@@ -5,6 +5,18 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] - 2026-02-14
+
+### Added
+- **Context Usage Indicator** -- Input box shows live `Context: X%` with color coding: green (<60%), yellow (60-80%), red (>80%) so you always know how close you are to the context limit
+- **Auto-Compaction** -- When context usage exceeds 80%, automatically sends conversation to the LLM for a structured breakdown summary (Current Task, Key Decisions, Files Modified, Current State, Important Context, Errors & Solutions), saves to MEMORY.md, and trims context keeping the last 8 messages + summary for seamless continuation
+- **`/compact` Command** -- Manually trigger context compaction at any time via slash command
+- **Brave Search Tool** -- Real-time web search via Brave Search API (set `BRAVE_API_KEY`); great if you already have a Brave API key or want a free-tier option
+- **EXA Search Tool** -- Neural-powered web search via EXA AI; works out of the box via free hosted MCP endpoint (no API key needed). Set `EXA_API_KEY` for direct API access with higher rate limits
+
+### Changed
+- **EXA Always Available** -- EXA search registers unconditionally via free MCP endpoint; Brave still requires `BRAVE_API_KEY`
+
 ## [0.1.4] - 2026-02-14
 
 ### Added
@@ -45,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Overlay Approval Dialog** — Replaced by inline approval in chat
 - **Bottom Status Bar** — Removed entirely for more screen space
 
+[0.1.5]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.5
 [0.1.4]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.4
 [0.1.3]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.3
 

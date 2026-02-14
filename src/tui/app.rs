@@ -56,6 +56,10 @@ pub const SLASH_COMMANDS: &[SlashCommand] = &[
         name: "/approve",
         description: "Tool approval policy",
     },
+    SlashCommand {
+        name: "/compact",
+        description: "Compact context now",
+    },
 ];
 
 /// Approval option selected by the user
@@ -200,6 +204,11 @@ pub struct App {
     pub model_selector_models: Vec<String>,
     pub model_selector_selected: usize,
 
+    // Input history (arrow up/down to cycle through past messages)
+    input_history: Vec<String>,
+    input_history_index: Option<usize>,  // None = not browsing, Some(i) = viewing history[i]
+    input_history_stash: String,         // saves current input when entering history
+
     // Working directory
     pub working_directory: std::path::PathBuf,
 
@@ -216,6 +225,9 @@ pub struct App {
 
     // Queued message — shared with agent so it can be injected between tool calls
     pub(crate) message_queue: Arc<tokio::sync::Mutex<Option<String>>>,
+
+    // Context window tracking
+    pub context_max_tokens: u32,
 
     // Self-update state
     pub rebuild_status: Option<String>,
@@ -274,6 +286,9 @@ impl App {
             session_rename_buffer: String::new(),
             model_selector_models: Vec::new(),
             model_selector_selected: 0,
+            input_history: Vec::new(),
+            input_history_index: None,
+            input_history_stash: String::new(),
             working_directory: std::env::current_dir().unwrap_or_default(),
             brain_path,
             user_commands,
@@ -281,6 +296,7 @@ impl App {
             force_onboard: false,
             cancel_token: None,
             message_queue: Arc::new(tokio::sync::Mutex::new(None)),
+            context_max_tokens: agent_service.context_window_for_model(agent_service.provider_model()),
             rebuild_status: None,
             session_service: SessionService::new(context.clone()),
             message_service: MessageService::new(context.clone()),
@@ -856,6 +872,14 @@ impl App {
                 return Ok(());
             }
             // Enter = send message
+            // Save to input history (dedup consecutive)
+            let trimmed = content.trim().to_string();
+            if self.input_history.last() != Some(&trimmed) {
+                self.input_history.push(trimmed);
+            }
+            self.input_history_index = None;
+            self.input_history_stash.clear();
+
             self.input_buffer.clear();
             self.slash_suggestions_active = false;
             self.send_message(content).await?;
@@ -918,6 +942,35 @@ impl App {
         } else if event.code == KeyCode::Backspace && event.modifiers.contains(KeyModifiers::ALT) {
             // Alt+Backspace — delete last word
             self.delete_last_word();
+        } else if keys::is_up(&event) && !self.slash_suggestions_active && !self.input_history.is_empty() {
+            // Arrow Up — browse input history (older)
+            match self.input_history_index {
+                None => {
+                    // Entering history — stash current input
+                    self.input_history_stash = self.input_buffer.clone();
+                    let idx = self.input_history.len() - 1;
+                    self.input_history_index = Some(idx);
+                    self.input_buffer = self.input_history[idx].clone();
+                }
+                Some(idx) if idx > 0 => {
+                    let idx = idx - 1;
+                    self.input_history_index = Some(idx);
+                    self.input_buffer = self.input_history[idx].clone();
+                }
+                _ => {} // already at oldest
+            }
+        } else if keys::is_down(&event) && !self.slash_suggestions_active && self.input_history_index.is_some() {
+            // Arrow Down — browse input history (newer)
+            let idx = self.input_history_index.expect("checked is_some");
+            if idx + 1 < self.input_history.len() {
+                let idx = idx + 1;
+                self.input_history_index = Some(idx);
+                self.input_buffer = self.input_history[idx].clone();
+            } else {
+                // Past newest — restore stashed input
+                self.input_history_index = None;
+                self.input_buffer = std::mem::take(&mut self.input_history_stash);
+            }
         } else {
             // Regular character input
             match event.code {
@@ -1266,6 +1319,19 @@ impl App {
                 self.scroll_offset = 0;
                 true
             }
+            "/compact" => {
+                let pct = self.context_usage_percent();
+                self.push_system_message(format!(
+                    "Compacting context... (currently at {:.0}%)",
+                    pct
+                ));
+                // Trigger compaction by sending a special message to the agent
+                let sender = self.event_sender();
+                let _ = sender.send(TuiEvent::MessageSubmitted(
+                    "[SYSTEM: Compact context now. Summarize this conversation for continuity.]".to_string(),
+                ));
+                true
+            }
             "/help" => {
                 self.mode = AppMode::Help;
                 true
@@ -1383,8 +1449,24 @@ impl App {
     /// Send a message to the agent
     async fn send_message(&mut self, content: String) -> Result<()> {
         if self.is_processing {
+            // Show the queued message as a real user message immediately
+            let user_msg = DisplayMessage {
+                id: Uuid::new_v4(),
+                role: "user".to_string(),
+                content: content.clone(),
+                timestamp: chrono::Utc::now(),
+                token_count: None,
+                cost: None,
+                approval: None,
+                approve_menu: None,
+                details: None,
+                expanded: false,
+            };
+            self.messages.push(user_msg);
+            self.scroll_offset = 0;
+
+            // Queue for injection between tool calls
             *self.message_queue.lock().await = Some(content);
-            self.push_system_message("Message queued -- will inject between tool calls.".to_string());
             return Ok(());
         }
         if let Some(session) = &self.current_session {
@@ -2063,6 +2145,15 @@ impl App {
     /// Get total token count for current session
     pub fn total_tokens(&self) -> i32 {
         self.messages.iter().filter_map(|m| m.token_count).sum()
+    }
+
+    /// Get context usage as a percentage (0.0 - 100.0)
+    pub fn context_usage_percent(&self) -> f64 {
+        if self.context_max_tokens == 0 {
+            return 0.0;
+        }
+        let used = self.total_tokens().max(0) as f64;
+        (used / self.context_max_tokens as f64) * 100.0
     }
 
     /// Get total cost for current session

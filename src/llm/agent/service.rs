@@ -42,6 +42,7 @@ pub enum ProgressEvent {
     Thinking,
     ToolStarted { tool_name: String, tool_input: Value },
     ToolCompleted { tool_name: String, tool_input: Value, success: bool, summary: String },
+    Compacting,
 }
 
 /// Callback for reporting progress during agent execution
@@ -84,6 +85,9 @@ pub struct AgentService {
 
     /// Working directory for tool execution
     working_directory: std::path::PathBuf,
+
+    /// Brain workspace path for saving compaction summaries to MEMORY.md
+    brain_path: Option<std::path::PathBuf>,
 }
 
 impl AgentService {
@@ -100,6 +104,7 @@ impl AgentService {
             progress_callback: None,
             message_queue_callback: None,
             working_directory: std::env::current_dir().unwrap_or_default(),
+            brain_path: None,
         }
     }
 
@@ -151,6 +156,12 @@ impl AgentService {
         self
     }
 
+    /// Set the brain workspace path for auto-compaction memory persistence
+    pub fn with_brain_path(mut self, brain_path: std::path::PathBuf) -> Self {
+        self.brain_path = Some(brain_path);
+        self
+    }
+
     /// Get the provider name
     pub fn provider_name(&self) -> &str {
         self.provider.name()
@@ -169,6 +180,11 @@ impl AgentService {
     /// Get a reference to the underlying LLM provider
     pub fn provider(&self) -> &Arc<dyn Provider> {
         &self.provider
+    }
+
+    /// Get context window size for a given model
+    pub fn context_window_for_model(&self, model: &str) -> u32 {
+        self.provider.context_window(model).unwrap_or(200_000)
     }
 
     /// Send a message and get a response
@@ -329,6 +345,15 @@ impl AgentService {
             .create_message(session_id, "user".to_string(), user_message)
             .await
             .map_err(|e| AgentError::Database(e.to_string()))?;
+
+        // Auto-compaction: if context usage exceeds 80%, compact before proceeding
+        if context.usage_percentage() > 80.0 {
+            tracing::warn!(
+                "Context usage at {:.0}% — triggering auto-compaction",
+                context.usage_percentage()
+            );
+            let _ = self.compact_context(&mut context, &model_name).await;
+        }
 
         // Create tool execution context
         let tool_context = ToolExecutionContext::new(session_id)
@@ -924,6 +949,123 @@ impl AgentService {
         };
 
         Ok((model_name, request, message_service, session_service))
+    }
+
+    /// Auto-compact the context when usage is too high.
+    ///
+    /// Before compaction, calculates the remaining context budget and sends
+    /// the last portion of the conversation to the LLM with a request for a
+    /// structured breakdown. This breakdown serves as a "wake-up" summary so
+    /// OpenCrabs can continue working seamlessly after compaction.
+    async fn compact_context(
+        &self,
+        context: &mut AgentContext,
+        model_name: &str,
+    ) -> Result<String> {
+        // Emit compacting progress
+        if let Some(ref cb) = self.progress_callback {
+            cb(ProgressEvent::Compacting);
+        }
+
+        let remaining_budget = context.max_tokens.saturating_sub(context.token_count);
+
+        // Build a summarization request with the full conversation
+        let mut summary_messages = Vec::new();
+
+        // Include all conversation messages so the LLM sees the full context
+        for msg in &context.messages {
+            summary_messages.push(msg.clone());
+        }
+
+        // Add the compaction instruction as a user message
+        let compaction_prompt = format!(
+            "IMPORTANT: The context window is at {:.0}% capacity ({} / {} tokens, {} tokens remaining). \
+             The conversation must be compacted to continue.\n\n\
+             Please provide a STRUCTURED BREAKDOWN of this entire conversation so far. \
+             This will be used as the sole context when the agent wakes up after compaction. \
+             Include ALL of the following sections:\n\n\
+             ## Current Task\n\
+             What is the user currently working on? What was the last request?\n\n\
+             ## Key Decisions Made\n\
+             List all important decisions, choices, and conclusions reached.\n\n\
+             ## Files Modified\n\
+             List every file that was created, edited, or discussed, with a brief note on what changed.\n\n\
+             ## Current State\n\
+             Where did we leave off? What is the next step? Any pending work?\n\n\
+             ## Important Context\n\
+             Any critical details, constraints, preferences, or gotchas the agent must remember.\n\n\
+             ## Errors & Solutions\n\
+             Any errors encountered and how they were resolved.\n\n\
+             Be concise but complete — this summary is the ONLY context the agent will have after compaction.",
+            context.usage_percentage(),
+            context.token_count,
+            context.max_tokens,
+            remaining_budget,
+        );
+
+        summary_messages.push(Message::user(compaction_prompt));
+
+        let request = LLMRequest::new(model_name.to_string(), summary_messages)
+            .with_max_tokens(4096)
+            .with_system("You are a precise summarization assistant. Your job is to create a structured breakdown of the conversation that will serve as the complete context for an AI agent continuing this work after context compaction. Be thorough — include every file, decision, and pending task.".to_string());
+
+        let response = self
+            .provider
+            .complete(request)
+            .await
+            .map_err(AgentError::Provider)?;
+
+        let summary = Self::extract_text_from_response(&response);
+
+        // Save to MEMORY.md
+        if let Err(e) = self.save_to_memory(&summary).await {
+            tracing::warn!("Failed to save compaction summary to MEMORY.md: {}", e);
+        }
+
+        // Compact the context: keep last 4 message pairs (8 messages)
+        context.compact_with_summary(summary.clone(), 8);
+
+        tracing::info!(
+            "Context compacted: now at {:.0}% ({} tokens)",
+            context.usage_percentage(),
+            context.token_count
+        );
+
+        Ok(summary)
+    }
+
+    /// Save a compaction summary to the brain workspace's MEMORY.md
+    async fn save_to_memory(&self, summary: &str) -> std::result::Result<(), String> {
+        let brain_path = self
+            .brain_path
+            .clone()
+            .unwrap_or_else(crate::brain::BrainLoader::resolve_path);
+
+        let memory_path = brain_path.join("MEMORY.md");
+
+        // Ensure directory exists
+        if let Some(parent) = memory_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create brain directory: {}", e))?;
+        }
+
+        // Read existing content
+        let existing = std::fs::read_to_string(&memory_path).unwrap_or_default();
+
+        // Append new section with timestamp
+        let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
+        let new_content = format!(
+            "{}\n\n---\n\n## Auto-Compaction Summary ({})\n\n{}\n",
+            existing.trim(),
+            timestamp,
+            summary
+        );
+
+        std::fs::write(&memory_path, new_content.trim_start())
+            .map_err(|e| format!("Failed to write MEMORY.md: {}", e))?;
+
+        tracing::info!("Saved compaction summary to {}", memory_path.display());
+        Ok(())
     }
 
     /// Extract text content from an LLM response

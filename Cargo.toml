@@ -1,6 +1,6 @@
 [package]
 name = "opencrabs"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 authors = ["OpenCrabs Team"]
 license = "FSL-1.1-MIT"

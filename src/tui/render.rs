@@ -522,12 +522,29 @@ fn render_input(f: &mut Frame, app: &App, area: Rect) {
     // Always keep steel blue border
     let border_style = Style::default().fg(Color::Rgb(70, 130, 180));
 
+    // Context usage indicator (right-side bottom title)
+    let pct = app.context_usage_percent();
+    let context_color = if pct > 80.0 {
+        Color::Red
+    } else if pct > 60.0 {
+        Color::Yellow
+    } else {
+        Color::Green
+    };
+    let context_label = format!(" Context: {:.0}% ", pct);
+    let context_title = Line::from(Span::styled(
+        context_label,
+        Style::default().fg(context_color).add_modifier(Modifier::BOLD),
+    ))
+    .alignment(Alignment::Right);
+
     let input = Paragraph::new(input_lines)
         .style(Style::default().fg(Color::White))
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .title(title)
+                .title_bottom(context_title)
                 .border_style(border_style),
         );
 
@@ -1085,6 +1102,7 @@ fn render_help(f: &mut Frame, app: &App, area: Rect) {
         kv("/onboard", "Setup wizard", blue),
         kv("/sessions", "Session manager", blue),
         kv("/approve", "Tool approval policy", blue),
+        kv("/compact", "Compact context now", blue),
         Line::from(""),
         Line::from(""),
         Line::from(vec![

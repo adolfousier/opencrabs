@@ -155,6 +155,44 @@ impl AgentContext {
             }
         }
     }
+
+    /// Compact the context by replacing old messages with a summary.
+    ///
+    /// Keeps the last `keep_recent` messages and prepends a system-role
+    /// summary of everything that was trimmed.
+    pub fn compact_with_summary(&mut self, summary: String, keep_recent: usize) {
+        // Keep at most keep_recent messages from the end
+        let keep_start = self.messages.len().saturating_sub(keep_recent);
+        let kept_messages: Vec<Message> = self.messages.drain(keep_start..).collect();
+
+        // Clear all old messages
+        self.messages.clear();
+
+        // Prepend the compaction summary as a user message (so the LLM sees the context)
+        let summary_msg = Message {
+            role: Role::User,
+            content: vec![ContentBlock::Text {
+                text: format!(
+                    "[CONTEXT COMPACTION — The conversation was automatically compacted. \
+                     Below is a structured summary of everything before this point.]\n\n{}",
+                    summary
+                ),
+            }],
+        };
+        self.messages.push(summary_msg);
+
+        // Re-add kept messages
+        self.messages.extend(kept_messages);
+
+        // Recalculate token count
+        self.token_count = 0;
+        if let Some(brain) = &self.system_brain {
+            self.token_count += Self::estimate_tokens(brain);
+        }
+        for msg in &self.messages {
+            self.token_count += self.estimate_message_tokens(msg);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -244,5 +282,104 @@ mod tests {
 
         // Should have removed some messages
         assert!(context.messages.len() < original_count);
+    }
+
+    #[test]
+    fn test_compact_with_summary_keeps_recent() {
+        let session_id = Uuid::new_v4();
+        let mut context = AgentContext::new(session_id, 10000);
+
+        // Add 10 messages
+        for i in 0..10 {
+            context.add_message(Message::user(format!("Message {}", i)));
+        }
+        assert_eq!(context.messages.len(), 10);
+
+        // Compact keeping last 3
+        context.compact_with_summary("Summary of old messages".to_string(), 3);
+
+        // Should have: 1 summary + 3 kept = 4 messages
+        assert_eq!(context.messages.len(), 4);
+
+        // First message should be the compaction summary
+        if let Some(ContentBlock::Text { text }) = context.messages[0].content.first() {
+            assert!(text.contains("CONTEXT COMPACTION"));
+            assert!(text.contains("Summary of old messages"));
+        } else {
+            panic!("First message should be a text compaction summary");
+        }
+
+        // Last 3 messages should be the original last 3
+        if let Some(ContentBlock::Text { text }) = context.messages[3].content.first() {
+            assert!(text.contains("Message 9"));
+        } else {
+            panic!("Last message should be Message 9");
+        }
+    }
+
+    #[test]
+    fn test_compact_with_summary_recalculates_tokens() {
+        let session_id = Uuid::new_v4();
+        let mut context = AgentContext::new(session_id, 10000);
+
+        // Add many large messages to build up token count
+        for i in 0..20 {
+            let big_text = format!("Large message {} {}", i, "x".repeat(400));
+            context.add_message(Message::user(big_text));
+        }
+
+        let tokens_before = context.token_count;
+        assert!(tokens_before > 0);
+
+        // Compact keeping 2
+        context.compact_with_summary("Brief summary".to_string(), 2);
+
+        // Token count should be recalculated and less than before
+        assert!(context.token_count < tokens_before);
+        assert!(context.token_count > 0);
+    }
+
+    #[test]
+    fn test_compact_with_summary_fewer_messages_than_keep() {
+        let session_id = Uuid::new_v4();
+        let mut context = AgentContext::new(session_id, 10000);
+
+        // Add only 2 messages but request keep_recent=5
+        context.add_message(Message::user("Hello".to_string()));
+        context.add_message(Message::user("World".to_string()));
+
+        context.compact_with_summary("Summary".to_string(), 5);
+
+        // Should have: 1 summary + 2 original = 3
+        assert_eq!(context.messages.len(), 3);
+    }
+
+    #[test]
+    fn test_compact_with_summary_preserves_system_brain_tokens() {
+        let session_id = Uuid::new_v4();
+        let mut context = AgentContext::new(session_id, 10000)
+            .with_system_brain("You are an AI assistant".to_string());
+
+        for i in 0..5 {
+            context.add_message(Message::user(format!("Msg {}", i)));
+        }
+
+        context.compact_with_summary("Summary".to_string(), 2);
+
+        // Token count should include system brain tokens
+        let brain_tokens = AgentContext::estimate_tokens("You are an AI assistant");
+        assert!(context.token_count >= brain_tokens);
+    }
+
+    #[test]
+    fn test_compact_empty_context() {
+        let session_id = Uuid::new_v4();
+        let mut context = AgentContext::new(session_id, 10000);
+
+        // No messages, compact should still work
+        context.compact_with_summary("Summary of nothing".to_string(), 3);
+
+        // Should have just the summary message
+        assert_eq!(context.messages.len(), 1);
     }
 }

@@ -86,13 +86,13 @@ where
             }
 
             // Drain all remaining queued events before re-rendering.
-            // This prevents stale Tick events from accumulating while
-            // backgrounded and causing UI lag on resume.
+            // Coalesce Ticks and Scrolls to avoid redundant re-renders.
+            let mut pending_scroll: i32 = 0;
             loop {
                 match app.try_next_event() {
-                    Some(TuiEvent::Tick) => {
-                        // Coalesce consecutive ticks — skip without re-rendering
-                        continue;
+                    Some(TuiEvent::Tick) => continue,
+                    Some(TuiEvent::MouseScroll(dir)) => {
+                        pending_scroll += dir as i32;
                     }
                     Some(event) => {
                         if let Err(e) = app.handle_event(event).await {
@@ -101,6 +101,12 @@ where
                     }
                     None => break,
                 }
+            }
+            // Apply coalesced scroll as a single operation
+            if pending_scroll > 0 {
+                app.scroll_offset = app.scroll_offset.saturating_add(pending_scroll as usize);
+            } else if pending_scroll < 0 {
+                app.scroll_offset = app.scroll_offset.saturating_sub(pending_scroll.unsigned_abs() as usize);
             }
         }
     }

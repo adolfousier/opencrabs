@@ -78,6 +78,8 @@
 | **Session Context** | Persistent conversation memory with SQLite storage |
 | **Streaming** | Real-time character-by-character response generation |
 | **Cost Tracking** | Per-message token count and cost displayed in header |
+| **Context Awareness** | Live context usage indicator with color-coded percentage; auto-compaction when nearing limits |
+| **Web Search** | Real-time internet search via EXA AI (neural) or Brave Search APIs — activate with an API key |
 | **Plan Mode** | Structured task decomposition with review workflow |
 | **Multi-line Input** | Paste entire functions, send with Ctrl+Enter |
 | **Markdown Rendering** | Rich text formatting with code blocks and headings |
@@ -396,6 +398,10 @@ default_model = "claude-opus-4-6"
 | `OPENAI_BASE_URL` | OpenAI / Compatible | Custom endpoint URL |
 | `QWEN_API_KEY` | Qwen | API key |
 | `QWEN_BASE_URL` | Qwen | Custom endpoint URL |
+| `EXA_API_KEY` | EXA AI Search | Optional — enables direct API mode (higher rate limits) |
+| `BRAVE_API_KEY` | Brave Search | Web search (free $5/mo credits at brave.com/search/api) |
+| `EXA_API_KEY` | EXA AI Search | Neural web search (free credits on signup at exa.ai) |
+| `BRAVE_API_KEY` | Brave Search | Web search (free $5/mo credits at brave.com/search/api) |
 
 ---
 
@@ -412,7 +418,9 @@ OpenCrabs includes a built-in tool execution system. The AI can use these tools 
 | `ls` | List directory contents |
 | `glob` | Find files matching patterns |
 | `grep` | Search file contents with regex |
-| `web_search` | Search the web |
+| `web_search` | Search the web (DuckDuckGo, always available, no key needed) |
+| `exa_search` | Neural web search via EXA AI (free via MCP, no API key needed) |
+| `brave_search` | Web search via Brave Search (set `BRAVE_API_KEY` — free $5/mo credits) |
 | `execute_code` | Run code in various languages |
 | `notebook_edit` | Edit Jupyter notebooks |
 | `parse_document` | Extract text from PDF, DOCX, HTML |
@@ -506,6 +514,8 @@ See [Plan Mode User Guide](src/docs/PLAN_MODE_USER_GUIDE.md) for full documentat
 | `/onboard` | Run setup wizard |
 | `/sessions` | Open session manager |
 | `/approve` | Tool approval policy selector (approve-only / session / yolo) |
+| `/compact` | Compact context (summarize + trim for long sessions) |
+| `/compact` | Compact context (summarize + trim for long sessions) |
 
 ### Sessions Mode
 

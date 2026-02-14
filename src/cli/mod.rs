@@ -422,8 +422,9 @@ async fn cmd_chat(config: &crate::config::Config, _session_id: Option<String>, f
         llm::{
             agent::AgentService,
             tools::{
-                bash::BashTool, code_exec::CodeExecTool, context::ContextTool,
-                doc_parser::DocParserTool, edit::EditTool, glob::GlobTool, grep::GrepTool,
+                bash::BashTool, brave_search::BraveSearchTool, code_exec::CodeExecTool,
+                context::ContextTool, doc_parser::DocParserTool, edit::EditTool,
+                exa_search::ExaSearchTool, glob::GlobTool, grep::GrepTool,
                 http::HttpClientTool, ls::LsTool, notebook::NotebookEditTool, plan_tool::PlanTool,
                 read::ReadTool, registry::ToolRegistry, task::TaskTool, web_search::WebSearchTool,
                 write::WriteTool,
@@ -626,6 +627,16 @@ async fn cmd_chat(config: &crate::config::Config, _session_id: Option<String>, f
     tool_registry.register(Arc::new(ContextTool));
     tool_registry.register(Arc::new(HttpClientTool));
     tool_registry.register(Arc::new(PlanTool));
+    // EXA search: always available (free via MCP), uses direct API if key is set
+    let exa_key = std::env::var("EXA_API_KEY").ok();
+    let exa_mode = if exa_key.is_some() { "direct API" } else { "MCP (free)" };
+    tool_registry.register(Arc::new(ExaSearchTool::new(exa_key)));
+    tracing::info!("Registered EXA search tool (mode: {})", exa_mode);
+    // Brave search: requires API key
+    if let Ok(brave_key) = std::env::var("BRAVE_API_KEY") {
+        tool_registry.register(Arc::new(BraveSearchTool::new(brave_key)));
+        tracing::info!("Registered Brave search tool");
+    }
 
     // Create service context
     let service_context = ServiceContext::new(db.pool().clone());
@@ -727,6 +738,9 @@ async fn cmd_chat(config: &crate::config::Config, _session_id: Option<String>, f
                 let _ = progress_sender.send(TuiEvent::ToolCallCompleted { tool_name, tool_input, success, summary });
             }
             ProgressEvent::Thinking => {} // spinner handles this already
+            ProgressEvent::Compacting => {
+                let _ = progress_sender.send(TuiEvent::AgentProcessing);
+            }
         }
     });
 
@@ -747,7 +761,8 @@ async fn cmd_chat(config: &crate::config::Config, _session_id: Option<String>, f
             .with_progress_callback(Some(progress_callback))
             .with_message_queue_callback(Some(message_queue_callback))
             .with_max_tool_iterations(20)
-            .with_working_directory(working_directory),
+            .with_working_directory(working_directory)
+            .with_brain_path(brain_path),
     );
 
     // Update app with the configured agent service (preserve event channels!)
@@ -779,8 +794,9 @@ async fn cmd_run(
         llm::{
             agent::AgentService,
             tools::{
-                bash::BashTool, code_exec::CodeExecTool, context::ContextTool,
-                doc_parser::DocParserTool, edit::EditTool, glob::GlobTool, grep::GrepTool,
+                bash::BashTool, brave_search::BraveSearchTool, code_exec::CodeExecTool,
+                context::ContextTool, doc_parser::DocParserTool, edit::EditTool,
+                exa_search::ExaSearchTool, glob::GlobTool, grep::GrepTool,
                 http::HttpClientTool, ls::LsTool, notebook::NotebookEditTool, plan_tool::PlanTool,
                 read::ReadTool, registry::ToolRegistry, task::TaskTool, web_search::WebSearchTool,
                 write::WriteTool,
@@ -818,6 +834,13 @@ async fn cmd_run(
     tool_registry.register(Arc::new(ContextTool));
     tool_registry.register(Arc::new(HttpClientTool));
     tool_registry.register(Arc::new(PlanTool));
+    // EXA search: always available (free via MCP), uses direct API if key is set
+    let exa_key = std::env::var("EXA_API_KEY").ok();
+    tool_registry.register(Arc::new(ExaSearchTool::new(exa_key)));
+    // Brave search: requires API key
+    if let Ok(brave_key) = std::env::var("BRAVE_API_KEY") {
+        tool_registry.register(Arc::new(BraveSearchTool::new(brave_key)));
+    }
 
     // Build dynamic system brain from workspace files
     let brain_path = BrainLoader::resolve_path();
