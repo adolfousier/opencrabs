@@ -319,6 +319,16 @@ pub mod keys {
         event.code == KeyCode::Down && event.modifiers.is_empty()
     }
 
+    /// Left arrow
+    pub fn is_left(event: &KeyEvent) -> bool {
+        event.code == KeyCode::Left && event.modifiers.is_empty()
+    }
+
+    /// Right arrow
+    pub fn is_right(event: &KeyEvent) -> bool {
+        event.code == KeyCode::Right && event.modifiers.is_empty()
+    }
+
     /// Page up
     pub fn is_page_up(event: &KeyEvent) -> bool {
         event.code == KeyCode::PageUp

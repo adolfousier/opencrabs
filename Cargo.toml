@@ -1,6 +1,6 @@
 [package]
 name = "opencrabs"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2024"
 authors = ["OpenCrabs Team"]
 license = "FSL-1.1-MIT"
@@ -95,6 +95,9 @@ arc-swap = "1.7"
 zeroize = { version = "1.8", features = ["derive"] }
 keyring = "3.6"
 
+# Telegram
+teloxide = { version = "0.13", features = ["macros"], optional = true }
+
 # Misc
 unicode-width = "0.2"
 bytes = "1.9"
@@ -121,11 +124,12 @@ tokio-test = "0.4"
 pprof = { version = "0.15", features = ["flamegraph", "frame-pointer"], optional = true }
 
 [features]
-default = []
+default = ["telegram"]
 # Profiling feature enables pprof on Unix only (no-op on Windows)
 profiling = []
 openai = ["async-openai"]
 aws-bedrock = ["aws-sdk-bedrockruntime"]
+telegram = ["teloxide"]
 all-llm = ["openai", "aws-bedrock"]
 
 [profile.dev]

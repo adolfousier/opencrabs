@@ -1145,26 +1145,32 @@ Respond with EXACTLY six sections using these delimiters. No extra text before t
             telegram: ChannelConfig {
                 enabled: self.channel_toggles.first().is_some_and(|t| t.1),
                 token: None,
+                allowed_users: Vec::new(),
             },
             discord: ChannelConfig {
                 enabled: self.channel_toggles.get(1).is_some_and(|t| t.1),
                 token: None,
+                allowed_users: Vec::new(),
             },
             whatsapp: ChannelConfig {
                 enabled: self.channel_toggles.get(2).is_some_and(|t| t.1),
                 token: None,
+                allowed_users: Vec::new(),
             },
             signal: ChannelConfig {
                 enabled: self.channel_toggles.get(3).is_some_and(|t| t.1),
                 token: None,
+                allowed_users: Vec::new(),
             },
             google_chat: ChannelConfig {
                 enabled: self.channel_toggles.get(4).is_some_and(|t| t.1),
                 token: None,
+                allowed_users: Vec::new(),
             },
             imessage: ChannelConfig {
                 enabled: self.channel_toggles.get(5).is_some_and(|t| t.1),
                 token: None,
+                allowed_users: Vec::new(),
             },
         };
 

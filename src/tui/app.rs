@@ -107,6 +107,21 @@ pub struct ApproveMenu {
     pub state: ApproveMenuState,
 }
 
+/// A single tool call entry within a grouped display
+#[derive(Debug, Clone)]
+pub struct ToolCallEntry {
+    pub description: String,
+    pub success: bool,
+    pub details: Option<String>,
+}
+
+/// A group of tool calls displayed as a collapsible bullet
+#[derive(Debug, Clone)]
+pub struct ToolCallGroup {
+    pub calls: Vec<ToolCallEntry>,
+    pub expanded: bool,
+}
+
 /// Display message for UI rendering
 #[derive(Debug, Clone)]
 pub struct DisplayMessage {
@@ -122,6 +137,8 @@ pub struct DisplayMessage {
     pub details: Option<String>,
     /// Whether details are currently expanded
     pub expanded: bool,
+    /// Grouped tool calls (for role == "tool_group")
+    pub tool_group: Option<ToolCallGroup>,
 }
 
 impl From<Message> for DisplayMessage {
@@ -137,6 +154,7 @@ impl From<Message> for DisplayMessage {
             approve_menu: None,
             details: None,
             expanded: false,
+            tool_group: None,
         }
     }
 }
@@ -228,6 +246,10 @@ pub struct App {
 
     // Context window tracking
     pub context_max_tokens: u32,
+    pub last_input_tokens: Option<u32>,
+
+    // Active tool call group (during processing)
+    pub active_tool_group: Option<ToolCallGroup>,
 
     // Self-update state
     pub rebuild_status: Option<String>,
@@ -297,6 +319,8 @@ impl App {
             cancel_token: None,
             message_queue: Arc::new(tokio::sync::Mutex::new(None)),
             context_max_tokens: agent_service.context_window_for_model(agent_service.provider_model()),
+            last_input_tokens: None,
+            active_tool_group: None,
             rebuild_status: None,
             session_service: SessionService::new(context.clone()),
             message_service: MessageService::new(context.clone()),
@@ -425,16 +449,18 @@ impl App {
             }
             TuiEvent::ToolCallCompleted { tool_name, tool_input, success, summary } => {
                 let desc = Self::format_tool_description(&tool_name, &tool_input);
-                if success {
-                    let details = if summary.is_empty() { None } else { Some(summary) };
-                    if let Some(det) = details {
-                        self.push_system_message_with_details(desc, det);
-                    } else {
-                        self.push_system_message(desc);
-                    }
+                let details = if summary.is_empty() { None } else { Some(summary) };
+                let entry = ToolCallEntry { description: desc, success, details };
+
+                if let Some(ref mut group) = self.active_tool_group {
+                    group.calls.push(entry);
                 } else {
-                    self.push_system_message(format!("{} -- FAILED: {}", desc, summary));
+                    self.active_tool_group = Some(ToolCallGroup {
+                        calls: vec![entry],
+                        expanded: false,
+                    });
                 }
+                self.scroll_offset = 0;
             }
             TuiEvent::FocusGained | TuiEvent::FocusLost => {
                 // Handled by the event loop for tick coalescing
@@ -705,9 +731,10 @@ impl App {
         }
 
         // Intercept keys when an inline approval is pending
+        // Options: Yes(0), Always(1), No(2)
         if self.has_pending_approval() {
-            if keys::is_up(&event) {
-                // Navigate approval options up
+            if keys::is_left(&event) || keys::is_up(&event) {
+                // Navigate options left
                 if let Some(approval) = self
                     .messages
                     .iter_mut()
@@ -718,8 +745,8 @@ impl App {
                     approval.selected_option = approval.selected_option.saturating_sub(1);
                 }
                 return Ok(());
-            } else if keys::is_down(&event) {
-                // Navigate approval options down
+            } else if keys::is_right(&event) || keys::is_down(&event) {
+                // Navigate options right
                 if let Some(approval) = self
                     .messages
                     .iter_mut()
@@ -731,8 +758,7 @@ impl App {
                 }
                 return Ok(());
             } else if keys::is_enter(&event) || keys::is_submit(&event) {
-                // Approve with selected option
-                // Extract data before mutating
+                // Confirm: Yes(0)=approve once, Always(1)=approve always, No(2)=deny
                 let approval_data: Option<(Uuid, usize, mpsc::UnboundedSender<ToolApprovalResponse>)> = self
                     .messages
                     .iter()
@@ -742,42 +768,49 @@ impl App {
                     .map(|a| (a.request_id, a.selected_option, a.response_tx.clone()));
 
                 if let Some((request_id, selected, response_tx)) = approval_data {
-                    let option = match selected {
-                        0 => ApprovalOption::AllowOnce,
-                        1 => ApprovalOption::AllowForSession,
-                        _ => ApprovalOption::AllowAlways,
-                    };
-
-                    // Set policy
-                    match &option {
-                        ApprovalOption::AllowForSession => self.approval_auto_session = true,
-                        ApprovalOption::AllowAlways => self.approval_auto_always = true,
-                        _ => {}
-                    }
-
-                    // Send approval response
-                    let response = ToolApprovalResponse {
-                        request_id,
-                        approved: true,
-                        reason: None,
-                    };
-                    let _ = response_tx.send(response.clone());
-                    let _ = self.event_sender().send(TuiEvent::ToolApprovalResponse(response));
-
-                    // Update state in the message
-                    if let Some(approval) = self
-                        .messages
-                        .iter_mut()
-                        .rev()
-                        .find_map(|m| m.approval.as_mut())
-                        .filter(|a| a.state == ApprovalState::Pending)
-                    {
-                        approval.state = ApprovalState::Approved(option);
+                    if selected == 2 {
+                        // "No" — deny
+                        let response = ToolApprovalResponse {
+                            request_id,
+                            approved: false,
+                            reason: Some("User denied permission".to_string()),
+                        };
+                        let _ = response_tx.send(response.clone());
+                        let _ = self.event_sender().send(TuiEvent::ToolApprovalResponse(response));
+                        if let Some(approval) = self.messages.iter_mut().rev()
+                            .find_map(|m| m.approval.as_mut())
+                            .filter(|a| a.state == ApprovalState::Pending)
+                        {
+                            approval.state = ApprovalState::Denied("User denied".to_string());
+                        }
+                    } else {
+                        // "Yes" (0) or "Always" (1)
+                        let option = if selected == 1 {
+                            ApprovalOption::AllowAlways
+                        } else {
+                            ApprovalOption::AllowOnce
+                        };
+                        if matches!(option, ApprovalOption::AllowAlways) {
+                            self.approval_auto_always = true;
+                        }
+                        let response = ToolApprovalResponse {
+                            request_id,
+                            approved: true,
+                            reason: None,
+                        };
+                        let _ = response_tx.send(response.clone());
+                        let _ = self.event_sender().send(TuiEvent::ToolApprovalResponse(response));
+                        if let Some(approval) = self.messages.iter_mut().rev()
+                            .find_map(|m| m.approval.as_mut())
+                            .filter(|a| a.state == ApprovalState::Pending)
+                        {
+                            approval.state = ApprovalState::Approved(option);
+                        }
                     }
                 }
                 return Ok(());
             } else if keys::is_deny(&event) || keys::is_cancel(&event) {
-                // Deny the approval
+                // D/Esc shortcut — deny directly
                 let approval_data: Option<(Uuid, mpsc::UnboundedSender<ToolApprovalResponse>)> = self
                     .messages
                     .iter()
@@ -794,21 +827,16 @@ impl App {
                     };
                     let _ = response_tx.send(response.clone());
                     let _ = self.event_sender().send(TuiEvent::ToolApprovalResponse(response));
-
-                    // Update state in the message
-                    if let Some(approval) = self
-                        .messages
-                        .iter_mut()
-                        .rev()
+                    if let Some(approval) = self.messages.iter_mut().rev()
                         .find_map(|m| m.approval.as_mut())
                         .filter(|a| a.state == ApprovalState::Pending)
                     {
-                        approval.state = ApprovalState::Denied("User denied permission".to_string());
+                        approval.state = ApprovalState::Denied("User denied".to_string());
                     }
                 }
                 return Ok(());
             } else if keys::is_view_details(&event) {
-                // Toggle details view
+                // V key — toggle details
                 if let Some(approval) = self
                     .messages
                     .iter_mut()
@@ -896,6 +924,23 @@ impl App {
                         self.streaming_response = None;
                         self.cancel_token = None;
                         self.escape_pending_at = None;
+                        // Finalize any active tool group
+                        if let Some(group) = self.active_tool_group.take() {
+                            let count = group.calls.len();
+                            self.messages.push(DisplayMessage {
+                                id: Uuid::new_v4(),
+                                role: "tool_group".to_string(),
+                                content: format!("{} tool call{}", count, if count == 1 { "" } else { "s" }),
+                                timestamp: chrono::Utc::now(),
+                                token_count: None,
+                                cost: None,
+                                approval: None,
+                                approve_menu: None,
+                                details: None,
+                                expanded: false,
+                                tool_group: Some(group),
+                            });
+                        }
                         self.push_system_message("Operation cancelled.".to_string());
                     } else {
                         self.escape_pending_at = Some(std::time::Instant::now());
@@ -931,9 +976,16 @@ impl App {
                     Some("Press Esc again to clear input".to_string());
             }
         } else if event.code == KeyCode::Char('o') && event.modifiers == KeyModifiers::CONTROL {
-            // Ctrl+O — toggle expand/collapse on the most recent expandable system message
-            if let Some(msg) = self.messages.iter_mut().rev().find(|m| m.details.is_some()) {
-                msg.expanded = !msg.expanded;
+            // Ctrl+O — toggle expand/collapse on active tool group or most recent tool group/details
+            if let Some(ref mut group) = self.active_tool_group {
+                group.expanded = !group.expanded;
+            } else if let Some(msg) = self.messages.iter_mut().rev()
+                .find(|m| m.tool_group.is_some() || m.details.is_some()) {
+                if let Some(ref mut group) = msg.tool_group {
+                    group.expanded = !group.expanded;
+                } else {
+                    msg.expanded = !msg.expanded;
+                }
             }
         } else if keys::is_page_up(&event) {
             self.scroll_offset = self.scroll_offset.saturating_add(10);
@@ -1315,6 +1367,7 @@ impl App {
                     }),
                     details: None,
                     expanded: false,
+                    tool_group: None,
                 });
                 self.scroll_offset = 0;
                 true
@@ -1364,7 +1417,7 @@ impl App {
     }
 
     /// Format a human-readable description of a tool call from its name and input
-    fn format_tool_description(tool_name: &str, tool_input: &Value) -> String {
+    pub fn format_tool_description(tool_name: &str, tool_input: &Value) -> String {
         match tool_name {
             "bash" => {
                 let cmd = tool_input.get("command").and_then(|v| v.as_str()).unwrap_or("?");
@@ -1408,6 +1461,14 @@ impl App {
                 let query = tool_input.get("query").and_then(|v| v.as_str()).unwrap_or("?");
                 format!("Search: {}", query)
             }
+            "exa_search" => {
+                let query = tool_input.get("query").and_then(|v| v.as_str()).unwrap_or("?");
+                format!("EXA search: {}", query)
+            }
+            "brave_search" => {
+                let query = tool_input.get("query").and_then(|v| v.as_str()).unwrap_or("?");
+                format!("Brave search: {}", query)
+            }
             other => other.to_string(),
         }
     }
@@ -1425,23 +1486,7 @@ impl App {
             approve_menu: None,
             details: None,
             expanded: false,
-        });
-        self.scroll_offset = 0;
-    }
-
-    /// Push a system message with collapsible details
-    fn push_system_message_with_details(&mut self, content: String, details: String) {
-        self.messages.push(DisplayMessage {
-            id: Uuid::new_v4(),
-            role: "system".to_string(),
-            content,
-            timestamp: chrono::Utc::now(),
-            token_count: None,
-            cost: None,
-            approval: None,
-            approve_menu: None,
-            details: Some(details),
-            expanded: false,
+            tool_group: None,
         });
         self.scroll_offset = 0;
     }
@@ -1461,6 +1506,7 @@ impl App {
                 approve_menu: None,
                 details: None,
                 expanded: false,
+                tool_group: None,
             };
             self.messages.push(user_msg);
             self.scroll_offset = 0;
@@ -1493,6 +1539,7 @@ impl App {
                 approve_menu: None,
                 details: None,
                 expanded: false,
+                tool_group: None,
             };
             self.messages.push(user_msg);
 
@@ -1553,6 +1600,24 @@ impl App {
         self.streaming_response = None;
         self.cancel_token = None;
 
+        // Finalize active tool group into a display message
+        if let Some(group) = self.active_tool_group.take() {
+            let count = group.calls.len();
+            self.messages.push(DisplayMessage {
+                id: Uuid::new_v4(),
+                role: "tool_group".to_string(),
+                content: format!("{} tool call{}", count, if count == 1 { "" } else { "s" }),
+                timestamp: chrono::Utc::now(),
+                token_count: None,
+                cost: None,
+                approval: None,
+                approve_menu: None,
+                details: None,
+                expanded: false,
+                tool_group: Some(group),
+            });
+        }
+
         // Reload user commands (agent may have written new ones to commands.json)
         self.reload_user_commands();
 
@@ -1562,6 +1627,9 @@ impl App {
         } else {
             false
         };
+
+        // Track context usage from latest response
+        self.last_input_tokens = Some(response.usage.input_tokens);
 
         // Add assistant message to UI
         let assistant_msg = DisplayMessage {
@@ -1577,6 +1645,7 @@ impl App {
             approve_menu: None,
             details: None,
             expanded: false,
+            tool_group: None,
         };
         self.messages.push(assistant_msg);
 
@@ -1611,6 +1680,7 @@ impl App {
                     approve_menu: None,
                     details: None,
                     expanded: false,
+                    tool_group: None,
                 };
                 self.messages.push(error_msg);
             } else {
@@ -1797,6 +1867,7 @@ impl App {
                             approve_menu: None,
                             details: None,
                             expanded: false,
+                            tool_group: None,
                         };
 
                         self.messages.push(notification);
@@ -1869,6 +1940,7 @@ impl App {
                                     approve_menu: None,
                                     details: None,
                                     expanded: false,
+                                    tool_group: None,
                                 };
 
                                 self.messages.push(notification);
@@ -2110,6 +2182,7 @@ impl App {
                 approve_menu: None,
                 details: None,
                 expanded: false,
+                tool_group: None,
             };
             self.messages.push(completion_msg);
         } else if let Some(message) = task_message {
@@ -2125,6 +2198,23 @@ impl App {
         self.is_processing = false;
         self.streaming_response = None;
         self.cancel_token = None;
+        // Finalize any active tool group
+        if let Some(group) = self.active_tool_group.take() {
+            let count = group.calls.len();
+            self.messages.push(DisplayMessage {
+                id: Uuid::new_v4(),
+                role: "tool_group".to_string(),
+                content: format!("{} tool call{}", count, if count == 1 { "" } else { "s" }),
+                timestamp: chrono::Utc::now(),
+                token_count: None,
+                cost: None,
+                approval: None,
+                approve_menu: None,
+                details: None,
+                expanded: false,
+                tool_group: Some(group),
+            });
+        }
         self.error_message = Some(error);
         // Auto-scroll to show the error
         self.scroll_offset = 0;
@@ -2148,11 +2238,14 @@ impl App {
     }
 
     /// Get context usage as a percentage (0.0 - 100.0)
+    /// Uses the latest response's input_tokens as the current context size
     pub fn context_usage_percent(&self) -> f64 {
         if self.context_max_tokens == 0 {
             return 0.0;
         }
-        let used = self.total_tokens().max(0) as f64;
+        // Find the most recent assistant message's input token count
+        // input_tokens represents how much context was sent to the LLM
+        let used = self.last_input_tokens.unwrap_or(0) as f64;
         (used / self.context_max_tokens as f64) * 100.0
     }
 
@@ -2198,6 +2291,7 @@ impl App {
             approve_menu: None,
             details: None,
             expanded: false,
+            tool_group: None,
         });
         self.scroll_offset = 0;
         // Stay in AppMode::Chat — no mode switch

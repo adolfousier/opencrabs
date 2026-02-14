@@ -134,9 +134,12 @@ impl AgentContext {
         tokens + 4
     }
 
-    /// Simple token estimation (roughly 4 characters per token)
+    /// Conservative token estimation (~3 chars per token).
+    /// Using /3 instead of /4 to avoid underestimating — the API's actual
+    /// tokenizer often counts more tokens than a naive chars/4 estimate,
+    /// especially for code, JSON, and tool definitions.
     fn estimate_tokens(text: &str) -> usize {
-        (text.len() / 4).max(1)
+        (text.len() / 3).max(1)
     }
 
     /// Get the current token usage percentage

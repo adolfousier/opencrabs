@@ -346,11 +346,23 @@ impl AgentService {
             .await
             .map_err(|e| AgentError::Database(e.to_string()))?;
 
-        // Auto-compaction: if context usage exceeds 80%, compact before proceeding
-        if context.usage_percentage() > 80.0 {
+        // Reserve tokens for tool definitions (not tracked in context.token_count).
+        // Each tool schema is roughly 300-800 tokens; reserve a flat budget.
+        let tool_overhead = self.tool_registry.count() * 500;
+        let effective_max = context.max_tokens.saturating_sub(tool_overhead);
+        let effective_usage = if effective_max > 0 {
+            (context.token_count as f64 / effective_max as f64) * 100.0
+        } else {
+            100.0
+        };
+
+        // Auto-compaction: if context usage exceeds 80% (accounting for tool overhead)
+        if effective_usage > 80.0 {
             tracing::warn!(
-                "Context usage at {:.0}% — triggering auto-compaction",
-                context.usage_percentage()
+                "Context usage at {:.0}% (effective {:.0}% with {} tool overhead) — triggering auto-compaction",
+                context.usage_percentage(),
+                effective_usage,
+                tool_overhead,
             );
             let _ = self.compact_context(&mut context, &model_name).await;
         }
@@ -401,12 +413,26 @@ impl AgentService {
                 tracing::warn!("No tools registered in tool registry!");
             }
 
-            // Send to provider
-            let response = self
-                .provider
-                .complete(request)
-                .await
-                .map_err(AgentError::Provider)?;
+            // Send to provider — retry once after emergency compaction if prompt is too long
+            let response = match self.provider.complete(request).await {
+                Ok(resp) => resp,
+                Err(ref e) if e.to_string().contains("prompt is too long") || e.to_string().contains("too many tokens") => {
+                    tracing::warn!("Prompt too long for provider — emergency compaction");
+                    let _ = self.compact_context(&mut context, &model_name).await;
+
+                    // Rebuild request with compacted context
+                    let mut retry_req = LLMRequest::new(model_name.clone(), context.messages.clone())
+                        .with_max_tokens(4096);
+                    if let Some(system) = &context.system_brain {
+                        retry_req = retry_req.with_system(system.clone());
+                    }
+                    if self.tool_registry.count() > 0 {
+                        retry_req = retry_req.with_tools(self.tool_registry.get_tool_definitions());
+                    }
+                    self.provider.complete(retry_req).await.map_err(AgentError::Provider)?
+                }
+                Err(e) => return Err(AgentError::Provider(e)),
+            };
 
             // Track token usage
             total_input_tokens += response.usage.input_tokens;

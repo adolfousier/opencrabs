@@ -38,6 +38,9 @@ pub mod services;
 pub mod tui;
 pub mod utils;
 
+#[cfg(feature = "telegram")]
+pub mod telegram;
+
 // Placeholder modules for future features
 // TODO: Implement these modules when ready
 #[allow(unused)]

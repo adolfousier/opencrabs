@@ -114,6 +114,9 @@ pub struct ChannelConfig {
     pub enabled: bool,
     #[serde(default)]
     pub token: Option<String>,
+    /// Allowlisted user IDs (Telegram user IDs, Discord user IDs, etc.)
+    #[serde(default)]
+    pub allowed_users: Vec<i64>,
 }
 
 /// Debug configuration options

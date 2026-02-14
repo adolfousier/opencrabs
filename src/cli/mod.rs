@@ -753,15 +753,16 @@ async fn cmd_chat(config: &crate::config::Config, _session_id: Option<String>, f
 
     // Create agent service with approval callback, progress callback, and message queue
     tracing::debug!("Creating agent service with approval, progress, and message queue callbacks");
+    let shared_tool_registry = Arc::new(tool_registry);
     let agent_service = Arc::new(
         AgentService::new(provider.clone(), service_context.clone())
             .with_system_brain(system_brain)
-            .with_tool_registry(Arc::new(tool_registry))
+            .with_tool_registry(shared_tool_registry.clone())
             .with_approval_callback(Some(approval_callback))
             .with_progress_callback(Some(progress_callback))
             .with_message_queue_callback(Some(message_queue_callback))
             .with_max_tool_iterations(20)
-            .with_working_directory(working_directory)
+            .with_working_directory(working_directory.clone())
             .with_brain_path(brain_path),
     );
 
@@ -772,6 +773,44 @@ async fn cmd_chat(config: &crate::config::Config, _session_id: Option<String>, f
     if force_onboard {
         app.force_onboard = true;
     }
+
+    // Spawn Telegram bot if configured
+    #[cfg(feature = "telegram")]
+    let _telegram_handle = {
+        let tg = &config.channels.telegram;
+        let tg_token = tg.token.clone().or_else(|| std::env::var("TELEGRAM_BOT_TOKEN").ok());
+        if tg.enabled || tg_token.is_some() {
+            if let Some(ref token) = tg_token {
+                // Build a separate agent service for Telegram (shared tools, no TUI callbacks)
+                let tg_brain = BrainLoader::new(BrainLoader::resolve_path())
+                    .build_system_brain(Some(&RuntimeInfo {
+                        model: Some(provider.default_model().to_string()),
+                        provider: Some(provider.name().to_string()),
+                        working_directory: Some(working_directory.to_string_lossy().to_string()),
+                    }), None);
+                let tg_agent = Arc::new(
+                    AgentService::new(provider.clone(), service_context.clone())
+                        .with_system_brain(tg_brain)
+                        .with_tool_registry(shared_tool_registry.clone())
+                        .with_auto_approve_tools(true)
+                        .with_max_tool_iterations(20)
+                        .with_working_directory(working_directory.clone()),
+                );
+                let bot = crate::telegram::TelegramBot::new(
+                    tg_agent,
+                    service_context.clone(),
+                    tg.allowed_users.clone(),
+                );
+                tracing::info!("Spawning Telegram bot ({} allowed users)", tg.allowed_users.len());
+                Some(bot.start(token.clone()))
+            } else {
+                tracing::warn!("Telegram enabled but no token configured");
+                None
+            }
+        } else {
+            None
+        }
+    };
 
     // Run TUI
     tracing::debug!("Launching TUI");
