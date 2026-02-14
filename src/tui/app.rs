@@ -12,8 +12,10 @@ use crate::llm::agent::AgentService;
 use crate::llm::provider::{ContentBlock, LLMRequest};
 use crate::services::{MessageService, PlanService, ServiceContext, SessionService};
 use anyhow::Result;
+use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 /// Slash command definition
@@ -49,7 +51,42 @@ pub const SLASH_COMMANDS: &[SlashCommand] = &[
         name: "/sessions",
         description: "List all sessions",
     },
+    SlashCommand {
+        name: "/approve",
+        description: "Reset tool approval policy",
+    },
 ];
+
+/// Approval option selected by the user
+#[derive(Debug, Clone, PartialEq)]
+pub enum ApprovalOption {
+    AllowOnce,
+    AllowForSession,
+    AllowAlways,
+}
+
+/// State of an inline approval request
+#[derive(Debug, Clone, PartialEq)]
+pub enum ApprovalState {
+    Pending,
+    Approved(ApprovalOption),
+    Denied(String),
+}
+
+/// Data for an inline tool approval request embedded in a DisplayMessage
+#[derive(Debug, Clone)]
+pub struct ApprovalData {
+    pub tool_name: String,
+    pub tool_description: String,
+    pub tool_input: Value,
+    pub capabilities: Vec<String>,
+    pub request_id: Uuid,
+    pub response_tx: mpsc::UnboundedSender<ToolApprovalResponse>,
+    pub requested_at: std::time::Instant,
+    pub state: ApprovalState,
+    pub selected_option: usize,  // 0-2, arrow key navigation
+    pub show_details: bool,      // V key toggle
+}
 
 /// Display message for UI rendering
 #[derive(Debug, Clone)]
@@ -60,6 +97,7 @@ pub struct DisplayMessage {
     pub timestamp: chrono::DateTime<chrono::Utc>,
     pub token_count: Option<i32>,
     pub cost: Option<f64>,
+    pub approval: Option<ApprovalData>,
 }
 
 impl From<Message> for DisplayMessage {
@@ -71,6 +109,7 @@ impl From<Message> for DisplayMessage {
             timestamp: msg.created_at,
             token_count: msg.token_count,
             cost: msg.cost,
+            approval: None,
         }
     }
 }
@@ -103,9 +142,15 @@ pub struct App {
     // Escape confirmation state (double-press to clear)
     escape_pending_at: Option<std::time::Instant>,
 
-    // Approval state
-    pub pending_approval: Option<ToolApprovalRequest>,
-    pub show_approval_details: bool,
+    // Ctrl+C confirmation state (first clears input, second quits)
+    ctrl_c_pending_at: Option<std::time::Instant>,
+
+    // Help/Settings scroll offset
+    pub help_scroll_offset: usize,
+
+    // Approval policy state
+    pub approval_auto_session: bool,
+    pub approval_auto_always: bool,
 
     // Plan mode state
     pub current_plan: Option<PlanDocument>,
@@ -181,8 +226,10 @@ impl App {
             animation_frame: 0,
             splash_shown_at: Some(std::time::Instant::now()),
             escape_pending_at: None,
-            pending_approval: None,
-            show_approval_details: false,
+            ctrl_c_pending_at: None,
+            help_scroll_offset: 0,
+            approval_auto_session: false,
+            approval_auto_always: false,
             current_plan: None,
             plan_scroll_offset: 0,
             selected_task_index: None,
@@ -314,43 +361,48 @@ impl App {
                 // Update animation frame for spinner
                 self.animation_frame = self.animation_frame.wrapping_add(1);
 
-                // Check for approval timeout
-                if let Some(ref approval_request) = self.pending_approval {
-                    if approval_request.is_timed_out() {
-                        tracing::warn!(
-                            "Approval request {} timed out after 5 minutes",
-                            approval_request.request_id
-                        );
+                // Check for approval timeout — scan messages for pending approvals
+                let timed_out: Option<(Uuid, mpsc::UnboundedSender<ToolApprovalResponse>)> = self
+                    .messages
+                    .iter()
+                    .rev()
+                    .find_map(|m| m.approval.as_ref())
+                    .filter(|a| {
+                        a.state == ApprovalState::Pending
+                            && a.requested_at.elapsed() > std::time::Duration::from_secs(300)
+                    })
+                    .map(|a| (a.request_id, a.response_tx.clone()));
 
-                        // Auto-deny the timed-out request
-                        let response = ToolApprovalResponse {
-                            request_id: approval_request.request_id,
-                            approved: false,
-                            reason: Some("Approval request timed out after 5 minutes".to_string()),
-                        };
+                if let Some((request_id, response_tx)) = timed_out {
+                    tracing::warn!("Approval request {} timed out after 5 minutes", request_id);
 
-                        // Send response
-                        let _ = approval_request.response_tx.send(response.clone());
-                        let _ = self
-                            .event_sender()
-                            .send(TuiEvent::ToolApprovalResponse(response));
+                    let response = ToolApprovalResponse {
+                        request_id,
+                        approved: false,
+                        reason: Some("Approval request timed out after 5 minutes".to_string()),
+                    };
+                    let _ = response_tx.send(response.clone());
+                    let _ = self.event_sender().send(TuiEvent::ToolApprovalResponse(response));
 
-                        // Clear pending approval and return to chat
-                        self.pending_approval = None;
-                        self.mode = AppMode::Chat;
-                        self.error_message = Some("⏱️  Approval request timed out".to_string());
+                    // Update state in the message
+                    if let Some(approval) = self
+                        .messages
+                        .iter_mut()
+                        .rev()
+                        .find_map(|m| m.approval.as_mut())
+                        .filter(|a| a.state == ApprovalState::Pending)
+                    {
+                        approval.state = ApprovalState::Denied("Timed out after 5 minutes".to_string());
                     }
+
+                    self.error_message = Some("Approval request timed out".to_string());
                 }
             }
             TuiEvent::ToolApprovalRequested(request) => {
                 self.handle_approval_requested(request);
             }
             TuiEvent::ToolApprovalResponse(_response) => {
-                // Response is sent via channel, just update UI state
-                self.pending_approval = None;
-                self.show_approval_details = false;
-                self.mode = AppMode::Chat;
-                // Auto-scroll to show tool execution result
+                // Response is sent via channel, just auto-scroll
                 self.scroll_offset = 0;
             }
             TuiEvent::Resize(_, _) | TuiEvent::AgentProcessing => {
@@ -363,6 +415,7 @@ impl App {
     /// Handle keyboard input
     async fn handle_key_event(&mut self, event: crossterm::event::KeyEvent) -> Result<()> {
         use super::events::keys;
+        use crossterm::event::{KeyCode, KeyModifiers};
 
         // DEBUG: Log key events when in Plan mode
         if matches!(self.mode, AppMode::Plan) {
@@ -373,9 +426,32 @@ impl App {
             );
         }
 
-        // Global shortcuts
+        // Ctrl+C: first press clears input, second press (within 3s) quits
         if keys::is_quit(&event) {
-            self.should_quit = true;
+            if let Some(pending_at) = self.ctrl_c_pending_at {
+                if pending_at.elapsed() < std::time::Duration::from_secs(3) {
+                    // Second Ctrl+C within window — quit
+                    self.should_quit = true;
+                    return Ok(());
+                }
+            }
+            // First Ctrl+C — clear input and show hint
+            self.input_buffer.clear();
+            self.slash_suggestions_active = false;
+            self.error_message = Some("Press Ctrl+C again to quit".to_string());
+            self.ctrl_c_pending_at = Some(std::time::Instant::now());
+            return Ok(());
+        }
+
+        // Any non-Ctrl+C key resets the quit confirmation
+        self.ctrl_c_pending_at = None;
+
+        // Ctrl+Backspace — delete last word
+        // Terminals send Ctrl+Backspace as Ctrl+H (KeyCode::Char('h')) so match both
+        if (event.code == KeyCode::Backspace || event.code == KeyCode::Char('h'))
+            && event.modifiers.contains(KeyModifiers::CONTROL)
+        {
+            self.delete_last_word();
             return Ok(());
         }
 
@@ -386,11 +462,6 @@ impl App {
 
         if keys::is_list_sessions(&event) {
             self.switch_mode(AppMode::Sessions).await?;
-            return Ok(());
-        }
-
-        if keys::is_help(&event) {
-            self.switch_mode(AppMode::Help).await?;
             return Ok(());
         }
 
@@ -445,7 +516,6 @@ impl App {
             AppMode::Chat => self.handle_chat_key(event).await?,
             AppMode::Plan => self.handle_plan_key(event).await?,
             AppMode::Sessions => self.handle_sessions_key(event).await?,
-            AppMode::ToolApproval => self.handle_approval_key(event).await?,
             AppMode::FilePicker => self.handle_file_picker_key(event).await?,
             AppMode::ModelSelector => self.handle_model_selector_key(event).await?,
             AppMode::UsageDialog => {
@@ -476,7 +546,16 @@ impl App {
             }
             AppMode::Help | AppMode::Settings => {
                 if keys::is_cancel(&event) {
+                    self.help_scroll_offset = 0;
                     self.switch_mode(AppMode::Chat).await?;
+                } else if keys::is_up(&event) {
+                    self.help_scroll_offset = self.help_scroll_offset.saturating_sub(1);
+                } else if keys::is_down(&event) {
+                    self.help_scroll_offset = self.help_scroll_offset.saturating_add(1);
+                } else if keys::is_page_up(&event) {
+                    self.help_scroll_offset = self.help_scroll_offset.saturating_sub(10);
+                } else if keys::is_page_down(&event) {
+                    self.help_scroll_offset = self.help_scroll_offset.saturating_add(10);
                 }
             }
         }
@@ -484,10 +563,152 @@ impl App {
         Ok(())
     }
 
+    /// Check if there is a pending inline approval in the messages
+    /// Delete the last word from input buffer (for Ctrl+Backspace and Alt+Backspace)
+    fn delete_last_word(&mut self) {
+        // Trim trailing whitespace first
+        let trimmed_len = self.input_buffer.trim_end().len();
+        self.input_buffer.truncate(trimmed_len);
+        // Find the last whitespace boundary
+        if let Some(pos) = self.input_buffer.rfind(char::is_whitespace) {
+            self.input_buffer.truncate(pos + 1);
+        } else {
+            self.input_buffer.clear();
+        }
+    }
+
+    fn has_pending_approval(&self) -> bool {
+        self.messages.iter().rev().any(|msg| {
+            msg.approval
+                .as_ref()
+                .is_some_and(|a| a.state == ApprovalState::Pending)
+        })
+    }
+
     /// Handle keys in chat mode
     async fn handle_chat_key(&mut self, event: crossterm::event::KeyEvent) -> Result<()> {
         use super::events::keys;
-        use crossterm::event::KeyCode;
+        use crossterm::event::{KeyCode, KeyModifiers};
+
+        // Intercept keys when an inline approval is pending
+        if self.has_pending_approval() {
+            if keys::is_up(&event) {
+                // Navigate approval options up
+                if let Some(approval) = self
+                    .messages
+                    .iter_mut()
+                    .rev()
+                    .find_map(|m| m.approval.as_mut())
+                    .filter(|a| a.state == ApprovalState::Pending)
+                {
+                    approval.selected_option = approval.selected_option.saturating_sub(1);
+                }
+                return Ok(());
+            } else if keys::is_down(&event) {
+                // Navigate approval options down
+                if let Some(approval) = self
+                    .messages
+                    .iter_mut()
+                    .rev()
+                    .find_map(|m| m.approval.as_mut())
+                    .filter(|a| a.state == ApprovalState::Pending)
+                {
+                    approval.selected_option = (approval.selected_option + 1).min(2);
+                }
+                return Ok(());
+            } else if keys::is_enter(&event) || keys::is_submit(&event) {
+                // Approve with selected option
+                // Extract data before mutating
+                let approval_data: Option<(Uuid, usize, mpsc::UnboundedSender<ToolApprovalResponse>)> = self
+                    .messages
+                    .iter()
+                    .rev()
+                    .find_map(|m| m.approval.as_ref())
+                    .filter(|a| a.state == ApprovalState::Pending)
+                    .map(|a| (a.request_id, a.selected_option, a.response_tx.clone()));
+
+                if let Some((request_id, selected, response_tx)) = approval_data {
+                    let option = match selected {
+                        0 => ApprovalOption::AllowOnce,
+                        1 => ApprovalOption::AllowForSession,
+                        _ => ApprovalOption::AllowAlways,
+                    };
+
+                    // Set policy
+                    match &option {
+                        ApprovalOption::AllowForSession => self.approval_auto_session = true,
+                        ApprovalOption::AllowAlways => self.approval_auto_always = true,
+                        _ => {}
+                    }
+
+                    // Send approval response
+                    let response = ToolApprovalResponse {
+                        request_id,
+                        approved: true,
+                        reason: None,
+                    };
+                    let _ = response_tx.send(response.clone());
+                    let _ = self.event_sender().send(TuiEvent::ToolApprovalResponse(response));
+
+                    // Update state in the message
+                    if let Some(approval) = self
+                        .messages
+                        .iter_mut()
+                        .rev()
+                        .find_map(|m| m.approval.as_mut())
+                        .filter(|a| a.state == ApprovalState::Pending)
+                    {
+                        approval.state = ApprovalState::Approved(option);
+                    }
+                }
+                return Ok(());
+            } else if keys::is_deny(&event) || keys::is_cancel(&event) {
+                // Deny the approval
+                let approval_data: Option<(Uuid, mpsc::UnboundedSender<ToolApprovalResponse>)> = self
+                    .messages
+                    .iter()
+                    .rev()
+                    .find_map(|m| m.approval.as_ref())
+                    .filter(|a| a.state == ApprovalState::Pending)
+                    .map(|a| (a.request_id, a.response_tx.clone()));
+
+                if let Some((request_id, response_tx)) = approval_data {
+                    let response = ToolApprovalResponse {
+                        request_id,
+                        approved: false,
+                        reason: Some("User denied permission".to_string()),
+                    };
+                    let _ = response_tx.send(response.clone());
+                    let _ = self.event_sender().send(TuiEvent::ToolApprovalResponse(response));
+
+                    // Update state in the message
+                    if let Some(approval) = self
+                        .messages
+                        .iter_mut()
+                        .rev()
+                        .find_map(|m| m.approval.as_mut())
+                        .filter(|a| a.state == ApprovalState::Pending)
+                    {
+                        approval.state = ApprovalState::Denied("User denied permission".to_string());
+                    }
+                }
+                return Ok(());
+            } else if keys::is_view_details(&event) {
+                // Toggle details view
+                if let Some(approval) = self
+                    .messages
+                    .iter_mut()
+                    .rev()
+                    .find_map(|m| m.approval.as_mut())
+                    .filter(|a| a.state == ApprovalState::Pending)
+                {
+                    approval.show_details = !approval.show_details;
+                }
+                return Ok(());
+            }
+            // Other keys ignored while approval pending
+            return Ok(());
+        }
 
         // When slash suggestions are active, intercept navigation keys
         if self.slash_suggestions_active {
@@ -569,16 +790,19 @@ impl App {
             self.scroll_offset = self.scroll_offset.saturating_add(10);
         } else if keys::is_page_down(&event) {
             self.scroll_offset = self.scroll_offset.saturating_sub(10);
+        } else if event.code == KeyCode::Backspace && event.modifiers.contains(KeyModifiers::ALT) {
+            // Alt+Backspace — delete last word
+            self.delete_last_word();
         } else {
             // Regular character input
             match event.code {
                 KeyCode::Char('@') => {
                     self.open_file_picker().await?;
                 }
-                KeyCode::Char(c) => {
+                KeyCode::Char(c) if event.modifiers.is_empty() || event.modifiers == KeyModifiers::SHIFT => {
                     self.input_buffer.push(c);
                 }
-                KeyCode::Backspace => {
+                KeyCode::Backspace if event.modifiers.is_empty() => {
                     self.input_buffer.pop();
                 }
                 KeyCode::Enter => {
@@ -801,6 +1025,7 @@ impl App {
         self.messages.clear();
         self.scroll_offset = 0;
         self.mode = AppMode::Chat;
+        self.approval_auto_session = false;
 
         // Reload sessions list
         self.load_sessions().await?;
@@ -824,6 +1049,7 @@ impl App {
         self.current_session = Some(session);
         self.messages = messages.into_iter().map(DisplayMessage::from).collect();
         self.scroll_offset = 0;
+        self.approval_auto_session = false;
 
         Ok(())
     }
@@ -897,6 +1123,14 @@ impl App {
                 let _ = self.event_sender().send(TuiEvent::SwitchMode(AppMode::Sessions));
                 true
             }
+            "/approve" => {
+                self.approval_auto_session = false;
+                self.approval_auto_always = false;
+                self.push_system_message(
+                    "Tool approval reset — all tools will require manual approval.".to_string(),
+                );
+                true
+            }
             "/help" => {
                 self.mode = AppMode::Help;
                 true
@@ -937,6 +1171,7 @@ impl App {
             timestamp: chrono::Utc::now(),
             token_count: None,
             cost: None,
+            approval: None,
         });
         self.scroll_offset = 0;
     }
@@ -963,6 +1198,7 @@ impl App {
                 timestamp: chrono::Utc::now(),
                 token_count: None,
                 cost: None,
+                approval: None,
             };
             self.messages.push(user_msg);
 
@@ -1037,6 +1273,7 @@ impl App {
                 response.usage.input_tokens as i32 + response.usage.output_tokens as i32,
             ),
             cost: Some(response.cost),
+            approval: None,
         };
         self.messages.push(assistant_msg);
 
@@ -1068,6 +1305,7 @@ impl App {
                     timestamp: chrono::Utc::now(),
                     token_count: None,
                     cost: None,
+                    approval: None,
                 };
                 self.messages.push(error_msg);
             } else {
@@ -1250,6 +1488,7 @@ impl App {
                             timestamp: chrono::Utc::now(),
                             token_count: None,
                             cost: None,
+                            approval: None,
                         };
 
                         self.messages.push(notification);
@@ -1318,6 +1557,7 @@ impl App {
                                     timestamp: chrono::Utc::now(),
                                     token_count: None,
                                     cost: None,
+                                    approval: None,
                                 };
 
                                 self.messages.push(notification);
@@ -1555,6 +1795,7 @@ impl App {
                 timestamp: chrono::Utc::now(),
                 token_count: None,
                 cost: None,
+                approval: None,
             };
             self.messages.push(completion_msg);
         } else if let Some(message) = task_message {
@@ -1596,55 +1837,70 @@ impl App {
         self.messages.iter().filter_map(|m| m.cost).sum()
     }
 
-    /// Handle tool approval request
+    /// Handle tool approval request — inline in chat
     fn handle_approval_requested(&mut self, request: ToolApprovalRequest) {
-        self.pending_approval = Some(request);
-        self.show_approval_details = false;
-        self.mode = AppMode::ToolApproval;
-    }
+        // Auto-approve if policy allows
+        if self.approval_auto_always || self.approval_auto_session {
+            let response = ToolApprovalResponse {
+                request_id: request.request_id,
+                approved: true,
+                reason: None,
+            };
+            let _ = request.response_tx.send(response.clone());
+            let _ = self.event_sender().send(TuiEvent::ToolApprovalResponse(response));
 
-    /// Handle keys in approval mode
-    async fn handle_approval_key(&mut self, event: crossterm::event::KeyEvent) -> Result<()> {
-        use super::events::keys;
-
-        if let Some(ref approval_request) = self.pending_approval {
-            if keys::is_approve(&event) {
-                // User approved
-                let response = ToolApprovalResponse {
-                    request_id: approval_request.request_id,
-                    approved: true,
-                    reason: None,
-                };
-
-                // Send response back through the channel
-                let _ = approval_request.response_tx.send(response.clone());
-
-                // Send event to update UI
-                let _ = self
-                    .event_sender()
-                    .send(TuiEvent::ToolApprovalResponse(response));
-            } else if keys::is_deny(&event) || keys::is_cancel(&event) {
-                // User denied
-                let response = ToolApprovalResponse {
-                    request_id: approval_request.request_id,
-                    approved: false,
-                    reason: Some("User denied permission".to_string()),
-                };
-
-                // Send response back through the channel
-                let _ = approval_request.response_tx.send(response.clone());
-
-                // Send event to update UI
-                let _ = self
-                    .event_sender()
-                    .send(TuiEvent::ToolApprovalResponse(response));
-            } else if keys::is_view_details(&event) {
-                // Toggle details view
-                self.show_approval_details = !self.show_approval_details;
-            }
+            // Add compact auto-approved message
+            self.messages.push(DisplayMessage {
+                id: Uuid::new_v4(),
+                role: "approval".to_string(),
+                content: String::new(),
+                timestamp: chrono::Utc::now(),
+                token_count: None,
+                cost: None,
+                approval: Some(ApprovalData {
+                    tool_name: request.tool_name,
+                    tool_description: request.tool_description,
+                    tool_input: request.tool_input,
+                    capabilities: request.capabilities,
+                    request_id: request.request_id,
+                    response_tx: request.response_tx,
+                    requested_at: request.requested_at,
+                    state: ApprovalState::Approved(if self.approval_auto_always {
+                        ApprovalOption::AllowAlways
+                    } else {
+                        ApprovalOption::AllowForSession
+                    }),
+                    selected_option: 0,
+                    show_details: false,
+                }),
+            });
+            self.scroll_offset = 0;
+            return;
         }
 
-        Ok(())
+        // Show inline approval in chat
+        self.messages.push(DisplayMessage {
+            id: Uuid::new_v4(),
+            role: "approval".to_string(),
+            content: String::new(),
+            timestamp: chrono::Utc::now(),
+            token_count: None,
+            cost: None,
+            approval: Some(ApprovalData {
+                tool_name: request.tool_name,
+                tool_description: request.tool_description,
+                tool_input: request.tool_input,
+                capabilities: request.capabilities,
+                request_id: request.request_id,
+                response_tx: request.response_tx,
+                requested_at: request.requested_at,
+                state: ApprovalState::Pending,
+                selected_option: 0,
+                show_details: false,
+            }),
+        });
+        self.scroll_offset = 0;
+        // Stay in AppMode::Chat — no mode switch
     }
 
     /// Update slash command autocomplete suggestions (built-in + user-defined)

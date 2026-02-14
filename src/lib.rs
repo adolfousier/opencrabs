@@ -7,7 +7,6 @@
 //!
 //! - **Multi-LLM Support:** Anthropic, OpenAI, Google Gemini, AWS Bedrock, Azure, VertexAI
 //! - **LSP Integration:** Semantic code understanding via Language Server Protocol
-//! - **MCP Support:** Model Context Protocol for enhanced capabilities
 //! - **Local-First:** SQLite storage for privacy and offline functionality
 //! - **Modern TUI:** Built with Ratatui for responsive terminal interface
 //! - **Tool System:** Extensible tools for file operations, shell commands, and more
@@ -45,8 +44,6 @@ pub mod utils;
 pub mod events;
 #[allow(unused)]
 pub mod lsp;
-#[allow(unused)]
-pub mod mcp;
 #[allow(unused)]
 pub mod message;
 #[allow(unused)]

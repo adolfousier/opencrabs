@@ -128,8 +128,6 @@ pub enum AppMode {
     Help,
     /// Settings
     Settings,
-    /// Tool approval dialog
-    ToolApproval,
     /// File picker dialog (triggered by @)
     FilePicker,
     /// Model selector dialog (triggered by /models)
@@ -256,11 +254,6 @@ pub mod keys {
     /// Ctrl+L - List sessions
     pub fn is_list_sessions(event: &KeyEvent) -> bool {
         key_matches(event, KeyCode::Char('l'), KeyModifiers::CONTROL)
-    }
-
-    /// Ctrl+H - Help
-    pub fn is_help(event: &KeyEvent) -> bool {
-        key_matches(event, KeyCode::Char('h'), KeyModifiers::CONTROL)
     }
 
     /// Ctrl+K - Clear current session

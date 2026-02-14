@@ -485,8 +485,7 @@ See [Plan Mode User Guide](src/docs/PLAN_MODE_USER_GUIDE.md) for full documentat
 
 | Shortcut | Action |
 |----------|--------|
-| `Ctrl+C` | Quit |
-| `Ctrl+H` | Show help screen |
+| `Ctrl+C` | First press clears input, second press (within 3s) quits |
 | `Ctrl+N` | New session |
 | `Ctrl+L` | List/switch sessions |
 | `Ctrl+K` | Clear current session |
@@ -506,6 +505,7 @@ See [Plan Mode User Guide](src/docs/PLAN_MODE_USER_GUIDE.md) for full documentat
 | `/usage` | Token/cost stats |
 | `/onboard` | Run setup wizard |
 | `/sessions` | Open session manager |
+| `/approve` | Reset tool approval policy to always-ask |
 
 ### Sessions Mode
 
@@ -516,6 +516,27 @@ See [Plan Mode User Guide](src/docs/PLAN_MODE_USER_GUIDE.md) for full documentat
 | `R` | Rename session |
 | `D` | Delete session |
 | `Esc` | Back to chat |
+
+### Tool Approval (Inline)
+
+When the AI requests a tool that needs permission, an inline approval prompt appears in chat:
+
+| Shortcut | Action |
+|----------|--------|
+| `↑` / `↓` | Navigate approval options |
+| `Enter` | Confirm selected option |
+| `D` / `Esc` | Deny the tool request |
+| `V` | Toggle parameter details |
+
+**Approval options:**
+
+| Option | Effect |
+|--------|--------|
+| **Allow once** | Approve this single tool call |
+| **Allow all for this task** | Auto-approve all tools this session (resets on session switch) |
+| **Allow all moving forward** | Auto-approve all tools permanently (app lifetime) |
+
+Use `/approve` to reset back to always-ask.
 
 ### Plan Mode
 
@@ -625,7 +646,7 @@ Service Layer (Session, Message, Agent, Plan)
     ↓
 Data Access Layer (SQLx + SQLite)
     ↓
-Integration Layer (LLM Providers, LSP, MCP)
+Integration Layer (LLM Providers, LSP)
 ```
 
 **Key Technologies:**
@@ -681,7 +702,6 @@ opencrabs/
 │   │   ├── render.rs     # Main render dispatch
 │   │   └── runner.rs     # TUI event loop
 │   ├── lsp/              # LSP integration
-│   ├── mcp/              # Model Context Protocol
 │   ├── events/           # Event handling
 │   ├── message/          # Message types
 │   ├── sync/             # Synchronization utilities
