@@ -259,46 +259,14 @@ fn char_boundary_at_width_from_end(s: &str, target_width: usize) -> usize {
 fn render_chat(f: &mut Frame, app: &App, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
 
-    // Show banner if there's a pending plan
-    if let Some(ref plan) = app.current_plan
-        && matches!(plan.status, crate::tui::plan::PlanStatus::PendingApproval) {
-            lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::styled("  ⚠️  ", Style::default().fg(Color::Rgb(184, 134, 11))),
-                Span::styled(
-                    "Plan Pending Approval",
-                    Style::default()
-                        .fg(Color::Rgb(184, 134, 11))
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("  ", Style::default()),
-                Span::styled("Press ", Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    "Ctrl+P",
-                    Style::default()
-                        .fg(Color::Rgb(70, 130, 180))
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    " to review the plan, or switch to Plan Mode to approve/reject.",
-                    Style::default().fg(Color::DarkGray),
-                ),
-            ]));
-            lines.push(Line::from(Span::styled(
-                "  ─".repeat(30),
-                Style::default().fg(Color::Rgb(184, 134, 11)),
-            )));
-            lines.push(Line::from(""));
-        }
-
-    // Get the model name from the current session
+    // Get the model name: session model → provider default → "AI"
     let model_name = app
         .current_session
         .as_ref()
         .and_then(|s| s.model.as_deref())
-        .unwrap_or("AI");
+        .unwrap_or_else(|| {
+            if app.default_model_name.is_empty() { "AI" } else { &app.default_model_name }
+        });
 
     let content_width = area.width.saturating_sub(2) as usize; // borders
 
@@ -306,6 +274,13 @@ fn render_chat(f: &mut Frame, app: &App, area: Rect) {
         // Render inline approval messages
         if let Some(ref approval) = msg.approval {
             render_inline_approval(&mut lines, approval, content_width);
+            lines.push(Line::from(""));
+            continue;
+        }
+
+        // Render inline plan approval selector
+        if let Some(ref plan_approval) = msg.plan_approval {
+            render_inline_plan_approval(&mut lines, plan_approval, content_width);
             lines.push(Line::from(""));
             continue;
         }
@@ -423,16 +398,27 @@ fn render_chat(f: &mut Frame, app: &App, area: Rect) {
         render_tool_group(&mut lines, group, true);
     }
 
-    // Add streaming response if present
-    if let Some(ref response) = app.streaming_response {
+    let has_pending_approval = app.has_pending_approval();
+
+    // Add streaming response if present (hide when approval is pending)
+    if !has_pending_approval && let Some(ref response) = app.streaming_response {
+        let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        let frame = spinner_frames[app.animation_frame % spinner_frames.len()];
+
         lines.push(Line::from(vec![
+            Span::styled(
+                format!("{} ", frame),
+                Style::default()
+                    .fg(Color::Rgb(70, 130, 180))
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(
                 format!("{} ", model_name),
                 Style::default()
                     .fg(Color::Blue)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("[streaming]", Style::default().fg(Color::DarkGray)),
+            Span::styled("is responding...", Style::default().fg(Color::Rgb(184, 134, 11))),
         ]));
 
         let streaming_lines = parse_markdown(response);
@@ -446,8 +432,8 @@ fn render_chat(f: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    // Show processing indicator with animated spinner
-    if app.is_processing && app.streaming_response.is_none() {
+    // Show processing indicator with animated spinner (hide when approval is pending)
+    if app.is_processing && app.streaming_response.is_none() && !has_pending_approval {
         let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         let frame = spinner_frames[app.animation_frame % spinner_frames.len()];
 
@@ -464,6 +450,24 @@ fn render_chat(f: &mut Frame, app: &App, area: Rect) {
                 Style::default().fg(Color::Rgb(184, 134, 11)),
             ),
         ]));
+    }
+
+    // Show error message if present
+    if let Some(ref error) = app.error_message {
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::styled(
+                "  Error: ",
+                Style::default()
+                    .fg(Color::Red)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                error.clone(),
+                Style::default().fg(Color::Red),
+            ),
+        ]));
+        lines.push(Line::from(""));
     }
 
     // Calculate scroll offset — lines are pre-wrapped so count is accurate
@@ -500,8 +504,8 @@ fn render_chat(f: &mut Frame, app: &App, area: Rect) {
 fn render_input(f: &mut Frame, app: &App, area: Rect) {
     let mut input_text = app.input_buffer.clone();
 
-    // Always show cursor (input stays active during processing)
-    input_text.push('\u{2588}');
+    // Insert cursor block at the current cursor position
+    input_text.insert(app.cursor_position, '\u{2588}');
 
     let input_content_width = area.width.saturating_sub(2) as usize; // borders
     let mut input_lines: Vec<Line> = Vec::new();
@@ -770,6 +774,125 @@ fn render_inline_approval<'a>(
                     format!("  {} -- denied{}", desc, suffix),
                     Style::default()
                         .fg(Color::Red)
+                        .add_modifier(Modifier::ITALIC),
+                ),
+            ]));
+        }
+    }
+}
+
+/// Render an inline plan approval selector (Approve / Reject / Request Changes / View Plan)
+fn render_inline_plan_approval<'a>(
+    lines: &mut Vec<Line<'a>>,
+    plan: &super::app::PlanApprovalData,
+    _content_width: usize,
+) {
+    use super::app::PlanApprovalState;
+
+    match &plan.state {
+        PlanApprovalState::Pending => {
+            // Plan title line
+            lines.push(Line::from(vec![
+                Span::styled("  ", Style::default()),
+                Span::styled(
+                    "\u{1F4CB} ", // 📋
+                    Style::default(),
+                ),
+                Span::styled(
+                    format!("Plan: {}", plan.plan_title),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]));
+
+            // Task count
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("  {} tasks", plan.task_count),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(
+                    " (V to show tasks)",
+                    Style::default().fg(Color::Rgb(80, 80, 80)),
+                ),
+            ]));
+
+            // Show task list if expanded
+            if plan.show_details {
+                for (i, summary) in plan.task_summaries.iter().enumerate() {
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            format!("    {}. ", i + 1),
+                            Style::default().fg(Color::Rgb(100, 100, 100)),
+                        ),
+                        Span::styled(
+                            summary.clone(),
+                            Style::default().fg(Color::Rgb(140, 140, 140)),
+                        ),
+                    ]));
+                }
+            }
+
+            // Blank line before options
+            lines.push(Line::from(""));
+
+            // Options: Approve(0), Reject(1), Request Changes(2), View Plan(3)
+            let options = [
+                ("Approve & Execute", Color::Green),
+                ("Reject", Color::Red),
+                ("Request Changes", Color::Yellow),
+                ("View Full Plan", Color::Rgb(70, 130, 180)),
+            ];
+            for (i, (label, color)) in options.iter().enumerate() {
+                if i == plan.selected_option {
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            format!("  {} ", "\u{276F}"), // ❯
+                            Style::default().fg(*color).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            label.to_string(),
+                            Style::default().fg(*color).add_modifier(Modifier::BOLD),
+                        ),
+                    ]));
+                } else {
+                    lines.push(Line::from(vec![
+                        Span::styled("    ", Style::default()),
+                        Span::styled(
+                            label.to_string(),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                    ]));
+                }
+            }
+        }
+        PlanApprovalState::Approved => {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("  \u{2705} Plan '{}' approved — executing...", plan.plan_title),
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::ITALIC),
+                ),
+            ]));
+        }
+        PlanApprovalState::Rejected => {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("  \u{274C} Plan '{}' rejected", plan.plan_title),
+                    Style::default()
+                        .fg(Color::Red)
+                        .add_modifier(Modifier::ITALIC),
+                ),
+            ]));
+        }
+        PlanApprovalState::RevisionRequested => {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("  \u{1F504} Plan '{}' — revision requested", plan.plan_title),
+                    Style::default()
+                        .fg(Color::Yellow)
                         .add_modifier(Modifier::ITALIC),
                 ),
             ]));

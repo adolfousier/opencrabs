@@ -5,7 +5,7 @@
 
 # OpenCrabs
 
-**High-Performance Terminal AI Orchestration Agent for Software Development**
+**The AI buddy that gets things done. Rust-based open-claw inspired orchestration layer for software development.**
 
 > A terminal-native AI orchestration agent written in Rust with Ratatui. Inspired by [Open Claw](https://github.com/openclaw/openclaw).
 
@@ -635,15 +635,31 @@ Commands appear in autocomplete alongside built-in commands. After each agent re
 
 ### Self-Sustaining Architecture
 
-OpenCrabs can modify its own source code, build, test, and hot-restart itself:
+OpenCrabs can modify its own source code, build, test, and hot-restart itself via the `/rebuild` command:
 
-1. The agent edits source files using its tools
-2. Builds with `cargo build --release`
-3. Runs `cargo test` to verify
-4. Replaces itself via Unix `exec()` — preserving the session ID
-5. The new binary loads the same session from SQLite
+```
+/rebuild          # Triggers build → test → restart
+```
 
-The running binary is in memory — source changes on disk don't affect it until restart. If the build fails, the agent stays running and can fix the errors.
+**How it works:**
+
+1. The agent edits source files using its built-in tools (read, write, edit, bash)
+2. `SelfUpdater::build()` runs `cargo build --release` asynchronously
+3. `SelfUpdater::test()` runs `cargo test` to verify correctness
+4. On success, the TUI shows a **RestartPending** confirmation dialog
+5. `SelfUpdater::restart(session_id)` replaces the process via Unix `exec()`
+6. The new binary starts with `opencrabs chat --session <uuid>` — resuming the same conversation from SQLite
+
+**Key details:**
+
+- The running binary is in memory — source changes on disk don't affect it until restart
+- If the build fails, the agent stays running and can read compiler errors to fix them
+- Session persistence via SQLite means no conversation context is lost across restarts
+- Brain files (`SOUL.md`, `MEMORY.md`, etc.) are re-read every turn, so edits take effect immediately without rebuild
+- User-defined slash commands (`commands.json`) also auto-reload after each agent response
+- Hot restart is Unix-only (`exec()` syscall); on Windows the build/test steps work but restart requires manual relaunch
+
+**Module:** `src/brain/self_update.rs` — `SelfUpdater` struct with `auto_detect()`, `build()`, `test()`, `restart()`
 
 ---
 

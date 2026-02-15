@@ -12,7 +12,11 @@ const BRAIN_FILES: &[(&str, &str)] = &[
     ("USER.md", "user"),
     ("AGENTS.md", "agents"),
     ("TOOLS.md", "tools"),
+    ("SECURITY.md", "security"),
     ("MEMORY.md", "memory"),
+    ("BOOT.md", "boot"),
+    ("BOOTSTRAP.md", "bootstrap"),
+    ("HEARTBEAT.md", "heartbeat"),
 ];
 
 /// Brain preamble — always present regardless of workspace contents.
@@ -94,30 +98,16 @@ impl BrainLoader {
         Self { workspace_path }
     }
 
-    /// Resolve the brain workspace path using priority order:
-    /// 1. `OPENCRABS_BRAIN_PATH` env var
-    /// 2. `~/opencrabs/brain/workspace/`
-    /// 3. Fallback: `$CWD/.opencrabs/brain/`
+    /// Resolve the brain workspace path: `~/opencrabs/brain/workspace/`
+    ///
+    /// Creates the directory if it doesn't exist.
     pub fn resolve_path() -> PathBuf {
-        // 1. Environment variable
-        if let Ok(path) = std::env::var("OPENCRABS_BRAIN_PATH") {
-            let p = PathBuf::from(path);
-            if p.exists() {
-                return p;
-            }
+        let home = dirs::home_dir().expect("Cannot determine home directory");
+        let p = home.join("opencrabs").join("brain").join("workspace");
+        if !p.exists() {
+            let _ = std::fs::create_dir_all(&p);
         }
-
-        // 2. ~/opencrabs/brain/workspace/
-        if let Some(home) = dirs::home_dir() {
-            let p = home.join("opencrabs").join("brain").join("workspace");
-            if p.exists() {
-                return p;
-            }
-        }
-
-        // 3. Fallback: cwd/.opencrabs/brain/
-        let cwd = std::env::current_dir().unwrap_or_default();
-        cwd.join(".opencrabs").join("brain")
+        p
     }
 
     /// Read a single markdown file from the workspace. Returns `None` if missing.

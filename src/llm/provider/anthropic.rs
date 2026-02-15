@@ -293,46 +293,54 @@ impl Provider for AnthropicProvider {
         )
         .await?;
 
-        // Parse Server-Sent Events stream
+        // Parse Server-Sent Events stream with cross-chunk buffering.
+        // TCP chunks can split SSE events, so we buffer partial lines.
         let byte_stream = response.bytes_stream();
-        let event_stream = byte_stream.map(|chunk_result| {
-            chunk_result
-                .map_err(|e| ProviderError::StreamError(e.to_string()))
-                .and_then(|chunk| {
-                    // Parse SSE format: "data: {json}\n\n"
-                    let text = String::from_utf8_lossy(&chunk);
+        let buffer = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
 
-                    // Split by SSE event delimiter
-                    for line in text.lines() {
-                        if let Some(json_str) = line.strip_prefix("data: ") {
-                            if json_str == "[DONE]" {
-                                tracing::trace!("Stream completed with [DONE] marker");
-                                continue;
+        let event_stream = byte_stream
+            .map(move |chunk_result| -> Vec<std::result::Result<StreamEvent, ProviderError>> {
+                match chunk_result {
+                    Err(e) => vec![Err(ProviderError::StreamError(e.to_string()))],
+                    Ok(chunk) => {
+                        let text = String::from_utf8_lossy(&chunk);
+                        let mut buf = buffer.lock().expect("SSE buffer lock poisoned");
+                        buf.push_str(&text);
+
+                        let mut events = Vec::new();
+
+                        // Process complete lines (terminated by \n)
+                        while let Some(newline_pos) = buf.find('\n') {
+                            let line = buf[..newline_pos].trim().to_string();
+                            buf.drain(..=newline_pos);
+
+                            if let Some(json_str) = line.strip_prefix("data: ") {
+                                if json_str == "[DONE]" {
+                                    continue;
+                                }
+                                match serde_json::from_str::<StreamEvent>(json_str) {
+                                    Ok(event) => events.push(Ok(event)),
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            "Failed to parse SSE event JSON: {}. Data: {}",
+                                            e,
+                                            json_str.chars().take(200).collect::<String>()
+                                        );
+                                        // Don't propagate parse errors for individual events
+                                    }
+                                }
                             }
+                        }
 
-                            // Parse the JSON event
-                            return serde_json::from_str::<StreamEvent>(json_str).map_err(|e| {
-                                tracing::warn!(
-                                    "Failed to parse SSE event JSON: {}. Data: {}",
-                                    e,
-                                    json_str.chars().take(200).collect::<String>()
-                                );
-                                ProviderError::JsonError(e)
-                            });
-                        } else if !line.trim().is_empty()
-                            && !line.starts_with("event:")
-                            && !line.starts_with("id:")
-                            && !line.starts_with("retry:")
-                        {
-                            // Log unexpected SSE line formats for debugging
-                            tracing::debug!("Unexpected SSE line format: {}", line);
+                        if events.is_empty() {
+                            vec![Ok(StreamEvent::Ping)]
+                        } else {
+                            events
                         }
                     }
-
-                    // Skip non-data lines (e.g., "event: message_start")
-                    Ok(StreamEvent::Ping)
-                })
-        });
+                }
+            })
+            .flat_map(futures::stream::iter);
 
         Ok(Box::pin(event_stream))
     }

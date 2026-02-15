@@ -1,6 +1,6 @@
 //! Telegram Message Handler
 //!
-//! Processes incoming messages: text, voice (STT/TTS), allowlist enforcement.
+//! Processes incoming messages: text, voice (STT/TTS), photos, image documents, allowlist enforcement.
 
 use crate::config::VoiceConfig;
 use crate::llm::agent::AgentService;
@@ -126,8 +126,136 @@ pub(crate) async fn handle_message(
                 return Ok(());
             }
         }
+    } else if let Some(photos) = msg.photo() {
+        // Photo -- download and send to agent as image attachment
+        let Some(photo) = photos.last() else {
+            return Ok(());
+        };
+        tracing::info!(
+            "Telegram: photo from user {} ({}) — {}x{}",
+            user_id,
+            user.first_name,
+            photo.width,
+            photo.height,
+        );
+
+        let file = bot.get_file(&photo.file.id).await?;
+        let download_url = format!(
+            "https://api.telegram.org/file/bot{}/{}",
+            bot_token.as_str(),
+            file.path
+        );
+
+        let photo_bytes = match reqwest::get(&download_url).await {
+            Ok(resp) => match resp.bytes().await {
+                Ok(b) => b.to_vec(),
+                Err(e) => {
+                    tracing::error!("Telegram: failed to read photo bytes: {}", e);
+                    bot.send_message(msg.chat.id, "Failed to download photo.")
+                        .await?;
+                    return Ok(());
+                }
+            },
+            Err(e) => {
+                tracing::error!("Telegram: failed to download photo: {}", e);
+                bot.send_message(msg.chat.id, "Failed to download photo.")
+                    .await?;
+                return Ok(());
+            }
+        };
+
+        // Save to temp file so the agent's <<IMG:path>> pipeline can handle it
+        let tmp_path = std::env::temp_dir().join(format!("tg_photo_{}.jpg", Uuid::new_v4()));
+        if let Err(e) = tokio::fs::write(&tmp_path, &photo_bytes).await {
+            tracing::error!("Telegram: failed to write temp photo: {}", e);
+            bot.send_message(msg.chat.id, "Failed to process photo.")
+                .await?;
+            return Ok(());
+        }
+
+        // Use caption if provided, otherwise generic prompt
+        let caption = msg.caption().unwrap_or("Analyze this image");
+        let text_with_img = format!("<<IMG:{}>> {}", tmp_path.display(), caption);
+
+        // Clean up temp file after a delay (don't block)
+        let cleanup_path = tmp_path.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            let _ = tokio::fs::remove_file(cleanup_path).await;
+        });
+
+        (text_with_img, false)
+    } else if let Some(doc) = msg.document() {
+        // Document -- check if it's an image by MIME type
+        let is_image = doc
+            .mime_type
+            .as_ref()
+            .is_some_and(|m| m.as_ref().starts_with("image/"));
+
+        if !is_image {
+            bot.send_message(msg.chat.id, "Only image files are supported for now.")
+                .await?;
+            return Ok(());
+        }
+
+        tracing::info!(
+            "Telegram: image document from user {} ({})",
+            user_id,
+            user.first_name,
+        );
+
+        let file = bot.get_file(&doc.file.id).await?;
+        let download_url = format!(
+            "https://api.telegram.org/file/bot{}/{}",
+            bot_token.as_str(),
+            file.path
+        );
+
+        let img_bytes = match reqwest::get(&download_url).await {
+            Ok(resp) => match resp.bytes().await {
+                Ok(b) => b.to_vec(),
+                Err(e) => {
+                    tracing::error!("Telegram: failed to read document bytes: {}", e);
+                    bot.send_message(msg.chat.id, "Failed to download file.")
+                        .await?;
+                    return Ok(());
+                }
+            },
+            Err(e) => {
+                tracing::error!("Telegram: failed to download document: {}", e);
+                bot.send_message(msg.chat.id, "Failed to download file.")
+                    .await?;
+                return Ok(());
+            }
+        };
+
+        // Determine extension from filename or default to jpg
+        let ext = doc
+            .file_name
+            .as_ref()
+            .and_then(|n| n.rsplit('.').next())
+            .unwrap_or("jpg");
+
+        let tmp_path = std::env::temp_dir().join(format!("tg_doc_{}.{}", Uuid::new_v4(), ext));
+        if let Err(e) = tokio::fs::write(&tmp_path, &img_bytes).await {
+            tracing::error!("Telegram: failed to write temp doc: {}", e);
+            bot.send_message(msg.chat.id, "Failed to process file.")
+                .await?;
+            return Ok(());
+        }
+
+        let caption = msg.caption().unwrap_or("Analyze this image");
+        let text_with_img = format!("<<IMG:{}>> {}", tmp_path.display(), caption);
+
+        let cleanup_path = tmp_path.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            let _ = tokio::fs::remove_file(cleanup_path).await;
+        });
+
+        (text_with_img, false)
     } else {
-        // Non-text, non-voice message -- ignore
+        // Non-text, non-voice, non-photo message -- ignore
         return Ok(());
     };
 
@@ -380,5 +508,43 @@ mod tests {
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0].len(), 4096);
         assert_eq!(chunks[1].len(), 904);
+    }
+
+    #[test]
+    fn test_markdown_to_telegram_html_bold() {
+        let html = markdown_to_telegram_html("**hello**");
+        assert!(html.contains("<b>hello</b>"));
+    }
+
+    #[test]
+    fn test_markdown_to_telegram_html_code_block() {
+        let md = "```rust\nfn main() {}\n```";
+        let html = markdown_to_telegram_html(md);
+        assert!(html.contains("<pre><code"));
+        assert!(html.contains("fn main()"));
+        assert!(html.contains("</code></pre>"));
+    }
+
+    #[test]
+    fn test_markdown_to_telegram_html_inline_code() {
+        let html = markdown_to_telegram_html("use `cargo build`");
+        assert!(html.contains("<code>cargo build</code>"));
+    }
+
+    #[test]
+    fn test_escape_html() {
+        assert_eq!(escape_html("<script>alert('xss')</script>"), "&lt;script&gt;alert('xss')&lt;/script&gt;");
+        assert_eq!(escape_html("a & b"), "a &amp; b");
+    }
+
+    #[test]
+    fn test_img_marker_format() {
+        // Verify the <<IMG:path>> marker format used for photo attachments
+        let path = "/tmp/tg_photo_abc.jpg";
+        let caption = "What's in this image?";
+        let text = format!("<<IMG:{}>> {}", path, caption);
+        assert!(text.starts_with("<<IMG:"));
+        assert!(text.contains(path));
+        assert!(text.contains(caption));
     }
 }

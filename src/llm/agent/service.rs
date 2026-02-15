@@ -45,6 +45,8 @@ pub enum ProgressEvent {
     ToolCompleted { tool_name: String, tool_input: Value, success: bool, summary: String },
     /// Intermediate text the agent sends between tool call batches
     IntermediateText { text: String },
+    /// Real-time streaming chunk from the LLM (word-by-word)
+    StreamingChunk { text: String },
     Compacting,
 }
 
@@ -417,8 +419,8 @@ impl AgentService {
                 tracing::warn!("No tools registered in tool registry!");
             }
 
-            // Send to provider — retry once after emergency compaction if prompt is too long
-            let response = match self.provider.complete(request).await {
+            // Send to provider via streaming — retry once after emergency compaction if prompt is too long
+            let response = match self.stream_complete(request, cancel_token.as_ref()).await {
                 Ok(resp) => resp,
                 Err(ref e) if e.to_string().contains("prompt is too long") || e.to_string().contains("too many tokens") => {
                     tracing::warn!("Prompt too long for provider — emergency compaction");
@@ -433,7 +435,7 @@ impl AgentService {
                     if self.tool_registry.count() > 0 {
                         retry_req = retry_req.with_tools(self.tool_registry.get_tool_definitions());
                     }
-                    self.provider.complete(retry_req).await.map_err(AgentError::Provider)?
+                    self.stream_complete(retry_req, cancel_token.as_ref()).await.map_err(AgentError::Provider)?
                 }
                 Err(e) => return Err(AgentError::Provider(e)),
             };
@@ -1012,6 +1014,120 @@ impl AgentService {
         Ok((model_name, request, message_service, session_service))
     }
 
+    /// Stream a request and accumulate into an LLMResponse.
+    ///
+    /// Sends text deltas to the progress callback as `StreamingChunk` events
+    /// so the TUI can display them in real-time. Returns the full response
+    /// once the stream completes, ready for tool extraction.
+    async fn stream_complete(&self, request: LLMRequest, cancel_token: Option<&CancellationToken>) -> std::result::Result<LLMResponse, crate::llm::provider::ProviderError> {
+        use crate::llm::provider::{ContentDelta, StreamEvent, TokenUsage};
+        use futures::StreamExt;
+
+        let mut stream = self.provider.stream(request).await?;
+
+        // Accumulate state from stream events
+        let mut id = String::new();
+        let mut model = String::new();
+        let mut stop_reason: Option<StopReason> = None;
+        let mut input_tokens = 0u32;
+        let mut output_tokens = 0u32;
+
+        // Track partial content blocks by index
+        // Text blocks: accumulate text deltas
+        // ToolUse blocks: accumulate JSON deltas
+        struct BlockState {
+            block: ContentBlock,
+            json_buf: String, // for tool use JSON accumulation
+        }
+        let mut block_states: Vec<BlockState> = Vec::new();
+
+        while let Some(event_result) = stream.next().await {
+            // Check for cancellation between stream events
+            if let Some(token) = cancel_token && token.is_cancelled() {
+                tracing::info!("Stream cancelled by user");
+                break;
+            }
+            let event = match event_result {
+                Ok(e) => e,
+                Err(e) => {
+                    tracing::warn!("Stream error: {}", e);
+                    return Err(e);
+                }
+            };
+
+            match event {
+                StreamEvent::MessageStart { message } => {
+                    id = message.id;
+                    model = message.model;
+                    input_tokens = message.usage.input_tokens;
+                }
+                StreamEvent::ContentBlockStart { index, content_block } => {
+                    // Ensure block_states has enough capacity
+                    while block_states.len() <= index {
+                        block_states.push(BlockState {
+                            block: ContentBlock::Text { text: String::new() },
+                            json_buf: String::new(),
+                        });
+                    }
+                    block_states[index] = BlockState {
+                        block: content_block,
+                        json_buf: String::new(),
+                    };
+                }
+                StreamEvent::ContentBlockDelta { index, delta } => {
+                    if index < block_states.len() {
+                        match delta {
+                            ContentDelta::TextDelta { text } => {
+                                // Forward to TUI for real-time display
+                                if let Some(ref cb) = self.progress_callback {
+                                    cb(ProgressEvent::StreamingChunk { text: text.clone() });
+                                }
+                                // Accumulate into block
+                                if let ContentBlock::Text { text: ref mut t } = block_states[index].block {
+                                    t.push_str(&text);
+                                }
+                            }
+                            ContentDelta::InputJsonDelta { partial_json } => {
+                                block_states[index].json_buf.push_str(&partial_json);
+                            }
+                        }
+                    }
+                }
+                StreamEvent::ContentBlockStop { index } => {
+                    if index < block_states.len() {
+                        let state = &mut block_states[index];
+                        // Finalize tool use blocks: parse accumulated JSON
+                        if let ContentBlock::ToolUse { ref mut input, .. } = state.block
+                            && !state.json_buf.is_empty()
+                            && let Ok(parsed) = serde_json::from_str(&state.json_buf) {
+                                *input = parsed;
+                        }
+                    }
+                }
+                StreamEvent::MessageDelta { delta, usage } => {
+                    stop_reason = delta.stop_reason;
+                    output_tokens = usage.output_tokens;
+                }
+                StreamEvent::MessageStop => break,
+                StreamEvent::Ping => {}
+                StreamEvent::Error { error } => {
+                    return Err(crate::llm::provider::ProviderError::StreamError(error));
+                }
+            }
+        }
+
+        // Build final content blocks from accumulated state
+        let content_blocks: Vec<ContentBlock> = block_states.into_iter().map(|s| s.block).collect();
+
+        Ok(LLMResponse {
+            id,
+            model,
+            content: content_blocks,
+            stop_reason,
+            usage: TokenUsage { input_tokens, output_tokens },
+        })
+    }
+
     /// Auto-compact the context when usage is too high.
     ///
     /// Before compaction, calculates the remaining context budget and sends
@@ -1335,9 +1451,43 @@ mod tests {
 
         async fn stream(
             &self,
-            _request: LLMRequest,
+            request: LLMRequest,
         ) -> crate::llm::provider::Result<ProviderStream> {
-            unimplemented!("Streaming not needed for basic tests")
+            use crate::llm::provider::{ContentDelta, MessageDelta, StreamEvent, StreamMessage};
+
+            let response = self.complete(request).await?;
+            let mut events = vec![
+                Ok(StreamEvent::MessageStart {
+                    message: StreamMessage {
+                        id: response.id.clone(),
+                        model: response.model.clone(),
+                        role: Role::Assistant,
+                        usage: response.usage,
+                    },
+                }),
+            ];
+            for (i, block) in response.content.iter().enumerate() {
+                if let ContentBlock::Text { text } = block {
+                    events.push(Ok(StreamEvent::ContentBlockStart {
+                        index: i,
+                        content_block: ContentBlock::Text { text: String::new() },
+                    }));
+                    events.push(Ok(StreamEvent::ContentBlockDelta {
+                        index: i,
+                        delta: ContentDelta::TextDelta { text: text.clone() },
+                    }));
+                    events.push(Ok(StreamEvent::ContentBlockStop { index: i }));
+                }
+            }
+            events.push(Ok(StreamEvent::MessageDelta {
+                delta: MessageDelta {
+                    stop_reason: response.stop_reason,
+                    stop_sequence: None,
+                },
+                usage: response.usage,
+            }));
+            events.push(Ok(StreamEvent::MessageStop));
+            Ok(Box::pin(futures::stream::iter(events)))
         }
 
         fn name(&self) -> &str {
@@ -1479,9 +1629,72 @@ mod tests {
 
         async fn stream(
             &self,
-            _request: LLMRequest,
+            request: LLMRequest,
         ) -> crate::llm::provider::Result<ProviderStream> {
-            unimplemented!("Streaming not needed for tool tests")
+            use crate::llm::provider::{ContentDelta, MessageDelta, StreamEvent, StreamMessage};
+
+            // Get the response that complete() would return, then convert to stream events
+            let response = self.complete(request).await?;
+            let mut events = vec![
+                Ok(StreamEvent::MessageStart {
+                    message: StreamMessage {
+                        id: response.id.clone(),
+                        model: response.model.clone(),
+                        role: Role::Assistant,
+                        usage: response.usage,
+                    },
+                }),
+            ];
+
+            for (i, block) in response.content.iter().enumerate() {
+                // ContentBlockStart sends empty shells; actual content comes via deltas
+                match block {
+                    ContentBlock::Text { text } => {
+                        events.push(Ok(StreamEvent::ContentBlockStart {
+                            index: i,
+                            content_block: ContentBlock::Text { text: String::new() },
+                        }));
+                        events.push(Ok(StreamEvent::ContentBlockDelta {
+                            index: i,
+                            delta: ContentDelta::TextDelta { text: text.clone() },
+                        }));
+                    }
+                    ContentBlock::ToolUse { id, name, input } => {
+                        events.push(Ok(StreamEvent::ContentBlockStart {
+                            index: i,
+                            content_block: ContentBlock::ToolUse {
+                                id: id.clone(),
+                                name: name.clone(),
+                                input: serde_json::Value::Object(Default::default()),
+                            },
+                        }));
+                        events.push(Ok(StreamEvent::ContentBlockDelta {
+                            index: i,
+                            delta: ContentDelta::InputJsonDelta {
+                                partial_json: serde_json::to_string(input).unwrap_or_default(),
+                            },
+                        }));
+                    }
+                    _ => {
+                        events.push(Ok(StreamEvent::ContentBlockStart {
+                            index: i,
+                            content_block: block.clone(),
+                        }));
+                    }
+                }
+                events.push(Ok(StreamEvent::ContentBlockStop { index: i }));
+            }
+
+            events.push(Ok(StreamEvent::MessageDelta {
+                delta: MessageDelta {
+                    stop_reason: response.stop_reason,
+                    stop_sequence: None,
+                },
+                usage: response.usage,
+            }));
+            events.push(Ok(StreamEvent::MessageStop));
+
+            Ok(Box::pin(futures::stream::iter(events)))
         }
 
         fn name(&self) -> &str {
@@ -1705,5 +1918,92 @@ mod tests {
             .collect();
 
         assert_eq!(user_messages.len(), 1, "should only have original user message");
+    }
+
+    #[tokio::test]
+    async fn test_stream_complete_text_only() {
+        // Verify stream_complete reconstructs a text-only response correctly
+        let (agent_service, _) = create_test_service().await;
+
+        let request = LLMRequest::new(
+            "mock-model".to_string(),
+            vec![Message::user("Hello")],
+        );
+
+        let response = agent_service.stream_complete(request, None).await.unwrap();
+        assert_eq!(response.model, "mock-model");
+        assert!(!response.content.is_empty());
+
+        // Should have a text block
+        let has_text = response.content.iter().any(|b| matches!(b, ContentBlock::Text { text } if !text.is_empty()));
+        assert!(has_text, "response should contain non-empty text");
+        assert_eq!(response.stop_reason, Some(StopReason::EndTurn));
+        assert!(response.usage.input_tokens > 0 || response.usage.output_tokens > 0);
+    }
+
+    #[tokio::test]
+    async fn test_stream_complete_with_tool_use() {
+        // Verify stream_complete reconstructs tool use blocks from stream events
+        let provider = Arc::new(MockProviderWithTools::new());
+        let db = Database::connect_in_memory().await.unwrap();
+        db.run_migrations().await.unwrap();
+        let context = ServiceContext::new(db.pool().clone());
+        let agent_service = AgentService::new(provider, context);
+
+        let request = LLMRequest::new(
+            "mock-model".to_string(),
+            vec![Message::user("Use a tool")],
+        );
+
+        let response = agent_service.stream_complete(request, None).await.unwrap();
+
+        // First call to MockProviderWithTools returns text + tool_use
+        let text_blocks: Vec<_> = response.content.iter().filter(|b| matches!(b, ContentBlock::Text { .. })).collect();
+        let tool_blocks: Vec<_> = response.content.iter().filter(|b| matches!(b, ContentBlock::ToolUse { .. })).collect();
+
+        assert!(!text_blocks.is_empty(), "should have text block");
+        assert!(!tool_blocks.is_empty(), "should have tool_use block");
+        assert_eq!(response.stop_reason, Some(StopReason::ToolUse));
+
+        // Verify tool use has correct name and parsed input
+        if let ContentBlock::ToolUse { name, input, .. } = &tool_blocks[0] {
+            assert_eq!(name, "test_tool");
+            assert_eq!(input.get("message").and_then(|v| v.as_str()), Some("test"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_streaming_chunks_emitted() {
+        // Verify StreamingChunk progress events are emitted during streaming
+        use std::sync::Mutex;
+
+        let provider = Arc::new(MockProvider);
+        let db = Database::connect_in_memory().await.unwrap();
+        db.run_migrations().await.unwrap();
+        let context = ServiceContext::new(db.pool().clone());
+
+        let chunks_received: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let chunks_clone = chunks_received.clone();
+
+        let progress_cb: ProgressCallback = Arc::new(move |event| {
+            if let ProgressEvent::StreamingChunk { text } = event {
+                chunks_clone.lock().unwrap().push(text);
+            }
+        });
+
+        let agent_service = AgentService::new(provider, context)
+            .with_progress_callback(Some(progress_cb));
+
+        let request = LLMRequest::new(
+            "mock-model".to_string(),
+            vec![Message::user("Hello")],
+        );
+
+        let _response = agent_service.stream_complete(request, None).await.unwrap();
+
+        let chunks = chunks_received.lock().unwrap();
+        assert!(!chunks.is_empty(), "should have received streaming chunks");
+        let combined: String = chunks.iter().cloned().collect();
+        assert!(!combined.is_empty(), "combined chunks should have content");
     }
 }

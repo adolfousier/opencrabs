@@ -10,10 +10,15 @@ async fn main() -> Result<()> {
     // Parse CLI arguments first to check for debug flag
     let cli_args = cli::Cli::parse();
 
-    // Initialize logging based on debug flag
-    // - Debug mode OFF: No log files created, silent logging
-    // - Debug mode ON: Creates log files in .opencrabs/logs/, detailed logging
-    let _guard = logging::setup_from_cli(cli_args.debug)
+    // Initialize logging based on --debug flag
+    let mut log_config = logging::LogConfig::new().with_debug_mode(cli_args.debug);
+
+    // Custom log directory from env
+    if let Ok(log_dir) = std::env::var("DEBUG_LOGS_LOCATION") {
+        log_config = log_config.with_log_dir(std::path::PathBuf::from(log_dir));
+    }
+
+    let _guard = logging::init_logging(log_config)
         .map_err(|e| anyhow::anyhow!("Failed to initialize logging: {}", e))?;
 
     // Clean up old log files (keep last 7 days)

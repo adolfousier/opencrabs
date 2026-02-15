@@ -5,6 +5,30 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.9] - 2026-02-15
+
+### Added
+- **Cursor Navigation** -- Full cursor movement in input: Left/Right arrows, Ctrl+Left/Right word jump, Home/End, Delete key, Backspace at cursor position, word delete (Alt/Ctrl+Backspace), character and paste insertion at cursor position, cursor renders at correct position
+- **Input History Persistence** -- Command history saved to `~/.config/opencrabs/history.txt` (one line per entry), loaded on startup, appended on each send, capped at 500 entries, survives restarts
+- **Real-time Streaming** -- Added `stream_complete()` method that streams text chunks from the provider via `StreamingChunk` progress events, replacing the old blocking `provider.complete()` call
+- **Streaming Spinner** -- Animated spinner shows `"claude-opus is responding..."` with streamed text below; `"thinking..."` spinner shows only before streaming begins
+- **Inline Plan Approval** -- Plan approval now renders as an interactive inline selector with arrow keys (Approve / Reject / Request Changes / View Plan) instead of plain text Ctrl key instructions
+- **Telegram Photo Support** -- Incoming photos download at largest resolution, saved to temp file, forwarded as `<<IMG:path>>` caption; image documents detected via `image/*` MIME type; temp files cleaned up after 30 seconds
+- **Error Message Rendering** -- `app.error_message` is now rendered in the chat UI (was previously set but never displayed)
+- **Default Model Name** -- New sessions show the actual provider model name (e.g. `claude-opus-4-6`) as placeholder instead of generic "AI"
+- **Debug Logging** -- `DEBUG_LOGS_LOCATION` env var sets custom log directory; `--debug` CLI flag enables debug mode
+- **8 New Tests** -- `stream_complete_text_only`, `stream_complete_with_tool_use`, `streaming_chunks_emitted`, `markdown_to_telegram_html_*`, `escape_html`, `img_marker_format` (412 total)
+
+### Fixed
+- **SSE Parser Cross-Chunk Buffering** -- TCP chunks splitting JSON events mid-string caused `EOF while parsing a string` errors and silent response drops; parser now buffers partial lines across chunks with `Arc<Mutex<String>>`, only parsing complete newline-terminated lines
+- **Stale Approval Cleanup** -- Old `Pending` approval messages permanently hid streaming responses; now cleared on new message send, new approval request, and response completion
+- **Approval Dialog Reset** -- `approval_auto_always` reset on session create/load; inline "Always" now sets `approval_auto_session` (resets on session change) instead of `approval_auto_always`
+- **Brain File Path** -- Brain prompt builder used wrong path for workspace files
+- **Abort During Streaming** -- Cancel token properly wired through streaming flow for Escape×2 abort
+
+### Changed
+- **README** -- Expanded self-sustaining section with `/rebuild` command, `SelfUpdater` module, session persistence, brain live-editing documentation
+
 ## [0.1.8] - 2026-02-15
 
 ### Added
@@ -118,6 +142,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Overlay Approval Dialog** — Replaced by inline approval in chat
 - **Bottom Status Bar** — Removed entirely for more screen space
 
+[0.1.9]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.9
+[0.1.8]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.8
+[0.1.7]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.7
+[0.1.6]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.6
 [0.1.5]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.5
 [0.1.4]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.4
 [0.1.3]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.3

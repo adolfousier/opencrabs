@@ -107,6 +107,26 @@ pub struct ApproveMenu {
     pub state: ApproveMenuState,
 }
 
+/// State of an inline plan approval
+#[derive(Debug, Clone, PartialEq)]
+pub enum PlanApprovalState {
+    Pending,
+    Approved,
+    Rejected,
+    RevisionRequested,
+}
+
+/// Data for an inline plan approval selector embedded in a DisplayMessage
+#[derive(Debug, Clone)]
+pub struct PlanApprovalData {
+    pub plan_title: String,
+    pub task_count: usize,
+    pub task_summaries: Vec<String>,
+    pub state: PlanApprovalState,
+    pub selected_option: usize, // 0=Approve, 1=Reject, 2=Request Changes, 3=View Plan
+    pub show_details: bool,     // toggle task list
+}
+
 /// An image file attached to the input (detected from pasted paths)
 #[derive(Debug, Clone)]
 pub struct ImageAttachment {
@@ -151,6 +171,8 @@ pub struct DisplayMessage {
     pub expanded: bool,
     /// Grouped tool calls (for role == "tool_group")
     pub tool_group: Option<ToolCallGroup>,
+    /// Inline plan approval selector
+    pub plan_approval: Option<PlanApprovalData>,
 }
 
 impl From<Message> for DisplayMessage {
@@ -167,6 +189,7 @@ impl From<Message> for DisplayMessage {
             details: None,
             expanded: false,
             tool_group: None,
+            plan_approval: None,
         }
     }
 }
@@ -181,6 +204,8 @@ pub struct App {
     // UI state
     pub mode: AppMode,
     pub input_buffer: String,
+    /// Cursor position within input_buffer (byte offset, always on a char boundary)
+    pub cursor_position: usize,
     /// Images attached to the current input (auto-detected from pasted paths)
     pub attachments: Vec<ImageAttachment>,
     pub scroll_offset: usize,
@@ -206,6 +231,9 @@ pub struct App {
 
     // Help/Settings scroll offset
     pub help_scroll_offset: usize,
+
+    // Model name for display (from provider default)
+    pub default_model_name: String,
 
     // Approval policy state
     pub approval_auto_session: bool,
@@ -297,6 +325,7 @@ impl App {
             sessions: Vec::new(),
             mode: AppMode::Splash,
             input_buffer: String::new(),
+            cursor_position: 0,
             attachments: Vec::new(),
             scroll_offset: 0,
             selected_session_index: 0,
@@ -326,7 +355,7 @@ impl App {
             session_rename_buffer: String::new(),
             model_selector_models: Vec::new(),
             model_selector_selected: 0,
-            input_history: Vec::new(),
+            input_history: Self::load_history(),
             input_history_index: None,
             input_history_stash: String::new(),
             working_directory: std::env::current_dir().unwrap_or_default(),
@@ -337,6 +366,7 @@ impl App {
             cancel_token: None,
             message_queue: Arc::new(tokio::sync::Mutex::new(None)),
             shared_session_id: Arc::new(tokio::sync::Mutex::new(None)),
+            default_model_name: agent_service.provider_model().to_string(),
             context_max_tokens: agent_service.context_window_for_model(agent_service.provider_model()),
             last_input_tokens: None,
             active_tool_group: None,
@@ -434,10 +464,12 @@ impl App {
                     if !new_attachments.is_empty() {
                         self.attachments.extend(new_attachments);
                         if !clean_text.trim().is_empty() {
-                            self.input_buffer.push_str(&clean_text);
+                            self.input_buffer.insert_str(self.cursor_position, &clean_text);
+                            self.cursor_position += clean_text.len();
                         }
                     } else {
-                        self.input_buffer.push_str(&text);
+                        self.input_buffer.insert_str(self.cursor_position, &text);
+                        self.cursor_position += text.len();
                     }
                     self.update_slash_suggestions();
                 }
@@ -477,10 +509,25 @@ impl App {
                 // Response is sent via channel, just auto-scroll
                 self.scroll_offset = 0;
             }
-            TuiEvent::ToolCallStarted { .. } => {
-                // Silenced — completion message shows what happened
+            TuiEvent::ToolCallStarted { tool_name, tool_input } => {
+                // Show tool call in progress
+                let desc = Self::format_tool_description(&tool_name, &tool_input);
+                let entry = ToolCallEntry { description: desc, success: true, details: None };
+                if let Some(ref mut group) = self.active_tool_group {
+                    group.calls.push(entry);
+                } else {
+                    self.active_tool_group = Some(ToolCallGroup {
+                        calls: vec![entry],
+                        expanded: false,
+                    });
+                }
+                self.scroll_offset = 0;
             }
             TuiEvent::IntermediateText(text) => {
+                // Clear streaming response — text was already shown live via streaming chunks,
+                // now it becomes a permanent message in the chat history.
+                self.streaming_response = None;
+
                 // Agent sent text between tool call batches — flush current
                 // tool group first so tool calls appear above the text.
                 if let Some(group) = self.active_tool_group.take() {
@@ -497,6 +544,7 @@ impl App {
                         details: None,
                         expanded: false,
                         tool_group: Some(group),
+                        plan_approval: None,
                     });
                 }
                 // Add the intermediate text as an assistant message
@@ -512,6 +560,7 @@ impl App {
                     details: None,
                     expanded: false,
                     tool_group: None,
+                    plan_approval: None,
                 });
                 self.scroll_offset = 0;
             }
@@ -564,6 +613,7 @@ impl App {
                 }
             // First Ctrl+C — clear input and show hint
             self.input_buffer.clear();
+            self.cursor_position = 0;
             self.slash_suggestions_active = false;
             self.error_message = Some("Press Ctrl+C again to quit".to_string());
             self.ctrl_c_pending_at = Some(std::time::Instant::now());
@@ -579,6 +629,29 @@ impl App {
             && event.modifiers.contains(KeyModifiers::CONTROL)
         {
             self.delete_last_word();
+            return Ok(());
+        }
+
+        // Ctrl+Left — jump to previous word boundary
+        if event.code == KeyCode::Left && event.modifiers.contains(KeyModifiers::CONTROL) {
+            let before = &self.input_buffer[..self.cursor_position];
+            // Skip whitespace, then find start of word
+            let trimmed = before.trim_end();
+            self.cursor_position = trimmed
+                .rfind(char::is_whitespace)
+                .map(|pos| pos + 1)
+                .unwrap_or(0);
+            return Ok(());
+        }
+
+        // Ctrl+Right — jump to next word boundary
+        if event.code == KeyCode::Right && event.modifiers.contains(KeyModifiers::CONTROL) {
+            let after = &self.input_buffer[self.cursor_position..];
+            // Skip current word chars, then skip whitespace
+            let word_end = after.find(char::is_whitespace).unwrap_or(after.len());
+            let rest = &after[word_end..];
+            let space_end = rest.find(|c: char| !c.is_whitespace()).unwrap_or(rest.len());
+            self.cursor_position += word_end + space_end;
             return Ok(());
         }
 
@@ -688,25 +761,82 @@ impl App {
         Ok(())
     }
 
-    /// Check if there is a pending inline approval in the messages
-    /// Delete the last word from input buffer (for Ctrl+Backspace and Alt+Backspace)
+    /// Delete the word before the cursor (for Ctrl+Backspace and Alt+Backspace)
     fn delete_last_word(&mut self) {
-        // Trim trailing whitespace first
-        let trimmed_len = self.input_buffer.trim_end().len();
-        self.input_buffer.truncate(trimmed_len);
-        // Find the last whitespace boundary
-        if let Some(pos) = self.input_buffer.rfind(char::is_whitespace) {
-            self.input_buffer.truncate(pos + 1);
-        } else {
-            self.input_buffer.clear();
+        if self.cursor_position == 0 {
+            return;
+        }
+        let before = &self.input_buffer[..self.cursor_position];
+        // Skip trailing whitespace
+        let trimmed = before.trim_end();
+        // Find the last whitespace boundary in the trimmed portion
+        let word_start = trimmed
+            .rfind(char::is_whitespace)
+            .map(|pos| pos + 1)
+            .unwrap_or(0);
+        // Remove from word_start to cursor_position
+        self.input_buffer.drain(word_start..self.cursor_position);
+        self.cursor_position = word_start;
+    }
+
+    /// History file path: ~/.config/opencrabs/history.txt
+    fn history_path() -> Option<std::path::PathBuf> {
+        dirs::config_dir().map(|d| d.join("opencrabs").join("history.txt"))
+    }
+
+    /// Load input history from disk (one entry per line, most recent last)
+    fn load_history() -> Vec<String> {
+        let Some(path) = Self::history_path() else {
+            return Vec::new();
+        };
+        match std::fs::read_to_string(&path) {
+            Ok(content) => content
+                .lines()
+                .filter(|l| !l.is_empty())
+                .map(|l| l.to_string())
+                .collect(),
+            Err(_) => Vec::new(),
         }
     }
 
-    fn has_pending_approval(&self) -> bool {
+    /// Append a single entry to the history file (and trim to 500 entries)
+    fn save_history_entry(&self, entry: &str) {
+        let Some(path) = Self::history_path() else {
+            return;
+        };
+        // Ensure directory exists
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        // Cap at 500 entries: keep last 499 + new entry
+        let max_entries = 500;
+        if self.input_history.len() > max_entries {
+            // Rewrite the whole file with only the last max_entries
+            let start = self.input_history.len().saturating_sub(max_entries);
+            let trimmed: Vec<&str> = self.input_history[start..].iter().map(|s| s.as_str()).collect();
+            let _ = std::fs::write(&path, trimmed.join("\n") + "\n");
+        } else {
+            // Just append
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+                let _ = writeln!(f, "{}", entry);
+            }
+        }
+    }
+
+    pub fn has_pending_approval(&self) -> bool {
         self.messages.iter().rev().any(|msg| {
             msg.approval
                 .as_ref()
                 .is_some_and(|a| a.state == ApprovalState::Pending)
+        })
+    }
+
+    pub fn has_pending_plan_approval(&self) -> bool {
+        self.messages.iter().rev().any(|msg| {
+            msg.plan_approval
+                .as_ref()
+                .is_some_and(|p| p.state == PlanApprovalState::Pending)
         })
     }
 
@@ -843,7 +973,9 @@ impl App {
                             approved: false,
                             reason: Some("User denied permission".to_string()),
                         };
-                        let _ = response_tx.send(response.clone());
+                        if let Err(e) = response_tx.send(response.clone()) {
+                            tracing::error!("Failed to send denial response back to agent: {:?}", e);
+                        }
                         let _ = self.event_sender().send(TuiEvent::ToolApprovalResponse(response));
                         if let Some(approval) = self.messages.iter_mut().rev()
                             .find_map(|m| m.approval.as_mut())
@@ -859,14 +991,16 @@ impl App {
                             ApprovalOption::AllowOnce
                         };
                         if matches!(option, ApprovalOption::AllowAlways) {
-                            self.approval_auto_always = true;
+                            self.approval_auto_session = true;
                         }
                         let response = ToolApprovalResponse {
                             request_id,
                             approved: true,
                             reason: None,
                         };
-                        let _ = response_tx.send(response.clone());
+                        if let Err(e) = response_tx.send(response.clone()) {
+                            tracing::error!("Failed to send approval response back to agent: {:?}", e);
+                        }
                         let _ = self.event_sender().send(TuiEvent::ToolApprovalResponse(response));
                         // Remove the approval message — tool progress is shown in the tool group
                         self.messages.retain(|m| {
@@ -891,7 +1025,9 @@ impl App {
                         approved: false,
                         reason: Some("User denied permission".to_string()),
                     };
-                    let _ = response_tx.send(response.clone());
+                    if let Err(e) = response_tx.send(response.clone()) {
+                        tracing::error!("Failed to send denial response back to agent: {:?}", e);
+                    }
                     let _ = self.event_sender().send(TuiEvent::ToolApprovalResponse(response));
                     if let Some(approval) = self.messages.iter_mut().rev()
                         .find_map(|m| m.approval.as_mut())
@@ -918,6 +1054,113 @@ impl App {
             return Ok(());
         }
 
+        // Intercept keys when an inline plan approval is pending
+        // Options: Approve(0), Reject(1), Request Changes(2), View Plan(3)
+        if self.has_pending_plan_approval() {
+            if keys::is_left(&event) || keys::is_up(&event) {
+                if let Some(pa) = self.messages.iter_mut().rev()
+                    .find_map(|m| m.plan_approval.as_mut())
+                    .filter(|p| p.state == PlanApprovalState::Pending)
+                {
+                    pa.selected_option = pa.selected_option.saturating_sub(1);
+                }
+                return Ok(());
+            } else if keys::is_right(&event) || keys::is_down(&event) {
+                if let Some(pa) = self.messages.iter_mut().rev()
+                    .find_map(|m| m.plan_approval.as_mut())
+                    .filter(|p| p.state == PlanApprovalState::Pending)
+                {
+                    pa.selected_option = (pa.selected_option + 1).min(3);
+                }
+                return Ok(());
+            } else if keys::is_enter(&event) || keys::is_submit(&event) {
+                let selected = self.messages.iter()
+                    .rev()
+                    .find_map(|m| m.plan_approval.as_ref())
+                    .filter(|p| p.state == PlanApprovalState::Pending)
+                    .map(|p| p.selected_option);
+
+                if let Some(selected) = selected {
+                    match selected {
+                        0 => {
+                            // Approve — same as Ctrl+A
+                            if let Some(pa) = self.messages.iter_mut().rev()
+                                .find_map(|m| m.plan_approval.as_mut())
+                                .filter(|p| p.state == PlanApprovalState::Pending)
+                            {
+                                pa.state = PlanApprovalState::Approved;
+                            }
+                            if let Some(plan) = &mut self.current_plan {
+                                plan.approve();
+                                plan.start_execution();
+                                self.export_plan_to_markdown("PLAN.md").await?;
+                                self.save_plan().await?;
+                                self.execute_plan_tasks().await?;
+                            }
+                        }
+                        1 => {
+                            // Reject — same as Ctrl+R
+                            if let Some(pa) = self.messages.iter_mut().rev()
+                                .find_map(|m| m.plan_approval.as_mut())
+                                .filter(|p| p.state == PlanApprovalState::Pending)
+                            {
+                                pa.state = PlanApprovalState::Rejected;
+                            }
+                            if let Some(plan) = &mut self.current_plan {
+                                plan.reject();
+                                self.save_plan().await?;
+                            }
+                            self.current_plan = None;
+                        }
+                        2 => {
+                            // Request changes — same as Ctrl+I
+                            if let Some(pa) = self.messages.iter_mut().rev()
+                                .find_map(|m| m.plan_approval.as_mut())
+                                .filter(|p| p.state == PlanApprovalState::Pending)
+                            {
+                                pa.state = PlanApprovalState::RevisionRequested;
+                            }
+                            if let Some(plan) = &self.current_plan {
+                                let plan_summary = format!(
+                                    "Current plan '{}' has {} tasks:\n{}",
+                                    plan.title,
+                                    plan.tasks.len(),
+                                    plan.tasks.iter().enumerate()
+                                        .map(|(i, t)| format!("  {}. {} ({})", i + 1, t.title, t.task_type))
+                                        .collect::<Vec<_>>()
+                                        .join("\n")
+                                );
+                                self.input_buffer = format!(
+                                    "Please revise this plan:\n\n{}\n\nRequested changes: ",
+                                    plan_summary
+                                );
+                                self.cursor_position = self.input_buffer.len();
+                            }
+                        }
+                        3 => {
+                            // View plan — switch to Plan Mode
+                            self.load_plan_for_viewing().await?;
+                            if self.current_plan.is_some() {
+                                self.switch_mode(AppMode::Plan).await?;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                return Ok(());
+            } else if keys::is_view_details(&event) {
+                // V key — toggle task list
+                if let Some(pa) = self.messages.iter_mut().rev()
+                    .find_map(|m| m.plan_approval.as_mut())
+                    .filter(|p| p.state == PlanApprovalState::Pending)
+                {
+                    pa.show_details = !pa.show_details;
+                }
+                return Ok(());
+            }
+            // Other keys fall through — plan approval is non-blocking, user can still type
+        }
+
         // When slash suggestions are active, intercept navigation keys
         if self.slash_suggestions_active {
             if keys::is_up(&event) {
@@ -937,6 +1180,7 @@ impl App {
                         .unwrap_or("")
                         .to_string();
                     self.input_buffer.clear();
+                    self.cursor_position = 0;
                     self.slash_suggestions_active = false;
                     self.handle_slash_command(&cmd_name);
                 }
@@ -956,12 +1200,14 @@ impl App {
 
         if keys::is_newline(&event) {
             // Alt+Enter or Shift+Enter = insert newline for multi-line input
-            self.input_buffer.push('\n');
+            self.input_buffer.insert(self.cursor_position, '\n');
+            self.cursor_position += 1;
         } else if keys::is_submit(&event) && (!self.input_buffer.trim().is_empty() || !self.attachments.is_empty()) {
             // Check for slash commands before sending to LLM
             let content = self.input_buffer.clone();
             if self.handle_slash_command(content.trim()) {
                 self.input_buffer.clear();
+                self.cursor_position = 0;
                 self.slash_suggestions_active = false;
                 return Ok(());
             }
@@ -978,15 +1224,17 @@ impl App {
             };
 
             // Enter = send message
-            // Save to input history (dedup consecutive)
+            // Save to input history (dedup consecutive) and persist to disk
             let trimmed = content.trim().to_string();
             if self.input_history.last() != Some(&trimmed) {
-                self.input_history.push(trimmed);
+                self.input_history.push(trimmed.clone());
+                self.save_history_entry(&trimmed);
             }
             self.input_history_index = None;
             self.input_history_stash.clear();
 
             self.input_buffer.clear();
+            self.cursor_position = 0;
             self.attachments.clear();
             self.slash_suggestions_active = false;
 
@@ -1030,6 +1278,7 @@ impl App {
                                 details: None,
                                 expanded: false,
                                 tool_group: Some(group),
+                                plan_approval: None,
                             });
                         }
                         self.push_system_message("Operation cancelled.".to_string());
@@ -1051,6 +1300,7 @@ impl App {
                 if pending_at.elapsed() < std::time::Duration::from_secs(3) {
                     // Second Escape within 3 seconds — clear input
                     self.input_buffer.clear();
+                    self.cursor_position = 0;
                     self.attachments.clear();
                     self.error_message = None;
                     self.escape_pending_at = None;
@@ -1095,11 +1345,13 @@ impl App {
                     let idx = self.input_history.len() - 1;
                     self.input_history_index = Some(idx);
                     self.input_buffer = self.input_history[idx].clone();
+                    self.cursor_position = self.input_buffer.len();
                 }
                 Some(idx) if idx > 0 => {
                     let idx = idx - 1;
                     self.input_history_index = Some(idx);
                     self.input_buffer = self.input_history[idx].clone();
+                    self.cursor_position = self.input_buffer.len();
                 }
                 _ => {} // already at oldest
             }
@@ -1110,10 +1362,12 @@ impl App {
                 let idx = idx + 1;
                 self.input_history_index = Some(idx);
                 self.input_buffer = self.input_history[idx].clone();
+                self.cursor_position = self.input_buffer.len();
             } else {
                 // Past newest — restore stashed input
                 self.input_history_index = None;
                 self.input_buffer = std::mem::take(&mut self.input_history_stash);
+                self.cursor_position = self.input_buffer.len();
             }
         } else {
             // Regular character input
@@ -1122,10 +1376,53 @@ impl App {
                     self.open_file_picker().await?;
                 }
                 KeyCode::Char(c) if event.modifiers.is_empty() || event.modifiers == KeyModifiers::SHIFT => {
-                    self.input_buffer.push(c);
+                    self.input_buffer.insert(self.cursor_position, c);
+                    self.cursor_position += c.len_utf8();
                 }
                 KeyCode::Backspace if event.modifiers.is_empty() => {
-                    self.input_buffer.pop();
+                    if self.cursor_position > 0 {
+                        // Find the previous char boundary
+                        let prev = self.input_buffer[..self.cursor_position]
+                            .char_indices()
+                            .last()
+                            .map(|(i, _)| i)
+                            .unwrap_or(0);
+                        self.input_buffer.remove(prev);
+                        self.cursor_position = prev;
+                    }
+                }
+                KeyCode::Delete if event.modifiers.is_empty() => {
+                    if self.cursor_position < self.input_buffer.len() {
+                        self.input_buffer.remove(self.cursor_position);
+                    }
+                }
+                KeyCode::Left if event.modifiers.is_empty() => {
+                    // Move cursor left one character
+                    if self.cursor_position > 0 {
+                        let prev = self.input_buffer[..self.cursor_position]
+                            .char_indices()
+                            .last()
+                            .map(|(i, _)| i)
+                            .unwrap_or(0);
+                        self.cursor_position = prev;
+                    }
+                }
+                KeyCode::Right if event.modifiers.is_empty() => {
+                    // Move cursor right one character
+                    if self.cursor_position < self.input_buffer.len() {
+                        let next = self.input_buffer[self.cursor_position..]
+                            .char_indices()
+                            .nth(1)
+                            .map(|(i, _)| self.cursor_position + i)
+                            .unwrap_or(self.input_buffer.len());
+                        self.cursor_position = next;
+                    }
+                }
+                KeyCode::Home => {
+                    self.cursor_position = 0;
+                }
+                KeyCode::End => {
+                    self.cursor_position = self.input_buffer.len();
                 }
                 KeyCode::Enter => {
                     // Fallback — if Enter didn't match is_submit (e.g., empty input)
@@ -1304,6 +1601,7 @@ impl App {
                     "Please revise this plan:\n\n{}\n\nRequested changes: ",
                     plan_summary
                 );
+                self.cursor_position = self.input_buffer.len();
 
                 // Keep plan in memory for reference (don't clear it)
             }
@@ -1348,6 +1646,7 @@ impl App {
         self.scroll_offset = 0;
         self.mode = AppMode::Chat;
         self.approval_auto_session = false;
+        self.approval_auto_always = false;
 
         // Sync shared session ID for channels (Telegram, WhatsApp)
         *self.shared_session_id.lock().await = Some(session.id);
@@ -1375,6 +1674,7 @@ impl App {
         self.messages = messages.into_iter().flat_map(Self::expand_message).collect();
         self.scroll_offset = 0;
         self.approval_auto_session = false;
+        self.approval_auto_always = false;
 
         // Sync shared session ID for channels (Telegram, WhatsApp)
         *self.shared_session_id.lock().await = Some(session.id);
@@ -1480,6 +1780,7 @@ impl App {
                     details: None,
                     expanded: false,
                     tool_group: None,
+                    plan_approval: None,
                 });
                 self.scroll_offset = 0;
                 true
@@ -1648,6 +1949,7 @@ impl App {
                     details: None,
                     expanded: false,
                     tool_group: None,
+                    plan_approval: None,
                 });
                 first_text = false;
             }
@@ -1678,6 +1980,7 @@ impl App {
                         details: None,
                         expanded: false,
                         tool_group: Some(ToolCallGroup { calls, expanded: false }),
+                        plan_approval: None,
                     });
                 }
                 remaining = &after_marker[end + 3..];
@@ -1702,6 +2005,7 @@ impl App {
                 details: None,
                 expanded: false,
                 tool_group: None,
+                plan_approval: None,
             });
         }
 
@@ -1719,6 +2023,7 @@ impl App {
                 details: None,
                 expanded: false,
                 tool_group: None,
+                plan_approval: None,
             });
         }
 
@@ -1826,13 +2131,33 @@ impl App {
             details: None,
             expanded: false,
             tool_group: None,
+            plan_approval: None,
         });
         self.scroll_offset = 0;
     }
 
     /// Send a message to the agent
     async fn send_message(&mut self, content: String) -> Result<()> {
+        tracing::info!("[send_message] START is_processing={} has_session={} content_len={}",
+            self.is_processing,
+            self.current_session.is_some(),
+            content.len());
+
+        // Clear stale pending approvals so they don't block streaming
+        let stale_count = self.messages.iter()
+            .filter(|m| m.approval.as_ref().is_some_and(|a| a.state == ApprovalState::Pending))
+            .count();
+        if stale_count > 0 {
+            tracing::warn!("[send_message] Clearing {} stale pending approvals", stale_count);
+        }
+        for msg in &mut self.messages {
+            if let Some(ref mut approval) = msg.approval && approval.state == ApprovalState::Pending {
+                approval.state = ApprovalState::Denied("Superseded".to_string());
+            }
+        }
+
         if self.is_processing {
+            tracing::warn!("[send_message] QUEUED — agent still processing previous request");
             // Show the queued message as a real user message immediately
             let user_msg = DisplayMessage {
                 id: Uuid::new_v4(),
@@ -1846,6 +2171,7 @@ impl App {
                 details: None,
                 expanded: false,
                 tool_group: None,
+                plan_approval: None,
             };
             self.messages.push(user_msg);
             self.scroll_offset = 0;
@@ -1880,6 +2206,7 @@ impl App {
                 details: None,
                 expanded: false,
                 tool_group: None,
+                plan_approval: None,
             };
             self.messages.push(user_msg);
 
@@ -1896,7 +2223,9 @@ impl App {
             let event_sender = self.event_sender();
             let read_only_mode = self.mode == AppMode::Plan;
 
+            tracing::info!("[send_message] Spawning agent task for session {}", session_id);
             tokio::spawn(async move {
+                tracing::info!("[agent_task] START calling send_message_with_tools_and_mode");
                 match agent_service
                     .send_message_with_tools_and_mode(
                         session_id,
@@ -1908,10 +2237,16 @@ impl App {
                     .await
                 {
                     Ok(response) => {
-                        let _ = event_sender.send(TuiEvent::ResponseComplete(response));
+                        tracing::info!("[agent_task] OK — sending ResponseComplete");
+                        if let Err(e) = event_sender.send(TuiEvent::ResponseComplete(response)) {
+                            tracing::error!("[agent_task] FAILED to send ResponseComplete: {}", e);
+                        }
                     }
                     Err(e) => {
-                        let _ = event_sender.send(TuiEvent::Error(e.to_string()));
+                        tracing::error!("[agent_task] ERROR: {}", e);
+                        if let Err(e2) = event_sender.send(TuiEvent::Error(e.to_string())) {
+                            tracing::error!("[agent_task] FAILED to send Error event: {}", e2);
+                        }
                     }
                 }
             });
@@ -1940,6 +2275,15 @@ impl App {
         self.streaming_response = None;
         self.cancel_token = None;
 
+        // Clean up stale pending approvals — if the agent finished but approval
+        // messages are still Pending, mark them as denied so they don't block rendering
+        for msg in &mut self.messages {
+            if let Some(ref mut approval) = msg.approval && approval.state == ApprovalState::Pending {
+                tracing::warn!("Cleaning up stale pending approval for tool '{}'", approval.tool_name);
+                approval.state = ApprovalState::Denied("Agent completed without resolution".to_string());
+            }
+        }
+
         // Finalize active tool group into a display message
         if let Some(group) = self.active_tool_group.take() {
             let count = group.calls.len();
@@ -1955,6 +2299,7 @@ impl App {
                 details: None,
                 expanded: false,
                 tool_group: Some(group),
+                plan_approval: None,
             });
         }
 
@@ -1986,6 +2331,7 @@ impl App {
             details: None,
             expanded: false,
             tool_group: None,
+            plan_approval: None,
         };
         self.messages.push(assistant_msg);
 
@@ -2021,6 +2367,7 @@ impl App {
                     details: None,
                     expanded: false,
                     tool_group: None,
+                    plan_approval: None,
                 };
                 self.messages.push(error_msg);
             } else {
@@ -2184,22 +2531,16 @@ impl App {
                     if self.current_plan.is_none() {
                         let plan_title = plan.title.clone();
                         let task_count = plan.tasks.len();
+                        let task_summaries: Vec<String> = plan.tasks.iter()
+                            .map(|t| format!("{} ({})", t.title, t.task_type))
+                            .collect();
                         self.current_plan = Some(plan);
 
-                        // Add notification message to chat (stay in current mode)
+                        // Add inline plan approval selector to chat
                         let notification = DisplayMessage {
                             id: Uuid::new_v4(),
-                            role: "system".to_string(),
-                            content: format!(
-                                "Plan '{}' is ready!\n\n\
-                                 {} tasks - Press Ctrl+P to review\n\n\
-                                 Actions:\n\
-                                 Ctrl+A: Approve and execute\n\
-                                 Ctrl+R: Reject\n\
-                                 Ctrl+I: Request changes\n\
-                                 Ctrl+P: View plan",
-                                plan_title, task_count
-                            ),
+                            role: "plan_approval".to_string(),
+                            content: String::new(),
                             timestamp: chrono::Utc::now(),
                             token_count: None,
                             cost: None,
@@ -2208,9 +2549,18 @@ impl App {
                             details: None,
                             expanded: false,
                             tool_group: None,
+                            plan_approval: Some(PlanApprovalData {
+                                plan_title,
+                                task_count,
+                                task_summaries,
+                                state: PlanApprovalState::Pending,
+                                selected_option: 0,
+                                show_details: false,
+                            }),
                         };
 
                         self.messages.push(notification);
+                        self.scroll_offset = 0;
                     }
                 }
                 return Ok(());
@@ -2257,22 +2607,16 @@ impl App {
                             if self.current_plan.is_none() {
                                 let plan_title = plan.title.clone();
                                 let task_count = plan.tasks.len();
+                                let task_summaries: Vec<String> = plan.tasks.iter()
+                                    .map(|t| format!("{} ({})", t.title, t.task_type))
+                                    .collect();
                                 self.current_plan = Some(plan);
 
-                                // Add notification message to chat (stay in current mode)
+                                // Add inline plan approval selector to chat
                                 let notification = DisplayMessage {
                                     id: Uuid::new_v4(),
-                                    role: "system".to_string(),
-                                    content: format!(
-                                        "Plan '{}' is ready!\n\n\
-                                         {} tasks - Press Ctrl+P to review\n\n\
-                                         Actions:\n\
-                                         Ctrl+A: Approve and execute\n\
-                                         Ctrl+R: Reject\n\
-                                         Ctrl+I: Request changes\n\
-                                         Ctrl+P: View plan",
-                                        plan_title, task_count
-                                    ),
+                                    role: "plan_approval".to_string(),
+                                    content: String::new(),
                                     timestamp: chrono::Utc::now(),
                                     token_count: None,
                                     cost: None,
@@ -2281,9 +2625,18 @@ impl App {
                                     details: None,
                                     expanded: false,
                                     tool_group: None,
+                                    plan_approval: Some(PlanApprovalData {
+                                        plan_title,
+                                        task_count,
+                                        task_summaries,
+                                        state: PlanApprovalState::Pending,
+                                        selected_option: 0,
+                                        show_details: false,
+                                    }),
                                 };
 
                                 self.messages.push(notification);
+                                self.scroll_offset = 0;
                             }
                         } else {
                             tracing::debug!(
@@ -2523,11 +2876,14 @@ impl App {
                 details: None,
                 expanded: false,
                 tool_group: None,
+                plan_approval: None,
             };
             self.messages.push(completion_msg);
         } else if let Some(message) = task_message {
             // Send task message to agent
+            tracing::info!("Sending plan task to agent (is_processing={})", self.is_processing);
             self.send_message(message).await?;
+            tracing::info!("Plan task sent (is_processing={})", self.is_processing);
         }
 
         Ok(())
@@ -2553,6 +2909,7 @@ impl App {
                 details: None,
                 expanded: false,
                 tool_group: Some(group),
+                plan_approval: None,
             });
         }
         self.error_message = Some(error);
@@ -2596,6 +2953,13 @@ impl App {
 
     /// Handle tool approval request — inline in chat
     fn handle_approval_requested(&mut self, request: ToolApprovalRequest) {
+        // Clear any stale pending approvals from previous requests
+        for msg in &mut self.messages {
+            if let Some(ref mut approval) = msg.approval && approval.state == ApprovalState::Pending {
+                approval.state = ApprovalState::Denied("Superseded by new request".to_string());
+            }
+        }
+
         // Auto-approve silently if policy allows
         if self.approval_auto_always || self.approval_auto_session {
             let response = ToolApprovalResponse {
@@ -2606,6 +2970,25 @@ impl App {
             let _ = request.response_tx.send(response.clone());
             let _ = self.event_sender().send(TuiEvent::ToolApprovalResponse(response));
             return;
+        }
+
+        // Clear streaming overlay so the approval dialog is visible
+        if let Some(text) = self.streaming_response.take() && !text.trim().is_empty() {
+            // Persist any streamed text as a regular message before showing approval
+            self.messages.push(DisplayMessage {
+                id: Uuid::new_v4(),
+                role: "assistant".to_string(),
+                content: text,
+                timestamp: chrono::Utc::now(),
+                token_count: None,
+                cost: None,
+                approval: None,
+                approve_menu: None,
+                details: None,
+                expanded: false,
+                tool_group: None,
+                plan_approval: None,
+            });
         }
 
         // Show inline approval in chat
@@ -2632,6 +3015,7 @@ impl App {
             details: None,
             expanded: false,
             tool_group: None,
+            plan_approval: None,
         });
         self.scroll_offset = 0;
         // Stay in AppMode::Chat — no mode switch
@@ -2932,9 +3316,10 @@ impl App {
                     // Refresh file list
                     self.open_file_picker().await?;
                 } else {
-                    // Insert file path into input buffer
+                    // Insert file path into input buffer at cursor
                     let path_str = selected_path.to_string_lossy().to_string();
-                    self.input_buffer.push_str(&path_str);
+                    self.input_buffer.insert_str(self.cursor_position, &path_str);
+                    self.cursor_position += path_str.len();
                     self.switch_mode(AppMode::Chat).await?;
                 }
             }
