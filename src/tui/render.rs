@@ -505,6 +505,7 @@ fn render_input(f: &mut Frame, app: &App, area: Rect) {
 
     let input_content_width = area.width.saturating_sub(2) as usize; // borders
     let mut input_lines: Vec<Line> = Vec::new();
+
     for line in input_text.lines() {
         let padded = Line::from(format!("  {}", line));
         for wrapped in wrap_line_with_padding(padded, input_content_width, "  ") {
@@ -550,15 +551,35 @@ fn render_input(f: &mut Frame, app: &App, area: Rect) {
     ))
     .alignment(Alignment::Right);
 
+    // Build attachment indicator for the top-right title area
+    let attach_title = if !app.attachments.is_empty() {
+        let names: Vec<String> = app.attachments.iter().enumerate()
+            .map(|(i, att)| format!("IMG{}:{}", i + 1, att.name))
+            .collect();
+        Line::from(Span::styled(
+            format!(" [{}] ", names.join(" | ")),
+            Style::default()
+                .fg(Color::Rgb(70, 200, 130))
+                .add_modifier(Modifier::BOLD),
+        ))
+        .alignment(Alignment::Right)
+    } else {
+        Line::from("")
+    };
+
+    let mut block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .title_bottom(context_title)
+        .border_style(border_style);
+
+    if !app.attachments.is_empty() {
+        block = block.title(attach_title);
+    }
+
     let input = Paragraph::new(input_lines)
         .style(Style::default().fg(Color::White))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(title)
-                .title_bottom(context_title)
-                .border_style(border_style),
-        );
+        .block(block);
 
     f.render_widget(input, area);
 }

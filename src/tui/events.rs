@@ -70,6 +70,9 @@ pub enum TuiEvent {
 
     /// A tool call has completed
     ToolCallCompleted { tool_name: String, tool_input: Value, success: bool, summary: String },
+
+    /// Intermediate text the agent sent between tool call batches
+    IntermediateText(String),
 }
 
 /// Tool approval request details

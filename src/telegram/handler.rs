@@ -190,7 +190,15 @@ pub(crate) async fn handle_message(
     // Send to agent (with tools so the agent can use file ops, search, etc.)
     match agent.send_message_with_tools(session_id, text, None).await {
         Ok(response) => {
-            // If input was voice AND TTS is enabled, reply with voice note
+            // Always send text reply first (keeps chat searchable)
+            let html = markdown_to_telegram_html(&response.content);
+            for chunk in split_message(&html, 4096) {
+                bot.send_message(msg.chat.id, chunk)
+                    .parse_mode(teloxide::types::ParseMode::Html)
+                    .await?;
+            }
+
+            // If input was voice AND TTS is enabled, also send voice note after text
             if is_voice && voice_config.tts_enabled
                 && let Some(ref oai_key) = *openai_key
             {
@@ -205,21 +213,11 @@ pub(crate) async fn handle_message(
                     Ok(audio_bytes) => {
                         bot.send_voice(msg.chat.id, InputFile::memory(audio_bytes))
                             .await?;
-                        return Ok(());
                     }
                     Err(e) => {
                         tracing::error!("Telegram: TTS error: {}", e);
-                        // Fall through to text reply
                     }
                 }
-            }
-
-            // Text reply (default, or TTS fallback)
-            let html = markdown_to_telegram_html(&response.content);
-            for chunk in split_message(&html, 4096) {
-                bot.send_message(msg.chat.id, chunk)
-                    .parse_mode(teloxide::types::ParseMode::Html)
-                    .await?;
             }
         }
         Err(e) => {

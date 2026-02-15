@@ -107,6 +107,18 @@ pub struct ApproveMenu {
     pub state: ApproveMenuState,
 }
 
+/// An image file attached to the input (detected from pasted paths)
+#[derive(Debug, Clone)]
+pub struct ImageAttachment {
+    /// Display name (file name)
+    pub name: String,
+    /// Full path to the image
+    pub path: String,
+}
+
+/// Image file extensions for auto-detection
+const IMAGE_EXTENSIONS: &[&str] = &[".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"];
+
 /// A single tool call entry within a grouped display
 #[derive(Debug, Clone)]
 pub struct ToolCallEntry {
@@ -169,6 +181,8 @@ pub struct App {
     // UI state
     pub mode: AppMode,
     pub input_buffer: String,
+    /// Images attached to the current input (auto-detected from pasted paths)
+    pub attachments: Vec<ImageAttachment>,
     pub scroll_offset: usize,
     pub selected_session_index: usize,
     pub should_quit: bool,
@@ -283,6 +297,7 @@ impl App {
             sessions: Vec::new(),
             mode: AppMode::Splash,
             input_buffer: String::new(),
+            attachments: Vec::new(),
             scroll_offset: 0,
             selected_session_index: 0,
             should_quit: false,
@@ -414,7 +429,16 @@ impl App {
             TuiEvent::Paste(text) => {
                 // Handle paste events - only in Chat mode
                 if self.mode == AppMode::Chat {
-                    self.input_buffer.push_str(&text);
+                    // Check if pasted text contains image paths — extract as attachments
+                    let (clean_text, new_attachments) = Self::extract_image_paths(&text);
+                    if !new_attachments.is_empty() {
+                        self.attachments.extend(new_attachments);
+                        if !clean_text.trim().is_empty() {
+                            self.input_buffer.push_str(&clean_text);
+                        }
+                    } else {
+                        self.input_buffer.push_str(&text);
+                    }
                     self.update_slash_suggestions();
                 }
             }
@@ -455,6 +479,41 @@ impl App {
             }
             TuiEvent::ToolCallStarted { .. } => {
                 // Silenced — completion message shows what happened
+            }
+            TuiEvent::IntermediateText(text) => {
+                // Agent sent text between tool call batches — flush current
+                // tool group first so tool calls appear above the text.
+                if let Some(group) = self.active_tool_group.take() {
+                    let count = group.calls.len();
+                    self.messages.push(DisplayMessage {
+                        id: Uuid::new_v4(),
+                        role: "tool_group".to_string(),
+                        content: format!("{} tool call{}", count, if count == 1 { "" } else { "s" }),
+                        timestamp: chrono::Utc::now(),
+                        token_count: None,
+                        cost: None,
+                        approval: None,
+                        approve_menu: None,
+                        details: None,
+                        expanded: false,
+                        tool_group: Some(group),
+                    });
+                }
+                // Add the intermediate text as an assistant message
+                self.messages.push(DisplayMessage {
+                    id: Uuid::new_v4(),
+                    role: "assistant".to_string(),
+                    content: text,
+                    timestamp: chrono::Utc::now(),
+                    token_count: None,
+                    cost: None,
+                    approval: None,
+                    approve_menu: None,
+                    details: None,
+                    expanded: false,
+                    tool_group: None,
+                });
+                self.scroll_offset = 0;
             }
             TuiEvent::ToolCallCompleted { tool_name, tool_input, success, summary } => {
                 let desc = Self::format_tool_description(&tool_name, &tool_input);
@@ -898,7 +957,7 @@ impl App {
         if keys::is_newline(&event) {
             // Alt+Enter or Shift+Enter = insert newline for multi-line input
             self.input_buffer.push('\n');
-        } else if keys::is_submit(&event) && !self.input_buffer.trim().is_empty() {
+        } else if keys::is_submit(&event) && (!self.input_buffer.trim().is_empty() || !self.attachments.is_empty()) {
             // Check for slash commands before sending to LLM
             let content = self.input_buffer.clone();
             if self.handle_slash_command(content.trim()) {
@@ -906,6 +965,18 @@ impl App {
                 self.slash_suggestions_active = false;
                 return Ok(());
             }
+
+            // Also scan typed input for image paths at submit time
+            let (clean_text, typed_attachments) = Self::extract_image_paths(&content);
+            let mut all_attachments = std::mem::take(&mut self.attachments);
+            all_attachments.extend(typed_attachments);
+
+            let final_content = if !all_attachments.is_empty() && clean_text.trim() != content.trim() {
+                clean_text
+            } else {
+                content.clone()
+            };
+
             // Enter = send message
             // Save to input history (dedup consecutive)
             let trimmed = content.trim().to_string();
@@ -916,8 +987,21 @@ impl App {
             self.input_history_stash.clear();
 
             self.input_buffer.clear();
+            self.attachments.clear();
             self.slash_suggestions_active = false;
-            self.send_message(content).await?;
+
+            // Build message content with attachment markers for the agent.
+            // Format: <<IMG:/path/to/file.png>> — handles spaces in paths.
+            let send_content = if all_attachments.is_empty() {
+                final_content
+            } else {
+                let mut msg = final_content.clone();
+                for att in &all_attachments {
+                    msg.push_str(&format!(" <<IMG:{}>>", att.path));
+                }
+                msg
+            };
+            self.send_message(send_content).await?;
         } else if keys::is_cancel(&event) {
             // When processing, double-Escape aborts the operation
             if self.is_processing {
@@ -967,6 +1051,7 @@ impl App {
                 if pending_at.elapsed() < std::time::Duration::from_secs(3) {
                     // Second Escape within 3 seconds — clear input
                     self.input_buffer.clear();
+                    self.attachments.clear();
                     self.error_message = None;
                     self.escape_pending_at = None;
                     self.slash_suggestions_active = false;
@@ -1287,7 +1372,7 @@ impl App {
             .await?;
 
         self.current_session = Some(session.clone());
-        self.messages = messages.into_iter().map(DisplayMessage::from).collect();
+        self.messages = messages.into_iter().flat_map(Self::expand_message).collect();
         self.scroll_offset = 0;
         self.approval_auto_session = false;
 
@@ -1456,15 +1541,15 @@ impl App {
                 }
             }
             "read_file" | "read" => {
-                let path = tool_input.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                let path = tool_input.get("path").and_then(|v| v.as_str()).unwrap_or("?");
                 format!("Read {}", path)
             }
             "write_file" | "write" => {
-                let path = tool_input.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                let path = tool_input.get("path").and_then(|v| v.as_str()).unwrap_or("?");
                 format!("Write {}", path)
             }
             "edit_file" | "edit" => {
-                let path = tool_input.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                let path = tool_input.get("path").and_then(|v| v.as_str()).unwrap_or("?");
                 format!("Edit {}", path)
             }
             "ls" => {
@@ -1514,16 +1599,217 @@ impl App {
                 format!("Parse {}", path)
             }
             "task_manager" => {
-                let action = tool_input.get("action").and_then(|v| v.as_str()).unwrap_or("?");
-                format!("Task: {}", action)
+                let op = tool_input.get("operation").and_then(|v| v.as_str()).unwrap_or("?");
+                format!("Task: {}", op)
             }
             "plan" => {
-                let action = tool_input.get("action").and_then(|v| v.as_str()).unwrap_or("?");
-                format!("Plan: {}", action)
+                let op = tool_input.get("operation").and_then(|v| v.as_str()).unwrap_or("?");
+                format!("Plan: {}", op)
             }
             "session_context" => "Session context".to_string(),
             other => other.to_string(),
         }
+    }
+
+    /// Expand a DB message into one or more DisplayMessages.
+    /// Assistant messages may contain `<!-- tools: Read /foo | Edit /bar -->` markers
+    /// that get reconstructed into ToolCallGroup display messages.
+    fn expand_message(msg: crate::db::models::Message) -> Vec<DisplayMessage> {
+        if msg.role != "assistant" || !msg.content.contains("<!-- tools:") {
+            return vec![DisplayMessage::from(msg)];
+        }
+
+        // Extract owned values before borrowing content
+        let id = msg.id;
+        let timestamp = msg.created_at;
+        let token_count = msg.token_count;
+        let cost = msg.cost;
+        let content = msg.content;
+
+        let mut result = Vec::new();
+        let marker = "<!-- tools:";
+
+        // Split on tool markers, preserving the structure
+        let mut remaining = content.as_str();
+        let mut first_text = true;
+        while let Some(marker_start) = remaining.find(marker) {
+            // Text before marker
+            let text_before = remaining[..marker_start].trim();
+            if !text_before.is_empty() {
+                result.push(DisplayMessage {
+                    id: if first_text { id } else { Uuid::new_v4() },
+                    role: "assistant".to_string(),
+                    content: text_before.to_string(),
+                    timestamp,
+                    token_count: if first_text { token_count } else { None },
+                    cost: if first_text { cost } else { None },
+                    approval: None,
+                    approve_menu: None,
+                    details: None,
+                    expanded: false,
+                    tool_group: None,
+                });
+                first_text = false;
+            }
+
+            // Parse the tool marker: <!-- tools: desc1 | desc2 -->
+            let after_marker = &remaining[marker_start + marker.len()..];
+            if let Some(end) = after_marker.find("-->") {
+                let tools_str = after_marker[..end].trim();
+                let calls: Vec<ToolCallEntry> = tools_str
+                    .split(" | ")
+                    .map(|desc| ToolCallEntry {
+                        description: desc.to_string(),
+                        success: true,
+                        details: None,
+                    })
+                    .collect();
+                if !calls.is_empty() {
+                    let count = calls.len();
+                    result.push(DisplayMessage {
+                        id: Uuid::new_v4(),
+                        role: "tool_group".to_string(),
+                        content: format!("{} tool call{}", count, if count == 1 { "" } else { "s" }),
+                        timestamp,
+                        token_count: None,
+                        cost: None,
+                        approval: None,
+                        approve_menu: None,
+                        details: None,
+                        expanded: false,
+                        tool_group: Some(ToolCallGroup { calls, expanded: false }),
+                    });
+                }
+                remaining = &after_marker[end + 3..];
+            } else {
+                remaining = after_marker;
+                break;
+            }
+        }
+
+        // Any remaining text after the last marker
+        let trailing = remaining.trim();
+        if !trailing.is_empty() {
+            result.push(DisplayMessage {
+                id: if first_text { id } else { Uuid::new_v4() },
+                role: "assistant".to_string(),
+                content: trailing.to_string(),
+                timestamp,
+                token_count: if first_text { token_count } else { None },
+                cost: if first_text { cost } else { None },
+                approval: None,
+                approve_menu: None,
+                details: None,
+                expanded: false,
+                tool_group: None,
+            });
+        }
+
+        if result.is_empty() {
+            // Content was only tool markers with no text — show a placeholder
+            result.push(DisplayMessage {
+                id,
+                role: "assistant".to_string(),
+                content: String::new(),
+                timestamp,
+                token_count,
+                cost,
+                approval: None,
+                approve_menu: None,
+                details: None,
+                expanded: false,
+                tool_group: None,
+            });
+        }
+
+        result
+    }
+
+    /// Extract image file paths from text and return (remaining_text, attachments).
+    /// Handles paths with spaces (e.g. `/home/user/My Screenshots/photo.png`)
+    /// and image URLs.
+    fn extract_image_paths(text: &str) -> (String, Vec<ImageAttachment>) {
+        let trimmed = text.trim();
+        let lower = trimmed.to_lowercase();
+
+        // Case 1: Entire pasted text is a single image path (handles spaces in path)
+        if IMAGE_EXTENSIONS.iter().any(|ext| lower.ends_with(ext)) {
+            // Local path
+            let path = std::path::Path::new(trimmed);
+            if path.exists() {
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| trimmed.to_string());
+                return (String::new(), vec![ImageAttachment {
+                    name,
+                    path: trimmed.to_string(),
+                }]);
+            }
+            // URL (no spaces — just check prefix)
+            if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+                let name = trimmed.rsplit('/').next().unwrap_or(trimmed).to_string();
+                return (String::new(), vec![ImageAttachment {
+                    name,
+                    path: trimmed.to_string(),
+                }]);
+            }
+        }
+
+        // Case 2: Mixed text — scan for image URLs (split by whitespace is fine for URLs)
+        // and absolute paths without spaces
+        let mut attachments = Vec::new();
+        let mut remaining_parts = Vec::new();
+
+        for word in text.split_whitespace() {
+            let word_lower = word.to_lowercase();
+            let is_image = IMAGE_EXTENSIONS.iter().any(|ext| word_lower.ends_with(ext));
+
+            if is_image {
+                let path = std::path::Path::new(word);
+                if path.exists() {
+                    let name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| word.to_string());
+                    attachments.push(ImageAttachment {
+                        name,
+                        path: word.to_string(),
+                    });
+                    continue;
+                }
+                if word.starts_with("http://") || word.starts_with("https://") {
+                    let name = word.rsplit('/').next().unwrap_or(word).to_string();
+                    attachments.push(ImageAttachment {
+                        name,
+                        path: word.to_string(),
+                    });
+                    continue;
+                }
+            }
+            remaining_parts.push(word);
+        }
+
+        (remaining_parts.join(" "), attachments)
+    }
+
+    /// Replace `<<IMG:/path/to/file.png>>` markers with readable `[IMG: file.png]` for display.
+    fn humanize_image_markers(text: &str) -> String {
+        let mut result = text.to_string();
+        while let Some(start) = result.find("<<IMG:") {
+            if let Some(end) = result[start..].find(">>") {
+                let path = &result[start + 6..start + end];
+                let name = std::path::Path::new(path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| path.to_string());
+                let replacement = format!("[IMG: {}]", name);
+                result = format!("{}{}{}", &result[..start], replacement, &result[start + end + 2..]);
+            } else {
+                break;
+            }
+        }
+        result.trim().to_string()
     }
 
     /// Push a system message into the chat display
@@ -1551,7 +1837,7 @@ impl App {
             let user_msg = DisplayMessage {
                 id: Uuid::new_v4(),
                 role: "user".to_string(),
-                content: content.clone(),
+                content: Self::humanize_image_markers(&content),
                 timestamp: chrono::Utc::now(),
                 token_count: None,
                 cost: None,
@@ -1580,11 +1866,12 @@ impl App {
                 tracing::info!("✨ Prompt transformed with tool hints");
             }
 
-            // Add user message to UI immediately (show original content)
+            // Add user message to UI — replace <<IMG:...>> markers with readable names
+            let display_content = Self::humanize_image_markers(&content);
             let user_msg = DisplayMessage {
                 id: Uuid::new_v4(),
                 role: "user".to_string(),
-                content: content.clone(),
+                content: display_content,
                 timestamp: chrono::Utc::now(),
                 token_count: None,
                 cost: None,

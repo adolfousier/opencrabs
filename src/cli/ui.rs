@@ -29,7 +29,7 @@ pub(crate) async fn cmd_chat(
         tui,
     };
 
-    println!("🦀 Starting OpenCrabs AI Orchestration Agent...\n");
+    println!("Starting OpenCrabs AI Orchestration Agent...");
 
     // Initialize database
     tracing::info!("Connecting to database: {}", config.database.path.display());
@@ -175,6 +175,9 @@ pub(crate) async fn cmd_chat(
             }
             ProgressEvent::ToolCompleted { tool_name, tool_input, success, summary } => {
                 let _ = progress_sender.send(TuiEvent::ToolCallCompleted { tool_name, tool_input, success, summary });
+            }
+            ProgressEvent::IntermediateText { text } => {
+                let _ = progress_sender.send(TuiEvent::IntermediateText(text));
             }
             ProgressEvent::Thinking => {} // spinner handles this already
             ProgressEvent::Compacting => {

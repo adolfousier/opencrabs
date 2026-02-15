@@ -6,7 +6,8 @@
 use super::context::AgentContext;
 use super::error::{AgentError, Result};
 use crate::llm::provider::{
-    ContentBlock, LLMRequest, LLMResponse, Message, Provider, ProviderStream, StopReason,
+    ContentBlock, ImageSource, LLMRequest, LLMResponse, Message, Provider, ProviderStream, Role,
+    StopReason,
 };
 use crate::llm::tools::{ToolExecutionContext, ToolRegistry};
 use crate::services::{MessageService, ServiceContext, SessionService};
@@ -42,6 +43,8 @@ pub enum ProgressEvent {
     Thinking,
     ToolStarted { tool_name: String, tool_input: Value },
     ToolCompleted { tool_name: String, tool_input: Value, success: bool, summary: String },
+    /// Intermediate text the agent sends between tool call batches
+    IntermediateText { text: String },
     Compacting,
 }
 
@@ -336,11 +339,11 @@ impl AgentService {
             context.system_brain = Some(brain.clone());
         }
 
-        // Add user message
-        let user_msg = Message::user(user_message.clone());
+        // Build user message — detect and attach images from paths/URLs
+        let user_msg = Self::build_user_message(&user_message).await;
         context.add_message(user_msg);
 
-        // Save user message to database
+        // Save user message to database (text only — images are ephemeral)
         let _user_db_msg = message_service
             .create_message(session_id, "user".to_string(), user_message)
             .await
@@ -378,6 +381,7 @@ impl AgentService {
         let mut total_input_tokens = 0u32;
         let mut total_output_tokens = 0u32;
         let mut final_response: Option<LLMResponse> = None;
+        let mut accumulated_text = String::new(); // Collect text from all iterations (not just final)
         let mut recent_tool_calls: Vec<String> = Vec::new(); // Track tool calls to detect loops
 
         while iteration < self.max_tool_iterations {
@@ -438,8 +442,11 @@ impl AgentService {
             total_input_tokens += response.usage.input_tokens;
             total_output_tokens += response.usage.output_tokens;
 
-            // Check if response contains tool use
+            // Separate text blocks and tool use blocks from the response
             tracing::debug!("Response has {} content blocks", response.content.len());
+            let mut iteration_text = String::new();
+            let mut tool_uses: Vec<(String, String, Value)> = Vec::new();
+
             for (i, block) in response.content.iter().enumerate() {
                 match block {
                     ContentBlock::Text { text } => {
@@ -448,9 +455,16 @@ impl AgentService {
                             i,
                             &text.chars().take(50).collect::<String>()
                         );
+                        if !text.trim().is_empty() {
+                            if !iteration_text.is_empty() {
+                                iteration_text.push_str("\n\n");
+                            }
+                            iteration_text.push_str(text);
+                        }
                     }
-                    ContentBlock::ToolUse { id, name, input: _ } => {
+                    ContentBlock::ToolUse { id, name, input } => {
                         tracing::debug!("Block {}: ToolUse {{ name: {}, id: {} }}", i, name, id);
+                        tool_uses.push((id.clone(), name.clone(), input.clone()));
                     }
                     _ => {
                         tracing::debug!("Block {}: Other content block", i);
@@ -458,17 +472,13 @@ impl AgentService {
                 }
             }
 
-            let tool_uses: Vec<_> = response
-                .content
-                .iter()
-                .filter_map(|block| {
-                    if let ContentBlock::ToolUse { id, name, input } = block {
-                        Some((id.clone(), name.clone(), input.clone()))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
+            // Accumulate text from every iteration
+            if !iteration_text.is_empty() {
+                if !accumulated_text.is_empty() {
+                    accumulated_text.push_str("\n\n");
+                }
+                accumulated_text.push_str(&iteration_text);
+            }
 
             tracing::debug!("Found {} tool uses to execute", tool_uses.len());
 
@@ -478,6 +488,12 @@ impl AgentService {
                 final_response = Some(response);
                 break;
             }
+
+            // Emit intermediate text to TUI so it appears before the tool calls
+            if !iteration_text.is_empty()
+                && let Some(ref cb) = self.progress_callback {
+                    cb(ProgressEvent::IntermediateText { text: iteration_text });
+                }
 
             // Detect tool loops: Track the current batch of tool calls
             // Include arguments in signature to distinguish different calls
@@ -534,7 +550,7 @@ impl AgentService {
                         }
 
                         "read" => {
-                            if let Some(path) = input.get("file_path").and_then(|v| v.as_str()) {
+                            if let Some(path) = input.get("path").and_then(|v| v.as_str()) {
                                 let normalized = path.replace('\\', "/");
                                 format!("read:{}", normalized)
                             } else {
@@ -544,7 +560,7 @@ impl AgentService {
 
                         // File modification tools - include file path
                         "write" | "edit" => {
-                            if let Some(path) = input.get("file_path").and_then(|v| v.as_str()) {
+                            if let Some(path) = input.get("path").and_then(|v| v.as_str()) {
                                 let normalized = path.replace('\\', "/");
                                 format!("{}:{}", name, normalized)
                             } else {
@@ -633,6 +649,7 @@ impl AgentService {
 
             // Execute tools and build response message
             let mut tool_results = Vec::new();
+            let mut tool_descriptions: Vec<String> = Vec::new(); // For DB persistence
 
             for (tool_id, tool_name, tool_input) in tool_uses {
                 // Check for cancellation before each tool
@@ -650,6 +667,9 @@ impl AgentService {
 
                 // Save tool input for progress reporting (before it's moved to execute)
                 let tool_input_for_progress = tool_input.clone();
+
+                // Build short description for DB persistence
+                tool_descriptions.push(Self::format_tool_summary(&tool_name, &tool_input));
 
                 // Emit tool started progress
                 if let Some(ref cb) = self.progress_callback {
@@ -840,6 +860,20 @@ impl AgentService {
                 }
             }
 
+            // Append tool call summaries to accumulated text for DB persistence.
+            // Format: <!-- tools: Read /foo.rs | Edit /bar.rs -->
+            // This lets the session loader reconstruct tool groups on reload.
+            if !tool_descriptions.is_empty() {
+                if !accumulated_text.is_empty() {
+                    accumulated_text.push('\n');
+                }
+                accumulated_text.push_str(&format!(
+                    "<!-- tools: {} -->",
+                    tool_descriptions.join(" | ")
+                ));
+                tool_descriptions.clear();
+            }
+
             // Add assistant message with tool use to context
             let assistant_msg = Message {
                 role: crate::llm::provider::Role::Assistant,
@@ -878,12 +912,13 @@ impl AgentService {
             AgentError::Internal("Tool loop completed without final response".to_string())
         })?;
 
-        // Extract text from final response
-        let assistant_text = Self::extract_text_from_response(&response);
+        // Extract text from the final response only (for TUI display).
+        // Intermediate text was already shown in real-time via IntermediateText events.
+        let final_text = Self::extract_text_from_response(&response);
 
-        // Save final assistant response to database
+        // Save full accumulated text to database (preserves all intermediate messages for history)
         let assistant_db_msg = message_service
-            .create_message(session_id, "assistant".to_string(), assistant_text.clone())
+            .create_message(session_id, "assistant".to_string(), accumulated_text)
             .await
             .map_err(|e| AgentError::Database(e.to_string()))?;
 
@@ -907,7 +942,7 @@ impl AgentService {
 
         Ok(AgentResponse {
             message_id: assistant_db_msg.id,
-            content: assistant_text,
+            content: final_text,
             stop_reason: response.stop_reason,
             usage: crate::llm::provider::TokenUsage {
                 input_tokens: total_input_tokens,
@@ -1094,20 +1129,136 @@ impl AgentService {
         Ok(())
     }
 
-    /// Extract text content from an LLM response
+    /// Build a user Message, auto-attaching images from `<<IMG:path>>` markers.
+    /// The TUI inserts these markers for detected image paths/URLs (handles spaces).
+    async fn build_user_message(text: &str) -> Message {
+        let mut image_blocks: Vec<ContentBlock> = Vec::new();
+
+        // Extract <<IMG:path>> markers
+        let mut clean_text = text.to_string();
+        while let Some(start) = clean_text.find("<<IMG:") {
+            if let Some(end) = clean_text[start..].find(">>") {
+                let marker_end = start + end + 2;
+                let img_path = &clean_text[start + 6..start + end];
+
+                // URL image
+                if img_path.starts_with("http://") || img_path.starts_with("https://") {
+                    image_blocks.push(ContentBlock::Image {
+                        source: ImageSource::Url { url: img_path.to_string() },
+                    });
+                    tracing::info!("Auto-attached image URL: {}", img_path);
+                }
+                // Local file
+                else {
+                    let path = std::path::Path::new(img_path);
+                    if let Ok(data) = tokio::fs::read(path).await {
+                        let lower = img_path.to_lowercase();
+                        let media_type = match lower.rsplit('.').next().unwrap_or("") {
+                            "png" => "image/png",
+                            "jpg" | "jpeg" => "image/jpeg",
+                            "gif" => "image/gif",
+                            "webp" => "image/webp",
+                            "bmp" => "image/bmp",
+                            "svg" => "image/svg+xml",
+                            _ => "application/octet-stream",
+                        };
+                        use base64::Engine;
+                        let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
+                        image_blocks.push(ContentBlock::Image {
+                            source: ImageSource::Base64 {
+                                media_type: media_type.to_string(),
+                                data: b64,
+                            },
+                        });
+                        tracing::info!("Auto-attached image: {} ({}, {} bytes)", img_path, media_type, data.len());
+                    } else {
+                        tracing::warn!("Could not read image file: {}", img_path);
+                    }
+                }
+
+                // Remove marker from text
+                clean_text = format!("{}{}", &clean_text[..start], &clean_text[marker_end..]);
+            } else {
+                break; // Malformed marker
+            }
+        }
+
+        let clean_text = clean_text.trim().to_string();
+
+        if image_blocks.is_empty() {
+            Message::user(clean_text)
+        } else {
+            // Text first, then images
+            let mut blocks = vec![ContentBlock::Text { text: clean_text }];
+            blocks.extend(image_blocks);
+            Message {
+                role: Role::User,
+                content: blocks,
+            }
+        }
+    }
+
+    /// Compact tool description for DB persistence (mirrors TUI's format_tool_description)
+    fn format_tool_summary(tool_name: &str, tool_input: &Value) -> String {
+        match tool_name {
+            "bash" => {
+                let cmd = tool_input.get("command").and_then(|v| v.as_str()).unwrap_or("?");
+                let short: String = cmd.chars().take(60).collect();
+                if cmd.len() > 60 { format!("bash: {}…", short) } else { format!("bash: {}", short) }
+            }
+            "read_file" | "read" => {
+                let path = tool_input.get("path").and_then(|v| v.as_str()).unwrap_or("?");
+                format!("Read {}", path)
+            }
+            "write_file" | "write" => {
+                let path = tool_input.get("path").and_then(|v| v.as_str()).unwrap_or("?");
+                format!("Write {}", path)
+            }
+            "edit_file" | "edit" => {
+                let path = tool_input.get("path").and_then(|v| v.as_str()).unwrap_or("?");
+                format!("Edit {}", path)
+            }
+            "ls" => {
+                let path = tool_input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+                format!("ls {}", path)
+            }
+            "glob" => {
+                let p = tool_input.get("pattern").and_then(|v| v.as_str()).unwrap_or("?");
+                format!("Glob {}", p)
+            }
+            "grep" => {
+                let p = tool_input.get("pattern").and_then(|v| v.as_str()).unwrap_or("?");
+                format!("Grep '{}'", p)
+            }
+            "web_search" | "exa_search" | "brave_search" => {
+                let q = tool_input.get("query").and_then(|v| v.as_str()).unwrap_or("?");
+                format!("Search: {}", q)
+            }
+            "plan" => {
+                let op = tool_input.get("operation").and_then(|v| v.as_str()).unwrap_or("?");
+                format!("Plan: {}", op)
+            }
+            "task_manager" => {
+                let op = tool_input.get("operation").and_then(|v| v.as_str()).unwrap_or("?");
+                format!("Task: {}", op)
+            }
+            other => other.to_string(),
+        }
+    }
+
+    /// Extract text content from an LLM response (text blocks only — tool calls
+    /// are displayed via the tool group UI, not as raw text).
     fn extract_text_from_response(response: &LLMResponse) -> String {
         let mut text = String::new();
 
         for content in &response.content {
-            match content {
-                ContentBlock::Text { text: t } => {
-                    text.push_str(t);
+            if let ContentBlock::Text { text: t } = content
+                && !t.trim().is_empty()
+            {
+                if !text.is_empty() {
+                    text.push_str("\n\n");
                 }
-                ContentBlock::ToolUse { name, input, .. } => {
-                    // Format tool use for display
-                    text.push_str(&format!("\n[Tool: {}]\n{}\n", name, input));
-                }
-                _ => {}
+                text.push_str(t);
             }
         }
 

@@ -1,6 +1,6 @@
 [package]
 name = "opencrabs"
-version = "0.1.7"
+version = "0.1.8"
 edition = "2024"
 authors = ["OpenCrabs Team"]
 license = "FSL-1.1-MIT"
@@ -51,6 +51,9 @@ thiserror = "2.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-appender = "0.2"
+
+# Encoding
+base64 = "0.22.1"
 
 # Utilities
 uuid = { version = "1.11", features = ["v4", "serde"] }

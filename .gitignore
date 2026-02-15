@@ -22,8 +22,10 @@ opencrab.db-wal
 
 # User data directories
 .opencrab/
+.opencrabs/
 .local/share/opencrab/
 .config/opencrab/
+/opencrabs
 
 # Environment variables
 .env
