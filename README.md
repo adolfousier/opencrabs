@@ -263,7 +263,7 @@ First-time users are guided through an 8-step setup wizard that appears automati
 |------|-------|-------------|
 | 1 | **Mode Selection** | QuickStart (sensible defaults) vs Advanced (full control) |
 | 2 | **Model & Auth** | Pick provider (Anthropic, OpenAI, Gemini, Qwen, Custom) → enter token/key → select model. Auto-detects existing keys from env/keyring |
-| 3 | **Workspace** | Set brain workspace path (default `~/.opencrabs/brain/workspace/`) → seed template files (SOUL.md, IDENTITY.md, etc.) |
+| 3 | **Workspace** | Set brain workspace path (default `~/.opencrabs/`) → seed template files (SOUL.md, IDENTITY.md, etc.) |
 | 4 | **Gateway** | Configure HTTP API gateway: port, bind address, auth mode |
 | 5 | **Channels** | Toggle messaging integrations (Telegram, Discord, WhatsApp, Signal, Google Chat, iMessage) |
 | 6 | **Daemon** | Install background service (systemd on Linux, LaunchAgent on macOS) |
@@ -645,7 +645,7 @@ OpenCrabs's brain is **dynamic and self-sustaining**. Instead of a hardcoded sys
 
 ### Brain Workspace
 
-The brain reads markdown files from `~/.opencrabs/brain/workspace/` (or `OPENCRABS_BRAIN_PATH` env var):
+The brain reads markdown files from `~/.opencrabs/` (or `OPENCRABS_BRAIN_PATH` env var):
 
 | File | Purpose |
 |------|---------|
@@ -662,7 +662,7 @@ Files are re-read **every turn** — edit them between messages and the agent im
 
 | Tier | Location | Purpose | Managed By |
 |------|----------|---------|------------|
-| **1. Brain MEMORY.md** | `~/.opencrabs/brain/workspace/MEMORY.md` | Durable, curated knowledge loaded into system brain every turn | You (the user) |
+| **1. Brain MEMORY.md** | `~/.opencrabs/MEMORY.md` | Durable, curated knowledge loaded into system brain every turn | You (the user) |
 | **2. Daily Memory Logs** | `~/.opencrabs/memory/YYYY-MM-DD.md` | Auto-compaction summaries with structured breakdowns of each session | Auto (on compaction) |
 | **3. Memory Search** | `memory_search` tool via QMD | Semantic search across all daily logs — the agent can recall past decisions, files, errors | Agent (via tool call) |
 
@@ -677,7 +677,7 @@ Files are re-read **every turn** — edit them between messages and the agent im
 
 ### User-Defined Slash Commands
 
-Tell OpenCrabs in natural language: *"Create a /deploy command that runs deploy.sh"* — and it writes the command to `~/.opencrabs/brain/commands.json`:
+Tell OpenCrabs in natural language: *"Create a /deploy command that runs deploy.sh"* — and it writes the command to `~/.opencrabs/commands.json`:
 
 ```json
 [

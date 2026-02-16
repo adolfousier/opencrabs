@@ -1724,18 +1724,11 @@ impl App {
         // Sync shared session ID for channels (Telegram, WhatsApp)
         *self.shared_session_id.lock().await = Some(session.id);
 
-        // Estimate context usage from loaded messages (chars/3 heuristic)
-        // This gets replaced by the actual API input_tokens on the next response
-        let estimated_tokens: u32 = self
-            .messages
-            .iter()
-            .map(|m| (m.content.len() as u32) / 3)
-            .sum();
-        if estimated_tokens > 0 {
-            self.last_input_tokens = Some(estimated_tokens);
-        } else {
-            self.last_input_tokens = None;
-        }
+        // Don't estimate context from stored messages — the chars/3 heuristic
+        // counts ALL messages (including compacted ones still in DB) which wildly
+        // overestimates actual context window usage. Instead, show no percentage
+        // until the next API response provides real input_tokens from the model.
+        self.last_input_tokens = None;
 
         Ok(())
     }

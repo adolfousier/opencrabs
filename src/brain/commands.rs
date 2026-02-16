@@ -39,19 +39,10 @@ impl CommandLoader {
         Self { path }
     }
 
-    /// Resolve the commands.json path from the brain workspace path.
+    /// Resolve the commands.json path from the brain path.
     pub fn from_brain_path(brain_path: &std::path::Path) -> Self {
-        // commands.json lives alongside the workspace, at ~/.opencrabs/brain/commands.json
-        // If brain_path is ~/.opencrabs/brain/workspace/, go up one level
-        let parent = if brain_path.ends_with("workspace") {
-            brain_path
-                .parent()
-                .unwrap_or(brain_path)
-                .join("commands.json")
-        } else {
-            brain_path.join("commands.json")
-        };
-        Self { path: parent }
+        // commands.json lives at ~/.opencrabs/commands.json
+        Self { path: brain_path.join("commands.json") }
     }
 
     /// Load user commands from JSON file. Returns empty vec if file doesn't exist.

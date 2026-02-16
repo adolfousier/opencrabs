@@ -127,10 +127,11 @@ struct ContextInput {
 }
 
 fn get_store_path(context: &ToolExecutionContext) -> PathBuf {
-    context
-        .working_directory
-        .join(".opencrabs")
-        .join(format!("context_{}.json", context.session_id))
+    let dir = crate::config::opencrabs_home()
+        .join("agents")
+        .join("session");
+    let _ = std::fs::create_dir_all(&dir);
+    dir.join(format!("context_{}.json", context.session_id))
 }
 
 #[async_trait]

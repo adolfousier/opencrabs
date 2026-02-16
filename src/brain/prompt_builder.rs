@@ -98,17 +98,12 @@ impl BrainLoader {
         Self { workspace_path }
     }
 
-    /// Resolve the brain workspace path: `~/.opencrabs/brain/workspace/`
+    /// Resolve the brain path: `~/.opencrabs/`
     ///
-    /// Creates the directory if it doesn't exist.
+    /// Brain files (SOUL.md, IDENTITY.md, etc.) live at the root of the
+    /// OpenCrabs home directory for simplicity.
     pub fn resolve_path() -> PathBuf {
-        let p = crate::config::opencrabs_home()
-            .join("brain")
-            .join("workspace");
-        if !p.exists() {
-            let _ = std::fs::create_dir_all(&p);
-        }
-        p
+        crate::config::opencrabs_home()
     }
 
     /// Read a single markdown file from the workspace. Returns `None` if missing.

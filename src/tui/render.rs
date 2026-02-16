@@ -540,20 +540,28 @@ fn render_input(f: &mut Frame, app: &App, area: Rect) {
     let border_style = Style::default().fg(Color::Rgb(70, 130, 180));
 
     // Context usage indicator (right-side bottom title)
-    let pct = app.context_usage_percent();
-    let context_color = if pct > 80.0 {
-        Color::Red
-    } else if pct > 60.0 {
-        Color::Yellow
+    let context_title = if app.last_input_tokens.is_some() {
+        let pct = app.context_usage_percent();
+        let context_color = if pct > 80.0 {
+            Color::Red
+        } else if pct > 60.0 {
+            Color::Yellow
+        } else {
+            Color::Green
+        };
+        let context_label = format!(" Context: {:.0}% ", pct);
+        Line::from(Span::styled(
+            context_label,
+            Style::default().fg(context_color).add_modifier(Modifier::BOLD),
+        ))
+        .alignment(Alignment::Right)
     } else {
-        Color::Green
+        Line::from(Span::styled(
+            " Context: – ",
+            Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+        ))
+        .alignment(Alignment::Right)
     };
-    let context_label = format!(" Context: {:.0}% ", pct);
-    let context_title = Line::from(Span::styled(
-        context_label,
-        Style::default().fg(context_color).add_modifier(Modifier::BOLD),
-    ))
-    .alignment(Alignment::Right);
 
     // Build attachment indicator for the top-right title area
     let attach_title = if !app.attachments.is_empty() {
@@ -1108,8 +1116,12 @@ fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
 
         // For current session, show live context window usage
         let context_info = if is_current {
-            let pct = app.context_usage_percent();
-            format!(" [ctx: {:.0}%]", pct)
+            if app.last_input_tokens.is_some() {
+                let pct = app.context_usage_percent();
+                format!(" [ctx: {:.0}%]", pct)
+            } else {
+                " [ctx: –]".to_string()
+            }
         } else {
             String::new()
         };
@@ -1160,13 +1172,17 @@ fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
 
             // Context usage for current session
             if !context_info.is_empty() {
-                let ctx_pct = app.context_usage_percent();
-                let ctx_color = if ctx_pct > 80.0 {
-                    Color::Red
-                } else if ctx_pct > 50.0 {
-                    Color::Yellow
+                let ctx_color = if app.last_input_tokens.is_some() {
+                    let ctx_pct = app.context_usage_percent();
+                    if ctx_pct > 80.0 {
+                        Color::Red
+                    } else if ctx_pct > 50.0 {
+                        Color::Yellow
+                    } else {
+                        Color::Green
+                    }
                 } else {
-                    Color::Green
+                    Color::DarkGray
                 };
                 spans.push(Span::styled(context_info, Style::default().fg(ctx_color)));
             }

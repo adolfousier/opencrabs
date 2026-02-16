@@ -312,9 +312,7 @@ impl OnboardingWizard {
     pub fn new() -> Self {
         let default_workspace = dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("~"))
-            .join(".opencrabs")
-            .join("brain")
-            .join("workspace");
+            .join(".opencrabs");
 
         Self {
             step: OnboardingStep::ModeSelect,

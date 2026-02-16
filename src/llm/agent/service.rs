@@ -93,7 +93,7 @@ pub struct AgentService {
     /// Working directory for tool execution
     working_directory: std::path::PathBuf,
 
-    /// Brain workspace path for saving compaction summaries to MEMORY.md
+    /// Brain path (~/.opencrabs/) for loading brain files
     brain_path: Option<std::path::PathBuf>,
 }
 
@@ -163,7 +163,7 @@ impl AgentService {
         self
     }
 
-    /// Set the brain workspace path for auto-compaction memory persistence
+    /// Set the brain path (~/.opencrabs/)
     pub fn with_brain_path(mut self, brain_path: std::path::PathBuf) -> Self {
         self.brain_path = Some(brain_path);
         self

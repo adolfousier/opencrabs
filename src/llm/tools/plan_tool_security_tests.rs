@@ -34,7 +34,7 @@ mod tests {
         assert!(result
             .unwrap_err()
             .to_string()
-            .contains("within working directory"));
+            .contains("within the session directory"));
     }
 
     #[test]

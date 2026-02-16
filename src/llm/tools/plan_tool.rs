@@ -102,11 +102,11 @@ fn default_complexity() -> u8 {
 
 /// Validate plan file path for security
 /// Prevents symlink attacks and path traversal
-fn validate_plan_file_path(path: &Path, working_dir: &Path) -> Result<()> {
-    // Check if path is absolute and within working directory
-    if !path.starts_with(working_dir) {
+fn validate_plan_file_path(path: &Path, base_dir: &Path) -> Result<()> {
+    // Check if path is absolute and within the base directory
+    if !path.starts_with(base_dir) {
         return Err(ToolError::InvalidInput(
-            "Plan file must be within working directory".to_string(),
+            "Plan file must be within the session directory".to_string(),
         ));
     }
 
@@ -304,11 +304,15 @@ impl Tool for PlanTool {
         let operation: PlanOperation = serde_json::from_value(input)?;
 
         // Load or create plan state from context (session-scoped)
+        let session_dir = crate::config::opencrabs_home()
+            .join("agents")
+            .join("session");
+        let _ = std::fs::create_dir_all(&session_dir);
         let plan_filename = format!(".opencrabs_plan_{}.json", context.session_id);
-        let plan_file = context.working_directory.join(&plan_filename);
+        let plan_file = session_dir.join(&plan_filename);
 
         // Security: Validate plan file path
-        validate_plan_file_path(&plan_file, &context.working_directory)?;
+        validate_plan_file_path(&plan_file, &session_dir)?;
 
         // Load existing plan with security checks
         let mut plan: Option<PlanDocument> = if plan_file.exists() {
