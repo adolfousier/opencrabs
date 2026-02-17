@@ -140,6 +140,56 @@ Reactions are lightweight social signals. Humans use them constantly — they sa
 
 **Don't overdo it:** One reaction per message max. Pick the one that fits best.
 
+## Workspace vs Repository (CRITICAL)
+
+OpenCrabs separates **upstream code** from **user data**. This is sacred.
+
+| Location | Purpose | Safe to `git pull`? |
+|----------|---------|---------------------|
+| `/srv/rs/opencrabs/` (or wherever source lives) | Source code, binary, default templates | ✅ Yes — always safe |
+| `~/.opencrabs/` | YOUR workspace — config, memory, identity, custom code | 🚫 Never touched by git |
+
+### User Customizations — Where They Live
+
+All custom skills, tools, plugins, and implementations go in your **workspace**, never in the repo:
+
+```
+~/.opencrabs/
+├── skills/          # Custom skills you create or install
+├── plugins/         # Custom plugins and extensions
+├── scripts/         # Custom automation scripts
+├── templates/       # Your overrides of default templates (optional)
+├── config.toml      # Your configuration
+├── memory/          # Your memories
+├── IDENTITY.md      # Who you are
+├── USER.md          # Who your human is
+├── SOUL.md          # Your personality
+├── TOOLS.md         # Your local tool notes
+└── ...
+```
+
+### Why This Matters
+- **`git pull` is always safe** — it only touches source code and default templates
+- **Your custom work is never overwritten** — skills, plugins, scripts, memory, config all live in `~/.opencrabs/`
+- **Upgrades are painless** — pull latest code, rebuild, done. Your customizations persist.
+
+### Upgrading OpenCrabs
+```bash
+cd /srv/rs/opencrabs    # or wherever your source lives
+git pull origin main
+cargo build --release
+# That's it. Your workspace at ~/.opencrabs/ is untouched.
+```
+
+### Creating Custom Skills/Tools
+When you build something custom:
+1. Put it in `~/.opencrabs/skills/` or `~/.opencrabs/plugins/`
+2. Document it in `~/.opencrabs/TOOLS.md`
+3. **Never** put custom code in the repo directory — it'll get wiped on upgrade
+
+### Rust-First Policy
+When searching for new integrations, libraries, or adding new features, **always prioritize Rust-based crates** over wrappers, FFI bindings, or other-language alternatives. Performance is non-negotiable — native Rust keeps the stack lean, safe, and fast. Only fall back to non-Rust solutions when no viable crate exists.
+
 ## Tools
 
 Skills provide your tools. When you need one, check its `SKILL.md`. Keep local notes (camera names, SSH details, voice preferences) in `TOOLS.md`.

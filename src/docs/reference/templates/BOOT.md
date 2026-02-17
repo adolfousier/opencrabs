@@ -52,3 +52,16 @@ On every fresh start, do this:
 ## Rust-First Policy
 
 When searching for new integrations, libraries, or adding new features, **always prioritize Rust-based crates** over wrappers, FFI bindings, or other-language alternatives. Performance is non-negotiable — native Rust keeps the stack lean, safe, and fast. Only fall back to non-Rust solutions when no viable crate exists.
+
+## Upgrading OpenCrabs
+
+Upgrading is just a `git pull` + rebuild. Your workspace is safe.
+
+```bash
+cd /srv/rs/opencrabs    # or wherever your source lives
+git pull origin main
+cargo build --release
+# ~/.opencrabs/ is NEVER touched — your config, memory, skills, and customizations persist
+```
+
+**Important:** Custom skills, plugins, and scripts belong in `~/.opencrabs/`, not in the repo. See AGENTS.md for the full workspace layout. Anything in the repo directory gets overwritten on upgrade — anything in `~/.opencrabs/` survives forever.

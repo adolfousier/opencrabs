@@ -9,6 +9,8 @@
 - **Workspace directory:** `~/.opencrabs/` — This is where EVERYTHING lives
 - **Path tip:** Always run `echo $HOME` or `ls ~/.opencrabs/` first to confirm the resolved path before file operations.
 - **What's inside:** Config (`config.toml`), memories (`memory/`), identities, tools, security, agent instructions, env files, sessions, and all state
+- **Custom code lives HERE** — skills (`skills/`), plugins (`plugins/`), scripts (`scripts/`) — never in the repo
+- **Repo = upstream code.** `git pull` is always safe. Your workspace is never touched by upgrades.
 - **NEVER search for these paths.** They are HERE. Memorized. Done.
 
 ## Identity

@@ -2,6 +2,22 @@
 
 Skills define *how* tools work. This file is for *your* specifics — the stuff that's unique to your setup.
 
+## Custom Skills & Plugins
+
+Your custom implementations live here in the workspace, **never in the repo**:
+
+```
+~/.opencrabs/
+├── skills/       # Custom skills you create or install
+├── plugins/      # Custom plugins and extensions
+├── scripts/      # Custom automation scripts
+```
+
+This ensures `git pull` on the repo never overwrites your work. See AGENTS.md for the full workspace layout.
+
+### Rust-First Policy
+When building custom tools or adding dependencies, **always prioritize Rust-based crates** over wrappers, FFI bindings, or other-language alternatives. Native Rust = lean, safe, fast.
+
 ## What Goes Here
 
 Things like:
@@ -14,6 +30,7 @@ Things like:
 - Server IPs and access methods
 - Docker container inventories
 - Nginx site mappings
+- Custom skill/plugin notes and configuration
 - Anything environment-specific
 
 ## Path Tips

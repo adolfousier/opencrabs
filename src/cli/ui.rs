@@ -190,8 +190,20 @@ pub(crate) async fn cmd_chat(
                     ))
                 })?;
 
-            // Wait for response
-            let response = response_rx.recv().await.ok_or_else(|| {
+            // Wait for response with timeout to prevent indefinite hang
+            let response = tokio::time::timeout(
+                std::time::Duration::from_secs(120),
+                response_rx.recv(),
+            )
+            .await
+            .map_err(|_| {
+                tracing::warn!("Approval request timed out after 120s, auto-denying");
+                crate::llm::agent::AgentError::Internal(
+                    "Approval request timed out (120s) — auto-denied".to_string(),
+                )
+            })?
+            .ok_or_else(|| {
+                tracing::warn!("Approval response channel closed unexpectedly");
                 crate::llm::agent::AgentError::Internal(
                     "Approval response channel closed".to_string(),
                 )
@@ -206,29 +218,33 @@ pub(crate) async fn cmd_chat(
     let progress_callback: crate::llm::agent::ProgressCallback = Arc::new(move |event| {
         use crate::llm::agent::ProgressEvent;
         use crate::tui::events::TuiEvent;
-        match event {
+
+        let result = match event {
             ProgressEvent::ToolStarted { tool_name, tool_input } => {
-                let _ = progress_sender.send(TuiEvent::ToolCallStarted { tool_name, tool_input });
+                progress_sender.send(TuiEvent::ToolCallStarted { tool_name, tool_input })
             }
             ProgressEvent::ToolCompleted { tool_name, tool_input, success, summary } => {
-                let _ = progress_sender.send(TuiEvent::ToolCallCompleted { tool_name, tool_input, success, summary });
+                progress_sender.send(TuiEvent::ToolCallCompleted { tool_name, tool_input, success, summary })
             }
             ProgressEvent::IntermediateText { text } => {
-                let _ = progress_sender.send(TuiEvent::IntermediateText(text));
+                progress_sender.send(TuiEvent::IntermediateText(text))
             }
             ProgressEvent::StreamingChunk { text } => {
-                let _ = progress_sender.send(TuiEvent::ResponseChunk(text));
+                progress_sender.send(TuiEvent::ResponseChunk(text))
             }
-            ProgressEvent::Thinking => {} // spinner handles this already
+            ProgressEvent::Thinking => return, // spinner handles this already
             ProgressEvent::Compacting => {
-                let _ = progress_sender.send(TuiEvent::AgentProcessing);
+                progress_sender.send(TuiEvent::AgentProcessing)
             }
             ProgressEvent::CompactionSummary { summary } => {
-                let _ = progress_sender.send(TuiEvent::CompactionSummary(summary));
+                progress_sender.send(TuiEvent::CompactionSummary(summary))
             }
             ProgressEvent::RestartReady { status } => {
-                let _ = progress_sender.send(TuiEvent::RestartReady(status));
+                progress_sender.send(TuiEvent::RestartReady(status))
             }
+        };
+        if let Err(e) = result {
+            tracing::error!("Progress event channel closed: {}", e);
         }
     });
 

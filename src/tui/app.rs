@@ -1077,12 +1077,6 @@ impl App {
                             tracing::error!("Failed to send denial response back to agent: {:?}", e);
                         }
                         let _ = self.event_sender().send(TuiEvent::ToolApprovalResponse(response));
-                        if let Some(approval) = self.messages.iter_mut().rev()
-                            .find_map(|m| m.approval.as_mut())
-                            .filter(|a| a.state == ApprovalState::Pending)
-                        {
-                            approval.state = ApprovalState::Denied("User denied".to_string());
-                        }
                     } else {
                         // "Yes" (0) or "Always" (1)
                         let option = if selected == 1 {
@@ -1103,11 +1097,11 @@ impl App {
                             tracing::error!("Failed to send approval response back to agent: {:?}", e);
                         }
                         let _ = self.event_sender().send(TuiEvent::ToolApprovalResponse(response));
-                        // Remove the approval message — tool progress is shown in the tool group
-                        self.messages.retain(|m| {
-                            !m.approval.as_ref().is_some_and(|a| a.state == ApprovalState::Pending)
-                        });
                     }
+                    // Remove resolved approval messages to prevent channel accumulation
+                    self.messages.retain(|m| {
+                        m.approval.as_ref().is_none_or(|a| a.request_id != request_id)
+                    });
                 }
                 return Ok(());
             } else if keys::is_deny(&event) || keys::is_cancel(&event) {
@@ -1130,12 +1124,10 @@ impl App {
                         tracing::error!("Failed to send denial response back to agent: {:?}", e);
                     }
                     let _ = self.event_sender().send(TuiEvent::ToolApprovalResponse(response));
-                    if let Some(approval) = self.messages.iter_mut().rev()
-                        .find_map(|m| m.approval.as_mut())
-                        .filter(|a| a.state == ApprovalState::Pending)
-                    {
-                        approval.state = ApprovalState::Denied("User denied".to_string());
-                    }
+                    // Remove resolved approval message
+                    self.messages.retain(|m| {
+                        m.approval.as_ref().is_none_or(|a| a.request_id != request_id)
+                    });
                 }
                 return Ok(());
             } else if keys::is_view_details(&event) {
@@ -2271,7 +2263,7 @@ impl App {
             self.current_session.is_some(),
             content.len());
 
-        // Clear stale pending approvals so they don't block streaming
+        // Deny stale pending approvals so they don't block streaming, then remove them
         let stale_count = self.messages.iter()
             .filter(|m| m.approval.as_ref().is_some_and(|a| a.state == ApprovalState::Pending))
             .count();
@@ -2288,6 +2280,7 @@ impl App {
                 approval.state = ApprovalState::Denied("Superseded".to_string());
             }
         }
+        self.messages.retain(|m| m.approval.is_none() || m.approval.as_ref().is_some_and(|a| a.state == ApprovalState::Pending));
 
         if self.is_processing {
             tracing::warn!("[send_message] QUEUED — agent still processing previous request");
@@ -2358,9 +2351,10 @@ impl App {
             let read_only_mode = self.mode == AppMode::Plan;
 
             tracing::info!("[send_message] Spawning agent task for session {}", session_id);
-            tokio::spawn(async move {
+            let panic_sender = event_sender.clone();
+            let handle = tokio::spawn(async move {
                 tracing::info!("[agent_task] START calling send_message_with_tools_and_mode");
-                match agent_service
+                let result = agent_service
                     .send_message_with_tools_and_mode(
                         session_id,
                         transformed_content,
@@ -2368,8 +2362,9 @@ impl App {
                         read_only_mode,
                         Some(token),
                     )
-                    .await
-                {
+                    .await;
+
+                match result {
                     Ok(response) => {
                         tracing::info!("[agent_task] OK — sending ResponseComplete");
                         if let Err(e) = event_sender.send(TuiEvent::ResponseComplete(response)) {
@@ -2382,6 +2377,15 @@ impl App {
                             tracing::error!("[agent_task] FAILED to send Error event: {}", e2);
                         }
                     }
+                }
+            });
+            // Watch for panics — surface them in the UI instead of silent hang
+            tokio::spawn(async move {
+                if let Err(e) = handle.await {
+                    tracing::error!("[agent_task] PANICKED: {}", e);
+                    let _ = panic_sender.send(TuiEvent::Error(
+                        format!("Agent task crashed unexpectedly: {e}. You can continue chatting."),
+                    ));
                 }
             });
         }
@@ -2411,7 +2415,7 @@ impl App {
         self.streaming_response = None;
         self.cancel_token = None;
 
-        // Clean up stale pending approvals — send deny so agent callbacks don't hang
+        // Clean up stale pending approvals — send deny so agent callbacks don't hang, then remove
         for msg in &mut self.messages {
             if let Some(ref mut approval) = msg.approval && approval.state == ApprovalState::Pending {
                 tracing::warn!("Cleaning up stale pending approval for tool '{}'", approval.tool_name);
@@ -2423,6 +2427,7 @@ impl App {
                 approval.state = ApprovalState::Denied("Agent completed without resolution".to_string());
             }
         }
+        self.messages.retain(|m| m.approval.is_none() || m.approval.as_ref().is_some_and(|a| a.state == ApprovalState::Pending));
 
         // Finalize active tool group into a display message
         if let Some(group) = self.active_tool_group.take() {
@@ -3032,7 +3037,7 @@ impl App {
         self.is_processing = false;
         self.streaming_response = None;
         self.cancel_token = None;
-        // Deny any pending approvals so agent callbacks don't hang
+        // Deny any pending approvals so agent callbacks don't hang, then remove
         for msg in &mut self.messages {
             if let Some(ref mut approval) = msg.approval && approval.state == ApprovalState::Pending {
                 let _ = approval.response_tx.send(ToolApprovalResponse {
@@ -3043,6 +3048,7 @@ impl App {
                 approval.state = ApprovalState::Denied("Error occurred".to_string());
             }
         }
+        self.messages.retain(|m| m.approval.is_none() || m.approval.as_ref().is_some_and(|a| a.state == ApprovalState::Pending));
         // Finalize any active tool group
         if let Some(group) = self.active_tool_group.take() {
             let count = group.calls.len();
@@ -3105,7 +3111,7 @@ impl App {
     fn handle_approval_requested(&mut self, request: ToolApprovalRequest) {
         tracing::info!("[APPROVAL] handle_approval_requested called for tool='{}' auto_session={} auto_always={}",
             request.tool_name, self.approval_auto_session, self.approval_auto_always);
-        // Clear any stale pending approvals from previous requests
+        // Deny and remove stale pending approvals from previous requests
         for msg in &mut self.messages {
             if let Some(ref mut approval) = msg.approval && approval.state == ApprovalState::Pending {
                 let _ = approval.response_tx.send(ToolApprovalResponse {
@@ -3116,6 +3122,9 @@ impl App {
                 approval.state = ApprovalState::Denied("Superseded by new request".to_string());
             }
         }
+        self.messages.retain(|m| {
+            m.approval.as_ref().is_none_or(|a| !matches!(a.state, ApprovalState::Denied(_)))
+        });
 
         // Auto-approve silently if policy allows
         if self.approval_auto_always || self.approval_auto_session {
