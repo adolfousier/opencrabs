@@ -15,8 +15,42 @@ use wacore::types::message::MessageInfo;
 use waproto::whatsapp::Message;
 use whatsapp_rust::client::Client;
 
+/// Header prepended to all outgoing messages so the user knows it's from the agent.
+pub const MSG_HEADER: &str = "\u{1f980} *OpenCrabs*";
+
+/// Unwrap nested message wrappers (device_sent, ephemeral, view_once, etc.)
+/// Returns the innermost Message that contains actual content.
+fn unwrap_message(msg: &Message) -> &Message {
+    // device_sent_message: wraps messages synced across linked devices
+    if let Some(ref dsm) = msg.device_sent_message {
+        if let Some(ref inner) = dsm.message {
+            return unwrap_message(inner);
+        }
+    }
+    // ephemeral_message: disappearing messages
+    if let Some(ref eph) = msg.ephemeral_message {
+        if let Some(ref inner) = eph.message {
+            return unwrap_message(inner);
+        }
+    }
+    // view_once_message
+    if let Some(ref vo) = msg.view_once_message {
+        if let Some(ref inner) = vo.message {
+            return unwrap_message(inner);
+        }
+    }
+    // document_with_caption_message
+    if let Some(ref dwc) = msg.document_with_caption_message {
+        if let Some(ref inner) = dwc.message {
+            return unwrap_message(inner);
+        }
+    }
+    msg
+}
+
 /// Extract plain text from a WhatsApp message.
 fn extract_text(msg: &Message) -> Option<String> {
+    let msg = unwrap_message(msg);
     // Try conversation field first (simple text messages)
     if let Some(ref conv) = msg.conversation
         && !conv.is_empty()
@@ -41,12 +75,14 @@ fn extract_text(msg: &Message) -> Option<String> {
 
 /// Check if the message has a downloadable image.
 fn has_image(msg: &Message) -> bool {
+    let msg = unwrap_message(msg);
     msg.image_message.is_some()
 }
 
 /// Download image from WhatsApp and save to a temp file.
 /// Returns the file path on success.
 async fn download_image(msg: &Message, client: &Client) -> Option<String> {
+    let msg = unwrap_message(msg);
     let img = msg.image_message.as_ref()?;
 
     let mime = img
@@ -89,13 +125,15 @@ async fn download_image(msg: &Message, client: &Client) -> Option<String> {
     }
 }
 
-/// Extract the sender's phone number (JID user part) from message info.
+/// Extract the sender's phone number (digits only) from message info.
+/// JID format is "351933536442@s.whatsapp.net" — we return just "351933536442".
 fn sender_phone(info: &MessageInfo) -> String {
-    info.source.sender.to_string()
+    let full = info.source.sender.to_string();
+    full.split('@').next().unwrap_or(&full).to_string()
 }
 
 /// Split a message into chunks that fit WhatsApp's limit (~65536 chars, but we use 4000 for readability).
-fn split_message(text: &str, max_len: usize) -> Vec<&str> {
+pub fn split_message(text: &str, max_len: usize) -> Vec<&str> {
     if text.len() <= max_len {
         return vec![text];
     }
@@ -131,10 +169,26 @@ pub(crate) async fn handle_message(
     shared_session: Arc<Mutex<Option<Uuid>>>,
 ) {
     let phone = sender_phone(&info);
+    tracing::debug!(
+        "WhatsApp handler: from={}, is_from_me={}, has_text={}, has_image={}",
+        phone,
+        info.source.is_from_me,
+        extract_text(&msg).is_some(),
+        has_image(&msg),
+    );
 
-    // Skip messages from self
+    // Skip bot's own outgoing replies (they echo back as is_from_me).
+    // User messages from their phone are also is_from_me (same account),
+    // so we only skip if the text starts with our agent header.
     if info.source.is_from_me {
-        return;
+        if let Some(text) = extract_text(&msg) {
+            if text.starts_with(MSG_HEADER) {
+                return;
+            }
+        } else {
+            // No text and is_from_me — likely a media echo, skip
+            return;
+        }
     }
 
     // Build message content: text + optional image attachment
@@ -146,8 +200,11 @@ pub(crate) async fn handle_message(
         return;
     }
 
-    // Allowlist check — if allowed list is empty, accept all
-    if !allowed.is_empty() && !allowed.contains(&phone) {
+    // Allowlist check — if allowed list is empty, accept all.
+    // Normalize: strip '+' from allowed entries to match JID digits.
+    if !allowed.is_empty()
+        && !allowed.iter().any(|a| a.trim_start_matches('+') == phone)
+    {
         tracing::debug!("WhatsApp: ignoring message from non-allowed phone {}", phone);
         return;
     }
@@ -174,7 +231,12 @@ pub(crate) async fn handle_message(
     }
 
     // Resolve session: owner (first in allowed list) shares TUI session, others get their own
-    let is_owner = allowed.is_empty() || allowed.iter().next() == Some(&phone);
+    let is_owner = allowed.is_empty()
+        || allowed
+            .iter()
+            .next()
+            .map(|a| a.trim_start_matches('+') == phone)
+            .unwrap_or(false);
 
     let session_id = if is_owner {
         let shared = shared_session.lock().await;
@@ -219,7 +281,8 @@ pub(crate) async fn handle_message(
     match agent.send_message_with_tools(session_id, content, None).await {
         Ok(response) => {
             let reply_jid = info.source.sender.clone();
-            for chunk in split_message(&response.content, 4000) {
+            let tagged = format!("{}\n\n{}", MSG_HEADER, response.content);
+            for chunk in split_message(&tagged, 4000) {
                 let reply_msg = waproto::whatsapp::Message {
                     conversation: Some(chunk.to_string()),
                     ..Default::default()
@@ -232,7 +295,7 @@ pub(crate) async fn handle_message(
         Err(e) => {
             tracing::error!("WhatsApp: agent error: {}", e);
             let error_msg = waproto::whatsapp::Message {
-                conversation: Some(format!("Error: {}", e)),
+                conversation: Some(format!("{}\n\nError: {}", MSG_HEADER, e)),
                 ..Default::default()
             };
             let _ = client

@@ -51,7 +51,7 @@ impl SqlxStore {
         let sql = r#"
             CREATE TABLE IF NOT EXISTS wa_device (
                 id          INTEGER PRIMARY KEY,
-                data        TEXT NOT NULL
+                data        BLOB NOT NULL
             );
             CREATE TABLE IF NOT EXISTS wa_identities (
                 address     TEXT NOT NULL,
@@ -155,6 +155,23 @@ impl SqlxStore {
                 .map_err(db_err)?;
         }
         Ok(())
+    }
+
+    /// Check if a paired device record exists (valid MessagePack data).
+    pub async fn device_exists(&self) -> Result<bool> {
+        let row = sqlx::query("SELECT data FROM wa_device WHERE id = ?")
+            .bind(self.device_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_err)?;
+        match row {
+            Some(r) => {
+                let data: Vec<u8> = r.get("data");
+                // Verify it's valid MessagePack (not legacy JSON)
+                Ok(rmp_serde::from_slice::<Device>(&data).is_ok())
+            }
+            None => Ok(false),
+        }
     }
 }
 
@@ -751,14 +768,14 @@ impl ProtocolStore for SqlxStore {
 #[async_trait]
 impl DeviceStore for SqlxStore {
     async fn save(&self, device: &Device) -> Result<()> {
-        let json = serde_json::to_string(device)
+        let bytes = rmp_serde::to_vec(device)
             .map_err(|e| StoreError::Serialization(e.to_string()))?;
         sqlx::query(
             "INSERT INTO wa_device (id, data) VALUES (?, ?)
              ON CONFLICT(id) DO UPDATE SET data = excluded.data",
         )
         .bind(self.device_id)
-        .bind(&json)
+        .bind(&bytes)
         .execute(&self.pool)
         .await
         .map_err(db_err)?;
@@ -773,9 +790,20 @@ impl DeviceStore for SqlxStore {
             .map_err(db_err)?;
         match row {
             Some(r) => {
-                let json: String = r.get("data");
-                let device: Device = serde_json::from_str(&json)
-                    .map_err(|e| StoreError::Serialization(e.to_string()))?;
+                let data: Vec<u8> = r.get("data");
+                let device: Device = match rmp_serde::from_slice(&data) {
+                    Ok(d) => d,
+                    Err(_) => {
+                        // Old JSON-serialized data can't roundtrip (byte array issue).
+                        // Delete it so the client re-pairs cleanly.
+                        tracing::warn!("WhatsApp: clearing incompatible legacy device data — re-pair required");
+                        let _ = sqlx::query("DELETE FROM wa_device WHERE id = ?")
+                            .bind(self.device_id)
+                            .execute(&self.pool)
+                            .await;
+                        return Ok(None);
+                    }
+                };
                 Ok(Some(device))
             }
             None => Ok(None),

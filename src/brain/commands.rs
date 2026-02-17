@@ -323,7 +323,7 @@ mod tests {
 
     #[test]
     fn test_commands_section() {
-        let builtin = vec![("/help", "Show help"), ("/model", "Current model")];
+        let builtin = vec![("/help", "Show help"), ("/models", "Switch model")];
         let user = vec![UserCommand {
             name: "/deploy".to_string(),
             description: "Deploy".to_string(),

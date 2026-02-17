@@ -36,6 +36,8 @@ pub mod task;
 // Tool implementations - Phase 4: Channel Integrations
 #[cfg(feature = "whatsapp")]
 pub mod whatsapp_connect;
+#[cfg(feature = "whatsapp")]
+pub mod whatsapp_send;
 
 // Re-exports
 pub use error::{Result, ToolError};

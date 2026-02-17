@@ -33,12 +33,8 @@ pub const SLASH_COMMANDS: &[SlashCommand] = &[
         description: "Show available commands",
     },
     SlashCommand {
-        name: "/model",
-        description: "Show current model",
-    },
-    SlashCommand {
         name: "/models",
-        description: "Select a model",
+        description: "Switch model",
     },
     SlashCommand {
         name: "/usage",
@@ -477,6 +473,7 @@ impl App {
 
     /// Set agent service (used to inject configured agent after app creation)
     pub fn set_agent_service(&mut self, agent_service: Arc<AgentService>) {
+        self.default_model_name = agent_service.provider_model().to_string();
         self.agent_service = agent_service;
     }
 
@@ -1835,19 +1832,6 @@ impl App {
     fn handle_slash_command(&mut self, input: &str) -> bool {
         let cmd = input.split_whitespace().next().unwrap_or("");
         match cmd {
-            "/model" => {
-                let model = self
-                    .current_session
-                    .as_ref()
-                    .and_then(|s| s.model.as_deref())
-                    .unwrap_or_else(|| self.agent_service.provider_model());
-                let provider = self.agent_service.provider_name();
-                self.push_system_message(format!(
-                    "Current model: {} (provider: {})",
-                    model, provider
-                ));
-                true
-            }
             "/models" => {
                 self.open_model_selector();
                 true

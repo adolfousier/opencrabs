@@ -5,6 +5,27 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.13] - 2026-02-17
+
+### Added
+- **Proactive WhatsApp Messaging** -- New `whatsapp_send` agent tool lets the agent send messages to the user (or any allowed phone) at any time, not just in reply to incoming messages
+- **WhatsApp Welcome Message** -- On successful QR pairing, the agent sends a fun random crab greeting to the owner's WhatsApp automatically
+- **WhatsApp Message Branding** -- All outgoing WhatsApp messages are prefixed with `🦀 *OpenCrabs*` header so users can distinguish agent replies from their own messages
+- **WhatsApp `device_sent_message` Unwrapping** -- Recursive `unwrap_message()` handles WhatsApp's nested message wrappers (`device_sent_message`, `ephemeral_message`, `view_once_message`, `document_with_caption_message`) to extract actual text content from linked-device messages
+- **Fun Startup/Shutdown Messages** -- Random crab-themed greetings on launch and farewell messages on exit (10 variants each)
+
+### Fixed
+- **WhatsApp Self-Chat Messages Ignored** -- Messages from the user's own phone were dropped because `is_from_me: true`; now only skips messages with the agent's `MSG_HEADER` prefix to prevent echo loops while accepting user messages from linked devices
+- **WhatsApp Phone Format Mismatch** -- Allowlist comparison failed because config stored `+351...` but JID user part was `351...`; `sender_phone()` now strips `@s.whatsapp.net` suffix, allowlist check strips `+` prefix
+- **Model Name Missing from Thinking Spinner** -- "is thinking" showed without model name because `session.model` could be `Some("")`; added `.filter(|m| !m.is_empty())` fallback to `default_model_name`
+- **WhatsApp SQLx Store Device Serialization** -- Device state now serialized via `rmp-serde` (MessagePack) instead of broken `bincode`; added `rmp-serde` dependency under whatsapp feature
+
+### Changed
+- **`wacore-binary` Direct Dependency** -- Added as direct optional dependency for `Jid` type access (needed by `whatsapp_send` and `whatsapp_connect` tools for JID parsing)
+
+### Removed
+- **`/model` Slash Command** -- Removed redundant `/model` command; `/models` already provides model switching with selected-model display
+
 ## [0.2.12] - 2026-02-17
 
 ### Added
@@ -206,6 +227,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Overlay Approval Dialog** — Replaced by inline approval in chat
 - **Bottom Status Bar** — Removed entirely for more screen space
 
+[0.2.13]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.13
+[0.2.12]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.12
 [0.2.1]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.1
 [0.2.0]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.0
 [0.1.9]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.9

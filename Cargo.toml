@@ -1,6 +1,6 @@
 [package]
 name = "opencrabs"
-version = "0.2.12"
+version = "0.2.13"
 edition = "2024"
 authors = ["Adolfo Usier <adolfo@meetneura.ai>"]
 license = "MIT"
@@ -83,8 +83,10 @@ whatsapp-rust = { version = "0.2", optional = true, default-features = false, fe
 whatsapp-rust-tokio-transport = { version = "0.2", optional = true }
 whatsapp-rust-ureq-http-client = { version = "0.2", optional = true }
 wacore = { version = "0.2", optional = true }
+wacore-binary = { version = "0.2", optional = true }
 waproto = { version = "0.2", optional = true }
 qrcode = { version = "0.14", optional = true }
+rmp-serde = { version = "1", optional = true }
 
 # Misc
 unicode-width = "0.2"
@@ -115,7 +117,7 @@ default = ["telegram", "whatsapp"]
 # Profiling feature enables pprof on Unix only (no-op on Windows)
 profiling = []
 telegram = ["teloxide"]
-whatsapp = ["whatsapp-rust", "whatsapp-rust-tokio-transport", "whatsapp-rust-ureq-http-client", "wacore", "waproto", "dep:qrcode"]
+whatsapp = ["whatsapp-rust", "whatsapp-rust-tokio-transport", "whatsapp-rust-ureq-http-client", "wacore", "wacore-binary", "waproto", "dep:qrcode", "dep:rmp-serde"]
 
 [profile.dev]
 opt-level = 0

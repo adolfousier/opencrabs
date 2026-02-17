@@ -264,6 +264,7 @@ fn render_chat(f: &mut Frame, app: &App, area: Rect) {
         .current_session
         .as_ref()
         .and_then(|s| s.model.as_deref())
+        .filter(|m| !m.is_empty())
         .unwrap_or_else(|| {
             if app.default_model_name.is_empty() { "AI" } else { &app.default_model_name }
         });
@@ -1263,7 +1264,6 @@ fn render_help(f: &mut Frame, app: &App, area: Rect) {
         Line::from(""),
         section_header("SLASH COMMANDS"),
         kv("/help", "Show this screen", blue),
-        kv("/model", "Current model", blue),
         kv("/models", "Switch model", blue),
         kv("/usage", "Token & cost stats", blue),
         kv("/onboard", "Setup wizard", blue),

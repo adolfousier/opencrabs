@@ -30,7 +30,26 @@ pub(crate) async fn cmd_chat(
         tui,
     };
 
-    println!("🦀 Starting OpenCrabs AI Orchestration Agent...\n");
+    {
+        const STARTS: &[&str] = &[
+            "🦀 Crabs assemble!",
+            "🦀 *sideways scuttling intensifies*",
+            "🦀 Booting crab consciousness...",
+            "🦀 Who summoned the crabs?",
+            "🦀 Crab rave initiated.",
+            "🦀 The crabs have awakened.",
+            "🦀 Emerging from the deep...",
+            "🦀 All systems crabby.",
+            "🦀 Let's get cracking.",
+            "🦀 Rustacean reporting for duty.",
+        ];
+        let i = (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos() as usize)
+            % STARTS.len();
+        println!("{}\n", STARTS[i]);
+    }
 
     // Initialize database
     tracing::info!("Connecting to database: {}", config.database.path.display());
@@ -224,13 +243,24 @@ pub(crate) async fn cmd_chat(
         config.voice.clone(),
     ));
 
+    // Shared WhatsApp state for proactive messaging (connect + send tools + static agent)
+    #[cfg(feature = "whatsapp")]
+    let whatsapp_state = Arc::new(crate::whatsapp::WhatsAppState::new());
+
     // Register WhatsApp connect tool (agent-callable QR pairing)
     #[cfg(feature = "whatsapp")]
     tool_registry.register(Arc::new(
         crate::llm::tools::whatsapp_connect::WhatsAppConnectTool::new(
             Some(progress_callback.clone()),
             channel_factory.clone(),
+            whatsapp_state.clone(),
         ),
+    ));
+
+    // Register WhatsApp send tool (proactive messaging)
+    #[cfg(feature = "whatsapp")]
+    tool_registry.register(Arc::new(
+        crate::llm::tools::whatsapp_send::WhatsAppSendTool::new(whatsapp_state.clone()),
     ));
 
     // Create agent service with approval callback, progress callback, and message queue
@@ -309,6 +339,7 @@ pub(crate) async fn cmd_chat(
                 wa.allowed_phones.clone(),
                 config.voice.clone(),
                 app.shared_session_id(),
+                whatsapp_state.clone(),
             );
             tracing::info!(
                 "Spawning WhatsApp agent ({} allowed phones)",
@@ -324,7 +355,26 @@ pub(crate) async fn cmd_chat(
     tracing::debug!("Launching TUI");
     tui::run(app).await.context("TUI error")?;
 
-    println!("\n👋 Goodbye!");
+    {
+        const BYES: &[&str] = &[
+            "🦀 Back to the ocean...",
+            "🦀 *scuttles into the sunset*",
+            "🦀 Until next tide!",
+            "🦀 Gone crabbing. BRB never.",
+            "🦀 The crabs retreat... for now.",
+            "🦀 Shell ya later!",
+            "🦀 Logging off. Don't forget to hydrate.",
+            "🦀 Peace out, landlubber.",
+            "🦀 Crab rave: paused.",
+            "🦀 See you on the other tide.",
+        ];
+        let i = (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos() as usize)
+            % BYES.len();
+        println!("\n{}", BYES[i]);
+    }
 
     Ok(())
 }

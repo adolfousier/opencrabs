@@ -3,6 +3,7 @@
 //! Agent struct and startup logic. Mirrors the Telegram agent pattern.
 
 use super::handler;
+use super::WhatsAppState;
 use crate::config::VoiceConfig;
 use crate::llm::agent::AgentService;
 use crate::services::{ServiceContext, SessionService};
@@ -21,9 +22,10 @@ use whatsapp_rust_ureq_http_client::UreqHttpClient;
 pub struct WhatsAppAgent {
     agent_service: Arc<AgentService>,
     session_service: SessionService,
-    allowed_phones: HashSet<String>,
+    allowed_phones: Vec<String>,
     voice_config: VoiceConfig,
     shared_session_id: Arc<Mutex<Option<Uuid>>>,
+    whatsapp_state: Arc<WhatsAppState>,
 }
 
 impl WhatsAppAgent {
@@ -33,13 +35,15 @@ impl WhatsAppAgent {
         allowed_phones: Vec<String>,
         voice_config: VoiceConfig,
         shared_session_id: Arc<Mutex<Option<Uuid>>>,
+        whatsapp_state: Arc<WhatsAppState>,
     ) -> Self {
         Self {
             agent_service,
             session_service: SessionService::new(service_context),
-            allowed_phones: allowed_phones.into_iter().collect(),
+            allowed_phones,
             voice_config,
             shared_session_id,
+            whatsapp_state,
         }
     }
 
@@ -65,17 +69,42 @@ impl WhatsAppAgent {
                 }
             };
 
+            // Only start if already paired — unpaired sessions should use the
+            // whatsapp_connect tool which displays the QR code in the TUI.
+            match backend.device_exists().await {
+                Ok(true) => {}
+                Ok(false) => {
+                    tracing::info!(
+                        "WhatsApp: no paired session found — use 'connect WhatsApp' in chat to pair"
+                    );
+                    return;
+                }
+                Err(e) => {
+                    tracing::warn!("WhatsApp: couldn't check device state: {}", e);
+                    // Continue anyway — let the bot try
+                }
+            }
+
             tracing::info!(
                 "WhatsApp agent running (STT={}, TTS={})",
                 self.voice_config.stt_enabled,
                 self.voice_config.tts_enabled,
             );
 
+            // Derive owner JID from first allowed phone (for proactive messaging)
+            let owner_jid = self
+                .allowed_phones
+                .first()
+                .map(|p| format!("{}@s.whatsapp.net", p.trim_start_matches('+')));
+
             let agent = self.agent_service.clone();
             let session_svc = self.session_service.clone();
-            let allowed = Arc::new(self.allowed_phones);
+            let allowed: Arc<HashSet<String>> =
+                Arc::new(self.allowed_phones.into_iter().collect());
             let voice_config = Arc::new(self.voice_config);
             let shared_session = self.shared_session_id.clone();
+            let wa_state = self.whatsapp_state.clone();
+            let owner_jid_clone = owner_jid.clone();
             let extra_sessions: Arc<Mutex<HashMap<String, Uuid>>> =
                 Arc::new(Mutex::new(HashMap::new()));
 
@@ -90,6 +119,8 @@ impl WhatsAppAgent {
                     let extra_sessions = extra_sessions.clone();
                     let voice_config = voice_config.clone();
                     let shared_session = shared_session.clone();
+                    let wa_state = wa_state.clone();
+                    let owner_jid = owner_jid_clone.clone();
                     async move {
                         match event {
                             Event::PairingQrCode { ref code, .. } => {
@@ -101,11 +132,13 @@ impl WhatsAppAgent {
                             }
                             Event::Connected(_) => {
                                 tracing::info!("WhatsApp: connected successfully");
+                                wa_state.set_connected(client.clone(), owner_jid.clone()).await;
                             }
                             Event::PairSuccess(_) => {
                                 tracing::info!("WhatsApp: pairing successful");
                             }
                             Event::Message(msg, info) => {
+                                tracing::debug!("WhatsApp: Event::Message received");
                                 handler::handle_message(
                                     *msg,
                                     info,
@@ -125,7 +158,9 @@ impl WhatsAppAgent {
                             Event::Disconnected(_) => {
                                 tracing::warn!("WhatsApp: disconnected");
                             }
-                            _ => {}
+                            other => {
+                                tracing::debug!("WhatsApp: unhandled event: {:?}", other);
+                            }
                         }
                     }
                 })

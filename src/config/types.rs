@@ -714,6 +714,10 @@ impl Config {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
+
+        // Back up before overwriting
+        Self::backup_config(&path, 5);
+
         let toml_str = toml::to_string_pretty(&doc)?;
         fs::write(&path, toml_str)?;
         tracing::info!("Wrote config key [{section}].{key} = {value}");
@@ -766,6 +770,51 @@ impl Config {
         Ok(())
     }
 
+    /// Rotate config backups before writing.
+    ///
+    /// Keeps up to `max_backups` copies named `config.toml.backup1` (newest)
+    /// through `config.toml.backupN` (oldest). Oldest is deleted when limit is
+    /// exceeded. Silently ignores errors — backup failure must never block a
+    /// config write.
+    fn backup_config(path: &Path, max_backups: usize) {
+        // Only back up if the file actually exists
+        if !path.exists() {
+            return;
+        }
+
+        let parent = match path.parent() {
+            Some(p) => p,
+            None => return,
+        };
+        let stem = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+
+        // Rotate existing backups: N → N+1 (delete oldest if over limit)
+        for i in (1..=max_backups).rev() {
+            let src = parent.join(format!("{stem}.backup{i}"));
+            if i == max_backups {
+                // Drop the oldest backup
+                let _ = fs::remove_file(&src);
+            } else {
+                let dst = parent.join(format!("{stem}.backup{}", i + 1));
+                if src.exists() {
+                    let _ = fs::rename(&src, &dst);
+                }
+            }
+        }
+
+        // Copy current config → backup1
+        let backup1 = parent.join(format!("{stem}.backup1"));
+        if let Err(e) = fs::copy(path, &backup1) {
+            tracing::warn!("Failed to back up config before write: {e}");
+        } else {
+            tracing::debug!("Config backed up to {}", backup1.display());
+        }
+    }
+
     /// Save configuration to a file
     pub fn save(&self, path: &Path) -> Result<()> {
         let toml_string =
@@ -776,6 +825,9 @@ impl Config {
             fs::create_dir_all(parent)
                 .with_context(|| format!("Failed to create config directory: {:?}", parent))?;
         }
+
+        // Back up before overwriting
+        Self::backup_config(path, 5);
 
         fs::write(path, toml_string)
             .with_context(|| format!("Failed to write config file: {:?}", path))?;
