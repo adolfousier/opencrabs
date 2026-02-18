@@ -5,6 +5,13 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.19] - 2026-02-18
+
+### Changed
+- **Cleaner Chat UI** — Replaced role labels with visual indicators: `❯` for user messages, `●` for assistant messages. User messages get subtle dark background for visual separation. Removed horizontal dividers and input box title for a cleaner look
+- **Alt+Arrow Word Navigation** — Added `Alt+Left` / `Alt+Right` as alternatives to `Ctrl+Left` / `Ctrl+Right` for word jumping (macOS compatibility)
+- **Branding** — Thinking/streaming indicators now show `🦀 OpenCrabs` instead of model name
+
 ## [0.2.18] - 2026-02-18
 
 ### Added

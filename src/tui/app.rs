@@ -731,8 +731,11 @@ impl App {
             return Ok(());
         }
 
-        // Ctrl+Left — jump to previous word boundary
-        if event.code == KeyCode::Left && event.modifiers.contains(KeyModifiers::CONTROL) {
+        // Ctrl+Left or Alt+Left — jump to previous word boundary
+        if event.code == KeyCode::Left
+            && (event.modifiers.contains(KeyModifiers::CONTROL)
+                || event.modifiers.contains(KeyModifiers::ALT))
+        {
             let before = &self.input_buffer[..self.cursor_position];
             // Skip whitespace, then find start of word
             let trimmed = before.trim_end();
@@ -743,8 +746,11 @@ impl App {
             return Ok(());
         }
 
-        // Ctrl+Right — jump to next word boundary
-        if event.code == KeyCode::Right && event.modifiers.contains(KeyModifiers::CONTROL) {
+        // Ctrl+Right or Alt+Right — jump to next word boundary
+        if event.code == KeyCode::Right
+            && (event.modifiers.contains(KeyModifiers::CONTROL)
+                || event.modifiers.contains(KeyModifiers::ALT))
+        {
             let after = &self.input_buffer[self.cursor_position..];
             // Skip current word chars, then skip whitespace
             let word_end = after.find(char::is_whitespace).unwrap_or(after.len());

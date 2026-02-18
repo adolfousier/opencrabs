@@ -343,54 +343,64 @@ fn render_chat(f: &mut Frame, app: &App, area: Rect) {
             continue;
         }
 
-        // Add timestamp and role with better formatting
-        let timestamp = msg.timestamp.format("%H:%M:%S");
-
-        // Build role text and style
-        let (role_text, role_style, prefix) = if msg.role == "user" {
-            (
-                "You".to_string(),
-                Style::default()
-                    .fg(Color::Rgb(70, 130, 180))
-                    .add_modifier(Modifier::BOLD),
-                "  ",
-            )
+        // Dot/arrow message differentiation (no role labels needed)
+        let is_user = msg.role == "user";
+        // User messages: subtle lighter background across full line width
+        let msg_bg = if is_user {
+            Some(Color::Rgb(30, 30, 38))
         } else {
-            (
-                model_name.to_string(),
-                Style::default()
-                    .fg(Color::Blue)
-                    .add_modifier(Modifier::BOLD),
-                "  ",
-            )
+            None
         };
 
-        lines.push(Line::from(vec![
-            Span::styled(prefix, Style::default()),
-            Span::styled(role_text, role_style),
-            Span::styled(
-                format!(" ({})", timestamp),
-                Style::default().fg(Color::DarkGray),
-            ),
-        ]));
-
-        // Parse and render message content as markdown (with left padding)
+        // Parse and render message content as markdown
         let content_lines = parse_markdown(&msg.content);
-        for line in content_lines {
-            let mut padded_spans = vec![Span::raw("  ")];
+        for (i, line) in content_lines.into_iter().enumerate() {
+            let mut padded_spans = if i == 0 {
+                if is_user {
+                    // User: arrow prefix
+                    vec![Span::styled(
+                        "\u{276F} ",
+                        Style::default().fg(Color::Rgb(100, 100, 100)),
+                    )]
+                } else {
+                    // Assistant: colored dot prefix
+                    vec![Span::styled(
+                        "\u{25CF} ",
+                        Style::default()
+                            .fg(Color::Rgb(70, 130, 180))
+                            .add_modifier(Modifier::BOLD),
+                    )]
+                }
+            } else {
+                vec![Span::raw("  ")]
+            };
             padded_spans.extend(line.spans);
             let padded_line = Line::from(padded_spans);
             for wrapped in wrap_line_with_padding(padded_line, content_width, "  ") {
-                lines.push(wrapped);
+                if let Some(bg) = msg_bg {
+                    // Apply bg to all spans and pad to full line width
+                    let mut spans: Vec<Span> = wrapped
+                        .spans
+                        .into_iter()
+                        .map(|s| Span::styled(s.content, s.style.bg(bg)))
+                        .collect();
+                    let line_width: usize =
+                        spans.iter().map(|s| s.content.width()).sum();
+                    let remaining = content_width.saturating_sub(line_width);
+                    if remaining > 0 {
+                        spans.push(Span::styled(
+                            " ".repeat(remaining),
+                            Style::default().bg(bg),
+                        ));
+                    }
+                    lines.push(Line::from(spans));
+                } else {
+                    lines.push(wrapped);
+                }
             }
         }
 
-        // Add spacing between messages
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            format!("  {}", "─".repeat(58)),
-            Style::default().fg(Color::DarkGray),
-        )));
+        // Spacing between messages
         lines.push(Line::from(""));
     }
 
@@ -409,7 +419,7 @@ fn render_chat(f: &mut Frame, app: &App, area: Rect) {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                format!("{} ", model_name),
+                "🦀 OpenCrabs ",
                 Style::default()
                     .fg(Color::Blue)
                     .add_modifier(Modifier::BOLD),
@@ -442,7 +452,7 @@ fn render_chat(f: &mut Frame, app: &App, area: Rect) {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                format!("{} is thinking...", model_name),
+                "🦀 OpenCrabs is thinking...".to_string(),
                 Style::default().fg(Color::Rgb(184, 134, 11)),
             ),
         ]));
@@ -512,31 +522,30 @@ fn render_input(f: &mut Frame, app: &App, area: Rect) {
     let input_content_width = area.width.saturating_sub(2) as usize; // borders
     let mut input_lines: Vec<Line> = Vec::new();
 
-    for line in input_text.lines() {
-        let padded = Line::from(format!("  {}", line));
+    for (line_idx, line) in input_text.lines().enumerate() {
+        let padded = if line_idx == 0 {
+            Line::from(vec![
+                Span::styled(
+                    "\u{276F} ",
+                    Style::default().fg(Color::Rgb(100, 100, 100)),
+                ),
+                Span::raw(line.to_string()),
+            ])
+        } else {
+            Line::from(format!("  {}", line))
+        };
         for wrapped in wrap_line_with_padding(padded, input_content_width, "  ") {
             input_lines.push(wrapped);
         }
     }
     if input_lines.is_empty() {
-        input_lines.push(Line::from("  "));
+        input_lines.push(Line::from(vec![
+            Span::styled(
+                "\u{276F} ",
+                Style::default().fg(Color::Rgb(100, 100, 100)),
+            ),
+        ]));
     }
-
-    let title = if app.is_processing {
-        Span::styled(
-            " Processing... (Esc x2 to abort) ",
-            Style::default()
-                .fg(Color::Rgb(70, 130, 180))
-                .add_modifier(Modifier::BOLD),
-        )
-    } else {
-        Span::styled(
-            " Type here (enter = send | alt + enter = newline)",
-            Style::default()
-                .fg(Color::Rgb(70, 130, 180))
-                .add_modifier(Modifier::BOLD),
-        )
-    };
 
     // Always keep steel blue border
     let border_style = Style::default().fg(Color::Rgb(70, 130, 180));
@@ -585,7 +594,6 @@ fn render_input(f: &mut Frame, app: &App, area: Rect) {
 
     let mut block = Block::default()
         .borders(Borders::ALL)
-        .title(title)
         .title_bottom(context_title)
         .border_style(border_style);
 
@@ -1263,7 +1271,7 @@ fn render_help(f: &mut Frame, app: &App, area: Rect) {
         section_header("CHAT"),
         kv("Enter", "Send message", blue),
         kv("Alt+Enter", "New line", blue),
-        kv("Escape (x2)", "Clear input", blue),
+        kv("Escape (x2)", "Clear input / abort", blue),
         kv("Page Up/Down", "Scroll history", blue),
         kv("@", "File picker", blue),
         Line::from(""),
