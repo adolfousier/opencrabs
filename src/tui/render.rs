@@ -2157,12 +2157,21 @@ fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     let provider_idx = app.model_selector_provider_selected;
     let selected_provider = &PROVIDERS[provider_idx];
     
-    // Use fetched models if available, otherwise fall back to static list
-    let display_models: Vec<&str> = if app.model_selector_models.is_empty() {
+    // Get all available models
+    let all_models: Vec<&str> = if app.model_selector_models.is_empty() {
         selected_provider.models.iter().map(|s| s.as_ref()).collect()
     } else {
         app.model_selector_models.iter().map(|s| s.as_ref()).collect()
     };
+    
+    // Filter models based on search filter
+    let filter = app.model_selector_filter.to_lowercase();
+    let display_models: Vec<&str> = if filter.is_empty() {
+        all_models
+    } else {
+        all_models.into_iter().filter(|m| m.to_lowercase().contains(&filter)).collect()
+    };
+    
     let model_count = display_models.len();
     let current_model = app
         .current_session
@@ -2254,19 +2263,27 @@ fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     const MAX_VISIBLE_MODELS: usize = 8;
     
     if model_focused {
+        // Show filter input
+        let filter_cursor = if model_focused { "█" } else { "" };
+        let filter_display = if app.model_selector_filter.is_empty() {
+            format!("  / filter{}", filter_cursor)
+        } else {
+            format!("  / {}{}", app.model_selector_filter, filter_cursor)
+        };
         lines.push(Line::from(Span::styled(
-            "  Model:",
+            filter_display,
             Style::default().fg(if model_focused { BRAND_BLUE } else { Color::DarkGray }),
         )));
     }
 
     let total = display_models.len();
+    let max_sel = if total > 0 { total - 1 } else { 0 };
+    let safe_selected = app.model_selector_selected.min(max_sel);
     let (start, end) = if total <= MAX_VISIBLE_MODELS {
         (0, total)
     } else {
         let half = MAX_VISIBLE_MODELS / 2;
-        let sel = app.model_selector_selected;
-        let s = sel.saturating_sub(half).min(total - MAX_VISIBLE_MODELS);
+        let s = safe_selected.saturating_sub(half).min(total - MAX_VISIBLE_MODELS);
         (s, s + MAX_VISIBLE_MODELS)
     };
 
@@ -2279,7 +2296,7 @@ fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
 
     for (offset, model) in display_models[start..end].iter().enumerate() {
         let i = start + offset;
-        let selected = i == app.model_selector_selected;
+        let selected = i == safe_selected;
         let active = *model == current_model;
 
         let prefix = if selected && model_focused { " > " } else { "   " };
@@ -2315,6 +2332,7 @@ fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
             ("[Enter]", "Fetch Models"),
         ],
         2 => vec![
+            ("[Type]", "Filter"),
             ("[↑/↓]", "Select"),
             ("[Enter]", "Confirm"),
         ],
