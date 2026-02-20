@@ -3991,8 +3991,15 @@ impl App {
             return Err(e);
         }
 
-        // Get the selected model from the provider's list
-        let selected_model = if let Some(model) = provider.models.get(self.model_selector_selected) {
+        // Get the selected model - use fetched models if available, otherwise fallback
+        let selected_model = if !self.model_selector_models.is_empty() {
+            // Use fetched models
+            if let Some(model) = self.model_selector_models.get(self.model_selector_selected) {
+                model.clone()
+            } else {
+                self.model_selector_models.first().cloned().unwrap_or_else(|| "gpt-4o-mini".to_string())
+            }
+        } else if let Some(model) = provider.models.get(self.model_selector_selected) {
             model.to_string()
         } else if let Some(model) = provider.models.first() {
             model.to_string()
