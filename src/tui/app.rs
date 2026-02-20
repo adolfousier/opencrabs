@@ -274,13 +274,15 @@ pub struct App {
     pub session_renaming: bool,
     pub session_rename_buffer: String,
 
-    // Model selector state
+    // Model selector state (mirrors onboarding ProviderAuth)
     pub model_selector_models: Vec<String>,
     pub model_selector_selected: usize,
     pub model_selector_showing_providers: bool,
     pub model_selector_provider_selected: usize,
     pub model_selector_api_key: String,
     pub model_selector_base_url: String,
+    pub model_selector_custom_model: String,
+    pub model_selector_focused_field: usize, // 0=provider, 1=api_key, 2=model
 
     // Input history (arrow up/down to cycle through past messages)
     input_history: Vec<String>,
@@ -406,6 +408,8 @@ impl App {
             model_selector_provider_selected: 0,
             model_selector_api_key: String::new(),
             model_selector_base_url: String::new(),
+            model_selector_custom_model: String::new(),
+            model_selector_focused_field: 0,
             input_history: Self::load_history(),
             input_history_index: None,
             input_history_stash: String::new(),
@@ -633,6 +637,9 @@ impl App {
                     if let Some(ref mut wizard) = self.onboarding {
                         wizard.handle_paste(&text);
                     }
+                } else if self.mode == AppMode::ModelSelector && self.model_selector_focused_field == 1 {
+                    // Handle paste in model selector API key field
+                    self.model_selector_api_key.push_str(&text);
                 }
             }
             TuiEvent::MessageSubmitted(content) => {
@@ -3747,72 +3754,53 @@ impl App {
 
         if keys::is_cancel(&event) {
             self.switch_mode(AppMode::Chat).await?;
-        } else if event.code == crossterm::event::KeyCode::Char('p') 
-            || event.code == crossterm::event::KeyCode::Tab 
-            || (event.code == crossterm::event::KeyCode::Down && event.modifiers.contains(crossterm::event::KeyModifiers::ALT)) {
-            // Toggle provider selection mode
-            self.model_selector_showing_providers = !self.model_selector_showing_providers;
-            if self.model_selector_showing_providers {
-                self.model_selector_api_key.clear();
-                self.model_selector_base_url.clear();
-            }
-        } else if self.model_selector_showing_providers {
-            // Provider selection mode - show selected provider's models and API key input
+        } else if event.code == crossterm::event::KeyCode::Tab {
+            // Tab cycles through fields: provider -> api_key -> model -> provider
+            self.model_selector_focused_field = (self.model_selector_focused_field + 1) % 3;
+            // If moving to provider, enable provider list; otherwise show model list
+            self.model_selector_showing_providers = self.model_selector_focused_field == 0;
+        } else if self.model_selector_focused_field == 0 {
+            // Provider selection (focused)
             match event.code {
                 crossterm::event::KeyCode::Up => {
                     self.model_selector_provider_selected = self.model_selector_provider_selected.saturating_sub(1);
-                    // Clear API key when switching providers
-                    self.model_selector_api_key.clear();
                 }
                 crossterm::event::KeyCode::Down => {
                     self.model_selector_provider_selected = (self.model_selector_provider_selected + 1)
                         .min(PROVIDERS.len() - 1);
-                    // Clear API key when switching providers
-                    self.model_selector_api_key.clear();
                 }
+                _ => {}
+            }
+        } else if self.model_selector_focused_field == 1 {
+            // API key input (focused)
+            match event.code {
                 crossterm::event::KeyCode::Char(c) => {
-                    // API key input for selected provider
                     self.model_selector_api_key.push(c);
                 }
                 crossterm::event::KeyCode::Backspace => {
                     self.model_selector_api_key.pop();
                 }
-                crossterm::event::KeyCode::Enter => {
-                    // Save provider selection and switch
-                    self.save_provider_selection(self.model_selector_provider_selected).await?;
-                }
                 _ => {}
             }
-        } else {
-            // Model selection mode (original behavior)
+        } else if self.model_selector_focused_field == 2 {
+            // Model selection (focused)
             if keys::is_up(&event) {
                 self.model_selector_selected = self.model_selector_selected.saturating_sub(1);
             } else if keys::is_down(&event) {
-                if !self.model_selector_models.is_empty() {
-                    self.model_selector_selected = (self.model_selector_selected + 1)
-                        .min(self.model_selector_models.len() - 1);
+                let max_models = if self.model_selector_showing_providers {
+                    PROVIDERS[self.model_selector_provider_selected].models.len()
+                } else {
+                    self.model_selector_models.len()
+                };
+                if max_models > 0 {
+                    self.model_selector_selected = (self.model_selector_selected + 1).min(max_models - 1);
                 }
-            } else if keys::is_enter(&event)
-                && let Some(model) = self.model_selector_models.get(self.model_selector_selected) {
-                    let model_name = model.clone();
-                    // Update session model
-                    if let Some(session) = &mut self.current_session {
-                        session.model = Some(model_name.clone());
-                        if let Err(e) = self.session_service.update_session(session).await {
-                            tracing::warn!("Failed to update session model: {}", e);
-                        }
-                    }
-                    // Persist to config.toml
-                    let provider_name = self.agent_service.provider_name().to_string();
-                    let section = format!("providers.{}", provider_name);
-                    if let Err(e) = crate::config::Config::write_key(&section, "default_model", &model_name) {
-                        tracing::warn!("Failed to persist model to config: {}", e);
-                    }
-                    // Update display name for splash screen
-                    self.default_model_name = model_name.clone();
-                    self.push_system_message(format!("Model changed to: {}", model_name));
-                    self.mode = AppMode::Chat;
-                }
+            }
+        }
+
+        // Enter to confirm - save and close
+        if keys::is_enter(&event) {
+            self.save_provider_selection(self.model_selector_provider_selected).await?;
         }
 
         Ok(())

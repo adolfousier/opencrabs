@@ -2146,43 +2146,27 @@ fn render_directory_picker(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(widget, area);
 }
 
-/// Render the model selector dialog (centered overlay)
+/// Render the model selector dialog - matches onboarding ProviderAuth style
 fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     use crate::tui::onboarding::PROVIDERS;
     
-    // Determine which models to show
-    let (display_models, selected_idx, provider_display) = if app.model_selector_showing_providers {
-        // Show selected provider's models when in provider selection mode
-        let selected_provider = &PROVIDERS[app.model_selector_provider_selected];
-        let models: Vec<String> = selected_provider.models.iter().map(|s| s.to_string()).collect();
-        (models, 0, selected_provider.name.split('(').next().unwrap_or(selected_provider.name).trim().to_string())
-    } else {
-        // Show current provider's models
-        let _current_model = app
-            .current_session
-            .as_ref()
-            .and_then(|s| s.model.as_deref())
-            .unwrap_or_else(|| app.provider_model())
-            .to_string();
-        
-        let current_provider_name = app.agent_service().provider_name();
-        let provider_display = match current_provider_name {
-            "anthropic" => "Anthropic Claude",
-            "openai" => "OpenAI",
-            "gemini" => "Google Gemini",
-            "qwen" => "Qwen/DashScope",
-            _ => current_provider_name,
-        };
-        
-        (app.model_selector_models.clone(), app.model_selector_selected, provider_display.to_string())
-    };
+    const BRAND_BLUE: Color = Color::Rgb(70, 130, 180);
+    const BRAND_GOLD: Color = Color::Rgb(218, 165, 32);
+    
+    let focused_field = app.model_selector_focused_field; // 0=provider, 1=api_key, 2=model
+    let provider_idx = app.model_selector_provider_selected;
+    let selected_provider = &PROVIDERS[provider_idx];
+    let provider_models: Vec<&str> = selected_provider.models.iter().map(|s| s.as_ref()).collect();
+    let model_count = provider_models.len();
+    let current_model = app
+        .current_session
+        .as_ref()
+        .and_then(|s| s.model.as_deref())
+        .unwrap_or_else(|| app.provider_model());
 
-    let model_count = display_models.len() as u16;
-    let provider_count = PROVIDERS.len() as u16;
-    let dialog_height = (model_count + provider_count + 12).min(area.height.saturating_sub(4));
-    let dialog_width = 60u16.min(area.width.saturating_sub(4));
+    let dialog_height = (model_count as u16 + 20).min(area.height.saturating_sub(4));
+    let dialog_width = 64u16.min(area.width.saturating_sub(4));
 
-    // Center the dialog
     let v_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -2201,154 +2185,136 @@ fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         .split(v_chunks[1]);
     let dialog_area = h_chunks[1];
 
-    let current_model = app
-        .current_session
-        .as_ref()
-        .and_then(|s| s.model.as_deref())
-        .unwrap_or_else(|| app.provider_model());
-
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(""));
-    
-    // Show provider header
-    lines.push(Line::from(vec![
-        Span::styled("▸ ", Style::default().fg(Color::Rgb(70, 130, 180)).add_modifier(Modifier::BOLD)),
-        Span::styled(&provider_display, Style::default().fg(Color::Rgb(70, 130, 180)).add_modifier(Modifier::BOLD)),
-    ]));
-    
-    // If in provider mode, show API key input
-    if app.model_selector_showing_providers {
-        let key_placeholder = if app.model_selector_api_key.is_empty() {
-            "[paste API key]"
-        } else {
-            "***"
-        };
-        lines.push(Line::from(vec![
-            Span::styled("   Key: ", Style::default().fg(Color::DarkGray)),
-            Span::styled(key_placeholder, Style::default().fg(Color::Green)),
-        ]));
-    }
-    
-    lines.push(Line::from(""));
 
-    // Show models
-    for (idx, model) in display_models.iter().enumerate() {
-        let is_selected = idx == selected_idx;
-        let is_active = model == current_model;
+    // Provider list (like onboarding)
+    for (i, provider) in PROVIDERS.iter().enumerate() {
+        let selected = i == provider_idx;
+        let focused = focused_field == 0;
 
-        let prefix = if is_selected { " > " } else { "   " };
-        let suffix = if is_active && !app.model_selector_showing_providers { " (active)" } else { "" };
-
-        let style = if is_selected {
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Rgb(70, 130, 180))
-                .add_modifier(Modifier::BOLD)
-        } else if is_active && !app.model_selector_showing_providers {
-            Style::default()
-                .fg(Color::Blue)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::White)
-        };
-
-        let suffix_style = if is_selected {
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Rgb(70, 130, 180))
-        } else {
-            Style::default().fg(Color::DarkGray)
-        };
+        let prefix = if selected && focused { " > " } else { "   " };
+        let marker = if selected { "[*]" } else { "[ ]" };
 
         lines.push(Line::from(vec![
-            Span::styled(prefix, style),
-            Span::styled(model.as_str(), style),
-            Span::styled(suffix, suffix_style),
-        ]));
-    }
-
-    // Separator and provider list
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        " ── Providers ── ",
-        Style::default().fg(Color::DarkGray),
-    )));
-    lines.push(Line::from(""));
-
-    // Show all providers
-    for (idx, provider) in PROVIDERS.iter().enumerate() {
-        let is_provider_selected = idx == app.model_selector_provider_selected;
-        
-        let prefix = if is_provider_selected { " > " } else { "   " };
-        
-        let style = if is_provider_selected {
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Rgb(100, 149, 237))
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::White)
-        };
-
-        let display_name = provider.name.split('(').next().unwrap_or(provider.name).trim();
-        
-        lines.push(Line::from(vec![
-            Span::styled(prefix, style),
-            Span::styled(display_name, style),
-        ]));
-    }
-
-    lines.push(Line::from(""));
-    
-    // Help text
-    if app.model_selector_showing_providers {
-        lines.push(Line::from(vec![
+            Span::styled(prefix, Style::default().fg(BRAND_GOLD)),
             Span::styled(
-                " [Enter]",
-                Style::default()
-                    .fg(Color::Blue)
-                    .add_modifier(Modifier::BOLD),
+                marker,
+                Style::default().fg(if selected { BRAND_GOLD } else { Color::DarkGray }),
             ),
-            Span::styled(" Confirm  ", Style::default().fg(Color::White)),
-            Span::styled("[↑/↓]", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::styled(" Select  ", Style::default().fg(Color::White)),
-            Span::styled("[Type]", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::styled(" API Key", Style::default().fg(Color::White)),
+            Span::styled(
+                format!(" {}", provider.name),
+                Style::default()
+                    .fg(if selected { Color::White } else { Color::DarkGray })
+                    .add_modifier(if selected { Modifier::BOLD } else { Modifier::empty() }),
+            ),
         ]));
+    }
+
+    lines.push(Line::from(""));
+
+    // API Key field (like onboarding)
+    let key_focused = focused_field == 1;
+    let key_label = selected_provider.key_label;
+    let (masked_key, key_hint) = if app.model_selector_api_key.is_empty() {
+        (format!("enter your {}", key_label.to_lowercase()), " (paste or type)".to_string())
     } else {
+        ("*".repeat(app.model_selector_api_key.len().min(30)), String::new())
+    };
+    let cursor = if key_focused { "█" } else { "" };
+
+    lines.push(Line::from(vec![
+        Span::styled(
+            format!("  {}: ", key_label),
+            Style::default().fg(if key_focused { BRAND_BLUE } else { Color::DarkGray }),
+        ),
+        Span::styled(
+            format!("{}{}", masked_key, cursor),
+            Style::default().fg(if key_focused { Color::White } else { Color::DarkGray }),
+        ),
+    ]));
+
+    if !key_hint.is_empty() && key_focused {
+        lines.push(Line::from(Span::styled(
+            format!("  {}", key_hint.trim()),
+            Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+        )));
+    }
+
+    lines.push(Line::from(""));
+
+    // Model selection (like onboarding)
+    let model_focused = focused_field == 2;
+    const MAX_VISIBLE_MODELS: usize = 8;
+    
+    if model_focused {
+        lines.push(Line::from(Span::styled(
+            "  Model:",
+            Style::default().fg(if model_focused { BRAND_BLUE } else { Color::DarkGray }),
+        )));
+    }
+
+    let total = provider_models.len();
+    let (start, end) = if total <= MAX_VISIBLE_MODELS {
+        (0, total)
+    } else {
+        let half = MAX_VISIBLE_MODELS / 2;
+        let sel = app.model_selector_selected;
+        let s = sel.saturating_sub(half).min(total - MAX_VISIBLE_MODELS);
+        (s, s + MAX_VISIBLE_MODELS)
+    };
+
+    if start > 0 {
+        lines.push(Line::from(Span::styled(
+            format!("  ↑ {} more", start),
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    for (offset, model) in provider_models[start..end].iter().enumerate() {
+        let i = start + offset;
+        let selected = i == app.model_selector_selected;
+        let active = *model == current_model;
+
+        let prefix = if selected && model_focused { " > " } else { "   " };
+        
+        let style = if selected && model_focused {
+            Style::default().fg(Color::Black).bg(BRAND_BLUE).add_modifier(Modifier::BOLD)
+        } else if active {
+            Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        };
+
+        let suffix = if active { " (active)" } else { "" };
+
         lines.push(Line::from(vec![
-            Span::styled(
-                " [Enter]",
-                Style::default()
-                    .fg(Color::Blue)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" Select  ", Style::default().fg(Color::White)),
-            Span::styled(
-                "[P/Tab]",
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" Providers  ", Style::default().fg(Color::White)),
-            Span::styled(
-                "[Esc]",
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" Cancel", Style::default().fg(Color::White)),
+            Span::styled(prefix, style),
+            Span::styled(*model, style),
+            Span::styled(suffix, Style::default().fg(Color::DarkGray)),
         ]));
     }
+
+    lines.push(Line::from(""));
+
+    // Help text
+    lines.push(Line::from(vec![
+        Span::styled("[Tab] ", Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD)),
+        Span::styled("Next Field  ", Style::default().fg(Color::White)),
+        Span::styled("[↑/↓] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled("Select  ", Style::default().fg(Color::White)),
+        Span::styled("[Enter] ", Style::default().fg(BRAND_GOLD).add_modifier(Modifier::BOLD)),
+        Span::styled("Confirm", Style::default().fg(Color::White)),
+    ]));
 
     f.render_widget(Clear, dialog_area);
     let dialog = Paragraph::new(lines).block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Rgb(70, 130, 180)))
+            .border_style(Style::default().fg(BRAND_BLUE))
             .title(Span::styled(
-                " Select Model ",
-                Style::default()
-                    .fg(Color::Rgb(70, 130, 180))
-                    .add_modifier(Modifier::BOLD),
+                " Select Provider & Model ",
+                Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
             )),
     );
     f.render_widget(dialog, dialog_area);
