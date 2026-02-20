@@ -22,30 +22,58 @@ use std::sync::Arc;
 /// Note: OPENAI_API_KEY may be present just for TTS voice synthesis.
 /// OpenAI is only used as the text provider when Anthropic has no credentials.
 pub fn create_provider(config: &Config) -> Result<Arc<dyn Provider>> {
-    // Try Qwen first (only if explicitly configured)
-    if let Some(provider) = try_create_qwen(config)? {
-        return Ok(provider);
+    // Check which provider is explicitly ENABLED (user selected in /models or onboard)
+    // Priority: Qwen > Anthropic > OpenAI > Gemini
+
+    if config.providers.qwen.as_ref().is_some_and(|p| p.enabled) {
+        tracing::info!("Using enabled provider: Qwen/DashScope");
+        return try_create_qwen(config)?
+            .ok_or_else(|| anyhow::anyhow!("Qwen enabled but failed to create"));
     }
 
-    // Try Anthropic (default provider)
-    if let Some(provider) = try_create_anthropic(config)? {
-        return Ok(provider);
+    if config
+        .providers
+        .anthropic
+        .as_ref()
+        .is_some_and(|p| p.enabled)
+    {
+        tracing::info!("Using enabled provider: Anthropic");
+        return try_create_anthropic(config)?
+            .ok_or_else(|| anyhow::anyhow!("Anthropic enabled but failed to create"));
     }
 
-    // Fall back to OpenAI (only if Anthropic unavailable)
-    if let Some(provider) = try_create_openai(config)? {
-        return Ok(provider);
+    if config.providers.openai.as_ref().is_some_and(|p| p.enabled) {
+        let is_openrouter = config
+            .providers
+            .openai
+            .as_ref()
+            .and_then(|p| p.base_url.as_ref())
+            .map(|u| u.contains("openrouter"))
+            .unwrap_or(false);
+        tracing::info!(
+            "Using enabled provider: {}",
+            if is_openrouter {
+                "OpenRouter"
+            } else {
+                "OpenAI"
+            }
+        );
+        return try_create_openai(config)?
+            .ok_or_else(|| anyhow::anyhow!("OpenAI/OpenRouter enabled but failed to create"));
     }
 
-    anyhow::bail!(
-        "No provider configured.\n\nPlease set one of:\n  \
-         - ANTHROPIC_API_KEY for Claude\n  \
-         - ANTHROPIC_MAX_SETUP_TOKEN for Claude Max (OAuth)\n  \
-         - OPENAI_API_KEY for OpenAI/GPT\n  \
-         - OPENAI_BASE_URL for local LLMs (LM Studio, Ollama)\n  \
-         - QWEN_BASE_URL for local Qwen (vLLM)\n  \
-         - DASHSCOPE_API_KEY for DashScope cloud"
-    )
+    if config.providers.gemini.as_ref().is_some_and(|p| p.enabled) {
+        tracing::info!("Using enabled provider: Google Gemini");
+        // Gemini creation would go here if implemented
+        return Err(anyhow::anyhow!(
+            "Gemini provider enabled but not yet implemented"
+        ));
+    }
+
+    // No provider enabled - user must select one
+    Err(anyhow::anyhow!(
+        "No provider enabled.\n\nPlease select a provider using /models command."
+    ))
 }
 
 /// Try to create Qwen provider if configured

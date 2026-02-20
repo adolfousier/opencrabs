@@ -1190,13 +1190,13 @@ pub fn resolve_provider_from_config(config: &Config) -> (&str, &str) {
     }
     if config.providers.openai.as_ref().is_some_and(|p| p.enabled) {
         // Check if OpenRouter
-        if let Some(base_url) = config.providers.openai.as_ref().and_then(|p| p.base_url.as_ref()) {
-            if base_url.contains("openrouter") {
-                let model = config.providers.openai.as_ref()
-                    .and_then(|p| p.default_model.as_deref())
-                    .unwrap_or("default");
-                return ("OpenRouter", model);
-            }
+        if let Some(base_url) = config.providers.openai.as_ref().and_then(|p| p.base_url.as_ref())
+            && base_url.contains("openrouter")
+        {
+            let model = config.providers.openai.as_ref()
+                .and_then(|p| p.default_model.as_deref())
+                .unwrap_or("default");
+            return ("OpenRouter", model);
         }
         let model = config.providers.openai.as_ref()
             .and_then(|p| p.default_model.as_deref())

@@ -527,37 +527,10 @@ impl App {
     /// Rebuild agent service with a new provider
     pub async fn rebuild_agent_service(&mut self) -> Result<()> {
         use crate::brain::provider::create_provider;
-        use crate::config::secrets::SecretString;
         
-        // Load config
-        let mut config = crate::config::Config::load()
+        // Load config - API keys are stored directly in config.toml
+        let config = crate::config::Config::load()
             .map_err(|e| anyhow::anyhow!("Failed to load config: {}", e))?;
-        
-        // Load API keys from keyring for each provider
-        if let Some(ref mut p) = config.providers.anthropic
-            && p.api_key.is_none()
-            && let Some(secret) = SecretString::from_keyring_optional("anthropic_api_key")
-        {
-            p.api_key = Some(secret.expose_secret().to_string());
-        }
-        if let Some(ref mut p) = config.providers.openai
-            && p.api_key.is_none()
-            && let Some(secret) = SecretString::from_keyring_optional("openai_api_key")
-        {
-            p.api_key = Some(secret.expose_secret().to_string());
-        }
-        if let Some(ref mut p) = config.providers.gemini
-            && p.api_key.is_none()
-            && let Some(secret) = SecretString::from_keyring_optional("gemini_api_key")
-        {
-            p.api_key = Some(secret.expose_secret().to_string());
-        }
-        if let Some(ref mut p) = config.providers.qwen
-            && p.api_key.is_none()
-            && let Some(secret) = SecretString::from_keyring_optional("dashscope_api_key")
-        {
-            p.api_key = Some(secret.expose_secret().to_string());
-        }
         
         // Create new provider from config
         let provider = create_provider(&config)
@@ -3699,52 +3672,59 @@ impl App {
         self.user_commands = command_loader.load();
     }
 
-    /// Open the model selector dialog (fetches live models from API)
+    /// Open the model selector dialog - load from config and fetch models
     async fn open_model_selector(&mut self) {
-        self.model_selector_models = self.agent_service.fetch_models().await;
-        let current = self
-            .current_session
-            .as_ref()
-            .and_then(|s| s.model.as_deref())
-            .unwrap_or_else(|| self.agent_service.provider_model())
+        // Load config to get enabled provider
+        let config = crate::config::Config::load().unwrap_or_default();
+        
+        // Determine which provider is enabled
+        let (provider_idx, api_key) = if config.providers.qwen.as_ref().is_some_and(|p| p.enabled) {
+            (3, config.providers.qwen.as_ref().and_then(|p| p.api_key.clone()))
+        } else if config.providers.anthropic.as_ref().is_some_and(|p| p.enabled) {
+            (0, config.providers.anthropic.as_ref().and_then(|p| p.api_key.clone()))
+        } else if config.providers.openai.as_ref().is_some_and(|p| p.enabled) {
+            if let Some(base_url) = config.providers.openai.as_ref().and_then(|p| p.base_url.as_ref()) {
+                if base_url.contains("openrouter") {
+                    (4, config.providers.openai.as_ref().and_then(|p| p.api_key.clone()))
+                } else {
+                    (5, config.providers.openai.as_ref().and_then(|p| p.api_key.clone()))
+                }
+            } else {
+                (1, config.providers.openai.as_ref().and_then(|p| p.api_key.clone()))
+            }
+        } else if config.providers.gemini.as_ref().is_some_and(|p| p.enabled) {
+            (2, config.providers.gemini.as_ref().and_then(|p| p.api_key.clone()))
+        } else {
+            (0, None) // Default
+        };
+        
+        self.model_selector_provider_selected = provider_idx;
+        
+        // Set API key from config (will show as asterisks in UI)
+        if let Some(ref key) = api_key {
+            self.model_selector_api_key = key.clone();
+        }
+        
+        // Fetch models from enabled provider using config's API key
+        self.model_selector_models = super::onboarding::fetch_provider_models(provider_idx, api_key.as_deref()).await;
+        
+        // Pre-select current model from config
+        let current = config.providers.openai.as_ref()
+            .and_then(|p| p.default_model.as_deref())
+            .or_else(|| config.providers.anthropic.as_ref().and_then(|p| p.default_model.as_deref()))
+            .or_else(|| config.providers.qwen.as_ref().and_then(|p| p.default_model.as_deref()))
+            .or_else(|| config.providers.gemini.as_ref().and_then(|p| p.default_model.as_deref()))
+            .unwrap_or("default")
             .to_string();
 
-        // Pre-select the current model
         self.model_selector_selected = self
             .model_selector_models
             .iter()
             .position(|m| m == &current)
             .unwrap_or(0);
 
-        // Determine current provider index from CONFIG (not from agent service)
-        let config = crate::config::Config::load().unwrap_or_default();
-        
-        // Check which provider is enabled in config
-        if config.providers.qwen.as_ref().is_some_and(|p| p.enabled) {
-            self.model_selector_provider_selected = 3;
-        } else if config.providers.anthropic.as_ref().is_some_and(|p| p.enabled) {
-            self.model_selector_provider_selected = 0;
-        } else if config.providers.openai.as_ref().is_some_and(|p| p.enabled) {
-            // Check if it's OpenRouter or custom
-            if let Some(base_url) = config.providers.openai.as_ref().and_then(|p| p.base_url.as_ref()) {
-                if base_url.contains("openrouter") {
-                    self.model_selector_provider_selected = 4; // OpenRouter
-                } else {
-                    self.model_selector_provider_selected = 5; // Custom
-                }
-            } else {
-                self.model_selector_provider_selected = 1; // Regular OpenAI
-            }
-        } else if config.providers.gemini.as_ref().is_some_and(|p| p.enabled) {
-            self.model_selector_provider_selected = 2;
-        } else {
-            // Default to Anthropic if nothing enabled
-            self.model_selector_provider_selected = 0;
-        }
-
-        // Reset provider view state
+        // Reset view state
         self.model_selector_showing_providers = false;
-        self.model_selector_api_key.clear();
         self.model_selector_base_url.clear();
         self.model_selector_filter.clear();
         self.model_selector_focused_field = 0;
@@ -3895,7 +3875,7 @@ impl App {
     /// Internal: save provider with option to close dialog
     async fn save_provider_selection_internal(&mut self, provider_idx: usize, close_dialog: bool) -> Result<()> {
         use super::onboarding::PROVIDERS;
-        use crate::config::{ProviderConfig, QwenProviderConfig, SecretString};
+        use crate::config::{ProviderConfig, QwenProviderConfig};
 
         let provider = &PROVIDERS[provider_idx];
         
@@ -3922,6 +3902,9 @@ impl App {
             Some(self.model_selector_api_key.clone())
         };
 
+        // Log what's being saved (hide key)
+        tracing::info!("Saving provider config: idx={}, has_api_key={}", provider_idx, api_key.is_some());
+
         // Build provider config based on selection
         let default_model = provider.models.first().copied().unwrap_or("default");
         match provider_idx {
@@ -3929,7 +3912,7 @@ impl App {
                 // Anthropic
                 config.providers.anthropic = Some(ProviderConfig {
                     enabled: true,
-                    api_key: None,
+                    api_key: api_key.clone(),
                     base_url: None,
                     default_model: Some(default_model.to_string()),
                 });
@@ -3938,7 +3921,7 @@ impl App {
                 // OpenAI
                 config.providers.openai = Some(ProviderConfig {
                     enabled: true,
-                    api_key: None,
+                    api_key: api_key.clone(),
                     base_url: None,
                     default_model: Some(default_model.to_string()),
                 });
@@ -3947,7 +3930,7 @@ impl App {
                 // Gemini
                 config.providers.gemini = Some(ProviderConfig {
                     enabled: true,
-                    api_key: None,
+                    api_key: api_key.clone(),
                     base_url: None,
                     default_model: Some(default_model.to_string()),
                 });
@@ -3956,7 +3939,7 @@ impl App {
                 // Qwen
                 config.providers.qwen = Some(QwenProviderConfig {
                     enabled: true,
-                    api_key: None,
+                    api_key: api_key.clone(),
                     base_url: None,
                     default_model: Some(default_model.to_string()),
                     tool_parser: None,
@@ -3969,18 +3952,18 @@ impl App {
                 // OpenRouter
                 config.providers.openai = Some(ProviderConfig {
                     enabled: true,
-                    api_key: None,
+                    api_key: api_key.clone(),
                     base_url: Some("https://openrouter.ai/api/v1/chat/completions".to_string()),
                     default_model: Some(default_model.to_string()),
                 });
             }
             5 => {
-                // Custom - need base URL
+                // Custom
                 config.providers.openai = Some(ProviderConfig {
                     enabled: true,
-                    api_key: None,
+                    api_key: api_key.clone(),
                     base_url: Some(self.model_selector_base_url.clone()),
-                    default_model: Some("gpt-4".to_string()),
+                    default_model: Some(default_model.to_string()),
                 });
             }
             _ => {}
@@ -3990,13 +3973,30 @@ impl App {
         let config_path = crate::config::opencrabs_home().join("config.toml");
         config.save(&config_path).map_err(|e| anyhow::anyhow!("Failed to save config: {}", e))?;
 
-        // Save API key to keyring if provided
-        if let Some(ref key) = api_key
-            && !provider.keyring_key.is_empty()
-        {
-            let secret = SecretString::from_str(key);
-            if let Err(e) = secret.save_to_keyring(provider.keyring_key) {
-                tracing::warn!("Failed to save API key to keyring: {}", e);
+        // Save API key - save directly to config.toml since keyring is broken (mock)
+        if let Some(ref key) = api_key {
+            match provider_idx {
+                0 => {
+                    if let Some(ref mut p) = config.providers.anthropic {
+                        p.api_key = Some(key.clone());
+                    }
+                }
+                1 | 4 | 5 => {
+                    if let Some(ref mut p) = config.providers.openai {
+                        p.api_key = Some(key.clone());
+                    }
+                }
+                2 => {
+                    if let Some(ref mut p) = config.providers.gemini {
+                        p.api_key = Some(key.clone());
+                    }
+                }
+                3 => {
+                    if let Some(ref mut p) = config.providers.qwen {
+                        p.api_key = Some(key.clone());
+                    }
+                }
+                _ => {}
             }
         }
 

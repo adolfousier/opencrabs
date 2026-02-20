@@ -2160,20 +2160,14 @@ fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     let provider_idx = app.model_selector_provider_selected;
     let selected_provider = &PROVIDERS[provider_idx];
     
-    // Get all available models
-    let all_models: Vec<&str> = if app.model_selector_models.is_empty() {
-        selected_provider.models.iter().map(|s| s.as_ref()).collect()
-    } else {
-        app.model_selector_models.iter().map(|s| s.as_ref()).collect()
-    };
+    // Get models from fetched list ONLY - never use static fallback
+    // If no fetched models, show message to re-select provider to fetch
+    let display_models: Vec<&str> = app.model_selector_models.iter().map(|s| s.as_ref()).collect();
     
-    // Filter models based on search filter
-    let filter = app.model_selector_filter.to_lowercase();
-    let display_models: Vec<&str> = if filter.is_empty() {
-        all_models
-    } else {
-        all_models.into_iter().filter(|m| m.to_lowercase().contains(&filter)).collect()
-    };
+    // If no models fetched yet, show placeholder
+    if display_models.is_empty() {
+        // Don't show static fallback - tell user to confirm to fetch
+    }
     
     let model_count = display_models.len();
     let current_model = app
