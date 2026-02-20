@@ -2242,7 +2242,7 @@ fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         ),
         Span::styled(
             format!("{}{}", masked_key, cursor),
-            Style::default().fg(if key_focused { Color::White } else { Color::DarkGray }),
+            Style::default().fg(if key_focused { Color::White } else { Color::Green }),
         ),
     ]));
 

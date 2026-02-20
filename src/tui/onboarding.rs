@@ -1784,10 +1784,10 @@ Respond with EXACTLY six sections using these delimiters. No extra text before t
         let model = self.selected_model_name().to_string();
         match self.selected_provider {
             0 => {
-                // Anthropic Claude (setup token or API key)
+                // Anthropic Claude
                 config.providers.anthropic = Some(ProviderConfig {
                     enabled: true,
-                    api_key: None, // stored in keyring or env
+                    api_key: Some(self.api_key_input.clone()),
                     base_url: None,
                     default_model: Some(model),
                 });
@@ -1796,7 +1796,7 @@ Respond with EXACTLY six sections using these delimiters. No extra text before t
                 // OpenAI
                 config.providers.openai = Some(ProviderConfig {
                     enabled: true,
-                    api_key: None,
+                    api_key: Some(self.api_key_input.clone()),
                     base_url: None,
                     default_model: Some(model),
                 });
@@ -1805,7 +1805,7 @@ Respond with EXACTLY six sections using these delimiters. No extra text before t
                 // Gemini
                 config.providers.gemini = Some(ProviderConfig {
                     enabled: true,
-                    api_key: None,
+                    api_key: Some(self.api_key_input.clone()),
                     base_url: None,
                     default_model: Some(model),
                 });
@@ -1814,7 +1814,7 @@ Respond with EXACTLY six sections using these delimiters. No extra text before t
                 // Qwen/DashScope
                 config.providers.qwen = Some(QwenProviderConfig {
                     enabled: true,
-                    api_key: None,
+                    api_key: Some(self.api_key_input.clone()),
                     base_url: None,
                     default_model: Some(model),
                     tool_parser: None,
@@ -1827,7 +1827,7 @@ Respond with EXACTLY six sections using these delimiters. No extra text before t
                 // OpenRouter (OpenAI-compatible with base_url)
                 config.providers.openai = Some(ProviderConfig {
                     enabled: true,
-                    api_key: None,
+                    api_key: Some(self.api_key_input.clone()),
                     base_url: Some("https://openrouter.ai/api/v1/chat/completions".to_string()),
                     default_model: Some(model),
                 });
@@ -1836,7 +1836,7 @@ Respond with EXACTLY six sections using these delimiters. No extra text before t
                 // Custom OpenAI-compatible
                 config.providers.openai = Some(ProviderConfig {
                     enabled: true,
-                    api_key: None,
+                    api_key: Some(self.api_key_input.clone()),
                     base_url: Some(self.custom_base_url.clone()),
                     default_model: Some(self.custom_model.clone()),
                 });
@@ -1943,17 +1943,6 @@ Respond with EXACTLY six sections using these delimiters. No extra text before t
         config
             .save(&config_path)
             .map_err(|e| format!("Failed to write config: {}", e))?;
-
-        // Store API key in keyring (skip if using existing key)
-        if !self.api_key_input.is_empty() && !self.has_existing_key() && !self.is_custom_provider() {
-            let provider = self.current_provider();
-            if !provider.keyring_key.is_empty() {
-                let secret = SecretString::from_str(&self.api_key_input);
-                secret
-                    .save_to_keyring(provider.keyring_key)
-                    .map_err(|e| format!("Failed to save API key to keyring: {}", e))?;
-            }
-        }
 
         // Store Telegram bot token in keyring (if new)
         if !self.telegram_token_input.is_empty() && !self.has_existing_telegram_token() {

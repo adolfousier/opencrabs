@@ -3831,20 +3831,11 @@ impl App {
             } else if self.model_selector_focused_field == 1 {
                 // On API key field - fetch models from provider, DON'T close dialog
                 let provider_idx = self.model_selector_provider_selected;
-                let provider = &PROVIDERS[provider_idx];
                 let api_key = if self.model_selector_api_key.is_empty() {
                     None
                 } else {
                     Some(self.model_selector_api_key.clone())
                 };
-                
-                // Save API key to keyring if provided
-                if let Some(ref key) = api_key
-                    && !provider.keyring_key.is_empty()
-                {
-                    let secret = crate::config::SecretString::from_str(key);
-                    let _ = secret.save_to_keyring(provider.keyring_key);
-                }
                 
                 // Save provider config - DON'T close
                 if let Err(e) = self.save_provider_selection_internal(provider_idx, false).await {

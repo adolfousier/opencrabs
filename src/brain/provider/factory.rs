@@ -157,18 +157,38 @@ fn try_create_openai(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         None => return Ok(None),
     };
 
-    // Local LLM (LM Studio, Ollama, etc.)
-    if let Some(base_url) = &openai_config.base_url {
-        tracing::info!("Using local LLM at: {}", base_url);
+    let has_api_key = openai_config.api_key.is_some();
+    let has_base_url = openai_config.base_url.is_some();
+    let is_openrouter = openai_config
+        .base_url
+        .as_ref()
+        .map(|u| u.contains("openrouter"))
+        .unwrap_or(false);
 
+    // OpenRouter: requires both api_key AND base_url
+    if is_openrouter && has_api_key {
+        let base_url = openai_config.base_url.as_ref().unwrap();
+        let api_key = openai_config.api_key.as_ref().unwrap();
+        tracing::info!("Using OpenRouter at: {}", base_url);
+        let provider = configure_openai(
+            OpenAIProvider::with_base_url(api_key.clone(), base_url.clone()),
+            openai_config,
+        );
+        return Ok(Some(Arc::new(provider)));
+    }
+
+    // Local LLM (LM Studio, Ollama, etc.) - NO api_key, YES base_url
+    if has_base_url && !has_api_key {
+        let base_url = openai_config.base_url.as_ref().unwrap();
+        tracing::info!("Using local LLM at: {}", base_url);
         let provider = configure_openai(OpenAIProvider::local(base_url.clone()), openai_config);
         return Ok(Some(Arc::new(provider)));
     }
 
-    // Official OpenAI API
-    if let Some(api_key) = &openai_config.api_key {
+    // Official OpenAI API - has api_key, no base_url (or default)
+    if has_api_key {
         tracing::info!("Using OpenAI provider");
-
+        let api_key = openai_config.api_key.as_ref().unwrap();
         let provider = configure_openai(OpenAIProvider::new(api_key.clone()), openai_config);
         return Ok(Some(Arc::new(provider)));
     }
