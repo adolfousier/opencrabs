@@ -6,6 +6,7 @@ Cargo.lock
 
 .opencrabs_*.json
 PLAN.md
+src/plans/
 
 *.swp
 *.swo
