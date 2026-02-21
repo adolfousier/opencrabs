@@ -454,21 +454,25 @@ See [LM_STUDIO_GUIDE.md](src/docs/guides/LM_STUDIO_GUIDE.md) for detailed setup 
 
 ## 📝 Configuration
 
-### Configuration File (`config.toml`)
+### Configuration Files
 
-OpenCrabs searches for config in this order:
+OpenCrabs uses two config files:
+1. `~/.opencrabs/config.toml` — Provider settings, models, channels (safe to commit)
+2. `~/.opencrabs/keys.toml` — API keys (chmod 600, NEVER commit!)
+
+Search order for config.toml:
 1. `~/.opencrabs/config.toml` (primary)
 2. `~/.config/opencrabs/config.toml` (legacy fallback)
 3. `./opencrabs.toml` (current directory override)
-
-Environment variables override config file settings. `.env` files are auto-loaded.
 
 ```bash
 # Initialize config
 cargo run -- init
 
-# Copy the example
-cp config.toml.example ~/.config/opencrabs/opencrabs.toml
+# Copy the examples
+cp config.toml.example ~/.opencrabs/config.toml
+cp keys.toml.example ~/.opencrabs/keys.toml
+chmod 600 ~/.opencrabs/keys.toml  # IMPORTANT: Secure the keys file!
 ```
 
 ### Example: Hybrid Setup (Local + Cloud)

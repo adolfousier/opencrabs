@@ -1,0 +1,48 @@
+# OpenCrabs API Keys File
+# Copy this to ~/.opencrabs/keys.toml
+# 
+# IMPORTANT: Set proper permissions after copying:
+#   chmod 600 ~/.opencrabs/keys.toml
+#
+# This file contains sensitive API keys - NEVER commit to version control!
+# Add to .gitignore: keys.toml
+
+# ========================================
+# LLM Provider API Keys
+# ========================================
+
+[providers.anthropic]
+# Get from: console.anthropic.com
+api_key = ""
+
+[providers.openai]
+# Get from: platform.openai.com
+api_key = ""
+
+[providers.openrouter]
+# Get from: openrouter.ai/keys
+api_key = ""
+
+[providers.minimax]
+# Get from: platform.minimax.io
+api_key = ""
+
+[providers.custom]
+# For custom OpenAI-compatible endpoints
+api_key = ""
+
+# ========================================
+# STT (Speech-to-Text) API Keys
+# ========================================
+
+[providers.stt.groq]
+# Get from: console.groq.com
+api_key = ""
+
+# ========================================
+# TTS (Text-to-Speech) API Keys
+# ========================================
+
+[providers.tts.openai]
+# Uses OpenAI key - can be same as providers.openai
+api_key = ""

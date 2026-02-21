@@ -355,6 +355,18 @@ pub struct ProviderConfig {
     pub models: Vec<String>,
 }
 
+impl Default for ProviderConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            api_key: None,
+            base_url: None,
+            default_model: None,
+            models: vec![],
+        }
+    }
+}
+
 fn default_enabled() -> bool {
     true
 }
@@ -388,6 +400,99 @@ pub fn opencrabs_home() -> PathBuf {
         let _ = std::fs::create_dir_all(&p);
     }
     p
+}
+
+/// Get path to keys.toml - separate file for sensitive API keys
+pub fn keys_path() -> PathBuf {
+    opencrabs_home().join("keys.toml")
+}
+
+/// Save API keys to keys.toml
+/// This file should be chmod 600 for security
+pub fn save_keys(keys: &ProviderConfigs) -> Result<()> {
+    let keys_path = keys_path();
+    let content = toml::to_string_pretty(keys)
+        .context("Failed to serialize keys")?;
+    std::fs::write(&keys_path, content)
+        .context("Failed to write keys file")?;
+    tracing::info!("Saved API keys to: {:?}", keys_path);
+    Ok(())
+}
+
+/// Load API keys from keys.toml
+/// This file should be chmod 600 for security
+fn load_keys_from_file() -> Result<ProviderConfigs> {
+    let keys_path = keys_path();
+    if !keys_path.exists() {
+        return Ok(ProviderConfigs::default());
+    }
+    
+    tracing::debug!("Loading keys from: {:?}", keys_path);
+    let content = std::fs::read_to_string(&keys_path)?;
+    let keys: ProviderConfigs = toml::from_str(&content)?;
+    Ok(keys)
+}
+
+/// Merge API keys from keys.toml into existing provider configs
+/// Keys from keys.toml override values in config.toml
+fn merge_provider_keys(mut base: ProviderConfigs, keys: ProviderConfigs) -> ProviderConfigs {
+    // Merge each provider's api_key if present in keys
+    if let Some(k) = keys.anthropic {
+        if let Some(key) = k.api_key {
+            let entry = base.anthropic.get_or_insert_with(|| ProviderConfig::default());
+            entry.api_key = Some(key);
+        }
+    }
+    if let Some(k) = keys.openai {
+        if let Some(key) = k.api_key {
+            let entry = base.openai.get_or_insert_with(|| ProviderConfig::default());
+            entry.api_key = Some(key);
+        }
+    }
+    if let Some(k) = keys.openrouter {
+        if let Some(key) = k.api_key {
+            let entry = base.openrouter.get_or_insert_with(|| ProviderConfig::default());
+            entry.api_key = Some(key);
+        }
+    }
+    if let Some(k) = keys.minimax {
+        if let Some(key) = k.api_key {
+            let entry = base.minimax.get_or_insert_with(|| ProviderConfig::default());
+            entry.api_key = Some(key);
+        }
+    }
+    if let Some(k) = keys.gemini {
+        if let Some(key) = k.api_key {
+            let entry = base.gemini.get_or_insert_with(|| ProviderConfig::default());
+            entry.api_key = Some(key);
+        }
+    }
+    if let Some(k) = keys.custom {
+        if let Some(key) = k.api_key {
+            let entry = base.custom.get_or_insert_with(|| ProviderConfig::default());
+            entry.api_key = Some(key);
+        }
+    }
+    // Also handle STT/TTS keys
+    if let Some(stt) = keys.stt {
+        if let Some(groq) = stt.groq {
+            if let Some(key) = groq.api_key {
+                let base_stt = base.stt.get_or_insert_with(SttProviders::default);
+                let entry = base_stt.groq.get_or_insert_with(ProviderConfig::default);
+                entry.api_key = Some(key);
+            }
+        }
+    }
+    if let Some(tts) = keys.tts {
+        if let Some(openai) = tts.openai {
+            if let Some(key) = openai.api_key {
+                let base_tts = base.tts.get_or_insert_with(TtsProviders::default);
+                let entry = base_tts.openai.get_or_insert_with(ProviderConfig::default);
+                entry.api_key = Some(key);
+            }
+        }
+    }
+    base
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -463,7 +568,12 @@ impl Config {
             config = Self::merge_from_file(config, &local_config_path)?;
         }
 
-        // 3. Apply environment variable overrides
+        // 3. Load API keys from keys.toml (overrides config.toml keys)
+        if let Ok(keys) = load_keys_from_file() {
+            config.providers = merge_provider_keys(config.providers, keys);
+        }
+
+        // 4. Apply environment variable overrides
         config = Self::apply_env_overrides(config)?;
 
         tracing::debug!("Configuration loaded successfully");

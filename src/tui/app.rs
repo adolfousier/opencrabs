@@ -4043,44 +4043,70 @@ impl App {
             _ => {}
         }
 
-        // Save config
+        // Save config (without API keys)
         let config_path = crate::config::opencrabs_home().join("config.toml");
-        config.save(&config_path).map_err(|e| anyhow::anyhow!("Failed to save config: {}", e))?;
+        
+        // Strip API keys before saving to config.toml
+        let mut config_for_save = config.clone();
+        if let Some(ref mut p) = config_for_save.providers.anthropic { p.api_key = None; }
+        if let Some(ref mut p) = config_for_save.providers.openai { p.api_key = None; }
+        if let Some(ref mut p) = config_for_save.providers.gemini { p.api_key = None; }
+        if let Some(ref mut p) = config_for_save.providers.openrouter { p.api_key = None; }
+        if let Some(ref mut p) = config_for_save.providers.minimax { p.api_key = None; }
+        if let Some(ref mut p) = config_for_save.providers.custom { p.api_key = None; }
+        
+        config_for_save.save(&config_path).map_err(|e| anyhow::anyhow!("Failed to save config: {}", e))?;
 
-        // Save API key - save directly to config.toml since keyring is broken (mock)
+        // Save API key to keys.toml
         if let Some(ref key) = api_key {
+            let mut keys = crate::config::ProviderConfigs::default();
             match provider_idx {
                 0 => {
-                    if let Some(ref mut p) = config.providers.anthropic {
-                        p.api_key = Some(key.clone());
-                    }
+                    keys.anthropic = Some(crate::config::ProviderConfig {
+                        enabled: true,
+                        api_key: Some(key.clone()),
+                        ..Default::default()
+                    });
                 }
                 1 => {
-                    if let Some(ref mut p) = config.providers.openai {
-                        p.api_key = Some(key.clone());
-                    }
+                    keys.openai = Some(crate::config::ProviderConfig {
+                        enabled: true,
+                        api_key: Some(key.clone()),
+                        ..Default::default()
+                    });
                 }
                 2 => {
-                    if let Some(ref mut p) = config.providers.gemini {
-                        p.api_key = Some(key.clone());
-                    }
+                    keys.gemini = Some(crate::config::ProviderConfig {
+                        enabled: true,
+                        api_key: Some(key.clone()),
+                        ..Default::default()
+                    });
                 }
                 3 => {
-                    if let Some(ref mut p) = config.providers.openrouter {
-                        p.api_key = Some(key.clone());
-                    }
+                    keys.openrouter = Some(crate::config::ProviderConfig {
+                        enabled: true,
+                        api_key: Some(key.clone()),
+                        ..Default::default()
+                    });
                 }
                 4 => {
-                    if let Some(ref mut p) = config.providers.minimax {
-                        p.api_key = Some(key.clone());
-                    }
+                    keys.minimax = Some(crate::config::ProviderConfig {
+                        enabled: true,
+                        api_key: Some(key.clone()),
+                        ..Default::default()
+                    });
                 }
                 5 => {
-                    if let Some(ref mut p) = config.providers.custom {
-                        p.api_key = Some(key.clone());
-                    }
+                    keys.custom = Some(crate::config::ProviderConfig {
+                        enabled: true,
+                        api_key: Some(key.clone()),
+                        ..Default::default()
+                    });
                 }
                 _ => {}
+            }
+            if let Err(e) = crate::config::save_keys(&keys) {
+                tracing::warn!("Failed to save API key to keys.toml: {}", e);
             }
         }
 

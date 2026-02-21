@@ -49,7 +49,7 @@ OpenCrabs can connect to messaging platforms. Configure in `~/.opencrabs/config.
 - **WhatsApp** — Link via QR code pairing, configure `[channels.whatsapp]` with allowed phone numbers
 - **Slack** — Create an app at api.slack.com/apps (enable Socket Mode), add tokens to config `[channels.slack]`
 
-API keys and tokens go in `~/.opencrabs/.env` (chmod 600). Channel settings go in `config.toml`.
+API keys go in `~/.opencrabs/keys.toml` (chmod 600). Channel settings go in `config.toml`.
 
 ### WhisperCrabs — Voice-to-Text (D-Bus)
 [WhisperCrabs](https://github.com/adolfousier/whispercrabs) is a floating voice-to-text tool. Fully controllable via D-Bus.

@@ -139,14 +139,20 @@ These providers have `/models` endpoints - models are fetched automatically:
 #### Config-Based (Minimax, Custom, etc.)
 These providers DO NOT have `/models` endpoints:
 - Add `models: Vec<String>` to config.toml
-- Example for Minimax:
+- API key goes in keys.toml (chmod 600)
+- Example config.toml for Minimax:
 ```toml
 [providers.minimax]
 enabled = true
-api_key = "your-key"
 base_url = "https://api.minimax.io/v1"
 default_model = "MiniMax-M2.5"
 models = ["MiniMax-M2.5", "MiniMax-M2.1", "MiniMax-Text-01"]
+```
+
+And in keys.toml:
+```toml
+[providers.minimax]
+api_key = "your-key"
 ```
 
 In `ProviderConfig` struct:
@@ -179,12 +185,18 @@ pub fn all_model_names(&self) -> Vec<&str> {
 ## Config.toml Example
 
 ### For providers with API model fetch (OpenAI, OpenRouter, Anthropic):
+config.toml:
 ```toml
 [providers.openrouter]
 enabled = true
-api_key = "sk-or-v1-..."
 base_url = "https://openrouter.ai/api/v1/chat/completions"
 default_model = "qwen/qwen3-coder-next"
+```
+
+keys.toml:
+```toml
+[providers.openrouter]
+api_key = "sk-or-v1-..."
 ```
 
 ### For providers WITHOUT API model fetch (Minimax, Custom):

@@ -2,6 +2,11 @@
 # Copy this file to one of these locations:
 #   - Linux/macOS: ~/.opencrabs/config.toml
 #   - Windows: %APPDATA%\opencrabs\config.toml or opencrabs\config.toml
+#
+# IMPORTANT: API keys should NOT be stored here!
+# Instead, store API keys in keys.toml (chmod 600) for security:
+#   - ~/.opencrabs/keys.toml
+# Keys in keys.toml take priority over this file.
 
 [database]
 # Database file location (stores conversation history)
@@ -32,53 +37,20 @@ default_model = "qwen2.5-coder-7b-instruct"
 # ========================================
 # [providers.openai]
 # enabled = true
-# api_key = "sk-..."  # Or use OPENAI_API_KEY environment variable
-# default_model = "gpt-4-turbo-preview"  # Optional: override default model
+# default_model = "gpt-4o"  # Optional: override default model
 
 # ========================================
 # Anthropic Provider (Claude)
 # ========================================
 # [providers.anthropic]
 # enabled = true
-# api_key = "sk-ant-..."  # Or use ANTHROPIC_API_KEY environment variable
-# default_model = "claude-3-5-sonnet-20240620"  # Optional: override default
-
-# ========================================
-# Qwen Provider (Local vLLM / DashScope Cloud)
-# ========================================
-# For local Qwen deployment (vLLM, LM Studio with Qwen models):
-# [providers.qwen]
-# enabled = true
-# base_url = "http://localhost:8000/v1/chat/completions"  # vLLM default
-# default_model = "qwen3-8b"
-# tool_parser = "hermes"  # Options: "hermes" (XML tags), "native" (✿FUNCTION✿ markers), "openai"
-# enable_thinking = true  # Enable Qwen3 thinking mode
-# thinking_budget = 5000  # Optional: limit thinking tokens
-
-# Tool parser options:
-# - "hermes": Uses <tool_call> XML tags (recommended for vLLM with --tool-call-parser hermes)
-# - "native" or "qwen": Uses ✿FUNCTION✿ Unicode markers (official Qwen-Agent format)
-# - "openai": Uses standard OpenAI tool_calls format
-
-# For DashScope cloud API:
-# [providers.qwen]
-# enabled = true
-# api_key = "your-dashscope-key"  # Or use DASHSCOPE_API_KEY env var
-# region = "intl"  # "intl" (Singapore) or "cn" (Beijing)
-# default_model = "qwen-plus"  # qwen-max, qwen-plus, qwen-turbo
-# enable_thinking = false  # Thinking mode for Qwen3 models only
-
-# Environment variables for Qwen:
-# - QWEN_BASE_URL: Local endpoint URL
-# - DASHSCOPE_API_KEY: Cloud API key
-# - QWEN_ENABLE_THINKING: Enable/disable thinking mode (true/false)
+# default_model = "claude-sonnet-4-6"  # Optional: override default
 
 # ========================================
 # OpenRouter Provider (100+ models via OpenAI-compatible API)
 # ========================================
 # [providers.openrouter]
 # enabled = true
-# api_key = "sk-or-v1-..."  # Get from openrouter.ai/keys
 # base_url = "https://openrouter.ai/api/v1/chat/completions"
 # default_model = "qwen/qwen3-coder-next"  # Many options at openrouter.ai/models
 
@@ -88,26 +60,51 @@ default_model = "qwen2.5-coder-7b-instruct"
 # Note: Minimax does NOT have a /models endpoint, so add models manually
 # [providers.minimax]
 # enabled = true
-# api_key = "your-minimax-key"
 # base_url = "https://api.minimax.io/v1"
 # default_model = "MiniMax-M2.5"
 # models = ["MiniMax-M2.5", "MiniMax-M2.1", "MiniMax-Text-01"]
 
 # ========================================
+# Custom OpenAI-Compatible Provider
+# ========================================
+# For any other OpenAI-compatible API
+# [providers.custom]
+# enabled = true
+# base_url = "https://your-endpoint.com/v1"
+# default_model = "your-model"
+
+# ========================================
+# STT (Speech-to-Text) Providers
+# ========================================
+# Groq Whisper for transcription
+# [providers.stt.groq]
+# enabled = true
+# default_model = "whisper-large-v3-turbo"
+
+# ========================================
+# TTS (Text-to-Speech) Providers
+# ========================================
+# OpenAI TTS for voice output
+# [providers.tts.openai]
+# enabled = true
+# default_model = "gpt-4o-mini-tts"
+
+# ========================================
 # Agent Behaviour
 # ========================================
-# [agent]
-# approval_policy = "ask"       # "ask" | "auto-session" | "auto-always"
-# max_concurrent = 4            # Maximum concurrent tool calls
+[agent]
+approval_policy = "ask"       # "ask" | "auto-session" | "auto-always"
+max_concurrent = 4            # Maximum concurrent tool calls
+context_limit = 200000         # Max context tokens
 
 # ========================================
 # Voice (STT / TTS)
 # ========================================
-# [voice]
-# stt_enabled = true            # Groq Whisper transcription
-# tts_enabled = false           # OpenAI TTS replies
-# tts_voice = "ash"             # TTS voice name
-# tts_model = "gpt-4o-mini-tts" # TTS model
+[voice]
+stt_enabled = true            # Enable speech-to-text
+tts_enabled = false           # Enable text-to-speech
+tts_voice = "ash"             # TTS voice name
+tts_model = "gpt-4o-mini-tts" # TTS model
 
 # ========================================
 # Tips for Using Local LLMs

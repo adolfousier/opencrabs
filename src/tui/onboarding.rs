@@ -1926,10 +1926,11 @@ Respond with EXACTLY six sections using these delimiters. No extra text before t
 
         // TTS provider config (providers.tts.openai)
         if self.tts_enabled && groq_key.is_some() {
+            let tts_key = groq_key.clone();
             config.providers.tts.get_or_insert_with(|| crate::config::TtsProviders {
                 openai: Some(crate::config::ProviderConfig {
                     enabled: true,
-                    api_key: groq_key,
+                    api_key: tts_key,
                     base_url: None,
                     default_model: Some("gpt-4o-mini-tts".to_string()),
                     models: vec![],
@@ -1937,12 +1938,119 @@ Respond with EXACTLY six sections using these delimiters. No extra text before t
             });
         }
 
-        // Write config.toml to ~/.opencrabs/config.toml
+        // Write config.toml to ~/.opencrabs/config.toml (without API keys)
         let config_path = crate::config::opencrabs_home().join("config.toml");
+
+        // Strip API keys from config before saving to config.toml
+        // Keys will be saved to keys.toml instead
+        if let Some(ref mut p) = config.providers.anthropic {
+            p.api_key = None;
+        }
+        if let Some(ref mut p) = config.providers.openai {
+            p.api_key = None;
+        }
+        if let Some(ref mut p) = config.providers.gemini {
+            p.api_key = None;
+        }
+        if let Some(ref mut p) = config.providers.openrouter {
+            p.api_key = None;
+        }
+        if let Some(ref mut p) = config.providers.minimax {
+            p.api_key = None;
+        }
+        if let Some(ref mut p) = config.providers.custom {
+            p.api_key = None;
+        }
+        if let Some(ref mut p) = config.providers.stt {
+            if let Some(ref mut groq) = p.groq {
+                groq.api_key = None;
+            }
+        }
+        if let Some(ref mut p) = config.providers.tts {
+            if let Some(ref mut openai) = p.openai {
+                openai.api_key = None;
+            }
+        }
 
         config
             .save(&config_path)
             .map_err(|e| format!("Failed to write config: {}", e))?;
+
+        // Save API keys to keys.toml instead of config.toml
+        let mut keys = crate::config::ProviderConfigs::default();
+        let api_key = &self.api_key_input;
+        if !api_key.is_empty() && !self.has_existing_key() {
+            match self.selected_provider {
+                0 => {
+                    keys.anthropic = Some(crate::config::ProviderConfig {
+                        enabled: true,
+                        api_key: Some(api_key.clone()),
+                        ..Default::default()
+                    });
+                }
+                1 => {
+                    keys.openai = Some(crate::config::ProviderConfig {
+                        enabled: true,
+                        api_key: Some(api_key.clone()),
+                        ..Default::default()
+                    });
+                }
+                2 => {
+                    keys.gemini = Some(crate::config::ProviderConfig {
+                        enabled: true,
+                        api_key: Some(api_key.clone()),
+                        ..Default::default()
+                    });
+                }
+                3 => {
+                    keys.openrouter = Some(crate::config::ProviderConfig {
+                        enabled: true,
+                        api_key: Some(api_key.clone()),
+                        ..Default::default()
+                    });
+                }
+                4 => {
+                    keys.minimax = Some(crate::config::ProviderConfig {
+                        enabled: true,
+                        api_key: Some(api_key.clone()),
+                        ..Default::default()
+                    });
+                }
+                5 => {
+                    keys.custom = Some(crate::config::ProviderConfig {
+                        enabled: true,
+                        api_key: Some(api_key.clone()),
+                        ..Default::default()
+                    });
+                }
+                _ => {}
+            }
+        }
+        
+        // Also save STT/TTS keys to keys.toml
+        if let Some(ref groq_key) = groq_key {
+            keys.stt.get_or_insert_with(|| crate::config::SttProviders {
+                groq: Some(crate::config::ProviderConfig {
+                    enabled: true,
+                    api_key: Some(groq_key.clone()),
+                    ..Default::default()
+                }),
+            });
+        }
+        if self.tts_enabled && groq_key.is_some() {
+            keys.tts.get_or_insert_with(|| crate::config::TtsProviders {
+                openai: Some(crate::config::ProviderConfig {
+                    enabled: true,
+                    api_key: groq_key.clone(),
+                    ..Default::default()
+                }),
+            });
+        }
+
+        // Save keys to keys.toml
+        if let Err(e) = crate::config::save_keys(&keys) {
+            tracing::warn!("Failed to save API keys to keys.toml: {}", e);
+        }
 
         // Store Telegram bot token in keyring (if new)
         if !self.telegram_token_input.is_empty() && !self.has_existing_telegram_token() {
