@@ -339,16 +339,37 @@ fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                 lines.push(Line::from(spans));
             }
 
-            // Show expanded details (e.g. compaction summary)
+            // Show expanded details (e.g. tool output, compaction summary)
             if app.messages[msg_idx].expanded
                 && let Some(ref details) = app.messages[msg_idx].details {
                     for detail_line in details.lines() {
+                        // Check for diff lines (+/-) and color accordingly
+                        let (style, line_text): (Style, &str) = if detail_line.starts_with("+ ") {
+                            (
+                                Style::default()
+                                    .fg(Color::Rgb(80, 200, 120))  // Green for additions
+                                    .bg(Color::Rgb(20, 30, 20)),   // Dim green bg
+                                &detail_line[2..],
+                            )
+                        } else if detail_line.starts_with("- ") {
+                            (
+                                Style::default()
+                                    .fg(Color::Rgb(255, 100, 100))  // Red for deletions
+                                    .bg(Color::Rgb(30, 20, 20)),    // Dim red bg
+                                &detail_line[2..],
+                            )
+                        } else {
+                            (
+                                Style::default()
+                                    .fg(Color::Rgb(180, 180, 180))  // Light gray text
+                                    .bg(Color::Rgb(35, 35, 45)),    // Gray background for context
+                                detail_line,
+                            )
+                        };
+                        
                         lines.push(Line::from(vec![
                             Span::styled("    ", Style::default()),
-                            Span::styled(
-                                detail_line.to_string(),
-                                Style::default().fg(Color::Rgb(150, 150, 150)),
-                            ),
+                            Span::styled(line_text.to_string(), style),
                         ]));
                     }
                 }
