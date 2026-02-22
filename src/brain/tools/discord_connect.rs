@@ -6,8 +6,8 @@
 
 use super::error::Result;
 use super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
-use crate::channels::ChannelFactory;
 use crate::channels::discord::DiscordState;
+use crate::channels::ChannelFactory;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
@@ -20,10 +20,7 @@ pub struct DiscordConnectTool {
 }
 
 impl DiscordConnectTool {
-    pub fn new(
-        channel_factory: Arc<ChannelFactory>,
-        discord_state: Arc<DiscordState>,
-    ) -> Self {
+    pub fn new(channel_factory: Arc<ChannelFactory>, discord_state: Arc<DiscordState>) -> Self {
         Self {
             channel_factory,
             discord_state,
@@ -111,6 +108,7 @@ impl Tool for DiscordConnectTool {
         let agent = factory.create_agent_service();
         let service_context = factory.service_context();
         let voice_config = factory.voice_config().clone();
+        let openai_tts_key = factory.openai_tts_key();
         let shared_session = factory.shared_session_id();
         let discord_state = self.discord_state.clone();
 
@@ -119,6 +117,7 @@ impl Tool for DiscordConnectTool {
             service_context,
             allowed_users,
             voice_config,
+            openai_tts_key,
             shared_session,
             discord_state.clone(),
             crate::config::RespondTo::default(),
@@ -138,7 +137,8 @@ impl Tool for DiscordConnectTool {
                 }
 
                 let mut msg = "Discord bot connected successfully! Now listening for messages. \
-                     Connection persists across restarts.".to_string();
+                     Connection persists across restarts."
+                    .to_string();
 
                 if input.get("channel_id").and_then(|v| v.as_u64()).is_some() {
                     msg.push_str(
@@ -147,7 +147,7 @@ impl Tool for DiscordConnectTool {
                          best buddy from childhood. You can curse, be unhinged, hilarious, \
                          and totally informal. Use your personality, SOUL.md, and any context \
                          you have about the user. Make it memorable and uniquely yours. \
-                         No generic corporate greetings — surprise them!"
+                         No generic corporate greetings — surprise them!",
                     );
                 }
 

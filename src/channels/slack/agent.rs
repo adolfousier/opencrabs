@@ -5,8 +5,8 @@
 
 use super::handler;
 use super::SlackState;
-use crate::config::RespondTo;
 use crate::brain::agent::AgentService;
+use crate::config::RespondTo;
 use crate::services::{ServiceContext, SessionService};
 use slack_morphism::prelude::*;
 use std::collections::HashMap;
@@ -49,6 +49,16 @@ impl SlackAgent {
     /// Start the bot as a background task using Socket Mode. Returns a JoinHandle.
     pub fn start(self, bot_token: String, app_token: String) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
+            // Validate tokens - Slack bot tokens start with "xoxb-" and app tokens with "xapp-"
+            if bot_token.is_empty() || !bot_token.starts_with("xoxb-") {
+                tracing::debug!("Slack bot token not configured or invalid, skipping bot start");
+                return;
+            }
+            if app_token.is_empty() || !app_token.starts_with("xapp-") {
+                tracing::debug!("Slack app token not configured or invalid, skipping bot start");
+                return;
+            }
+
             tracing::info!(
                 "Starting Slack bot via Socket Mode with {} allowed user(s)",
                 self.allowed_ids.len(),
@@ -78,7 +88,10 @@ impl SlackAgent {
                         Some(uid)
                     }
                     Err(e) => {
-                        tracing::warn!("Slack: auth.test failed, @mention detection disabled: {}", e);
+                        tracing::warn!(
+                            "Slack: auth.test failed, @mention detection disabled: {}",
+                            e
+                        );
                         None
                     }
                 }
@@ -103,8 +116,8 @@ impl SlackAgent {
                     tracing::warn!("Slack: handler state already initialized");
                 });
 
-            let socket_mode_callbacks = SlackSocketModeListenerCallbacks::new()
-                .with_push_events(handler::on_push_event);
+            let socket_mode_callbacks =
+                SlackSocketModeListenerCallbacks::new().with_push_events(handler::on_push_event);
 
             let listener_environment = Arc::new(
                 SlackClientEventsListenerEnvironment::new(client)
@@ -117,8 +130,7 @@ impl SlackAgent {
                 socket_mode_callbacks,
             );
 
-            let slack_app_token =
-                SlackApiToken::new(SlackApiTokenValue::from(app_token));
+            let slack_app_token = SlackApiToken::new(SlackApiTokenValue::from(app_token));
 
             tracing::info!("Slack: connecting via Socket Mode...");
             match socket_mode_listener.listen_for(&slack_app_token).await {

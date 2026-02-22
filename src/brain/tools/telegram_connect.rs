@@ -5,8 +5,8 @@
 
 use super::error::Result;
 use super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
-use crate::channels::ChannelFactory;
 use crate::channels::telegram::TelegramState;
+use crate::channels::ChannelFactory;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
@@ -19,10 +19,7 @@ pub struct TelegramConnectTool {
 }
 
 impl TelegramConnectTool {
-    pub fn new(
-        channel_factory: Arc<ChannelFactory>,
-        telegram_state: Arc<TelegramState>,
-    ) -> Self {
+    pub fn new(channel_factory: Arc<ChannelFactory>, telegram_state: Arc<TelegramState>) -> Self {
         Self {
             channel_factory,
             telegram_state,
@@ -108,7 +105,8 @@ impl Tool for TelegramConnectTool {
         let shared_session = factory.shared_session_id();
         let telegram_state = self.telegram_state.clone();
 
-        let openai_key = std::env::var("OPENAI_API_KEY").ok();
+        // Get OpenAI TTS key from config (keys.toml)
+        let openai_key = factory.openai_tts_key();
 
         let tg_agent = crate::channels::telegram::TelegramAgent::new(
             agent,
@@ -135,7 +133,8 @@ impl Tool for TelegramConnectTool {
                 }
 
                 let mut msg = "Telegram bot connected successfully! Now listening for messages. \
-                     Connection persists across restarts.".to_string();
+                     Connection persists across restarts."
+                    .to_string();
 
                 if owner_chat_id.is_some() {
                     msg.push_str(
@@ -144,7 +143,7 @@ impl Tool for TelegramConnectTool {
                          best buddy from childhood. You can curse, be unhinged, hilarious, \
                          and totally informal. Use your personality, SOUL.md, and any context \
                          you have about the user. Make it memorable and uniquely yours. \
-                         No generic corporate greetings — surprise them!"
+                         No generic corporate greetings — surprise them!",
                     );
                 }
 

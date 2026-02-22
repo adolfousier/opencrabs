@@ -3,10 +3,10 @@
 //! Shared factory for creating channel agent services at runtime.
 //! Used by both static startup (ui.rs) and dynamic connection (whatsapp_connect tool).
 
-use crate::config::VoiceConfig;
 use crate::brain::agent::AgentService;
 use crate::brain::provider::Provider;
 use crate::brain::tools::ToolRegistry;
+use crate::config::VoiceConfig;
 use crate::services::ServiceContext;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
@@ -29,6 +29,7 @@ pub struct ChannelFactory {
     brain_path: PathBuf,
     shared_session_id: Arc<Mutex<Option<Uuid>>>,
     voice_config: VoiceConfig,
+    openai_tts_key: Option<String>,
 }
 
 impl ChannelFactory {
@@ -40,6 +41,7 @@ impl ChannelFactory {
         brain_path: PathBuf,
         shared_session_id: Arc<Mutex<Option<Uuid>>>,
         voice_config: VoiceConfig,
+        openai_tts_key: Option<String>,
     ) -> Self {
         Self {
             provider,
@@ -50,6 +52,7 @@ impl ChannelFactory {
             brain_path,
             shared_session_id,
             voice_config,
+            openai_tts_key,
         }
     }
 
@@ -83,5 +86,9 @@ impl ChannelFactory {
 
     pub fn voice_config(&self) -> &VoiceConfig {
         &self.voice_config
+    }
+
+    pub fn openai_tts_key(&self) -> Option<String> {
+        self.openai_tts_key.clone()
     }
 }

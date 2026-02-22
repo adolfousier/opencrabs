@@ -277,6 +277,9 @@ pub(crate) async fn cmd_chat(
 
     // Create ChannelFactory (shared by static channel spawn + WhatsApp connect tool).
     // Tool registry is set lazily after Arc wrapping to break circular dependency.
+    let openai_tts_key = config.providers.tts.as_ref()
+        .and_then(|t| t.openai.as_ref())
+        .and_then(|p| p.api_key.clone());
     let channel_factory = Arc::new(crate::channels::ChannelFactory::new(
         provider.clone(),
         service_context.clone(),
@@ -285,6 +288,7 @@ pub(crate) async fn cmd_chat(
         brain_path.clone(),
         app.shared_session_id(),
         config.voice.clone(),
+        openai_tts_key,
     ));
 
     // Shared Telegram state for proactive messaging
@@ -448,8 +452,19 @@ pub(crate) async fn cmd_chat(
     #[cfg(feature = "telegram")]
     let _telegram_handle = {
         let tg = &config.channels.telegram;
-        let tg_token = tg.token.clone().or_else(|| std::env::var("TELEGRAM_BOT_TOKEN").ok());
-        if tg.enabled || tg_token.is_some() {
+        let tg_token = tg.token.clone();
+        let has_valid_token = tg_token.as_ref().map(|t| {
+            if t.is_empty() || !t.contains(':') {
+                return false;
+            }
+            let parts: Vec<&str> = t.splitn(2, ':').collect();
+            parts.len() == 2 && parts[0].parse::<u64>().is_ok() && parts[1].len() >= 30
+        }).unwrap_or(false);
+        
+        tracing::debug!("[Telegram] enabled={}, has_token={}, has_valid_token={}", 
+            tg.enabled, tg_token.is_some(), has_valid_token);
+        
+        if tg.enabled && has_valid_token {
             if let Some(ref token) = tg_token {
                 let tg_agent = channel_factory.create_agent_service();
                 // Extract OpenAI API key for TTS (from providers.tts.openai)
@@ -476,7 +491,7 @@ pub(crate) async fn cmd_chat(
                 tracing::info!("Spawning Telegram bot ({} allowed users)", tg.allowed_users.len());
                 Some(bot.start(token.clone()))
             } else {
-                tracing::warn!("Telegram enabled but no token configured");
+                tracing::debug!("Telegram enabled but no valid token configured");
                 None
             }
         } else {
@@ -511,14 +526,21 @@ pub(crate) async fn cmd_chat(
     #[cfg(feature = "discord")]
     let _discord_handle = {
         let dc = &config.channels.discord;
-        let dc_token = dc.token.clone().or_else(|| std::env::var("DISCORD_BOT_TOKEN").ok());
-        if dc.enabled || dc_token.is_some() {
+        let dc_token = dc.token.clone();
+        // Discord tokens are typically ~70 chars, base64-like
+        let has_valid_token = dc_token.as_ref().map(|t| !t.is_empty() && t.len() > 50).unwrap_or(false);
+        if dc.enabled && has_valid_token {
             if let Some(ref token) = dc_token {
+                // Extract OpenAI API key for TTS (from providers.tts.openai in keys.toml)
+                let openai_key = config.providers.tts.as_ref()
+                    .and_then(|t| t.openai.as_ref())
+                    .and_then(|p| p.api_key.clone());
                 let dc_agent = crate::channels::discord::DiscordAgent::new(
                     channel_factory.create_agent_service(),
                     service_context.clone(),
                     dc.allowed_users.clone(),
                     config.voice.clone(),
+                    openai_key,
                     app.shared_session_id(),
                     discord_state.clone(),
                     dc.respond_to.clone(),
@@ -530,7 +552,7 @@ pub(crate) async fn cmd_chat(
                 );
                 Some(dc_agent.start(token.clone()))
             } else {
-                tracing::warn!("Discord enabled but no token configured");
+                tracing::debug!("Discord enabled but no valid token configured");
                 None
             }
         } else {
@@ -542,12 +564,11 @@ pub(crate) async fn cmd_chat(
     #[cfg(feature = "slack")]
     let _slack_handle = {
         let sl = &config.channels.slack;
-        let sl_token = sl.token.clone().or_else(|| std::env::var("SLACK_BOT_TOKEN").ok());
-        let sl_app_token = sl
-            .app_token
-            .clone()
-            .or_else(|| std::env::var("SLACK_APP_TOKEN").ok());
-        if sl.enabled || sl_token.is_some() {
+        let sl_token = sl.token.clone();
+        let sl_app_token = sl.app_token.clone();
+        let has_valid_tokens = sl_token.as_ref().map(|t| !t.is_empty() && t.starts_with("xoxb-")).unwrap_or(false)
+            && sl_app_token.as_ref().map(|t| !t.is_empty() && t.starts_with("xapp-")).unwrap_or(false);
+        if sl.enabled && has_valid_tokens {
             if let (Some(bot_tok), Some(app_tok)) = (sl_token, sl_app_token) {
                 let sl_agent = crate::channels::slack::SlackAgent::new(
                     channel_factory.create_agent_service(),
@@ -564,11 +585,7 @@ pub(crate) async fn cmd_chat(
                 );
                 Some(sl_agent.start(bot_tok, app_tok))
             } else {
-                if sl.enabled {
-                    tracing::warn!(
-                        "Slack enabled but missing tokens (need both SLACK_BOT_TOKEN and SLACK_APP_TOKEN)"
-                    );
-                }
+                tracing::debug!("Slack enabled but missing valid tokens");
                 None
             }
         } else {

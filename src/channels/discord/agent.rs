@@ -4,8 +4,8 @@
 
 use super::handler;
 use super::DiscordState;
-use crate::config::{RespondTo, VoiceConfig};
 use crate::brain::agent::AgentService;
+use crate::config::{RespondTo, VoiceConfig};
 use crate::services::{ServiceContext, SessionService};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -23,6 +23,7 @@ pub struct DiscordAgent {
     session_service: SessionService,
     allowed_users: Vec<i64>,
     voice_config: VoiceConfig,
+    openai_api_key: Option<String>,
     shared_session_id: Arc<Mutex<Option<Uuid>>>,
     discord_state: Arc<DiscordState>,
     respond_to: RespondTo,
@@ -36,6 +37,7 @@ impl DiscordAgent {
         service_context: ServiceContext,
         allowed_users: Vec<i64>,
         voice_config: VoiceConfig,
+        openai_api_key: Option<String>,
         shared_session_id: Arc<Mutex<Option<Uuid>>>,
         discord_state: Arc<DiscordState>,
         respond_to: RespondTo,
@@ -46,6 +48,7 @@ impl DiscordAgent {
             session_service: SessionService::new(service_context),
             allowed_users,
             voice_config,
+            openai_api_key,
             shared_session_id,
             discord_state,
             respond_to,
@@ -56,6 +59,12 @@ impl DiscordAgent {
     /// Start the bot as a background task. Returns a JoinHandle.
     pub fn start(self, token: String) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
+            // Validate token format - Discord tokens are typically ~70 chars
+            if token.is_empty() || token.len() < 50 {
+                tracing::debug!("Discord bot token not configured or invalid, skipping bot start");
+                return;
+            }
+
             tracing::info!(
                 "Starting Discord bot with {} allowed user(s), STT={}, TTS={}",
                 self.allowed_users.len(),
@@ -63,16 +72,14 @@ impl DiscordAgent {
                 self.voice_config.tts_enabled,
             );
 
-            let allowed: Arc<HashSet<i64>> =
-                Arc::new(self.allowed_users.into_iter().collect());
+            let allowed: Arc<HashSet<i64>> = Arc::new(self.allowed_users.into_iter().collect());
             let extra_sessions: Arc<Mutex<HashMap<u64, Uuid>>> =
                 Arc::new(Mutex::new(HashMap::new()));
 
-            let allowed_channels: HashSet<String> =
-                self.allowed_channels.into_iter().collect();
+            let allowed_channels: HashSet<String> = self.allowed_channels.into_iter().collect();
 
             let voice_config = Arc::new(self.voice_config);
-            let openai_key = Arc::new(std::env::var("OPENAI_API_KEY").ok());
+            let openai_key = Arc::new(self.openai_api_key);
 
             let event_handler = Handler {
                 agent: self.agent_service,
@@ -126,7 +133,11 @@ struct Handler {
 #[async_trait]
 impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, ready: Ready) {
-        tracing::info!("Discord: connected as {} (id={})", ready.user.name, ready.user.id);
+        tracing::info!(
+            "Discord: connected as {} (id={})",
+            ready.user.name,
+            ready.user.id
+        );
         self.discord_state
             .set_connected(ctx.http.clone(), None)
             .await;

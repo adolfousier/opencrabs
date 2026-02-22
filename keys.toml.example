@@ -46,3 +46,27 @@ api_key = ""
 [providers.tts.openai]
 # Uses OpenAI key - can be same as providers.openai
 api_key = ""
+
+# ========================================
+# Messaging Channel Tokens
+# ========================================
+
+[channels.telegram]
+# Get from: @BotFather on Telegram
+# Format: "123456789:ABCdef..."
+token = ""
+
+[channels.discord]
+# Get from: Discord Developer Portal
+# Format: ~70 character base64 string
+token = ""
+
+[channels.slack]
+# Get from: Slack App settings
+# Bot token (xoxb-...) and App-level token (xapp-...)
+token = ""
+app_token = ""
+
+[channels.whatsapp]
+# WhatsApp Business API (if using cloud API)
+token = ""

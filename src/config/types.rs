@@ -409,17 +409,26 @@ pub fn save_keys(keys: &ProviderConfigs) -> Result<()> {
     Ok(())
 }
 
+/// Keys file structure (keys.toml) - contains sensitive keys and tokens
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct KeysFile {
+    #[serde(default)]
+    pub providers: ProviderConfigs,
+    #[serde(default)]
+    pub channels: ChannelsConfig,
+}
+
 /// Load API keys from keys.toml
 /// This file should be chmod 600 for security
-fn load_keys_from_file() -> Result<ProviderConfigs> {
+fn load_keys_from_file() -> Result<KeysFile> {
     let keys_path = keys_path();
     if !keys_path.exists() {
-        return Ok(ProviderConfigs::default());
+        return Ok(KeysFile::default());
     }
     
     tracing::debug!("Loading keys from: {:?}", keys_path);
     let content = std::fs::read_to_string(&keys_path)?;
-    let keys: ProviderConfigs = toml::from_str(&content)?;
+    let keys: KeysFile = toml::from_str(&content)?;
     Ok(keys)
 }
 
@@ -472,6 +481,40 @@ fn merge_provider_keys(mut base: ProviderConfigs, keys: ProviderConfigs) -> Prov
                 let entry = base_tts.openai.get_or_insert_with(ProviderConfig::default);
                 entry.api_key = Some(key);
             }
+    base
+}
+
+/// Merge channel tokens from keys.toml into existing channels config
+/// Tokens from keys.toml override values in config.toml
+fn merge_channel_keys(mut base: ChannelsConfig, keys: ChannelsConfig) -> ChannelsConfig {
+    // Telegram
+    if let Some(ref token) = keys.telegram.token
+        && !token.is_empty() {
+            base.telegram.token = Some(token.clone());
+        }
+    
+    // Discord
+    if let Some(ref token) = keys.discord.token
+        && !token.is_empty() {
+            base.discord.token = Some(token.clone());
+        }
+    
+    // Slack
+    if let Some(ref token) = keys.slack.token
+        && !token.is_empty() {
+            base.slack.token = Some(token.clone());
+        }
+    if let Some(ref app_token) = keys.slack.app_token
+        && !app_token.is_empty() {
+            base.slack.app_token = Some(app_token.clone());
+        }
+    
+    // WhatsApp
+    if let Some(ref token) = keys.whatsapp.token
+        && !token.is_empty() {
+            base.whatsapp.token = Some(token.clone());
+        }
+    
     base
 }
 
@@ -550,7 +593,8 @@ impl Config {
 
         // 3. Load API keys from keys.toml (overrides config.toml keys)
         if let Ok(keys) = load_keys_from_file() {
-            config.providers = merge_provider_keys(config.providers, keys);
+            config.providers = merge_provider_keys(config.providers, keys.providers);
+            config.channels = merge_channel_keys(config.channels, keys.channels);
         }
 
         // 4. Apply environment variable overrides
