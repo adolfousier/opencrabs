@@ -399,10 +399,57 @@ pub fn keys_path() -> PathBuf {
 
 /// Save API keys to keys.toml
 /// This file should be chmod 600 for security
+/// Only saves api_key values, not full provider config
 pub fn save_keys(keys: &ProviderConfigs) -> Result<()> {
     let keys_path = keys_path();
-    let content = toml::to_string_pretty(keys)
-        .context("Failed to serialize keys")?;
+    
+    // Build a simple key-only structure
+    let mut lines = vec![
+        "# OpenCrabs API Keys File".to_string(),
+        "# This file contains sensitive API keys - NEVER commit to version control!".to_string(),
+        "".to_string(),
+        "# LLM Provider API Keys".to_string(),
+    ];
+    
+    // Add provider keys
+    if let Some(p) = &keys.anthropic {
+        if let Some(key) = &p.api_key {
+            lines.push(format!("\n[providers.anthropic]"));
+            lines.push(format!("api_key = \"{}\"", key));
+        }
+    }
+    if let Some(p) = &keys.openai {
+        if let Some(key) = &p.api_key {
+            lines.push(format!("\n[providers.openai]"));
+            lines.push(format!("api_key = \"{}\"", key));
+        }
+    }
+    if let Some(p) = &keys.openrouter {
+        if let Some(key) = &p.api_key {
+            lines.push(format!("\n[providers.openrouter]"));
+            lines.push(format!("api_key = \"{}\"", key));
+        }
+    }
+    if let Some(p) = &keys.minimax {
+        if let Some(key) = &p.api_key {
+            lines.push(format!("\n[providers.minimax]"));
+            lines.push(format!("api_key = \"{}\"", key));
+        }
+    }
+    if let Some(p) = &keys.custom {
+        if let Some(key) = &p.api_key {
+            lines.push(format!("\n[providers.custom]"));
+            lines.push(format!("api_key = \"{}\"", key));
+        }
+    }
+    if let Some(p) = &keys.gemini {
+        if let Some(key) = &p.api_key {
+            lines.push(format!("\n[providers.gemini]"));
+            lines.push(format!("api_key = \"{}\"", key));
+        }
+    }
+    
+    let content = lines.join("\n");
     std::fs::write(&keys_path, content)
         .context("Failed to write keys file")?;
     tracing::info!("Saved API keys to: {:?}", keys_path);
