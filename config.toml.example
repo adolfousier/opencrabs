@@ -113,6 +113,7 @@ tts_model = "gpt-4o-mini-tts" # TTS model
 # ==================================================
 # Channels (Telegram / WhatsApp / Slack / Discord)
 # ==================================================
+
 [channels.whatsapp]
 enabled = false
 allowed_list = ["user19802389679", "user2890797897"]
@@ -132,3 +133,7 @@ channel_id = ["channel1890779", "channel289792323"]
 enabled = false
 allowed_list = ["user19802389679", "user2890797897"]
 channel_id = ["channel1890779", "channel289792323"]
+
+# ==================================================
+# Web Search (Brave, EXA, etc)
+# ==================================================

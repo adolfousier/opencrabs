@@ -654,25 +654,35 @@ impl OnboardingWizard {
     }
 
     /// Try to load an existing API key for the currently selected provider.
-    /// Checks keyring first, then all env vars. If found, sets sentinel.
+    /// Checks keys.toml for the API key. If found, sets sentinel.
     pub fn detect_existing_key(&mut self) {
-        let provider = &PROVIDERS[self.selected_provider];
-        if provider.env_vars.is_empty() && provider.keyring_key.is_empty() {
-            return;
-        }
-        // Try keyring first
-        if !provider.keyring_key.is_empty()
-            && SecretString::from_keyring_optional(provider.keyring_key).is_some() {
+        // Check keys.toml for the API key
+        if let Ok(config) = crate::config::Config::load() {
+            let has_key = match self.selected_provider {
+                0 => config.providers.anthropic.as_ref().and_then(|p| p.api_key.as_ref()).is_some(),
+                1 => config.providers.openai.as_ref().and_then(|p| p.api_key.as_ref()).is_some(),
+                2 => config.providers.gemini.as_ref().and_then(|p| p.api_key.as_ref()).is_some(),
+                3 => config.providers.openrouter.as_ref().and_then(|p| p.api_key.as_ref()).is_some(),
+                4 => config.providers.minimax.as_ref().and_then(|p| p.api_key.as_ref()).is_some(),
+                5 => {
+                    // Custom provider - also load base_url and model
+                    if let Some(c) = &config.providers.custom {
+                        if c.api_key.is_some() {
+                            self.custom_base_url = c.base_url.clone().unwrap_or_default();
+                            self.custom_model = c.default_model.clone().unwrap_or_default();
+                            self.custom_api_key = EXISTING_KEY_SENTINEL.to_string();
+                        }
+                        true
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            };
+            
+            if has_key {
                 self.api_key_input = EXISTING_KEY_SENTINEL.to_string();
                 self.api_key_cursor = 0;
-                return;
-            }
-        // Then try each env var
-        for env_var in provider.env_vars {
-            if SecretString::from_env_optional(env_var).is_some() {
-                self.api_key_input = EXISTING_KEY_SENTINEL.to_string();
-                self.api_key_cursor = 0;
-                return;
             }
         }
     }

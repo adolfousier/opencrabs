@@ -70,3 +70,9 @@ app_token = ""
 [channels.whatsapp]
 # WhatsApp Business API (if using cloud API)
 token = ""
+
+# ==================================================
+# Web Search (Brave, EXA, etc)
+# ==================================================
+
+api_key = ""
