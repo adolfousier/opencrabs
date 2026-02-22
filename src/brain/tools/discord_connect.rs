@@ -1,7 +1,7 @@
 //! Discord Connect Tool
 //!
 //! Agent-callable tool that connects a Discord bot at runtime.
-//! Accepts a bot token, saves it to config/keyring, spawns the bot,
+//! Accepts a bot token, saves it to keys.toml, spawns the bot,
 //! and waits for a successful connection.
 
 use super::error::Result;
@@ -95,10 +95,8 @@ impl Tool for DiscordConnectTool {
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
 
-        // Save token to keyring for persistence
-        if let Ok(entry) = keyring::Entry::new("opencrabs", "discord_bot_token") {
-            let _ = entry.set_password(&token);
-        }
+        // Save token to keys.toml for persistence
+        let _ = crate::config::write_secret_key("channels.discord", "token", &token);
 
         // Persist enabled state to config
         let _ = crate::config::Config::write_key("channels.discord", "enabled", "true");

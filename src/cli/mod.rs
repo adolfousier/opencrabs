@@ -82,11 +82,6 @@ pub enum Commands {
         operation: LogCommands,
     },
 
-    /// Manage API keys in OS keyring (secure storage)
-    Keyring {
-        #[command(subcommand)]
-        operation: KeyringCommands,
-    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -123,28 +118,6 @@ pub enum DbCommands {
     },
 }
 
-#[derive(Subcommand, Debug)]
-pub enum KeyringCommands {
-    /// Store an API key in OS keyring
-    Set {
-        /// Provider name (anthropic, openai, gemini, azure)
-        provider: String,
-        /// API key to store
-        api_key: String,
-    },
-    /// Retrieve an API key from OS keyring
-    Get {
-        /// Provider name
-        provider: String,
-    },
-    /// Delete an API key from OS keyring
-    Delete {
-        /// Provider name
-        provider: String,
-    },
-    /// List all stored providers
-    List,
-}
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum OutputFormat {
@@ -198,7 +171,6 @@ pub async fn run() -> Result<()> {
         Some(Commands::Config { show_secrets }) => commands::cmd_config(&config, show_secrets).await,
         Some(Commands::Db { operation }) => commands::cmd_db(&config, operation).await,
         Some(Commands::Logs { operation }) => commands::cmd_logs(operation).await,
-        Some(Commands::Keyring { operation }) => commands::cmd_keyring(operation).await,
         Some(Commands::Run {
             prompt,
             auto_approve,

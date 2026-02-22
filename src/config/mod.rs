@@ -8,6 +8,6 @@ mod types;
 pub mod update;
 
 pub use crabrace::{CrabraceConfig, CrabraceIntegration};
-pub use secrets::{ProviderSecrets, SecretString};
+pub use secrets::SecretString;
 pub use types::*;
 pub use update::{ProviderUpdater, UpdateResult};

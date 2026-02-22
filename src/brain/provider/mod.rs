@@ -18,8 +18,8 @@ pub use types::*;
 // Provider implementations
 pub mod anthropic;
 pub mod factory;
-pub mod openai;
+pub mod custom_openai_compatible;
 
 pub use anthropic::AnthropicProvider;
+pub use custom_openai_compatible::OpenAIProvider;
 pub use factory::create_provider;
-pub use openai::OpenAIProvider;

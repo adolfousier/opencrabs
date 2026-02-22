@@ -4,7 +4,7 @@
 
 use super::{
     anthropic::AnthropicProvider,
-    openai::OpenAIProvider,
+    custom_openai_compatible::OpenAIProvider,
     Provider,
 };
 use crate::config::{Config, ProviderConfig};

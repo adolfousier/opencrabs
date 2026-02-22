@@ -7,10 +7,9 @@
 use crate::config::{
     ChannelConfig, ChannelsConfig, Config, GatewayConfig, ProviderConfig,
 };
-use crate::config::secrets::SecretString;
 use chrono::Local;
 
-/// Sentinel value stored in api_key_input when a key was loaded from env/keyring.
+/// Sentinel value stored in api_key_input when a key was loaded from config.
 /// The actual key is never held in memory — this just signals "key exists".
 const EXISTING_KEY_SENTINEL: &str = "__EXISTING_KEY__";
 use crossterm::event::{KeyCode, KeyEvent};
@@ -20,8 +19,6 @@ use std::path::PathBuf;
 pub const PROVIDERS: &[ProviderInfo] = &[
     ProviderInfo {
         name: "Anthropic Claude",
-        env_vars: &["ANTHROPIC_MAX_SETUP_TOKEN", "ANTHROPIC_API_KEY"],
-        keyring_key: "anthropic_api_key",
         models: &[],  // Fetched from API
         key_label: "Setup Token",
         help_lines: &[
@@ -31,40 +28,30 @@ pub const PROVIDERS: &[ProviderInfo] = &[
     },
     ProviderInfo {
         name: "OpenAI",
-        env_vars: &["OPENAI_API_KEY"],
-        keyring_key: "openai_api_key",
         models: &[],
         key_label: "API Key",
         help_lines: &["Get key from platform.openai.com"],
     },
     ProviderInfo {
         name: "Google Gemini",
-        env_vars: &["GEMINI_API_KEY"],
-        keyring_key: "gemini_api_key",
         models: &[],
         key_label: "API Key",
         help_lines: &["Get key from aistudio.google.com"],
     },
     ProviderInfo {
         name: "OpenRouter",
-        env_vars: &["OPENROUTER_API_KEY"],
-        keyring_key: "openrouter_api_key",
         models: &[],
         key_label: "API Key",
         help_lines: &["Get key from openrouter.ai/keys"],
     },
     ProviderInfo {
         name: "Minimax",
-        env_vars: &["MINIMAX_API_KEY"],
-        keyring_key: "minimax_api_key",
         models: &[],  // Loaded from config.toml at runtime
         key_label: "API Key",
         help_lines: &["Get key from platform.minimax.io"],
     },
     ProviderInfo {
         name: "Custom OpenAI-Compatible",
-        env_vars: &[],
-        keyring_key: "",
         models: &[],
         key_label: "Base URL",
         help_lines: &["Enter your own API endpoint"],
@@ -73,8 +60,6 @@ pub const PROVIDERS: &[ProviderInfo] = &[
 
 pub struct ProviderInfo {
     pub name: &'static str,
-    pub env_vars: &'static [&'static str],
-    pub keyring_key: &'static str,
     pub models: &'static [&'static str],
     pub key_label: &'static str,
     pub help_lines: &'static [&'static str],
@@ -388,8 +373,7 @@ impl OnboardingWizard {
                 (3, EXISTING_KEY_SENTINEL.to_string(), String::new(), String::new(), String::new())
             } else if config.providers.minimax.as_ref().is_some_and(|p| p.enabled) {
                 (4, EXISTING_KEY_SENTINEL.to_string(), String::new(), String::new(), String::new())
-            } else if config.providers.custom.as_ref().is_some_and(|p| p.enabled) {
-                let c = config.providers.custom.as_ref().unwrap();
+            } else if let Some(c) = config.providers.custom.as_ref().filter(|p| p.enabled) {
                 let base = c.base_url.clone().unwrap_or_default();
                 let model = c.default_model.clone().unwrap_or_default();
                 (5, String::new(), base, EXISTING_KEY_SENTINEL.to_string(), model)
@@ -654,25 +638,29 @@ impl OnboardingWizard {
     }
 
     /// Try to load an existing API key for the currently selected provider.
-    /// Checks keys.toml for the API key. If found, sets sentinel.
+    /// Checks keys.toml (merged into config) for the API key. If found, sets sentinel.
     pub fn detect_existing_key(&mut self) {
-        // Check keys.toml for the API key
+        // Helper: true when the provider has a non-empty API key
+        fn has_nonempty_key(p: Option<&ProviderConfig>) -> bool {
+            p.and_then(|p| p.api_key.as_ref()).is_some_and(|k| !k.is_empty())
+        }
+
         if let Ok(config) = crate::config::Config::load() {
             let has_key = match self.selected_provider {
-                0 => config.providers.anthropic.as_ref().and_then(|p| p.api_key.as_ref()).is_some(),
-                1 => config.providers.openai.as_ref().and_then(|p| p.api_key.as_ref()).is_some(),
-                2 => config.providers.gemini.as_ref().and_then(|p| p.api_key.as_ref()).is_some(),
-                3 => config.providers.openrouter.as_ref().and_then(|p| p.api_key.as_ref()).is_some(),
-                4 => config.providers.minimax.as_ref().and_then(|p| p.api_key.as_ref()).is_some(),
+                0 => has_nonempty_key(config.providers.anthropic.as_ref()),
+                1 => has_nonempty_key(config.providers.openai.as_ref()),
+                2 => has_nonempty_key(config.providers.gemini.as_ref()),
+                3 => has_nonempty_key(config.providers.openrouter.as_ref()),
+                4 => has_nonempty_key(config.providers.minimax.as_ref()),
                 5 => {
                     // Custom provider - also load base_url and model
                     if let Some(c) = &config.providers.custom {
-                        if c.api_key.is_some() {
+                        if c.api_key.as_ref().is_some_and(|k| !k.is_empty()) {
                             self.custom_base_url = c.base_url.clone().unwrap_or_default();
                             self.custom_model = c.default_model.clone().unwrap_or_default();
                             self.custom_api_key = EXISTING_KEY_SENTINEL.to_string();
                         }
-                        true
+                        c.base_url.as_ref().is_some_and(|u| !u.is_empty())
                     } else {
                         false
                     }
@@ -1458,16 +1446,12 @@ impl OnboardingWizard {
         self.messaging_slack
     }
 
-    /// Detect existing Discord bot token from env var
+    /// Detect existing Discord bot token from keys.toml
     fn detect_existing_discord_token(&mut self) {
-        if let Ok(token) = std::env::var("DISCORD_BOT_TOKEN")
-            && !token.is_empty()
-        {
-            self.discord_token_input = EXISTING_KEY_SENTINEL.to_string();
-            return;
-        }
-        if SecretString::from_keyring_optional("discord_bot_token").is_some() {
-            self.discord_token_input = EXISTING_KEY_SENTINEL.to_string();
+        if let Ok(config) = crate::config::Config::load() {
+            if config.channels.discord.token.as_ref().is_some_and(|t| !t.is_empty()) {
+                self.discord_token_input = EXISTING_KEY_SENTINEL.to_string();
+            }
         }
     }
 
@@ -1476,17 +1460,15 @@ impl OnboardingWizard {
         self.discord_token_input == EXISTING_KEY_SENTINEL
     }
 
-    /// Detect existing Slack tokens from env vars
+    /// Detect existing Slack tokens from keys.toml
     fn detect_existing_slack_tokens(&mut self) {
-        if let Ok(token) = std::env::var("SLACK_BOT_TOKEN")
-            && !token.is_empty()
-        {
-            self.slack_bot_token_input = EXISTING_KEY_SENTINEL.to_string();
-        }
-        if let Ok(token) = std::env::var("SLACK_APP_TOKEN")
-            && !token.is_empty()
-        {
-            self.slack_app_token_input = EXISTING_KEY_SENTINEL.to_string();
+        if let Ok(config) = crate::config::Config::load() {
+            if config.channels.slack.token.as_ref().is_some_and(|t| !t.is_empty()) {
+                self.slack_bot_token_input = EXISTING_KEY_SENTINEL.to_string();
+            }
+            if config.channels.slack.app_token.as_ref().is_some_and(|t| !t.is_empty()) {
+                self.slack_app_token_input = EXISTING_KEY_SENTINEL.to_string();
+            }
         }
     }
 
@@ -1500,17 +1482,12 @@ impl OnboardingWizard {
         self.slack_app_token_input == EXISTING_KEY_SENTINEL
     }
 
-    /// Detect existing Telegram bot token from env var
+    /// Detect existing Telegram bot token from keys.toml
     fn detect_existing_telegram_token(&mut self) {
-        if let Ok(token) = std::env::var("TELEGRAM_BOT_TOKEN")
-            && !token.is_empty()
-        {
-            self.telegram_token_input = EXISTING_KEY_SENTINEL.to_string();
-            return;
-        }
-        // Also check keyring
-        if SecretString::from_keyring_optional("telegram_bot_token").is_some() {
-            self.telegram_token_input = EXISTING_KEY_SENTINEL.to_string();
+        if let Ok(config) = crate::config::Config::load() {
+            if config.channels.telegram.token.as_ref().is_some_and(|t| !t.is_empty()) {
+                self.telegram_token_input = EXISTING_KEY_SENTINEL.to_string();
+            }
         }
     }
 
@@ -1519,12 +1496,16 @@ impl OnboardingWizard {
         self.telegram_token_input == EXISTING_KEY_SENTINEL
     }
 
-    /// Detect existing Groq API key from env var
+    /// Detect existing Groq API key from keys.toml
     fn detect_existing_groq_key(&mut self) {
-        if let Ok(key) = std::env::var("GROQ_API_KEY")
-            && !key.is_empty()
-        {
-            self.groq_api_key_input = EXISTING_KEY_SENTINEL.to_string();
+        if let Ok(config) = crate::config::Config::load() {
+            if config.providers.stt.as_ref()
+                .and_then(|s| s.groq.as_ref())
+                .and_then(|p| p.api_key.as_ref())
+                .is_some_and(|k| !k.is_empty())
+            {
+                self.groq_api_key_input = EXISTING_KEY_SENTINEL.to_string();
+            }
         }
     }
 
@@ -2212,34 +2193,25 @@ Respond with EXACTLY six sections using these delimiters. No extra text before t
             tracing::warn!("Failed to save API keys to keys.toml: {}", e);
         }
 
-        // Store Telegram bot token in keyring (if new)
+        // Persist channel tokens to keys.toml (if new)
         if !self.telegram_token_input.is_empty() && !self.has_existing_telegram_token() {
-            let secret = SecretString::from_str(&self.telegram_token_input);
-            if let Err(e) = secret.save_to_keyring("telegram_bot_token") {
-                tracing::warn!("Failed to save Telegram token to keyring: {}", e);
-                // Non-fatal — the token is also in config.toml
+            if let Err(e) = crate::config::write_secret_key("channels.telegram", "token", &self.telegram_token_input) {
+                tracing::warn!("Failed to save Telegram token to keys.toml: {}", e);
             }
         }
-
-        // Store Discord bot token in keyring (if new)
         if !self.discord_token_input.is_empty() && !self.has_existing_discord_token() {
-            let secret = SecretString::from_str(&self.discord_token_input);
-            if let Err(e) = secret.save_to_keyring("discord_bot_token") {
-                tracing::warn!("Failed to save Discord token to keyring: {}", e);
+            if let Err(e) = crate::config::write_secret_key("channels.discord", "token", &self.discord_token_input) {
+                tracing::warn!("Failed to save Discord token to keys.toml: {}", e);
             }
         }
-
-        // Store Slack tokens in keyring (if new)
         if !self.slack_bot_token_input.is_empty() && !self.has_existing_slack_bot_token() {
-            let secret = SecretString::from_str(&self.slack_bot_token_input);
-            if let Err(e) = secret.save_to_keyring("slack_bot_token") {
-                tracing::warn!("Failed to save Slack bot token to keyring: {}", e);
+            if let Err(e) = crate::config::write_secret_key("channels.slack", "token", &self.slack_bot_token_input) {
+                tracing::warn!("Failed to save Slack bot token to keys.toml: {}", e);
             }
         }
         if !self.slack_app_token_input.is_empty() && !self.has_existing_slack_app_token() {
-            let secret = SecretString::from_str(&self.slack_app_token_input);
-            if let Err(e) = secret.save_to_keyring("slack_app_token") {
-                tracing::warn!("Failed to save Slack app token to keyring: {}", e);
+            if let Err(e) = crate::config::write_secret_key("channels.slack", "app_token", &self.slack_app_token_input) {
+                tracing::warn!("Failed to save Slack app token to keys.toml: {}", e);
             }
         }
 
@@ -2888,7 +2860,6 @@ mod tests {
     fn test_openrouter_provider_index() {
         // OpenRouter is index 3, Custom is last
         assert_eq!(PROVIDERS[3].name, "OpenRouter");
-        assert!(PROVIDERS[3].env_vars.contains(&"OPENROUTER_API_KEY"));
         assert_eq!(PROVIDERS.last().unwrap().name, "Custom OpenAI-Compatible");
     }
 

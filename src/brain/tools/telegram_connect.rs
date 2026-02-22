@@ -1,7 +1,7 @@
 //! Telegram Connect Tool
 //!
 //! Agent-callable tool that connects a Telegram bot at runtime.
-//! Accepts a bot token, saves it to config/keyring, and spawns the bot.
+//! Accepts a bot token, saves it to keys.toml, and spawns the bot.
 
 use super::error::Result;
 use super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
@@ -89,10 +89,8 @@ impl Tool for TelegramConnectTool {
         // Capture owner ID before vec is moved into TelegramAgent
         let owner_chat_id = allowed_users.first().copied();
 
-        // Save token to keyring for persistence
-        if let Ok(entry) = keyring::Entry::new("opencrabs", "telegram_bot_token") {
-            let _ = entry.set_password(&token);
-        }
+        // Save token to keys.toml for persistence
+        let _ = crate::config::write_secret_key("channels.telegram", "token", &token);
 
         // Persist enabled state to config
         let _ = crate::config::Config::write_key("channels.telegram", "enabled", "true");

@@ -14,8 +14,7 @@ path = "~/.opencrabs/opencrabs.db"
 
 [providers]
 # ========================================
-# OpenAI-Compat
-ible Provider (Local LLMs)
+# Custom: OpenAI-Compatible Provider (Local LLMs, and any OpenAI Compatible model)
 # ========================================
 # Use this for LM Studio, Ollama, LocalAI, etc.
 [providers.custom]
@@ -82,23 +81,8 @@ default_model = "whisper-large-v3-turbo"
 [providers.tts.openai]
 enabled = false
 default_model = "gpt-4o-mini-tts"
-
-# ========================================
-# Agent Behaviour
-# ========================================
-[agent]
-approval_policy = "ask"       # "ask" | "auto-session" | "auto-always"
-max_concurrent = 4            # Maximum concurrent tool calls
-context_limit = 200000         # Max context tokens
-
-# ========================================
-# Voice (STT / TTS)
-# ========================================
-[voice]
-stt_enabled = true            # Enable speech-to-text
-tts_enabled = false           # Enable text-to-speech
-tts_voice = "ash"             # TTS voice name
-tts_model = "gpt-4o-mini-tts" # TTS model
+voice = "ash"             # TTS voice name
+model = "gpt-4o-mini-tts" # TTS model
 
 # ========================================
 # Tips for Using Local LLMs
@@ -134,6 +118,14 @@ enabled = false
 allowed_list = ["user19802389679", "user2890797897"]
 channel_id = ["channel1890779", "channel289792323"]
 
-# ==================================================
-# Web Search (Brave, EXA, etc)
-# ==================================================
+# ========================================
+# Web Search Providers
+# ========================================
+
+[providers.web_search.exa]
+enabled = true
+# API key goes in keys.toml: [providers.web_search.exa] api_key = "..."
+
+[providers.web_search.brave]
+enabled = false
+# API key goes in keys.toml: [providers.web_search.brave] api_key = "..."

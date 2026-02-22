@@ -71,8 +71,14 @@ app_token = ""
 # WhatsApp Business API (if using cloud API)
 token = ""
 
-# ==================================================
-# Web Search (Brave, EXA, etc)
-# ==================================================
+# ========================================
+# Web Search API Keys
+# ========================================
 
+[providers.web_search.exa]
+# Get from: exa.ai/api-key
+api_key = ""
+
+[providers.web_search.brave]
+# Get from: brave.com/search/api/
 api_key = ""

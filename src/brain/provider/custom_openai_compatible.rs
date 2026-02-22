@@ -1,19 +1,11 @@
-//! OpenAI Provider Implementation
+//! Custom OpenAI-Compatible Provider Implementation
 //!
-//! Implements the Provider trait for OpenAI's GPT models.
-//!
-//! ## Supported Models
-//! - gpt-4-turbo-preview
-//! - gpt-4
-//! - gpt-4-32k
-//! - gpt-3.5-turbo
-//! - gpt-3.5-turbo-16k
-//!
-//! ## Compatibility
-//! This implementation also works with OpenAI-compatible APIs:
-//! - Local LLMs via LM Studio (http://localhost:1234/v1)
-//! - Ollama with OpenAI compatibility (http://localhost:11434/v1)
-//! - LocalAI and other compatible APIs
+//! Implements the Provider trait for any OpenAI-compatible API, including:
+//! - Official OpenAI (GPT-4, GPT-3.5, etc.)
+//! - OpenRouter (100+ models)
+//! - Minimax
+//! - Local LLMs via LM Studio, Ollama, LocalAI
+//! - Any endpoint that speaks the OpenAI chat completions protocol
 
 use super::error::{ProviderError, Result};
 use super::r#trait::{Provider, ProviderStream};
@@ -525,16 +517,26 @@ impl Provider for OpenAIProvider {
         let byte_stream = response.bytes_stream();
         let buffer = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
         
-        // State must be outside closure and shared via Arc to persist across chunks
-        // Including tool call argument accumulation for providers like MiniMax
-        let tool_state = std::sync::Arc::new(std::sync::Mutex::new((
-            false, // emitted_message_start
-            false, // emitted_content_start
-            std::collections::HashMap::<String, String>::new(), // accumulated tool args: index -> json string
-        )));
-        
-        // Keep old state reference for now, use tool_state for accumulation
-        let state = tool_state.clone();
+        // Accumulated state for a single streamed tool call
+        #[derive(Debug, Clone, Default)]
+        struct ToolCallAccum {
+            id: String,
+            name: String,
+            arguments: String,
+        }
+
+        // State persisted across SSE chunks via Arc<Mutex<_>>
+        struct StreamState {
+            emitted_message_start: bool,
+            emitted_content_start: bool,
+            tool_calls: std::collections::HashMap<usize, ToolCallAccum>, // index -> accumulated tool call
+        }
+
+        let state = std::sync::Arc::new(std::sync::Mutex::new(StreamState {
+            emitted_message_start: false,
+            emitted_content_start: false,
+            tool_calls: std::collections::HashMap::new(),
+        }));
         
         let event_stream = byte_stream
             .map(move |chunk_result| -> Vec<std::result::Result<StreamEvent, ProviderError>> {
@@ -546,16 +548,12 @@ impl Provider for OpenAIProvider {
                         if raw_text.contains("tool_calls") {
                             tracing::debug!("[STREAM_RAW] SSE chunk with tool_calls: {}", raw_text.chars().take(500).collect::<String>());
                         }
-                        
+
                         let mut buf = buffer.lock().expect("SSE buffer lock poisoned");
                         buf.push_str(&raw_text);
 
                         let mut events = Vec::new();
-                        
-                        let (mut emitted_message_start, mut emitted_content_start) = {
-                            let s = state.lock().expect("SSE state lock");
-                            (s.0, s.1)
-                        };
+                        let mut st = state.lock().expect("SSE state lock");
 
                         // Process complete lines (terminated by \n)
                         while let Some(newline_pos) = buf.find('\n') {
@@ -564,21 +562,32 @@ impl Provider for OpenAIProvider {
 
                             if let Some(json_str) = line.strip_prefix("data: ") {
                                 if json_str == "[DONE]" {
+                                    // Flush any accumulated tool calls before DONE
+                                    for (_idx, accum) in st.tool_calls.drain() {
+                                        let input = serde_json::from_str(&accum.arguments)
+                                            .unwrap_or_else(|_| serde_json::json!({}));
+                                        tracing::info!(
+                                            "[TOOL_EMIT] Flushing tool on DONE: id={}, name={}, args={}",
+                                            accum.id, accum.name, &accum.arguments.chars().take(200).collect::<String>()
+                                        );
+                                        events.push(Ok(StreamEvent::ContentBlockStart {
+                                            index: _idx,
+                                            content_block: ContentBlock::ToolUse {
+                                                id: accum.id,
+                                                name: accum.name,
+                                                input,
+                                            },
+                                        }));
+                                    }
                                     events.push(Ok(StreamEvent::MessageStop));
                                     continue;
                                 }
 
                                 match serde_json::from_str::<OpenAIStreamChunk>(json_str) {
                                     Ok(chunk) => {
-                                        // Debug: log what minimax returns
-                                        let has_tool_calls = chunk.choices.first().and_then(|c| c.delta.as_ref()).and_then(|d| d.tool_calls.as_ref()).is_some();
-                                        if has_tool_calls {
-                                            tracing::debug!("Chunk has tool_calls!");
-                                        }
-                                        
                                         // Emit MessageStart on first chunk with id
-                                        if !emitted_message_start && !chunk.id.is_empty() {
-                                            emitted_message_start = true;
+                                        if !st.emitted_message_start && !chunk.id.is_empty() {
+                                            st.emitted_message_start = true;
                                             let model = chunk.model.clone().unwrap_or_default();
                                             events.push(Ok(StreamEvent::MessageStart {
                                                 message: crate::brain::provider::types::StreamMessage {
@@ -592,73 +601,93 @@ impl Provider for OpenAIProvider {
                                                 },
                                             }));
                                         }
-                                        
-                                        // Get content
+
+                                        // Get content from delta or message (MiniMax uses message)
                                         let content = chunk.choices.first()
                                             .and_then(|c| c.delta.as_ref().or(c.message.as_ref()))
                                             .and_then(|d| d.content.as_ref())
                                             .cloned();
-                                        
-                                        // Get tool_calls from delta OR message (MiniMax sends final tool_calls in message)
+
+                                        // Get streaming tool_calls from delta or message
                                         let tool_calls = chunk.choices.first()
                                             .and_then(|c| c.delta.as_ref().or(c.message.as_ref()))
                                             .and_then(|d| d.tool_calls.as_ref());
 
-                                        if let Some(tc) = tool_calls
-                                            && !tc.is_empty() {
-                                                tracing::debug!("Found {} tool_calls in stream", tc.len());
-                                                for (idx, tc_item) in tc.iter().enumerate() {
-                                                    let name = &tc_item.function.name;
-                                                    let args = &tc_item.function.arguments;
-                                                    let tc_id = &tc_item.id;
-                                                    
-                                                    // GRANULAR LOG: Tool call parsing details
-                                                    tracing::info!(
-                                                        "[TOOL_PARSE] Tool call {}: id={}, name={}, args_len={}, args_sample={}",
-                                                        idx,
-                                                        tc_id,
-                                                        name,
-                                                        args.len(),
-                                                        &args.chars().take(100).collect::<String>()
-                                                    );
-                                                    
-                                                    // Check if arguments are empty or partial JSON
-                                                    let args_trimmed = args.trim();
-                                                    let is_valid_json = !args_trimmed.is_empty() 
-                                                        && args_trimmed != "{}"
-                                                        && serde_json::from_str::<serde_json::Value>(args).is_ok();
-                                                    
-                                                    if !is_valid_json {
-                                                        tracing::warn!(
-                                                            "[TOOL_PARSE] ⚠️ Tool '{}' args are INCOMPLETE (id={}), skipping emit in this chunk",
-                                                            name, tc_id
-                                                        );
-                                                        continue; // Skip this tool_call, wait for next chunk with complete data
+                                        // Accumulate tool calls across chunks
+                                        // OpenAI streaming sends: chunk1={index,id,type,name,args:""}, chunk2..N={index,args:"<fragment>"}
+                                        if let Some(tc_list) = tool_calls {
+                                            for tc_item in tc_list {
+                                                let idx = tc_item.index;
+                                                let accum = st.tool_calls.entry(idx).or_default();
+
+                                                // First chunk for this index carries id + name
+                                                if let Some(ref id) = tc_item.id {
+                                                    if !id.is_empty() {
+                                                        accum.id = id.clone();
                                                     }
-                                                    
-                                                    let input = serde_json::from_str(args).unwrap_or_else(|_| serde_json::json!({}));
+                                                }
+                                                if let Some(ref func) = tc_item.function {
+                                                    if let Some(ref name) = func.name {
+                                                        if !name.is_empty() {
+                                                            accum.name = name.clone();
+                                                        }
+                                                    }
+                                                    // Append argument fragment
+                                                    if let Some(ref args) = func.arguments {
+                                                        accum.arguments.push_str(args);
+                                                    }
+                                                }
+
+                                                tracing::debug!(
+                                                    "[TOOL_ACCUM] idx={}, id={}, name={}, args_len={}, args_tail={}",
+                                                    idx, accum.id, accum.name, accum.arguments.len(),
+                                                    accum.arguments.chars().rev().take(60).collect::<String>().chars().rev().collect::<String>()
+                                                );
+                                            }
+                                        }
+
+                                        // Check finish_reason — emit accumulated tool calls when done
+                                        let finish_reason_str = chunk.choices.first()
+                                            .and_then(|c| c.finish_reason.as_ref());
+
+                                        if let Some(reason) = finish_reason_str {
+                                            if reason == "tool_calls" || reason == "function_call" {
+                                                // Emit all accumulated tool calls
+                                                for (idx, accum) in st.tool_calls.drain() {
+                                                    let input = serde_json::from_str(&accum.arguments)
+                                                        .unwrap_or_else(|e| {
+                                                            tracing::warn!(
+                                                                "[TOOL_EMIT] Failed to parse accumulated args for '{}': {} | args: {}",
+                                                                accum.name, e, &accum.arguments.chars().take(300).collect::<String>()
+                                                            );
+                                                            serde_json::json!({})
+                                                        });
+                                                    tracing::info!(
+                                                        "[TOOL_EMIT] Emitting tool call: idx={}, id={}, name={}, args_len={}",
+                                                        idx, accum.id, accum.name, accum.arguments.len()
+                                                    );
                                                     events.push(Ok(StreamEvent::ContentBlockStart {
                                                         index: idx,
                                                         content_block: ContentBlock::ToolUse {
-                                                            id: tc_item.id.clone(),
-                                                            name: tc_item.function.name.clone(),
+                                                            id: accum.id,
+                                                            name: accum.name,
                                                             input,
                                                         },
                                                     }));
                                                 }
                                             }
+                                        }
 
+                                        // Emit text content
                                         if let Some(ref c) = content {
-                                            // Emit ContentBlockStart when we first see empty content
-                                            if !emitted_content_start && c.is_empty() {
-                                                emitted_content_start = true;
+                                            if !st.emitted_content_start && c.is_empty() {
+                                                st.emitted_content_start = true;
                                                 events.push(Ok(StreamEvent::ContentBlockStart {
                                                     index: 0,
                                                     content_block: ContentBlock::Text { text: String::new() },
                                                 }));
                                             }
-                                            
-                                            // Emit ContentBlockDelta for actual content
+
                                             if !c.is_empty() {
                                                 events.push(Ok(StreamEvent::ContentBlockDelta {
                                                     index: 0,
@@ -668,24 +697,21 @@ impl Provider for OpenAIProvider {
                                                 }));
                                             }
                                         }
-                                        
-                                        // Extract usage from final chunk (when finish_reason is present)
-                                        // This is sent when stream_options.include_usage = true
+
+                                        // Extract usage from final chunk
                                         if let Some(ref usage) = chunk.usage {
-                                            let finish_reason_str = chunk.choices.first().and_then(|c| c.finish_reason.as_ref());
                                             if finish_reason_str.is_some() {
                                                 let input_tokens = usage.prompt_tokens.unwrap_or(0);
                                                 let output_tokens = usage.completion_tokens.unwrap_or(0);
-                                                tracing::info!("[STREAM_USAGE] Final chunk usage: input={}, output={}", input_tokens, output_tokens);
-                                                
-                                                // Convert string stop_reason to StopReason enum
+                                                tracing::info!("[STREAM_USAGE] Final usage: input={}, output={}", input_tokens, output_tokens);
+
                                                 let stop_reason = finish_reason_str.map(|s| match s.as_str() {
                                                     "stop" => crate::brain::provider::types::StopReason::EndTurn,
                                                     "length" => crate::brain::provider::types::StopReason::MaxTokens,
-                                                    "tool_calls" => crate::brain::provider::types::StopReason::ToolUse,
+                                                    "tool_calls" | "function_call" => crate::brain::provider::types::StopReason::ToolUse,
                                                     _ => crate::brain::provider::types::StopReason::EndTurn,
                                                 });
-                                                
+
                                                 events.push(Ok(StreamEvent::MessageDelta {
                                                     delta: crate::brain::provider::types::MessageDelta {
                                                         stop_reason,
@@ -700,12 +726,10 @@ impl Provider for OpenAIProvider {
                                         }
                                     }
                                     Err(e) => {
-                                        // GRANULAR LOG: Chunk parsing failure
-                                        let json_preview = json_str.chars().take(200).collect::<String>();
+                                        let json_preview = json_str.chars().take(300).collect::<String>();
                                         tracing::warn!(
-                                            "[STREAM_PARSE] ⚠️ Failed to parse stream chunk: {} | Raw: {}",
-                                            e,
-                                            json_preview
+                                            "[STREAM_PARSE] Failed to parse chunk: {} | Raw: {}",
+                                            e, json_preview
                                         );
                                     }
                                 }
@@ -715,12 +739,6 @@ impl Provider for OpenAIProvider {
                         if events.is_empty() {
                             vec![Ok(StreamEvent::Ping)]
                         } else {
-                            // Save state back
-                            {
-                                let mut s = state.lock().expect("SSE state lock");
-                                s.0 = emitted_message_start;
-                                s.1 = emitted_content_start;
-                            }
                             events
                         }
                     }
@@ -935,12 +953,34 @@ struct OpenAIStreamChoice {
     finish_reason: Option<String>,
 }
 
+/// Streaming tool call — fields are optional because OpenAI sends them
+/// incrementally: first chunk has id/type/name, continuation chunks only
+/// have index + argument fragments.
+#[derive(Debug, Clone, Deserialize)]
+struct StreamingToolCall {
+    index: usize,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    r#type: Option<String>,
+    #[serde(default)]
+    function: Option<StreamingFunctionCall>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct StreamingFunctionCall {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    arguments: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)]
 struct OpenAIMessageDelta {
     role: Option<String>,
     content: Option<String>,
-    tool_calls: Option<Vec<OpenAIToolCall>>,
+    tool_calls: Option<Vec<StreamingToolCall>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

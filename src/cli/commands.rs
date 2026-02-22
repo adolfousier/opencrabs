@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::brain::prompt_builder::RuntimeInfo;
 use crate::brain::BrainLoader;
 
-use super::{DbCommands, KeyringCommands, LogCommands, OutputFormat};
+use super::{DbCommands, LogCommands, OutputFormat};
 
 /// Load configuration from file or defaults
 pub(crate) async fn load_config(config_path: Option<&str>) -> Result<crate::config::Config> {
@@ -278,10 +278,15 @@ pub(crate) async fn cmd_run(
     // Slash command invocation (agent can call any slash command)
     tool_registry.register(Arc::new(SlashCommandTool));
     // EXA search: always available (free via MCP), uses direct API if key is set
-    let exa_key = std::env::var("EXA_API_KEY").ok();
+    let exa_key = config.providers.web_search.as_ref()
+        .and_then(|ws| ws.exa.as_ref())
+        .and_then(|p| p.api_key.clone());
     tool_registry.register(Arc::new(ExaSearchTool::new(exa_key)));
     // Brave search: requires API key
-    if let Ok(brave_key) = std::env::var("BRAVE_API_KEY") {
+    if let Some(brave_key) = config.providers.web_search.as_ref()
+        .and_then(|ws| ws.brave.as_ref())
+        .and_then(|p| p.api_key.clone())
+    {
         tool_registry.register(Arc::new(BraveSearchTool::new(brave_key)));
     }
 
@@ -359,104 +364,6 @@ pub(crate) async fn cmd_run(
     }
 
     Ok(())
-}
-
-/// Keyring management commands
-pub(crate) async fn cmd_keyring(operation: KeyringCommands) -> Result<()> {
-    use crate::config::secrets::SecretString;
-
-    match operation {
-        KeyringCommands::Set { provider, api_key } => {
-            println!("🔐 Saving API key for {} to OS keyring...\n", provider);
-
-            let secret = SecretString::from_str(&api_key);
-            let key_name = format!("{}_api_key", provider.to_lowercase());
-
-            secret
-                .save_to_keyring(&key_name)
-                .with_context(|| format!("Failed to save {} API key to keyring", provider))?;
-
-            println!("✅ Successfully saved {} API key to OS keyring", provider);
-            println!("\n💡 The key is now securely stored in your system's credential manager:");
-            #[cfg(target_os = "windows")]
-            println!("   - Windows Credential Manager");
-            #[cfg(target_os = "macos")]
-            println!("   - macOS Keychain");
-            #[cfg(target_os = "linux")]
-            println!("   - Linux Secret Service");
-
-            println!("\n🔒 Security benefits:");
-            println!("   ✓ Encrypted by the operating system");
-            println!("   ✓ Not stored in plaintext files");
-            println!("   ✓ Automatically cleared from memory");
-
-            Ok(())
-        }
-
-        KeyringCommands::Get { provider } => {
-            let key_name = format!("{}_api_key", provider.to_lowercase());
-
-            match SecretString::from_keyring_optional(&key_name) {
-                Some(secret) => {
-                    println!("🔐 API key for {}: {}", provider, secret.expose_secret());
-                    println!(
-                        "\n⚠️  Warning: API key displayed in plain text. Clear your terminal history."
-                    );
-                }
-                None => {
-                    println!("❌ No API key found for {} in OS keyring", provider);
-                    println!("\n💡 To store an API key, use:");
-                    println!("   opencrabs keyring set {} YOUR_API_KEY", provider);
-                }
-            }
-
-            Ok(())
-        }
-
-        KeyringCommands::Delete { provider } => {
-            let key_name = format!("{}_api_key", provider.to_lowercase());
-
-            SecretString::delete_from_keyring(&key_name)
-                .with_context(|| format!("Failed to delete {} API key from keyring", provider))?;
-
-            println!("✅ Deleted {} API key from OS keyring", provider);
-            Ok(())
-        }
-
-        KeyringCommands::List => {
-            println!("🔐 API Keys in OS Keyring\n");
-
-            let providers = ["anthropic", "openai", "gemini", "azure"];
-            let mut found_any = false;
-
-            for provider in &providers {
-                let key_name = format!("{}_api_key", provider);
-                if let Some(secret) = SecretString::from_keyring_optional(&key_name) {
-                    let masked = format!(
-                        "{}...{}",
-                        &secret.expose_secret()[..4.min(secret.len())],
-                        if secret.len() > 8 {
-                            &secret.expose_secret()[secret.len() - 4..]
-                        } else {
-                            ""
-                        }
-                    );
-                    println!("  ✓ {:<12} {}", provider, masked);
-                    found_any = true;
-                } else {
-                    println!("  ✗ {:<12} (not configured)", provider);
-                }
-            }
-
-            if !found_any {
-                println!("\n💡 No API keys found in keyring.");
-                println!("   To store an API key, use:");
-                println!("   opencrabs keyring set <provider> <api-key>");
-            }
-
-            Ok(())
-        }
-    }
 }
 
 /// Log management commands

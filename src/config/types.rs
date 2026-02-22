@@ -298,6 +298,10 @@ pub struct ProviderConfigs {
     #[serde(default)]
     pub tts: Option<TtsProviders>,
 
+    /// Web search provider configurations
+    #[serde(default)]
+    pub web_search: Option<WebSearchProviders>,
+
     /// Fallback provider configuration (under [providers.fallback] in config)
     #[serde(default)]
     pub fallback: Option<FallbackProviderConfig>,
@@ -329,6 +333,18 @@ pub struct TtsProviders {
     /// OpenAI TTS configuration
     #[serde(default)]
     pub openai: Option<ProviderConfig>,
+}
+
+/// Web Search provider configurations
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct WebSearchProviders {
+    /// EXA search configuration
+    #[serde(default)]
+    pub exa: Option<ProviderConfig>,
+
+    /// Brave search configuration
+    #[serde(default)]
+    pub brave: Option<ProviderConfig>,
 }
 
 /// Individual provider configuration
@@ -397,62 +413,73 @@ pub fn keys_path() -> PathBuf {
     opencrabs_home().join("keys.toml")
 }
 
-/// Save API keys to keys.toml
-/// This file should be chmod 600 for security
-/// Only saves api_key values, not full provider config
+/// Save API keys to keys.toml using merge (preserves existing keys).
+/// Only writes non-empty api_key values; never deletes other providers' keys.
 pub fn save_keys(keys: &ProviderConfigs) -> Result<()> {
-    let keys_path = keys_path();
-    
-    // Build a simple key-only structure
-    let mut lines = vec![
-        "# OpenCrabs API Keys File".to_string(),
-        "# This file contains sensitive API keys - NEVER commit to version control!".to_string(),
-        "".to_string(),
-        "# LLM Provider API Keys".to_string(),
+    // Merge each provider key individually via write_secret_key (read-modify-write)
+    let providers: &[(&str, Option<&ProviderConfig>)] = &[
+        ("providers.anthropic", keys.anthropic.as_ref()),
+        ("providers.openai", keys.openai.as_ref()),
+        ("providers.openrouter", keys.openrouter.as_ref()),
+        ("providers.minimax", keys.minimax.as_ref()),
+        ("providers.custom", keys.custom.as_ref()),
+        ("providers.gemini", keys.gemini.as_ref()),
     ];
-    
-    // Add provider keys
-    if let Some(p) = &keys.anthropic {
-        if let Some(key) = &p.api_key {
-            lines.push(format!("\n[providers.anthropic]"));
-            lines.push(format!("api_key = \"{}\"", key));
+
+    for (section, provider) in providers {
+        if let Some(p) = provider
+            && let Some(key) = &p.api_key
+            && !key.is_empty()
+        {
+            write_secret_key(section, "api_key", key)?;
         }
     }
-    if let Some(p) = &keys.openai {
-        if let Some(key) = &p.api_key {
-            lines.push(format!("\n[providers.openai]"));
-            lines.push(format!("api_key = \"{}\"", key));
+
+    tracing::info!("Saved API keys to: {:?}", keys_path());
+    Ok(())
+}
+
+/// Write a single key-value pair into keys.toml at the given dotted section path.
+///
+/// Equivalent to `Config::write_key` but targets `~/.opencrabs/keys.toml`.
+/// Use for persisting secrets (tokens, API keys) that must not go into config.toml.
+///
+/// # Example
+/// ```no_run
+/// write_secret_key("channels.telegram", "token", "123456:ABC...")?;
+/// // results in keys.toml: [channels.telegram] token = "123456:ABC..."
+/// ```
+pub fn write_secret_key(section: &str, key: &str, value: &str) -> Result<()> {
+    let path = keys_path();
+
+    let mut doc: toml::Value = if path.exists() {
+        let content = fs::read_to_string(&path)?;
+        toml::from_str(&content).unwrap_or(toml::Value::Table(toml::map::Map::new()))
+    } else {
+        toml::Value::Table(toml::map::Map::new())
+    };
+
+    let parts: Vec<&str> = section.split('.').collect();
+    let mut current = doc.as_table_mut()
+        .context("keys.toml root is not a table")?;
+
+    for part in &parts {
+        if !current.contains_key(*part) {
+            current.insert(part.to_string(), toml::Value::Table(toml::map::Map::new()));
         }
+        current = current.get_mut(*part)
+            .context("section not found after insert")?
+            .as_table_mut()
+            .with_context(|| format!("'{}' is not a table", part))?;
     }
-    if let Some(p) = &keys.openrouter {
-        if let Some(key) = &p.api_key {
-            lines.push(format!("\n[providers.openrouter]"));
-            lines.push(format!("api_key = \"{}\"", key));
-        }
+    current.insert(key.to_string(), toml::Value::String(value.to_string()));
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
     }
-    if let Some(p) = &keys.minimax {
-        if let Some(key) = &p.api_key {
-            lines.push(format!("\n[providers.minimax]"));
-            lines.push(format!("api_key = \"{}\"", key));
-        }
-    }
-    if let Some(p) = &keys.custom {
-        if let Some(key) = &p.api_key {
-            lines.push(format!("\n[providers.custom]"));
-            lines.push(format!("api_key = \"{}\"", key));
-        }
-    }
-    if let Some(p) = &keys.gemini {
-        if let Some(key) = &p.api_key {
-            lines.push(format!("\n[providers.gemini]"));
-            lines.push(format!("api_key = \"{}\"", key));
-        }
-    }
-    
-    let content = lines.join("\n");
-    std::fs::write(&keys_path, content)
-        .context("Failed to write keys file")?;
-    tracing::info!("Saved API keys to: {:?}", keys_path);
+    let toml_str = toml::to_string_pretty(&doc)?;
+    fs::write(&path, toml_str)?;
+    tracing::info!("Wrote secret key [{section}].{key}");
     Ok(())
 }
 
@@ -528,6 +555,19 @@ fn merge_provider_keys(mut base: ProviderConfigs, keys: ProviderConfigs) -> Prov
                 let entry = base_tts.openai.get_or_insert_with(ProviderConfig::default);
                 entry.api_key = Some(key);
             }
+    if let Some(ws) = keys.web_search {
+        let base_ws = base.web_search.get_or_insert_with(WebSearchProviders::default);
+        if let Some(exa) = ws.exa
+            && let Some(key) = exa.api_key {
+                let entry = base_ws.exa.get_or_insert_with(ProviderConfig::default);
+                entry.api_key = Some(key);
+            }
+        if let Some(brave) = ws.brave
+            && let Some(key) = brave.api_key {
+                let entry = base_ws.brave.get_or_insert_with(ProviderConfig::default);
+                entry.api_key = Some(key);
+            }
+    }
     base
 }
 
@@ -755,78 +795,7 @@ impl Config {
             config.crabrace.auto_update = auto_update.parse().unwrap_or(true);
         }
 
-        // Groq API key for voice STT - load from providers.stt.groq
-        if let Ok(groq_key) = std::env::var("GROQ_API_KEY") {
-            let stt = config.providers.stt.get_or_insert_with(SttProviders::default);
-            stt.groq.get_or_insert_with(|| ProviderConfig {
-                enabled: true,
-                api_key: Some(groq_key),
-                base_url: None,
-                default_model: None,
-                models: vec![],
-            });
-        }
-
-        // Provider API keys from environment (only for API keys, not models)
-        // Config.toml is the source of truth for all settings including models
-        Self::load_provider_api_keys(&mut config)?;
-
         Ok(config)
-    }
-
-    /// Load provider API keys from environment variables
-    /// Note: Models are NOT loaded from env - config.toml is the source of truth
-    fn load_provider_api_keys(config: &mut Self) -> Result<()> {
-        // Anthropic - API key only (no model override from env)
-        // ANTHROPIC_MAX_SETUP_TOKEN takes priority over ANTHROPIC_API_KEY (OAuth token for Claude Max)
-        if let Ok(api_key) = std::env::var("ANTHROPIC_MAX_SETUP_TOKEN")
-            .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
-        {
-            let provider = config.providers.anthropic.get_or_insert(ProviderConfig {
-                enabled: true,
-                api_key: None,
-                base_url: None,
-                default_model: None,
-                models: vec![],
-            });
-            provider.api_key = Some(api_key);
-        }
-
-        // OpenAI — ONLY set api_key on an EXISTING provider config.
-        // Do NOT auto-create an OpenAI text provider just from OPENAI_API_KEY,
-        // because that key may only be for TTS (gpt-4o-mini-tts).
-        // Users who want OpenAI for text must explicitly configure it in config.toml.
-        if let Ok(api_key) = std::env::var("OPENAI_API_KEY")
-            && let Some(provider) = config.providers.openai.as_mut()
-        {
-            provider.api_key = Some(api_key);
-        }
-
-        // OpenAI base URL (for LM Studio, Ollama, etc.) — explicit local LLM setup
-        if let Ok(base_url) = std::env::var("OPENAI_BASE_URL") {
-            let provider = config.providers.openai.get_or_insert(ProviderConfig {
-                enabled: true,
-                api_key: None,
-                base_url: None,
-                default_model: None,
-                models: vec![],
-            });
-            provider.base_url = Some(base_url);
-        }
-
-        // Google Gemini
-        if let Ok(api_key) = std::env::var("GEMINI_API_KEY") {
-            let provider = config.providers.gemini.get_or_insert(ProviderConfig {
-                enabled: true,
-                api_key: None,
-                base_url: None,
-                default_model: None,
-                models: vec![],
-            });
-            provider.api_key = Some(api_key);
-        }
-
-        Ok(())
     }
 
     /// Reload configuration from disk (re-runs `Config::load()`).
@@ -956,7 +925,7 @@ impl Config {
     }
 
     /// Validate configuration
-    /// Check if any provider has an API key configured (from env, keyring, or config).
+    /// Check if any provider has an API key configured (from config).
     pub fn has_any_api_key(&self) -> bool {
         let has_anthropic = self.providers.anthropic.as_ref()
             .is_some_and(|p| p.api_key.is_some());

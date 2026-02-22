@@ -230,6 +230,10 @@ pub struct App {
     pub processing_started_at: Option<std::time::Instant>,
     pub streaming_response: Option<String>,
     pub error_message: Option<String>,
+    /// Set to true when IntermediateText arrives during the current response cycle.
+    /// Reset to false at the start of each new send_message call.
+    /// Used in complete_response to avoid double-adding the assistant message.
+    intermediate_text_received: bool,
 
     // Animation state
     pub animation_frame: usize,
@@ -383,6 +387,7 @@ impl App {
             processing_started_at: None,
             streaming_response: None,
             error_message: None,
+            intermediate_text_received: false,
             animation_frame: 0,
             splash_shown_at: Some(std::time::Instant::now()),
             escape_pending_at: None,
@@ -763,6 +768,7 @@ impl App {
                 
                 // Clear streaming response - text is now going to be a permanent message
                 self.streaming_response = None;
+                self.intermediate_text_received = true;
 
                 // Check if there was a queued message that was just processed
                 // If so, add it at the VERY END (after all assistant messages and tool calls)
@@ -2800,6 +2806,7 @@ impl App {
             self.is_processing = true;
             self.processing_started_at = Some(std::time::Instant::now());
             self.error_message = None;
+            self.intermediate_text_received = false;
 
             // Analyze and transform the prompt before sending to agent
             let transformed_content = self.prompt_analyzer.analyze_and_transform(&content);
@@ -2982,14 +2989,9 @@ impl App {
         // Debug: log response content length
         tracing::debug!("Response complete: content_len={}, output_tokens={}", response.content.len(), response.usage.output_tokens);
 
-        // Check if we already added assistant messages via IntermediateText
-        // If so, don't add duplicate - just finalize tool groups
-        let has_intermediate_messages = self.messages
-            .iter()
-            .rfind(|m| m.role == "assistant")
-            .is_some();
-
-        if has_intermediate_messages {
+        // Check if we already added assistant messages via IntermediateText this cycle.
+        // Uses a per-cycle flag (not a history search) so prior turns don't cause false positives.
+        if self.intermediate_text_received {
             tracing::debug!("Skipping duplicate assistant message - already shown via IntermediateText");
         } else {
             // Add assistant message to UI only if not already added
@@ -4225,7 +4227,7 @@ impl App {
         // Rebuild agent service with new provider
         if let Err(e) = self.rebuild_agent_service().await {
             // If rebuild fails, check if it's due to missing API key
-            if api_key.is_none() && provider.keyring_key.is_empty() {
+            if api_key.is_none() && provider_idx == 5 {
                 // Need API key - show message and stay in provider mode
                 self.push_system_message(format!("API key required for {}. Type it and press Enter.", provider.name.split('(').next().unwrap_or(provider.name).trim()));
                 return Ok(());
@@ -4321,24 +4323,18 @@ impl App {
                 }
                 WizardAction::FetchModels => {
                     let provider_idx = wizard.selected_provider;
-                    // Resolve API key from keyring/env or raw input
+                    // Resolve API key from config (keys.toml) or raw input
                     let api_key = if wizard.has_existing_key() {
-                        let info = &super::onboarding::PROVIDERS[provider_idx];
-                        let mut key = None;
-                        if !info.keyring_key.is_empty()
-                            && let Some(s) = crate::config::secrets::SecretString::from_keyring_optional(info.keyring_key) {
-                                key = Some(s.expose_secret().to_string());
+                        let provider_name = super::onboarding::PROVIDERS[provider_idx].name;
+                        let loaded = crate::config::Config::load().ok();
+                        match provider_name {
+                            "Anthropic Claude" => loaded.as_ref().and_then(|c| c.providers.anthropic.as_ref()).and_then(|p| p.api_key.clone()),
+                            "OpenAI" => loaded.as_ref().and_then(|c| c.providers.openai.as_ref()).and_then(|p| p.api_key.clone()),
+                            "Google Gemini" => loaded.as_ref().and_then(|c| c.providers.gemini.as_ref()).and_then(|p| p.api_key.clone()),
+                            "OpenRouter" => loaded.as_ref().and_then(|c| c.providers.openrouter.as_ref()).and_then(|p| p.api_key.clone()),
+                            "Minimax" => loaded.as_ref().and_then(|c| c.providers.minimax.as_ref()).and_then(|p| p.api_key.clone()),
+                            _ => None,
                         }
-                        if key.is_none() {
-                            for env_var in info.env_vars {
-                                if let Ok(val) = std::env::var(env_var)
-                                    && !val.is_empty() {
-                                        key = Some(val);
-                                        break;
-                                }
-                            }
-                        }
-                        key
                     } else if !wizard.api_key_input.is_empty() {
                         Some(wizard.api_key_input.clone())
                     } else {

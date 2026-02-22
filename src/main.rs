@@ -8,9 +8,6 @@ async fn main() -> Result<()> {
     #[cfg(feature = "slack")]
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    // Load .env file before anything else (silently ignore if missing)
-    dotenvy::dotenv().ok();
-
     // Parse CLI arguments first to check for debug flag
     let cli_args = cli::Cli::parse();
 

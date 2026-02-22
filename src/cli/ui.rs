@@ -98,12 +98,17 @@ pub(crate) async fn cmd_chat(
     // Slash command invocation (agent can call any slash command)
     tool_registry.register(Arc::new(SlashCommandTool));
     // EXA search: always available (free via MCP), uses direct API if key is set
-    let exa_key = std::env::var("EXA_API_KEY").ok();
+    let exa_key = config.providers.web_search.as_ref()
+        .and_then(|ws| ws.exa.as_ref())
+        .and_then(|p| p.api_key.clone());
     let exa_mode = if exa_key.is_some() { "direct API" } else { "MCP (free)" };
     tool_registry.register(Arc::new(ExaSearchTool::new(exa_key)));
     tracing::info!("Registered EXA search tool (mode: {})", exa_mode);
     // Brave search: requires API key
-    if let Ok(brave_key) = std::env::var("BRAVE_API_KEY") {
+    if let Some(brave_key) = config.providers.web_search.as_ref()
+        .and_then(|ws| ws.brave.as_ref())
+        .and_then(|p| p.api_key.clone())
+    {
         tool_registry.register(Arc::new(BraveSearchTool::new(brave_key)));
         tracing::info!("Registered Brave search tool");
     }

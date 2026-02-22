@@ -35,7 +35,6 @@ toml = "0.8"
 # Configuration
 config = "0.15"
 dirs = "6.0"
-dotenvy = "0.15"
 
 # HTTP & LLM Clients
 reqwest = { version = "0.12", features = ["json", "multipart", "native-tls", "stream"], default-features = false }
@@ -76,7 +75,6 @@ openssl = { version = "0.10", features = ["vendored"] }
 
 # Security
 zeroize = { version = "1.8", features = ["derive"] }
-keyring = "3.6"
 
 # Telegram
 teloxide = { version = "0.13", features = ["macros"], optional = true }

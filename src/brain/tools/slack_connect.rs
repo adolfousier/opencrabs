@@ -1,7 +1,7 @@
 //! Slack Connect Tool
 //!
 //! Agent-callable tool that connects a Slack bot at runtime via Socket Mode.
-//! Accepts bot token + app token, saves to config/keyring, spawns the bot,
+//! Accepts bot token + app token, saves to keys.toml, spawns the bot,
 //! and waits for a successful connection.
 
 use super::error::Result;
@@ -115,13 +115,9 @@ impl Tool for SlackConnectTool {
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
 
-        // Save tokens to keyring as backup
-        if let Ok(entry) = keyring::Entry::new("opencrabs", "slack_bot_token") {
-            let _ = entry.set_password(&bot_token);
-        }
-        if let Ok(entry) = keyring::Entry::new("opencrabs", "slack_app_token") {
-            let _ = entry.set_password(&app_token);
-        }
+        // Save tokens to keys.toml for persistence
+        let _ = crate::config::write_secret_key("channels.slack", "token", &bot_token);
+        let _ = crate::config::write_secret_key("channels.slack", "app_token", &app_token);
 
         // Persist to config so startup can read them (field is 'token', not 'bot_token')
         let _ = crate::config::Config::write_key("channels.slack", "enabled", "true");
