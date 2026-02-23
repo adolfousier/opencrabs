@@ -64,8 +64,10 @@ pub async fn on_push_event(
     client: Arc<SlackHyperClient>,
     _states: SlackClientEventsUserState,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    tracing::debug!("Slack: received push event");
     match event.event {
         SlackEventCallbackBody::Message(msg) => {
+            tracing::debug!("Slack: message event from user={:?}, channel={:?}, bot_id={:?}", msg.sender.user, msg.origin.channel, msg.sender.bot_id);
             handle_message(&msg, client).await;
         }
         _ => {
@@ -97,28 +99,41 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
 
     // Skip bot messages
     if msg.sender.bot_id.is_some() {
+        tracing::debug!("Slack: skipping bot message (bot_id={:?})", msg.sender.bot_id);
         return;
     }
 
     // Extract user ID
     let user_id = match &msg.sender.user {
         Some(uid) => uid.to_string(),
-        None => return,
+        None => {
+            tracing::debug!("Slack: message has no sender user ID, ignoring");
+            return;
+        }
     };
 
     // Extract channel ID
     let channel_id = match &msg.origin.channel {
         Some(ch) => ch.to_string(),
-        None => return,
+        None => {
+            tracing::debug!("Slack: message has no channel ID, ignoring");
+            return;
+        }
     };
 
     // Extract text
     let text = match &msg.content {
         Some(content) => match &content.text {
             Some(t) if !t.is_empty() => t.clone(),
-            _ => return,
+            _ => {
+                tracing::debug!("Slack: message has empty text, ignoring");
+                return;
+            }
         },
-        None => return,
+        None => {
+            tracing::debug!("Slack: message has no content, ignoring");
+            return;
+        }
     };
 
     // Allowlist check — if allowed list is empty, accept all

@@ -1951,10 +1951,10 @@ fn render_brain_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard)
 
     lines.push(Line::from(""));
 
-    // "Your Agent" text area
+    // "Your OpenCrabs" text area
     let agent_focused = wizard.brain_field == BrainField::AboutAgent;
     lines.push(Line::from(Span::styled(
-        "  Your Agent:".to_string(),
+        "  Your OpenCrabs:".to_string(),
         Style::default()
             .fg(if agent_focused {
                 BRAND_BLUE
@@ -1964,13 +1964,13 @@ fn render_brain_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard)
             .add_modifier(Modifier::BOLD),
     )));
 
-    let agent_display = if wizard.about_agent.is_empty() && !agent_focused {
+    let agent_display = if wizard.about_opencrabs.is_empty() && !agent_focused {
         "  personality, vibe, how it should talk to you".to_string()
     } else {
         let cursor = if agent_focused { "█" } else { "" };
-        format!("  {}{}", wizard.about_agent, cursor)
+        format!("  {}{}", wizard.about_opencrabs, cursor)
     };
-    let agent_style = if wizard.about_agent.is_empty() && !agent_focused {
+    let agent_style = if wizard.about_opencrabs.is_empty() && !agent_focused {
         Style::default()
             .fg(Color::DarkGray)
             .add_modifier(Modifier::ITALIC)
@@ -1991,6 +1991,18 @@ fn render_brain_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard)
         Style::default()
             .fg(Color::DarkGray)
             .add_modifier(Modifier::ITALIC),
+    )));
+
+    // Show loaded hint if brain files exist
+    if !wizard.original_about_me.is_empty() || !wizard.original_about_opencrabs.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  Loaded from existing brain files".to_string(),
+            Style::default().fg(ACCENT_GOLD),
+        )));
+    }
+    lines.push(Line::from(Span::styled(
+        "  Esc to skip · Tab to switch fields · Enter to generate".to_string(),
+        Style::default().fg(Color::DarkGray),
     )));
 }
 

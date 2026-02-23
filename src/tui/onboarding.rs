@@ -344,7 +344,10 @@ pub struct OnboardingWizard {
     // Step 8: Brain Setup
     pub brain_field: BrainField,
     pub about_me: String,
-    pub about_agent: String,
+    pub about_opencrabs: String,
+    /// Original values loaded from workspace brain files (for change detection)
+    pub original_about_me: String,
+    pub original_about_opencrabs: String,
     pub brain_generating: bool,
     pub brain_generated: bool,
     pub brain_error: Option<String>,
@@ -377,8 +380,8 @@ impl OnboardingWizard {
             .unwrap_or_else(|| PathBuf::from("~"))
             .join(".opencrabs");
 
-        // Pre-load default models from embedded config.toml.example for MiniMax and Custom
-        let config_models = Self::load_default_models();
+        // config_models loaded on demand per provider via reload_config_models()
+        let config_models = Vec::new();
 
         // Try to load existing config to pre-fill settings
         let existing_config = crate::config::Config::load().ok();
@@ -416,7 +419,7 @@ impl OnboardingWizard {
             .map(|c| c.gateway.bind.clone())
             .unwrap_or_else(|| "127.0.0.1".to_string());
 
-        Self {
+        let mut wizard = Self {
             step: OnboardingStep::ModeSelect,
             mode: WizardMode::QuickStart,
 
@@ -480,7 +483,9 @@ impl OnboardingWizard {
 
             brain_field: BrainField::AboutMe,
             about_me: String::new(),
-            about_agent: String::new(),
+            about_opencrabs: String::new(),
+            original_about_me: String::new(),
+            original_about_opencrabs: String::new(),
             brain_generating: false,
             brain_generated: false,
             brain_error: None,
@@ -494,18 +499,27 @@ impl OnboardingWizard {
             model_filter: String::new(),
             focused_field: 0,
             error_message: None,
+        };
+
+        // Load existing brain files from workspace if available
+        let workspace = std::path::Path::new(&wizard.workspace_path);
+        if let Ok(content) = std::fs::read_to_string(workspace.join("USER.md")) {
+            let truncated = Self::truncate_preview(&content, 200);
+            wizard.about_me = truncated.clone();
+            wizard.original_about_me = truncated;
         }
+        if let Ok(content) = std::fs::read_to_string(workspace.join("IDENTITY.md")) {
+            let truncated = Self::truncate_preview(&content, 200);
+            wizard.about_opencrabs = truncated.clone();
+            wizard.original_about_opencrabs = truncated;
+        }
+
+        wizard
     }
 
     /// Create a wizard with existing config.toml values as defaults
     pub fn from_config(config: &Config) -> Self {
         let mut wizard = Self::new();
-
-        // Load models from config for each provider
-        if let Some(p) = &config.providers.anthropic
-            && !p.models.is_empty() {
-                wizard.config_models = p.models.clone();
-        }
 
         // Determine which provider is configured and set selected_provider
         if config.providers.anthropic.as_ref().is_some_and(|p| p.enabled) {
@@ -515,10 +529,6 @@ impl OnboardingWizard {
             }
         } else if config.providers.minimax.as_ref().is_some_and(|p| p.enabled) {
             wizard.selected_provider = 4; // Minimax
-            if let Some(p) = &config.providers.minimax
-                && !p.models.is_empty() {
-                    wizard.config_models = p.models.clone();
-                }
             if let Some(model) = &config.providers.minimax.as_ref().and_then(|p| p.default_model.clone()) {
                 wizard.custom_model = model.clone();
             }
@@ -542,6 +552,7 @@ impl OnboardingWizard {
 
         // Detect if we have an existing API key for the selected provider
         wizard.detect_existing_key();
+        wizard.reload_config_models();
 
         // Load gateway settings
         wizard.gateway_port = config.gateway.port.to_string();
@@ -576,6 +587,34 @@ impl OnboardingWizard {
     /// Check if the current provider is the "Custom" option
     pub fn is_custom_provider(&self) -> bool {
         self.selected_provider == PROVIDERS.len() - 1
+    }
+
+    /// Reload config_models for the currently selected provider.
+    /// Tries config.toml first, falls back to config.toml.example defaults.
+    fn reload_config_models(&mut self) {
+        self.config_models.clear();
+        // Try live config first
+        if let Ok(config) = crate::config::Config::load() {
+            match self.selected_provider {
+                4 => {
+                    if let Some(p) = &config.providers.minimax
+                        && !p.models.is_empty() {
+                            self.config_models = p.models.clone();
+                            return;
+                        }
+                }
+                5 => {
+                    if let Some((_name, p)) = config.providers.active_custom()
+                        && !p.models.is_empty() {
+                            self.config_models = p.models.clone();
+                            return;
+                        }
+                }
+                _ => return,
+            }
+        }
+        // Fall back to embedded config.toml.example
+        self.config_models = Self::load_default_models(self.selected_provider);
     }
 
     /// All model names for the current provider (fetched or config or static fallback)
@@ -623,39 +662,46 @@ impl OnboardingWizard {
     }
 
     /// Load default models from embedded config.toml.example for MiniMax and Custom
-    fn load_default_models() -> Vec<String> {
-        // Parse the embedded config.toml.example to extract default models
+    fn load_default_models(provider_index: usize) -> Vec<String> {
+        // Parse the embedded config.toml.example to extract default models for a specific provider
         let config_content = include_str!("../../config.toml.example");
         let mut models = Vec::new();
-        
-        // Parse MiniMax models
+
         if let Ok(config) = config_content.parse::<toml::Value>()
             && let Some(providers) = config.get("providers") {
-                if let Some(minimax) = providers.get("minimax")
-                    && let Some(models_arr) = minimax.get("models").and_then(|m| m.as_array()) {
-                        for model in models_arr {
-                            if let Some(model_str) = model.as_str() {
-                                models.push(model_str.to_string());
-                            }
-                        }
-                    }
-                // Custom providers are now named: [providers.custom.<name>]
-                if let Some(custom) = providers.get("custom")
-                    && let Some(custom_table) = custom.as_table() {
-                        for (_name, entry) in custom_table {
-                            if let Some(models_arr) = entry.get("models").and_then(|m| m.as_array()) {
+                match provider_index {
+                    4 => {
+                        // Minimax only
+                        if let Some(minimax) = providers.get("minimax")
+                            && let Some(models_arr) = minimax.get("models").and_then(|m| m.as_array()) {
                                 for model in models_arr {
-                                    if let Some(model_str) = model.as_str()
-                                        && !models.contains(&model_str.to_string()) {
-                                            models.push(model_str.to_string());
-                                        }
+                                    if let Some(model_str) = model.as_str() {
+                                        models.push(model_str.to_string());
+                                    }
                                 }
                             }
-                        }
                     }
+                    5 => {
+                        // Custom providers only
+                        if let Some(custom) = providers.get("custom")
+                            && let Some(custom_table) = custom.as_table() {
+                                for (_name, entry) in custom_table {
+                                    if let Some(models_arr) = entry.get("models").and_then(|m| m.as_array()) {
+                                        for model in models_arr {
+                                            if let Some(model_str) = model.as_str()
+                                                && !models.contains(&model_str.to_string()) {
+                                                    models.push(model_str.to_string());
+                                                }
+                                        }
+                                    }
+                                }
+                            }
+                    }
+                    _ => {}
+                }
             }
-        
-        tracing::debug!("Loaded {} default models from config.toml.example", models.len());
+
+        tracing::debug!("Loaded {} default models from config.toml.example for provider {}", models.len(), provider_index);
         models
     }
 
@@ -882,17 +928,8 @@ impl OnboardingWizard {
             tracing::info!("Created keys.toml at {:?}", keys_path);
         }
 
-        // Load models from the newly created config.toml for MiniMax and Custom providers
-        if let Ok(config) = crate::config::Config::load() {
-            if let Some(p) = &config.providers.minimax
-                && !p.models.is_empty() {
-                    self.config_models = p.models.clone();
-                }
-            if let Some((_name, p)) = config.providers.active_custom()
-                && !p.models.is_empty() {
-                    self.config_models = p.models.clone();
-                }
-        }
+        // Reload models for the selected provider from the newly created config
+        self.reload_config_models();
 
         Ok(())
     }
@@ -1241,6 +1278,8 @@ impl OnboardingWizard {
                     self.model_filter.clear();
                     self.api_key_input.clear();
                     self.fetched_models.clear();
+                    self.config_models.clear();
+                    self.reload_config_models();
                     self.detect_existing_key();
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
@@ -1250,6 +1289,8 @@ impl OnboardingWizard {
                     self.model_filter.clear();
                     self.api_key_input.clear();
                     self.fetched_models.clear();
+                    self.config_models.clear();
+                    self.reload_config_models();
                     self.detect_existing_key();
                 }
                 KeyCode::Enter | KeyCode::Tab => {
@@ -1424,6 +1465,7 @@ impl OnboardingWizard {
                         self.focused_field = 1;
                     }
                     KeyCode::Enter => {
+                        self.workspace_path = self.workspace_path.trim().to_string();
                         self.next_step();
                         return self.maybe_fetch_models();
                     }
@@ -2201,7 +2243,7 @@ impl OnboardingWizard {
             KeyCode::Enter => {
                 if self.health_complete {
                     self.next_step();
-                    return WizardAction::Complete;
+                    return WizardAction::None;
                 }
             }
             KeyCode::Char('r') | KeyCode::Char('R') => {
@@ -2229,6 +2271,11 @@ impl OnboardingWizard {
         }
 
         match event.code {
+            KeyCode::Esc => {
+                // Esc always skips
+                self.step = OnboardingStep::Complete;
+                return WizardAction::Complete;
+            }
             KeyCode::Tab => {
                 self.brain_field = match self.brain_field {
                     BrainField::AboutMe => BrainField::AboutAgent,
@@ -2242,12 +2289,18 @@ impl OnboardingWizard {
                 };
             }
             KeyCode::Enter => {
-                // Ctrl+Enter or Enter on AboutAgent triggers generation
                 if self.brain_field == BrainField::AboutAgent {
-                    if self.about_me.is_empty() && self.about_agent.is_empty() {
-                        self.error_message = Some("Drop some info first — don't leave your agent hanging".to_string());
-                        return WizardAction::None;
+                    if self.about_me.is_empty() && self.about_opencrabs.is_empty() {
+                        // Nothing to work with — skip straight to Complete
+                        self.step = OnboardingStep::Complete;
+                        return WizardAction::Complete;
                     }
+                    // If inputs unchanged from loaded values, skip without regenerating
+                    if !self.brain_inputs_changed() && !self.original_about_me.is_empty() {
+                        self.step = OnboardingStep::Complete;
+                        return WizardAction::Complete;
+                    }
+                    // Inputs changed or new — trigger generation
                     return WizardAction::GenerateBrain;
                 }
                 // Enter on AboutMe moves to AboutAgent
@@ -2268,20 +2321,52 @@ impl OnboardingWizard {
     fn active_brain_field_mut(&mut self) -> &mut String {
         match self.brain_field {
             BrainField::AboutMe => &mut self.about_me,
-            BrainField::AboutAgent => &mut self.about_agent,
+            BrainField::AboutAgent => &mut self.about_opencrabs,
         }
     }
 
-    /// Build the prompt sent to the AI to generate personalized brain files
+    /// Whether brain inputs have been modified since loading from file
+    fn brain_inputs_changed(&self) -> bool {
+        self.about_me != self.original_about_me || self.about_opencrabs != self.original_about_opencrabs
+    }
+
+    /// Truncate file content to first N chars for preview in the wizard
+    fn truncate_preview(content: &str, max_chars: usize) -> String {
+        let trimmed = content.trim();
+        if trimmed.len() <= max_chars {
+            trimmed.to_string()
+        } else {
+            let truncated = &trimmed[..trimmed.floor_char_boundary(max_chars)];
+            format!("{}...", truncated.trim_end())
+        }
+    }
+
+    /// Build the prompt sent to the AI to generate personalized brain files.
+    /// Uses existing workspace files if available, falls back to static templates.
     pub fn build_brain_prompt(&self) -> String {
         let today = Local::now().format("%Y-%m-%d").to_string();
+        let workspace = std::path::Path::new(&self.workspace_path);
 
-        let soul_template = include_str!("../docs/reference/templates/SOUL.md");
-        let identity_template = include_str!("../docs/reference/templates/IDENTITY.md");
-        let user_template = include_str!("../docs/reference/templates/USER.md");
-        let agents_template = include_str!("../docs/reference/templates/AGENTS.md");
-        let tools_template = include_str!("../docs/reference/templates/TOOLS.md");
-        let memory_template = include_str!("../docs/reference/templates/MEMORY.md");
+        // Read current brain files from workspace, fall back to static templates
+        let soul_template_static = include_str!("../docs/reference/templates/SOUL.md");
+        let identity_template_static = include_str!("../docs/reference/templates/IDENTITY.md");
+        let user_template_static = include_str!("../docs/reference/templates/USER.md");
+        let agents_template_static = include_str!("../docs/reference/templates/AGENTS.md");
+        let tools_template_static = include_str!("../docs/reference/templates/TOOLS.md");
+        let memory_template_static = include_str!("../docs/reference/templates/MEMORY.md");
+
+        let soul_template = std::fs::read_to_string(workspace.join("SOUL.md"))
+            .unwrap_or_else(|_| soul_template_static.to_string());
+        let identity_template = std::fs::read_to_string(workspace.join("IDENTITY.md"))
+            .unwrap_or_else(|_| identity_template_static.to_string());
+        let user_template = std::fs::read_to_string(workspace.join("USER.md"))
+            .unwrap_or_else(|_| user_template_static.to_string());
+        let agents_template = std::fs::read_to_string(workspace.join("AGENTS.md"))
+            .unwrap_or_else(|_| agents_template_static.to_string());
+        let tools_template = std::fs::read_to_string(workspace.join("TOOLS.md"))
+            .unwrap_or_else(|_| tools_template_static.to_string());
+        let memory_template = std::fs::read_to_string(workspace.join("MEMORY.md"))
+            .unwrap_or_else(|_| memory_template_static.to_string());
 
         format!(
             r#"You are setting up a personal AI agent's brain — its entire workspace of markdown files that define who it is, who its human is, and how it operates.
@@ -2292,7 +2377,7 @@ The user dumped two blocks of info. One about themselves (name, role, links, pro
 {about_me}
 
 === ABOUT THE AGENT ===
-{about_agent}
+{about_opencrabs}
 
 === TODAY'S DATE ===
 {date}
@@ -2331,7 +2416,7 @@ Respond with EXACTLY six sections using these delimiters. No extra text before t
 ---MEMORY---
 (generated MEMORY.md content)"#,
             about_me = if self.about_me.is_empty() { "Not provided" } else { &self.about_me },
-            about_agent = if self.about_agent.is_empty() { "Not provided" } else { &self.about_agent },
+            about_opencrabs = if self.about_opencrabs.is_empty() { "Not provided" } else { &self.about_opencrabs },
             date = today,
             soul = soul_template,
             identity = identity_template,
@@ -2580,17 +2665,19 @@ Respond with EXACTLY six sections using these delimiters. No extra text before t
 
             for (filename, content) in TEMPLATE_FILES {
                 let file_path = workspace.join(filename);
-                if !file_path.exists() {
-                    // Use AI-generated content when available, static template as fallback
-                    let final_content = match *filename {
-                        "SOUL.md" => self.generated_soul.as_deref().unwrap_or(content),
-                        "IDENTITY.md" => self.generated_identity.as_deref().unwrap_or(content),
-                        "USER.md" => self.generated_user.as_deref().unwrap_or(content),
-                        "AGENTS.md" => self.generated_agents.as_deref().unwrap_or(content),
-                        "TOOLS.md" => self.generated_tools.as_deref().unwrap_or(content),
-                        "MEMORY.md" => self.generated_memory.as_deref().unwrap_or(content),
-                        _ => content,
-                    };
+                // Use AI-generated content when available, static template as fallback
+                let generated = match *filename {
+                    "SOUL.md" => self.generated_soul.as_deref(),
+                    "IDENTITY.md" => self.generated_identity.as_deref(),
+                    "USER.md" => self.generated_user.as_deref(),
+                    "AGENTS.md" => self.generated_agents.as_deref(),
+                    "TOOLS.md" => self.generated_tools.as_deref(),
+                    "MEMORY.md" => self.generated_memory.as_deref(),
+                    _ => None,
+                };
+                // Write if: AI-generated (always overwrite) or file doesn't exist (seed template)
+                if generated.is_some() || !file_path.exists() {
+                    let final_content = generated.unwrap_or(content);
                     std::fs::write(&file_path, final_content)
                         .map_err(|e| format!("Failed to write {}: {}", filename, e))?;
                 }
@@ -3221,7 +3308,7 @@ mod tests {
     fn test_brain_setup_defaults() {
         let wizard = OnboardingWizard::new();
         assert!(wizard.about_me.is_empty());
-        assert!(wizard.about_agent.is_empty());
+        assert!(wizard.about_opencrabs.is_empty());
         assert_eq!(wizard.brain_field, BrainField::AboutMe);
     }
 

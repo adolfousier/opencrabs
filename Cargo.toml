@@ -1,6 +1,6 @@
 [package]
 name = "opencrabs"
-version = "0.2.27"
+version = "0.2.28"
 edition = "2024"
 authors = ["Adolfo Usier <adolfo@meetneura.ai>"]
 license = "MIT"

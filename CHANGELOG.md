@@ -5,6 +5,24 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.28] - 2026-02-23
+
+### Added
+- **Brain Setup Persistence** — BrainSetup step loads existing `USER.md`/`IDENTITY.md` from workspace as truncated preview on re-run. No extra files — brain files are the source of truth
+- **Brain Setup Skip** — `Esc` to skip, unchanged inputs skip regeneration, empty inputs skip gracefully
+- **Brain Regeneration Context** — On re-run, LLM receives current workspace brain files (not static templates), preserving manual edits as context. Generated content overwrites existing files
+- **Splash Auto-Close** — Splash screen auto-closes after 3 seconds
+- **Slack Debug Logging** — Added debug tracing for Slack message routing (user, channel, bot_id)
+
+### Fixed
+- **Model List Isolation** — Minimax and Custom provider model lists no longer mix. Each provider loads only its own models from `config.toml.example`. Previously `load_default_models()` dumped all providers into one shared list
+- **Workspace Path Trim** — Workspace path is trimmed on confirm, preventing ghost directories from trailing spaces
+- **HealthCheck Skipping BrainSetup** — HealthCheck step returned `WizardAction::Complete` immediately, skipping BrainSetup. Now returns `WizardAction::None` to advance to BrainSetup
+- **Brain File Overwrite on Regeneration** — `apply_config()` skipped writing brain files if they already existed, even after regeneration. Now overwrites when AI-generated content is available
+
+### Changed
+- **Renamed `about_agent` → `about_opencrabs`** — Field and label renamed from "Your Agent" to "Your OpenCrabs" for clarity
+
 ## [0.2.27] - 2026-02-23
 
 ### Added
@@ -447,32 +465,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Overlay Approval Dialog** — Replaced by inline approval in chat
 - **Bottom Status Bar** — Removed entirely for more screen space
 
-[0.2.27]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.27
-[0.2.26]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.26
-[0.2.25]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.25
-[0.2.24]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.24
-[0.2.23]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.23
-[0.2.22]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.22
-[0.2.21]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.21
-[0.2.20]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.20
-[0.2.19]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.19
-[0.2.18]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.18
-[0.2.17]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.17
-[0.2.16]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.16
-[0.2.15]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.15
-[0.2.14]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.14
-[0.2.13]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.13
-[0.2.12]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.12
-[0.2.1]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.1
-[0.2.0]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.0
-[0.1.9]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.9
-[0.1.8]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.8
-[0.1.7]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.7
-[0.1.6]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.6
-[0.1.5]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.5
-[0.1.4]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.4
-[0.1.3]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.3
-
 ## [0.1.2] - 2026-02-14
 
 ### Added
@@ -540,4 +532,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
-[0.1.0]: https://github.com/adolfousier/opencrab/releases/tag/v0.1.0
+[0.2.28]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.28
+[0.2.27]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.27
+[0.2.26]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.26
+[0.2.25]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.25
+[0.2.24]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.24
+[0.2.23]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.23
+[0.2.22]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.22
+[0.2.21]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.21
+[0.2.20]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.20
+[0.2.19]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.19
+[0.2.18]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.18
+[0.2.17]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.17
+[0.2.16]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.16
+[0.2.15]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.15
+[0.2.14]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.14
+[0.2.13]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.13
+[0.2.12]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.12
+[0.2.11]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.11
+[0.2.1]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.1
+[0.2.0]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.0
+[0.1.9]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.9
+[0.1.8]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.8
+[0.1.7]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.7
+[0.1.6]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.6
+[0.1.5]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.5
+[0.1.4]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.4
+[0.1.3]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.3
+[0.1.2]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.2
+[0.1.1]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.1
+[0.1.0]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.0

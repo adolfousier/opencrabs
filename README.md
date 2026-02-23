@@ -378,9 +378,19 @@ First-time users are guided through an 8-step setup wizard that appears automati
 | 5 | **Channels** | Toggle messaging integrations (Telegram, Discord, WhatsApp, Signal, Google Chat, iMessage) |
 | 6 | **Daemon** | Install background service (systemd on Linux, LaunchAgent on macOS) |
 | 7 | **Health Check** | Verify API key, config, workspace — shows pass/fail summary |
-| 8 | **Brain Personalization** | Tell the agent about yourself and your preferred agent vibe → AI generates personalized brain files (SOUL.md, IDENTITY.md, USER.md, etc.) |
+| 8 | **Brain Personalization** | Tell the agent about yourself and how you want it to behave → AI generates personalized brain files (SOUL.md, IDENTITY.md, USER.md, etc.) |
 
 **QuickStart mode** skips steps 4-6 with sensible defaults. **Advanced mode** lets you configure everything.
+
+#### Brain Personalization (Step 8)
+
+Two input fields: **About You** (who you are) and **Your OpenCrabs** (how the agent should behave). The LLM uses these plus the 6 workspace template files to generate personalized brain files.
+
+- **First run:** Empty fields, static templates as reference → LLM generates → writes to workspace
+- **Re-run:** Fields pre-populated with truncated preview of existing `USER.md` / `IDENTITY.md` → edit to regenerate or `Esc` to skip
+- **Regeneration:** LLM receives the **current workspace files** (not static templates), so any manual edits you made are preserved as context
+- **Overwrite:** Only files with new AI-generated content are overwritten; untouched files keep their current state
+- No extra persistence files — the brain files themselves are the source of truth
 
 ### Wizard Navigation
 
@@ -818,6 +828,7 @@ The brain reads markdown files from `~/.opencrabs/`:
 ├── HEARTBEAT.md               # Periodic task definitions (optional)
 ├── BOOTSTRAP.md               # First-run onboarding wizard (deleted after setup)
 ├── config.toml                # App configuration (provider, model, approval policy)
+├── keys.toml                  # API keys (provider, channel, STT/TTS)
 ├── commands.toml              # User-defined slash commands
 ├── opencrabs.db               # SQLite — sessions, messages, plans
 └── memory/                    # Daily memory logs (auto-compaction summaries)

@@ -473,6 +473,8 @@ pub fn keys_path() -> PathBuf {
     opencrabs_home().join("keys.toml")
 }
 
+
+
 /// Save API keys to keys.toml using merge (preserves existing keys).
 /// Only writes non-empty api_key values; never deletes other providers' keys.
 pub fn save_keys(keys: &ProviderConfigs) -> Result<()> {

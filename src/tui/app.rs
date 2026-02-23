@@ -732,6 +732,21 @@ impl App {
             TuiEvent::Tick => {
                 // Update animation frame for spinner
                 self.animation_frame = self.animation_frame.wrapping_add(1);
+
+                // Auto-close splash screen after 3 seconds
+                if self.mode == AppMode::Splash
+                    && let Some(shown_at) = self.splash_shown_at
+                        && shown_at.elapsed() >= std::time::Duration::from_secs(3) {
+                            self.splash_shown_at = None;
+                            let is_first = super::onboarding::is_first_time();
+                            if self.force_onboard || is_first {
+                                self.force_onboard = false;
+                                self.onboarding = Some(OnboardingWizard::new());
+                                self.switch_mode(AppMode::Onboarding).await?;
+                            } else {
+                                self.switch_mode(AppMode::Chat).await?;
+                            }
+                        }
             }
             TuiEvent::ToolApprovalRequested(request) => {
                 self.handle_approval_requested(request);
