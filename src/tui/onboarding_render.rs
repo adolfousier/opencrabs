@@ -1044,13 +1044,19 @@ fn render_telegram_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWiza
             .fg(Color::DarkGray)
             .add_modifier(Modifier::ITALIC),
     )));
+    lines.push(Line::from(Span::styled(
+        "  User ID is optional — leave empty to allow all users",
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::ITALIC),
+    )));
 
     // Test status
     render_channel_test_status(lines, wizard);
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "  Skip with Enter if you'll add it later",
+        "  Tab: next field | Enter: test/continue | Esc: back",
         Style::default().fg(Color::DarkGray),
     )));
 }
@@ -1176,30 +1182,75 @@ fn render_discord_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
         )));
     }
 
+    // Allowed List input (Discord user ID — who the bot replies to)
+    let al_focused = wizard.discord_field == DiscordField::AllowedList;
+    let (al_display, al_hint) = if wizard.has_existing_discord_allowed_list() {
+        (
+            "**********".to_string(),
+            " (already configured)".to_string(),
+        )
+    } else if wizard.discord_allowed_list_input.is_empty() {
+        ("user ID (optional — empty = reply to all)".to_string(), String::new())
+    } else {
+        (wizard.discord_allowed_list_input.clone(), String::new())
+    };
+    let al_cursor = if al_focused && !wizard.has_existing_discord_allowed_list() {
+        "\u{2588}"
+    } else {
+        ""
+    };
+
+    lines.push(Line::from(vec![
+        Span::styled(
+            "  Allowed List: ",
+            Style::default().fg(if al_focused {
+                BRAND_BLUE
+            } else {
+                Color::DarkGray
+            }),
+        ),
+        Span::styled(
+            format!("{}{}", al_display, al_cursor),
+            Style::default().fg(if wizard.has_existing_discord_allowed_list() {
+                Color::Green
+            } else if al_focused {
+                Color::White
+            } else {
+                Color::DarkGray
+            }),
+        ),
+    ]));
+
+    if !al_hint.is_empty() && al_focused {
+        lines.push(Line::from(Span::styled(
+            format!("  {}", al_hint.trim()),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
+        )));
+    }
+
     // Test status
     render_channel_test_status(lines, wizard);
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "  Skip with Enter if you'll add it later",
+        "  Tab: next field | Enter: test/continue | Esc: back",
         Style::default().fg(Color::DarkGray),
     )));
 }
 
 fn render_whatsapp_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
+    use crate::tui::onboarding::WhatsAppField;
+
+    // Connection section
+    let conn_focused = wizard.whatsapp_field == WhatsAppField::Connection;
     if wizard.whatsapp_connected {
-        // Success state
         lines.push(Line::from(Span::styled(
             "  WhatsApp connected!",
             Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
         )));
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "  Press Enter to continue",
-            Style::default().fg(Color::DarkGray),
-        )));
     } else if let Some(ref qr) = wizard.whatsapp_qr_text {
-        // QR code displayed
         lines.push(Line::from(Span::styled(
             "  Open WhatsApp > Linked Devices > Link a Device",
             Style::default()
@@ -1215,38 +1266,92 @@ fn render_whatsapp_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWiza
             "  Waiting for scan...",
             Style::default().fg(BRAND_GOLD),
         )));
-        lines.push(Line::from(Span::styled(
-            "  Press 'S' to skip",
-            Style::default().fg(Color::DarkGray),
-        )));
     } else if wizard.whatsapp_connecting {
-        // Loading state
         lines.push(Line::from(Span::styled(
             "  Starting WhatsApp connection...",
             Style::default().fg(Color::DarkGray),
         )));
     } else if let Some(ref err) = wizard.whatsapp_error {
-        // Error state
         lines.push(Line::from(Span::styled(
             format!("  {}", err),
             Style::default().fg(Color::Red),
         )));
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "  Press Enter to retry or 'S' to skip",
-            Style::default().fg(Color::DarkGray),
-        )));
-    } else {
-        // Initial state — press Enter to start
+        if conn_focused {
+            lines.push(Line::from(Span::styled(
+                "  Press Enter to retry or 'S' to skip",
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+    } else if conn_focused {
         lines.push(Line::from(Span::styled(
             "  Press Enter to show QR code",
             Style::default().fg(Color::DarkGray),
         )));
+    }
+
+    lines.push(Line::from(""));
+
+    // Phone allowlist field
+    let phone_focused = wizard.whatsapp_field == WhatsAppField::PhoneAllowlist;
+    let (phone_display, phone_hint) = if wizard.has_existing_whatsapp_phone() {
+        (
+            "**********".to_string(),
+            " (already configured)".to_string(),
+        )
+    } else if wizard.whatsapp_phone_input.is_empty() {
+        ("+15551234567".to_string(), String::new())
+    } else {
+        (wizard.whatsapp_phone_input.clone(), String::new())
+    };
+    let phone_cursor = if phone_focused && !wizard.has_existing_whatsapp_phone() {
+        "\u{2588}"
+    } else {
+        ""
+    };
+
+    lines.push(Line::from(vec![
+        Span::styled(
+            "  Allowed Phone: ",
+            Style::default().fg(if phone_focused {
+                BRAND_BLUE
+            } else {
+                Color::DarkGray
+            }),
+        ),
+        Span::styled(
+            format!("{}{}", phone_display, phone_cursor),
+            Style::default().fg(if wizard.has_existing_whatsapp_phone() {
+                Color::Green
+            } else if phone_focused {
+                Color::White
+            } else {
+                Color::DarkGray
+            }),
+        ),
+    ]));
+
+    if !phone_hint.is_empty() && phone_focused {
         lines.push(Line::from(Span::styled(
-            "  Press 'S' to skip WhatsApp setup",
-            Style::default().fg(Color::DarkGray),
+            format!("  {}", phone_hint.trim()),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
         )));
     }
+
+    lines.push(Line::from(Span::styled(
+        "  Optional — leave empty to allow all numbers",
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::ITALIC),
+    )));
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  Tab: next field | Enter: continue | S: skip | Esc: back",
+        Style::default().fg(Color::DarkGray),
+    )));
 }
 
 fn render_slack_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
@@ -1421,12 +1526,60 @@ fn render_slack_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard)
         )));
     }
 
+    // Allowed List input (Slack user ID — who the bot replies to)
+    let al_focused = wizard.slack_field == SlackField::AllowedList;
+    let (al_display, al_hint) = if wizard.has_existing_slack_allowed_list() {
+        (
+            "**********".to_string(),
+            " (already configured)".to_string(),
+        )
+    } else if wizard.slack_allowed_list_input.is_empty() {
+        ("U12345678 (optional — empty = reply to all)".to_string(), String::new())
+    } else {
+        (wizard.slack_allowed_list_input.clone(), String::new())
+    };
+    let al_cursor = if al_focused && !wizard.has_existing_slack_allowed_list() {
+        "\u{2588}"
+    } else {
+        ""
+    };
+
+    lines.push(Line::from(vec![
+        Span::styled(
+            "  Allowed List: ",
+            Style::default().fg(if al_focused {
+                BRAND_BLUE
+            } else {
+                Color::DarkGray
+            }),
+        ),
+        Span::styled(
+            format!("{}{}", al_display, al_cursor),
+            Style::default().fg(if wizard.has_existing_slack_allowed_list() {
+                Color::Green
+            } else if al_focused {
+                Color::White
+            } else {
+                Color::DarkGray
+            }),
+        ),
+    ]));
+
+    if !al_hint.is_empty() && al_focused {
+        lines.push(Line::from(Span::styled(
+            format!("  {}", al_hint.trim()),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
+        )));
+    }
+
     // Test status
     render_channel_test_status(lines, wizard);
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "  Skip with Enter if you'll add tokens later",
+        "  Tab: next field | Enter: test/continue | Esc: back",
         Style::default().fg(Color::DarkGray),
     )));
 }

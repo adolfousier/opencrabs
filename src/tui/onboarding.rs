@@ -218,6 +218,7 @@ pub enum AuthField {
 pub enum DiscordField {
     BotToken,
     ChannelID,
+    AllowedList,
 }
 
 /// Which field is focused in SlackSetup step
@@ -226,6 +227,7 @@ pub enum SlackField {
     BotToken,
     AppToken,
     ChannelID,
+    AllowedList,
 }
 
 /// Which field is focused in TelegramSetup step
@@ -233,6 +235,13 @@ pub enum SlackField {
 pub enum TelegramField {
     BotToken,
     UserID,
+}
+
+/// Which field is focused in WhatsAppSetup step
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WhatsAppField {
+    Connection,
+    PhoneAllowlist,
 }
 
 /// Channel test connection status
@@ -299,18 +308,22 @@ pub struct OnboardingWizard {
     pub discord_field: DiscordField,
     pub discord_token_input: String,
     pub discord_channel_id_input: String,
+    pub discord_allowed_list_input: String,
 
     // WhatsApp Setup (shown when WhatsApp is enabled)
+    pub whatsapp_field: WhatsAppField,
     pub whatsapp_qr_text: Option<String>,
     pub whatsapp_connecting: bool,
     pub whatsapp_connected: bool,
     pub whatsapp_error: Option<String>,
+    pub whatsapp_phone_input: String,
 
     // Slack Setup (shown when Slack is enabled)
     pub slack_field: SlackField,
     pub slack_bot_token_input: String,
     pub slack_app_token_input: String,
     pub slack_channel_id_input: String,
+    pub slack_allowed_list_input: String,
 
     // Channel test connection status
     pub channel_test_status: ChannelTestStatus,
@@ -438,16 +451,20 @@ impl OnboardingWizard {
             discord_field: DiscordField::BotToken,
             discord_token_input: String::new(),
             discord_channel_id_input: String::new(),
+            discord_allowed_list_input: String::new(),
 
+            whatsapp_field: WhatsAppField::Connection,
             whatsapp_qr_text: None,
             whatsapp_connecting: false,
             whatsapp_connected: false,
             whatsapp_error: None,
+            whatsapp_phone_input: String::new(),
 
             slack_field: SlackField::BotToken,
             slack_bot_token_input: String::new(),
             slack_app_token_input: String::new(),
             slack_channel_id_input: String::new(),
+            slack_allowed_list_input: String::new(),
 
             channel_test_status: ChannelTestStatus::Idle,
 
@@ -1098,6 +1115,15 @@ impl OnboardingWizard {
                         }
                         self.discord_channel_id_input.push_str(clean);
                     }
+                    DiscordField::AllowedList => {
+                        let digits: String = clean.chars().filter(|c| c.is_ascii_digit()).collect();
+                        if !digits.is_empty() {
+                            if self.has_existing_discord_allowed_list() {
+                                self.discord_allowed_list_input.clear();
+                            }
+                            self.discord_allowed_list_input.push_str(&digits);
+                        }
+                    }
                 }
             }
             OnboardingStep::SlackSetup => {
@@ -1120,6 +1146,26 @@ impl OnboardingWizard {
                             self.slack_channel_id_input.clear();
                         }
                         self.slack_channel_id_input.push_str(clean);
+                    }
+                    SlackField::AllowedList => {
+                        if self.has_existing_slack_allowed_list() {
+                            self.slack_allowed_list_input.clear();
+                        }
+                        self.slack_allowed_list_input.push_str(clean);
+                    }
+                }
+            }
+            OnboardingStep::WhatsAppSetup => {
+                if self.whatsapp_field == WhatsAppField::PhoneAllowlist {
+                    // Accept digits, +, - for phone number
+                    let phone: String = clean.chars()
+                        .filter(|c| c.is_ascii_digit() || *c == '+' || *c == '-')
+                        .collect();
+                    if !phone.is_empty() {
+                        if self.has_existing_whatsapp_phone() {
+                            self.whatsapp_phone_input.clear();
+                        }
+                        self.whatsapp_phone_input.push_str(&phone);
                     }
                 }
             }
@@ -1529,10 +1575,13 @@ impl OnboardingWizard {
                             self.channel_test_status = ChannelTestStatus::Idle;
                             self.detect_existing_discord_token();
                             self.detect_existing_discord_channel_id();
+                            self.detect_existing_discord_allowed_list();
                         }
                         2 => {
                             self.step = OnboardingStep::WhatsAppSetup;
+                            self.whatsapp_field = WhatsAppField::Connection;
                             self.reset_whatsapp_state();
+                            self.detect_existing_whatsapp_phone();
                         }
                         3 => {
                             self.step = OnboardingStep::SlackSetup;
@@ -1540,6 +1589,7 @@ impl OnboardingWizard {
                             self.channel_test_status = ChannelTestStatus::Idle;
                             self.detect_existing_slack_tokens();
                             self.detect_existing_slack_channel_id();
+                            self.detect_existing_slack_allowed_list();
                         }
                         _ => {}
                     }
@@ -1600,6 +1650,19 @@ impl OnboardingWizard {
         self.discord_channel_id_input == EXISTING_KEY_SENTINEL
     }
 
+    /// Detect existing Discord allowed users from config.toml
+    fn detect_existing_discord_allowed_list(&mut self) {
+        if let Ok(config) = crate::config::Config::load()
+            && !config.channels.discord.allowed_users.is_empty() {
+                self.discord_allowed_list_input = EXISTING_KEY_SENTINEL.to_string();
+            }
+    }
+
+    /// Check if Discord allowed list holds a pre-existing value
+    pub fn has_existing_discord_allowed_list(&self) -> bool {
+        self.discord_allowed_list_input == EXISTING_KEY_SENTINEL
+    }
+
     /// Detect existing Slack tokens from keys.toml
     fn detect_existing_slack_tokens(&mut self) {
         if let Ok(config) = crate::config::Config::load() {
@@ -1635,6 +1698,19 @@ impl OnboardingWizard {
         self.slack_channel_id_input == EXISTING_KEY_SENTINEL
     }
 
+    /// Detect existing Slack allowed IDs from config.toml
+    fn detect_existing_slack_allowed_list(&mut self) {
+        if let Ok(config) = crate::config::Config::load()
+            && !config.channels.slack.allowed_ids.is_empty() {
+                self.slack_allowed_list_input = EXISTING_KEY_SENTINEL.to_string();
+            }
+    }
+
+    /// Check if Slack allowed list holds a pre-existing value
+    pub fn has_existing_slack_allowed_list(&self) -> bool {
+        self.slack_allowed_list_input == EXISTING_KEY_SENTINEL
+    }
+
     /// Detect existing Telegram bot token from keys.toml
     fn detect_existing_telegram_token(&mut self) {
         if let Ok(config) = crate::config::Config::load()
@@ -1659,6 +1735,19 @@ impl OnboardingWizard {
     /// Check if telegram user ID holds a pre-existing value
     pub fn has_existing_telegram_user_id(&self) -> bool {
         self.telegram_user_id_input == EXISTING_KEY_SENTINEL
+    }
+
+    /// Detect existing WhatsApp allowed phones from config.toml
+    fn detect_existing_whatsapp_phone(&mut self) {
+        if let Ok(config) = crate::config::Config::load()
+            && !config.channels.whatsapp.allowed_phones.is_empty() {
+                self.whatsapp_phone_input = EXISTING_KEY_SENTINEL.to_string();
+            }
+    }
+
+    /// Check if WhatsApp phone holds a pre-existing value
+    pub fn has_existing_whatsapp_phone(&self) -> bool {
+        self.whatsapp_phone_input == EXISTING_KEY_SENTINEL
     }
 
     /// Detect existing Groq API key from keys.toml
@@ -1817,6 +1906,28 @@ impl OnboardingWizard {
                 KeyCode::BackTab => {
                     self.discord_field = DiscordField::BotToken;
                 }
+                KeyCode::Tab | KeyCode::Enter => {
+                    self.discord_field = DiscordField::AllowedList;
+                }
+                _ => {}
+            },
+            DiscordField::AllowedList => match event.code {
+                KeyCode::Char(c) if c.is_ascii_digit() => {
+                    if self.has_existing_discord_allowed_list() {
+                        self.discord_allowed_list_input.clear();
+                    }
+                    self.discord_allowed_list_input.push(c);
+                }
+                KeyCode::Backspace => {
+                    if self.has_existing_discord_allowed_list() {
+                        self.discord_allowed_list_input.clear();
+                    } else {
+                        self.discord_allowed_list_input.pop();
+                    }
+                }
+                KeyCode::BackTab => {
+                    self.discord_field = DiscordField::ChannelID;
+                }
                 KeyCode::Enter => {
                     let has_token = !self.discord_token_input.is_empty();
                     let has_channel = !self.discord_channel_id_input.is_empty();
@@ -1832,27 +1943,59 @@ impl OnboardingWizard {
     }
 
     fn handle_whatsapp_setup_key(&mut self, event: KeyEvent) -> WizardAction {
-        match event.code {
-            KeyCode::Enter => {
-                if self.whatsapp_connected {
-                    // Connected — advance to next channel sub-step
+        match self.whatsapp_field {
+            WhatsAppField::Connection => match event.code {
+                KeyCode::Enter => {
+                    if self.whatsapp_connected {
+                        // Connected — move to phone field
+                        self.whatsapp_field = WhatsAppField::PhoneAllowlist;
+                        WizardAction::None
+                    } else if !self.whatsapp_connecting {
+                        // Start connection
+                        self.whatsapp_connecting = true;
+                        self.whatsapp_error = None;
+                        WizardAction::WhatsAppConnect
+                    } else {
+                        WizardAction::None // already connecting, wait
+                    }
+                }
+                KeyCode::Tab => {
+                    self.whatsapp_field = WhatsAppField::PhoneAllowlist;
+                    WizardAction::None
+                }
+                KeyCode::Char('s') | KeyCode::Char('S') => {
+                    // Skip — advance without connecting
                     self.next_step();
                     WizardAction::None
-                } else if !self.whatsapp_connecting {
-                    // Start connection
-                    self.whatsapp_connecting = true;
-                    self.whatsapp_error = None;
-                    WizardAction::WhatsAppConnect
-                } else {
-                    WizardAction::None // already connecting, wait
                 }
-            }
-            KeyCode::Char('s') | KeyCode::Char('S') => {
-                // Skip — advance without connecting
-                self.next_step();
-                WizardAction::None
-            }
-            _ => WizardAction::None,
+                _ => WizardAction::None,
+            },
+            WhatsAppField::PhoneAllowlist => match event.code {
+                KeyCode::Char(c) if c.is_ascii_digit() || c == '+' || c == '-' || c == ' ' => {
+                    if self.has_existing_whatsapp_phone() {
+                        self.whatsapp_phone_input.clear();
+                    }
+                    self.whatsapp_phone_input.push(c);
+                    WizardAction::None
+                }
+                KeyCode::Backspace => {
+                    if self.has_existing_whatsapp_phone() {
+                        self.whatsapp_phone_input.clear();
+                    } else {
+                        self.whatsapp_phone_input.pop();
+                    }
+                    WizardAction::None
+                }
+                KeyCode::BackTab => {
+                    self.whatsapp_field = WhatsAppField::Connection;
+                    WizardAction::None
+                }
+                KeyCode::Enter => {
+                    self.next_step();
+                    WizardAction::None
+                }
+                _ => WizardAction::None,
+            },
         }
     }
 
@@ -1966,6 +2109,28 @@ impl OnboardingWizard {
                 }
                 KeyCode::BackTab => {
                     self.slack_field = SlackField::AppToken;
+                }
+                KeyCode::Tab | KeyCode::Enter => {
+                    self.slack_field = SlackField::AllowedList;
+                }
+                _ => {}
+            },
+            SlackField::AllowedList => match event.code {
+                KeyCode::Char(c) => {
+                    if self.has_existing_slack_allowed_list() {
+                        self.slack_allowed_list_input.clear();
+                    }
+                    self.slack_allowed_list_input.push(c);
+                }
+                KeyCode::Backspace => {
+                    if self.has_existing_slack_allowed_list() {
+                        self.slack_allowed_list_input.clear();
+                    } else {
+                        self.slack_allowed_list_input.pop();
+                    }
+                }
+                KeyCode::BackTab => {
+                    self.slack_field = SlackField::ChannelID;
                 }
                 KeyCode::Enter => {
                     let has_token = !self.slack_bot_token_input.is_empty();
@@ -2380,6 +2545,18 @@ Respond with EXACTLY six sections using these delimiters. No extra text before t
         if !self.slack_channel_id_input.is_empty() && !self.has_existing_slack_channel_id() {
             let _ = Config::write_array("channels.slack", "allowed_channels",
                 std::slice::from_ref(&self.slack_channel_id_input));
+        }
+        if !self.discord_allowed_list_input.is_empty() && !self.has_existing_discord_allowed_list()
+            && let Ok(uid) = self.discord_allowed_list_input.parse::<i64>() {
+                let _ = Config::write_i64_array("channels.discord", "allowed_users", &[uid]);
+            }
+        if !self.slack_allowed_list_input.is_empty() && !self.has_existing_slack_allowed_list() {
+            let _ = Config::write_array("channels.slack", "allowed_ids",
+                std::slice::from_ref(&self.slack_allowed_list_input));
+        }
+        if !self.whatsapp_phone_input.is_empty() && !self.has_existing_whatsapp_phone() {
+            let _ = Config::write_array("channels.whatsapp", "allowed_phones",
+                std::slice::from_ref(&self.whatsapp_phone_input));
         }
 
         // Seed workspace templates (use AI-generated content when available)

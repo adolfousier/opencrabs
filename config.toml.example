@@ -101,15 +101,17 @@ allowed_phones = ["+15551234567"]
 
 [channels.discord]
 enabled = false
-allowed_channels = ["channel_id"]
+allowed_channels = ["channel_id"]   # Where the bot operates (empty = all channels)
+allowed_users = [123456789012345]   # Who the bot replies to (empty = everyone)
 
 [channels.telegram]
 enabled = false
-allowed_users = [123456789]
+allowed_users = [123456789]         # Who the bot replies to (empty = everyone)
 
 [channels.slack]
 enabled = false
-allowed_channels = ["C12345678"]
+allowed_channels = ["C12345678"]    # Where the bot operates (empty = all channels)
+allowed_ids = ["U12345678"]         # Who the bot replies to (empty = everyone)
 
 # ========================================
 # Web Search Providers
