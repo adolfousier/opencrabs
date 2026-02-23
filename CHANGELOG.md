@@ -447,6 +447,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Overlay Approval Dialog** — Replaced by inline approval in chat
 - **Bottom Status Bar** — Removed entirely for more screen space
 
+[0.2.27]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.27
+[0.2.26]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.26
+[0.2.25]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.25
+[0.2.24]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.24
+[0.2.23]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.23
+[0.2.22]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.22
+[0.2.21]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.21
+[0.2.20]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.20
+[0.2.19]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.19
+[0.2.18]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.18
+[0.2.17]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.17
+[0.2.16]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.16
+[0.2.15]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.15
+[0.2.14]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.14
 [0.2.13]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.13
 [0.2.12]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.12
 [0.2.1]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.1

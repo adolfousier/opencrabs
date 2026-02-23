@@ -2418,11 +2418,16 @@ Respond with EXACTLY six sections using these delimiters. No extra text before t
         for section in &all_provider_sections {
             let _ = Config::write_key(section, "enabled", "false");
         }
-        // Disable all named custom providers
+        // Disable all custom providers (flat and named)
         if let Ok(config) = Config::load()
             && let Some(customs) = &config.providers.custom {
                 for name in customs.keys() {
-                    let _ = Config::write_key(&format!("providers.custom.{}", name), "enabled", "false");
+                    let section = if name == "default" {
+                        "providers.custom".to_string()
+                    } else {
+                        format!("providers.custom.{}", name)
+                    };
+                    let _ = Config::write_key(&section, "enabled", "false");
                 }
             }
 
@@ -2435,11 +2440,19 @@ Respond with EXACTLY six sections using these delimiters. No extra text before t
             3 => "providers.openrouter",
             4 => "providers.minimax",
             5 => {
-                custom_section = format!("providers.custom.{}", self.custom_provider_name);
+                custom_section = if self.custom_provider_name == "default" {
+                    "providers.custom".to_string()
+                } else {
+                    format!("providers.custom.{}", self.custom_provider_name)
+                };
                 &custom_section
             }
             _ => {
-                custom_section = format!("providers.custom.{}", self.custom_provider_name);
+                custom_section = if self.custom_provider_name == "default" {
+                    "providers.custom".to_string()
+                } else {
+                    format!("providers.custom.{}", self.custom_provider_name)
+                };
                 &custom_section
             }
         };

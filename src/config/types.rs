@@ -494,13 +494,18 @@ pub fn save_keys(keys: &ProviderConfigs) -> Result<()> {
         }
     }
 
-    // Handle named custom providers
+    // Handle custom providers (flat "default" and named)
     if let Some(customs) = &keys.custom {
         for (name, p) in customs {
             if let Some(key) = &p.api_key
                 && !key.is_empty()
             {
-                write_secret_key(&format!("providers.custom.{}", name), "api_key", key)?;
+                let section = if name == "default" {
+                    "providers.custom".to_string()
+                } else {
+                    format!("providers.custom.{}", name)
+                };
+                write_secret_key(&section, "api_key", key)?;
             }
         }
     }

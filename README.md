@@ -485,6 +485,26 @@ default_model = "mistral"
 models = ["mistral", "llama3", "codellama"]
 ```
 
+### Multiple Local Providers
+
+Want both LM Studio and Ollama configured? Use named providers and switch via `/models`:
+
+```toml
+[providers.custom.lm_studio]
+enabled = true
+base_url = "http://localhost:1234/v1"
+default_model = "qwen2.5-coder-7b-instruct"
+models = ["qwen2.5-coder-7b-instruct", "llama-3-8B", "mistral-7B-instruct"]
+
+[providers.custom.ollama]
+enabled = false
+base_url = "http://localhost:11434/v1"
+default_model = "mistral"
+models = ["mistral", "llama3", "codellama"]
+```
+
+The name after `custom.` is just a label you choose. The first one with `enabled = true` is used. Switch anytime via `/models` or `/onboard`.
+
 ### Recommended Models
 
 | Model | RAM | Best For |
