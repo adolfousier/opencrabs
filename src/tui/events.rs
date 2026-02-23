@@ -86,6 +86,13 @@ pub enum TuiEvent {
     /// Onboarding wizard received fetched model list from provider API
     OnboardingModelsFetched(Vec<String>),
 
+    /// WhatsApp QR code data received during onboarding pairing
+    WhatsAppQrCode(String),
+    /// WhatsApp pairing successful during onboarding
+    WhatsAppConnected,
+    /// WhatsApp pairing failed during onboarding
+    WhatsAppError(String),
+
     /// A system message to display in chat
     SystemMessage(String),
 

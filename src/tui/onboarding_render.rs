@@ -3,8 +3,9 @@
 //! Render functions for each step of the onboarding wizard.
 
 use super::onboarding::{
-    AuthField, BrainField, DiscordField, HealthStatus, MessagingField, OnboardingStep,
+    AuthField, BrainField, DiscordField, HealthStatus, OnboardingStep,
     OnboardingWizard, SlackField, TelegramField, VoiceField, WizardMode, PROVIDERS,
+    CHANNEL_NAMES,
 };
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Flex, Layout},
@@ -52,12 +53,12 @@ pub fn render_onboarding(f: &mut Frame, wizard: &OnboardingWizard) {
         other => {
             match other {
                 OnboardingStep::ModeSelect => render_mode_select(&mut lines, wizard),
-                OnboardingStep::MessagingSetup => render_messaging_setup(&mut lines, wizard),
                 OnboardingStep::Workspace => render_workspace(&mut lines, wizard),
-                OnboardingStep::Gateway => render_gateway(&mut lines, wizard),
                 OnboardingStep::Channels => render_channels(&mut lines, wizard),
+                OnboardingStep::Gateway => render_gateway(&mut lines, wizard),
                 OnboardingStep::TelegramSetup => render_telegram_setup(&mut lines, wizard),
                 OnboardingStep::DiscordSetup => render_discord_setup(&mut lines, wizard),
+                OnboardingStep::WhatsAppSetup => render_whatsapp_setup(&mut lines, wizard),
                 OnboardingStep::SlackSetup => render_slack_setup(&mut lines, wizard),
                 OnboardingStep::VoiceSetup => render_voice_setup(&mut lines, wizard),
                 OnboardingStep::Daemon => render_daemon(&mut lines, wizard),
@@ -397,9 +398,36 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
     lines.push(Line::from(""));
 
     if is_custom {
+        let name_focused = wizard.auth_field == AuthField::CustomName;
         let base_focused = wizard.auth_field == AuthField::CustomBaseUrl;
         let api_key_focused = wizard.auth_field == AuthField::CustomApiKey;
         let model_focused = wizard.auth_field == AuthField::CustomModel;
+
+        // Provider Name field
+        let name_display = if wizard.custom_provider_name.is_empty() {
+            "default".to_string()
+        } else {
+            wizard.custom_provider_name.clone()
+        };
+        let cursor = if name_focused { "█" } else { "" };
+        lines.push(Line::from(vec![
+            Span::styled(
+                "  Name:     ",
+                Style::default().fg(if name_focused {
+                    BRAND_BLUE
+                } else {
+                    Color::DarkGray
+                }),
+            ),
+            Span::styled(
+                format!("{}{}", name_display, cursor),
+                Style::default().fg(if name_focused {
+                    Color::White
+                } else {
+                    Color::DarkGray
+                }),
+            ),
+        ]));
 
         let base_display = if wizard.custom_base_url.is_empty() {
             "http://localhost:8000/v1".to_string()
@@ -654,79 +682,6 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
     focused_line
 }
 
-fn render_messaging_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
-    lines.push(Line::from(Span::styled(
-        "  Pick your channels (Space to toggle):",
-        Style::default().fg(Color::DarkGray),
-    )));
-    lines.push(Line::from(""));
-
-    // Channel entries: (field, label, enabled, description)
-    let channels: Vec<(MessagingField, &str, bool, &str)> = vec![
-        (
-            MessagingField::Telegram,
-            "Telegram",
-            wizard.messaging_telegram,
-            "Bot token (via @BotFather)",
-        ),
-        (
-            MessagingField::Discord,
-            "Discord",
-            wizard.messaging_discord,
-            "Bot token (via Developer Portal)",
-        ),
-        (
-            MessagingField::WhatsApp,
-            "WhatsApp",
-            wizard.messaging_whatsapp,
-            "QR code pairing — set up later",
-        ),
-        (
-            MessagingField::Slack,
-            "Slack",
-            wizard.messaging_slack,
-            "Socket Mode (bot + app tokens)",
-        ),
-    ];
-
-    for (field, label, on, desc) in &channels {
-        let focused = wizard.messaging_field == *field;
-        lines.push(Line::from(vec![
-            Span::styled(
-                if focused { " > " } else { "   " },
-                Style::default().fg(ACCENT_GOLD),
-            ),
-            Span::styled(
-                if *on { "[x]" } else { "[ ]" },
-                Style::default().fg(if *on { BRAND_GOLD } else { Color::DarkGray }),
-            ),
-            Span::styled(
-                format!(" {}", label),
-                Style::default()
-                    .fg(if focused {
-                        Color::White
-                    } else {
-                        Color::DarkGray
-                    })
-                    .add_modifier(if focused {
-                        Modifier::BOLD
-                    } else {
-                        Modifier::empty()
-                    }),
-            ),
-        ]));
-        lines.push(Line::from(Span::styled(
-            format!("       {}", desc),
-            Style::default().fg(Color::DarkGray),
-        )));
-    }
-
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "  Skip all with Enter if you're not into it",
-        Style::default().fg(Color::DarkGray),
-    )));
-}
 
 fn render_workspace(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
     let path_focused = wizard.focused_field == 0;
@@ -896,7 +851,7 @@ fn render_gateway(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
 
 fn render_channels(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
     lines.push(Line::from(Span::styled(
-        "  Toggle channels with Space:",
+        "  Pick your channels (Space to toggle):",
         Style::default().fg(Color::DarkGray),
     )));
     lines.push(Line::from(""));
@@ -905,6 +860,8 @@ fn render_channels(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
         let focused = i == wizard.focused_field;
         let prefix = if focused { " > " } else { "   " };
         let marker = if *enabled { "[x]" } else { "[ ]" };
+        // Get the description from CHANNEL_NAMES
+        let desc = CHANNEL_NAMES.get(i).map(|(_, d)| *d).unwrap_or("");
 
         lines.push(Line::from(vec![
             Span::styled(prefix, Style::default().fg(ACCENT_GOLD)),
@@ -931,7 +888,17 @@ fn render_channels(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
                     }),
             ),
         ]));
+        lines.push(Line::from(Span::styled(
+            format!("       {}", desc),
+            Style::default().fg(Color::DarkGray),
+        )));
     }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  Skip all with Enter if you're not into it",
+        Style::default().fg(Color::DarkGray),
+    )));
 }
 
 fn render_telegram_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
@@ -1105,6 +1072,69 @@ fn render_discord_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
         "  Skip with Enter if you'll add it later",
         Style::default().fg(Color::DarkGray),
     )));
+}
+
+fn render_whatsapp_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
+    if wizard.whatsapp_connected {
+        // Success state
+        lines.push(Line::from(Span::styled(
+            "  WhatsApp connected!",
+            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "  Press Enter to continue",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else if let Some(ref qr) = wizard.whatsapp_qr_text {
+        // QR code displayed
+        lines.push(Line::from(Span::styled(
+            "  Open WhatsApp > Linked Devices > Link a Device",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
+        )));
+        lines.push(Line::from(""));
+        for qr_line in qr.lines() {
+            lines.push(Line::from(Span::raw(format!("  {}", qr_line))));
+        }
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "  Waiting for scan...",
+            Style::default().fg(BRAND_GOLD),
+        )));
+        lines.push(Line::from(Span::styled(
+            "  Press 'S' to skip",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else if wizard.whatsapp_connecting {
+        // Loading state
+        lines.push(Line::from(Span::styled(
+            "  Starting WhatsApp connection...",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else if let Some(ref err) = wizard.whatsapp_error {
+        // Error state
+        lines.push(Line::from(Span::styled(
+            format!("  {}", err),
+            Style::default().fg(Color::Red),
+        )));
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "  Press Enter to retry or 'S' to skip",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else {
+        // Initial state — press Enter to start
+        lines.push(Line::from(Span::styled(
+            "  Press Enter to show QR code",
+            Style::default().fg(Color::DarkGray),
+        )));
+        lines.push(Line::from(Span::styled(
+            "  Press 'S' to skip WhatsApp setup",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
 }
 
 fn render_slack_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {

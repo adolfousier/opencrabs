@@ -544,7 +544,7 @@ impl App {
             config.providers.gemini.as_ref().filter(|p| p.enabled).map(|_| "gemini"),
             config.providers.openrouter.as_ref().filter(|p| p.enabled).map(|_| "openrouter"),
             config.providers.minimax.as_ref().filter(|p| p.enabled).map(|_| "minimax"),
-            config.providers.custom.as_ref().filter(|p| p.enabled).map(|_| "custom"),
+            config.providers.active_custom().map(|_| "custom"),
         ].into_iter().flatten().collect();
         
         tracing::debug!("rebuild_agent_service: enabled_providers = {:?}", enabled_providers);
@@ -928,6 +928,22 @@ impl App {
                         wizard.fetched_models = models;
                         wizard.selected_model = 0;
                     }
+                }
+            }
+            TuiEvent::WhatsAppQrCode(qr_data) => {
+                if let Some(ref mut wizard) = self.onboarding {
+                    wizard.set_whatsapp_qr(&qr_data);
+                }
+            }
+            TuiEvent::WhatsAppConnected => {
+                if let Some(ref mut wizard) = self.onboarding {
+                    wizard.set_whatsapp_connected();
+                    let _ = crate::config::Config::write_key("channels.whatsapp", "enabled", "true");
+                }
+            }
+            TuiEvent::WhatsAppError(err) => {
+                if let Some(ref mut wizard) = self.onboarding {
+                    wizard.set_whatsapp_error(err);
                 }
             }
             TuiEvent::SudoPasswordRequested(request) => {
@@ -3847,12 +3863,12 @@ impl App {
         } else if config.providers.minimax.as_ref().is_some_and(|p| p.enabled) {
             tracing::debug!("[open_model_selector] MiniMax enabled");
             (4, config.providers.minimax.as_ref().and_then(|p| p.api_key.clone()))
-        } else if config.providers.custom.as_ref().is_some_and(|p| p.enabled) {
+        } else if let Some((_name, custom_cfg)) = config.providers.active_custom() {
             tracing::debug!("[open_model_selector] Custom provider enabled");
-            if let Some(base_url) = config.providers.custom.as_ref().and_then(|p| p.base_url.clone()) {
-                self.model_selector_base_url = base_url;
+            if let Some(base_url) = &custom_cfg.base_url {
+                self.model_selector_base_url = base_url.clone();
             }
-            (5, config.providers.custom.as_ref().and_then(|p| p.api_key.clone()))
+            (5, custom_cfg.api_key.clone())
         } else {
             tracing::debug!("[open_model_selector] No provider enabled, defaulting to Anthropic");
             (0, None) // Default
@@ -3879,7 +3895,7 @@ impl App {
             .or_else(|| config.providers.gemini.as_ref().and_then(|p| p.default_model.as_deref()))
             .or_else(|| config.providers.openrouter.as_ref().and_then(|p| p.default_model.as_deref()))
             .or_else(|| config.providers.minimax.as_ref().and_then(|p| p.default_model.as_deref()))
-            .or_else(|| config.providers.custom.as_ref().and_then(|p| p.default_model.as_deref()))
+            .or_else(|| config.providers.active_custom().and_then(|(_, p)| p.default_model.as_deref()))
             .unwrap_or("default")
             .to_string();
 
@@ -4145,27 +4161,36 @@ impl App {
                 });
             }
             5 => {
-                // Custom OpenAI-compatible
-                config.providers.custom = Some(ProviderConfig {
+                // Custom OpenAI-compatible (named provider)
+                let mut customs = config.providers.custom.unwrap_or_default();
+                customs.insert("default".to_string(), ProviderConfig {
                     enabled: true,
                     api_key: api_key.clone(),
                     base_url: Some(self.model_selector_base_url.clone()),
                     default_model: Some(default_model.to_string()),
                     models: vec![],
                 });
+                config.providers.custom = Some(customs);
             }
             _ => {}
         }
 
         // Save provider config via merge (write_key) — never overwrite entire config.toml
+        let custom_section;
         let section = match provider_idx {
             0 => "providers.anthropic",
             1 => "providers.openai",
             2 => "providers.gemini",
             3 => "providers.openrouter",
             4 => "providers.minimax",
-            5 => "providers.custom",
-            _ => "providers.custom",
+            5 => {
+                custom_section = "providers.custom.default".to_string();
+                &custom_section
+            }
+            _ => {
+                custom_section = "providers.custom.default".to_string();
+                &custom_section
+            }
         };
 
         if let Err(e) = crate::config::Config::write_key(section, "enabled", "true") {
@@ -4227,13 +4252,17 @@ impl App {
         };
 
         // Save the model to config
+        let custom_section2;
         let section = match provider_idx {
             0 => "providers.anthropic",
             1 => "providers.openai",
             2 => "providers.gemini",
             3 => "providers.openrouter",
             4 => "providers.minimax",
-            5 => "providers.custom",
+            5 => {
+                custom_section2 = "providers.custom.default".to_string();
+                &custom_section2
+            }
             _ => "providers.anthropic",
         };
         
@@ -4319,6 +4348,45 @@ impl App {
                     tokio::spawn(async move {
                         let models = super::onboarding::fetch_provider_models(provider_idx, api_key.as_deref()).await;
                         let _ = sender.send(TuiEvent::OnboardingModelsFetched(models));
+                    });
+                }
+                WizardAction::WhatsAppConnect => {
+                    let sender = self.event_sender();
+                    tokio::spawn(async move {
+                        match crate::brain::tools::whatsapp_connect::start_whatsapp_pairing().await {
+                            Ok(handle) => {
+                                // Forward QR codes to the TUI
+                                let qr_sender = sender.clone();
+                                let mut qr_rx = handle.qr_rx;
+                                tokio::spawn(async move {
+                                    while let Some(qr) = qr_rx.recv().await {
+                                        let _ = qr_sender.send(TuiEvent::WhatsAppQrCode(qr));
+                                    }
+                                });
+                                // Wait for connection (2 minute timeout)
+                                match tokio::time::timeout(
+                                    std::time::Duration::from_secs(120),
+                                    handle.connected_rx,
+                                ).await {
+                                    Ok(Ok(())) => {
+                                        let _ = sender.send(TuiEvent::WhatsAppConnected);
+                                    }
+                                    Ok(Err(_)) => {
+                                        let _ = sender.send(TuiEvent::WhatsAppError(
+                                            "Connection channel closed unexpectedly".into(),
+                                        ));
+                                    }
+                                    Err(_) => {
+                                        let _ = sender.send(TuiEvent::WhatsAppError(
+                                            "Connection timed out (2 minutes)".into(),
+                                        ));
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                let _ = sender.send(TuiEvent::WhatsAppError(e.to_string()));
+                            }
+                        }
                     });
                 }
                 WizardAction::GenerateBrain => {

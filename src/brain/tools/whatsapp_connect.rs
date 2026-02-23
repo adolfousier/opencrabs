@@ -27,7 +27,7 @@ use whatsapp_rust_ureq_http_client::UreqHttpClient;
 /// Render a QR code as pure Unicode block characters (no ANSI escapes).
 /// Uses upper/lower half blocks to pack two rows per line.
 /// Includes a 4-module quiet zone (white border) required for scanning.
-fn render_qr_unicode(data: &str) -> Option<String> {
+pub fn render_qr_unicode(data: &str) -> Option<String> {
     let code = QrCode::new(data.as_bytes()).ok()?;
     let matrix = code.to_colors();
     let w = code.width();
@@ -64,6 +64,92 @@ fn render_qr_unicode(data: &str) -> Option<String> {
         y += 2;
     }
     Some(out)
+}
+
+/// Handle returned by `start_whatsapp_pairing` for async QR code / connection flow.
+pub struct WhatsAppConnectHandle {
+    /// Receives QR code data strings (may receive multiple as codes refresh).
+    pub qr_rx: tokio::sync::mpsc::UnboundedReceiver<String>,
+    /// Fires once when WhatsApp is successfully paired.
+    pub connected_rx: tokio::sync::oneshot::Receiver<()>,
+}
+
+/// Start WhatsApp pairing — spawns a lightweight bot, returns channels for QR codes
+/// and a connection signal.  Used by onboarding to show the QR popup without the
+/// full message-handling pipeline that `WhatsAppConnectTool` wires up.
+pub async fn start_whatsapp_pairing() -> Result<WhatsAppConnectHandle> {
+    // 1. Create session storage
+    let db_dir = opencrabs_home().join("whatsapp");
+    std::fs::create_dir_all(&db_dir)
+        .map_err(|e| super::error::ToolError::Internal(format!(
+            "Failed to create WhatsApp data directory: {}", e
+        )))?;
+    let db_path = db_dir.join("session.db");
+
+    let backend = Arc::new(
+        crate::channels::whatsapp::sqlx_store::SqlxStore::new(
+            db_path.to_string_lossy().as_ref(),
+        )
+        .await
+        .map_err(|e| super::error::ToolError::Internal(format!(
+            "Failed to open WhatsApp session store: {}", e
+        )))?,
+    );
+
+    // 2. Set up signaling channels
+    let (qr_tx, qr_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let (conn_tx, conn_rx) = tokio::sync::oneshot::channel::<()>();
+    let conn_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>> =
+        Arc::new(Mutex::new(Some(conn_tx)));
+
+    // 3. Build bot with minimal event handler (QR + Connected only)
+    let mut bot = Bot::builder()
+        .with_backend(backend)
+        .with_transport_factory(TokioWebSocketTransportFactory::new())
+        .with_http_client(UreqHttpClient::new())
+        .on_event(move |event, _client| {
+            let qr_tx = qr_tx.clone();
+            let conn_tx = conn_tx.clone();
+            async move {
+                match event {
+                    Event::PairingQrCode { ref code, .. } => {
+                        let _ = qr_tx.send(code.clone());
+                    }
+                    Event::Connected(_) | Event::PairSuccess(_) => {
+                        let mut tx = conn_tx.lock().await;
+                        if let Some(sender) = tx.take() {
+                            let _ = sender.send(());
+                        }
+                        tracing::info!("WhatsApp: paired successfully via onboarding");
+                    }
+                    _ => {}
+                }
+            }
+        })
+        .build()
+        .await
+        .map_err(|e| super::error::ToolError::Internal(format!(
+            "Failed to create WhatsApp client: {}", e
+        )))?;
+
+    // 4. Spawn bot.run() in background
+    tokio::spawn(async move {
+        match bot.run().await {
+            Ok(handle) => {
+                if let Err(e) = handle.await {
+                    tracing::error!("WhatsApp pairing bot task error: {:?}", e);
+                }
+            }
+            Err(e) => {
+                tracing::error!("WhatsApp pairing bot run error: {}", e);
+            }
+        }
+    });
+
+    Ok(WhatsAppConnectHandle {
+        qr_rx,
+        connected_rx: conn_rx,
+    })
 }
 
 /// Tool that connects WhatsApp by generating a QR code for the user to scan.
