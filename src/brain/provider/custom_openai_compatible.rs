@@ -532,12 +532,14 @@ impl Provider for OpenAIProvider {
         struct StreamState {
             emitted_message_start: bool,
             emitted_content_start: bool,
+            seen_delta_content: bool, // true once we've received real content via `delta` field
             tool_calls: std::collections::HashMap<usize, ToolCallAccum>, // index -> accumulated tool call
         }
 
         let state = std::sync::Arc::new(std::sync::Mutex::new(StreamState {
             emitted_message_start: false,
             emitted_content_start: false,
+            seen_delta_content: false,
             tool_calls: std::collections::HashMap::new(),
         }));
         
@@ -605,11 +607,30 @@ impl Provider for OpenAIProvider {
                                             }));
                                         }
 
-                                        // Get content from delta or message (MiniMax uses message)
-                                        let content = chunk.choices.first()
-                                            .and_then(|c| c.delta.as_ref().or(c.message.as_ref()))
+                                        // Get content from delta or message (MiniMax uses message).
+                                        // IMPORTANT: Some providers (LM Studio, etc.) send the FULL
+                                        // response in the final chunk's `message` field while `delta`
+                                        // is absent. If we already received content via delta, we must
+                                        // NOT fall back to `message` or we'll duplicate the entire text.
+                                        let delta_content = chunk.choices.first()
+                                            .and_then(|c| c.delta.as_ref())
                                             .and_then(|d| d.content.as_ref())
                                             .cloned();
+                                        let content = if delta_content.is_some() {
+                                            if delta_content.as_ref().is_some_and(|s| !s.is_empty()) {
+                                                st.seen_delta_content = true;
+                                            }
+                                            delta_content
+                                        } else if !st.seen_delta_content {
+                                            // Only use message field if we've never seen delta content
+                                            // (MiniMax always uses message, standard providers don't)
+                                            chunk.choices.first()
+                                                .and_then(|c| c.message.as_ref())
+                                                .and_then(|d| d.content.as_ref())
+                                                .cloned()
+                                        } else {
+                                            None
+                                        };
 
                                         // Get streaming tool_calls from delta or message
                                         let tool_calls = chunk.choices.first()
