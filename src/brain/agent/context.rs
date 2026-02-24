@@ -146,6 +146,29 @@ impl AgentContext {
         tokenizer::count_tokens(text)
     }
 
+    /// Static version of estimate_message_tokens — usable without a &self reference.
+    pub fn estimate_tokens_static(message: &Message) -> usize {
+        let mut tokens = 0;
+        for content in &message.content {
+            match content {
+                ContentBlock::Text { text } => {
+                    tokens += Self::estimate_tokens(text);
+                }
+                ContentBlock::ToolUse { name, input, .. } => {
+                    tokens += Self::estimate_tokens(name);
+                    tokens += Self::estimate_tokens(&input.to_string());
+                }
+                ContentBlock::ToolResult { content, .. } => {
+                    tokens += Self::estimate_tokens(content);
+                }
+                ContentBlock::Image { .. } => {
+                    tokens += 1000;
+                }
+            }
+        }
+        tokens + 4
+    }
+
     /// Get the current token usage percentage
     pub fn usage_percentage(&self) -> f64 {
         (self.token_count as f64 / self.max_tokens as f64) * 100.0

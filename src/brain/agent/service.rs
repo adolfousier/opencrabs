@@ -1595,7 +1595,42 @@ impl AgentService {
                         .all(|b| matches!(b, crate::brain::provider::ContentBlock::ToolResult { .. })))
             })
             .unwrap_or(context.messages.len());
-        for msg in &context.messages[start..] {
+
+        // Cap the messages sent to the summarizer so the compaction request itself
+        // never exceeds the provider's context window. Reserve 8k tokens for the
+        // compaction prompt + system prompt + output budget, leaving the rest for
+        // conversation history. Take the LAST N messages (most recent = most useful).
+        let compaction_overhead = 8_000usize;
+        let summary_budget = context.max_tokens.saturating_sub(compaction_overhead);
+        let mut running_tokens = 0usize;
+        let all_msgs = &context.messages[start..];
+        // Walk backwards from most-recent until we hit the budget
+        let msgs_to_include: Vec<&Message> = all_msgs
+            .iter()
+            .rev()
+            .take_while(|m| {
+                let t = AgentContext::estimate_tokens_static(m);
+                if running_tokens + t <= summary_budget {
+                    running_tokens += t;
+                    true
+                } else {
+                    false
+                }
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+
+        tracing::info!(
+            "Compaction: sending {} / {} messages to summarizer ({} / {} tokens)",
+            msgs_to_include.len(),
+            all_msgs.len(),
+            running_tokens,
+            context.max_tokens,
+        );
+
+        for msg in msgs_to_include {
             summary_messages.push(msg.clone());
         }
 
@@ -1627,8 +1662,11 @@ impl AgentService {
 
         summary_messages.push(Message::user(compaction_prompt));
 
+        // Output budget: cap at 8k tokens for the summary itself (plenty for structured output)
+        let summary_max_tokens = 8_000usize.min(self.max_tokens);
+
         let request = LLMRequest::new(model_name.to_string(), summary_messages)
-            .with_max_tokens(self.max_tokens)
+            .with_max_tokens(summary_max_tokens)
             .with_system("You are a precise summarization assistant. Your job is to create a structured breakdown of the conversation that will serve as the complete context for an AI agent continuing this work after context compaction. Be thorough — include every file, decision, and pending task.".to_string());
 
         let response = self

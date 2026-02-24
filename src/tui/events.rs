@@ -86,6 +86,9 @@ pub enum TuiEvent {
     /// Onboarding wizard received fetched model list from provider API
     OnboardingModelsFetched(Vec<String>),
 
+    /// Model selector (/models) received fetched model list after paste
+    ModelSelectorModelsFetched(Vec<String>),
+
     /// WhatsApp QR code data received during onboarding pairing
     WhatsAppQrCode(String),
     /// WhatsApp pairing successful during onboarding

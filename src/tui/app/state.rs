@@ -708,9 +708,30 @@ impl App {
                             });
                         }
                     }
-                } else if self.mode == AppMode::ModelSelector && self.model_selector_focused_field == 1 {
-                    // Handle paste in model selector API key field
-                    self.model_selector_api_key.push_str(&text);
+                } else if self.mode == AppMode::ModelSelector {
+                    let is_custom = self.model_selector_provider_selected == 5;
+                    match (self.model_selector_focused_field, is_custom) {
+                        // Non-custom: field 1 = API key
+                        (1, false) => {
+                            self.model_selector_api_key.push_str(&text);
+                            // Trigger model fetch after pasting key
+                            let provider_idx = self.model_selector_provider_selected;
+                            let api_key = self.model_selector_api_key.clone();
+                            let sender = self.event_sender();
+                            tokio::spawn(async move {
+                                let models = super::onboarding::fetch_provider_models(provider_idx, Some(&api_key)).await;
+                                let _ = sender.send(TuiEvent::ModelSelectorModelsFetched(models));
+                            });
+                        }
+                        // Custom: field 1 = base URL, field 2 = API key
+                        (1, true) => {
+                            self.model_selector_base_url.push_str(&text);
+                        }
+                        (2, true) => {
+                            self.model_selector_api_key.push_str(&text);
+                        }
+                        _ => {}
+                    }
                 }
             }
             TuiEvent::MessageSubmitted(content) => {
@@ -949,6 +970,18 @@ impl App {
                     if !models.is_empty() {
                         wizard.fetched_models = models;
                         wizard.selected_model = 0;
+                    }
+                }
+            }
+            TuiEvent::ModelSelectorModelsFetched(models) => {
+                if self.mode == AppMode::ModelSelector {
+                    if !models.is_empty() {
+                        self.model_selector_models = models;
+                        self.model_selector_selected = 0;
+                        self.model_selector_filter.clear();
+                        // Advance to model selection field
+                        let is_custom = self.model_selector_provider_selected == 5;
+                        self.model_selector_focused_field = if is_custom { 3 } else { 2 };
                     }
                 }
             }
