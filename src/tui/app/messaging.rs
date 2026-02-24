@@ -580,6 +580,29 @@ impl App {
             });
         }
 
+        // Merge consecutive tool_group messages into a single group.
+        // Each tool-loop iteration writes its own <!-- tools-v2: --> marker,
+        // but the live TUI groups them into one collapsible block. Match that.
+        let mut merged: Vec<DisplayMessage> = Vec::with_capacity(result.len());
+        for mut msg in result {
+            let should_merge = msg.role == "tool_group"
+                && msg.tool_group.is_some()
+                && merged.last().is_some_and(|p| p.role == "tool_group" && p.tool_group.is_some());
+
+            if should_merge {
+                if let Some(new_group) = msg.tool_group.take() {
+                    let prev = merged.last_mut().expect("checked above");
+                    let prev_group = prev.tool_group.as_mut().expect("checked above");
+                    prev_group.calls.extend(new_group.calls);
+                    let count = prev_group.calls.len();
+                    prev.content = format!("{} tool call{}", count, if count == 1 { "" } else { "s" });
+                }
+            } else {
+                merged.push(msg);
+            }
+        }
+        let mut result = merged;
+
         if result.is_empty() {
             // Content was only tool markers with no text — show a placeholder
             result.push(DisplayMessage {

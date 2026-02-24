@@ -135,13 +135,25 @@ allowed_channels = ["C12345678"]    # Where the bot operates (empty = all channe
 allowed_ids = ["U12345678"]         # Who the bot replies to (empty = everyone)
 
 # ========================================
-# Web Search Providers
+# Agent-to-Agent (A2A) Protocol
+# ========================================
+# Enables HTTP gateway for peer-to-peer agent communication.
+# Other A2A-compatible agents can send tasks, collaborate, and debate.
+[a2a]
+enabled = false
+bind = "127.0.0.1"     # Loopback only by default for security
+port = 18790            # A2A gateway port
+# CORS allowed origins (empty = no cross-origin requests allowed)
+# allowed_origins = ["http://localhost:3000"]
+
+# ========================================
+# Web Search Providers (default to free Duck Duck Go, no need additional web search provider)
 # ========================================
 
 [providers.web_search.exa]
 enabled = true
-# API key goes in keys.toml: [providers.web_search.exa] api_key = "..."
+# Its free up to 1000 requests. API key goes in keys.toml: [providers.web_search.exa] api_key = "..."
 
 [providers.web_search.brave]
 enabled = false
-# API key goes in keys.toml: [providers.web_search.brave] api_key = "..."
+# Its free up to 1000 requests. API key goes in keys.toml: [providers.web_search.brave] api_key = "..."

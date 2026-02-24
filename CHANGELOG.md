@@ -5,6 +5,24 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.30] - 2026-02-24
+
+### Added
+- **Agent-to-Agent (A2A) Protocol** — HTTP gateway implementing A2A Protocol RC v1.0 for peer-to-peer agent communication via JSON-RPC 2.0. Supports `message/send`, `tasks/get`, `tasks/cancel`. Contributed by [@koatora20](https://github.com/koatora20) in [#9](https://github.com/adolfousier/opencrabs/pull/9)
+- **Bee Colony Debate** — Multi-agent structured debate protocol based on ReConcile (ACL 2024) confidence-weighted voting. Configurable rounds with knowledge-enriched context from QMD memory search
+- **Dynamic Agent Card** — `/.well-known/agent.json` endpoint with skills generated from the live tool registry
+- **A2A Documentation** — Config example, README section with curl examples, TOOLS.md/SECURITY.md/BOOTSTRAP.md reference templates updated
+
+### Fixed
+- **A2A: Removed unused `rusqlite` dependency** — A2A handler no longer pulls in rusqlite; uses existing SQLite infrastructure
+- **A2A: UTF-8 slicing safety** — Fixed potential panic on multi-byte characters in message truncation
+- **A2A: Restrictive CORS by default** — No cross-origin requests allowed unless `allowed_origins` is explicitly configured
+- **A2A: Handler module split** — Monolithic `handler.rs` split into `handler/mod.rs`, `handler/service.rs`, `handler/processing.rs` for maintainability
+
+### Changed
+- **A2A: Agent card uses tool registry** — Skills reflect actual available tools instead of hardcoded list
+- **A2A: Server wiring** — Proper integration with AppState, config, and tool registry
+
 ## [0.2.29] - 2026-02-24
 
 ### Added
@@ -555,6 +573,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.30]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.30
 [0.2.29]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.29
 [0.2.28]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.28
 [0.2.27]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.27

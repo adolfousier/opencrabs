@@ -453,6 +453,18 @@ pub(crate) async fn cmd_chat(
         app.resume_session_id = Some(uuid);
     }
 
+    // Spawn A2A gateway if configured
+    if config.a2a.enabled {
+        let a2a_agent = channel_factory.create_agent_service();
+        let a2a_ctx = service_context.clone();
+        let a2a_config = config.a2a.clone();
+        tokio::spawn(async move {
+            if let Err(e) = crate::a2a::server::start_server(&a2a_config, a2a_agent, a2a_ctx).await {
+                tracing::error!("A2A gateway error: {}", e);
+            }
+        });
+    }
+
     // Spawn Telegram bot if configured
     #[cfg(feature = "telegram")]
     let _telegram_handle = {

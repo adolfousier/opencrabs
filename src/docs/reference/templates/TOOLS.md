@@ -90,6 +90,26 @@ API keys go in `~/.opencrabs/keys.toml` (chmod 600). Channel settings go in `con
 
 **As an OpenCrabs tool:** When user asks to transcribe voice or set up voice input, use D-Bus to control WhisperCrabs — check if running, start recording, configure provider, etc.
 
+### Agent-to-Agent (A2A) Gateway
+OpenCrabs exposes an A2A Protocol HTTP gateway for peer-to-peer agent communication.
+
+**What it does:** Other A2A-compatible agents can send tasks via JSON-RPC 2.0. OpenCrabs processes them using its full tool suite and returns results.
+
+**Endpoints:**
+- `GET /.well-known/agent.json` — Agent Card discovery (skills, capabilities)
+- `POST /a2a/v1` — JSON-RPC 2.0 (`message/send`, `tasks/get`, `tasks/cancel`)
+- `GET /a2a/health` — Health check
+
+**Setup:** Enable in `~/.opencrabs/config.toml`:
+```toml
+[a2a]
+enabled = true
+bind = "127.0.0.1"
+port = 18790
+```
+
+**Bee Colony Debate:** Multi-agent structured debate with knowledge-enriched context from QMD memory search. Configurable rounds, confidence-weighted consensus based on ReConcile (ACL 2024).
+
 ## Why Separate?
 
 Skills are shared. Your setup is yours. Keeping them apart means you can update skills without losing your notes, and share skills without leaking your infrastructure.

@@ -45,6 +45,7 @@ Ask how they want to reach you:
 - **Telegram** — set up a bot via @BotFather
 - **Discord** — create a bot at discord.com/developers, enable MESSAGE CONTENT intent
 - **Slack** — create an app at api.slack.com/apps, enable Socket Mode
+- **A2A Gateway** — enable peer-to-peer agent communication (`[a2a] enabled = true` in config.toml)
 
 Guide them through whichever they pick. Multiple channels can be active simultaneously.
 

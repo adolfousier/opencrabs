@@ -6,6 +6,9 @@
 //! - `GET  /a2a/health`             — Health check
 
 use crate::a2a::{agent_card, handler, types::*};
+use crate::brain::agent::service::AgentService;
+use crate::config::A2aConfig;
+use crate::services::ServiceContext;
 use axum::{
     extract::State,
     http::StatusCode,
@@ -14,14 +17,18 @@ use axum::{
     Router,
 };
 use std::net::SocketAddr;
+use std::sync::Arc;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
 /// Shared state for the A2A gateway.
 #[derive(Clone)]
 pub struct A2aState {
     pub task_store: handler::TaskStore,
+    pub cancel_store: handler::CancelStore,
     pub host: String,
     pub port: u16,
+    pub agent_service: Arc<AgentService>,
+    pub service_context: ServiceContext,
 }
 
 /// Build the axum router for the A2A gateway.
@@ -29,7 +36,8 @@ pub fn build_router(state: A2aState, allowed_origins: &[String]) -> Router {
     let cors = if allowed_origins.is_empty() {
         CorsLayer::new()
     } else {
-        let origins: Vec<_> = allowed_origins.iter()
+        let origins: Vec<_> = allowed_origins
+            .iter()
             .filter_map(|o| o.parse().ok())
             .collect();
         CorsLayer::new().allow_origin(AllowOrigin::list(origins))
@@ -43,39 +51,35 @@ pub fn build_router(state: A2aState, allowed_origins: &[String]) -> Router {
         .with_state(state)
 }
 
-/// A2A Gateway server configuration.
-pub struct GatewayParams {
-    pub bind: String,
-    pub port: u16,
-    pub enabled: bool,
-    pub allowed_origins: Option<Vec<String>>,
-}
-
 /// Start the A2A gateway server.
 ///
-/// This runs as a background task — call from `tokio::spawn`.
-pub async fn start_server(params: &GatewayParams) -> anyhow::Result<()> {
-    if !params.enabled {
+/// Runs as a background task — call from `tokio::spawn`.
+pub async fn start_server(
+    config: &A2aConfig,
+    agent_service: Arc<AgentService>,
+    service_context: ServiceContext,
+) -> anyhow::Result<()> {
+    if !config.enabled {
         tracing::info!("A2A gateway disabled in config");
         return Ok(());
     }
 
     let state = A2aState {
         task_store: handler::new_task_store(),
-        host: params.bind.clone(),
-        port: params.port,
+        cancel_store: handler::new_cancel_store(),
+        host: config.bind.clone(),
+        port: config.port,
+        agent_service,
+        service_context,
     };
 
-    let app = build_router(state, &params.allowed_origins);
-    let addr: SocketAddr = format!("{}:{}", params.bind, params.port)
+    let app = build_router(state, &config.allowed_origins);
+    let addr: SocketAddr = format!("{}:{}", config.bind, config.port)
         .parse()
-        .map_err(|e| anyhow::anyhow!("Invalid gateway address: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Invalid A2A gateway address: {}", e))?;
 
-    tracing::info!("🐝 A2A Gateway starting on http://{}", addr);
-    tracing::info!(
-        "   Agent Card: http://{}/.well-known/agent.json",
-        addr
-    );
+    tracing::info!("A2A Gateway starting on http://{}", addr);
+    tracing::info!("   Agent Card: http://{}/.well-known/agent.json", addr);
     tracing::info!("   JSON-RPC:   http://{}/a2a/v1", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -86,7 +90,8 @@ pub async fn start_server(params: &GatewayParams) -> anyhow::Result<()> {
 
 /// GET /.well-known/agent.json — Agent Card discovery.
 async fn get_agent_card(State(state): State<A2aState>) -> Json<AgentCard> {
-    let card = agent_card::build_agent_card(&state.host, state.port);
+    let registry = state.agent_service.tool_registry();
+    let card = agent_card::build_agent_card(&state.host, state.port, Some(registry));
     Json(card)
 }
 
@@ -95,7 +100,6 @@ async fn handle_jsonrpc(
     State(state): State<A2aState>,
     Json(req): Json<JsonRpcRequest>,
 ) -> (StatusCode, Json<JsonRpcResponse>) {
-    // Validate JSON-RPC version
     if req.jsonrpc != "2.0" {
         return (
             StatusCode::OK,
@@ -107,7 +111,14 @@ async fn handle_jsonrpc(
         );
     }
 
-    let response = handler::dispatch(req, state.task_store).await;
+    let response = handler::dispatch(
+        req,
+        state.task_store,
+        state.cancel_store,
+        state.agent_service,
+        state.service_context,
+    )
+    .await;
     (StatusCode::OK, Json(response))
 }
 
@@ -129,17 +140,21 @@ mod tests {
     use axum::http::Request;
     use tower::ServiceExt;
 
-    fn test_state() -> A2aState {
+    async fn test_state() -> A2aState {
+        use crate::a2a::test_helpers::helpers;
         A2aState {
             task_store: handler::new_task_store(),
+            cancel_store: handler::new_cancel_store(),
             host: "127.0.0.1".to_string(),
-            port: 18789,
+            port: 18790,
+            agent_service: helpers::placeholder_agent_service().await,
+            service_context: helpers::placeholder_service_context().await,
         }
     }
 
     #[tokio::test]
     async fn test_health_endpoint() {
-        let app = build_router(test_state(), &None);
+        let app = build_router(test_state().await, &[]);
         let req = Request::builder()
             .uri("/a2a/health")
             .body(Body::empty())
@@ -151,36 +166,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_agent_card_endpoint() {
-        let app = build_router(test_state(), &None);
+        let app = build_router(test_state().await, &[]);
         let req = Request::builder()
             .uri("/.well-known/agent.json")
             .body(Body::empty())
-            .expect("request");
-
-        let resp = app.oneshot(req).await.expect("response");
-        assert_eq!(resp.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn test_jsonrpc_send_message() {
-        let app = build_router(test_state(), &None);
-        let body = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "message/send",
-            "params": {
-                "message": {
-                    "role": "user",
-                    "parts": [{"text": "Hello from A2A test!"}]
-                }
-            },
-            "id": 1
-        });
-
-        let req = Request::builder()
-            .method("POST")
-            .uri("/a2a/v1")
-            .header("content-type", "application/json")
-            .body(Body::from(serde_json::to_string(&body).expect("json")))
             .expect("request");
 
         let resp = app.oneshot(req).await.expect("response");

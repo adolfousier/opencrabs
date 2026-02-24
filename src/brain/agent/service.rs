@@ -832,6 +832,19 @@ impl AgentService {
                             format!("session_search:{}:{}", op, query)
                         }
 
+                        // web_search: include query to distinguish different searches
+                        "web_search" => {
+                            let query = input.get("query").and_then(|v| v.as_str()).unwrap_or("");
+                            format!("web_search:{}", query)
+                        }
+
+                        // http_request: include method + url to distinguish calls
+                        "http_request" => {
+                            let method = input.get("method").and_then(|v| v.as_str()).unwrap_or("");
+                            let url = input.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                            format!("http_request:{}:{}", method, url)
+                        }
+
                         // Other tools: just use name
                         _ => name.to_string(),
                     }
@@ -841,32 +854,27 @@ impl AgentService {
 
             recent_tool_calls.push(current_call_signature.clone());
 
-            // Keep only last 15 iterations for loop detection (increased for deep exploration)
-            if recent_tool_calls.len() > 15 {
+            // Keep last 50 iterations for loop detection.
+            // Modern agents legitimately make dozens of tool calls with different args.
+            // Signatures include arguments, so only truly identical calls match.
+            if recent_tool_calls.len() > 50 {
                 recent_tool_calls.remove(0);
             }
 
-            // Check for repeated patterns with tool-specific thresholds
-            // This will only trigger for truly identical calls (same tool + same arguments)
-
-            // Determine loop threshold based on tool type
-            let is_exploration_tool = current_call_signature.starts_with("ls:")
-                || current_call_signature.starts_with("glob:")
-                || current_call_signature.starts_with("grep:")
-                || current_call_signature.starts_with("read:");
+            // Check for repeated patterns with tool-specific thresholds.
+            // Only triggers for truly identical calls (same tool + same arguments).
 
             let is_modification_tool = current_call_signature.starts_with("write:")
                 || current_call_signature.starts_with("edit:")
                 || current_call_signature.starts_with("bash:");
 
-            // Higher threshold for exploration tools (allow deep directory traversal)
-            // Lower threshold for modification tools (dangerous if looping)
-            let loop_threshold = if is_exploration_tool {
-                10 // Allow up to 10 identical calls for exploration
-            } else if is_modification_tool {
-                2 // Only 2 identical calls for modification tools
+            // Modification tools get a lower threshold (dangerous if looping).
+            // Everything else gets a generous threshold since signatures
+            // already distinguish different arguments.
+            let loop_threshold = if is_modification_tool {
+                4 // Same exact write/edit/bash command 4 times = stuck
             } else {
-                3 // Default: 3 identical calls
+                8 // Same exact call with same exact args 8 times = stuck
             };
 
             // Check if we have enough calls to detect a loop
@@ -879,16 +887,10 @@ impl AgentService {
                         loop_threshold
                     );
 
-                    if is_exploration_tool {
-                        tracing::info!(
-                            "💡 Hint: The model is stuck trying to access the same path {} times. \
-                             This often means the path doesn't exist or the model is confused about the directory structure.",
-                            loop_threshold
-                        );
-                    } else if is_modification_tool {
+                    if is_modification_tool {
                         tracing::warn!(
-                            "⚠️ Modification tool loop detected! This could be dangerous. \
-                             The model tried to modify the same file/run the same command {} times.",
+                            "⚠️ Modification tool loop detected. \
+                             Same command repeated {} times with identical arguments.",
                             loop_threshold
                         );
                     }

@@ -414,6 +414,246 @@ impl DebateSession {
     }
 }
 
+// ─── Debate Execution Engine ────────────────────────────────
+
+/// Errors that can occur during debate execution.
+#[derive(Debug)]
+pub enum DebateError {
+    /// HTTP communication failure with a bee endpoint.
+    Http(String),
+    /// A2A protocol-level error (bad response, timeout, task failure).
+    Protocol(String),
+}
+
+impl std::fmt::Display for DebateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Http(e) => write!(f, "HTTP error: {}", e),
+            Self::Protocol(e) => write!(f, "Protocol error: {}", e),
+        }
+    }
+}
+
+/// Send a message to a bee endpoint via A2A JSON-RPC and poll until completion.
+async fn send_a2a_message(
+    client: &reqwest::Client,
+    endpoint: &str,
+    message: Message,
+) -> Result<String, DebateError> {
+    let rpc_request = JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        method: "message/send".to_string(),
+        params: serde_json::to_value(SendMessageParams {
+            message,
+            configuration: None,
+            metadata: None,
+        })
+        .map_err(|e| DebateError::Protocol(e.to_string()))?,
+        id: serde_json::json!(1),
+    };
+
+    let resp = client
+        .post(endpoint)
+        .json(&rpc_request)
+        .send()
+        .await
+        .map_err(|e| DebateError::Http(format!("{}: {}", endpoint, e)))?;
+
+    let rpc_response: JsonRpcResponse = resp
+        .json()
+        .await
+        .map_err(|e| DebateError::Http(format!("Bad response from {}: {}", endpoint, e)))?;
+
+    let task_id = rpc_response
+        .result
+        .as_ref()
+        .and_then(|r| r.get("id"))
+        .and_then(|id| id.as_str())
+        .ok_or_else(|| DebateError::Protocol("No task ID in response".to_string()))?
+        .to_string();
+
+    // Poll for completion (2s interval, 5 min timeout)
+    for _ in 0..150 {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        let get_request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            method: "tasks/get".to_string(),
+            params: serde_json::json!({"id": task_id}),
+            id: serde_json::json!(2),
+        };
+
+        let poll_resp = client
+            .post(endpoint)
+            .json(&get_request)
+            .send()
+            .await
+            .map_err(|e| DebateError::Http(e.to_string()))?;
+
+        let poll_rpc: JsonRpcResponse = poll_resp
+            .json()
+            .await
+            .map_err(|e| DebateError::Http(e.to_string()))?;
+
+        if let Some(result) = &poll_rpc.result {
+            let state = result
+                .get("status")
+                .and_then(|s| s.get("state"))
+                .and_then(|s| s.as_str())
+                .unwrap_or("unknown");
+
+            match state {
+                "completed" => {
+                    let text = result
+                        .get("artifacts")
+                        .and_then(|a| a.as_array())
+                        .and_then(|arr| arr.first())
+                        .and_then(|art| art.get("parts"))
+                        .and_then(|p| p.as_array())
+                        .and_then(|parts| parts.first())
+                        .and_then(|part| part.get("text"))
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("[No response text]")
+                        .to_string();
+                    return Ok(text);
+                }
+                "failed" | "canceled" | "rejected" => {
+                    let msg = result
+                        .get("status")
+                        .and_then(|s| s.get("message"))
+                        .and_then(|m| m.get("parts"))
+                        .and_then(|p| p.as_array())
+                        .and_then(|arr| arr.first())
+                        .and_then(|part| part.get("text"))
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("Unknown error");
+                    return Err(DebateError::Protocol(format!("Task {}: {}", state, msg)));
+                }
+                _ => continue,
+            }
+        }
+    }
+
+    Err(DebateError::Protocol(format!(
+        "Task {} timed out after 5 minutes",
+        task_id
+    )))
+}
+
+/// Extract confidence score from response text (heuristic).
+///
+/// Looks for patterns like "confidence: 0.85" or "Confidence score: 0.9".
+fn extract_confidence(text: &str) -> f64 {
+    let lower = text.to_lowercase();
+    if let Some(pos) = lower.find("confidence") {
+        let after = &text[pos..];
+        for word in after.split_whitespace().skip(1) {
+            let clean: String = word
+                .chars()
+                .filter(|c| c.is_ascii_digit() || *c == '.')
+                .collect();
+            if let Ok(val) = clean.parse::<f64>()
+                && (0.0..=1.0).contains(&val)
+            {
+                return val;
+            }
+        }
+    }
+    0.5
+}
+
+/// Run a full multi-round debate across bee endpoints.
+///
+/// 1. Loads knowledge context from QMD memory if not pre-populated
+/// 2. Sends round prompts to all bee endpoints concurrently via A2A JSON-RPC
+/// 3. Collects responses, checks consensus
+/// 4. Repeats or concludes
+pub async fn run_debate(mut config: DebateConfig) -> Result<DebateSession, DebateError> {
+    // Load knowledge context from QMD if not pre-populated
+    if config.knowledge_context.is_empty()
+        && let Ok(store) = crate::memory::get_store()
+    {
+        match crate::memory::search(store, &config.topic, 10).await {
+            Ok(results) => {
+                config.knowledge_context = results
+                    .iter()
+                    .map(|r| format!("[{}]\n{}", r.path, r.snippet))
+                    .collect();
+                tracing::info!(
+                    "Loaded {} knowledge context items for debate",
+                    config.knowledge_context.len()
+                );
+            }
+            Err(e) => {
+                tracing::warn!("Memory search failed for debate context: {}", e);
+            }
+        }
+    }
+
+    let mut session = DebateSession::new(config);
+    let client = reqwest::Client::new();
+
+    for round_num in 1..=session.config.max_rounds {
+        session.state = DebateState::InRound;
+
+        let prompt = if round_num == 1 {
+            session.round1_prompt()
+        } else {
+            session.critique_prompt(round_num)
+        };
+
+        let messages = session.build_round_messages(round_num);
+
+        // Send to all bees concurrently
+        let mut handles = Vec::new();
+        for (i, (endpoint, msg)) in messages.into_iter().enumerate() {
+            let client = client.clone();
+            handles.push(tokio::spawn(async move {
+                let result = send_a2a_message(&client, &endpoint, msg).await;
+                (i, endpoint, result)
+            }));
+        }
+
+        // Collect responses
+        let mut responses = Vec::new();
+        for handle in handles {
+            match handle.await {
+                Ok((i, endpoint, Ok(content))) => {
+                    let confidence = extract_confidence(&content);
+                    responses.push(BeeResponse {
+                        bee_id: format!("bee-{}", i),
+                        endpoint,
+                        content,
+                        confidence,
+                        position: None,
+                        key_points: vec![],
+                    });
+                }
+                Ok((i, endpoint, Err(e))) => {
+                    tracing::error!("Bee {} ({}) failed: {}", i, endpoint, e);
+                }
+                Err(e) => {
+                    tracing::error!("Bee task panicked: {}", e);
+                }
+            }
+        }
+
+        if responses.is_empty() {
+            return Err(DebateError::Protocol(
+                "All bees failed to respond".to_string(),
+            ));
+        }
+
+        session.record_round(round_num, prompt, responses);
+
+        if session.state == DebateState::Concluded || session.state == DebateState::Exhausted {
+            break;
+        }
+    }
+
+    Ok(session)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

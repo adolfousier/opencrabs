@@ -120,12 +120,14 @@ A malicious skill/package follows this pattern:
 | Component | Recommended |
 |-----------|-------------|
 | Gateway | `bind: loopback` — 127.0.0.1 only, not public |
+| A2A Gateway | `bind: loopback` — 127.0.0.1 only; CORS origins must be explicitly set |
 | Messaging | `allowlist` — restrict to known user IDs/phones |
 | SSH | Key auth only — no passwords, consider MFA |
 | Firewall | Deny by default, allow by exception |
 
 ### Rules
 - Never expose gateway to public internet without auth
+- Never expose A2A gateway to public internet without authentication
 - Always use allowlist for messaging channels
 - SSH key auth only — no passwords
 - Firewall: deny by default, allow by exception

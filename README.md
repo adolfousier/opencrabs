@@ -34,6 +34,7 @@
 - [Screenshots](#-screenshots)
 - [Core Features](#-core-features)
 - [Supported AI Providers](#-supported-ai-providers)
+- [Agent-to-Agent (A2A) Protocol](#-agent-to-agent-a2a-protocol)
 - [Quick Start](#-quick-start)
 - [Onboarding Wizard](#-onboarding-wizard)
 - [API Keys (keys.toml)](#-api-keys-keystoml)
@@ -127,13 +128,14 @@
 ### Agent Capabilities
 | Feature | Description |
 |---------|-------------|
-| **Built-in Tools** | Read/write/edit files, bash, glob, grep, web search (EXA, Brave), plan mode, and more |
+| **Built-in Tools** | Read/write/edit files, bash, glob, grep, web search (DuckDuckGo + EXA default, no key needed; Brave optional), plan mode, and more |
 | **Plan Mode** | Structured task decomposition with dependency graphs, complexity ratings, and inline approval workflow |
 | **Self-Sustaining** | Agent can modify its own source, build, test, and hot-restart via Unix `exec()` |
 | **Natural Language Commands** | Tell OpenCrabs to create slash commands — it writes them to `commands.toml` autonomously via the `config_manager` tool |
 | **Live Settings** | Agent can read/write `config.toml` at runtime; Settings TUI screen (press `S`) shows current config; approval policy persists across restarts |
-| **Web Search** | EXA AI (neural, free via MCP) and Brave Search APIs — keys in `keys.toml` |
+| **Web Search** | DuckDuckGo (built-in, no key needed) + EXA AI (neural, free via MCP) by default; Brave Search optional (key in `keys.toml`) |
 | **Debug Logging** | `--debug` flag enables file logging; `DEBUG_LOGS_LOCATION` env var for custom log directory |
+| **Agent-to-Agent (A2A)** | HTTP gateway implementing A2A Protocol RC v1.0 — peer-to-peer agent communication via JSON-RPC 2.0. Supports `message/send`, `tasks/get`, `tasks/cancel`. Includes multi-agent debate (Bee Colony) with confidence-weighted consensus. Loopback-only by default; CORS origins must be explicitly configured |
 
 ---
 
@@ -231,6 +233,76 @@ default_model = "mistral"
 The name after `custom.` is just a label you choose. The first one with `enabled = true` is used. Keys go in `keys.toml` using the same label (e.g. `[providers.custom.lm_studio]`).
 
 **Provider priority:** MiniMax > OpenRouter > Anthropic > OpenAI > Custom. The first provider with `enabled = true` is used. Each provider has its own API key in `keys.toml` — no sharing or confusion.
+
+---
+
+## 🤝 Agent-to-Agent (A2A) Protocol
+
+OpenCrabs includes a built-in A2A gateway — an HTTP server implementing the [A2A Protocol RC v1.0](https://google.github.io/A2A/) for peer-to-peer agent communication. Other A2A-compatible agents can discover OpenCrabs, send it tasks, and get results back — all via standard JSON-RPC 2.0.
+
+### Enabling A2A
+
+Add to `~/.opencrabs/config.toml`:
+
+```toml
+[a2a]
+enabled = true
+bind = "127.0.0.1"   # Loopback only (default)
+port = 18790          # Gateway port
+# allowed_origins = ["http://localhost:3000"]  # CORS (empty = blocked)
+```
+
+No API keys required — A2A is config-only.
+
+### Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/.well-known/agent.json` | GET | Agent Card — discover skills, capabilities, supported content types |
+| `/a2a/v1` | POST | JSON-RPC 2.0 — `message/send`, `tasks/get`, `tasks/cancel` |
+| `/a2a/health` | GET | Health check |
+
+### Quick Start Examples
+
+```bash
+# Discover the agent
+curl http://127.0.0.1:18790/.well-known/agent.json | jq .
+
+# Send a message (creates a task)
+curl -X POST http://127.0.0.1:18790/a2a/v1 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "message/send",
+    "params": {
+      "message": {
+        "role": "user",
+        "parts": [{"kind": "text", "text": "What tools do you have?"}]
+      }
+    }
+  }'
+
+# Poll a task by ID
+curl -X POST http://127.0.0.1:18790/a2a/v1 \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tasks/get","params":{"id":"TASK_ID"}}'
+
+# Cancel a running task
+curl -X POST http://127.0.0.1:18790/a2a/v1 \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tasks/cancel","params":{"id":"TASK_ID"}}'
+```
+
+### Bee Colony Debate
+
+OpenCrabs supports multi-agent structured debate via the **Bee Colony** protocol — based on [ReConcile (ACL 2024)](https://arxiv.org/abs/2309.13007) confidence-weighted voting. Multiple "bee" agents argue across configurable rounds, each enriched with knowledge context from QMD memory search, then converge on a consensus answer with confidence scores.
+
+### Security Notes
+
+- **Loopback only** by default — binds to `127.0.0.1`, not `0.0.0.0`
+- **CORS locked down** — no cross-origin requests unless `allowed_origins` is explicitly set
+- **No authentication** built in — do not expose to public internet without a reverse proxy + auth layer
 
 ---
 

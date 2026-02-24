@@ -45,6 +45,10 @@ pub struct Config {
     /// Agent behaviour configuration
     #[serde(default)]
     pub agent: AgentConfig,
+
+    /// A2A (Agent-to-Agent) protocol gateway configuration
+    #[serde(default)]
+    pub a2a: A2aConfig,
 }
 
 /// HTTP API gateway configuration
@@ -79,6 +83,34 @@ fn default_gateway_auth() -> String {
     "token".to_string()
 }
 
+/// A2A (Agent-to-Agent) protocol gateway configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct A2aConfig {
+    /// Whether the A2A gateway is enabled (default: false)
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Bind address (default: "127.0.0.1")
+    #[serde(default = "default_a2a_bind")]
+    pub bind: String,
+
+    /// Gateway port (default: 18790)
+    #[serde(default = "default_a2a_port")]
+    pub port: u16,
+
+    /// Allowed CORS origins — must be set explicitly, no cross-origin requests allowed by default
+    #[serde(default)]
+    pub allowed_origins: Vec<String>,
+}
+
+fn default_a2a_bind() -> String {
+    "127.0.0.1".to_string()
+}
+
+fn default_a2a_port() -> u16 {
+    18790
+}
+
 impl Default for GatewayConfig {
     fn default() -> Self {
         Self {
@@ -86,6 +118,17 @@ impl Default for GatewayConfig {
             bind: default_gateway_bind(),
             auth_mode: default_gateway_auth(),
             enabled: false,
+        }
+    }
+}
+
+impl Default for A2aConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            bind: default_a2a_bind(),
+            port: default_a2a_port(),
+            allowed_origins: vec![],
         }
     }
 }
@@ -736,6 +779,7 @@ impl Default for Config {
             channels: ChannelsConfig::default(),
             voice: VoiceConfig::default(),
             agent: AgentConfig::default(),
+            a2a: A2aConfig::default(),
         }
     }
 }
@@ -849,6 +893,7 @@ impl Config {
             channels: overlay.channels,
             voice: overlay.voice,
             agent: overlay.agent,
+            a2a: overlay.a2a,
         }
     }
 
