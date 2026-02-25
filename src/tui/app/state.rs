@@ -921,6 +921,9 @@ impl App {
                 self.hidden_older_messages = 0;
                 self.oldest_displayed_sequence = 0;
                 self.display_token_count = 0;
+                // Reset streaming state so post-compaction tool calls render cleanly
+                self.streaming_response = None;
+                self.active_tool_group = None;
 
                 // Brief status notice
                 self.messages.push(DisplayMessage {
