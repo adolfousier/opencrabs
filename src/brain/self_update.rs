@@ -105,25 +105,48 @@ impl SelfUpdater {
     ///
     /// Returns `Ok(binary_path)` on success or `Err(compiler_output)` on failure.
     pub async fn build(&self) -> Result<PathBuf, String> {
+        self.build_streaming(|_| {}).await
+    }
+
+    /// Build with streaming progress — calls `on_line` for each compiler output line.
+    ///
+    /// Returns `Ok(binary_path)` on success or `Err(compiler_output)` on failure.
+    pub async fn build_streaming<F>(&self, on_line: F) -> Result<PathBuf, String>
+    where
+        F: Fn(String) + Send + 'static,
+    {
+        use tokio::io::{AsyncBufReadExt, BufReader};
+        use tokio::process::Command;
+
         tracing::info!("Building OpenCrabs at {}", self.project_root.display());
 
-        let output = tokio::process::Command::new("cargo")
-            .arg("build")
-            .arg("--release")
+        let mut child = Command::new("cargo")
+            .args(["build", "--release"])
             .env("RUSTFLAGS", "-C target-cpu=native")
             .current_dir(&self.project_root)
-            .output()
-            .await
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
             .map_err(|e| format!("Failed to spawn cargo build: {}", e))?;
 
-        if output.status.success() {
+        // Stream stderr (where cargo writes progress) line by line
+        if let Some(stderr) = child.stderr.take() {
+            let mut lines = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                on_line(line);
+            }
+        }
+
+        let status = child
+            .wait()
+            .await
+            .map_err(|e| format!("Build process error: {}", e))?;
+
+        if status.success() {
             tracing::info!("Build succeeded: {}", self.binary_path.display());
             Ok(self.binary_path.clone())
         } else {
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-            tracing::error!("Build failed:\n{}\n{}", stderr, stdout);
-            Err(format!("{}\n{}", stderr, stdout))
+            Err("Build failed — see output above".to_string())
         }
     }
 

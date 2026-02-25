@@ -958,9 +958,25 @@ impl App {
                 });
                 // auto_scroll stays true — new messages continue below
             }
-            TuiEvent::RestartReady(status) => {
-                self.rebuild_status = Some(status);
-                self.switch_mode(AppMode::RestartPending).await?;
+            TuiEvent::RestartReady(_status) => {
+                self.rebuild_status = None;
+                // Auto exec() restart — no prompt, no permission needed
+                if let Some(session) = &self.current_session {
+                    let session_id = session.id;
+                    match SelfUpdater::auto_detect() {
+                        Ok(updater) => {
+                            if let Err(e) = updater.restart(session_id) {
+                                self.show_error(format!("Restart failed: {}", e));
+                                self.switch_mode(AppMode::Chat).await?;
+                            }
+                            // exec() succeeded — this process is replaced, never reached
+                        }
+                        Err(e) => {
+                            self.show_error(format!("Restart failed: {}", e));
+                            self.switch_mode(AppMode::Chat).await?;
+                        }
+                    }
+                }
             }
             TuiEvent::ConfigReloaded => {
                 // Refresh cached config values and commands

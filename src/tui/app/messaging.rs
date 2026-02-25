@@ -267,25 +267,37 @@ impl App {
             }
             "/rebuild" => {
                 self.push_system_message(
-                    "Detecting source... (auto-clones if needed)".to_string(),
+                    "🔨 Building from source... (streaming output below)".to_string(),
                 );
                 let sender = self.event_sender();
                 tokio::spawn(async move {
                     match SelfUpdater::auto_detect() {
                         Ok(updater) => {
                             let root = updater.project_root().display().to_string();
-                            let _ = sender.send(TuiEvent::Error(format!(
-                                "Building from {}...", root
+                            let _ = sender.send(TuiEvent::SystemMessage(format!(
+                                "📁 {}", root
                             )));
-                            match updater.build().await {
+                            let tx = sender.clone();
+                            match updater.build_streaming(move |line| {
+                                // Filter to only meaningful cargo lines
+                                let trimmed = line.trim();
+                                if trimmed.starts_with("Compiling")
+                                    || trimmed.starts_with("Finished")
+                                    || trimmed.starts_with("error")
+                                    || trimmed.starts_with("warning[")
+                                    || trimmed.starts_with("-->")
+                                {
+                                    let _ = tx.send(TuiEvent::SystemMessage(line));
+                                }
+                            }).await {
                                 Ok(_) => {
                                     let _ = sender.send(TuiEvent::RestartReady(
-                                        "Build successful".into(),
+                                        "✅ Build complete".into(),
                                     ));
                                 }
                                 Err(e) => {
                                     let _ = sender.send(TuiEvent::Error(format!(
-                                        "Build failed:\n{}", e
+                                        "Build failed: {}", e
                                     )));
                                 }
                             }
