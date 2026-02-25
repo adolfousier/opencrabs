@@ -514,6 +514,8 @@ impl AgentService {
         let mut accumulated_text = String::new(); // Collect text from all iterations (not just final)
         let mut recent_tool_calls: Vec<String> = Vec::new(); // Track tool calls to detect loops
         let mut loop_break_reason: Option<String> = None; // Why the loop broke (if not normal exit)
+        let mut stream_retry_count = 0u32; // Track consecutive stream drop retries
+        const MAX_STREAM_RETRIES: u32 = 2; // Retry up to 2 times on dropped streams
 
         loop {
             // Safety: warn every 50 iterations but never hard-stop
@@ -675,6 +677,40 @@ impl AgentService {
             // Fire real-time token count update after every API response
             if let Some(ref cb) = self.progress_callback {
                 cb(ProgressEvent::TokenCount(context.token_count));
+            }
+
+            // --- STREAM DROP DETECTION ---
+            // If stop_reason is None, the stream ended without [DONE]/MessageStop.
+            // This means a network interruption, provider timeout, or dropped connection.
+            // The response may contain partial/corrupt data. Retry instead of proceeding
+            // with garbage that silently drops the task.
+            if response.stop_reason.is_none() {
+                if stream_retry_count < MAX_STREAM_RETRIES {
+                    stream_retry_count += 1;
+                    tracing::warn!(
+                        "🔄 Stream dropped without completion (no stop_reason) at iteration {}. \
+                         Retrying ({}/{}) — partial content discarded.",
+                        iteration, stream_retry_count, MAX_STREAM_RETRIES,
+                    );
+                    // Subtract the tokens we just counted — they'll be re-counted on retry
+                    total_input_tokens -= response.usage.input_tokens;
+                    total_output_tokens -= response.usage.output_tokens;
+                    // Don't increment iteration — this is a retry, not a new turn
+                    iteration -= 1;
+                    continue;
+                } else {
+                    tracing::error!(
+                        "🚨 Stream dropped {} times consecutively at iteration {}. \
+                         Proceeding with partial response to avoid infinite retry loop. \
+                         Content blocks: {}, stop_reason: None",
+                        MAX_STREAM_RETRIES, iteration, response.content.len(),
+                    );
+                    // Reset retry counter — we're accepting the partial response
+                    stream_retry_count = 0;
+                }
+            } else {
+                // Successful stream completion — reset retry counter
+                stream_retry_count = 0;
             }
 
             // Separate text blocks and tool use blocks from the response
@@ -1507,6 +1543,16 @@ impl AgentService {
                     return Err(crate::brain::provider::ProviderError::StreamError(error));
                 }
             }
+        }
+
+        // Detect premature stream termination — if we accumulated blocks but never
+        // got a stop_reason, the connection likely dropped before [DONE]/MessageStop.
+        if stop_reason.is_none() && !block_states.is_empty() {
+            tracing::warn!(
+                "⚠️ Stream ended without MessageStop/[DONE]. {} content blocks accumulated, \
+                 {} output tokens counted. Possible network interruption or provider timeout.",
+                block_states.len(), output_tokens,
+            );
         }
 
         // Build final content blocks from accumulated state
