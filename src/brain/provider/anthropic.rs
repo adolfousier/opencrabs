@@ -442,18 +442,33 @@ impl Provider for AnthropicProvider {
     }
 
     fn calculate_cost(&self, model: &str, input_tokens: u32, output_tokens: u32) -> f64 {
-        // Costs per million tokens
-        let (input_cost, output_cost) = match model {
-            "claude-opus-4-6" => (15.0, 75.0),
-            "claude-sonnet-4-5-20250929" => (3.0, 15.0),
-            "claude-haiku-4-5-20251001" => (0.80, 4.0),
-            "claude-3-5-sonnet-20241022" => (3.0, 15.0),
-            "claude-3-5-haiku-20241022" => (0.80, 4.0),
-            "claude-3-opus-20240229" => (15.0, 75.0),
-            "claude-3-sonnet-20240229" => (3.0, 15.0),
-            "claude-3-5-sonnet-20240620" => (3.0, 15.0),
-            "claude-3-haiku-20240307" => (0.25, 1.25),
-            _ => return 0.0,
+        // Costs per million tokens (verified via OpenRouter API 2026-02-25)
+        // Pattern-match on prefix so future point-release suffixes still match
+        let model_lower = model.to_lowercase();
+        let (input_cost, output_cost) = if model_lower.contains("claude-opus-4") {
+            // claude-opus-4-6, claude-opus-4.6, claude-opus-4.5, claude-opus-4 — $5/$25
+            (5.0_f64, 25.0_f64)
+        } else if model_lower.contains("claude-opus-3") || model == "claude-3-opus-20240229" {
+            // Legacy claude-3-opus — $15/$75
+            (15.0, 75.0)
+        } else if model_lower.contains("claude-sonnet-4")
+            || model == "claude-3-7-sonnet-20250219"
+            || model == "claude-sonnet-4-5-20250929"
+            || model == "claude-3-5-sonnet-20241022"
+            || model == "claude-3-5-sonnet-20240620"
+            || model == "claude-3-sonnet-20240229"
+        {
+            // All sonnet-4.x and claude-3.5-sonnet — $3/$15
+            (3.0, 15.0)
+        } else if model_lower.contains("claude-haiku-4") || model == "claude-haiku-4-5-20251001" {
+            // claude-haiku-4.5+ — $1/$5
+            (1.0, 5.0)
+        } else if model == "claude-3-5-haiku-20241022" {
+            (0.80, 4.0)
+        } else if model == "claude-3-haiku-20240307" {
+            (0.25, 1.25)
+        } else {
+            return 0.0;
         };
 
         let input_cost_total = (input_tokens as f64 / 1_000_000.0) * input_cost;
@@ -548,16 +563,24 @@ mod tests {
     fn test_cost_calculation() {
         let provider = AnthropicProvider::new("test-key".to_string());
 
-        // Test Opus 4 pricing
+        // Test Opus 4 pricing (corrected: $5/$25 per OpenRouter 2026-02-25)
         let cost = provider.calculate_cost("claude-opus-4-6", 1_000_000, 1_000_000);
-        assert_eq!(cost, 90.0); // $15 input + $75 output
+        assert_eq!(cost, 30.0); // $5 input + $25 output
 
-        // Test legacy Opus pricing (same)
+        // Test Sonnet 4.6 pricing (was missing — main model)
+        let cost = provider.calculate_cost("claude-sonnet-4-6", 1_000_000, 1_000_000);
+        assert_eq!(cost, 18.0); // $3 input + $15 output
+
+        // Test legacy Opus 3 pricing ($15/$75)
         let cost = provider.calculate_cost("claude-3-opus-20240229", 1_000_000, 1_000_000);
         assert_eq!(cost, 90.0);
 
-        // Test Haiku 4.5 pricing
+        // Test Haiku 4.5 pricing ($1/$5)
         let cost = provider.calculate_cost("claude-haiku-4-5-20251001", 1_000_000, 1_000_000);
+        assert_eq!(cost, 6.0); // $1 input + $5 output
+
+        // Test legacy Haiku 3.5 pricing
+        let cost = provider.calculate_cost("claude-3-5-haiku-20241022", 1_000_000, 1_000_000);
         assert_eq!(cost, 4.8); // $0.80 input + $4.0 output
 
         // Test legacy Haiku pricing

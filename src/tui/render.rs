@@ -2460,12 +2460,212 @@ fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(dialog, dialog_area);
 }
 
+/// Estimate cost for a model/token pair using the same pricing table as the provider.
+/// Used for old sessions that have token_count but zero cost stored.
+/// Pricing per million tokens (verified via OpenRouter API 2026-02-25).
+fn estimate_cost_from_tokens(model: &str, token_count: i64) -> Option<f64> {
+    let m = model.to_lowercase();
+    // Assume a typical 80/20 split: 80% input, 20% output tokens
+    let input_tokens = (token_count as f64 * 0.80) as u64;
+    let output_tokens = (token_count as f64 * 0.20) as u64;
+
+    let (input_cost, output_cost): (f64, f64) = if m.contains("claude-opus-4") {
+        (5.0, 25.0)
+    } else if m.contains("claude-opus-3") || m.contains("claude-3-opus") {
+        (15.0, 75.0)
+    } else if m.contains("claude-sonnet-4")
+        || m.contains("claude-3-7-sonnet")
+        || m.contains("claude-3-5-sonnet")
+        || m.contains("claude-3-sonnet")
+    {
+        (3.0, 15.0)
+    } else if m.contains("claude-haiku-4") {
+        (1.0, 5.0)
+    } else if m.contains("claude-3-5-haiku") {
+        (0.80, 4.0)
+    } else if m.contains("claude-3-haiku") {
+        (0.25, 1.25)
+    } else {
+        return None; // Unknown model — can't estimate
+    };
+
+    let cost = (input_tokens as f64 / 1_000_000.0) * input_cost
+        + (output_tokens as f64 / 1_000_000.0) * output_cost;
+    Some(cost)
+}
+
 /// Render the usage stats dialog (centered overlay)
 fn render_usage_dialog(f: &mut Frame, app: &App, area: Rect) {
-    let dialog_height = 12u16.min(area.height.saturating_sub(4));
-    let dialog_width = 50u16.min(area.width.saturating_sub(4));
+    // ── Current session stats ──────────────────────────────────────────────
+    let session_name = app
+        .current_session
+        .as_ref()
+        .and_then(|s| s.title.as_deref())
+        .unwrap_or("New Session");
 
-    // Center the dialog
+    let model = app
+        .current_session
+        .as_ref()
+        .and_then(|s| s.model.as_deref())
+        .unwrap_or_else(|| app.provider_model());
+
+    let message_count = app.messages.len();
+    let cur_tokens = app.total_tokens();
+    let cur_cost = app.total_cost();
+
+    // ── All-time stats grouped by model ───────────────────────────────────
+    // Group sessions by model, sum token_count and total_cost.
+    // For sessions with zero cost but non-zero tokens, estimate cost.
+    use std::collections::HashMap;
+    struct ModelStats {
+        sessions: usize,
+        tokens: i64,
+        cost: f64,
+        estimated: bool, // true if any session used estimation
+    }
+    let mut by_model: HashMap<String, ModelStats> = HashMap::new();
+
+    for s in &app.sessions {
+        let model_key = s.model.clone().unwrap_or_else(|| "unknown".to_string());
+        let entry = by_model.entry(model_key.clone()).or_insert(ModelStats {
+            sessions: 0,
+            tokens: 0,
+            cost: 0.0,
+            estimated: false,
+        });
+        entry.sessions += 1;
+        entry.tokens += s.token_count as i64;
+
+        if s.total_cost > 0.0 {
+            entry.cost += s.total_cost;
+        } else if s.token_count > 0 {
+            // Cost not stored — estimate from token count
+            if let Some(est) = estimate_cost_from_tokens(&model_key, s.token_count as i64) {
+                entry.cost += est;
+                entry.estimated = true;
+            }
+        }
+    }
+
+    let total_sessions = app.sessions.len();
+    let all_tokens: i64 = by_model.values().map(|v| v.tokens).sum();
+    let all_cost: f64 = by_model.values().map(|v| v.cost).sum();
+    let any_estimated = by_model.values().any(|v| v.estimated);
+
+    // Sort models by cost descending
+    let mut model_entries: Vec<(&String, &ModelStats)> = by_model.iter().collect();
+    model_entries.sort_by(|a, b| b.1.cost.partial_cmp(&a.1.cost).unwrap_or(std::cmp::Ordering::Equal));
+
+    // ── Build lines ────────────────────────────────────────────────────────
+    let label_style = Style::default().fg(Color::DarkGray);
+    let value_style = Style::default()
+        .fg(Color::White)
+        .add_modifier(Modifier::BOLD);
+    let dim_style = Style::default().fg(Color::DarkGray);
+    let header_style = Style::default()
+        .fg(Color::Rgb(70, 130, 180))
+        .add_modifier(Modifier::BOLD);
+    let est_style = Style::default().fg(Color::Yellow);
+
+    let fmt_tokens = |t: i64| -> String {
+        if t >= 1_000_000 {
+            format!("{:.1}M", t as f64 / 1_000_000.0)
+        } else if t >= 1_000 {
+            format!("{:.0}K", t as f64 / 1_000.0)
+        } else {
+            format!("{}", t)
+        }
+    };
+
+    let mut lines: Vec<Line> = vec![
+        Line::from(""),
+        Line::from(vec![Span::styled("  ── Current Session ──", header_style)]),
+        Line::from(vec![
+            Span::styled("  Session:  ", label_style),
+            Span::styled(session_name.to_string(), value_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  Model:    ", label_style),
+            Span::styled(model.to_string(), value_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  Messages: ", label_style),
+            Span::styled(format!("{}", message_count), value_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  Tokens:   ", label_style),
+            Span::styled(fmt_tokens(cur_tokens as i64), value_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  Cost:     ", label_style),
+            Span::styled(format!("${:.4}", cur_cost), value_style),
+        ]),
+        Line::from(""),
+        Line::from(vec![Span::styled("  ── All Sessions ──", header_style)]),
+        Line::from(vec![
+            Span::styled("  Sessions: ", label_style),
+            Span::styled(format!("{}", total_sessions), value_style),
+            Span::styled(format!("  Tokens: {}", fmt_tokens(all_tokens)), dim_style),
+        ]),
+    ];
+
+    // Per-model breakdown
+    for (model_name, stats) in &model_entries {
+        let cost_str = if stats.estimated {
+            format!("~${:.2}", stats.cost)
+        } else {
+            format!("${:.2}", stats.cost)
+        };
+        let short_model = if model_name.len() > 20 {
+            format!("{}…", &model_name[..19])
+        } else {
+            model_name.to_string()
+        };
+        lines.push(Line::from(vec![
+            Span::styled("    ", dim_style),
+            Span::styled(format!("{:<21}", short_model), value_style),
+            if stats.estimated {
+                Span::styled(format!("{:>8}", cost_str), est_style)
+            } else {
+                Span::styled(format!("{:>8}", cost_str), value_style)
+            },
+            Span::styled(format!("  ({})", fmt_tokens(stats.tokens)), dim_style),
+        ]));
+    }
+
+    // Total
+    let total_str = if any_estimated {
+        format!("~${:.2}", all_cost)
+    } else {
+        format!("${:.2}", all_cost)
+    };
+    lines.push(Line::from(vec![
+        Span::styled("  Total:    ", label_style),
+        if any_estimated {
+            Span::styled(total_str, est_style)
+        } else {
+            Span::styled(total_str, value_style)
+        },
+    ]));
+
+    if any_estimated {
+        lines.push(Line::from(vec![Span::styled(
+            "  ~ = estimated (80/20 token split)",
+            Style::default().fg(Color::DarkGray),
+        )]));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![Span::styled(
+        "         [Esc] Close",
+        Style::default().fg(Color::DarkGray),
+    )]));
+
+    // ── Compute dialog size dynamically ───────────────────────────────────
+    let content_lines = lines.len() as u16;
+    let dialog_height = (content_lines + 2).min(area.height.saturating_sub(4));
+    let dialog_width = 56u16.min(area.width.saturating_sub(4));
+
     let v_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -2484,68 +2684,13 @@ fn render_usage_dialog(f: &mut Frame, app: &App, area: Rect) {
         .split(v_chunks[1]);
     let dialog_area = h_chunks[1];
 
-    let session_name = app
-        .current_session
-        .as_ref()
-        .and_then(|s| s.title.as_deref())
-        .unwrap_or("New Session");
-
-    let provider = app.provider_name();
-    let model = app
-        .current_session
-        .as_ref()
-        .and_then(|s| s.model.as_deref())
-        .unwrap_or_else(|| app.provider_model());
-
-    let message_count = app.messages.len();
-    let tokens = app.total_tokens();
-    let cost = app.total_cost();
-
-    let label_style = Style::default().fg(Color::DarkGray);
-    let value_style = Style::default()
-        .fg(Color::White)
-        .add_modifier(Modifier::BOLD);
-
-    let lines = vec![
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("  Session:  ", label_style),
-            Span::styled(session_name, value_style),
-        ]),
-        Line::from(vec![
-            Span::styled("  Provider: ", label_style),
-            Span::styled(provider, value_style),
-        ]),
-        Line::from(vec![
-            Span::styled("  Model:    ", label_style),
-            Span::styled(model, value_style),
-        ]),
-        Line::from(vec![
-            Span::styled("  Messages: ", label_style),
-            Span::styled(format!("{}", message_count), value_style),
-        ]),
-        Line::from(vec![
-            Span::styled("  Tokens:   ", label_style),
-            Span::styled(format!("{}", tokens), value_style),
-        ]),
-        Line::from(vec![
-            Span::styled("  Cost:     ", label_style),
-            Span::styled(format!("${:.4}", cost), value_style),
-        ]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            "         [Esc] Close",
-            Style::default().fg(Color::DarkGray),
-        )]),
-    ];
-
     f.render_widget(Clear, dialog_area);
     let dialog = Paragraph::new(lines).block(
         Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Rgb(70, 130, 180)))
             .title(Span::styled(
-                " Session Usage ",
+                " Usage Stats ",
                 Style::default()
                     .fg(Color::Rgb(70, 130, 180))
                     .add_modifier(Modifier::BOLD),
