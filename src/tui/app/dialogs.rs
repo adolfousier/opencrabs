@@ -7,7 +7,57 @@ use crate::brain::provider::{ContentBlock, LLMRequest};
 use anyhow::Result;
 use std::path::PathBuf;
 
+/// Sentinel for model selector - same as onboarding
+const MODEL_SELECTOR_EXISTING_KEY_SENTINEL: &str = "__EXISTING_KEY__";
+
 impl App {
+    /// Detect existing API key for the currently selected provider in model selector.
+    /// Uses sentinel pattern - doesn't load actual key into memory.
+    pub(crate) fn detect_model_selector_key_for_provider(&mut self) {
+        let provider_idx = self.model_selector_provider_selected;
+        
+        if let Ok(config) = crate::config::Config::load() {
+            let has_key = match provider_idx {
+                0 => config.providers.anthropic.as_ref()
+                    .is_some_and(|p| p.api_key.as_ref().is_some_and(|k| !k.is_empty())),
+                1 => config.providers.openai.as_ref()
+                    .is_some_and(|p| p.api_key.as_ref().is_some_and(|k| !k.is_empty())),
+                2 => config.providers.gemini.as_ref()
+                    .is_some_and(|p| p.api_key.as_ref().is_some_and(|k| !k.is_empty())),
+                3 => config.providers.openrouter.as_ref()
+                    .is_some_and(|p| p.api_key.as_ref().is_some_and(|k| !k.is_empty())),
+                4 => config.providers.minimax.as_ref()
+                    .is_some_and(|p| p.api_key.as_ref().is_some_and(|k| !k.is_empty())),
+                5 => {
+                    // Custom provider - also load base_url and model
+                    if let Some((_name, c)) = config.providers.active_custom() {
+                        if c.api_key.as_ref().is_some_and(|k| !k.is_empty()) {
+                            self.model_selector_base_url = c.base_url.clone().unwrap_or_default();
+                            self.model_selector_custom_model = c.default_model.clone().unwrap_or_default();
+                            self.model_selector_api_key = MODEL_SELECTOR_EXISTING_KEY_SENTINEL.to_string();
+                        }
+                        c.base_url.as_ref().is_some_and(|u| !u.is_empty())
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            };
+            
+            if provider_idx != 5 {
+                if has_key {
+                    self.model_selector_api_key = MODEL_SELECTOR_EXISTING_KEY_SENTINEL.to_string();
+                } else {
+                    self.model_selector_api_key.clear();
+                }
+            }
+        }
+        
+        // Clear model selection when provider changes
+        self.model_selector_selected = 0;
+        self.model_selector_filter.clear();
+    }
+
     /// Open the model selector dialog - load from config and fetch models
     pub(crate) async fn open_model_selector(&mut self) {
         tracing::debug!("[open_model_selector] Opening model selector");
@@ -60,9 +110,12 @@ impl App {
         
         self.model_selector_provider_selected = provider_idx;
         
-        // Set API key from config (will show as asterisks in UI)
-        if let Some(ref key) = api_key {
-            self.model_selector_api_key = key.clone();
+        // Use sentinel pattern - don't load actual key into memory, just signal "key exists"
+        // The actual key stays in keys.toml, we only need to know if it exists
+        if api_key.is_some() {
+            self.model_selector_api_key = MODEL_SELECTOR_EXISTING_KEY_SENTINEL.to_string();
+        } else {
+            self.model_selector_api_key.clear();
         }
         
         // Fetch models from enabled provider using config's API key
@@ -118,15 +171,22 @@ impl App {
             self.model_selector_showing_providers = self.model_selector_focused_field == 0;
         } else if self.model_selector_focused_field == 0 {
             // Provider selection (focused)
-            match event.code {
+            let provider_changed = match event.code {
                 crossterm::event::KeyCode::Up => {
                     self.model_selector_provider_selected = self.model_selector_provider_selected.saturating_sub(1);
+                    true
                 }
                 crossterm::event::KeyCode::Down => {
                     self.model_selector_provider_selected = (self.model_selector_provider_selected + 1)
                         .min(PROVIDERS.len() - 1);
+                    true
                 }
-                _ => {}
+                _ => false
+            };
+            
+            // If provider changed, detect existing key for the new provider
+            if provider_changed {
+                self.detect_model_selector_key_for_provider();
             }
         } else if self.model_selector_focused_field == 1 && self.model_selector_provider_selected == 5 {
             // Base URL input for Custom provider (field 1)
@@ -208,7 +268,7 @@ impl App {
             
             if self.model_selector_focused_field == 0 {
                 // On provider field - save config, DON'T close dialog
-                if let Err(e) = self.save_provider_selection_internal(self.model_selector_provider_selected, false).await {
+                if let Err(e) = self.save_provider_selection_internal(self.model_selector_provider_selected, false, false).await {
                     self.push_system_message(format!("Error: {}", e));
                 } else {
                     self.model_selector_focused_field = 1;
@@ -220,14 +280,23 @@ impl App {
                 || (self.model_selector_focused_field == 2 && is_custom) {
                 // On API key field (field 1 for non-Custom, field 2 for Custom)
                 let provider_idx = self.model_selector_provider_selected;
-                let api_key = if self.model_selector_api_key.is_empty() {
+                
+                // Check if sentinel (existing key) or user-typed key
+                let is_existing_key = self.model_selector_api_key == MODEL_SELECTOR_EXISTING_KEY_SENTINEL;
+                let api_key = if is_existing_key {
+                    // Don't save anything - key already exists in config
+                    None
+                } else if self.model_selector_api_key.is_empty() {
                     None
                 } else {
                     Some(self.model_selector_api_key.clone())
                 };
                 
+                // Skip saving if key already exists (sentinel) - no need to update
+                let key_changed = !is_existing_key && !self.model_selector_api_key.is_empty();
+                
                 // Save provider config - DON'T close
-                if let Err(e) = self.save_provider_selection_internal(provider_idx, false).await {
+                if let Err(e) = self.save_provider_selection_internal(provider_idx, false, key_changed).await {
                     self.push_system_message(format!("Error: {}", e));
                 } else {
                     // Fetch live models from the provider (for non-Custom)
@@ -241,7 +310,7 @@ impl App {
                 }
             } else {
                 // On model field - save and close (this one CAN close)
-                self.save_provider_selection(self.model_selector_provider_selected).await?;
+                self.save_provider_selection(self.model_selector_provider_selected, true).await?;
             }
         }
 
@@ -250,12 +319,13 @@ impl App {
 
     /// Save provider selection to config and reload agent service
     /// If `close_dialog` is false, stays in model selector (for step 1 and 2)
-    async fn save_provider_selection(&mut self, provider_idx: usize) -> Result<()> {
-        self.save_provider_selection_internal(provider_idx, true).await
+    async fn save_provider_selection(&mut self, provider_idx: usize, key_changed: bool) -> Result<()> {
+        self.save_provider_selection_internal(provider_idx, true, key_changed).await
     }
 
     /// Internal: save provider with option to close dialog
-    async fn save_provider_selection_internal(&mut self, provider_idx: usize, close_dialog: bool) -> Result<()> {
+    /// `key_changed` - true if user typed a new key (needs to be saved)
+    async fn save_provider_selection_internal(&mut self, provider_idx: usize, close_dialog: bool, key_changed: bool) -> Result<()> {
         use super::onboarding::PROVIDERS;
         use crate::config::ProviderConfig;
 
@@ -281,10 +351,44 @@ impl App {
             p.enabled = false;
         }
         
-        let api_key = if self.model_selector_api_key.is_empty() {
-            None
+        // Get existing key from config if not changing
+        let existing_key = match provider_idx {
+            0 => config.providers.anthropic.as_ref()
+                .and_then(|p| p.api_key.as_ref())
+                .filter(|k| !k.is_empty())
+                .cloned(),
+            1 => config.providers.openai.as_ref()
+                .and_then(|p| p.api_key.as_ref())
+                .filter(|k| !k.is_empty())
+                .cloned(),
+            2 => config.providers.gemini.as_ref()
+                .and_then(|p| p.api_key.as_ref())
+                .filter(|k| !k.is_empty())
+                .cloned(),
+            3 => config.providers.openrouter.as_ref()
+                .and_then(|p| p.api_key.as_ref())
+                .filter(|k| !k.is_empty())
+                .cloned(),
+            4 => config.providers.minimax.as_ref()
+                .and_then(|p| p.api_key.as_ref())
+                .filter(|k| !k.is_empty())
+                .cloned(),
+            5 => config.providers.active_custom()
+                .and_then(|(_, p)| p.api_key.as_ref())
+                .filter(|k| !k.is_empty())
+                .cloned(),
+            _ => None,
+        };
+        
+        // Use existing key if not changed, otherwise use user input
+        let api_key = if key_changed {
+            if self.model_selector_api_key.is_empty() {
+                None
+            } else {
+                Some(self.model_selector_api_key.clone())
+            }
         } else {
-            Some(self.model_selector_api_key.clone())
+            existing_key
         };
 
         // Log what's being saved (hide key)

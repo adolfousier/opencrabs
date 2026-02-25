@@ -463,6 +463,13 @@ impl AgentService {
             .await
             .map_err(|e| AgentError::Database(e.to_string()))?;
 
+        // Create assistant message placeholder NOW for real-time persistence.
+        // We'll append content as we go and update with final tokens at the end.
+        let assistant_db_msg = message_service
+            .create_message(session_id, "assistant".to_string(), String::new())
+            .await
+            .map_err(|e| AgentError::Database(e.to_string()))?;
+
         // Reserve tokens for tool definitions (not tracked in context.token_count).
         // Each tool schema is roughly 300-800 tokens; reserve a flat budget.
         let tool_overhead = self.tool_registry.count() * 500;
@@ -789,6 +796,11 @@ impl AgentService {
                     accumulated_text.push_str("\n\n");
                 }
                 accumulated_text.push_str(&iteration_text);
+                
+                // REAL-TIME PERSISTENCE: Save to DB immediately after each iteration's text
+                let _ = message_service
+                    .append_content(assistant_db_msg.id, &format!("{}\n\n", iteration_text))
+                    .await;
             }
 
             tracing::debug!("Found {} tool uses to execute", tool_uses.len());
@@ -1161,6 +1173,16 @@ impl AgentService {
                     "<!-- tools-v2: {} -->",
                     serde_json::to_string(&entries).unwrap_or_default()
                 ));
+                
+                // REAL-TIME PERSISTENCE: Save tool results to DB immediately
+                let tool_block = format!(
+                    "\n<!-- tools-v2: {} -->\n",
+                    serde_json::to_string(&entries).unwrap_or_default()
+                );
+                let _ = message_service
+                    .append_content(assistant_db_msg.id, &tool_block)
+                    .await;
+                
                 tool_descriptions.clear();
                 tool_outputs.clear();
             }
@@ -1250,15 +1272,13 @@ impl AgentService {
 
         // === GRACEFUL SAVE ON CANCEL/LOOP-BREAK ===
         // If we broke out of the loop without a final_response (cancellation, error, etc.)
-        // but we have accumulated text/tool results, save them to DB so history isn't lost.
+        // but we have accumulated text/tool results, they're already in the DB from real-time persistence.
+        // Just ensure session usage is updated.
         if final_response.is_none() && !accumulated_text.is_empty() {
             tracing::info!(
-                "Saving accumulated text ({} chars) to DB despite no final response (cancelled/loop-break)",
+                "Loop broken without final response but accumulated text ({} chars) already persisted in real-time",
                 accumulated_text.len()
             );
-            let _ = message_service
-                .create_message(session_id, "assistant".to_string(), accumulated_text.clone())
-                .await;
             // Also save token usage for what we consumed
             let partial_tokens = total_input_tokens + total_output_tokens;
             if partial_tokens > 0 {
@@ -1282,12 +1302,9 @@ impl AgentService {
         // Intermediate text was already shown in real-time via IntermediateText events.
         let final_text = Self::extract_text_from_response(&response);
 
-        // Save full accumulated text to database (preserves all intermediate messages for history)
-        let assistant_db_msg = message_service
-            .create_message(session_id, "assistant".to_string(), accumulated_text)
-            .await
-            .map_err(|e| AgentError::Database(e.to_string()))?;
-
+        // The assistant message was already created and updated in real-time.
+        // Now update with final token usage.
+        
         // Calculate total cost
         let total_tokens = total_input_tokens + total_output_tokens;
         let cost =

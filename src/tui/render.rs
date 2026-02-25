@@ -2308,10 +2308,21 @@ fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     // API Key field (field 1 for non-Custom, field 2 for Custom)
     let key_focused = (focused_field == 1 && !is_custom) || (focused_field == 2 && is_custom);
     let key_label = selected_provider.key_label;
-    let (masked_key, key_hint) = if app.model_selector_api_key.is_empty() {
-        (format!("enter your {} (optional)", key_label.to_lowercase()), String::new())
-    } else {
+    
+    // Check if we have an existing key (sentinel) or user-typed key
+    // Note: This matches the sentinel value from dialogs.rs
+    let has_existing_key = app.model_selector_api_key == "__EXISTING_KEY__";
+    let has_user_key = !app.model_selector_api_key.is_empty() && !has_existing_key;
+    
+    let (masked_key, key_hint) = if has_user_key {
+        // User typed a new key - show asterisks for what they typed
         ("*".repeat(app.model_selector_api_key.len().min(30)), String::new())
+    } else if has_existing_key {
+        // Key exists in config - show placeholder indicating it's configured
+        ("● configured".to_string(), String::new())
+    } else {
+        // Empty - show input hint
+        (format!("enter your {} (optional)", key_label.to_lowercase()), String::new())
     };
     let cursor = if key_focused { "█" } else { "" };
 

@@ -552,6 +552,7 @@ impl Provider for OpenAIProvider {
                     Ok(chunk) => {
                         // GRANULAR LOG: Raw SSE chunk
                         let raw_text = String::from_utf8_lossy(&chunk);
+                        tracing::debug!("[STREAM_RAW] SSE chunk: {}", raw_text.chars().take(500).collect::<String>());
                         if raw_text.contains("tool_calls") {
                             tracing::debug!("[STREAM_RAW] SSE chunk with tool_calls: {}", raw_text.chars().take(500).collect::<String>());
                         }

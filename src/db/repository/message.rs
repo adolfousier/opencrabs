@@ -93,6 +93,19 @@ impl MessageRepository {
         Ok(())
     }
 
+    /// Append content to an existing message (for real-time history persistence)
+    pub async fn append_content(&self, id: Uuid, content_to_append: &str) -> Result<()> {
+        sqlx::query("UPDATE messages SET content = content || ? WHERE id = ?")
+            .bind(content_to_append)
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await
+            .context("Failed to append to message")?;
+
+        tracing::debug!("Appended content to message: {}", id);
+        Ok(())
+    }
+
     /// Delete a message
     pub async fn delete(&self, id: Uuid) -> Result<()> {
         sqlx::query("DELETE FROM messages WHERE id = ?")

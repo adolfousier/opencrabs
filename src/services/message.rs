@@ -108,6 +108,15 @@ impl MessageService {
         Ok(())
     }
 
+    /// Append content to an existing message (for real-time history persistence)
+    pub async fn append_content(&self, id: Uuid, content_to_append: &str) -> Result<()> {
+        let repo = MessageRepository::new(self.context.pool());
+        repo.append_content(id, content_to_append)
+            .await
+            .context("Failed to append to message")?;
+        Ok(())
+    }
+
     /// Delete a message
     pub async fn delete_message(&self, id: Uuid) -> Result<()> {
         let repo = MessageRepository::new(self.context.pool());
