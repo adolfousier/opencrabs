@@ -784,124 +784,16 @@ impl AgentService {
                     cb(ProgressEvent::IntermediateText { text: iteration_text });
                 }
 
-            // Detect tool loops: Track the current batch of tool calls
-            // Include arguments in signature to distinguish different calls
-            // For example: ls(./src) vs ls(./src/cli) should be different
+            // Detect tool loops: hash the full input for every tool.
+            // Different arguments = different hash = no false loop detection.
             let current_call_signature = tool_uses
                 .iter()
                 .map(|(_, name, input)| {
-                    match name.as_str() {
-                        "plan" => {
-                            // Extract operation from plan tool input
-                            if let Some(operation) = input.get("operation").and_then(|v| v.as_str())
-                            {
-                                // For add_task, include task title to distinguish different tasks
-                                if operation == "add_task" {
-                                    if let Some(title) = input.get("title").and_then(|v| v.as_str())
-                                    {
-                                        format!("{}:{}:{}", name, operation, title)
-                                    } else {
-                                        format!("{}:{}", name, operation)
-                                    }
-                                } else {
-                                    format!("{}:{}", name, operation)
-                                }
-                            } else {
-                                name.to_string()
-                            }
-                        }
-
-                        // File system exploration tools - include path to distinguish calls
-                        "ls" => {
-                            if let Some(path) = input.get("path").and_then(|v| v.as_str()) {
-                                // Normalize path separators for consistent comparison
-                                let normalized = path.replace('\\', "/");
-                                format!("ls:{}", normalized)
-                            } else {
-                                "ls:".to_string()
-                            }
-                        }
-
-                        "glob" => {
-                            if let Some(pattern) = input.get("pattern").and_then(|v| v.as_str()) {
-                                format!("glob:{}", pattern)
-                            } else {
-                                "glob:".to_string()
-                            }
-                        }
-
-                        "grep" => {
-                            // Include pattern AND path to distinguish searches
-                            let pattern =
-                                input.get("pattern").and_then(|v| v.as_str()).unwrap_or("");
-                            let path = input.get("path").and_then(|v| v.as_str()).unwrap_or("");
-                            format!("grep:{}:{}", pattern, path)
-                        }
-
-                        "read" => {
-                            if let Some(path) = input.get("path").and_then(|v| v.as_str()) {
-                                let normalized = path.replace('\\', "/");
-                                format!("read:{}", normalized)
-                            } else {
-                                "read:".to_string()
-                            }
-                        }
-
-                        // File modification tools - include file path
-                        "write" | "edit" => {
-                            if let Some(path) = input.get("path").and_then(|v| v.as_str()) {
-                                let normalized = path.replace('\\', "/");
-                                format!("{}:{}", name, normalized)
-                            } else {
-                                format!("{}:", name)
-                            }
-                        }
-
-                        // Command execution - include command
-                        "bash" => {
-                            if let Some(cmd) = input.get("command").and_then(|v| v.as_str()) {
-                                // Normalize and truncate for signature
-                                let cmd_normalized = cmd.replace('\\', "/");
-                                let cmd_short: String = cmd_normalized.chars().take(100).collect();
-                                format!("bash:{}", cmd_short)
-                            } else {
-                                "bash:".to_string()
-                            }
-                        }
-
-                        // session_search: include operation + query to distinguish calls
-                        "session_search" => {
-                            let op = input.get("operation").and_then(|v| v.as_str()).unwrap_or("");
-                            let query = input.get("query").and_then(|v| v.as_str()).unwrap_or("");
-                            format!("session_search:{}:{}", op, query)
-                        }
-
-                        // web_search: include query to distinguish different searches
-                        "web_search" => {
-                            let query = input.get("query").and_then(|v| v.as_str()).unwrap_or("");
-                            format!("web_search:{}", query)
-                        }
-
-                        // http_request: include method + url to distinguish calls
-                        "http_request" => {
-                            let method = input.get("method").and_then(|v| v.as_str()).unwrap_or("");
-                            let url = input.get("url").and_then(|v| v.as_str()).unwrap_or("");
-                            format!("http_request:{}:{}", method, url)
-                        }
-
-                        // All other tools: include a hash of the full input so different
-                        // arguments produce different signatures. This prevents false loop
-                        // detection when an agent legitimately calls the same tool with
-                        // different parameters across iterations.
-                        _ => {
-                            let input_str = serde_json::to_string(input).unwrap_or_default();
-                            // Use a simple hash to keep signatures compact
-                            let hash: u64 = input_str.bytes().fold(0u64, |acc, b| {
-                                acc.wrapping_mul(31).wrapping_add(b as u64)
-                            });
-                            format!("{}:{:x}", name, hash)
-                        }
-                    }
+                    let input_str = serde_json::to_string(input).unwrap_or_default();
+                    let hash: u64 = input_str.bytes().fold(0u64, |acc, b| {
+                        acc.wrapping_mul(31).wrapping_add(b as u64)
+                    });
+                    format!("{}:{:x}", name, hash)
                 })
                 .collect::<Vec<_>>()
                 .join(",");
