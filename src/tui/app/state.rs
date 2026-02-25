@@ -305,6 +305,11 @@ pub struct App {
     /// Working directory
     pub working_directory: std::path::PathBuf,
 
+    /// Context hints queued by UI actions (e.g. /cd, @ file picker).
+    /// Drained and prepended to the next user message so the LLM knows
+    /// what just happened without the user having to explain.
+    pub pending_context: Vec<String>,
+
     /// Brain state
     pub brain_path: PathBuf,
     pub user_commands: Vec<UserCommand>,
@@ -429,6 +434,7 @@ impl App {
             input_history_index: None,
             input_history_stash: String::new(),
             working_directory: std::env::current_dir().unwrap_or_default(),
+            pending_context: Vec::new(),
             brain_path,
             user_commands,
             onboarding: None,

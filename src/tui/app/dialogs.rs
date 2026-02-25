@@ -915,6 +915,13 @@ impl App {
                 "Working directory changed to: {}",
                 canonical.display()
             ));
+
+            // Queue context hint so the next message to the LLM knows about the cd
+            self.pending_context.push(format!(
+                "[User changed working directory to: {}]",
+                canonical.display()
+            ));
+
             self.switch_mode(AppMode::Chat).await?;
         }
 
