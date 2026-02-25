@@ -161,6 +161,31 @@ impl AgentService {
         &self.tool_registry
     }
 
+    /// Get the progress callback (for preserving across rebuilds)
+    pub fn progress_callback(&self) -> &Option<ProgressCallback> {
+        &self.progress_callback
+    }
+
+    /// Get the message queue callback (for preserving across rebuilds)
+    pub fn message_queue_callback(&self) -> &Option<MessageQueueCallback> {
+        &self.message_queue_callback
+    }
+
+    /// Get the sudo callback (for preserving across rebuilds)
+    pub fn sudo_callback(&self) -> &Option<SudoCallback> {
+        &self.sudo_callback
+    }
+
+    /// Get the working directory (for preserving across rebuilds)
+    pub fn working_directory(&self) -> &Arc<std::sync::RwLock<std::path::PathBuf>> {
+        &self.working_directory
+    }
+
+    /// Get the brain path (for preserving across rebuilds)
+    pub fn brain_path(&self) -> &Option<std::path::PathBuf> {
+        &self.brain_path
+    }
+
     /// Set the default system brain
     pub fn with_system_brain(mut self, prompt: String) -> Self {
         self.default_system_brain = Some(prompt);
@@ -216,7 +241,7 @@ impl AgentService {
     }
 
     /// Get the current working directory
-    pub fn working_directory(&self) -> std::path::PathBuf {
+    pub fn get_working_directory(&self) -> std::path::PathBuf {
         self.working_directory.read().expect("working_directory lock poisoned").clone()
     }
 

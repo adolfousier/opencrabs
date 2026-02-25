@@ -627,10 +627,26 @@ impl App {
             })
         });
         
-        // Create new agent service with new provider, system brain, and approval callback
+        // Preserve existing callbacks from the current agent service
+        let progress_callback = self.agent_service.progress_callback().clone();
+        let message_queue_callback = self.agent_service.message_queue_callback().clone();
+        let sudo_callback = self.agent_service.sudo_callback().clone();
+        let working_dir = self.agent_service.working_directory().read()
+            .expect("working_directory lock poisoned").clone();
+        let brain_path = self.agent_service.brain_path().clone();
+        
+        // Create new agent service with new provider — preserve ALL callbacks
         let mut new_agent_service = AgentService::new(provider, context)
             .with_tool_registry(tool_registry)
-            .with_approval_callback(Some(approval_callback));
+            .with_approval_callback(Some(approval_callback))
+            .with_progress_callback(progress_callback)
+            .with_message_queue_callback(message_queue_callback)
+            .with_sudo_callback(sudo_callback)
+            .with_working_directory(working_dir);
+        
+        if let Some(bp) = brain_path {
+            new_agent_service = new_agent_service.with_brain_path(bp);
+        }
         
         // Add system brain if it exists
         if let Some(brain) = system_brain {
