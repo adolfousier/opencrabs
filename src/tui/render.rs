@@ -2500,6 +2500,13 @@ fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         let prefix = if selected && focused { " > " } else { "   " };
         let marker = if selected { "[*]" } else { "[ ]" };
 
+        // For custom provider with a name set, show the name instead of generic label
+        let label = if i == 5 && !app.model_selector_custom_name.is_empty() {
+            app.model_selector_custom_name.clone()
+        } else {
+            provider.name.to_string()
+        };
+
         lines.push(Line::from(vec![
             Span::styled(prefix, Style::default().fg(BRAND_GOLD)),
             Span::styled(
@@ -2511,7 +2518,7 @@ fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
                 }),
             ),
             Span::styled(
-                format!(" {}", provider.name),
+                format!(" {}", label),
                 Style::default()
                     .fg(if selected {
                         Color::White
@@ -2721,6 +2728,38 @@ fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
                 Span::styled(suffix, Style::default().fg(Color::DarkGray)),
             ]));
         }
+    }
+
+    // Custom provider: name identifier field (field 4 — last before save)
+    if is_custom {
+        let name_focused = focused_field == 4;
+        let name_cursor = if name_focused { "█" } else { "" };
+        let name_display = if app.model_selector_custom_name.is_empty() {
+            format!("enter identifier (e.g. nvidia, kimi){}", name_cursor)
+        } else {
+            format!("{}{}", app.model_selector_custom_name, name_cursor)
+        };
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::styled(
+                "  Name: ",
+                Style::default().fg(if name_focused {
+                    BRAND_BLUE
+                } else {
+                    Color::DarkGray
+                }),
+            ),
+            Span::styled(
+                name_display,
+                Style::default().fg(if name_focused {
+                    Color::White
+                } else if app.model_selector_custom_name.is_empty() {
+                    Color::DarkGray
+                } else {
+                    Color::Green
+                }),
+            ),
+        ]));
     }
 
     lines.push(Line::from(""));

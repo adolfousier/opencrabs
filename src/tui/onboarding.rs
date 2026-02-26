@@ -392,6 +392,7 @@ impl OnboardingWizard {
         let existing_config = crate::config::Config::load().ok();
 
         // Detect existing enabled provider
+        let mut custom_provider_name_init: Option<String> = None;
         let (selected_provider, api_key_input, custom_base_url, custom_model) =
             if let Some(ref config) = existing_config {
                 // Find first enabled provider
@@ -440,9 +441,21 @@ impl OnboardingWizard {
                         String::new(),
                         String::new(),
                     )
-                } else if let Some((_name, c)) = config.providers.active_custom() {
+                } else if let Some((name, c)) = config
+                    .providers
+                    .active_custom()
+                    .or_else(|| {
+                        config
+                            .providers
+                            .custom
+                            .as_ref()
+                            .and_then(|m| m.iter().next())
+                            .map(|(n, c)| (n.as_str(), c))
+                    })
+                {
                     let base = c.base_url.clone().unwrap_or_default();
                     let model = c.default_model.clone().unwrap_or_default();
+                    custom_provider_name_init = Some(name.to_string());
                     (5, EXISTING_KEY_SENTINEL.to_string(), base, model)
                 } else {
                     (0, String::new(), String::new(), String::new())
@@ -470,7 +483,7 @@ impl OnboardingWizard {
             api_key_cursor: 0,
             selected_model: 0,
             auth_field: AuthField::Provider,
-            custom_provider_name: "default".to_string(),
+            custom_provider_name: custom_provider_name_init.unwrap_or_default(),
             custom_base_url,
             custom_model,
             fetched_models: Vec::new(),
@@ -822,11 +835,20 @@ impl OnboardingWizard {
                 4 => has_nonempty_key(config.providers.minimax.as_ref()),
                 5 => {
                     // Custom provider - also load base_url, model, and name
-                    if let Some((name, c)) = config.providers.active_custom() {
+                    // Try enabled first, fall back to first entry in custom map
+                    let found = config.providers.active_custom().or_else(|| {
+                        config
+                            .providers
+                            .custom
+                            .as_ref()
+                            .and_then(|m| m.iter().next())
+                            .map(|(n, c)| (n.as_str(), c))
+                    });
+                    if let Some((name, c)) = found {
+                        self.custom_provider_name = name.to_string();
+                        self.custom_base_url = c.base_url.clone().unwrap_or_default();
+                        self.custom_model = c.default_model.clone().unwrap_or_default();
                         if c.api_key.as_ref().is_some_and(|k| !k.is_empty()) {
-                            self.custom_provider_name = name.to_string();
-                            self.custom_base_url = c.base_url.clone().unwrap_or_default();
-                            self.custom_model = c.default_model.clone().unwrap_or_default();
                             self.api_key_input = EXISTING_KEY_SENTINEL.to_string();
                         }
                         c.base_url.as_ref().is_some_and(|u| !u.is_empty())
@@ -870,10 +892,13 @@ impl OnboardingWizard {
                     return;
                 }
                 if self.is_custom_provider()
-                    && (self.custom_base_url.is_empty() || self.custom_model.is_empty())
+                    && (self.custom_base_url.is_empty()
+                        || self.custom_model.is_empty()
+                        || self.custom_provider_name.is_empty())
                 {
                     self.error_message = Some(
-                        "Base URL and model name are required for custom provider".to_string(),
+                        "Base URL, model name, and provider name are required for custom provider"
+                            .to_string(),
                     );
                     return;
                 }
@@ -1499,12 +1524,13 @@ impl OnboardingWizard {
                     self.custom_provider_name.pop();
                 }
                 KeyCode::Enter | KeyCode::Tab => {
-                    // Default to "default" if empty, always lowercase for config consistency
                     if self.custom_provider_name.is_empty() {
-                        self.custom_provider_name = "default".to_string();
-                    } else {
-                        self.custom_provider_name = self.custom_provider_name.to_lowercase();
+                        self.error_message = Some(
+                            "Enter a name identifier for this provider".to_string(),
+                        );
+                        return WizardAction::None;
                     }
+                    self.custom_provider_name = self.custom_provider_name.to_lowercase();
                     self.auth_field = AuthField::CustomBaseUrl;
                 }
                 KeyCode::BackTab => {

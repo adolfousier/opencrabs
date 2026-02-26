@@ -1000,16 +1000,16 @@ impl App {
             }
         }
 
-        if let Some(session) = &self.current_session {
-            if self.processing_sessions.contains(&session.id) {
-                tracing::warn!("[send_message] QUEUED — session {} still processing", session.id);
-                // DON'T add to messages yet - wait until agent processes it
-                // It will be added at the end after all assistant messages
+        if let Some(session) = &self.current_session
+            && self.processing_sessions.contains(&session.id)
+        {
+            tracing::warn!("[send_message] QUEUED — session {} still processing", session.id);
+            // DON'T add to messages yet - wait until agent processes it
+            // It will be added at the end after all assistant messages
 
-                // Queue for injection between tool calls
-                *self.message_queue.lock().await = Some(content);
-                return Ok(());
-            }
+            // Queue for injection between tool calls
+            *self.message_queue.lock().await = Some(content);
+            return Ok(());
         }
         if let Some(session) = &self.current_session {
             self.processing_sessions.insert(session.id);

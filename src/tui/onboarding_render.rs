@@ -366,6 +366,13 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
         let prefix = if selected && focused { " > " } else { "   " };
         let marker = if selected { "[*]" } else { "[ ]" };
 
+        // For custom provider with a name set, show the name instead of generic label
+        let label = if i == 5 && !wizard.custom_provider_name.is_empty() {
+            wizard.custom_provider_name.clone()
+        } else {
+            provider.name.to_string()
+        };
+
         lines.push(Line::from(vec![
             Span::styled(prefix, Style::default().fg(ACCENT_GOLD)),
             Span::styled(
@@ -377,7 +384,7 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
                 }),
             ),
             Span::styled(
-                format!(" {}", provider.name),
+                format!(" {}", label),
                 Style::default()
                     .fg(if selected {
                         Color::White
@@ -403,7 +410,7 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
 
         // Provider Name field
         let name_display = if wizard.custom_provider_name.is_empty() {
-            "default".to_string()
+            "enter a name (e.g. nvidia, ollama)".to_string()
         } else {
             wizard.custom_provider_name.clone()
         };
@@ -453,12 +460,19 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
         ]));
 
         // API Key field (optional for custom providers)
+        let has_existing = wizard.has_existing_key();
         let key_display = if wizard.api_key_input.is_empty() {
             "optional".to_string()
+        } else if has_existing {
+            "● configured".to_string()
         } else {
             "*".repeat(wizard.api_key_input.len().min(30))
         };
-        let cursor = if api_key_focused { "█" } else { "" };
+        let cursor = if api_key_focused && !has_existing {
+            "█"
+        } else {
+            ""
+        };
         lines.push(Line::from(vec![
             Span::styled(
                 "  API Key:  ",
@@ -470,7 +484,9 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
             ),
             Span::styled(
                 format!("{}{}", key_display, cursor),
-                Style::default().fg(if api_key_focused {
+                Style::default().fg(if has_existing {
+                    Color::Green
+                } else if api_key_focused {
                     Color::White
                 } else {
                     Color::DarkGray
@@ -2061,10 +2077,16 @@ fn render_complete(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
 
     // Summary
     let provider = &PROVIDERS[wizard.selected_provider];
+    let provider_label = if wizard.selected_provider == 5 && !wizard.custom_provider_name.is_empty()
+    {
+        wizard.custom_provider_name.clone()
+    } else {
+        provider.name.to_string()
+    };
     lines.push(Line::from(vec![
         Span::styled("  Provider: ", Style::default().fg(Color::DarkGray)),
         Span::styled(
-            provider.name.to_string(),
+            provider_label,
             Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
