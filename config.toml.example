@@ -17,7 +17,9 @@
 # Custom: OpenAI-Compatible Provider (Local LLMs, and any OpenAI Compatible model)
 # ========================================
 # Use this for LM Studio, Ollama, LocalAI, etc.
-[providers.custom]
+# Every custom provider needs a name — the label after "custom." (e.g. lm_studio, nvidia, groq).
+# You can define as many as you need and switch between them via /models.
+[providers.custom.lm_studio]
 enabled = true
 base_url = "http://localhost:1234/v1/chat/completions"  # LM Studio default
 models = ["kimi-k2.5", "glm-5", "MiniMax-M2.5", "qwen3-coder", "gpt-oss-120b", "llama-4-70B", "mistral-Large-3", "qwen3-coder-next"]
@@ -30,21 +32,7 @@ models = ["kimi-k2.5", "glm-5", "MiniMax-M2.5", "qwen3-coder", "gpt-oss-120b", "
 #   - llama-3.2-1b-instruct
 default_model = "qwen3-coder-next"
 
-# Other local LLM servers:
-# Ollama: base_url = "http://localhost:11434/v1/chat/completions"
-# LocalAI: base_url = "http://localhost:8080/v1/chat/completions"
-
-# ========================================
-# Advanced: Multiple Named Custom Providers
-# ========================================
-# Want multiple custom providers and switch between them via /models?
-# Use named sections instead of [providers.custom]:
-#
-# [providers.custom.lm_studio]
-# enabled = true
-# base_url = "http://localhost:1234/v1/chat/completions"
-# default_model = "qwen2.5-coder-7b-instruct"
-# models = ["qwen2.5-coder-7b-instruct", "llama-3-8B"]
+# Other local LLM servers — just add another named section:
 #
 # [providers.custom.ollama]
 # enabled = false

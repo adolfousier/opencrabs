@@ -43,13 +43,19 @@ impl App {
                     .as_ref()
                     .is_some_and(|p| p.api_key.as_ref().is_some_and(|k| !k.is_empty())),
                 5 => {
-                    // Custom provider - also load base_url, model, and name
-                    if let Some((name, c)) = config.providers.active_custom() {
-                        self.model_selector_custom_name = name.to_string();
-                        self.model_selector_base_url = c.base_url.clone().unwrap_or_default();
-                        self.model_selector_custom_model =
-                            c.default_model.clone().unwrap_or_default();
-                        c.api_key.as_ref().is_some_and(|k| !k.is_empty())
+                    // Custom provider - load base_url, model, and name
+                    // Use first custom from map (not active_custom which filters by enabled)
+                    if let Some(map) = &config.providers.custom {
+                        if let Some((name, c)) = map.iter().next() {
+                            self.model_selector_custom_name = name.to_string();
+                            self.model_selector_base_url =
+                                c.base_url.clone().unwrap_or_default();
+                            self.model_selector_custom_model =
+                                c.default_model.clone().unwrap_or_default();
+                            c.api_key.as_ref().is_some_and(|k| !k.is_empty())
+                        } else {
+                            false
+                        }
                     } else {
                         false
                     }
@@ -357,6 +363,20 @@ impl App {
                 }
                 _ => {}
             }
+        } else if self.model_selector_focused_field == 4
+            && self.model_selector_provider_selected == 5
+        {
+            // Custom provider: name identifier input (field 4 — last before save)
+            match event.code {
+                crossterm::event::KeyCode::Char(c) => {
+                    self.model_selector_custom_name.push(c);
+                    self.error_message = None;
+                }
+                crossterm::event::KeyCode::Backspace => {
+                    self.model_selector_custom_name.pop();
+                }
+                _ => {}
+            }
         } else if self.model_selector_focused_field == 2
             && self.model_selector_provider_selected != 5
         {
@@ -443,12 +463,24 @@ impl App {
                 // On API key field (field 1 for non-Custom, field 2 for Custom)
                 let provider_idx = self.model_selector_provider_selected;
 
-                // User typed a new key, or field is empty (existing key untouched)
+                // User typed a new key, or kept existing (just hit Enter to move on)
                 let key_changed = !self.model_selector_api_key.is_empty();
                 let api_key = if key_changed {
                     Some(self.model_selector_api_key.clone())
                 } else {
-                    None
+                    // Existing key untouched — load from config (merged with keys.toml)
+                    crate::config::Config::load().ok().and_then(|c| {
+                        match provider_idx {
+                            0 => c.providers.anthropic.and_then(|p| p.api_key),
+                            1 => c.providers.openai.and_then(|p| p.api_key),
+                            2 => c.providers.gemini.and_then(|p| p.api_key),
+                            3 => c.providers.openrouter.and_then(|p| p.api_key),
+                            4 => c.providers.minimax.and_then(|p| p.api_key),
+                            5 => c.providers.active_custom().and_then(|(_, p)| p.api_key.clone()),
+                            _ => None,
+                        }
+                        .filter(|k| !k.is_empty())
+                    })
                 };
 
                 // Save provider config - DON'T close
@@ -468,11 +500,24 @@ impl App {
                     }
                     self.model_selector_selected = 0;
 
-                    // Move to model selection field (field 2 for non-Custom, field 3 for Custom)
+                    // Move to model field (field 2 for non-Custom, field 3 for Custom)
                     self.model_selector_focused_field = if is_custom { 3 } else { 2 };
                 }
+            } else if is_custom && self.model_selector_focused_field == 3 {
+                // Custom: after model, go to name field (field 4)
+                self.model_selector_focused_field = 4;
+            } else if is_custom && self.model_selector_focused_field == 4 {
+                // Custom: on name field — validate then save
+                if self.model_selector_custom_name.is_empty() {
+                    self.error_message =
+                        Some("Enter a name identifier for this provider".to_string());
+                } else {
+                    self.error_message = None;
+                    self.save_provider_selection(self.model_selector_provider_selected, false)
+                        .await?;
+                }
             } else {
-                // On model field - save and close (this one CAN close)
+                // Non-custom: on model field — save and close
                 self.save_provider_selection(self.model_selector_provider_selected, false)
                     .await?;
             }

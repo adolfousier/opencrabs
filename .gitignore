@@ -3,13 +3,6 @@
 **/*.rs.bk
 *.pdb
 Cargo.lock
-~/
-.opencrabs_*.json
-PLAN.md
-src/plans/
-
-*.swp
-*.swo
 
 # Debug files
 *.dSYM/
@@ -69,3 +62,14 @@ Desktop.ini
 
 # Workspace personal files (use docs/reference/templates/ for generic versions)
 src/workspace/
+
+
+# Local
+src/tasks/
+tasks/
+~/
+.opencrabs_*.json
+PLAN.md
+src/plans/
+*.swp
+*.swo
