@@ -21,6 +21,51 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(120);
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
 
+/// Filter `<think>...</think>` reasoning blocks from a streaming chunk.
+///
+/// Tracks state across chunks via `inside_think`. Returns the portion of `text`
+/// that is outside any think block. Handles tags split across chunk boundaries.
+fn filter_think_tags(text: &str, inside_think: &mut bool) -> String {
+    let mut result = String::new();
+    let mut remaining = text;
+
+    loop {
+        if *inside_think {
+            if let Some(end) = remaining.find("</think>") {
+                remaining = &remaining[end + 8..];
+                *inside_think = false;
+            } else {
+                break;
+            }
+        } else if let Some(start) = remaining.find("<think>") {
+            result.push_str(&remaining[..start]);
+            remaining = &remaining[start + 7..];
+            *inside_think = true;
+        } else {
+            result.push_str(remaining);
+            break;
+        }
+    }
+
+    result
+}
+
+/// Strip complete `<think>...</think>` blocks from non-streaming content.
+fn strip_think_blocks(text: &str) -> String {
+    let mut result = String::new();
+    let mut remaining = text;
+    while let Some(start) = remaining.find("<think>") {
+        result.push_str(&remaining[..start]);
+        if let Some(end) = remaining[start..].find("</think>") {
+            remaining = &remaining[start + end + 8..];
+        } else {
+            return result.trim().to_string();
+        }
+    }
+    result.push_str(remaining);
+    result.trim().to_string()
+}
+
 /// OpenAI provider for GPT models
 #[derive(Clone)]
 pub struct OpenAIProvider {
@@ -284,10 +329,13 @@ impl OpenAIProvider {
         // Convert content to content blocks
         let mut content_blocks = Vec::new();
 
-        // Add text content if present
+        // Add text content if present, stripping <think>...</think> reasoning blocks
         if let Some(content) = choice.message.content
             && !content.is_empty() {
-                content_blocks.push(ContentBlock::Text { text: content });
+                let clean = strip_think_blocks(&content);
+                if !clean.is_empty() {
+                    content_blocks.push(ContentBlock::Text { text: clean });
+                }
             }
 
         // Convert tool_calls to ToolUse content blocks
@@ -536,6 +584,8 @@ impl Provider for OpenAIProvider {
             seen_delta_content: bool,
             /// Index -> accumulated tool call
             tool_calls: std::collections::HashMap<usize, ToolCallAccum>,
+            /// True while inside a `<think>...</think>` reasoning block
+            inside_think: bool,
         }
 
         let state = std::sync::Arc::new(std::sync::Mutex::new(StreamState {
@@ -543,6 +593,7 @@ impl Provider for OpenAIProvider {
             emitted_content_start: false,
             seen_delta_content: false,
             tool_calls: std::collections::HashMap::new(),
+            inside_think: false,
         }));
         
         let event_stream = byte_stream
@@ -579,7 +630,7 @@ impl Provider for OpenAIProvider {
                                             accum.id, accum.name, &accum.arguments.chars().take(200).collect::<String>()
                                         );
                                         events.push(Ok(StreamEvent::ContentBlockStart {
-                                            index: _idx,
+                                            index: _idx + 1, // Offset to avoid collision with text block at index 0
                                             content_block: ContentBlock::ToolUse {
                                                 id: accum.id,
                                                 name: accum.name,
@@ -702,22 +753,30 @@ impl Provider for OpenAIProvider {
                                                 }
                                             }
 
-                                        // Emit text content
+                                        // Emit text content, filtering <think>...</think> reasoning blocks
                                         if let Some(ref c) = content {
-                                            if !st.emitted_content_start && c.is_empty() {
+                                            let filtered = filter_think_tags(c, &mut st.inside_think);
+
+                                            if !filtered.trim().is_empty() {
+                                                if !st.emitted_content_start {
+                                                    st.emitted_content_start = true;
+                                                    events.push(Ok(StreamEvent::ContentBlockStart {
+                                                        index: 0,
+                                                        content_block: ContentBlock::Text { text: String::new() },
+                                                    }));
+                                                }
+
+                                                events.push(Ok(StreamEvent::ContentBlockDelta {
+                                                    index: 0,
+                                                    delta: ContentDelta::TextDelta {
+                                                        text: filtered,
+                                                    },
+                                                }));
+                                            } else if !st.emitted_content_start && c.is_empty() {
                                                 st.emitted_content_start = true;
                                                 events.push(Ok(StreamEvent::ContentBlockStart {
                                                     index: 0,
                                                     content_block: ContentBlock::Text { text: String::new() },
-                                                }));
-                                            }
-
-                                            if !c.is_empty() {
-                                                events.push(Ok(StreamEvent::ContentBlockDelta {
-                                                    index: 0,
-                                                    delta: ContentDelta::TextDelta {
-                                                        text: c.clone(),
-                                                    },
                                                 }));
                                             }
                                         }
@@ -739,31 +798,40 @@ impl Provider for OpenAIProvider {
                                             }));
                                         }
 
-                                        // Extract usage from final chunk
-                                        if let Some(ref usage) = chunk.usage
-                                            && finish_reason_str.is_some() {
-                                                let input_tokens = usage.prompt_tokens.unwrap_or(0);
-                                                let output_tokens = usage.completion_tokens.unwrap_or(0);
+                                        // Emit MessageDelta when finish_reason is present
+                                        // (decoupled from usage — MiniMax sends finish_reason
+                                        // without usage in the same chunk)
+                                        if let Some(reason) = finish_reason_str {
+                                            let (input_tokens, output_tokens) = if let Some(ref usage) = chunk.usage {
+                                                (usage.prompt_tokens.unwrap_or(0), usage.completion_tokens.unwrap_or(0))
+                                            } else {
+                                                (0, 0)
+                                            };
+                                            if input_tokens > 0 || output_tokens > 0 {
                                                 tracing::info!("[STREAM_USAGE] Final usage: input={}, output={}", input_tokens, output_tokens);
-
-                                                let stop_reason = finish_reason_str.map(|s| match s.as_str() {
-                                                    "stop" => crate::brain::provider::types::StopReason::EndTurn,
-                                                    "length" => crate::brain::provider::types::StopReason::MaxTokens,
-                                                    "tool_calls" | "function_call" => crate::brain::provider::types::StopReason::ToolUse,
-                                                    _ => crate::brain::provider::types::StopReason::EndTurn,
-                                                });
-
-                                                events.push(Ok(StreamEvent::MessageDelta {
-                                                    delta: crate::brain::provider::types::MessageDelta {
-                                                        stop_reason,
-                                                        stop_sequence: None,
-                                                    },
-                                                    usage: crate::brain::provider::types::TokenUsage {
-                                                        input_tokens,
-                                                        output_tokens,
-                                                    },
-                                                }));
                                             }
+
+                                            let stop_reason = Some(match reason.as_str() {
+                                                "stop" => crate::brain::provider::types::StopReason::EndTurn,
+                                                "length" => crate::brain::provider::types::StopReason::MaxTokens,
+                                                "tool_calls" | "function_call" => crate::brain::provider::types::StopReason::ToolUse,
+                                                _ => crate::brain::provider::types::StopReason::EndTurn,
+                                            });
+
+                                            events.push(Ok(StreamEvent::MessageDelta {
+                                                delta: crate::brain::provider::types::MessageDelta {
+                                                    stop_reason,
+                                                    stop_sequence: None,
+                                                },
+                                                usage: crate::brain::provider::types::TokenUsage {
+                                                    input_tokens,
+                                                    output_tokens,
+                                                },
+                                            }));
+
+                                            // Emit MessageStop — not all providers send [DONE]
+                                            events.push(Ok(StreamEvent::MessageStop));
+                                        }
                                     }
                                     Err(e) => {
                                         let json_preview = json_str.chars().take(300).collect::<String>();

@@ -686,9 +686,18 @@ impl AgentService {
                 Err(e) => return Err(AgentError::Provider(e)),
             };
 
-            // Track token usage
-            last_input_tokens = response.usage.input_tokens;
-            total_input_tokens += response.usage.input_tokens;
+            // Track token usage — fall back to tiktoken estimate when provider
+            // doesn't report usage (e.g. MiniMax streaming ignores include_usage)
+            last_input_tokens = if response.usage.input_tokens > 0 {
+                response.usage.input_tokens
+            } else {
+                tracing::debug!(
+                    "Provider reported 0 input tokens, using tiktoken estimate: {}",
+                    context.token_count
+                );
+                context.token_count as u32
+            };
+            total_input_tokens += last_input_tokens;
             total_output_tokens += response.usage.output_tokens;
 
             // Calibrate context token count with the API's real input_tokens.
@@ -839,6 +848,14 @@ impl AgentService {
             if tool_uses.is_empty() {
                 if iteration > 0 {
                     tracing::info!("Agent completed after {} tool iterations", iteration);
+                    // Emit final text so TUI persists it as a permanent message
+                    if !iteration_text.is_empty()
+                        && let Some(ref cb) = self.progress_callback {
+                            cb(ProgressEvent::IntermediateText {
+                                text: iteration_text,
+                                reasoning: reasoning_text,
+                            });
+                    }
                 } else {
                     tracing::info!("Agent responded with text only (no tool calls)");
                 }
