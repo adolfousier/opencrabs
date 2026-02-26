@@ -5,6 +5,27 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.37] - 2026-02-26
+
+### Added
+- **Per-session provider selection** (`5689cd9`) — Each session can now have its own LLM provider. Configure per-session via `/models` or in `config.toml` under `[session.*.provider]`. Parallel execution of multiple sessions with different providers supported
+  - `src/brain/agent/service.rs`, `src/brain/mod.rs`, `src/tui/app/state.rs`, `src/tui/render.rs`, `config.toml.example`
+- **Arrow key navigation in multiline input** (`9b544f9`) — Arrow Up/Down now navigate between lines in the multiline input field, not just recall history. Cursor moves within the multiline content as expected
+  - `src/tui/app/input.rs`, `src/tui/render/input.rs`
+- **Test units for multi-session and multi-model** (`cf7ff0d`) — Added unit tests covering session-aware approval policies, model switching within sessions, and provider key isolation
+  - `src/brain/agent/service/tests/approval_policies.rs`, `src/brain/agent/service/tests/basic.rs`
+
+### Fixed
+- **Session-aware tool approvals** (`846f228`) — Tool approval policies now correctly apply per-session. Approval state is stored with session ID, not globally. Async model fetching improved with better error handling
+  - `src/brain/agent/service.rs`, `src/brain/mod.rs`, `src/tui/app/state.rs`
+- **Custom provider name field** (`c22a05a`) — Onboarding now pre-fills the custom provider name field. Model fetching uses existing key if available instead of requiring re-entry. Provider name displays correctly in `/models` dialog
+  - `src/tui/onboarding.rs`, `src/tui/app/dialogs.rs`, `src/brain/provider/custom_openai_compatible.rs`
+
+### Refactored
+- **Split `agent/service.rs`** (`8f9c160`) — Extracted into module directory: `service/builder.rs`, `service/context.rs`, `service/helpers.rs`, `service/messaging.rs`, `service/mod.rs`. Improved code organization and testability
+- **Split `render.rs`** (`6247666`) — Extracted 3312-line file into `render/` module directory with `render/mod.rs`, `render/input.rs`, `render/dialogs.rs`, `render/components.rs`
+- **Cargo fmt pass** (`d02fcf7`) — Full codebase formatting enforcement
+
 ## [0.2.36] - 2026-02-26
 
 ### Fixed
