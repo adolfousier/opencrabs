@@ -416,8 +416,9 @@ where
                 flat_table.insert(key.to_string(), v.clone());
             }
         }
-        let default_cfg: ProviderConfig =
-            toml::Value::Table(flat_table).try_into().map_err(de::Error::custom)?;
+        let default_cfg: ProviderConfig = toml::Value::Table(flat_table)
+            .try_into()
+            .map_err(de::Error::custom)?;
         map.insert("default".to_string(), default_cfg);
         for (name, val) in table {
             if flat_keys.contains(&name.as_str()) {

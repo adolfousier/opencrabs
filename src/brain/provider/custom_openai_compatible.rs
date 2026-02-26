@@ -76,7 +76,11 @@ fn strip_think_blocks(text: &str) -> String {
     for (open, close) in STRIP_OPEN_TAGS.iter().zip(STRIP_CLOSE_TAGS.iter()) {
         while let Some(start) = result.find(open) {
             if let Some(end) = result[start..].find(close) {
-                result = format!("{}{}", &result[..start], &result[start + end + close.len()..]);
+                result = format!(
+                    "{}{}",
+                    &result[..start],
+                    &result[start + end + close.len()..]
+                );
             } else {
                 // Unclosed tag — strip from open tag to end
                 result = result[..start].to_string();

@@ -7,7 +7,6 @@ use crate::brain::provider::{ContentBlock, LLMRequest};
 use anyhow::Result;
 use std::path::PathBuf;
 
-
 impl App {
     /// Detect existing API key for the currently selected provider in model selector.
     /// Sets a boolean flag — never loads the actual key into memory.
@@ -183,8 +182,7 @@ impl App {
                 self.model_selector_base_url = base_url.clone();
             }
             // Load existing model name so /models doesn't lose it
-            self.model_selector_custom_model =
-                custom_cfg.default_model.clone().unwrap_or_default();
+            self.model_selector_custom_model = custom_cfg.default_model.clone().unwrap_or_default();
             // Remember the custom provider name for saving
             self.model_selector_custom_name = name.to_string();
             (5, custom_cfg.api_key.clone())
@@ -676,7 +674,8 @@ impl App {
                 if self.model_selector_custom_name.is_empty() {
                     "providers.custom"
                 } else {
-                    custom_section = format!("providers.custom.{}", self.model_selector_custom_name);
+                    custom_section =
+                        format!("providers.custom.{}", self.model_selector_custom_name);
                     &custom_section
                 }
             }
@@ -781,9 +780,10 @@ impl App {
             if let Some(model) = filtered.get(self.model_selector_selected) {
                 model.to_string()
             } else {
-                self.model_selector_models.first().cloned().unwrap_or_else(
-                    || self.default_model_name.clone(),
-                )
+                self.model_selector_models
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| self.default_model_name.clone())
             }
         } else if let Some(model) = provider.models.get(self.model_selector_selected) {
             model.to_string()
@@ -805,7 +805,8 @@ impl App {
                 if self.model_selector_custom_name.is_empty() {
                     "providers.custom"
                 } else {
-                    custom_section2 = format!("providers.custom.{}", self.model_selector_custom_name);
+                    custom_section2 =
+                        format!("providers.custom.{}", self.model_selector_custom_name);
                     &custom_section2
                 }
             }
@@ -823,7 +824,8 @@ impl App {
         // Only close dialog if explicitly requested
         if close_dialog {
             // Use user-configured name for custom providers (e.g. "nvidia"), fall back to generic
-            let provider_name = if provider_idx == 5 && !self.model_selector_custom_name.is_empty() {
+            let provider_name = if provider_idx == 5 && !self.model_selector_custom_name.is_empty()
+            {
                 self.model_selector_custom_name.clone()
             } else {
                 provider
@@ -865,24 +867,19 @@ impl App {
                     if let Some(ref wizard) = self.onboarding {
                         match wizard.apply_config() {
                             Ok(()) => {
-                                let (provider_name, model_name) =
-                                    if wizard.is_custom_provider() {
-                                        (
-                                            format!(
-                                                "Custom ({})",
-                                                wizard.custom_provider_name
-                                            ),
-                                            wizard.custom_model.clone(),
-                                        )
-                                    } else {
-                                        (
-                                            super::onboarding::PROVIDERS
-                                                [wizard.selected_provider]
-                                                .name
-                                                .to_string(),
-                                            wizard.selected_model_name().to_string(),
-                                        )
-                                    };
+                                let (provider_name, model_name) = if wizard.is_custom_provider() {
+                                    (
+                                        format!("Custom ({})", wizard.custom_provider_name),
+                                        wizard.custom_model.clone(),
+                                    )
+                                } else {
+                                    (
+                                        super::onboarding::PROVIDERS[wizard.selected_provider]
+                                            .name
+                                            .to_string(),
+                                        wizard.selected_model_name().to_string(),
+                                    )
+                                };
                                 self.push_system_message(format!(
                                     "Setup complete! Provider: {} | Model: {}",
                                     provider_name, model_name

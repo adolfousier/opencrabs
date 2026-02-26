@@ -946,12 +946,18 @@ impl App {
             // Drain pending context hints (model changes, /cd, etc.) and prepend to message
             let mut transformed_content = content.clone();
             if !self.pending_context.is_empty() {
-                let context = self.pending_context.drain(..).collect::<Vec<_>>().join("\n");
+                let context = self
+                    .pending_context
+                    .drain(..)
+                    .collect::<Vec<_>>()
+                    .join("\n");
                 transformed_content = format!("{}\n\n{}", context, transformed_content);
             }
 
             // Analyze and transform the prompt before sending to agent
-            let transformed_content = self.prompt_analyzer.analyze_and_transform(&transformed_content);
+            let transformed_content = self
+                .prompt_analyzer
+                .analyze_and_transform(&transformed_content);
 
             // Log if the prompt was transformed
             if transformed_content != content {

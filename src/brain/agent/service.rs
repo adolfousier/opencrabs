@@ -2702,7 +2702,10 @@ mod tests {
         let request = LLMRequest::new("mock-model".to_string(), vec![Message::user("Hello")]);
 
         let (response, reasoning) = agent_service.stream_complete(request, None).await.unwrap();
-        assert!(reasoning.is_none(), "mock provider should not produce reasoning");
+        assert!(
+            reasoning.is_none(),
+            "mock provider should not produce reasoning"
+        );
         assert_eq!(response.model, "mock-model");
         assert!(!response.content.is_empty());
 
@@ -2728,7 +2731,10 @@ mod tests {
         let request = LLMRequest::new("mock-model".to_string(), vec![Message::user("Use a tool")]);
 
         let (response, reasoning) = agent_service.stream_complete(request, None).await.unwrap();
-        assert!(reasoning.is_none(), "mock provider should not produce reasoning");
+        assert!(
+            reasoning.is_none(),
+            "mock provider should not produce reasoning"
+        );
 
         // First call to MockProviderWithTools returns text + tool_use
         let text_blocks: Vec<_> = response
@@ -2778,7 +2784,10 @@ mod tests {
         let request = LLMRequest::new("mock-model".to_string(), vec![Message::user("Hello")]);
 
         let (response, reasoning) = agent_service.stream_complete(request, None).await.unwrap();
-        assert!(reasoning.is_none(), "mock provider should not produce reasoning");
+        assert!(
+            reasoning.is_none(),
+            "mock provider should not produce reasoning"
+        );
         assert!(!response.content.is_empty(), "response should have content");
 
         let chunks = chunks_received.lock().unwrap();

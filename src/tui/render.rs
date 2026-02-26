@@ -758,7 +758,9 @@ fn render_input(f: &mut Frame, app: &App, area: Rect) {
     let mut input_lines: Vec<Line> = Vec::new();
 
     // Build input text with cursor highlight on the character (not inserting a block)
-    let cursor_style = Style::default().fg(Color::Black).bg(Color::Rgb(70, 130, 180));
+    let cursor_style = Style::default()
+        .fg(Color::Black)
+        .bg(Color::Rgb(70, 130, 180));
 
     if app.input_buffer.is_empty() {
         // Empty input — just show prompt with cursor block
@@ -798,7 +800,8 @@ fn render_input(f: &mut Frame, app: &App, area: Rect) {
 
         for (line_idx, line) in full_text.lines().enumerate() {
             // Calculate where this line sits in the overall buffer
-            let line_start_in_full: usize = full_text.lines().take(line_idx).map(|l| l.len() + 1).sum();
+            let line_start_in_full: usize =
+                full_text.lines().take(line_idx).map(|l| l.len() + 1).sum();
             let line_end_in_full = line_start_in_full + line.len();
 
             // Check if cursor falls within this line
@@ -2700,10 +2703,7 @@ fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
             ],
             1 => vec![("[Type]", "Base URL"), ("[Enter]", "Next")],
             2 => vec![("[Type]", "API Key"), ("[Enter]", "Next")],
-            3 => vec![
-                ("[Type]", "Model name"),
-                ("[Enter]", "Confirm"),
-            ],
+            3 => vec![("[Type]", "Model name"), ("[Enter]", "Confirm")],
             _ => vec![],
         }
     } else {
