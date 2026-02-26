@@ -5,6 +5,20 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.34] - 2026-02-26
+
+### Added
+- **Reasoning/thinking persistence** — MiniMax (and other providers that emit `reasoning_content`) now accumulate thinking content during streaming, persist it to DB with `<!-- reasoning -->` markers, and reconstruct it on session reload. Reasoning is rendered as a collapsible "Thinking" section on assistant messages
+- **Real-time message persistence per step** — Assistant text is written to DB after each tool iteration, not just at the end. Crash or disconnect mid-task no longer loses intermediate text
+- **Collapsible reasoning UI** — Ctrl+O now toggles both tool groups and reasoning sections. Collapsed by default, expandable inline with dimmed italic style matching the streaming "Thinking..." indicator
+
+### Fixed
+- **MiniMax intermediate text lost on reload** — Tool call indices from OpenAI-compatible providers collided with the text content block at index 0 in `stream_complete()`, overwriting accumulated text. Tool indices now offset by +1. Fixes [#10](https://github.com/adolfousier/opencrabs/issues/10)
+- **TUI unresponsive after onboarding** — `rebuild_agent_service()` only attached the approval callback, dropping `progress_callback`, `message_queue_callback`, `sudo_callback`, and `working_directory`. All callbacks are now preserved from the existing agent service. Fixes [#10](https://github.com/adolfousier/opencrabs/issues/10)
+- **Tool loop false positives eliminated** — Replaced 115-line per-tool signature matching with 7-line universal input hash. Different arguments = different hash = no false detection. Same args repeated 8 times = real loop
+- **Chat history lost on mid-task exit** — Exiting while the agent was between tool iterations discarded the conversation. Now persists accumulated text before exit
+- **Clippy warnings** — Collapsed nested `if` statements in `service.rs` and `input.rs`
+
 ## [0.2.33] - 2026-02-25
 
 ### Added
@@ -618,6 +632,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.34]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.34
+[0.2.33]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.33
 [0.2.32]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.32
 [0.2.31]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.31
 [0.2.30]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.30
