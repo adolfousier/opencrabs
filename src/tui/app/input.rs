@@ -7,6 +7,18 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 impl App {
+    /// Returns (line_start_byte, column_chars) for the cursor's current line.
+    /// `line_start_byte` is the byte offset where the current line begins.
+    /// `column_chars` is how many bytes into the line the cursor is.
+    fn cursor_line_position(&self) -> (usize, usize) {
+        let line_start = self.input_buffer[..self.cursor_position]
+            .rfind('\n')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let col = self.cursor_position - line_start;
+        (line_start, col)
+    }
+
     /// Delete the word before the cursor (for Ctrl+Backspace and Alt+Backspace)
     pub(crate) fn delete_last_word(&mut self) {
         if self.cursor_position == 0 {
@@ -753,6 +765,50 @@ impl App {
         } else if event.code == KeyCode::Backspace && event.modifiers.contains(KeyModifiers::ALT) {
             // Alt+Backspace — delete last word
             self.delete_last_word();
+        } else if keys::is_up(&event)
+            && !self.slash_suggestions_active
+            && self.input_buffer.contains('\n')
+            && self.input_history_index.is_none()
+        {
+            // Arrow Up in multiline — move to previous line or start of input
+            let (line_start, col) = self.cursor_line_position();
+            if line_start == 0 {
+                // Already on first line — move to start of input
+                self.cursor_position = 0;
+            } else {
+                // Find the previous line
+                let prev_line_end = line_start - 1; // the \n before current line
+                let prev_line_start = self.input_buffer[..prev_line_end]
+                    .rfind('\n')
+                    .map(|i| i + 1)
+                    .unwrap_or(0);
+                let prev_line_len = prev_line_end - prev_line_start;
+                self.cursor_position = prev_line_start + col.min(prev_line_len);
+            }
+        } else if keys::is_down(&event)
+            && !self.slash_suggestions_active
+            && self.input_buffer.contains('\n')
+            && self.input_history_index.is_none()
+        {
+            // Arrow Down in multiline — move to next line or end of input
+            let (line_start, col) = self.cursor_line_position();
+            let line_end = self.input_buffer[line_start..]
+                .find('\n')
+                .map(|i| line_start + i)
+                .unwrap_or(self.input_buffer.len());
+            if line_end == self.input_buffer.len() {
+                // Already on last line — move to end of input
+                self.cursor_position = self.input_buffer.len();
+            } else {
+                // Find the next line
+                let next_line_start = line_end + 1;
+                let next_line_end = self.input_buffer[next_line_start..]
+                    .find('\n')
+                    .map(|i| next_line_start + i)
+                    .unwrap_or(self.input_buffer.len());
+                let next_line_len = next_line_end - next_line_start;
+                self.cursor_position = next_line_start + col.min(next_line_len);
+            }
         } else if keys::is_up(&event)
             && !self.slash_suggestions_active
             && self.input_buffer.is_empty()
