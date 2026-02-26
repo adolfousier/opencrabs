@@ -202,6 +202,7 @@ impl App {
             self.messages.clear();
             self.scroll_offset = 0;
             self.streaming_response = None;
+            self.streaming_reasoning = None;
             self.error_message = None;
         }
 
@@ -863,6 +864,7 @@ impl App {
         self.is_processing = false;
         self.processing_started_at = None;
         self.streaming_response = None;
+        self.streaming_reasoning = None;
         self.cancel_token = None;
 
         // Clean up stale pending approvals — send deny so agent callbacks don't hang

@@ -528,7 +528,26 @@ impl App {
                         }
                         self.is_processing = false;
                         self.processing_started_at = None;
-                        self.streaming_response = None;
+                        // Preserve partial streaming response as a message before clearing
+                        if let Some(text) = self.streaming_response.take() {
+                            if !text.trim().is_empty() {
+                                self.messages.push(DisplayMessage {
+                                    id: Uuid::new_v4(),
+                                    role: "assistant".to_string(),
+                                    content: text,
+                                    timestamp: chrono::Utc::now(),
+                                    token_count: None,
+                                    cost: None,
+                                    approval: None,
+                                    approve_menu: None,
+                                    details: None,
+                                    expanded: false,
+                                    tool_group: None,
+                                    plan_approval: None,
+                                });
+                            }
+                        }
+                        self.streaming_reasoning = None;
                         self.cancel_token = None;
                         self.escape_pending_at = None;
                         // Deny any pending approvals so agent callbacks don't hang

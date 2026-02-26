@@ -259,6 +259,8 @@ pub enum ContentDelta {
     TextDelta { text: String },
     /// Tool input delta (JSON)
     InputJsonDelta { partial_json: String },
+    /// Reasoning/thinking content delta (display-only, not part of response text)
+    ReasoningDelta { text: String },
 }
 
 /// Message delta for final updates

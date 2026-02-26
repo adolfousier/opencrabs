@@ -233,6 +233,8 @@ pub struct App {
     pub is_processing: bool,
     pub processing_started_at: Option<std::time::Instant>,
     pub streaming_response: Option<String>,
+    /// Reasoning/thinking content from providers like MiniMax (display-only, cleared on complete)
+    pub streaming_reasoning: Option<String>,
     pub error_message: Option<String>,
     /// Set to true when IntermediateText arrives during the current response cycle.
     /// Reset to false at the start of each new send_message call.
@@ -399,6 +401,7 @@ impl App {
             is_processing: false,
             processing_started_at: None,
             streaming_response: None,
+            streaming_reasoning: None,
             error_message: None,
             intermediate_text_received: false,
             animation_frame: 0,
@@ -762,6 +765,16 @@ impl App {
             TuiEvent::ResponseChunk(chunk) => {
                 self.append_streaming_chunk(chunk);
             }
+            TuiEvent::ReasoningChunk(text) => {
+                if let Some(ref mut existing) = self.streaming_reasoning {
+                    existing.push_str(&text);
+                } else {
+                    self.streaming_reasoning = Some(text);
+                }
+                if self.auto_scroll {
+                    self.scroll_offset = 0;
+                }
+            }
             TuiEvent::ResponseComplete(response) => {
                 self.complete_response(response).await?;
             }
@@ -834,6 +847,7 @@ impl App {
                 
                 // Clear streaming response - text is now going to be a permanent message
                 self.streaming_response = None;
+                self.streaming_reasoning = None;
                 self.intermediate_text_received = true;
 
                 // Check if there was a queued message that was just processed
@@ -945,6 +959,7 @@ impl App {
                 self.display_token_count = 0;
                 // Reset streaming state so post-compaction tool calls render cleanly
                 self.streaming_response = None;
+                self.streaming_reasoning = None;
                 self.active_tool_group = None;
 
                 // Brief status notice
@@ -1302,7 +1317,12 @@ impl App {
         self.is_processing = false;
         self.processing_started_at = None;
         self.streaming_response = None;
+        self.streaming_reasoning = None;
         self.cancel_token = None;
+        // Preserve context token count from real-time updates if we never got a complete response
+        if self.last_input_tokens.is_none() && self.display_token_count > 0 {
+            self.last_input_tokens = Some(self.display_token_count as u32);
+        }
         // Deny any pending approvals so agent callbacks don't hang, then remove
         for msg in &mut self.messages {
             if let Some(ref mut approval) = msg.approval && approval.state == ApprovalState::Pending {

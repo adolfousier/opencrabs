@@ -54,8 +54,8 @@ pub enum ProgressEvent {
     RestartReady { status: String },
     /// Real-time token count update — fire after every API response and tool execution
     TokenCount(usize),
-//    /// A queued user message was injected into the agent context between tool iterations
-//    QueuedMessageInjected { content: String },
+    /// Reasoning/thinking content from providers like MiniMax (display-only)
+    ReasoningChunk { text: String },
 }
 
 /// Callback for reporting progress during agent execution
@@ -709,6 +709,28 @@ impl AgentService {
             // Fire real-time token count update after every API response
             if let Some(ref cb) = self.progress_callback {
                 cb(ProgressEvent::TokenCount(context.token_count));
+            }
+
+            // --- CANCEL CHECK BEFORE STREAM DROP RETRY ---
+            // If the user cancelled during streaming, don't retry — save partial text and break.
+            if response.stop_reason.is_none() {
+                if let Some(ref token) = cancel_token && token.is_cancelled() {
+                    // Extract any text from the partial response for persistence
+                    for block in &response.content {
+                        if let ContentBlock::Text { text } = block && !text.trim().is_empty() {
+                            if !accumulated_text.is_empty() {
+                                accumulated_text.push_str("\n\n");
+                            }
+                            accumulated_text.push_str(text);
+                            // Persist partial text to DB
+                            let _ = message_service
+                                .append_content(assistant_db_msg.id, &format!("{}\n\n", text))
+                                .await;
+                        }
+                    }
+                    tracing::info!("Stream cancelled by user — saving partial text ({} chars)", accumulated_text.len());
+                    break;
+                }
             }
 
             // --- STREAM DROP DETECTION ---
@@ -1479,6 +1501,13 @@ impl AgentService {
                             }
                             ContentDelta::InputJsonDelta { partial_json } => {
                                 block_states[index].json_buf.push_str(&partial_json);
+                            }
+                            ContentDelta::ReasoningDelta { text } => {
+                                // Forward reasoning content to TUI for display-only
+                                // (not accumulated into response content blocks)
+                                if let Some(ref cb) = self.progress_callback {
+                                    cb(ProgressEvent::ReasoningChunk { text });
+                                }
                             }
                         }
                     }

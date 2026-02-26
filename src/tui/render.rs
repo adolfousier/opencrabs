@@ -483,6 +483,37 @@ fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         }
         lines.push(Line::from(spans));
 
+        // Render reasoning/thinking content above the response text (dimmed style)
+        if let Some(ref reasoning) = app.streaming_reasoning {
+            lines.push(Line::from(vec![
+                Span::styled("  ", Style::default()),
+                Span::styled(
+                    "Thinking...",
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::ITALIC | Modifier::BOLD),
+                ),
+            ]));
+            let reasoning_lines = parse_markdown(reasoning);
+            let reasoning_style = Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC);
+            for line in reasoning_lines {
+                let mut padded_spans = vec![Span::styled("  ", Style::default())];
+                for span in line.spans {
+                    padded_spans.push(Span::styled(
+                        span.content.to_string(),
+                        reasoning_style,
+                    ));
+                }
+                let padded_line = Line::from(padded_spans);
+                for wrapped in wrap_line_with_padding(padded_line, content_width, "  ") {
+                    lines.push(wrapped);
+                }
+            }
+            lines.push(Line::from("")); // separator between reasoning and response
+        }
+
         let streaming_lines = parse_markdown(response);
         for line in streaming_lines {
             let mut padded_spans = vec![Span::raw("  ")];

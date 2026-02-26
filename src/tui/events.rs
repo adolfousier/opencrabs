@@ -107,6 +107,9 @@ pub enum TuiEvent {
 
     /// Sudo password requested by bash tool
     SudoPasswordRequested(SudoPasswordRequest),
+
+    /// Reasoning/thinking content chunk from providers like MiniMax (display-only)
+    ReasoningChunk(String),
 }
 
 /// Sudo password request from the bash tool

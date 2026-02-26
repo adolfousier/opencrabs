@@ -722,6 +722,23 @@ impl Provider for OpenAIProvider {
                                             }
                                         }
 
+                                        // Extract reasoning_content (MiniMax thinking process).
+                                        // MiniMax sends incremental deltas in `delta.reasoning_content`,
+                                        // and the full accumulated string in `message.reasoning_content`.
+                                        // Use delta first (incremental), skip message to avoid duplication.
+                                        let reasoning = chunk.choices.first()
+                                            .and_then(|c| c.delta.as_ref())
+                                            .and_then(|d| d.reasoning_content.as_ref())
+                                            .cloned();
+                                        if let Some(rc) = reasoning && !rc.is_empty() {
+                                            events.push(Ok(StreamEvent::ContentBlockDelta {
+                                                index: 0,
+                                                delta: ContentDelta::ReasoningDelta {
+                                                    text: rc,
+                                                },
+                                            }));
+                                        }
+
                                         // Extract usage from final chunk
                                         if let Some(ref usage) = chunk.usage
                                             && finish_reason_str.is_some() {
@@ -994,6 +1011,7 @@ struct StreamingFunctionCall {
 struct OpenAIMessageDelta {
     role: Option<String>,
     content: Option<String>,
+    reasoning_content: Option<String>,
     tool_calls: Option<Vec<StreamingToolCall>>,
 }
 
