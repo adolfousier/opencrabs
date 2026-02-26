@@ -5,6 +5,20 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.35] - 2026-02-26
+
+### Added
+- **Animated tool call dots** — Green `●` dot pulses (`●`/`○`) while tools are actively processing, stays solid when finished. Visually distinguishes active tool execution from completed groups
+- **Inline thinking indicator during tool execution** — "OpenCrabs is thinking..." now renders inline above the active tool group instead of as a sticky overlay, preventing overlap with tool call content
+- **`.github/CODEOWNERS`** — Auto-assigns `@adolfousier` as reviewer on all PRs
+
+### Fixed
+- **TUI spacing improvements** — Removed double blank lines between messages and tool groups. Added proper spacing before thinking sections and between thinking hint and expanded content
+- **Inline code background removed** — `bg(Color::Black)` on backtick code spans in markdown renderer removed for cleaner look. Thinking hints use subtle `Rgb(90,90,90)` text with no background
+- **Sudo prompt bleeding into TUI** — Added `-p ""` flag to `sudo -S` to suppress sudo's native "Password:" prompt from writing directly to the terminal
+- **`cargo fmt` full codebase pass** — Enforced official Rust style guide across 92 files
+- **Test fixes** — `stream_complete()` tests updated to destructure `(LLMResponse, Option<String>)` tuple return with reasoning assertions. `write_secret_key` doctest fixed (missing import + Result return type)
+
 ## [0.2.34] - 2026-02-26
 
 ### Added
@@ -632,6 +646,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.35]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.35
 [0.2.34]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.34
 [0.2.33]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.33
 [0.2.32]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.32

@@ -312,7 +312,6 @@ fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
         // Render tool call groups (finalized)
         if let Some(ref group) = app.messages[msg_idx].tool_group {
-            lines.push(Line::from(""));
             render_tool_group(&mut lines, group, false, app.animation_frame);
             lines.push(Line::from(""));
             continue;
@@ -580,7 +579,6 @@ fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             } else {
                 String::new()
             };
-            lines.push(Line::from(""));
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("  {} ", frame),
@@ -594,7 +592,6 @@ fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                 ),
             ]));
         }
-        lines.push(Line::from(""));
         render_tool_group(&mut lines, group, true, app.animation_frame);
     }
 
