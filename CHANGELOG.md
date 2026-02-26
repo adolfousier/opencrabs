@@ -5,6 +5,20 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.36] - 2026-02-26
+
+### Fixed
+- **Custom provider `/models` dialog** (`fc0626c`) — Model name is now a free-text input instead of a hardcoded list. Labels show the actual provider name (e.g. "Moonshot") instead of generic "Custom". Onboarding flow updated to match
+  - `src/tui/app/dialogs.rs`, `src/tui/render.rs`, `src/tui/onboarding.rs`, `src/config/types.rs`, `src/tui/app/state.rs`, `src/brain/provider/anthropic.rs`, `src/brain/provider/custom_openai_compatible.rs`, `README.md`
+- **Input UX improvements** (`7804ab3`) — Esc scrolls viewport to bottom of conversation. Arrow Up recalls previously cleared/stashed input text. Cursor renders as a block highlighting the current character instead of a thin line. Escape timer resets when processing completes so next Esc behaves correctly
+  - `src/tui/app/input.rs`, `src/tui/app/messaging.rs`, `src/tui/app/state.rs`, `src/tui/render.rs`
+- **Strip Kimi HTML comment markup** (`47b1d58`) — Kimi K2.5 embeds reasoning and hallucinated tool calls as HTML comments (`<!-- reasoning -->`, `<!-- tools-v2: -->`) in the content field. Extended `filter_think_tags` and `strip_think_blocks` to strip these alongside `<think>`. Fixed `extract_reasoning` to handle multiple reasoning blocks per message. Added Moonshot/Kimi pricing (K2.5, K2 Turbo, K2) to compiled-in defaults and `usage_pricing.toml.example`
+  - `src/brain/provider/custom_openai_compatible.rs`, `src/pricing.rs`, `src/tui/app/messaging.rs`, `usage_pricing.toml.example`
+- **`/models` provider switch: never overwrite user API keys** (`5120bf5`) — Killed sentinel string `"__EXISTING_KEY__"` from `/models` dialog entirely. Replaced with boolean flag `model_selector_has_existing_key`. Only writes to `keys.toml` when user actually types a new key. Disables all other providers on disk before enabling selected one. Added `is_real_key` guard in `merge_provider_keys` for all providers
+  - `src/config/types.rs`, `src/tui/app/dialogs.rs`, `src/tui/app/state.rs`, `src/tui/render.rs`
+- **Model change context hint for agent** (`ce8e422`) — When user switches model via `/models`, a `[Model changed to X (provider: Y)]` hint is prepended to the next user message via `pending_context` (same mechanism as `/cd`), so the LLM is aware of the switch. TUI status message also shown in chat. Custom provider uses user-configured name (e.g. "nvidia") instead of generic label. Fallback provider key changed from `providers.custom.default` to `providers.custom` to avoid stale config entries
+  - `src/tui/app/dialogs.rs`, `src/tui/app/messaging.rs`
+
 ## [0.2.35] - 2026-02-26
 
 ### Added
@@ -646,6 +660,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.36]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.36
 [0.2.35]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.35
 [0.2.34]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.34
 [0.2.33]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.33
