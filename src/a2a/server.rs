@@ -10,12 +10,12 @@ use crate::brain::agent::service::AgentService;
 use crate::config::A2aConfig;
 use crate::services::ServiceContext;
 use axum::{
+    Router,
     extract::State,
     http::StatusCode,
     middleware,
-    response::{sse, IntoResponse, Json, Sse},
+    response::{IntoResponse, Json, Sse, sse},
     routing::{get, post},
-    Router,
 };
 use futures::stream;
 use std::net::SocketAddr;
@@ -79,7 +79,10 @@ pub fn build_router(state: A2aState, allowed_origins: &[String]) -> Router {
     // Auth-protected JSON-RPC endpoint
     let protected = Router::new()
         .route("/a2a/v1", post(handle_jsonrpc))
-        .route_layer(middleware::from_fn_with_state(state.clone(), require_bearer));
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_bearer,
+        ));
 
     // Public endpoints (discovery + health)
     Router::new()
@@ -109,7 +112,11 @@ pub async fn start_server(
     if !persisted.is_empty() {
         let mut store = task_store.write().await;
         for task in persisted {
-            tracing::info!("A2A: Restored task {} (state: {:?})", task.id, task.status.state);
+            tracing::info!(
+                "A2A: Restored task {} (state: {:?})",
+                task.id,
+                task.status.state
+            );
             store.insert(task.id.clone(), task);
         }
     }
@@ -203,9 +210,7 @@ async fn handle_stream(state: A2aState, req: JsonRpcRequest) -> axum::response::
             });
             Sse::new(stream).into_response()
         }
-        Err(error_response) => {
-            (StatusCode::OK, Json(error_response)).into_response()
-        }
+        Err(error_response) => (StatusCode::OK, Json(error_response)).into_response(),
     }
 }
 

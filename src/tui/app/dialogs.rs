@@ -1,8 +1,8 @@
 //! Dialogs — model selector, onboarding wizard, file/directory pickers.
 
-use super::*;
 use super::events::{AppMode, TuiEvent};
 use super::onboarding::WizardAction;
+use super::*;
 use crate::brain::provider::{ContentBlock, LLMRequest};
 use anyhow::Result;
 use std::path::PathBuf;
@@ -15,26 +15,43 @@ impl App {
     /// Uses sentinel pattern - doesn't load actual key into memory.
     pub(crate) fn detect_model_selector_key_for_provider(&mut self) {
         let provider_idx = self.model_selector_provider_selected;
-        
+
         if let Ok(config) = crate::config::Config::load() {
             let has_key = match provider_idx {
-                0 => config.providers.anthropic.as_ref()
+                0 => config
+                    .providers
+                    .anthropic
+                    .as_ref()
                     .is_some_and(|p| p.api_key.as_ref().is_some_and(|k| !k.is_empty())),
-                1 => config.providers.openai.as_ref()
+                1 => config
+                    .providers
+                    .openai
+                    .as_ref()
                     .is_some_and(|p| p.api_key.as_ref().is_some_and(|k| !k.is_empty())),
-                2 => config.providers.gemini.as_ref()
+                2 => config
+                    .providers
+                    .gemini
+                    .as_ref()
                     .is_some_and(|p| p.api_key.as_ref().is_some_and(|k| !k.is_empty())),
-                3 => config.providers.openrouter.as_ref()
+                3 => config
+                    .providers
+                    .openrouter
+                    .as_ref()
                     .is_some_and(|p| p.api_key.as_ref().is_some_and(|k| !k.is_empty())),
-                4 => config.providers.minimax.as_ref()
+                4 => config
+                    .providers
+                    .minimax
+                    .as_ref()
                     .is_some_and(|p| p.api_key.as_ref().is_some_and(|k| !k.is_empty())),
                 5 => {
                     // Custom provider - also load base_url and model
                     if let Some((_name, c)) = config.providers.active_custom() {
                         if c.api_key.as_ref().is_some_and(|k| !k.is_empty()) {
                             self.model_selector_base_url = c.base_url.clone().unwrap_or_default();
-                            self.model_selector_custom_model = c.default_model.clone().unwrap_or_default();
-                            self.model_selector_api_key = MODEL_SELECTOR_EXISTING_KEY_SENTINEL.to_string();
+                            self.model_selector_custom_model =
+                                c.default_model.clone().unwrap_or_default();
+                            self.model_selector_api_key =
+                                MODEL_SELECTOR_EXISTING_KEY_SENTINEL.to_string();
                         }
                         c.base_url.as_ref().is_some_and(|u| !u.is_empty())
                     } else {
@@ -43,7 +60,7 @@ impl App {
                 }
                 _ => false,
             };
-            
+
             if provider_idx != 5 {
                 if has_key {
                     self.model_selector_api_key = MODEL_SELECTOR_EXISTING_KEY_SENTINEL.to_string();
@@ -52,7 +69,7 @@ impl App {
                 }
             }
         }
-        
+
         // Clear model selection when provider changes
         self.model_selector_selected = 0;
         self.model_selector_filter.clear();
@@ -61,40 +78,114 @@ impl App {
     /// Open the model selector dialog - load from config and fetch models
     pub(crate) async fn open_model_selector(&mut self) {
         tracing::debug!("[open_model_selector] Opening model selector");
-        
+
         // Load config to get enabled provider
         let config = crate::config::Config::load().unwrap_or_default();
-        
+
         // Determine which provider is enabled
         // Indices: 0=Anthropic, 1=OpenAI, 2=Gemini, 3=OpenRouter, 4=Minimax, 5=Custom
-        let (provider_idx, api_key) = if config.providers.anthropic.as_ref().is_some_and(|p| p.enabled) {
+        let (provider_idx, api_key) = if config
+            .providers
+            .anthropic
+            .as_ref()
+            .is_some_and(|p| p.enabled)
+        {
             tracing::debug!("[open_model_selector] Anthropic enabled");
-            (0, config.providers.anthropic.as_ref().and_then(|p| p.api_key.clone()))
+            (
+                0,
+                config
+                    .providers
+                    .anthropic
+                    .as_ref()
+                    .and_then(|p| p.api_key.clone()),
+            )
         } else if config.providers.openai.as_ref().is_some_and(|p| p.enabled) {
-            if let Some(base_url) = config.providers.openai.as_ref().and_then(|p| p.base_url.as_ref()) {
+            if let Some(base_url) = config
+                .providers
+                .openai
+                .as_ref()
+                .and_then(|p| p.base_url.as_ref())
+            {
                 if base_url.contains("openrouter") {
                     tracing::debug!("[open_model_selector] OpenAI (OpenRouter) enabled");
-                    (3, config.providers.openai.as_ref().and_then(|p| p.api_key.clone()))
+                    (
+                        3,
+                        config
+                            .providers
+                            .openai
+                            .as_ref()
+                            .and_then(|p| p.api_key.clone()),
+                    )
                 } else if base_url.contains("minimax") {
                     tracing::debug!("[open_model_selector] OpenAI (MiniMax) enabled");
-                    (4, config.providers.openai.as_ref().and_then(|p| p.api_key.clone()))
+                    (
+                        4,
+                        config
+                            .providers
+                            .openai
+                            .as_ref()
+                            .and_then(|p| p.api_key.clone()),
+                    )
                 } else {
-                    tracing::debug!("[open_model_selector] OpenAI (Custom) enabled, base_url={}", base_url);
-                    (5, config.providers.openai.as_ref().and_then(|p| p.api_key.clone()))
+                    tracing::debug!(
+                        "[open_model_selector] OpenAI (Custom) enabled, base_url={}",
+                        base_url
+                    );
+                    (
+                        5,
+                        config
+                            .providers
+                            .openai
+                            .as_ref()
+                            .and_then(|p| p.api_key.clone()),
+                    )
                 }
             } else {
                 tracing::debug!("[open_model_selector] OpenAI enabled");
-                (1, config.providers.openai.as_ref().and_then(|p| p.api_key.clone()))
+                (
+                    1,
+                    config
+                        .providers
+                        .openai
+                        .as_ref()
+                        .and_then(|p| p.api_key.clone()),
+                )
             }
         } else if config.providers.gemini.as_ref().is_some_and(|p| p.enabled) {
             tracing::debug!("[open_model_selector] Gemini enabled");
-            (2, config.providers.gemini.as_ref().and_then(|p| p.api_key.clone()))
-        } else if config.providers.openrouter.as_ref().is_some_and(|p| p.enabled) {
+            (
+                2,
+                config
+                    .providers
+                    .gemini
+                    .as_ref()
+                    .and_then(|p| p.api_key.clone()),
+            )
+        } else if config
+            .providers
+            .openrouter
+            .as_ref()
+            .is_some_and(|p| p.enabled)
+        {
             tracing::debug!("[open_model_selector] OpenRouter enabled");
-            (3, config.providers.openrouter.as_ref().and_then(|p| p.api_key.clone()))
+            (
+                3,
+                config
+                    .providers
+                    .openrouter
+                    .as_ref()
+                    .and_then(|p| p.api_key.clone()),
+            )
         } else if config.providers.minimax.as_ref().is_some_and(|p| p.enabled) {
             tracing::debug!("[open_model_selector] MiniMax enabled");
-            (4, config.providers.minimax.as_ref().and_then(|p| p.api_key.clone()))
+            (
+                4,
+                config
+                    .providers
+                    .minimax
+                    .as_ref()
+                    .and_then(|p| p.api_key.clone()),
+            )
         } else if let Some((_name, custom_cfg)) = config.providers.active_custom() {
             tracing::debug!("[open_model_selector] Custom provider enabled");
             if let Some(base_url) = &custom_cfg.base_url {
@@ -105,11 +196,15 @@ impl App {
             tracing::debug!("[open_model_selector] No provider enabled, defaulting to Anthropic");
             (0, None) // Default
         };
-        
-        tracing::debug!("[open_model_selector] provider_idx={}, has_api_key={}", provider_idx, api_key.is_some());
-        
+
+        tracing::debug!(
+            "[open_model_selector] provider_idx={}, has_api_key={}",
+            provider_idx,
+            api_key.is_some()
+        );
+
         self.model_selector_provider_selected = provider_idx;
-        
+
         // Use sentinel pattern - don't load actual key into memory, just signal "key exists"
         // The actual key stays in keys.toml, we only need to know if it exists
         if api_key.is_some() {
@@ -117,25 +212,67 @@ impl App {
         } else {
             self.model_selector_api_key.clear();
         }
-        
+
         // Fetch models from enabled provider using config's API key
-        tracing::debug!("[open_model_selector] Fetching models for provider_idx={}", provider_idx);
-        self.model_selector_models = super::onboarding::fetch_provider_models(provider_idx, api_key.as_deref()).await;
-        tracing::debug!("[open_model_selector] Fetched {} models", self.model_selector_models.len());
-        
+        tracing::debug!(
+            "[open_model_selector] Fetching models for provider_idx={}",
+            provider_idx
+        );
+        self.model_selector_models =
+            super::onboarding::fetch_provider_models(provider_idx, api_key.as_deref()).await;
+        tracing::debug!(
+            "[open_model_selector] Fetched {} models",
+            self.model_selector_models.len()
+        );
+
         // Pre-select current model from config
-        let current = config.providers.openai.as_ref()
+        let current = config
+            .providers
+            .openai
+            .as_ref()
             .and_then(|p| p.default_model.as_deref())
-            .or_else(|| config.providers.anthropic.as_ref().and_then(|p| p.default_model.as_deref()))
-            .or_else(|| config.providers.gemini.as_ref().and_then(|p| p.default_model.as_deref()))
-            .or_else(|| config.providers.openrouter.as_ref().and_then(|p| p.default_model.as_deref()))
-            .or_else(|| config.providers.minimax.as_ref().and_then(|p| p.default_model.as_deref()))
-            .or_else(|| config.providers.active_custom().and_then(|(_, p)| p.default_model.as_deref()))
+            .or_else(|| {
+                config
+                    .providers
+                    .anthropic
+                    .as_ref()
+                    .and_then(|p| p.default_model.as_deref())
+            })
+            .or_else(|| {
+                config
+                    .providers
+                    .gemini
+                    .as_ref()
+                    .and_then(|p| p.default_model.as_deref())
+            })
+            .or_else(|| {
+                config
+                    .providers
+                    .openrouter
+                    .as_ref()
+                    .and_then(|p| p.default_model.as_deref())
+            })
+            .or_else(|| {
+                config
+                    .providers
+                    .minimax
+                    .as_ref()
+                    .and_then(|p| p.default_model.as_deref())
+            })
+            .or_else(|| {
+                config
+                    .providers
+                    .active_custom()
+                    .and_then(|(_, p)| p.default_model.as_deref())
+            })
             .unwrap_or("default")
             .to_string();
 
-        tracing::debug!("[open_model_selector] Current model from config: {}", current);
-        
+        tracing::debug!(
+            "[open_model_selector] Current model from config: {}",
+            current
+        );
+
         self.model_selector_selected = self
             .model_selector_models
             .iter()
@@ -173,22 +310,25 @@ impl App {
             // Provider selection (focused)
             let provider_changed = match event.code {
                 crossterm::event::KeyCode::Up => {
-                    self.model_selector_provider_selected = self.model_selector_provider_selected.saturating_sub(1);
+                    self.model_selector_provider_selected =
+                        self.model_selector_provider_selected.saturating_sub(1);
                     true
                 }
                 crossterm::event::KeyCode::Down => {
-                    self.model_selector_provider_selected = (self.model_selector_provider_selected + 1)
-                        .min(PROVIDERS.len() - 1);
+                    self.model_selector_provider_selected =
+                        (self.model_selector_provider_selected + 1).min(PROVIDERS.len() - 1);
                     true
                 }
-                _ => false
+                _ => false,
             };
-            
+
             // If provider changed, detect existing key for the new provider
             if provider_changed {
                 self.detect_model_selector_key_for_provider();
             }
-        } else if self.model_selector_focused_field == 1 && self.model_selector_provider_selected == 5 {
+        } else if self.model_selector_focused_field == 1
+            && self.model_selector_provider_selected == 5
+        {
             // Base URL input for Custom provider (field 1)
             match event.code {
                 crossterm::event::KeyCode::Char(c) => {
@@ -199,8 +339,11 @@ impl App {
                 }
                 _ => {}
             }
-        } else if (self.model_selector_focused_field == 1 && self.model_selector_provider_selected != 5)
-            || (self.model_selector_focused_field == 2 && self.model_selector_provider_selected == 5) {
+        } else if (self.model_selector_focused_field == 1
+            && self.model_selector_provider_selected != 5)
+            || (self.model_selector_focused_field == 2
+                && self.model_selector_provider_selected == 5)
+        {
             // API key input (field 1 for non-Custom, field 2 for Custom)
             match event.code {
                 crossterm::event::KeyCode::Char(c) => {
@@ -211,9 +354,11 @@ impl App {
                 }
                 _ => {}
             }
-
-        } else if (self.model_selector_focused_field == 2 && self.model_selector_provider_selected != 5)
-            || (self.model_selector_focused_field == 3 && self.model_selector_provider_selected == 5) {
+        } else if (self.model_selector_focused_field == 2
+            && self.model_selector_provider_selected != 5)
+            || (self.model_selector_focused_field == 3
+                && self.model_selector_provider_selected == 5)
+        {
             // Model selection (field 2 for non-Custom, field 3 for Custom)
             match event.code {
                 crossterm::event::KeyCode::Char(c) => {
@@ -226,9 +371,12 @@ impl App {
                     // Keep selection valid after filter change
                     let filter = self.model_selector_filter.to_lowercase();
                     let count = if self.model_selector_models.is_empty() {
-                        PROVIDERS[self.model_selector_provider_selected].models.len()
+                        PROVIDERS[self.model_selector_provider_selected]
+                            .models
+                            .len()
                     } else {
-                        self.model_selector_models.iter()
+                        self.model_selector_models
+                            .iter()
                             .filter(|m| m.to_lowercase().contains(&filter))
                             .count()
                     };
@@ -243,19 +391,24 @@ impl App {
                 }
                 _ => {
                     if keys::is_up(&event) {
-                        self.model_selector_selected = self.model_selector_selected.saturating_sub(1);
+                        self.model_selector_selected =
+                            self.model_selector_selected.saturating_sub(1);
                     } else if keys::is_down(&event) {
                         // Get filtered count
                         let filter = self.model_selector_filter.to_lowercase();
                         let max_models = if self.model_selector_models.is_empty() {
-                            PROVIDERS[self.model_selector_provider_selected].models.len()
+                            PROVIDERS[self.model_selector_provider_selected]
+                                .models
+                                .len()
                         } else {
-                            self.model_selector_models.iter()
+                            self.model_selector_models
+                                .iter()
                                 .filter(|m| m.to_lowercase().contains(&filter))
                                 .count()
                         };
                         if max_models > 0 {
-                            self.model_selector_selected = (self.model_selector_selected + 1).min(max_models - 1);
+                            self.model_selector_selected =
+                                (self.model_selector_selected + 1).min(max_models - 1);
                         }
                     }
                 }
@@ -265,10 +418,17 @@ impl App {
         // Enter to confirm - move to next field
         if keys::is_enter(&event) {
             let is_custom = self.model_selector_provider_selected == 5;
-            
+
             if self.model_selector_focused_field == 0 {
                 // On provider field - save config, DON'T close dialog
-                if let Err(e) = self.save_provider_selection_internal(self.model_selector_provider_selected, false, false).await {
+                if let Err(e) = self
+                    .save_provider_selection_internal(
+                        self.model_selector_provider_selected,
+                        false,
+                        false,
+                    )
+                    .await
+                {
                     self.push_system_message(format!("Error: {}", e));
                 } else {
                     self.model_selector_focused_field = 1;
@@ -277,12 +437,14 @@ impl App {
                 // Custom provider: field 1 is base_url, move to field 2 (api_key)
                 self.model_selector_focused_field = 2;
             } else if (self.model_selector_focused_field == 1 && !is_custom)
-                || (self.model_selector_focused_field == 2 && is_custom) {
+                || (self.model_selector_focused_field == 2 && is_custom)
+            {
                 // On API key field (field 1 for non-Custom, field 2 for Custom)
                 let provider_idx = self.model_selector_provider_selected;
-                
+
                 // Check if sentinel (existing key) or user-typed key
-                let is_existing_key = self.model_selector_api_key == MODEL_SELECTOR_EXISTING_KEY_SENTINEL;
+                let is_existing_key =
+                    self.model_selector_api_key == MODEL_SELECTOR_EXISTING_KEY_SENTINEL;
                 let api_key = if is_existing_key {
                     // Don't save anything - key already exists in config
                     None
@@ -291,26 +453,34 @@ impl App {
                 } else {
                     Some(self.model_selector_api_key.clone())
                 };
-                
+
                 // Skip saving if key already exists (sentinel) - no need to update
                 let key_changed = !is_existing_key && !self.model_selector_api_key.is_empty();
-                
+
                 // Save provider config - DON'T close
-                if let Err(e) = self.save_provider_selection_internal(provider_idx, false, key_changed).await {
+                if let Err(e) = self
+                    .save_provider_selection_internal(provider_idx, false, key_changed)
+                    .await
+                {
                     self.push_system_message(format!("Error: {}", e));
                 } else {
                     // Fetch live models from the provider (for non-Custom)
                     if !is_custom {
-                        self.model_selector_models = super::onboarding::fetch_provider_models(provider_idx, api_key.as_deref()).await;
+                        self.model_selector_models = super::onboarding::fetch_provider_models(
+                            provider_idx,
+                            api_key.as_deref(),
+                        )
+                        .await;
                     }
                     self.model_selector_selected = 0;
-                    
+
                     // Move to model selection field (field 2 for non-Custom, field 3 for Custom)
                     self.model_selector_focused_field = if is_custom { 3 } else { 2 };
                 }
             } else {
                 // On model field - save and close (this one CAN close)
-                self.save_provider_selection(self.model_selector_provider_selected, true).await?;
+                self.save_provider_selection(self.model_selector_provider_selected, true)
+                    .await?;
             }
         }
 
@@ -319,21 +489,31 @@ impl App {
 
     /// Save provider selection to config and reload agent service
     /// If `close_dialog` is false, stays in model selector (for step 1 and 2)
-    async fn save_provider_selection(&mut self, provider_idx: usize, key_changed: bool) -> Result<()> {
-        self.save_provider_selection_internal(provider_idx, true, key_changed).await
+    async fn save_provider_selection(
+        &mut self,
+        provider_idx: usize,
+        key_changed: bool,
+    ) -> Result<()> {
+        self.save_provider_selection_internal(provider_idx, true, key_changed)
+            .await
     }
 
     /// Internal: save provider with option to close dialog
     /// `key_changed` - true if user typed a new key (needs to be saved)
-    async fn save_provider_selection_internal(&mut self, provider_idx: usize, close_dialog: bool, key_changed: bool) -> Result<()> {
+    async fn save_provider_selection_internal(
+        &mut self,
+        provider_idx: usize,
+        close_dialog: bool,
+        key_changed: bool,
+    ) -> Result<()> {
         use super::onboarding::PROVIDERS;
         use crate::config::ProviderConfig;
 
         let provider = &PROVIDERS[provider_idx];
-        
+
         // Load existing config to merge
         let mut config = crate::config::Config::load().unwrap_or_default();
-        
+
         // Disable all providers first - we'll enable only the selected one
         if let Some(ref mut p) = config.providers.anthropic {
             p.enabled = false;
@@ -350,36 +530,53 @@ impl App {
         if let Some(ref mut p) = config.providers.minimax {
             p.enabled = false;
         }
-        
+
         // Get existing key from config if not changing
         let existing_key = match provider_idx {
-            0 => config.providers.anthropic.as_ref()
+            0 => config
+                .providers
+                .anthropic
+                .as_ref()
                 .and_then(|p| p.api_key.as_ref())
                 .filter(|k| !k.is_empty())
                 .cloned(),
-            1 => config.providers.openai.as_ref()
+            1 => config
+                .providers
+                .openai
+                .as_ref()
                 .and_then(|p| p.api_key.as_ref())
                 .filter(|k| !k.is_empty())
                 .cloned(),
-            2 => config.providers.gemini.as_ref()
+            2 => config
+                .providers
+                .gemini
+                .as_ref()
                 .and_then(|p| p.api_key.as_ref())
                 .filter(|k| !k.is_empty())
                 .cloned(),
-            3 => config.providers.openrouter.as_ref()
+            3 => config
+                .providers
+                .openrouter
+                .as_ref()
                 .and_then(|p| p.api_key.as_ref())
                 .filter(|k| !k.is_empty())
                 .cloned(),
-            4 => config.providers.minimax.as_ref()
+            4 => config
+                .providers
+                .minimax
+                .as_ref()
                 .and_then(|p| p.api_key.as_ref())
                 .filter(|k| !k.is_empty())
                 .cloned(),
-            5 => config.providers.active_custom()
+            5 => config
+                .providers
+                .active_custom()
                 .and_then(|(_, p)| p.api_key.as_ref())
                 .filter(|k| !k.is_empty())
                 .cloned(),
             _ => None,
         };
-        
+
         // Use existing key if not changed, otherwise use user input
         let api_key = if key_changed {
             if self.model_selector_api_key.is_empty() {
@@ -392,7 +589,11 @@ impl App {
         };
 
         // Log what's being saved (hide key)
-        tracing::info!("Saving provider config: idx={}, has_api_key={}", provider_idx, api_key.is_some());
+        tracing::info!(
+            "Saving provider config: idx={}, has_api_key={}",
+            provider_idx,
+            api_key.is_some()
+        );
 
         // Build provider config based on selection
         let default_model = provider.models.first().copied().unwrap_or("default");
@@ -450,13 +651,16 @@ impl App {
             5 => {
                 // Custom OpenAI-compatible (named provider)
                 let mut customs = config.providers.custom.unwrap_or_default();
-                customs.insert("default".to_string(), ProviderConfig {
-                    enabled: true,
-                    api_key: api_key.clone(),
-                    base_url: Some(self.model_selector_base_url.clone()),
-                    default_model: Some(default_model.to_string()),
-                    models: vec![],
-                });
+                customs.insert(
+                    "default".to_string(),
+                    ProviderConfig {
+                        enabled: true,
+                        api_key: api_key.clone(),
+                        base_url: Some(self.model_selector_base_url.clone()),
+                        default_model: Some(default_model.to_string()),
+                        models: vec![],
+                    },
+                );
                 config.providers.custom = Some(customs);
             }
             _ => {}
@@ -487,14 +691,26 @@ impl App {
         // Write base_url if applicable
         match provider_idx {
             3 => {
-                let _ = crate::config::Config::write_key(section, "base_url", "https://openrouter.ai/api/v1/chat/completions");
+                let _ = crate::config::Config::write_key(
+                    section,
+                    "base_url",
+                    "https://openrouter.ai/api/v1/chat/completions",
+                );
             }
             4 => {
-                let _ = crate::config::Config::write_key(section, "base_url", "https://api.minimax.io/v1");
+                let _ = crate::config::Config::write_key(
+                    section,
+                    "base_url",
+                    "https://api.minimax.io/v1",
+                );
             }
             5 => {
                 if !self.model_selector_base_url.is_empty() {
-                    let _ = crate::config::Config::write_key(section, "base_url", &self.model_selector_base_url);
+                    let _ = crate::config::Config::write_key(
+                        section,
+                        "base_url",
+                        &self.model_selector_base_url,
+                    );
                 }
             }
             _ => {}
@@ -503,16 +719,25 @@ impl App {
         // Save API key to keys.toml via merge
         if let Some(ref key) = api_key
             && !key.is_empty()
-                && let Err(e) = crate::config::write_secret_key(section, "api_key", key) {
-                    tracing::warn!("Failed to save API key to keys.toml: {}", e);
-                }
+            && let Err(e) = crate::config::write_secret_key(section, "api_key", key)
+        {
+            tracing::warn!("Failed to save API key to keys.toml: {}", e);
+        }
 
         // Rebuild agent service with new provider
         if let Err(e) = self.rebuild_agent_service().await {
             // If rebuild fails, check if it's due to missing API key
             if api_key.is_none() && provider_idx == 5 {
                 // Need API key - show message and stay in provider mode
-                self.push_system_message(format!("API key required for {}. Type it and press Enter.", provider.name.split('(').next().unwrap_or(provider.name).trim()));
+                self.push_system_message(format!(
+                    "API key required for {}. Type it and press Enter.",
+                    provider
+                        .name
+                        .split('(')
+                        .next()
+                        .unwrap_or(provider.name)
+                        .trim()
+                ));
                 return Ok(());
             }
             return Err(e);
@@ -522,13 +747,18 @@ impl App {
         let selected_model = if !self.model_selector_models.is_empty() {
             // Get model from fetched list using filtered index
             let filter = self.model_selector_filter.to_lowercase();
-            let filtered: Vec<_> = self.model_selector_models.iter()
+            let filtered: Vec<_> = self
+                .model_selector_models
+                .iter()
                 .filter(|m| m.to_lowercase().contains(&filter))
                 .collect();
             if let Some(model) = filtered.get(self.model_selector_selected) {
                 model.to_string()
             } else {
-                self.model_selector_models.first().cloned().unwrap_or_else(|| "gpt-4o-mini".to_string())
+                self.model_selector_models
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "gpt-4o-mini".to_string())
             }
         } else if let Some(model) = provider.models.get(self.model_selector_selected) {
             model.to_string()
@@ -552,8 +782,9 @@ impl App {
             }
             _ => "providers.anthropic",
         };
-        
-        if let Err(e) = crate::config::Config::write_key(section, "default_model", &selected_model) {
+
+        if let Err(e) = crate::config::Config::write_key(section, "default_model", &selected_model)
+        {
             tracing::warn!("Failed to persist model to config: {}", e);
         }
 
@@ -562,8 +793,16 @@ impl App {
 
         // Only close dialog if explicitly requested
         if close_dialog {
-            let provider_name = provider.name.split('(').next().unwrap_or(provider.name).trim();
-            self.push_system_message(format!("Provider: {}, Model: {}", provider_name, selected_model));
+            let provider_name = provider
+                .name
+                .split('(')
+                .next()
+                .unwrap_or(provider.name)
+                .trim();
+            self.push_system_message(format!(
+                "Provider: {}, Model: {}",
+                provider_name, selected_model
+            ));
             self.mode = AppMode::Chat;
         }
 
@@ -571,7 +810,10 @@ impl App {
     }
 
     /// Handle keys in onboarding wizard mode
-    pub(crate) async fn handle_onboarding_key(&mut self, event: crossterm::event::KeyEvent) -> Result<()> {
+    pub(crate) async fn handle_onboarding_key(
+        &mut self,
+        event: crossterm::event::KeyEvent,
+    ) -> Result<()> {
         if let Some(ref mut wizard) = self.onboarding {
             let action = wizard.handle_key(event);
             match action {
@@ -584,7 +826,8 @@ impl App {
                     if let Some(ref wizard) = self.onboarding {
                         match wizard.apply_config() {
                             Ok(()) => {
-                                let provider_name = super::onboarding::PROVIDERS[wizard.selected_provider].name;
+                                let provider_name =
+                                    super::onboarding::PROVIDERS[wizard.selected_provider].name;
                                 let model_name = wizard.selected_model_name().to_string();
                                 self.push_system_message(format!(
                                     "Setup complete! Provider: {} | Model: {}",
@@ -617,11 +860,26 @@ impl App {
                         let provider_name = super::onboarding::PROVIDERS[provider_idx].name;
                         let loaded = crate::config::Config::load().ok();
                         match provider_name {
-                            "Anthropic Claude" => loaded.as_ref().and_then(|c| c.providers.anthropic.as_ref()).and_then(|p| p.api_key.clone()),
-                            "OpenAI" => loaded.as_ref().and_then(|c| c.providers.openai.as_ref()).and_then(|p| p.api_key.clone()),
-                            "Google Gemini" => loaded.as_ref().and_then(|c| c.providers.gemini.as_ref()).and_then(|p| p.api_key.clone()),
-                            "OpenRouter" => loaded.as_ref().and_then(|c| c.providers.openrouter.as_ref()).and_then(|p| p.api_key.clone()),
-                            "Minimax" => loaded.as_ref().and_then(|c| c.providers.minimax.as_ref()).and_then(|p| p.api_key.clone()),
+                            "Anthropic Claude" => loaded
+                                .as_ref()
+                                .and_then(|c| c.providers.anthropic.as_ref())
+                                .and_then(|p| p.api_key.clone()),
+                            "OpenAI" => loaded
+                                .as_ref()
+                                .and_then(|c| c.providers.openai.as_ref())
+                                .and_then(|p| p.api_key.clone()),
+                            "Google Gemini" => loaded
+                                .as_ref()
+                                .and_then(|c| c.providers.gemini.as_ref())
+                                .and_then(|p| p.api_key.clone()),
+                            "OpenRouter" => loaded
+                                .as_ref()
+                                .and_then(|c| c.providers.openrouter.as_ref())
+                                .and_then(|p| p.api_key.clone()),
+                            "Minimax" => loaded
+                                .as_ref()
+                                .and_then(|c| c.providers.minimax.as_ref())
+                                .and_then(|p| p.api_key.clone()),
                             _ => None,
                         }
                     } else if !wizard.api_key_input.is_empty() {
@@ -633,7 +891,11 @@ impl App {
 
                     let sender = self.event_sender();
                     tokio::spawn(async move {
-                        let models = super::onboarding::fetch_provider_models(provider_idx, api_key.as_deref()).await;
+                        let models = super::onboarding::fetch_provider_models(
+                            provider_idx,
+                            api_key.as_deref(),
+                        )
+                        .await;
                         let _ = sender.send(TuiEvent::OnboardingModelsFetched(models));
                     });
                 }
@@ -644,7 +906,8 @@ impl App {
                         let pairing_result = tokio::time::timeout(
                             std::time::Duration::from_secs(15),
                             crate::brain::tools::whatsapp_connect::start_whatsapp_pairing(),
-                        ).await;
+                        )
+                        .await;
 
                         match pairing_result {
                             Ok(Ok(handle)) => {
@@ -660,7 +923,9 @@ impl App {
                                 match tokio::time::timeout(
                                     std::time::Duration::from_secs(120),
                                     handle.connected_rx,
-                                ).await {
+                                )
+                                .await
+                                {
                                     Ok(Ok(())) => {
                                         let _ = sender.send(TuiEvent::WhatsAppConnected);
                                     }
@@ -690,14 +955,16 @@ impl App {
                 WizardAction::TestTelegram => {
                     wizard.channel_test_status = super::onboarding::ChannelTestStatus::Testing;
                     let token = if wizard.has_existing_telegram_token() {
-                        crate::config::Config::load().ok()
+                        crate::config::Config::load()
+                            .ok()
                             .and_then(|c| c.channels.telegram.token.clone())
                             .unwrap_or_default()
                     } else {
                         wizard.telegram_token_input.clone()
                     };
                     let user_id_str = if wizard.has_existing_telegram_user_id() {
-                        crate::config::Config::load().ok()
+                        crate::config::Config::load()
+                            .ok()
                             .and_then(|c| c.channels.telegram.allowed_users.first().copied())
                             .map(|id| id.to_string())
                             .unwrap_or_default()
@@ -717,14 +984,16 @@ impl App {
                 WizardAction::TestDiscord => {
                     wizard.channel_test_status = super::onboarding::ChannelTestStatus::Testing;
                     let token = if wizard.has_existing_discord_token() {
-                        crate::config::Config::load().ok()
+                        crate::config::Config::load()
+                            .ok()
                             .and_then(|c| c.channels.discord.token.clone())
                             .unwrap_or_default()
                     } else {
                         wizard.discord_token_input.clone()
                     };
                     let channel_id = if wizard.has_existing_discord_channel_id() {
-                        crate::config::Config::load().ok()
+                        crate::config::Config::load()
+                            .ok()
                             .and_then(|c| c.channels.discord.allowed_channels.first().cloned())
                             .unwrap_or_default()
                     } else {
@@ -743,14 +1012,16 @@ impl App {
                 WizardAction::TestSlack => {
                     wizard.channel_test_status = super::onboarding::ChannelTestStatus::Testing;
                     let token = if wizard.has_existing_slack_bot_token() {
-                        crate::config::Config::load().ok()
+                        crate::config::Config::load()
+                            .ok()
                             .and_then(|c| c.channels.slack.token.clone())
                             .unwrap_or_default()
                     } else {
                         wizard.slack_bot_token_input.clone()
                     };
                     let channel_id = if wizard.has_existing_slack_channel_id() {
-                        crate::config::Config::load().ok()
+                        crate::config::Config::load()
+                            .ok()
                             .and_then(|c| c.channels.slack.allowed_channels.first().cloned())
                             .unwrap_or_default()
                     } else {
@@ -781,7 +1052,9 @@ impl App {
     async fn generate_brain_files(&mut self) {
         // Extract what we need before borrowing wizard mutably
         let prompt = {
-            let Some(ref wizard) = self.onboarding else { return };
+            let Some(ref wizard) = self.onboarding else {
+                return;
+            };
             wizard.build_brain_prompt()
         };
 
@@ -796,11 +1069,8 @@ impl App {
         let model = self.agent_service.provider_model().to_string();
 
         // Build LLM request
-        let request = LLMRequest::new(
-            model,
-            vec![crate::brain::provider::Message::user(prompt)],
-        )
-        .with_max_tokens(65536);
+        let request = LLMRequest::new(model, vec![crate::brain::provider::Message::user(prompt)])
+            .with_max_tokens(65536);
 
         // Call the provider
         match provider.complete(request).await {
@@ -873,7 +1143,10 @@ impl App {
     }
 
     /// Handle keys in file picker mode
-    pub(crate) async fn handle_file_picker_key(&mut self, event: crossterm::event::KeyEvent) -> Result<()> {
+    pub(crate) async fn handle_file_picker_key(
+        &mut self,
+        event: crossterm::event::KeyEvent,
+    ) -> Result<()> {
         use super::events::keys;
         use crossterm::event::KeyCode;
 
@@ -899,7 +1172,8 @@ impl App {
                     self.file_picker_scroll_offset = self.file_picker_selected - visible_items + 1;
                 }
             }
-        } else if keys::is_enter(&event) || event.code == KeyCode::Char(' ') || keys::is_tab(&event) {
+        } else if keys::is_enter(&event) || event.code == KeyCode::Char(' ') || keys::is_tab(&event)
+        {
             // Select file or navigate into directory
             if let Some(selected_path) = self.file_picker_files.get(self.file_picker_selected) {
                 if selected_path.is_dir() {
@@ -917,7 +1191,8 @@ impl App {
                 } else {
                     // Insert file path into input buffer at cursor
                     let path_str = selected_path.to_string_lossy().to_string();
-                    self.input_buffer.insert_str(self.cursor_position, &path_str);
+                    self.input_buffer
+                        .insert_str(self.cursor_position, &path_str);
                     self.cursor_position += path_str.len();
                     self.switch_mode(AppMode::Chat).await?;
                 }
@@ -977,14 +1252,15 @@ impl App {
                 self.file_picker_selected += 1;
                 let visible_items = 20;
                 if self.file_picker_selected >= self.file_picker_scroll_offset + visible_items {
-                    self.file_picker_scroll_offset =
-                        self.file_picker_selected - visible_items + 1;
+                    self.file_picker_scroll_offset = self.file_picker_selected - visible_items + 1;
                 }
             }
         } else if keys::is_enter(&event) {
             // Enter navigates into directory
-            if let Some(selected_path) =
-                self.file_picker_files.get(self.file_picker_selected).cloned()
+            if let Some(selected_path) = self
+                .file_picker_files
+                .get(self.file_picker_selected)
+                .cloned()
             {
                 if selected_path.ends_with("..") {
                     if let Some(parent) = self.file_picker_current_dir.parent() {
@@ -1122,9 +1398,7 @@ pub(crate) async fn ensure_whispercrabs() -> Result<PathBuf> {
     let _ = std::fs::remove_file(&tmp);
 
     if !binary_path.exists() {
-        anyhow::bail!(
-            "Binary not found after extraction — archive may use a different layout"
-        );
+        anyhow::bail!("Binary not found after extraction — archive may use a different layout");
     }
 
     Ok(binary_path)
@@ -1135,7 +1409,8 @@ pub(crate) async fn ensure_whispercrabs() -> Result<PathBuf> {
 async fn test_telegram_connection(token: &str, user_id_str: &str) -> Result<(), String> {
     use teloxide::prelude::Requester;
 
-    let user_id: i64 = user_id_str.parse()
+    let user_id: i64 = user_id_str
+        .parse()
         .map_err(|_| format!("Invalid user ID: {}", user_id_str))?;
     let bot = teloxide::Bot::new(token);
     bot.send_message(
@@ -1155,11 +1430,13 @@ async fn test_telegram_connection(_token: &str, _user_id_str: &str) -> Result<()
 /// Test Discord connection by sending a message to a channel.
 #[cfg(feature = "discord")]
 async fn test_discord_connection(token: &str, channel_id_str: &str) -> Result<(), String> {
-    let channel_id: u64 = channel_id_str.parse()
+    let channel_id: u64 = channel_id_str
+        .parse()
         .map_err(|_| format!("Invalid channel ID: {}", channel_id_str))?;
     let http = serenity::http::Http::new(token);
     let channel = serenity::model::id::ChannelId::new(channel_id);
-    channel.say(&http, "OpenCrabs connected! Your Discord bot is ready.")
+    channel
+        .say(&http, "OpenCrabs connected! Your Discord bot is ready.")
         .await
         .map_err(|e| format!("Discord API error: {}", e))?;
     Ok(())
@@ -1175,8 +1452,9 @@ async fn test_discord_connection(_token: &str, _channel_id_str: &str) -> Result<
 async fn test_slack_connection(token: &str, channel_id: &str) -> Result<(), String> {
     use slack_morphism::prelude::*;
 
-    let client = SlackClient::new(SlackClientHyperConnector::new()
-        .map_err(|e| format!("Slack client error: {}", e))?);
+    let client = SlackClient::new(
+        SlackClientHyperConnector::new().map_err(|e| format!("Slack client error: {}", e))?,
+    );
     let api_token = SlackApiToken::new(SlackApiTokenValue::from(token.to_string()));
     let session = client.open_session(&api_token);
     let request = SlackApiChatPostMessageRequest::new(
@@ -1184,7 +1462,8 @@ async fn test_slack_connection(token: &str, channel_id: &str) -> Result<(), Stri
         SlackMessageContent::new()
             .with_text("OpenCrabs connected! Your Slack bot is ready.".to_string()),
     );
-    session.chat_post_message(&request)
+    session
+        .chat_post_message(&request)
         .await
         .map_err(|e| format!("Slack API error: {}", e))?;
     Ok(())

@@ -4,9 +4,7 @@
 //! Handles mode selection, provider/auth setup, workspace, gateway,
 //! channels, daemon installation, and health check.
 
-use crate::config::{
-    Config, ProviderConfig,
-};
+use crate::config::{Config, ProviderConfig};
 use chrono::Local;
 
 /// Sentinel value stored in api_key_input when a key was loaded from config.
@@ -19,7 +17,7 @@ use std::path::PathBuf;
 pub const PROVIDERS: &[ProviderInfo] = &[
     ProviderInfo {
         name: "Anthropic Claude",
-        models: &[],  // Fetched from API
+        models: &[], // Fetched from API
         key_label: "Setup Token",
         help_lines: &[
             "Claude Max / Code: run 'claude setup-token'",
@@ -46,7 +44,7 @@ pub const PROVIDERS: &[ProviderInfo] = &[
     },
     ProviderInfo {
         name: "Minimax",
-        models: &[],  // Loaded from config.toml at runtime
+        models: &[], // Loaded from config.toml at runtime
         key_label: "API Key",
         help_lines: &["Get key from platform.minimax.io"],
     },
@@ -68,23 +66,29 @@ pub struct ProviderInfo {
 /// Channel definitions for the unified Channels step.
 /// Index mapping: 0=Telegram, 1=Discord, 2=WhatsApp, 3=Slack, 4=Signal, 5=Google Chat, 6=iMessage
 pub const CHANNEL_NAMES: &[(&str, &str)] = &[
-    ("Telegram",    "Bot token (via @BotFather)"),
-    ("Discord",     "Bot token (via Developer Portal)"),
-    ("WhatsApp",    "QR code pairing"),
-    ("Slack",       "Socket Mode (bot + app tokens)"),
-    ("Signal",      "Coming soon"),
+    ("Telegram", "Bot token (via @BotFather)"),
+    ("Discord", "Bot token (via Developer Portal)"),
+    ("WhatsApp", "QR code pairing"),
+    ("Slack", "Socket Mode (bot + app tokens)"),
+    ("Signal", "Coming soon"),
     ("Google Chat", "Coming soon"),
-    ("iMessage",    "Coming soon"),
+    ("iMessage", "Coming soon"),
 ];
 
 /// Template files to seed in the workspace
 const TEMPLATE_FILES: &[(&str, &str)] = &[
-    ("SOUL.md", include_str!("../docs/reference/templates/SOUL.md")),
+    (
+        "SOUL.md",
+        include_str!("../docs/reference/templates/SOUL.md"),
+    ),
     (
         "IDENTITY.md",
         include_str!("../docs/reference/templates/IDENTITY.md"),
     ),
-    ("USER.md", include_str!("../docs/reference/templates/USER.md")),
+    (
+        "USER.md",
+        include_str!("../docs/reference/templates/USER.md"),
+    ),
     (
         "AGENTS.md",
         include_str!("../docs/reference/templates/AGENTS.md"),
@@ -126,10 +130,10 @@ impl OnboardingStep {
             Self::Workspace => 2,
             Self::ProviderAuth => 3,
             Self::Channels => 4,
-            Self::TelegramSetup => 4,   // sub-step of Channels
-            Self::DiscordSetup => 4,    // sub-step of Channels
-            Self::WhatsAppSetup => 4,   // sub-step of Channels
-            Self::SlackSetup => 4,      // sub-step of Channels
+            Self::TelegramSetup => 4, // sub-step of Channels
+            Self::DiscordSetup => 4,  // sub-step of Channels
+            Self::WhatsAppSetup => 4, // sub-step of Channels
+            Self::SlackSetup => 4,    // sub-step of Channels
             Self::Gateway => 5,
             Self::VoiceSetup => 6,
             Self::Daemon => 7,
@@ -386,37 +390,74 @@ impl OnboardingWizard {
 
         // Try to load existing config to pre-fill settings
         let existing_config = crate::config::Config::load().ok();
-        
+
         // Detect existing enabled provider
         let (selected_provider, api_key_input, custom_base_url, custom_model) =
             if let Some(ref config) = existing_config {
-            // Find first enabled provider
-            if config.providers.anthropic.as_ref().is_some_and(|p| p.enabled) {
-                (0, EXISTING_KEY_SENTINEL.to_string(), String::new(), String::new())
-            } else if config.providers.openai.as_ref().is_some_and(|p| p.enabled) {
-                (1, EXISTING_KEY_SENTINEL.to_string(), String::new(), String::new())
-            } else if config.providers.gemini.as_ref().is_some_and(|p| p.enabled) {
-                (2, EXISTING_KEY_SENTINEL.to_string(), String::new(), String::new())
-            } else if config.providers.openrouter.as_ref().is_some_and(|p| p.enabled) {
-                (3, EXISTING_KEY_SENTINEL.to_string(), String::new(), String::new())
-            } else if config.providers.minimax.as_ref().is_some_and(|p| p.enabled) {
-                (4, EXISTING_KEY_SENTINEL.to_string(), String::new(), String::new())
-            } else if let Some((_name, c)) = config.providers.active_custom() {
-                let base = c.base_url.clone().unwrap_or_default();
-                let model = c.default_model.clone().unwrap_or_default();
-                (5, EXISTING_KEY_SENTINEL.to_string(), base, model)
+                // Find first enabled provider
+                if config
+                    .providers
+                    .anthropic
+                    .as_ref()
+                    .is_some_and(|p| p.enabled)
+                {
+                    (
+                        0,
+                        EXISTING_KEY_SENTINEL.to_string(),
+                        String::new(),
+                        String::new(),
+                    )
+                } else if config.providers.openai.as_ref().is_some_and(|p| p.enabled) {
+                    (
+                        1,
+                        EXISTING_KEY_SENTINEL.to_string(),
+                        String::new(),
+                        String::new(),
+                    )
+                } else if config.providers.gemini.as_ref().is_some_and(|p| p.enabled) {
+                    (
+                        2,
+                        EXISTING_KEY_SENTINEL.to_string(),
+                        String::new(),
+                        String::new(),
+                    )
+                } else if config
+                    .providers
+                    .openrouter
+                    .as_ref()
+                    .is_some_and(|p| p.enabled)
+                {
+                    (
+                        3,
+                        EXISTING_KEY_SENTINEL.to_string(),
+                        String::new(),
+                        String::new(),
+                    )
+                } else if config.providers.minimax.as_ref().is_some_and(|p| p.enabled) {
+                    (
+                        4,
+                        EXISTING_KEY_SENTINEL.to_string(),
+                        String::new(),
+                        String::new(),
+                    )
+                } else if let Some((_name, c)) = config.providers.active_custom() {
+                    let base = c.base_url.clone().unwrap_or_default();
+                    let model = c.default_model.clone().unwrap_or_default();
+                    (5, EXISTING_KEY_SENTINEL.to_string(), base, model)
+                } else {
+                    (0, String::new(), String::new(), String::new())
+                }
             } else {
                 (0, String::new(), String::new(), String::new())
-            }
-        } else {
-            (0, String::new(), String::new(), String::new())
-        };
-        
+            };
+
         // Pre-fill gateway settings from existing config
-        let gateway_port = existing_config.as_ref()
+        let gateway_port = existing_config
+            .as_ref()
             .map(|c| c.gateway.port.to_string())
             .unwrap_or_else(|| "18789".to_string());
-        let gateway_bind = existing_config.as_ref()
+        let gateway_bind = existing_config
+            .as_ref()
             .map(|c| c.gateway.bind.clone())
             .unwrap_or_else(|| "127.0.0.1".to_string());
 
@@ -523,28 +564,63 @@ impl OnboardingWizard {
         let mut wizard = Self::new();
 
         // Determine which provider is configured and set selected_provider
-        if config.providers.anthropic.as_ref().is_some_and(|p| p.enabled) {
+        if config
+            .providers
+            .anthropic
+            .as_ref()
+            .is_some_and(|p| p.enabled)
+        {
             wizard.selected_provider = 0; // Anthropic
-            if let Some(model) = &config.providers.anthropic.as_ref().and_then(|p| p.default_model.clone()) {
+            if let Some(model) = &config
+                .providers
+                .anthropic
+                .as_ref()
+                .and_then(|p| p.default_model.clone())
+            {
                 wizard.custom_model = model.clone();
             }
         } else if config.providers.minimax.as_ref().is_some_and(|p| p.enabled) {
             wizard.selected_provider = 4; // Minimax
-            if let Some(model) = &config.providers.minimax.as_ref().and_then(|p| p.default_model.clone()) {
+            if let Some(model) = &config
+                .providers
+                .minimax
+                .as_ref()
+                .and_then(|p| p.default_model.clone())
+            {
                 wizard.custom_model = model.clone();
             }
-        } else if config.providers.openrouter.as_ref().is_some_and(|p| p.enabled) {
+        } else if config
+            .providers
+            .openrouter
+            .as_ref()
+            .is_some_and(|p| p.enabled)
+        {
             wizard.selected_provider = 3; // OpenRouter - fetches from API
-            if let Some(model) = &config.providers.openrouter.as_ref().and_then(|p| p.default_model.clone()) {
+            if let Some(model) = &config
+                .providers
+                .openrouter
+                .as_ref()
+                .and_then(|p| p.default_model.clone())
+            {
                 wizard.custom_model = model.clone();
             }
         } else if config.providers.openai.as_ref().is_some_and(|p| p.enabled) {
             // Custom OpenAI-compatible
             wizard.selected_provider = 5;
-            if let Some(base_url) = &config.providers.openai.as_ref().and_then(|p| p.base_url.clone()) {
+            if let Some(base_url) = &config
+                .providers
+                .openai
+                .as_ref()
+                .and_then(|p| p.base_url.clone())
+            {
                 wizard.custom_base_url = base_url.clone();
             }
-            if let Some(model) = &config.providers.openai.as_ref().and_then(|p| p.default_model.clone()) {
+            if let Some(model) = &config
+                .providers
+                .openai
+                .as_ref()
+                .and_then(|p| p.default_model.clone())
+            {
                 wizard.custom_model = model.clone();
             }
         } else if config.providers.gemini.as_ref().is_some_and(|p| p.enabled) {
@@ -558,16 +634,20 @@ impl OnboardingWizard {
         // Load gateway settings
         wizard.gateway_port = config.gateway.port.to_string();
         wizard.gateway_bind = config.gateway.bind.clone();
-        wizard.gateway_auth = if config.gateway.auth_mode == "none" { 1 } else { 0 };
+        wizard.gateway_auth = if config.gateway.auth_mode == "none" {
+            1
+        } else {
+            0
+        };
 
         // Load channel toggles (indices match CHANNEL_NAMES order)
-        wizard.channel_toggles[0].1 = config.channels.telegram.enabled;  // Telegram
-        wizard.channel_toggles[1].1 = config.channels.discord.enabled;   // Discord
-        wizard.channel_toggles[2].1 = config.channels.whatsapp.enabled;  // WhatsApp
-        wizard.channel_toggles[3].1 = config.channels.slack.enabled;     // Slack
-        wizard.channel_toggles[4].1 = config.channels.signal.enabled;    // Signal
+        wizard.channel_toggles[0].1 = config.channels.telegram.enabled; // Telegram
+        wizard.channel_toggles[1].1 = config.channels.discord.enabled; // Discord
+        wizard.channel_toggles[2].1 = config.channels.whatsapp.enabled; // WhatsApp
+        wizard.channel_toggles[3].1 = config.channels.slack.enabled; // Slack
+        wizard.channel_toggles[4].1 = config.channels.signal.enabled; // Signal
         wizard.channel_toggles[5].1 = config.channels.google_chat.enabled; // Google Chat
-        wizard.channel_toggles[6].1 = config.channels.imessage.enabled;  // iMessage
+        wizard.channel_toggles[6].1 = config.channels.imessage.enabled; // iMessage
 
         // Load voice settings
         wizard.tts_enabled = config.voice.tts_enabled;
@@ -599,17 +679,19 @@ impl OnboardingWizard {
             match self.selected_provider {
                 4 => {
                     if let Some(p) = &config.providers.minimax
-                        && !p.models.is_empty() {
-                            self.config_models = p.models.clone();
-                            return;
-                        }
+                        && !p.models.is_empty()
+                    {
+                        self.config_models = p.models.clone();
+                        return;
+                    }
                 }
                 5 => {
                     if let Some((_name, p)) = config.providers.active_custom()
-                        && !p.models.is_empty() {
-                            self.config_models = p.models.clone();
-                            return;
-                        }
+                        && !p.models.is_empty()
+                    {
+                        self.config_models = p.models.clone();
+                        return;
+                    }
                 }
                 _ => return,
             }
@@ -637,7 +719,9 @@ impl OnboardingWizard {
             all
         } else {
             let q = self.model_filter.to_lowercase();
-            all.into_iter().filter(|m| m.to_lowercase().contains(&q)).collect()
+            all.into_iter()
+                .filter(|m| m.to_lowercase().contains(&q))
+                .collect()
         }
     }
 
@@ -669,43 +753,51 @@ impl OnboardingWizard {
         let mut models = Vec::new();
 
         if let Ok(config) = config_content.parse::<toml::Value>()
-            && let Some(providers) = config.get("providers") {
-                match provider_index {
-                    4 => {
-                        // Minimax only
-                        if let Some(minimax) = providers.get("minimax")
-                            && let Some(models_arr) = minimax.get("models").and_then(|m| m.as_array()) {
+            && let Some(providers) = config.get("providers")
+        {
+            match provider_index {
+                4 => {
+                    // Minimax only
+                    if let Some(minimax) = providers.get("minimax")
+                        && let Some(models_arr) = minimax.get("models").and_then(|m| m.as_array())
+                    {
+                        for model in models_arr {
+                            if let Some(model_str) = model.as_str() {
+                                models.push(model_str.to_string());
+                            }
+                        }
+                    }
+                }
+                5 => {
+                    // Custom providers only
+                    if let Some(custom) = providers.get("custom")
+                        && let Some(custom_table) = custom.as_table()
+                    {
+                        for (_name, entry) in custom_table {
+                            if let Some(models_arr) = entry.get("models").and_then(|m| m.as_array())
+                            {
                                 for model in models_arr {
-                                    if let Some(model_str) = model.as_str() {
+                                    if let Some(model_str) = model.as_str()
+                                        && !models.contains(&model_str.to_string())
+                                    {
                                         models.push(model_str.to_string());
                                     }
                                 }
                             }
+                        }
                     }
-                    5 => {
-                        // Custom providers only
-                        if let Some(custom) = providers.get("custom")
-                            && let Some(custom_table) = custom.as_table() {
-                                for (_name, entry) in custom_table {
-                                    if let Some(models_arr) = entry.get("models").and_then(|m| m.as_array()) {
-                                        for model in models_arr {
-                                            if let Some(model_str) = model.as_str()
-                                                && !models.contains(&model_str.to_string()) {
-                                                    models.push(model_str.to_string());
-                                                }
-                                        }
-                                    }
-                                }
-                            }
-                    }
-                    _ => {}
                 }
+                _ => {}
             }
+        }
 
-        tracing::debug!("Loaded {} default models from config.toml.example for provider {}", models.len(), provider_index);
+        tracing::debug!(
+            "Loaded {} default models from config.toml.example for provider {}",
+            models.len(),
+            provider_index
+        );
         models
     }
-
 
     /// Whether the current api_key_input holds a pre-existing key (from env/keyring)
     pub fn has_existing_key(&self) -> bool {
@@ -717,7 +809,8 @@ impl OnboardingWizard {
     pub fn detect_existing_key(&mut self) {
         // Helper: true when the provider has a non-empty API key
         fn has_nonempty_key(p: Option<&ProviderConfig>) -> bool {
-            p.and_then(|p| p.api_key.as_ref()).is_some_and(|k| !k.is_empty())
+            p.and_then(|p| p.api_key.as_ref())
+                .is_some_and(|k| !k.is_empty())
         }
 
         if let Ok(config) = crate::config::Config::load() {
@@ -743,7 +836,7 @@ impl OnboardingWizard {
                 }
                 _ => false,
             };
-            
+
             if has_key {
                 self.api_key_input = EXISTING_KEY_SENTINEL.to_string();
                 self.api_key_cursor = 0;
@@ -779,8 +872,9 @@ impl OnboardingWizard {
                 if self.is_custom_provider()
                     && (self.custom_base_url.is_empty() || self.custom_model.is_empty())
                 {
-                    self.error_message =
-                        Some("Base URL and model name are required for custom provider".to_string());
+                    self.error_message = Some(
+                        "Base URL and model name are required for custom provider".to_string(),
+                    );
                     return;
                 }
                 // QuickStart: skip channels, go straight to gateway
@@ -903,7 +997,7 @@ impl OnboardingWizard {
     /// Ensure config.toml and keys.toml exist in the workspace directory
     fn ensure_config_files(&mut self) -> Result<(), String> {
         let workspace_path = std::path::PathBuf::from(&self.workspace_path);
-        
+
         // Create workspace directory if it doesn't exist
         if !workspace_path.exists() {
             std::fs::create_dir_all(&workspace_path)
@@ -1003,11 +1097,12 @@ impl OnboardingWizard {
 
         // Check 3: Workspace directory
         let workspace = PathBuf::from(&self.workspace_path);
-        self.health_results[2].1 = if workspace.exists() || std::fs::create_dir_all(&workspace).is_ok() {
-            HealthStatus::Pass
-        } else {
-            HealthStatus::Fail(format!("Cannot create {}", workspace.display()))
-        };
+        self.health_results[2].1 =
+            if workspace.exists() || std::fs::create_dir_all(&workspace).is_ok() {
+                HealthStatus::Pass
+            } else {
+                HealthStatus::Fail(format!("Cannot create {}", workspace.display()))
+            };
 
         // Check 4: Template files available (they're compiled in, always present)
         self.health_results[3].1 = HealthStatus::Pass;
@@ -1041,7 +1136,9 @@ impl OnboardingWizard {
                     if !self.discord_channel_id_input.is_empty() {
                         HealthStatus::Pass
                     } else {
-                        HealthStatus::Fail("No channel ID — bot won't know where to post".to_string())
+                        HealthStatus::Fail(
+                            "No channel ID — bot won't know where to post".to_string(),
+                        )
                     }
                 }
                 "Slack Bot Token" => {
@@ -1055,7 +1152,9 @@ impl OnboardingWizard {
                     if !self.slack_channel_id_input.is_empty() {
                         HealthStatus::Pass
                     } else {
-                        HealthStatus::Fail("No channel ID — bot won't know where to post".to_string())
+                        HealthStatus::Fail(
+                            "No channel ID — bot won't know where to post".to_string(),
+                        )
                     }
                 }
                 "WhatsApp Connected" => {
@@ -1076,7 +1175,10 @@ impl OnboardingWizard {
     /// Check if all health checks passed
     pub fn all_health_passed(&self) -> bool {
         self.health_complete
-            && self.health_results.iter().all(|(_, s)| matches!(s, HealthStatus::Pass))
+            && self
+                .health_results
+                .iter()
+                .all(|(_, s)| matches!(s, HealthStatus::Pass))
     }
 
     /// Handle key events for the current step
@@ -1116,10 +1218,7 @@ impl OnboardingWizard {
     /// Handle paste event - inserts text at current cursor position
     pub fn handle_paste(&mut self, text: &str) {
         // Sanitize pasted text: take first line only, strip \r\n and whitespace
-        let clean = text.split(['\r', '\n'])
-            .next()
-            .unwrap_or("")
-            .trim();
+        let clean = text.split(['\r', '\n']).next().unwrap_or("").trim();
         if clean.is_empty() {
             return;
         }
@@ -1127,7 +1226,11 @@ impl OnboardingWizard {
         // Dispatch paste based on current step first, then auth_field
         match self.step {
             OnboardingStep::TelegramSetup => {
-                tracing::debug!("[paste] Telegram pasted ({} chars) field={:?}", clean.len(), self.telegram_field);
+                tracing::debug!(
+                    "[paste] Telegram pasted ({} chars) field={:?}",
+                    clean.len(),
+                    self.telegram_field
+                );
                 match self.telegram_field {
                     TelegramField::BotToken => {
                         if self.has_existing_telegram_token() {
@@ -1148,7 +1251,11 @@ impl OnboardingWizard {
                 }
             }
             OnboardingStep::DiscordSetup => {
-                tracing::debug!("[paste] Discord pasted ({} chars) field={:?}", clean.len(), self.discord_field);
+                tracing::debug!(
+                    "[paste] Discord pasted ({} chars) field={:?}",
+                    clean.len(),
+                    self.discord_field
+                );
                 match self.discord_field {
                     DiscordField::BotToken => {
                         if self.has_existing_discord_token() {
@@ -1174,7 +1281,11 @@ impl OnboardingWizard {
                 }
             }
             OnboardingStep::SlackSetup => {
-                tracing::debug!("[paste] Slack pasted ({} chars) field={:?}", clean.len(), self.slack_field);
+                tracing::debug!(
+                    "[paste] Slack pasted ({} chars) field={:?}",
+                    clean.len(),
+                    self.slack_field
+                );
                 match self.slack_field {
                     SlackField::BotToken => {
                         if self.has_existing_slack_bot_token() {
@@ -1205,7 +1316,8 @@ impl OnboardingWizard {
             OnboardingStep::WhatsAppSetup => {
                 if self.whatsapp_field == WhatsAppField::PhoneAllowlist {
                     // Accept digits, +, - for phone number
-                    let phone: String = clean.chars()
+                    let phone: String = clean
+                        .chars()
                         .filter(|c| c.is_ascii_digit() || *c == '+' || *c == '-')
                         .collect();
                     if !phone.is_empty() {
@@ -1223,27 +1335,25 @@ impl OnboardingWizard {
                 }
                 self.groq_api_key_input.push_str(clean);
             }
-            OnboardingStep::ProviderAuth => {
-                match self.auth_field {
-                    AuthField::ApiKey | AuthField::CustomApiKey => {
-                        if self.has_existing_key() {
-                            self.api_key_input.clear();
-                        }
-                        self.api_key_input.push_str(clean);
-                        self.api_key_cursor = self.api_key_input.len();
+            OnboardingStep::ProviderAuth => match self.auth_field {
+                AuthField::ApiKey | AuthField::CustomApiKey => {
+                    if self.has_existing_key() {
+                        self.api_key_input.clear();
                     }
-                    AuthField::CustomName => {
-                        self.custom_provider_name.push_str(clean);
-                    }
-                    AuthField::CustomBaseUrl => {
-                        self.custom_base_url.push_str(clean);
-                    }
-                    AuthField::CustomModel => {
-                        self.custom_model.push_str(clean);
-                    }
-                    _ => {}
+                    self.api_key_input.push_str(clean);
+                    self.api_key_cursor = self.api_key_input.len();
                 }
-            }
+                AuthField::CustomName => {
+                    self.custom_provider_name.push_str(clean);
+                }
+                AuthField::CustomBaseUrl => {
+                    self.custom_base_url.push_str(clean);
+                }
+                AuthField::CustomModel => {
+                    self.custom_model.push_str(clean);
+                }
+                _ => {}
+            },
             _ => {}
         }
     }
@@ -1293,8 +1403,7 @@ impl OnboardingWizard {
                     self.detect_existing_key();
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    self.selected_provider =
-                        (self.selected_provider + 1).min(PROVIDERS.len() - 1);
+                    self.selected_provider = (self.selected_provider + 1).min(PROVIDERS.len() - 1);
                     self.selected_model = 0;
                     self.model_filter.clear();
                     self.api_key_input.clear();
@@ -1679,9 +1788,15 @@ impl OnboardingWizard {
     /// Detect existing Discord bot token from keys.toml
     fn detect_existing_discord_token(&mut self) {
         if let Ok(config) = crate::config::Config::load()
-            && config.channels.discord.token.as_ref().is_some_and(|t| !t.is_empty()) {
-                self.discord_token_input = EXISTING_KEY_SENTINEL.to_string();
-            }
+            && config
+                .channels
+                .discord
+                .token
+                .as_ref()
+                .is_some_and(|t| !t.is_empty())
+        {
+            self.discord_token_input = EXISTING_KEY_SENTINEL.to_string();
+        }
     }
 
     /// Check if discord token holds a pre-existing value
@@ -1692,9 +1807,10 @@ impl OnboardingWizard {
     /// Detect existing Discord channel ID from config.toml
     fn detect_existing_discord_channel_id(&mut self) {
         if let Ok(config) = crate::config::Config::load()
-            && !config.channels.discord.allowed_channels.is_empty() {
-                self.discord_channel_id_input = EXISTING_KEY_SENTINEL.to_string();
-            }
+            && !config.channels.discord.allowed_channels.is_empty()
+        {
+            self.discord_channel_id_input = EXISTING_KEY_SENTINEL.to_string();
+        }
     }
 
     /// Check if discord channel ID holds a pre-existing value
@@ -1705,9 +1821,10 @@ impl OnboardingWizard {
     /// Detect existing Discord allowed users from config.toml
     fn detect_existing_discord_allowed_list(&mut self) {
         if let Ok(config) = crate::config::Config::load()
-            && !config.channels.discord.allowed_users.is_empty() {
-                self.discord_allowed_list_input = EXISTING_KEY_SENTINEL.to_string();
-            }
+            && !config.channels.discord.allowed_users.is_empty()
+        {
+            self.discord_allowed_list_input = EXISTING_KEY_SENTINEL.to_string();
+        }
     }
 
     /// Check if Discord allowed list holds a pre-existing value
@@ -1718,10 +1835,22 @@ impl OnboardingWizard {
     /// Detect existing Slack tokens from keys.toml
     fn detect_existing_slack_tokens(&mut self) {
         if let Ok(config) = crate::config::Config::load() {
-            if config.channels.slack.token.as_ref().is_some_and(|t| !t.is_empty()) {
+            if config
+                .channels
+                .slack
+                .token
+                .as_ref()
+                .is_some_and(|t| !t.is_empty())
+            {
                 self.slack_bot_token_input = EXISTING_KEY_SENTINEL.to_string();
             }
-            if config.channels.slack.app_token.as_ref().is_some_and(|t| !t.is_empty()) {
+            if config
+                .channels
+                .slack
+                .app_token
+                .as_ref()
+                .is_some_and(|t| !t.is_empty())
+            {
                 self.slack_app_token_input = EXISTING_KEY_SENTINEL.to_string();
             }
         }
@@ -1740,9 +1869,10 @@ impl OnboardingWizard {
     /// Detect existing Slack channel ID from config.toml
     fn detect_existing_slack_channel_id(&mut self) {
         if let Ok(config) = crate::config::Config::load()
-            && !config.channels.slack.allowed_channels.is_empty() {
-                self.slack_channel_id_input = EXISTING_KEY_SENTINEL.to_string();
-            }
+            && !config.channels.slack.allowed_channels.is_empty()
+        {
+            self.slack_channel_id_input = EXISTING_KEY_SENTINEL.to_string();
+        }
     }
 
     /// Check if slack channel ID holds a pre-existing value
@@ -1753,9 +1883,10 @@ impl OnboardingWizard {
     /// Detect existing Slack allowed IDs from config.toml
     fn detect_existing_slack_allowed_list(&mut self) {
         if let Ok(config) = crate::config::Config::load()
-            && !config.channels.slack.allowed_ids.is_empty() {
-                self.slack_allowed_list_input = EXISTING_KEY_SENTINEL.to_string();
-            }
+            && !config.channels.slack.allowed_ids.is_empty()
+        {
+            self.slack_allowed_list_input = EXISTING_KEY_SENTINEL.to_string();
+        }
     }
 
     /// Check if Slack allowed list holds a pre-existing value
@@ -1766,9 +1897,15 @@ impl OnboardingWizard {
     /// Detect existing Telegram bot token from keys.toml
     fn detect_existing_telegram_token(&mut self) {
         if let Ok(config) = crate::config::Config::load()
-            && config.channels.telegram.token.as_ref().is_some_and(|t| !t.is_empty()) {
-                self.telegram_token_input = EXISTING_KEY_SENTINEL.to_string();
-            }
+            && config
+                .channels
+                .telegram
+                .token
+                .as_ref()
+                .is_some_and(|t| !t.is_empty())
+        {
+            self.telegram_token_input = EXISTING_KEY_SENTINEL.to_string();
+        }
     }
 
     /// Check if telegram token holds a pre-existing value
@@ -1779,9 +1916,10 @@ impl OnboardingWizard {
     /// Detect existing Telegram user ID from config.toml
     fn detect_existing_telegram_user_id(&mut self) {
         if let Ok(config) = crate::config::Config::load()
-            && !config.channels.telegram.allowed_users.is_empty() {
-                self.telegram_user_id_input = EXISTING_KEY_SENTINEL.to_string();
-            }
+            && !config.channels.telegram.allowed_users.is_empty()
+        {
+            self.telegram_user_id_input = EXISTING_KEY_SENTINEL.to_string();
+        }
     }
 
     /// Check if telegram user ID holds a pre-existing value
@@ -1792,9 +1930,10 @@ impl OnboardingWizard {
     /// Detect existing WhatsApp allowed phones from config.toml
     fn detect_existing_whatsapp_phone(&mut self) {
         if let Ok(config) = crate::config::Config::load()
-            && !config.channels.whatsapp.allowed_phones.is_empty() {
-                self.whatsapp_phone_input = EXISTING_KEY_SENTINEL.to_string();
-            }
+            && !config.channels.whatsapp.allowed_phones.is_empty()
+        {
+            self.whatsapp_phone_input = EXISTING_KEY_SENTINEL.to_string();
+        }
     }
 
     /// Check if WhatsApp phone holds a pre-existing value
@@ -1805,13 +1944,16 @@ impl OnboardingWizard {
     /// Detect existing Groq API key from keys.toml
     fn detect_existing_groq_key(&mut self) {
         if let Ok(config) = crate::config::Config::load()
-            && config.providers.stt.as_ref()
+            && config
+                .providers
+                .stt
+                .as_ref()
                 .and_then(|s| s.groq.as_ref())
                 .and_then(|p| p.api_key.as_ref())
                 .is_some_and(|k| !k.is_empty())
-            {
-                self.groq_api_key_input = EXISTING_KEY_SENTINEL.to_string();
-            }
+        {
+            self.groq_api_key_input = EXISTING_KEY_SENTINEL.to_string();
+        }
     }
 
     /// Check if groq key holds a pre-existing value
@@ -2061,8 +2203,7 @@ impl OnboardingWizard {
 
     /// Called by app when a QR code is received from the pairing flow
     pub fn set_whatsapp_qr(&mut self, qr_data: &str) {
-        self.whatsapp_qr_text =
-            crate::brain::tools::whatsapp_connect::render_qr_unicode(qr_data);
+        self.whatsapp_qr_text = crate::brain::tools::whatsapp_connect::render_qr_unicode(qr_data);
         self.whatsapp_connecting = true;
     }
 
@@ -2337,7 +2478,8 @@ impl OnboardingWizard {
 
     /// Whether brain inputs have been modified since loading from file
     fn brain_inputs_changed(&self) -> bool {
-        self.about_me != self.original_about_me || self.about_opencrabs != self.original_about_opencrabs
+        self.about_me != self.original_about_me
+            || self.about_opencrabs != self.original_about_opencrabs
     }
 
     /// Truncate file content to first N chars for preview in the wizard
@@ -2425,8 +2567,16 @@ Respond with EXACTLY six sections using these delimiters. No extra text before t
 (generated TOOLS.md content)
 ---MEMORY---
 (generated MEMORY.md content)"#,
-            about_me = if self.about_me.is_empty() { "Not provided" } else { &self.about_me },
-            about_opencrabs = if self.about_opencrabs.is_empty() { "Not provided" } else { &self.about_opencrabs },
+            about_me = if self.about_me.is_empty() {
+                "Not provided"
+            } else {
+                &self.about_me
+            },
+            about_opencrabs = if self.about_opencrabs.is_empty() {
+                "Not provided"
+            } else {
+                &self.about_opencrabs
+            },
             date = today,
             soul = soul_template,
             identity = identity_template,
@@ -2498,9 +2648,7 @@ Respond with EXACTLY six sections using these delimiters. No extra text before t
     /// Merges with existing config to preserve settings not modified in wizard
     pub fn apply_config(&self) -> Result<(), String> {
         // Groq key for STT/TTS
-        let groq_key = if !self.groq_api_key_input.is_empty()
-            && !self.has_existing_groq_key()
-        {
+        let groq_key = if !self.groq_api_key_input.is_empty() && !self.has_existing_groq_key() {
             Some(self.groq_api_key_input.clone())
         } else {
             None
@@ -2508,23 +2656,29 @@ Respond with EXACTLY six sections using these delimiters. No extra text before t
 
         // Write config.toml via merge (write_key) — never overwrite entire file
         // Disable all providers first, then enable selected one
-        let all_provider_sections = ["providers.anthropic", "providers.openai", "providers.gemini",
-            "providers.openrouter", "providers.minimax"];
+        let all_provider_sections = [
+            "providers.anthropic",
+            "providers.openai",
+            "providers.gemini",
+            "providers.openrouter",
+            "providers.minimax",
+        ];
         for section in &all_provider_sections {
             let _ = Config::write_key(section, "enabled", "false");
         }
         // Disable all custom providers (flat and named)
         if let Ok(config) = Config::load()
-            && let Some(customs) = &config.providers.custom {
-                for name in customs.keys() {
-                    let section = if name == "default" {
-                        "providers.custom".to_string()
-                    } else {
-                        format!("providers.custom.{}", name)
-                    };
-                    let _ = Config::write_key(&section, "enabled", "false");
-                }
+            && let Some(customs) = &config.providers.custom
+        {
+            for name in customs.keys() {
+                let section = if name == "default" {
+                    "providers.custom".to_string()
+                } else {
+                    format!("providers.custom.{}", name)
+                };
+                let _ = Config::write_key(&section, "enabled", "false");
             }
+        }
 
         // Enable + configure the selected provider
         let custom_section;
@@ -2559,8 +2713,16 @@ Respond with EXACTLY six sections using these delimiters. No extra text before t
 
         // Write base_url for providers that need it
         match self.selected_provider {
-            3 => { let _ = Config::write_key(section, "base_url", "https://openrouter.ai/api/v1/chat/completions"); }
-            4 => { let _ = Config::write_key(section, "base_url", "https://api.minimax.io/v1"); }
+            3 => {
+                let _ = Config::write_key(
+                    section,
+                    "base_url",
+                    "https://openrouter.ai/api/v1/chat/completions",
+                );
+            }
+            4 => {
+                let _ = Config::write_key(section, "base_url", "https://api.minimax.io/v1");
+            }
             5 => {
                 if !self.custom_base_url.is_empty() {
                     let _ = Config::write_key(section, "base_url", &self.custom_base_url);
@@ -2580,14 +2742,37 @@ Respond with EXACTLY six sections using these delimiters. No extra text before t
         // Gateway config
         let _ = Config::write_key("gateway", "port", &self.gateway_port);
         let _ = Config::write_key("gateway", "bind", &self.gateway_bind);
-        let _ = Config::write_key("gateway", "auth_mode", if self.gateway_auth == 0 { "token" } else { "none" });
+        let _ = Config::write_key(
+            "gateway",
+            "auth_mode",
+            if self.gateway_auth == 0 {
+                "token"
+            } else {
+                "none"
+            },
+        );
 
         // Channel enabled flags (from channel_toggles: 0=Telegram, 1=Discord, 2=WhatsApp, 3=Slack)
-        let _ = Config::write_key("channels.telegram", "enabled", &self.is_telegram_enabled().to_string());
-        let _ = Config::write_key("channels.discord", "enabled", &self.is_discord_enabled().to_string());
-        let _ = Config::write_key("channels.whatsapp", "enabled",
-            &self.channel_toggles.get(2).is_some_and(|t| t.1).to_string());
-        let _ = Config::write_key("channels.slack", "enabled", &self.is_slack_enabled().to_string());
+        let _ = Config::write_key(
+            "channels.telegram",
+            "enabled",
+            &self.is_telegram_enabled().to_string(),
+        );
+        let _ = Config::write_key(
+            "channels.discord",
+            "enabled",
+            &self.is_discord_enabled().to_string(),
+        );
+        let _ = Config::write_key(
+            "channels.whatsapp",
+            "enabled",
+            &self.channel_toggles.get(2).is_some_and(|t| t.1).to_string(),
+        );
+        let _ = Config::write_key(
+            "channels.slack",
+            "enabled",
+            &self.is_slack_enabled().to_string(),
+        );
 
         // Voice config
         let groq_key_exists = !self.groq_api_key_input.is_empty() || self.has_existing_groq_key();
@@ -2597,7 +2782,11 @@ Respond with EXACTLY six sections using these delimiters. No extra text before t
         // STT provider
         if !self.groq_api_key_input.is_empty() || self.has_existing_groq_key() {
             let _ = Config::write_key("providers.stt.groq", "enabled", "true");
-            let _ = Config::write_key("providers.stt.groq", "default_model", "whisper-large-v3-turbo");
+            let _ = Config::write_key(
+                "providers.stt.groq",
+                "default_model",
+                "whisper-large-v3-turbo",
+            );
         }
 
         // TTS provider
@@ -2607,64 +2796,110 @@ Respond with EXACTLY six sections using these delimiters. No extra text before t
         }
 
         // Save API key to keys.toml via merge — never overwrite
-        if !self.has_existing_key() && !self.api_key_input.is_empty()
-            && let Err(e) = crate::config::write_secret_key(section, "api_key", &self.api_key_input) {
-                tracing::warn!("Failed to save API key to keys.toml: {}", e);
-            }
+        if !self.has_existing_key()
+            && !self.api_key_input.is_empty()
+            && let Err(e) = crate::config::write_secret_key(section, "api_key", &self.api_key_input)
+        {
+            tracing::warn!("Failed to save API key to keys.toml: {}", e);
+        }
 
         // Save STT/TTS keys to keys.toml
         if let Some(ref groq_key) = groq_key
-            && let Err(e) = crate::config::write_secret_key("providers.stt.groq", "api_key", groq_key) {
-                tracing::warn!("Failed to save Groq key to keys.toml: {}", e);
-            }
+            && let Err(e) =
+                crate::config::write_secret_key("providers.stt.groq", "api_key", groq_key)
+        {
+            tracing::warn!("Failed to save Groq key to keys.toml: {}", e);
+        }
         if self.tts_enabled
             && let Some(ref groq_key) = groq_key
-                && let Err(e) = crate::config::write_secret_key("providers.tts.openai", "api_key", groq_key) {
-                    tracing::warn!("Failed to save TTS key to keys.toml: {}", e);
-                }
+            && let Err(e) =
+                crate::config::write_secret_key("providers.tts.openai", "api_key", groq_key)
+        {
+            tracing::warn!("Failed to save TTS key to keys.toml: {}", e);
+        }
 
         // Persist channel tokens to keys.toml (if new)
-        if !self.telegram_token_input.is_empty() && !self.has_existing_telegram_token()
-            && let Err(e) = crate::config::write_secret_key("channels.telegram", "token", &self.telegram_token_input) {
-                tracing::warn!("Failed to save Telegram token to keys.toml: {}", e);
-            }
-        if !self.discord_token_input.is_empty() && !self.has_existing_discord_token()
-            && let Err(e) = crate::config::write_secret_key("channels.discord", "token", &self.discord_token_input) {
-                tracing::warn!("Failed to save Discord token to keys.toml: {}", e);
-            }
-        if !self.slack_bot_token_input.is_empty() && !self.has_existing_slack_bot_token()
-            && let Err(e) = crate::config::write_secret_key("channels.slack", "token", &self.slack_bot_token_input) {
-                tracing::warn!("Failed to save Slack bot token to keys.toml: {}", e);
-            }
-        if !self.slack_app_token_input.is_empty() && !self.has_existing_slack_app_token()
-            && let Err(e) = crate::config::write_secret_key("channels.slack", "app_token", &self.slack_app_token_input) {
-                tracing::warn!("Failed to save Slack app token to keys.toml: {}", e);
-            }
+        if !self.telegram_token_input.is_empty()
+            && !self.has_existing_telegram_token()
+            && let Err(e) = crate::config::write_secret_key(
+                "channels.telegram",
+                "token",
+                &self.telegram_token_input,
+            )
+        {
+            tracing::warn!("Failed to save Telegram token to keys.toml: {}", e);
+        }
+        if !self.discord_token_input.is_empty()
+            && !self.has_existing_discord_token()
+            && let Err(e) = crate::config::write_secret_key(
+                "channels.discord",
+                "token",
+                &self.discord_token_input,
+            )
+        {
+            tracing::warn!("Failed to save Discord token to keys.toml: {}", e);
+        }
+        if !self.slack_bot_token_input.is_empty()
+            && !self.has_existing_slack_bot_token()
+            && let Err(e) = crate::config::write_secret_key(
+                "channels.slack",
+                "token",
+                &self.slack_bot_token_input,
+            )
+        {
+            tracing::warn!("Failed to save Slack bot token to keys.toml: {}", e);
+        }
+        if !self.slack_app_token_input.is_empty()
+            && !self.has_existing_slack_app_token()
+            && let Err(e) = crate::config::write_secret_key(
+                "channels.slack",
+                "app_token",
+                &self.slack_app_token_input,
+            )
+        {
+            tracing::warn!("Failed to save Slack app token to keys.toml: {}", e);
+        }
 
         // Persist channel IDs/user IDs to config.toml (if new)
-        if !self.telegram_user_id_input.is_empty() && !self.has_existing_telegram_user_id()
-            && let Ok(uid) = self.telegram_user_id_input.parse::<i64>() {
-                let _ = Config::write_i64_array("channels.telegram", "allowed_users", &[uid]);
-            }
+        if !self.telegram_user_id_input.is_empty()
+            && !self.has_existing_telegram_user_id()
+            && let Ok(uid) = self.telegram_user_id_input.parse::<i64>()
+        {
+            let _ = Config::write_i64_array("channels.telegram", "allowed_users", &[uid]);
+        }
         if !self.discord_channel_id_input.is_empty() && !self.has_existing_discord_channel_id() {
-            let _ = Config::write_array("channels.discord", "allowed_channels",
-                std::slice::from_ref(&self.discord_channel_id_input));
+            let _ = Config::write_array(
+                "channels.discord",
+                "allowed_channels",
+                std::slice::from_ref(&self.discord_channel_id_input),
+            );
         }
         if !self.slack_channel_id_input.is_empty() && !self.has_existing_slack_channel_id() {
-            let _ = Config::write_array("channels.slack", "allowed_channels",
-                std::slice::from_ref(&self.slack_channel_id_input));
+            let _ = Config::write_array(
+                "channels.slack",
+                "allowed_channels",
+                std::slice::from_ref(&self.slack_channel_id_input),
+            );
         }
-        if !self.discord_allowed_list_input.is_empty() && !self.has_existing_discord_allowed_list()
-            && let Ok(uid) = self.discord_allowed_list_input.parse::<i64>() {
-                let _ = Config::write_i64_array("channels.discord", "allowed_users", &[uid]);
-            }
+        if !self.discord_allowed_list_input.is_empty()
+            && !self.has_existing_discord_allowed_list()
+            && let Ok(uid) = self.discord_allowed_list_input.parse::<i64>()
+        {
+            let _ = Config::write_i64_array("channels.discord", "allowed_users", &[uid]);
+        }
         if !self.slack_allowed_list_input.is_empty() && !self.has_existing_slack_allowed_list() {
-            let _ = Config::write_array("channels.slack", "allowed_ids",
-                std::slice::from_ref(&self.slack_allowed_list_input));
+            let _ = Config::write_array(
+                "channels.slack",
+                "allowed_ids",
+                std::slice::from_ref(&self.slack_allowed_list_input),
+            );
         }
         if !self.whatsapp_phone_input.is_empty() && !self.has_existing_whatsapp_phone() {
-            let _ = Config::write_array("channels.whatsapp", "allowed_phones",
-                std::slice::from_ref(&self.whatsapp_phone_input));
+            let _ = Config::write_array(
+                "channels.whatsapp",
+                "allowed_phones",
+                std::slice::from_ref(&self.whatsapp_phone_input),
+            );
         }
 
         // Seed workspace templates (use AI-generated content when available)
@@ -2696,10 +2931,11 @@ Respond with EXACTLY six sections using these delimiters. No extra text before t
 
         // Install daemon if requested
         if self.install_daemon
-            && let Err(e) = install_daemon_service() {
-                tracing::warn!("Failed to install daemon: {}", e);
-                // Non-fatal — don't block onboarding completion
-            }
+            && let Err(e) = install_daemon_service()
+        {
+            tracing::warn!("Failed to install daemon: {}", e);
+            // Non-fatal — don't block onboarding completion
+        }
 
         Ok(())
     }
@@ -2734,7 +2970,7 @@ pub enum WizardAction {
 /// To re-run the wizard, use `opencrabs onboard`, `--onboard` flag, or `/onboard`.
 pub fn is_first_time() -> bool {
     tracing::debug!("[is_first_time] checking if first time setup needed...");
-    
+
     // Check if config exists
     let config_path = crate::config::opencrabs_home().join("config.toml");
     if !config_path.exists() {
@@ -2746,20 +2982,34 @@ pub fn is_first_time() -> bool {
     let config = match crate::config::Config::load() {
         Ok(c) => c,
         Err(e) => {
-            tracing::debug!("[is_first_time] failed to load config: {}, need onboarding", e);
+            tracing::debug!(
+                "[is_first_time] failed to load config: {}, need onboarding",
+                e
+            );
             return true;
         }
     };
 
-    let has_enabled_provider = 
-        config.providers.anthropic.as_ref().is_some_and(|p| p.enabled)
+    let has_enabled_provider = config
+        .providers
+        .anthropic
+        .as_ref()
+        .is_some_and(|p| p.enabled)
         || config.providers.openai.as_ref().is_some_and(|p| p.enabled)
         || config.providers.gemini.as_ref().is_some_and(|p| p.enabled)
-        || config.providers.openrouter.as_ref().is_some_and(|p| p.enabled)
+        || config
+            .providers
+            .openrouter
+            .as_ref()
+            .is_some_and(|p| p.enabled)
         || config.providers.minimax.as_ref().is_some_and(|p| p.enabled)
         || config.providers.active_custom().is_some();
-    
-    tracing::debug!("[is_first_time] has_enabled_provider={}, result={}", has_enabled_provider, !has_enabled_provider);
+
+    tracing::debug!(
+        "[is_first_time] has_enabled_provider={}, result={}",
+        has_enabled_provider,
+        !has_enabled_provider
+    );
     !has_enabled_provider
 }
 
@@ -2805,8 +3055,7 @@ fn install_systemd_service() -> Result<(), String> {
     std::fs::create_dir_all(&service_dir)
         .map_err(|e| format!("Failed to create systemd dir: {}", e))?;
 
-    let exe_path = std::env::current_exe()
-        .map_err(|e| format!("Failed to get exe path: {}", e))?;
+    let exe_path = std::env::current_exe().map_err(|e| format!("Failed to get exe path: {}", e))?;
 
     let service_content = format!(
         r#"[Unit]
@@ -2848,8 +3097,7 @@ fn install_launchagent() -> Result<(), String> {
     std::fs::create_dir_all(&agents_dir)
         .map_err(|e| format!("Failed to create LaunchAgents dir: {}", e))?;
 
-    let exe_path = std::env::current_exe()
-        .map_err(|e| format!("Failed to get exe path: {}", e))?;
+    let exe_path = std::env::current_exe().map_err(|e| format!("Failed to get exe path: {}", e))?;
 
     let plist_content = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -2889,23 +3137,28 @@ fn install_launchagent() -> Result<(), String> {
 /// Returns empty vec on failure (callers fall back to static list).
 pub async fn fetch_provider_models(provider_index: usize, api_key: Option<&str>) -> Vec<String> {
     #[derive(serde::Deserialize)]
-    struct ModelEntry { id: String }
+    struct ModelEntry {
+        id: String,
+    }
     #[derive(serde::Deserialize)]
-    struct ModelsResponse { data: Vec<ModelEntry> }
+    struct ModelsResponse {
+        data: Vec<ModelEntry>,
+    }
 
     // Handle Minimax specially - no /models API, must use config
     if provider_index == 4 {
         // Minimax — NO /models API endpoint, must use config.models
         if let Ok(config) = crate::config::Config::load()
-            && let Some(p) = &config.providers.minimax {
-                if !p.models.is_empty() {
-                    return p.models.clone();
-                }
-                // Fall back to default_model if no models list
-                if let Some(model) = &p.default_model {
-                    return vec![model.clone()];
-                }
+            && let Some(p) = &config.providers.minimax
+        {
+            if !p.models.is_empty() {
+                return p.models.clone();
             }
+            // Fall back to default_model if no models list
+            if let Some(model) = &p.default_model {
+                return vec![model.clone()];
+            }
+        }
         // Return hardcoded defaults if no config
         return vec!["MiniMax-M2.5".to_string(), "MiniMax-M2.1".to_string()];
     }
@@ -2936,8 +3189,9 @@ pub async fn fetch_provider_models(provider_index: usize, api_key: Option<&str>)
             // OpenAI — /v1/models
             let mut req = client.get("https://api.openai.com/v1/models");
             if let Some(key) = api_key
-                && !key.is_empty() {
-                    req = req.header("Authorization", format!("Bearer {}", key));
+                && !key.is_empty()
+            {
+                req = req.header("Authorization", format!("Bearer {}", key));
             }
             req.send().await
         }
@@ -2945,7 +3199,8 @@ pub async fn fetch_provider_models(provider_index: usize, api_key: Option<&str>)
             // OpenRouter — /api/v1/models
             let mut req = client.get("https://openrouter.ai/api/v1/models");
             if let Some(key) = api_key
-                && !key.is_empty() {
+                && !key.is_empty()
+            {
                 req = req.header("Authorization", format!("Bearer {}", key));
             }
             req.send().await
@@ -2954,19 +3209,14 @@ pub async fn fetch_provider_models(provider_index: usize, api_key: Option<&str>)
     };
 
     match result {
-        Ok(resp) if resp.status().is_success() => {
-            match resp.json::<ModelsResponse>().await {
-                Ok(body) => {
-                    let mut models: Vec<String> = body.data
-                        .into_iter()
-                        .map(|m| m.id)
-                        .collect();
-                    models.sort();
-                    models
-                }
-                Err(_) => Vec::new(),
+        Ok(resp) if resp.status().is_success() => match resp.json::<ModelsResponse>().await {
+            Ok(body) => {
+                let mut models: Vec<String> = body.data.into_iter().map(|m| m.id).collect();
+                models.sort();
+                models
             }
-        }
+            Err(_) => Vec::new(),
+        },
         _ => Vec::new(),
     }
 }
@@ -3149,7 +3399,11 @@ mod tests {
             assert!(!enabled, "Channel {} should default to disabled", name);
         }
         // Verify all expected channels are present
-        let toggle_names: Vec<&str> = wizard.channel_toggles.iter().map(|(n, _)| n.as_str()).collect();
+        let toggle_names: Vec<&str> = wizard
+            .channel_toggles
+            .iter()
+            .map(|(n, _)| n.as_str())
+            .collect();
         assert!(toggle_names.contains(&"Telegram"));
         assert!(toggle_names.contains(&"Discord"));
         assert!(toggle_names.contains(&"iMessage"));
@@ -3321,7 +3575,12 @@ mod tests {
         // Should stay on ProviderAuth with error
         assert_eq!(wizard.step, OnboardingStep::ProviderAuth);
         assert!(wizard.error_message.is_some());
-        assert!(wizard.error_message.as_ref().map_or(false, |m| m.contains("required")));
+        assert!(
+            wizard
+                .error_message
+                .as_ref()
+                .map_or(false, |m| m.contains("required"))
+        );
     }
 
     #[test]
@@ -3383,7 +3642,12 @@ mod tests {
         assert_eq!(wizard.model_count(), 0);
 
         // After fetching
-        wizard.fetched_models = vec!["model-a".into(), "model-b".into(), "model-c".into(), "model-d".into()];
+        wizard.fetched_models = vec![
+            "model-a".into(),
+            "model-b".into(),
+            "model-c".into(),
+            "model-d".into(),
+        ];
         assert_eq!(wizard.model_count(), 4);
     }
 
@@ -3432,9 +3696,16 @@ mod tests {
         };
         let rt = tokio::runtime::Runtime::new().unwrap();
         let models = rt.block_on(fetch_provider_models(0, Some(&key)));
-        assert!(!models.is_empty(), "Anthropic should return models with API key");
+        assert!(
+            !models.is_empty(),
+            "Anthropic should return models with API key"
+        );
         // Should contain at least one claude model
-        assert!(models.iter().any(|m| m.contains("claude")), "Expected claude model, got: {:?}", models);
+        assert!(
+            models.iter().any(|m| m.contains("claude")),
+            "Expected claude model, got: {:?}",
+            models
+        );
     }
 
     #[test]
@@ -3445,8 +3716,15 @@ mod tests {
         };
         let rt = tokio::runtime::Runtime::new().unwrap();
         let models = rt.block_on(fetch_provider_models(0, Some(&key)));
-        assert!(!models.is_empty(), "Anthropic should return models with setup token");
-        assert!(models.iter().any(|m| m.contains("claude")), "Expected claude model, got: {:?}", models);
+        assert!(
+            !models.is_empty(),
+            "Anthropic should return models with setup token"
+        );
+        assert!(
+            models.iter().any(|m| m.contains("claude")),
+            "Expected claude model, got: {:?}",
+            models
+        );
     }
 
     #[test]
@@ -3457,8 +3735,15 @@ mod tests {
         };
         let rt = tokio::runtime::Runtime::new().unwrap();
         let models = rt.block_on(fetch_provider_models(1, Some(&key)));
-        assert!(!models.is_empty(), "OpenAI should return models with API key");
-        assert!(models.iter().any(|m| m.contains("gpt")), "Expected gpt model, got: {:?}", models);
+        assert!(
+            !models.is_empty(),
+            "OpenAI should return models with API key"
+        );
+        assert!(
+            models.iter().any(|m| m.contains("gpt")),
+            "Expected gpt model, got: {:?}",
+            models
+        );
     }
 
     #[test]
@@ -3471,14 +3756,25 @@ mod tests {
         let models = rt.block_on(fetch_provider_models(4, Some(&key)));
         assert!(!models.is_empty(), "OpenRouter should return models");
         // OpenRouter has 400+ models
-        assert!(models.len() > 50, "Expected 50+ models from OpenRouter, got {}", models.len());
+        assert!(
+            models.len() > 50,
+            "Expected 50+ models from OpenRouter, got {}",
+            models.len()
+        );
     }
 
     #[test]
     fn test_fetch_models_bad_key_returns_empty() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         // Bad key should fail gracefully (empty vec, not panic)
-        let models = rt.block_on(fetch_provider_models(0, Some("sk-bad-key-definitely-invalid")));
-        assert!(models.is_empty(), "Bad key should return empty, got {} models", models.len());
+        let models = rt.block_on(fetch_provider_models(
+            0,
+            Some("sk-bad-key-definitely-invalid"),
+        ));
+        assert!(
+            models.is_empty(),
+            "Bad key should return empty, got {} models",
+            models.len()
+        );
     }
 }

@@ -17,9 +17,9 @@ pub use prompt_builder::BrainLoader;
 pub use self_update::SelfUpdater;
 
 // LLM re-exports
+pub use agent::{AgentContext, AgentError, AgentService};
 pub use provider::{
     AnthropicProvider, ContentBlock, LLMRequest, LLMResponse, Message, Provider, ProviderError,
     ProviderStream, Role, StopReason, StreamEvent, TokenUsage, Tool,
 };
-pub use agent::{AgentContext, AgentError, AgentService};
 pub use tools::{ToolError, ToolRegistry, ToolResult};

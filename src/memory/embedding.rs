@@ -86,9 +86,7 @@ pub fn embed_content(store: &Mutex<Store>, body: &str) {
     };
 
     // Store lock → insert → release
-    let now = chrono::Local::now()
-        .format("%Y-%m-%dT%H:%M:%S")
-        .to_string();
+    let now = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
     if let Ok(s) = store.lock()
         && let Err(e) = s.insert_embedding(&hash, 0, 0, &emb.embedding, &emb.model, &now)
     {
@@ -125,9 +123,7 @@ pub(super) fn backfill_embeddings(store: &Mutex<Store>) {
     // Process one document at a time, releasing the engine lock between each
     // so other callers (session_search, embed_content) aren't blocked for the
     // entire batch duration.
-    let now = chrono::Local::now()
-        .format("%Y-%m-%dT%H:%M:%S")
-        .to_string();
+    let now = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
     let mut stored = 0usize;
 
     for (i, (hash, _path, body)) in needing.iter().enumerate() {
@@ -147,11 +143,11 @@ pub(super) fn backfill_embeddings(store: &Mutex<Store>) {
         // Store lock: insert embedding → release
         if let Some(emb) = emb
             && let Ok(s) = store.lock()
-                && s.insert_embedding(hash, 0, 0, &emb.embedding, &emb.model, &now)
-                    .is_ok()
-                {
-                    stored += 1;
-                }
+            && s.insert_embedding(hash, 0, 0, &emb.embedding, &emb.model, &now)
+                .is_ok()
+        {
+            stored += 1;
+        }
     }
 
     tracing::info!("Backfilled {stored}/{count} embeddings");

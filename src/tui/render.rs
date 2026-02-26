@@ -8,11 +8,11 @@ use super::markdown::parse_markdown;
 use super::onboarding_render;
 use super::splash;
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Padding, Paragraph, Wrap},
-    Frame,
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -59,7 +59,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         .constraints([
             Constraint::Length(3),            // Header (1 content line + borders)
             Constraint::Min(10),              // Main content
-            Constraint::Length(input_height),  // Input (dynamic)
+            Constraint::Length(input_height), // Input (dynamic)
         ])
         .split(f.area());
 
@@ -80,11 +80,11 @@ pub fn render(f: &mut Frame, app: &mut App) {
         }
         AppMode::Chat => {
             render_chat(f, app, chunks[1]);
-            
+
             // Render thinking indicator STICKY at bottom (right above input field)
             // This ensures users can always see it's responding
             render_thinking_indicator(f, app, chunks[1]);
-            
+
             render_input(f, app, chunks[2]);
             // Render slash autocomplete dropdown above the input area
             if app.slash_suggestions_active {
@@ -218,7 +218,11 @@ fn wrap_line_with_padding<'a>(line: Line<'a>, max_width: usize, padding: &'a str
                     .rfind(' ')
                     .map(|p| p + 1)
                     .unwrap_or(byte_limit);
-                let break_at = if break_at == 0 { byte_limit.max(remaining.ceil_char_boundary(1)) } else { break_at };
+                let break_at = if break_at == 0 {
+                    byte_limit.max(remaining.ceil_char_boundary(1))
+                } else {
+                    break_at
+                };
                 let (chunk, rest) = remaining.split_at(break_at);
                 current_spans.push(Span::styled(chunk.to_string(), style));
                 remaining = rest.trim_start();
@@ -346,38 +350,40 @@ fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
             // Show expanded details (e.g. tool output, compaction summary)
             if app.messages[msg_idx].expanded
-                && let Some(ref details) = app.messages[msg_idx].details {
-                    for detail_line in details.lines() {
-                        // Check for diff lines (+/-) and color accordingly
-                        let (style, line_text): (Style, &str) = if let Some(stripped) = detail_line.strip_prefix("+ ") {
+                && let Some(ref details) = app.messages[msg_idx].details
+            {
+                for detail_line in details.lines() {
+                    // Check for diff lines (+/-) and color accordingly
+                    let (style, line_text): (Style, &str) =
+                        if let Some(stripped) = detail_line.strip_prefix("+ ") {
                             (
                                 Style::default()
-                                    .fg(Color::Rgb(80, 200, 120))  // Green for additions
-                                    .bg(Color::Rgb(20, 30, 20)),   // Dim green bg
+                                    .fg(Color::Rgb(80, 200, 120)) // Green for additions
+                                    .bg(Color::Rgb(20, 30, 20)), // Dim green bg
                                 stripped,
                             )
                         } else if let Some(stripped) = detail_line.strip_prefix("- ") {
                             (
                                 Style::default()
-                                    .fg(Color::Rgb(255, 100, 100))  // Red for deletions
-                                    .bg(Color::Rgb(30, 20, 20)),    // Dim red bg
+                                    .fg(Color::Rgb(255, 100, 100)) // Red for deletions
+                                    .bg(Color::Rgb(30, 20, 20)), // Dim red bg
                                 stripped,
                             )
                         } else {
                             (
                                 Style::default()
-                                    .fg(Color::Rgb(180, 180, 180))  // Light gray text
-                                    .bg(Color::Rgb(35, 35, 45)),    // Gray background for context
+                                    .fg(Color::Rgb(180, 180, 180)) // Light gray text
+                                    .bg(Color::Rgb(35, 35, 45)), // Gray background for context
                                 detail_line,
                             )
                         };
-                        
-                        lines.push(Line::from(vec![
-                            Span::styled("    ", Style::default()),
-                            Span::styled(line_text.to_string(), style),
-                        ]));
-                    }
+
+                    lines.push(Line::from(vec![
+                        Span::styled("    ", Style::default()),
+                        Span::styled(line_text.to_string(), style),
+                    ]));
                 }
+            }
             lines.push(Line::from(""));
             continue;
         }
@@ -429,14 +435,10 @@ fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                         .into_iter()
                         .map(|s| Span::styled(s.content, s.style.bg(bg)))
                         .collect();
-                    let line_width: usize =
-                        spans.iter().map(|s| s.content.width()).sum();
+                    let line_width: usize = spans.iter().map(|s| s.content.width()).sum();
                     let remaining = content_width.saturating_sub(line_width);
                     if remaining > 0 {
-                        spans.push(Span::styled(
-                            " ".repeat(remaining),
-                            Style::default().bg(bg),
-                        ));
+                        spans.push(Span::styled(" ".repeat(remaining), Style::default().bg(bg)));
                     }
                     lines.push(Line::from(spans));
                 } else {
@@ -459,24 +461,22 @@ fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                     .add_modifier(Modifier::ITALIC),
             )));
             if app.messages[msg_idx].expanded
-                && let Some(ref details) = app.messages[msg_idx].details {
-                    let reasoning_lines = parse_markdown(details);
-                    let reasoning_style = Style::default()
-                        .fg(Color::DarkGray)
-                        .add_modifier(Modifier::ITALIC);
-                    for line in reasoning_lines {
-                        let mut padded_spans = vec![Span::styled("  ", Style::default())];
-                        for span in line.spans {
-                            padded_spans.push(Span::styled(
-                                span.content.to_string(),
-                                reasoning_style,
-                            ));
-                        }
-                        let padded_line = Line::from(padded_spans);
-                        for wrapped in wrap_line_with_padding(padded_line, content_width, "  ") {
-                            lines.push(wrapped);
-                        }
+                && let Some(ref details) = app.messages[msg_idx].details
+            {
+                let reasoning_lines = parse_markdown(details);
+                let reasoning_style = Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC);
+                for line in reasoning_lines {
+                    let mut padded_spans = vec![Span::styled("  ", Style::default())];
+                    for span in line.spans {
+                        padded_spans.push(Span::styled(span.content.to_string(), reasoning_style));
                     }
+                    let padded_line = Line::from(padded_spans);
+                    for wrapped in wrap_line_with_padding(padded_line, content_width, "  ") {
+                        lines.push(wrapped);
+                    }
+                }
             }
         }
 
@@ -491,7 +491,8 @@ fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         let frame = spinner_frames[app.animation_frame % spinner_frames.len()];
 
-        let elapsed = app.processing_started_at
+        let elapsed = app
+            .processing_started_at
             .map(|t| t.elapsed().as_secs())
             .unwrap_or(0);
 
@@ -508,7 +509,10 @@ fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                     .fg(Color::Blue)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("is responding...", Style::default().fg(Color::Rgb(184, 134, 11))),
+            Span::styled(
+                "is responding...",
+                Style::default().fg(Color::Rgb(184, 134, 11)),
+            ),
         ];
         if elapsed > 0 {
             spans.push(Span::styled(
@@ -536,10 +540,7 @@ fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             for line in reasoning_lines {
                 let mut padded_spans = vec![Span::styled("  ", Style::default())];
                 for span in line.spans {
-                    padded_spans.push(Span::styled(
-                        span.content.to_string(),
-                        reasoning_style,
-                    ));
+                    padded_spans.push(Span::styled(span.content.to_string(), reasoning_style));
                 }
                 let padded_line = Line::from(padded_spans);
                 for wrapped in wrap_line_with_padding(padded_line, content_width, "  ") {
@@ -572,14 +573,9 @@ fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         lines.push(Line::from(vec![
             Span::styled(
                 "  Error: ",
-                Style::default()
-                    .fg(Color::Red)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(
-                error.clone(),
-                Style::default().fg(Color::Red),
-            ),
+            Span::styled(error.clone(), Style::default().fg(Color::Red)),
         ]));
         lines.push(Line::from(""));
     }
@@ -607,10 +603,7 @@ fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         };
         lines.push(Line::from(vec![
             Span::styled("  Command: ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                cmd_display,
-                Style::default().fg(Color::White),
-            ),
+            Span::styled(cmd_display, Style::default().fg(Color::White)),
         ]));
         // Password input (masked with dots)
         lines.push(Line::from(vec![
@@ -619,10 +612,7 @@ fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                 "\u{2022}".repeat(app.sudo_input.len()),
                 Style::default().fg(Color::White),
             ),
-            Span::styled(
-                "\u{2588}",
-                Style::default().fg(Color::Rgb(70, 130, 180)),
-            ),
+            Span::styled("\u{2588}", Style::default().fg(Color::Rgb(70, 130, 180))),
         ]));
         // Help line
         lines.push(Line::from(vec![
@@ -635,9 +625,7 @@ fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             Span::styled("Submit  ", Style::default().fg(Color::DarkGray)),
             Span::styled(
                 "[Esc] ",
-                Style::default()
-                    .fg(Color::Red)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             ),
             Span::styled("Cancel", Style::default().fg(Color::DarkGray)),
         ]));
@@ -647,9 +635,8 @@ fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     // Calculate scroll offset — lines are pre-wrapped so count is accurate
     let total_lines = lines.len();
     // Reserve 1 extra line when thinking indicator is visible so it doesn't overlap content
-    let thinking_visible = app.is_processing
-        && app.streaming_response.is_none()
-        && !app.has_pending_approval();
+    let thinking_visible =
+        app.is_processing && app.streaming_response.is_none() && !app.has_pending_approval();
     let reserved = if thinking_visible { 4 } else { 3 }; // borders + top padding + indicator
     let visible_height = area.height.saturating_sub(reserved) as usize;
     let max_scroll = total_lines.saturating_sub(visible_height);
@@ -692,7 +679,8 @@ fn render_thinking_indicator(f: &mut Frame, app: &App, chat_area: Rect) {
     let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     let frame = spinner_frames[app.animation_frame % spinner_frames.len()];
 
-    let elapsed = app.processing_started_at
+    let elapsed = app
+        .processing_started_at
         .map(|t| t.elapsed().as_secs())
         .unwrap_or(0);
 
@@ -718,9 +706,8 @@ fn render_thinking_indicator(f: &mut Frame, app: &App, chat_area: Rect) {
 
     // Render at the bottom of the chat area (sticky)
     // We use a paragraph that's positioned at the bottom of the chat area
-    let para = Paragraph::new(thinking_line)
-        .style(Style::default().bg(Color::Rgb(20, 20, 28)));
-    
+    let para = Paragraph::new(thinking_line).style(Style::default().bg(Color::Rgb(20, 20, 28)));
+
     // Position at bottom of chat area, just above the bottom border
     let indicator_area = Rect {
         x: chat_area.x + 2,
@@ -728,7 +715,7 @@ fn render_thinking_indicator(f: &mut Frame, app: &App, chat_area: Rect) {
         width: chat_area.width.saturating_sub(4),
         height: 1,
     };
-    
+
     f.render_widget(para, indicator_area);
 }
 
@@ -745,10 +732,7 @@ fn render_input(f: &mut Frame, app: &App, area: Rect) {
     for (line_idx, line) in input_text.lines().enumerate() {
         let padded = if line_idx == 0 {
             Line::from(vec![
-                Span::styled(
-                    "\u{276F} ",
-                    Style::default().fg(Color::Rgb(100, 100, 100)),
-                ),
+                Span::styled("\u{276F} ", Style::default().fg(Color::Rgb(100, 100, 100))),
                 Span::raw(line.to_string()),
             ])
         } else {
@@ -759,12 +743,10 @@ fn render_input(f: &mut Frame, app: &App, area: Rect) {
         }
     }
     if input_lines.is_empty() {
-        input_lines.push(Line::from(vec![
-            Span::styled(
-                "\u{276F} ",
-                Style::default().fg(Color::Rgb(100, 100, 100)),
-            ),
-        ]));
+        input_lines.push(Line::from(vec![Span::styled(
+            "\u{276F} ",
+            Style::default().fg(Color::Rgb(100, 100, 100)),
+        )]));
     }
 
     // Always keep steel blue border
@@ -785,20 +767,27 @@ fn render_input(f: &mut Frame, app: &App, area: Rect) {
         let context_label = format!(" ctx: {}/{} ({:.0}%) ", ctx_label, max_label, pct);
         Line::from(Span::styled(
             context_label,
-            Style::default().fg(context_color).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(context_color)
+                .add_modifier(Modifier::BOLD),
         ))
         .alignment(Alignment::Right)
     } else {
         Line::from(Span::styled(
             " Context: – ",
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
         ))
         .alignment(Alignment::Right)
     };
 
     // Build attachment indicator for the top-right title area
     let attach_title = if !app.attachments.is_empty() {
-        let names: Vec<String> = app.attachments.iter().enumerate()
+        let names: Vec<String> = app
+            .attachments
+            .iter()
+            .enumerate()
             .map(|(i, att)| format!("IMG{}:{}", i + 1, att.name))
             .collect();
         Line::from(Span::styled(
@@ -846,16 +835,18 @@ fn render_tool_group<'a>(
         format!("{} tool call{}", count, if count == 1 { "" } else { "s" })
     };
 
-    let mut header_spans = vec![
-        Span::styled(
-            format!("  {} {}", "●", header),
-            Style::default()
-                .fg(Color::Rgb(70, 130, 180))
-                .add_modifier(Modifier::BOLD),
-        ),
-    ];
+    let mut header_spans = vec![Span::styled(
+        format!("  {} {}", "●", header),
+        Style::default()
+            .fg(Color::Rgb(70, 130, 180))
+            .add_modifier(Modifier::BOLD),
+    )];
     header_spans.push(Span::styled(
-        if group.expanded { " (ctrl+o to collapse)" } else { " (ctrl+o to expand)" },
+        if group.expanded {
+            " (ctrl+o to collapse)"
+        } else {
+            " (ctrl+o to expand)"
+        },
         Style::default().fg(Color::Rgb(100, 100, 100)),
     ));
     lines.push(Line::from(header_spans));
@@ -915,7 +906,9 @@ fn render_tool_group<'a>(
                         ),
                         Span::styled(
                             format!("... ({} more lines)", line_count - 30),
-                            Style::default().fg(Color::Rgb(120, 120, 120)).add_modifier(Modifier::ITALIC),
+                            Style::default()
+                                .fg(Color::Rgb(120, 120, 120))
+                                .add_modifier(Modifier::ITALIC),
                         ),
                     ]));
                 }
@@ -934,10 +927,7 @@ fn render_tool_group<'a>(
                     .add_modifier(Modifier::ITALIC)
             };
             lines.push(Line::from(vec![
-                Span::styled(
-                    "    └─ ".to_string(),
-                    Style::default().fg(Color::DarkGray),
-                ),
+                Span::styled("    └─ ".to_string(), Style::default().fg(Color::DarkGray)),
                 Span::styled(last.description.clone(), style),
             ]));
         }
@@ -955,10 +945,8 @@ fn render_inline_approval<'a>(
     match &approval.state {
         ApprovalState::Pending => {
             // Line 1: tool description
-            let desc = super::app::App::format_tool_description(
-                &approval.tool_name,
-                &approval.tool_input,
-            );
+            let desc =
+                super::app::App::format_tool_description(&approval.tool_name, &approval.tool_input);
             lines.push(Line::from(vec![
                 Span::styled("  ", Style::default()),
                 Span::styled(
@@ -971,46 +959,49 @@ fn render_inline_approval<'a>(
 
             // Show params if expanded (V toggle)
             if approval.show_details
-                && let Some(obj) = approval.tool_input.as_object() {
-                    for (key, value) in obj.iter().take(5) {
-                        let val_str = match value {
-                            serde_json::Value::String(s) => {
-                                if s.width() > 60 {
-                                    let end = char_boundary_at_width(s, 57);
-                                    format!("\"{}...\"", &s[..end])
-                                } else {
-                                    format!("\"{}\"", s)
-                                }
+                && let Some(obj) = approval.tool_input.as_object()
+            {
+                for (key, value) in obj.iter().take(5) {
+                    let val_str = match value {
+                        serde_json::Value::String(s) => {
+                            if s.width() > 60 {
+                                let end = char_boundary_at_width(s, 57);
+                                format!("\"{}...\"", &s[..end])
+                            } else {
+                                format!("\"{}\"", s)
                             }
-                            _ => {
-                                let s = value.to_string();
-                                if s.width() > 60 {
-                                    let end = char_boundary_at_width(&s, 57);
-                                    format!("{}...", &s[..end])
-                                } else {
-                                    s
-                                }
+                        }
+                        _ => {
+                            let s = value.to_string();
+                            if s.width() > 60 {
+                                let end = char_boundary_at_width(&s, 57);
+                                format!("{}...", &s[..end])
+                            } else {
+                                s
                             }
-                        };
-                        lines.push(Line::from(vec![
-                            Span::styled(
-                                format!("    {}: ", key),
-                                Style::default().fg(Color::DarkGray),
-                            ),
-                            Span::styled(val_str, Style::default().fg(Color::Rgb(120, 120, 120))),
-                        ]));
-                    }
+                        }
+                    };
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            format!("    {}: ", key),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                        Span::styled(val_str, Style::default().fg(Color::Rgb(120, 120, 120))),
+                    ]));
                 }
+            }
 
             // "Do you approve?" + vertical option list with ❯ selector
             // Order: Yes(0), Always(1), No(2)
-            lines.push(Line::from(vec![
-                Span::styled(
-                    "  Do you approve?",
-                    Style::default().fg(Color::DarkGray),
-                ),
-            ]));
-            let options = [("Yes", Color::Green), ("Always", Color::Yellow), ("No", Color::Red)];
+            lines.push(Line::from(vec![Span::styled(
+                "  Do you approve?",
+                Style::default().fg(Color::DarkGray),
+            )]));
+            let options = [
+                ("Yes", Color::Green),
+                ("Always", Color::Yellow),
+                ("No", Color::Red),
+            ];
             for (i, (label, color)) in options.iter().enumerate() {
                 if i == approval.selected_option {
                     lines.push(Line::from(vec![
@@ -1026,10 +1017,7 @@ fn render_inline_approval<'a>(
                 } else {
                     lines.push(Line::from(vec![
                         Span::styled("    ", Style::default()),
-                        Span::styled(
-                            label.to_string(),
-                            Style::default().fg(Color::DarkGray),
-                        ),
+                        Span::styled(label.to_string(), Style::default().fg(Color::DarkGray)),
                     ]));
                 }
             }
@@ -1038,23 +1026,19 @@ fn render_inline_approval<'a>(
             // Silently skip — tool execution is already shown in the tool group
         }
         ApprovalState::Denied(reason) => {
-            let desc = super::app::App::format_tool_description(
-                &approval.tool_name,
-                &approval.tool_input,
-            );
+            let desc =
+                super::app::App::format_tool_description(&approval.tool_name, &approval.tool_input);
             let suffix = if reason.is_empty() {
                 String::new()
             } else {
                 format!(": {}", reason)
             };
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("  {} -- denied{}", desc, suffix),
-                    Style::default()
-                        .fg(Color::Red)
-                        .add_modifier(Modifier::ITALIC),
-                ),
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                format!("  {} -- denied{}", desc, suffix),
+                Style::default()
+                    .fg(Color::Red)
+                    .add_modifier(Modifier::ITALIC),
+            )]));
         }
     }
 }
@@ -1137,43 +1121,40 @@ fn render_inline_plan_approval<'a>(
                 } else {
                     lines.push(Line::from(vec![
                         Span::styled("    ", Style::default()),
-                        Span::styled(
-                            label.to_string(),
-                            Style::default().fg(Color::DarkGray),
-                        ),
+                        Span::styled(label.to_string(), Style::default().fg(Color::DarkGray)),
                     ]));
                 }
             }
         }
         PlanApprovalState::Approved => {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("  \u{2705} Plan '{}' approved — executing...", plan.plan_title),
-                    Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::ITALIC),
+            lines.push(Line::from(vec![Span::styled(
+                format!(
+                    "  \u{2705} Plan '{}' approved — executing...",
+                    plan.plan_title
                 ),
-            ]));
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::ITALIC),
+            )]));
         }
         PlanApprovalState::Rejected => {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("  \u{274C} Plan '{}' rejected", plan.plan_title),
-                    Style::default()
-                        .fg(Color::Red)
-                        .add_modifier(Modifier::ITALIC),
-                ),
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                format!("  \u{274C} Plan '{}' rejected", plan.plan_title),
+                Style::default()
+                    .fg(Color::Red)
+                    .add_modifier(Modifier::ITALIC),
+            )]));
         }
         PlanApprovalState::RevisionRequested => {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("  \u{1F504} Plan '{}' — revision requested", plan.plan_title),
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::ITALIC),
+            lines.push(Line::from(vec![Span::styled(
+                format!(
+                    "  \u{1F504} Plan '{}' — revision requested",
+                    plan.plan_title
                 ),
-            ]));
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::ITALIC),
+            )]));
         }
     }
 }
@@ -1190,18 +1171,22 @@ fn render_approve_menu<'a>(
         ApproveMenuState::Pending => {
             let gold = Color::Rgb(255, 200, 50);
 
-            lines.push(Line::from(vec![
-                Span::styled(
-                    "  TOOL APPROVAL POLICY",
-                    Style::default().fg(gold).add_modifier(Modifier::BOLD),
-                ),
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                "  TOOL APPROVAL POLICY",
+                Style::default().fg(gold).add_modifier(Modifier::BOLD),
+            )]));
             lines.push(Line::from(""));
 
             let options = [
                 ("Approve-only", "Always ask before executing tools"),
-                ("Allow all (session)", "Auto-approve all tools for this session"),
-                ("Yolo mode", "Execute everything without approval until reset"),
+                (
+                    "Allow all (session)",
+                    "Auto-approve all tools for this session",
+                ),
+                (
+                    "Yolo mode",
+                    "Execute everything without approval until reset",
+                ),
             ];
 
             lines.push(Line::from(Span::styled(
@@ -1215,7 +1200,9 @@ fn render_approve_menu<'a>(
                 let prefix = if is_selected { "\u{25b6} " } else { "  " };
 
                 let style = if is_selected {
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::White)
                 };
@@ -1230,7 +1217,9 @@ fn render_approve_menu<'a>(
                         Span::raw("      "),
                         Span::styled(
                             *desc,
-                            Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+                            Style::default()
+                                .fg(Color::DarkGray)
+                                .add_modifier(Modifier::ITALIC),
                         ),
                     ]));
                 }
@@ -1249,12 +1238,10 @@ fn render_approve_menu<'a>(
                 2 => ("Yolo mode", Color::Red),
                 _ => ("Cancelled", Color::DarkGray),
             };
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("  Policy set: {}", label),
-                    Style::default().fg(color).add_modifier(Modifier::ITALIC),
-                ),
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                format!("  Policy set: {}", label),
+                Style::default().fg(color).add_modifier(Modifier::ITALIC),
+            )]));
         }
     }
 }
@@ -1607,15 +1594,24 @@ fn render_help(f: &mut Frame, app: &App, area: Rect) {
         section_header("FEATURES"),
         Line::from(vec![
             Span::styled(" ✓ ", Style::default().fg(Color::Blue)),
-            Span::styled("Markdown & Syntax Highlighting", Style::default().fg(Color::White)),
+            Span::styled(
+                "Markdown & Syntax Highlighting",
+                Style::default().fg(Color::White),
+            ),
         ]),
         Line::from(vec![
             Span::styled(" ✓ ", Style::default().fg(Color::Blue)),
-            Span::styled("Multi-line Input & Streaming", Style::default().fg(Color::White)),
+            Span::styled(
+                "Multi-line Input & Streaming",
+                Style::default().fg(Color::White),
+            ),
         ]),
         Line::from(vec![
             Span::styled(" ✓ ", Style::default().fg(Color::Blue)),
-            Span::styled("Session Management & History", Style::default().fg(Color::White)),
+            Span::styled(
+                "Session Management & History",
+                Style::default().fg(Color::White),
+            ),
         ]),
         Line::from(vec![
             Span::styled(" ✓ ", Style::default().fg(Color::Blue)),
@@ -1623,11 +1619,17 @@ fn render_help(f: &mut Frame, app: &App, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled(" ✓ ", Style::default().fg(Color::Blue)),
-            Span::styled("Plan Mode & Tool Approval", Style::default().fg(Color::White)),
+            Span::styled(
+                "Plan Mode & Tool Approval",
+                Style::default().fg(Color::White),
+            ),
         ]),
         Line::from(vec![
             Span::styled(" ✓ ", Style::default().fg(Color::Blue)),
-            Span::styled("Inline Tool Approval (3 policies)", Style::default().fg(Color::White)),
+            Span::styled(
+                "Inline Tool Approval (3 policies)",
+                Style::default().fg(Color::White),
+            ),
         ]),
         Line::from(""),
     ];
@@ -1741,7 +1743,10 @@ fn render_plan(f: &mut Frame, app: &App, area: Rect) {
         // Status
         lines.push(Line::from(vec![
             Span::styled("Status: ", Style::default().fg(Color::DarkGray)),
-            Span::styled(plan.status.to_string(), Style::default().fg(Color::Rgb(184, 134, 11))),
+            Span::styled(
+                plan.status.to_string(),
+                Style::default().fg(Color::Rgb(184, 134, 11)),
+            ),
         ]));
 
         lines.push(Line::from(""));
@@ -1817,10 +1822,16 @@ fn render_plan(f: &mut Frame, app: &App, area: Rect) {
             lines.push(Line::from(vec![
                 Span::styled("    ", Style::default()),
                 Span::styled("Type: ", Style::default().fg(Color::DarkGray)),
-                Span::styled(task.task_type.to_string(), Style::default().fg(Color::Rgb(70, 130, 180))),
+                Span::styled(
+                    task.task_type.to_string(),
+                    Style::default().fg(Color::Rgb(70, 130, 180)),
+                ),
                 Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
                 Span::styled("Complexity: ", Style::default().fg(Color::DarkGray)),
-                Span::styled(task.complexity_stars(), Style::default().fg(Color::Rgb(184, 134, 11))),
+                Span::styled(
+                    task.complexity_stars(),
+                    Style::default().fg(Color::Rgb(184, 134, 11)),
+                ),
             ]));
 
             // Acceptance Criteria
@@ -1919,7 +1930,10 @@ fn render_settings(f: &mut Frame, app: &App, area: Rect) {
             ("○", Color::DarkGray)
         };
         Line::from(vec![
-            Span::styled(format!("   {:<20}", label), Style::default().fg(Color::Rgb(184, 134, 11))),
+            Span::styled(
+                format!("   {:<20}", label),
+                Style::default().fg(Color::Rgb(184, 134, 11)),
+            ),
             Span::styled(dot, Style::default().fg(color)),
             Span::styled(
                 if enabled { " enabled" } else { " disabled" },
@@ -2272,23 +2286,27 @@ fn render_directory_picker(f: &mut Frame, app: &App, area: Rect) {
 /// Render the model selector dialog - matches onboarding ProviderAuth style
 fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     use crate::tui::onboarding::PROVIDERS;
-    
+
     const BRAND_BLUE: Color = Color::Rgb(70, 130, 180);
     const BRAND_GOLD: Color = Color::Rgb(218, 165, 32);
-    
+
     let focused_field = app.model_selector_focused_field; // 0=provider, 1=api_key, 2=model
     let provider_idx = app.model_selector_provider_selected;
     let selected_provider = &PROVIDERS[provider_idx];
-    
+
     // Get models from fetched list ONLY - never use static fallback
     // If no fetched models, show message to re-select provider to fetch
-    let display_models: Vec<&str> = app.model_selector_models.iter().map(|s| s.as_ref()).collect();
-    
+    let display_models: Vec<&str> = app
+        .model_selector_models
+        .iter()
+        .map(|s| s.as_ref())
+        .collect();
+
     // If no models fetched yet, show placeholder
     if display_models.is_empty() {
         // Don't show static fallback - tell user to confirm to fetch
     }
-    
+
     let model_count = display_models.len();
     let current_model = app
         .current_session
@@ -2332,13 +2350,25 @@ fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(prefix, Style::default().fg(BRAND_GOLD)),
             Span::styled(
                 marker,
-                Style::default().fg(if selected { BRAND_GOLD } else { Color::DarkGray }),
+                Style::default().fg(if selected {
+                    BRAND_GOLD
+                } else {
+                    Color::DarkGray
+                }),
             ),
             Span::styled(
                 format!(" {}", provider.name),
                 Style::default()
-                    .fg(if selected { Color::White } else { Color::DarkGray })
-                    .add_modifier(if selected { Modifier::BOLD } else { Modifier::empty() }),
+                    .fg(if selected {
+                        Color::White
+                    } else {
+                        Color::DarkGray
+                    })
+                    .add_modifier(if selected {
+                        Modifier::BOLD
+                    } else {
+                        Modifier::empty()
+                    }),
             ),
         ]));
     }
@@ -2361,11 +2391,19 @@ fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(vec![
             Span::styled(
                 "  Base URL: ",
-                Style::default().fg(if base_focused { BRAND_BLUE } else { Color::DarkGray }),
+                Style::default().fg(if base_focused {
+                    BRAND_BLUE
+                } else {
+                    Color::DarkGray
+                }),
             ),
             Span::styled(
                 format!("{}{}", base_display, cursor),
-                Style::default().fg(if base_focused { Color::White } else { Color::Green }),
+                Style::default().fg(if base_focused {
+                    Color::White
+                } else {
+                    Color::Green
+                }),
             ),
         ]));
         lines.push(Line::from(""));
@@ -2374,39 +2412,55 @@ fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     // API Key field (field 1 for non-Custom, field 2 for Custom)
     let key_focused = (focused_field == 1 && !is_custom) || (focused_field == 2 && is_custom);
     let key_label = selected_provider.key_label;
-    
+
     // Check if we have an existing key (sentinel) or user-typed key
     // Note: This matches the sentinel value from dialogs.rs
     let has_existing_key = app.model_selector_api_key == "__EXISTING_KEY__";
     let has_user_key = !app.model_selector_api_key.is_empty() && !has_existing_key;
-    
+
     let (masked_key, key_hint) = if has_user_key {
         // User typed a new key - show asterisks for what they typed
-        ("*".repeat(app.model_selector_api_key.len().min(30)), String::new())
+        (
+            "*".repeat(app.model_selector_api_key.len().min(30)),
+            String::new(),
+        )
     } else if has_existing_key {
         // Key exists in config - show placeholder indicating it's configured
         ("● configured".to_string(), String::new())
     } else {
         // Empty - show input hint
-        (format!("enter your {} (optional)", key_label.to_lowercase()), String::new())
+        (
+            format!("enter your {} (optional)", key_label.to_lowercase()),
+            String::new(),
+        )
     };
     let cursor = if key_focused { "█" } else { "" };
 
     lines.push(Line::from(vec![
         Span::styled(
             format!("  {}: ", key_label),
-            Style::default().fg(if key_focused { BRAND_BLUE } else { Color::DarkGray }),
+            Style::default().fg(if key_focused {
+                BRAND_BLUE
+            } else {
+                Color::DarkGray
+            }),
         ),
         Span::styled(
             format!("{}{}", masked_key, cursor),
-            Style::default().fg(if key_focused { Color::White } else { Color::Green }),
+            Style::default().fg(if key_focused {
+                Color::White
+            } else {
+                Color::Green
+            }),
         ),
     ]));
 
     if !key_hint.is_empty() && key_focused {
         lines.push(Line::from(Span::styled(
             format!("  {}", key_hint.trim()),
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
         )));
     }
 
@@ -2415,7 +2469,7 @@ fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     // Model selection (field 2 for non-Custom, field 3 for Custom)
     let model_focused = (focused_field == 2 && !is_custom) || (focused_field == 3 && is_custom);
     const MAX_VISIBLE_MODELS: usize = 8;
-    
+
     if model_focused {
         // Show filter input
         let filter_cursor = if model_focused { "█" } else { "" };
@@ -2426,7 +2480,11 @@ fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         };
         lines.push(Line::from(Span::styled(
             filter_display,
-            Style::default().fg(if model_focused { BRAND_BLUE } else { Color::DarkGray }),
+            Style::default().fg(if model_focused {
+                BRAND_BLUE
+            } else {
+                Color::DarkGray
+            }),
         )));
     }
 
@@ -2437,7 +2495,9 @@ fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         (0, total)
     } else {
         let half = MAX_VISIBLE_MODELS / 2;
-        let s = safe_selected.saturating_sub(half).min(total - MAX_VISIBLE_MODELS);
+        let s = safe_selected
+            .saturating_sub(half)
+            .min(total - MAX_VISIBLE_MODELS);
         (s, s + MAX_VISIBLE_MODELS)
     };
 
@@ -2453,12 +2513,21 @@ fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         let selected = i == safe_selected;
         let active = *model == current_model;
 
-        let prefix = if selected && model_focused { " > " } else { "   " };
-        
+        let prefix = if selected && model_focused {
+            " > "
+        } else {
+            "   "
+        };
+
         let style = if selected && model_focused {
-            Style::default().fg(Color::Black).bg(BRAND_BLUE).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Black)
+                .bg(BRAND_BLUE)
+                .add_modifier(Modifier::BOLD)
         } else if active {
-            Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Blue)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::White)
         };
@@ -2482,14 +2551,8 @@ fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
                 ("[Enter]", "Next"),
                 ("[Tab]", "Skip to Model"),
             ],
-            1 => vec![
-                ("[Type]", "Base URL"),
-                ("[Enter]", "Next"),
-            ],
-            2 => vec![
-                ("[Type]", "API Key"),
-                ("[Enter]", "Next"),
-            ],
+            1 => vec![("[Type]", "Base URL"), ("[Enter]", "Next")],
+            2 => vec![("[Type]", "API Key"), ("[Enter]", "Next")],
             3 => vec![
                 ("[Type]", "Filter"),
                 ("[↑/↓]", "Select"),
@@ -2504,10 +2567,7 @@ fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
                 ("[Enter]", "Next"),
                 ("[Tab]", "Skip to Model"),
             ],
-            1 => vec![
-                ("[Type]", "API Key"),
-                ("[Enter]", "Fetch Models"),
-            ],
+            1 => vec![("[Type]", "API Key"), ("[Enter]", "Fetch Models")],
             2 => vec![
                 ("[Type]", "Filter"),
                 ("[↑/↓]", "Select"),
@@ -2519,8 +2579,16 @@ fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
 
     let mut help_spans: Vec<Span> = Vec::new();
     for (key, action) in help_text {
-        help_spans.push(Span::styled(key, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)));
-        help_spans.push(Span::styled(format!("{}  ", action), Style::default().fg(Color::White)));
+        help_spans.push(Span::styled(
+            key,
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+        help_spans.push(Span::styled(
+            format!("{}  ", action),
+            Style::default().fg(Color::White),
+        ));
     }
     lines.push(Line::from(help_spans));
 
@@ -2570,7 +2638,10 @@ fn render_usage_dialog(f: &mut Frame, app: &App, area: Rect) {
         if stored > 0.0 {
             (stored, false)
         } else if cur_tokens > 0 {
-            (estimate_cost_from_tokens(model, cur_tokens as i64).unwrap_or(0.0), true)
+            (
+                estimate_cost_from_tokens(model, cur_tokens as i64).unwrap_or(0.0),
+                true,
+            )
         } else {
             (0.0, false)
         }
@@ -2633,7 +2704,11 @@ fn render_usage_dialog(f: &mut Frame, app: &App, area: Rect) {
 
     // Sort models by cost descending
     let mut model_entries: Vec<(&String, &ModelStats)> = by_model.iter().collect();
-    model_entries.sort_by(|a, b| b.1.cost.partial_cmp(&a.1.cost).unwrap_or(std::cmp::Ordering::Equal));
+    model_entries.sort_by(|a, b| {
+        b.1.cost
+            .partial_cmp(&a.1.cost)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // ── Build lines ────────────────────────────────────────────────────────
     let label_style = Style::default().fg(Color::DarkGray);
@@ -2683,7 +2758,11 @@ fn render_usage_dialog(f: &mut Frame, app: &App, area: Rect) {
                 } else {
                     format!("${:.4}", cur_cost)
                 },
-                if cur_cost_estimated { est_style } else { value_style },
+                if cur_cost_estimated {
+                    est_style
+                } else {
+                    value_style
+                },
             ),
         ]),
         Line::from(""),
@@ -2787,10 +2866,7 @@ fn render_usage_dialog(f: &mut Frame, app: &App, area: Rect) {
 
 /// Render restart confirmation dialog
 fn render_restart_dialog(f: &mut Frame, app: &App, area: Rect) {
-    let status = app
-        .rebuild_status
-        .as_deref()
-        .unwrap_or("Build successful");
+    let status = app.rebuild_status.as_deref().unwrap_or("Build successful");
 
     let dialog_height = 8u16;
     let dialog_width = 50u16.min(area.width.saturating_sub(4));
@@ -2828,9 +2904,17 @@ fn render_restart_dialog(f: &mut Frame, app: &App, area: Rect) {
         Line::from("  Restart with new binary?"),
         Line::from(""),
         Line::from(vec![
-            Span::styled("  [Enter] ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "  [Enter] ",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw("Restart  "),
-            Span::styled("[Esc] ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "[Esc] ",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
             Span::raw("Cancel"),
         ]),
     ];
@@ -2949,7 +3033,11 @@ mod tests {
     fn test_wrap_ascii_wraps() {
         let line = Line::from("this is a longer line that should wrap");
         let result = wrap_line_with_padding(line, 20, "  ");
-        assert!(result.len() > 1, "expected wrapping, got {} lines", result.len());
+        assert!(
+            result.len() > 1,
+            "expected wrapping, got {} lines",
+            result.len()
+        );
     }
 
     #[test]
@@ -3004,6 +3092,4 @@ mod tests {
         let result = wrap_line_with_padding(line, 170, "  ");
         assert!(!result.is_empty());
     }
-
 }
-

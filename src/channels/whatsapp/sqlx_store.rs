@@ -11,12 +11,12 @@ use std::str::FromStr;
 
 use wacore::appstate::hash::HashState;
 use wacore::appstate::processor::AppStateMutationMAC;
-use wacore::store::error::{db_err, Result, StoreError};
+use wacore::store::Device;
+use wacore::store::error::{Result, StoreError, db_err};
 use wacore::store::traits::{
     AppStateSyncKey, AppSyncStore, DeviceListRecord, DeviceStore, LidPnMappingEntry, ProtocolStore,
     SignalStore,
 };
-use wacore::store::Device;
 
 /// SQLx-backed storage for `whatsapp-rust`.
 ///
@@ -194,14 +194,12 @@ impl SignalStore for SqlxStore {
     }
 
     async fn load_identity(&self, address: &str) -> Result<Option<Vec<u8>>> {
-        let row = sqlx::query(
-            "SELECT key FROM wa_identities WHERE address = ? AND device_id = ?",
-        )
-        .bind(address)
-        .bind(self.device_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(db_err)?;
+        let row = sqlx::query("SELECT key FROM wa_identities WHERE address = ? AND device_id = ?")
+            .bind(address)
+            .bind(self.device_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_err)?;
         Ok(row.map(|r| r.get("key")))
     }
 
@@ -216,14 +214,12 @@ impl SignalStore for SqlxStore {
     }
 
     async fn get_session(&self, address: &str) -> Result<Option<Vec<u8>>> {
-        let row = sqlx::query(
-            "SELECT record FROM wa_sessions WHERE address = ? AND device_id = ?",
-        )
-        .bind(address)
-        .bind(self.device_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(db_err)?;
+        let row = sqlx::query("SELECT record FROM wa_sessions WHERE address = ? AND device_id = ?")
+            .bind(address)
+            .bind(self.device_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_err)?;
         Ok(row.map(|r| r.get("record")))
     }
 
@@ -267,14 +263,12 @@ impl SignalStore for SqlxStore {
     }
 
     async fn load_prekey(&self, id: u32) -> Result<Option<Vec<u8>>> {
-        let row = sqlx::query(
-            "SELECT record FROM wa_prekeys WHERE id = ? AND device_id = ?",
-        )
-        .bind(id)
-        .bind(self.device_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(db_err)?;
+        let row = sqlx::query("SELECT record FROM wa_prekeys WHERE id = ? AND device_id = ?")
+            .bind(id)
+            .bind(self.device_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db_err)?;
         Ok(row.map(|r| r.get("record")))
     }
 
@@ -303,25 +297,22 @@ impl SignalStore for SqlxStore {
     }
 
     async fn load_signed_prekey(&self, id: u32) -> Result<Option<Vec<u8>>> {
-        let row = sqlx::query(
-            "SELECT record FROM wa_signed_prekeys WHERE id = ? AND device_id = ?",
-        )
-        .bind(id)
-        .bind(self.device_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(db_err)?;
+        let row =
+            sqlx::query("SELECT record FROM wa_signed_prekeys WHERE id = ? AND device_id = ?")
+                .bind(id)
+                .bind(self.device_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(db_err)?;
         Ok(row.map(|r| r.get("record")))
     }
 
     async fn load_all_signed_prekeys(&self) -> Result<Vec<(u32, Vec<u8>)>> {
-        let rows = sqlx::query(
-            "SELECT id, record FROM wa_signed_prekeys WHERE device_id = ?",
-        )
-        .bind(self.device_id)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(db_err)?;
+        let rows = sqlx::query("SELECT id, record FROM wa_signed_prekeys WHERE device_id = ?")
+            .bind(self.device_id)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_err)?;
         Ok(rows
             .into_iter()
             .map(|r| {
@@ -357,14 +348,13 @@ impl SignalStore for SqlxStore {
     }
 
     async fn get_sender_key(&self, address: &str) -> Result<Option<Vec<u8>>> {
-        let row = sqlx::query(
-            "SELECT record FROM wa_sender_keys WHERE address = ? AND device_id = ?",
-        )
-        .bind(address)
-        .bind(self.device_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(db_err)?;
+        let row =
+            sqlx::query("SELECT record FROM wa_sender_keys WHERE address = ? AND device_id = ?")
+                .bind(address)
+                .bind(self.device_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(db_err)?;
         Ok(row.map(|r| r.get("record")))
     }
 
@@ -384,19 +374,18 @@ impl SignalStore for SqlxStore {
 #[async_trait]
 impl AppSyncStore for SqlxStore {
     async fn get_sync_key(&self, key_id: &[u8]) -> Result<Option<AppStateSyncKey>> {
-        let row = sqlx::query(
-            "SELECT data FROM wa_app_state_keys WHERE key_id = ? AND device_id = ?",
-        )
-        .bind(key_id)
-        .bind(self.device_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(db_err)?;
+        let row =
+            sqlx::query("SELECT data FROM wa_app_state_keys WHERE key_id = ? AND device_id = ?")
+                .bind(key_id)
+                .bind(self.device_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(db_err)?;
         match row {
             Some(r) => {
                 let json: String = r.get("data");
-                let key: AppStateSyncKey =
-                    serde_json::from_str(&json).map_err(|e| StoreError::Serialization(e.to_string()))?;
+                let key: AppStateSyncKey = serde_json::from_str(&json)
+                    .map_err(|e| StoreError::Serialization(e.to_string()))?;
                 Ok(Some(key))
             }
             None => Ok(None),
@@ -420,19 +409,18 @@ impl AppSyncStore for SqlxStore {
     }
 
     async fn get_version(&self, name: &str) -> Result<HashState> {
-        let row = sqlx::query(
-            "SELECT data FROM wa_app_state_versions WHERE name = ? AND device_id = ?",
-        )
-        .bind(name)
-        .bind(self.device_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(db_err)?;
+        let row =
+            sqlx::query("SELECT data FROM wa_app_state_versions WHERE name = ? AND device_id = ?")
+                .bind(name)
+                .bind(self.device_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(db_err)?;
         match row {
             Some(r) => {
                 let json: String = r.get("data");
-                let state: HashState =
-                    serde_json::from_str(&json).map_err(|e| StoreError::Serialization(e.to_string()))?;
+                let state: HashState = serde_json::from_str(&json)
+                    .map_err(|e| StoreError::Serialization(e.to_string()))?;
                 Ok(state)
             }
             None => Ok(HashState::default()),
@@ -542,14 +530,12 @@ impl ProtocolStore for SqlxStore {
     }
 
     async fn clear_skdm_recipients(&self, group_jid: &str) -> Result<()> {
-        sqlx::query(
-            "DELETE FROM wa_skdm_recipients WHERE group_jid = ? AND device_id = ?",
-        )
-        .bind(group_jid)
-        .bind(self.device_id)
-        .execute(&self.pool)
-        .await
-        .map_err(db_err)?;
+        sqlx::query("DELETE FROM wa_skdm_recipients WHERE group_jid = ? AND device_id = ?")
+            .bind(group_jid)
+            .bind(self.device_id)
+            .execute(&self.pool)
+            .await
+            .map_err(db_err)?;
         Ok(())
     }
 
@@ -703,14 +689,13 @@ impl ProtocolStore for SqlxStore {
     }
 
     async fn get_devices(&self, user: &str) -> Result<Option<DeviceListRecord>> {
-        let row = sqlx::query(
-            "SELECT data FROM wa_device_registry WHERE user = ? AND device_id = ?",
-        )
-        .bind(user)
-        .bind(self.device_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(db_err)?;
+        let row =
+            sqlx::query("SELECT data FROM wa_device_registry WHERE user = ? AND device_id = ?")
+                .bind(user)
+                .bind(self.device_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(db_err)?;
         match row {
             Some(r) => {
                 let json: String = r.get("data");
@@ -750,14 +735,12 @@ impl ProtocolStore for SqlxStore {
         let participants: Vec<String> = rows.into_iter().map(|r| r.get("participant")).collect();
 
         if !participants.is_empty() {
-            sqlx::query(
-                "DELETE FROM wa_sender_key_forget WHERE group_jid = ? AND device_id = ?",
-            )
-            .bind(group_jid)
-            .bind(self.device_id)
-            .execute(&self.pool)
-            .await
-            .map_err(db_err)?;
+            sqlx::query("DELETE FROM wa_sender_key_forget WHERE group_jid = ? AND device_id = ?")
+                .bind(group_jid)
+                .bind(self.device_id)
+                .execute(&self.pool)
+                .await
+                .map_err(db_err)?;
         }
         Ok(participants)
     }
@@ -768,8 +751,8 @@ impl ProtocolStore for SqlxStore {
 #[async_trait]
 impl DeviceStore for SqlxStore {
     async fn save(&self, device: &Device) -> Result<()> {
-        let bytes = rmp_serde::to_vec(device)
-            .map_err(|e| StoreError::Serialization(e.to_string()))?;
+        let bytes =
+            rmp_serde::to_vec(device).map_err(|e| StoreError::Serialization(e.to_string()))?;
         sqlx::query(
             "INSERT INTO wa_device (id, data) VALUES (?, ?)
              ON CONFLICT(id) DO UPDATE SET data = excluded.data",
@@ -796,7 +779,9 @@ impl DeviceStore for SqlxStore {
                     Err(_) => {
                         // Old JSON-serialized data can't roundtrip (byte array issue).
                         // Delete it so the client re-pairs cleanly.
-                        tracing::warn!("WhatsApp: clearing incompatible legacy device data — re-pair required");
+                        tracing::warn!(
+                            "WhatsApp: clearing incompatible legacy device data — re-pair required"
+                        );
                         let _ = sqlx::query("DELETE FROM wa_device WHERE id = ?")
                             .bind(self.device_id)
                             .execute(&self.pool)
@@ -836,7 +821,10 @@ mod tests {
     async fn test_identity_roundtrip() {
         let store = test_store().await;
         let key = [42u8; 32];
-        store.put_identity("alice@s.whatsapp.net", key).await.unwrap();
+        store
+            .put_identity("alice@s.whatsapp.net", key)
+            .await
+            .unwrap();
 
         let loaded = store.load_identity("alice@s.whatsapp.net").await.unwrap();
         assert_eq!(loaded.unwrap(), key.to_vec());
@@ -896,11 +884,24 @@ mod tests {
     #[tokio::test]
     async fn test_sender_key_roundtrip() {
         let store = test_store().await;
-        store.put_sender_key("group::sender", b"sk-data").await.unwrap();
-        let loaded = store.get_sender_key("group::sender").await.unwrap().unwrap();
+        store
+            .put_sender_key("group::sender", b"sk-data")
+            .await
+            .unwrap();
+        let loaded = store
+            .get_sender_key("group::sender")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(loaded, b"sk-data");
         store.delete_sender_key("group::sender").await.unwrap();
-        assert!(store.get_sender_key("group::sender").await.unwrap().is_none());
+        assert!(
+            store
+                .get_sender_key("group::sender")
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test]
@@ -934,7 +935,13 @@ mod tests {
         let recipients = store.get_skdm_recipients("group1").await.unwrap();
         assert_eq!(recipients.len(), 2);
         store.clear_skdm_recipients("group1").await.unwrap();
-        assert!(store.get_skdm_recipients("group1").await.unwrap().is_empty());
+        assert!(
+            store
+                .get_skdm_recipients("group1")
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]
@@ -963,18 +970,44 @@ mod tests {
     async fn test_base_key_collision() {
         let store = test_store().await;
         store.save_base_key("addr", "msg1", b"key1").await.unwrap();
-        assert!(store.has_same_base_key("addr", "msg1", b"key1").await.unwrap());
-        assert!(!store.has_same_base_key("addr", "msg1", b"key2").await.unwrap());
-        assert!(!store.has_same_base_key("addr", "msg2", b"key1").await.unwrap());
+        assert!(
+            store
+                .has_same_base_key("addr", "msg1", b"key1")
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .has_same_base_key("addr", "msg1", b"key2")
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .has_same_base_key("addr", "msg2", b"key1")
+                .await
+                .unwrap()
+        );
         store.delete_base_key("addr", "msg1").await.unwrap();
-        assert!(!store.has_same_base_key("addr", "msg1", b"key1").await.unwrap());
+        assert!(
+            !store
+                .has_same_base_key("addr", "msg1", b"key1")
+                .await
+                .unwrap()
+        );
     }
 
     #[tokio::test]
     async fn test_sender_key_forget_marks() {
         let store = test_store().await;
-        store.mark_forget_sender_key("group1", "user1").await.unwrap();
-        store.mark_forget_sender_key("group1", "user2").await.unwrap();
+        store
+            .mark_forget_sender_key("group1", "user1")
+            .await
+            .unwrap();
+        store
+            .mark_forget_sender_key("group1", "user2")
+            .await
+            .unwrap();
 
         let marks = store.consume_forget_marks("group1").await.unwrap();
         assert_eq!(marks.len(), 2);
@@ -1007,14 +1040,36 @@ mod tests {
                 value_mac: vec![7, 8],
             },
         ];
-        store.put_mutation_macs("critical_block", 1, &macs).await.unwrap();
+        store
+            .put_mutation_macs("critical_block", 1, &macs)
+            .await
+            .unwrap();
 
-        let v = store.get_mutation_mac("critical_block", &[1, 2]).await.unwrap().unwrap();
+        let v = store
+            .get_mutation_mac("critical_block", &[1, 2])
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(v, vec![3, 4]);
 
-        store.delete_mutation_macs("critical_block", &[vec![1, 2]]).await.unwrap();
-        assert!(store.get_mutation_mac("critical_block", &[1, 2]).await.unwrap().is_none());
+        store
+            .delete_mutation_macs("critical_block", &[vec![1, 2]])
+            .await
+            .unwrap();
+        assert!(
+            store
+                .get_mutation_mac("critical_block", &[1, 2])
+                .await
+                .unwrap()
+                .is_none()
+        );
         // Second one still there
-        assert!(store.get_mutation_mac("critical_block", &[5, 6]).await.unwrap().is_some());
+        assert!(
+            store
+                .get_mutation_mac("critical_block", &[5, 6])
+                .await
+                .unwrap()
+                .is_some()
+        );
     }
 }

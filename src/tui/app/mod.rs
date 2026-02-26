@@ -1,10 +1,10 @@
 //! App Module — TUI application state and logic.
 
-mod state;
+mod dialogs;
 mod input;
 mod messaging;
 mod plan_exec;
-mod dialogs;
+mod state;
 
 pub use state::*;
 

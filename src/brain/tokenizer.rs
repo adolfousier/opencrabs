@@ -12,10 +12,8 @@ use tiktoken_rs::CoreBPE;
 /// Global tokenizer instance — initialized once, reused everywhere.
 /// cl100k_base is used by GPT-4, GPT-3.5-turbo, and text-embedding-ada-002.
 /// It's the closest publicly available tokenizer to what Anthropic uses.
-static TOKENIZER: Lazy<CoreBPE> = Lazy::new(|| {
-    tiktoken_rs::cl100k_base()
-        .expect("Failed to initialize cl100k_base tokenizer")
-});
+static TOKENIZER: Lazy<CoreBPE> =
+    Lazy::new(|| tiktoken_rs::cl100k_base().expect("Failed to initialize cl100k_base tokenizer"));
 
 /// Count tokens in a string using cl100k_base BPE encoding.
 ///
@@ -52,7 +50,10 @@ mod tests {
     fn test_simple_text() {
         let count = count_tokens("Hello, world!");
         // cl100k_base: "Hello" "," " world" "!" = 4 tokens
-        assert!(count >= 3 && count <= 6, "Got {count} tokens for 'Hello, world!'");
+        assert!(
+            count >= 3 && count <= 6,
+            "Got {count} tokens for 'Hello, world!'"
+        );
     }
 
     #[test]
@@ -60,14 +61,20 @@ mod tests {
         let code = r#"fn main() { println!("Hello, world!"); }"#;
         let count = count_tokens(code);
         // Code tends to tokenize into more pieces
-        assert!(count > 5, "Code should have more than 5 tokens, got {count}");
+        assert!(
+            count > 5,
+            "Code should have more than 5 tokens, got {count}"
+        );
     }
 
     #[test]
     fn test_json_content() {
         let json = r#"{"name": "test", "value": 42, "nested": {"key": "val"}}"#;
         let count = count_tokens(json);
-        assert!(count > 10, "JSON should have more than 10 tokens, got {count}");
+        assert!(
+            count > 10,
+            "JSON should have more than 10 tokens, got {count}"
+        );
     }
 
     #[test]
@@ -75,7 +82,10 @@ mod tests {
         let text = "word ".repeat(1000); // ~1000 words
         let count = count_tokens(&text);
         // Should be roughly 1000 tokens (each "word " is ~1-2 tokens)
-        assert!(count > 500 && count < 2000, "Got {count} tokens for ~1000 words");
+        assert!(
+            count > 500 && count < 2000,
+            "Got {count} tokens for ~1000 words"
+        );
     }
 
     #[test]
@@ -90,13 +100,17 @@ mod tests {
     #[test]
     fn test_more_accurate_than_chars_div_3() {
         // chars/3 tends to underestimate for code/JSON, overestimate for prose
-        let code = r#"pub async fn process_request(&self, ctx: &mut AgentContext) -> Result<Response> {"#;
+        let code =
+            r#"pub async fn process_request(&self, ctx: &mut AgentContext) -> Result<Response> {"#;
         let tiktoken_count = count_tokens(code);
         let chars_3 = code.len() / 3;
         let chars_4 = code.len() / 4;
 
         // tiktoken should give a reasonable count — log for visibility
-        eprintln!("Code: tiktoken={tiktoken_count}, chars/3={chars_3}, chars/4={chars_4}, len={}", code.len());
+        eprintln!(
+            "Code: tiktoken={tiktoken_count}, chars/3={chars_3}, chars/4={chars_4}, len={}",
+            code.len()
+        );
         assert!(tiktoken_count > 0);
     }
 

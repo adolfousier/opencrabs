@@ -6,10 +6,10 @@
 
 use super::error::Result;
 use super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
-use crate::channels::ChannelFactory;
-use crate::config::opencrabs_home;
 use crate::brain::agent::{ProgressCallback, ProgressEvent};
+use crate::channels::ChannelFactory;
 use crate::channels::whatsapp::handler;
+use crate::config::opencrabs_home;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -80,20 +80,23 @@ pub struct WhatsAppConnectHandle {
 pub async fn start_whatsapp_pairing() -> Result<WhatsAppConnectHandle> {
     // 1. Create session storage
     let db_dir = opencrabs_home().join("whatsapp");
-    std::fs::create_dir_all(&db_dir)
-        .map_err(|e| super::error::ToolError::Internal(format!(
-            "Failed to create WhatsApp data directory: {}", e
-        )))?;
+    std::fs::create_dir_all(&db_dir).map_err(|e| {
+        super::error::ToolError::Internal(format!(
+            "Failed to create WhatsApp data directory: {}",
+            e
+        ))
+    })?;
     let db_path = db_dir.join("session.db");
 
     let backend = Arc::new(
-        crate::channels::whatsapp::sqlx_store::SqlxStore::new(
-            db_path.to_string_lossy().as_ref(),
-        )
-        .await
-        .map_err(|e| super::error::ToolError::Internal(format!(
-            "Failed to open WhatsApp session store: {}", e
-        )))?,
+        crate::channels::whatsapp::sqlx_store::SqlxStore::new(db_path.to_string_lossy().as_ref())
+            .await
+            .map_err(|e| {
+                super::error::ToolError::Internal(format!(
+                    "Failed to open WhatsApp session store: {}",
+                    e
+                ))
+            })?,
     );
 
     // 2. Set up signaling channels
@@ -128,9 +131,9 @@ pub async fn start_whatsapp_pairing() -> Result<WhatsAppConnectHandle> {
         })
         .build()
         .await
-        .map_err(|e| super::error::ToolError::Internal(format!(
-            "Failed to create WhatsApp client: {}", e
-        )))?;
+        .map_err(|e| {
+            super::error::ToolError::Internal(format!("Failed to create WhatsApp client: {}", e))
+        })?;
 
     // 4. Spawn bot.run() in background
     tokio::spawn(async move {
@@ -243,10 +246,8 @@ impl Tool for WhatsAppConnectTool {
         //    messages immediately after pairing — no abort/respawn needed.
         let factory = self.channel_factory.clone();
         let agent = factory.create_agent_service();
-        let session_svc =
-            crate::services::SessionService::new(factory.service_context());
-        let allowed: Arc<HashSet<String>> =
-            Arc::new(allowed_phones.iter().cloned().collect());
+        let session_svc = crate::services::SessionService::new(factory.service_context());
+        let allowed: Arc<HashSet<String>> = Arc::new(allowed_phones.iter().cloned().collect());
         let voice_config = Arc::new(factory.voice_config().clone());
         let shared_session = factory.shared_session_id();
         let extra_sessions: Arc<Mutex<HashMap<String, uuid::Uuid>>> =
@@ -282,7 +283,9 @@ impl Tool for WhatsAppConnectTool {
                         }
                         Event::Connected(_) | Event::PairSuccess(_) => {
                             // Store client for proactive messaging
-                            wa_state.set_connected(client.clone(), owner_jid.clone()).await;
+                            wa_state
+                                .set_connected(client.clone(), owner_jid.clone())
+                                .await;
 
                             let mut tx = connected_tx.lock().await;
                             if let Some(sender) = tx.take() {
@@ -347,32 +350,30 @@ impl Tool for WhatsAppConnectTool {
         let qr_displayed = tokio::time::timeout(Duration::from_secs(30), qr_rx.recv()).await;
 
         match qr_displayed {
-            Ok(Some(qr_code)) => {
-                match render_qr_unicode(&qr_code) {
-                    Some(qr_text) => {
-                        if let Some(ref cb) = self.progress {
-                            cb(ProgressEvent::IntermediateText {
-                                text: format!(
-                                    "Scan this QR code with WhatsApp on your phone:\n\n{}",
-                                    qr_text
-                                ),
-                                reasoning: None,
-                            });
-                        }
-                    }
-                    None => {
-                        if let Some(ref cb) = self.progress {
-                            cb(ProgressEvent::IntermediateText {
-                                text: format!(
-                                    "QR code generated but couldn't render. Raw code: {}",
-                                    qr_code
-                                ),
-                                reasoning: None,
-                            });
-                        }
+            Ok(Some(qr_code)) => match render_qr_unicode(&qr_code) {
+                Some(qr_text) => {
+                    if let Some(ref cb) = self.progress {
+                        cb(ProgressEvent::IntermediateText {
+                            text: format!(
+                                "Scan this QR code with WhatsApp on your phone:\n\n{}",
+                                qr_text
+                            ),
+                            reasoning: None,
+                        });
                     }
                 }
-            }
+                None => {
+                    if let Some(ref cb) = self.progress {
+                        cb(ProgressEvent::IntermediateText {
+                            text: format!(
+                                "QR code generated but couldn't render. Raw code: {}",
+                                qr_code
+                            ),
+                            reasoning: None,
+                        });
+                    }
+                }
+            },
             Ok(None) => {
                 return Ok(ToolResult::error(
                     "WhatsApp client closed before generating QR code. \

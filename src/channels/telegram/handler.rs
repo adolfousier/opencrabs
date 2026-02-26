@@ -3,8 +3,8 @@
 //! Processes incoming messages: text, voice (STT/TTS), photos, image documents, allowlist enforcement.
 
 use super::TelegramState;
-use crate::config::{RespondTo, VoiceConfig};
 use crate::brain::agent::AgentService;
+use crate::config::{RespondTo, VoiceConfig};
 use crate::services::SessionService;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -12,7 +12,6 @@ use teloxide::prelude::*;
 use teloxide::types::{ChatKind, InputFile};
 use tokio::sync::Mutex;
 use uuid::Uuid;
-
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_message(
@@ -46,15 +45,25 @@ pub(crate) async fn handle_message(
             user_id
         );
         bot.send_message(msg.chat.id, reply).await?;
-        tracing::info!("Telegram: /start from user {} ({})", user_id, user.first_name);
+        tracing::info!(
+            "Telegram: /start from user {} ({})",
+            user_id,
+            user.first_name
+        );
         return Ok(());
     }
 
     // Allowlist check -- reject non-allowed users
     if !allowed.contains(&user_id) {
-        tracing::debug!("Telegram: ignoring message from non-allowed user {}", user_id);
-        bot.send_message(msg.chat.id, "You are not authorized. Send /start to get your user ID.")
-            .await?;
+        tracing::debug!(
+            "Telegram: ignoring message from non-allowed user {}",
+            user_id
+        );
+        bot.send_message(
+            msg.chat.id,
+            "You are not authorized. Send /start to get your user ID.",
+        )
+        .await?;
         return Ok(());
     }
 
@@ -65,7 +74,10 @@ pub(crate) async fn handle_message(
 
         // Check allowed_channels (empty = all channels allowed)
         if !allowed_channels.is_empty() && !allowed_channels.contains(&chat_id_str) {
-            tracing::debug!("Telegram: ignoring message in non-allowed chat {}", chat_id_str);
+            tracing::debug!(
+                "Telegram: ignoring message in non-allowed chat {}",
+                chat_id_str
+            );
             return Ok(());
         }
 
@@ -79,13 +91,13 @@ pub(crate) async fn handle_message(
                 let bot_username = telegram_state.bot_username().await;
                 let text_content = msg.text().or(msg.caption()).unwrap_or("");
 
-                let mentioned_by_username = bot_username.as_ref().is_some_and(|uname| {
-                    text_content.contains(&format!("@{}", uname))
-                });
+                let mentioned_by_username = bot_username
+                    .as_ref()
+                    .is_some_and(|uname| text_content.contains(&format!("@{}", uname)));
 
-                let replied_to_bot = msg.reply_to_message().is_some_and(|reply| {
-                    reply.from.as_ref().is_some_and(|u| u.is_bot)
-                });
+                let replied_to_bot = msg
+                    .reply_to_message()
+                    .is_some_and(|reply| reply.from.as_ref().is_some_and(|u| u.is_bot));
 
                 if !mentioned_by_username && !replied_to_bot {
                     tracing::debug!("Telegram: respond_to=mention, bot not mentioned — ignoring");
@@ -115,8 +127,11 @@ pub(crate) async fn handle_message(
                 Some(key) => key.clone(),
                 None => {
                     tracing::warn!("Telegram: voice note received but no STT API key configured");
-                    bot.send_message(msg.chat.id, "Voice transcription not configured (missing API key).")
-                        .await?;
+                    bot.send_message(
+                        msg.chat.id,
+                        "Voice transcription not configured (missing API key).",
+                    )
+                    .await?;
                     return Ok(());
                 }
             },
@@ -394,7 +409,8 @@ pub(crate) async fn handle_message(
             }
 
             // If input was voice AND TTS is enabled, also send voice note after text
-            if is_voice && voice_config.tts_enabled
+            if is_voice
+                && voice_config.tts_enabled
                 && let Some(ref oai_key) = *openai_key
             {
                 match crate::channels::voice::synthesize_speech(
@@ -518,8 +534,7 @@ fn find_closing_marker(chars: &[char], marker: &[char]) -> Option<usize> {
     if marker.len() != 2 {
         return None;
     }
-    (0..chars.len().saturating_sub(1))
-        .find(|&i| chars[i] == marker[0] && chars[i + 1] == marker[1])
+    (0..chars.len().saturating_sub(1)).find(|&i| chars[i] == marker[0] && chars[i + 1] == marker[1])
 }
 
 /// Split a message into chunks that fit Telegram's 4096 char limit
@@ -600,7 +615,10 @@ mod tests {
 
     #[test]
     fn test_escape_html() {
-        assert_eq!(escape_html("<script>alert('xss')</script>"), "&lt;script&gt;alert('xss')&lt;/script&gt;");
+        assert_eq!(
+            escape_html("<script>alert('xss')</script>"),
+            "&lt;script&gt;alert('xss')&lt;/script&gt;"
+        );
         assert_eq!(escape_html("a & b"), "a &amp; b");
     }
 

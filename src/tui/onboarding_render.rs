@@ -3,16 +3,15 @@
 //! Render functions for each step of the onboarding wizard.
 
 use super::onboarding::{
-    AuthField, BrainField, ChannelTestStatus, DiscordField, HealthStatus, OnboardingStep,
-    OnboardingWizard, SlackField, TelegramField, VoiceField, WizardMode, PROVIDERS,
-    CHANNEL_NAMES,
+    AuthField, BrainField, CHANNEL_NAMES, ChannelTestStatus, DiscordField, HealthStatus,
+    OnboardingStep, OnboardingWizard, PROVIDERS, SlackField, TelegramField, VoiceField, WizardMode,
 };
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Flex, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
-    Frame,
 };
 
 /// Main color palette (matches existing OpenCrabs theme)
@@ -681,7 +680,6 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
     focused_line
 }
 
-
 fn render_workspace(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
     let path_focused = wizard.focused_field == 0;
     let seed_focused = wizard.focused_field == 1;
@@ -904,8 +902,16 @@ fn render_channels(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
         Span::styled(
             "Continue →",
             Style::default()
-                .fg(if continue_focused { Color::White } else { Color::DarkGray })
-                .add_modifier(if continue_focused { Modifier::BOLD } else { Modifier::empty() }),
+                .fg(if continue_focused {
+                    Color::White
+                } else {
+                    Color::DarkGray
+                })
+                .add_modifier(if continue_focused {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
         ),
     ]));
     lines.push(Line::from(""));
@@ -1141,7 +1147,10 @@ fn render_discord_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
             " (already configured)".to_string(),
         )
     } else if wizard.discord_channel_id_input.is_empty() {
-        ("right-click channel > Copy Channel ID".to_string(), String::new())
+        (
+            "right-click channel > Copy Channel ID".to_string(),
+            String::new(),
+        )
     } else {
         (wizard.discord_channel_id_input.clone(), String::new())
     };
@@ -1189,7 +1198,10 @@ fn render_discord_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
             " (already configured)".to_string(),
         )
     } else if wizard.discord_allowed_list_input.is_empty() {
-        ("user ID (optional — empty = reply to all)".to_string(), String::new())
+        (
+            "user ID (optional — empty = reply to all)".to_string(),
+            String::new(),
+        )
     } else {
         (wizard.discord_allowed_list_input.clone(), String::new())
     };
@@ -1247,7 +1259,9 @@ fn render_whatsapp_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWiza
     if wizard.whatsapp_connected {
         lines.push(Line::from(Span::styled(
             "  WhatsApp connected!",
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
         )));
     } else if let Some(ref qr) = wizard.whatsapp_qr_text {
         lines.push(Line::from(Span::styled(
@@ -1533,7 +1547,10 @@ fn render_slack_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard)
             " (already configured)".to_string(),
         )
     } else if wizard.slack_allowed_list_input.is_empty() {
-        ("U12345678 (optional — empty = reply to all)".to_string(), String::new())
+        (
+            "U12345678 (optional — empty = reply to all)".to_string(),
+            String::new(),
+        )
     } else {
         (wizard.slack_allowed_list_input.clone(), String::new())
     };

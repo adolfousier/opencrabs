@@ -1,7 +1,7 @@
 //! Input handling — keyboard events, history, and approval interception.
 
-use super::*;
 use super::events::{AppMode, ToolApprovalResponse, TuiEvent};
+use super::*;
 use anyhow::Result;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -59,12 +59,19 @@ impl App {
         if self.input_history.len() > max_entries {
             // Rewrite the whole file with only the last max_entries
             let start = self.input_history.len().saturating_sub(max_entries);
-            let trimmed: Vec<&str> = self.input_history[start..].iter().map(|s| s.as_str()).collect();
+            let trimmed: Vec<&str> = self.input_history[start..]
+                .iter()
+                .map(|s| s.as_str())
+                .collect();
             let _ = std::fs::write(&path, trimmed.join("\n") + "\n");
         } else {
             // Just append
             use std::io::Write;
-            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+            {
                 let _ = writeln!(f, "{}", entry);
             }
         }
@@ -95,14 +102,20 @@ impl App {
     }
 
     /// Handle keys in chat mode
-    pub(crate) async fn handle_chat_key(&mut self, event: crossterm::event::KeyEvent) -> Result<()> {
+    pub(crate) async fn handle_chat_key(
+        &mut self,
+        event: crossterm::event::KeyEvent,
+    ) -> Result<()> {
         use super::events::keys;
         use crossterm::event::{KeyCode, KeyModifiers};
 
         // Intercept keys when /approve menu is pending
         if self.has_pending_approve_menu() {
             if keys::is_up(&event) {
-                if let Some(menu) = self.messages.iter_mut().rev()
+                if let Some(menu) = self
+                    .messages
+                    .iter_mut()
+                    .rev()
                     .find_map(|m| m.approve_menu.as_mut())
                     .filter(|m| m.state == ApproveMenuState::Pending)
                 {
@@ -110,7 +123,10 @@ impl App {
                 }
                 return Ok(());
             } else if keys::is_down(&event) {
-                if let Some(menu) = self.messages.iter_mut().rev()
+                if let Some(menu) = self
+                    .messages
+                    .iter_mut()
+                    .rev()
                     .find_map(|m| m.approve_menu.as_mut())
                     .filter(|m| m.state == ApproveMenuState::Pending)
                 {
@@ -118,7 +134,9 @@ impl App {
                 }
                 return Ok(());
             } else if keys::is_enter(&event) || keys::is_submit(&event) {
-                let selected = self.messages.iter()
+                let selected = self
+                    .messages
+                    .iter()
                     .rev()
                     .find_map(|m| m.approve_menu.as_ref())
                     .filter(|m| m.state == ApproveMenuState::Pending)
@@ -151,7 +169,10 @@ impl App {
                 };
 
                 // Mark menu as resolved
-                if let Some(menu) = self.messages.iter_mut().rev()
+                if let Some(menu) = self
+                    .messages
+                    .iter_mut()
+                    .rev()
                     .find_map(|m| m.approve_menu.as_mut())
                     .filter(|m| m.state == ApproveMenuState::Pending)
                 {
@@ -164,7 +185,9 @@ impl App {
                     1 => "auto-session",
                     _ => "auto-always",
                 };
-                if let Err(e) = crate::config::Config::write_key("agent", "approval_policy", policy_str) {
+                if let Err(e) =
+                    crate::config::Config::write_key("agent", "approval_policy", policy_str)
+                {
                     tracing::warn!("Failed to persist approval policy: {}", e);
                 }
 
@@ -172,7 +195,10 @@ impl App {
                 return Ok(());
             } else if keys::is_cancel(&event) {
                 // Cancel — dismiss menu without changing policy
-                if let Some(menu) = self.messages.iter_mut().rev()
+                if let Some(menu) = self
+                    .messages
+                    .iter_mut()
+                    .rev()
                     .find_map(|m| m.approve_menu.as_mut())
                     .filter(|m| m.state == ApproveMenuState::Pending)
                 {
@@ -213,7 +239,11 @@ impl App {
                 return Ok(());
             } else if keys::is_enter(&event) || keys::is_submit(&event) {
                 // Confirm: Yes(0)=approve once, Always(1)=approve always, No(2)=deny
-                let approval_data: Option<(Uuid, usize, mpsc::UnboundedSender<ToolApprovalResponse>)> = self
+                let approval_data: Option<(
+                    Uuid,
+                    usize,
+                    mpsc::UnboundedSender<ToolApprovalResponse>,
+                )> = self
                     .messages
                     .iter()
                     .rev()
@@ -230,9 +260,14 @@ impl App {
                             reason: Some("User denied permission".to_string()),
                         };
                         if let Err(e) = response_tx.send(response.clone()) {
-                            tracing::error!("Failed to send denial response back to agent: {:?}", e);
+                            tracing::error!(
+                                "Failed to send denial response back to agent: {:?}",
+                                e
+                            );
                         }
-                        let _ = self.event_sender().send(TuiEvent::ToolApprovalResponse(response));
+                        let _ = self
+                            .event_sender()
+                            .send(TuiEvent::ToolApprovalResponse(response));
                     } else {
                         // "Yes" (0) or "Always" (1)
                         let option = if selected == 1 {
@@ -242,7 +277,10 @@ impl App {
                         };
                         if matches!(option, ApprovalOption::AllowAlways) {
                             self.approval_auto_session = true;
-                            self.push_system_message("Auto-approve enabled for this session. Use /approve to reset.".to_string());
+                            self.push_system_message(
+                                "Auto-approve enabled for this session. Use /approve to reset."
+                                    .to_string(),
+                            );
                         }
                         let response = ToolApprovalResponse {
                             request_id,
@@ -250,25 +288,32 @@ impl App {
                             reason: None,
                         };
                         if let Err(e) = response_tx.send(response.clone()) {
-                            tracing::error!("Failed to send approval response back to agent: {:?}", e);
+                            tracing::error!(
+                                "Failed to send approval response back to agent: {:?}",
+                                e
+                            );
                         }
-                        let _ = self.event_sender().send(TuiEvent::ToolApprovalResponse(response));
+                        let _ = self
+                            .event_sender()
+                            .send(TuiEvent::ToolApprovalResponse(response));
                     }
                     // Remove resolved approval messages to prevent channel accumulation
                     self.messages.retain(|m| {
-                        m.approval.as_ref().is_none_or(|a| a.request_id != request_id)
+                        m.approval
+                            .as_ref()
+                            .is_none_or(|a| a.request_id != request_id)
                     });
                 }
                 return Ok(());
             } else if keys::is_deny(&event) || keys::is_cancel(&event) {
                 // D/Esc shortcut — deny directly
-                let approval_data: Option<(Uuid, mpsc::UnboundedSender<ToolApprovalResponse>)> = self
-                    .messages
-                    .iter()
-                    .rev()
-                    .find_map(|m| m.approval.as_ref())
-                    .filter(|a| a.state == ApprovalState::Pending)
-                    .map(|a| (a.request_id, a.response_tx.clone()));
+                let approval_data: Option<(Uuid, mpsc::UnboundedSender<ToolApprovalResponse>)> =
+                    self.messages
+                        .iter()
+                        .rev()
+                        .find_map(|m| m.approval.as_ref())
+                        .filter(|a| a.state == ApprovalState::Pending)
+                        .map(|a| (a.request_id, a.response_tx.clone()));
 
                 if let Some((request_id, response_tx)) = approval_data {
                     let response = ToolApprovalResponse {
@@ -279,10 +324,14 @@ impl App {
                     if let Err(e) = response_tx.send(response.clone()) {
                         tracing::error!("Failed to send denial response back to agent: {:?}", e);
                     }
-                    let _ = self.event_sender().send(TuiEvent::ToolApprovalResponse(response));
+                    let _ = self
+                        .event_sender()
+                        .send(TuiEvent::ToolApprovalResponse(response));
                     // Remove resolved approval message
                     self.messages.retain(|m| {
-                        m.approval.as_ref().is_none_or(|a| a.request_id != request_id)
+                        m.approval
+                            .as_ref()
+                            .is_none_or(|a| a.request_id != request_id)
                     });
                 }
                 return Ok(());
@@ -302,7 +351,9 @@ impl App {
                 // Allow Ctrl+O during approval so user can collapse tool groups to see the approval
                 let target = if let Some(ref group) = self.active_tool_group {
                     !group.expanded
-                } else if let Some(msg) = self.messages.iter().rev().find(|m| m.tool_group.is_some()) {
+                } else if let Some(msg) =
+                    self.messages.iter().rev().find(|m| m.tool_group.is_some())
+                {
                     !msg.tool_group.as_ref().expect("checked").expanded
                 } else {
                     true
@@ -325,7 +376,10 @@ impl App {
         // Options: Approve(0), Reject(1), Request Changes(2), View Plan(3)
         if self.has_pending_plan_approval() {
             if keys::is_left(&event) || keys::is_up(&event) {
-                if let Some(pa) = self.messages.iter_mut().rev()
+                if let Some(pa) = self
+                    .messages
+                    .iter_mut()
+                    .rev()
                     .find_map(|m| m.plan_approval.as_mut())
                     .filter(|p| p.state == PlanApprovalState::Pending)
                 {
@@ -333,7 +387,10 @@ impl App {
                 }
                 return Ok(());
             } else if keys::is_right(&event) || keys::is_down(&event) {
-                if let Some(pa) = self.messages.iter_mut().rev()
+                if let Some(pa) = self
+                    .messages
+                    .iter_mut()
+                    .rev()
                     .find_map(|m| m.plan_approval.as_mut())
                     .filter(|p| p.state == PlanApprovalState::Pending)
                 {
@@ -341,7 +398,9 @@ impl App {
                 }
                 return Ok(());
             } else if keys::is_enter(&event) || keys::is_submit(&event) {
-                let selected = self.messages.iter()
+                let selected = self
+                    .messages
+                    .iter()
                     .rev()
                     .find_map(|m| m.plan_approval.as_ref())
                     .filter(|p| p.state == PlanApprovalState::Pending)
@@ -351,7 +410,10 @@ impl App {
                     match selected {
                         0 => {
                             // Approve — same as Ctrl+A
-                            if let Some(pa) = self.messages.iter_mut().rev()
+                            if let Some(pa) = self
+                                .messages
+                                .iter_mut()
+                                .rev()
                                 .find_map(|m| m.plan_approval.as_mut())
                                 .filter(|p| p.state == PlanApprovalState::Pending)
                             {
@@ -367,7 +429,10 @@ impl App {
                         }
                         1 => {
                             // Reject — same as Ctrl+R
-                            if let Some(pa) = self.messages.iter_mut().rev()
+                            if let Some(pa) = self
+                                .messages
+                                .iter_mut()
+                                .rev()
                                 .find_map(|m| m.plan_approval.as_mut())
                                 .filter(|p| p.state == PlanApprovalState::Pending)
                             {
@@ -381,7 +446,10 @@ impl App {
                         }
                         2 => {
                             // Request changes — same as Ctrl+I
-                            if let Some(pa) = self.messages.iter_mut().rev()
+                            if let Some(pa) = self
+                                .messages
+                                .iter_mut()
+                                .rev()
                                 .find_map(|m| m.plan_approval.as_mut())
                                 .filter(|p| p.state == PlanApprovalState::Pending)
                             {
@@ -392,8 +460,15 @@ impl App {
                                     "Current plan '{}' has {} tasks:\n{}",
                                     plan.title,
                                     plan.tasks.len(),
-                                    plan.tasks.iter().enumerate()
-                                        .map(|(i, t)| format!("  {}. {} ({})", i + 1, t.title, t.task_type))
+                                    plan.tasks
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(i, t)| format!(
+                                            "  {}. {} ({})",
+                                            i + 1,
+                                            t.title,
+                                            t.task_type
+                                        ))
                                         .collect::<Vec<_>>()
                                         .join("\n")
                                 );
@@ -417,7 +492,10 @@ impl App {
                 return Ok(());
             } else if keys::is_view_details(&event) {
                 // V key — toggle task list
-                if let Some(pa) = self.messages.iter_mut().rev()
+                if let Some(pa) = self
+                    .messages
+                    .iter_mut()
+                    .rev()
                     .find_map(|m| m.plan_approval.as_mut())
                     .filter(|p| p.state == PlanApprovalState::Pending)
                 {
@@ -442,10 +520,7 @@ impl App {
             } else if keys::is_enter(&event) || keys::is_submit(&event) {
                 // Select the highlighted command and execute it
                 if let Some(&cmd_idx) = self.slash_filtered.get(self.slash_selected_index) {
-                    let cmd_name = self
-                        .slash_command_name(cmd_idx)
-                        .unwrap_or("")
-                        .to_string();
+                    let cmd_name = self.slash_command_name(cmd_idx).unwrap_or("").to_string();
                     self.input_buffer.clear();
                     self.cursor_position = 0;
                     self.slash_suggestions_active = false;
@@ -469,7 +544,9 @@ impl App {
             // Alt+Enter or Shift+Enter = insert newline for multi-line input
             self.input_buffer.insert(self.cursor_position, '\n');
             self.cursor_position += 1;
-        } else if keys::is_submit(&event) && (!self.input_buffer.trim().is_empty() || !self.attachments.is_empty()) {
+        } else if keys::is_submit(&event)
+            && (!self.input_buffer.trim().is_empty() || !self.attachments.is_empty())
+        {
             // Check for slash commands before sending to LLM
             let content = self.input_buffer.clone();
             if self.handle_slash_command(content.trim()).await {
@@ -484,11 +561,12 @@ impl App {
             let mut all_attachments = std::mem::take(&mut self.attachments);
             all_attachments.extend(typed_attachments);
 
-            let final_content = if !all_attachments.is_empty() && clean_text.trim() != content.trim() {
-                clean_text
-            } else {
-                content.clone()
-            };
+            let final_content =
+                if !all_attachments.is_empty() && clean_text.trim() != content.trim() {
+                    clean_text
+                } else {
+                    content.clone()
+                };
 
             // Enter = send message
             // Save to input history (dedup consecutive) and persist to disk
@@ -530,34 +608,38 @@ impl App {
                         self.processing_started_at = None;
                         // Preserve partial streaming response as a message before clearing
                         if let Some(text) = self.streaming_response.take()
-                            && !text.trim().is_empty() {
-                                self.messages.push(DisplayMessage {
-                                    id: Uuid::new_v4(),
-                                    role: "assistant".to_string(),
-                                    content: text,
-                                    timestamp: chrono::Utc::now(),
-                                    token_count: None,
-                                    cost: None,
-                                    approval: None,
-                                    approve_menu: None,
-                                    details: None,
-                                    expanded: false,
-                                    tool_group: None,
-                                    plan_approval: None,
-                                });
+                            && !text.trim().is_empty()
+                        {
+                            self.messages.push(DisplayMessage {
+                                id: Uuid::new_v4(),
+                                role: "assistant".to_string(),
+                                content: text,
+                                timestamp: chrono::Utc::now(),
+                                token_count: None,
+                                cost: None,
+                                approval: None,
+                                approve_menu: None,
+                                details: None,
+                                expanded: false,
+                                tool_group: None,
+                                plan_approval: None,
+                            });
                         }
                         self.streaming_reasoning = None;
                         self.cancel_token = None;
                         self.escape_pending_at = None;
                         // Deny any pending approvals so agent callbacks don't hang
                         for msg in &mut self.messages {
-                            if let Some(ref mut approval) = msg.approval && approval.state == ApprovalState::Pending {
+                            if let Some(ref mut approval) = msg.approval
+                                && approval.state == ApprovalState::Pending
+                            {
                                 let _ = approval.response_tx.send(ToolApprovalResponse {
                                     request_id: approval.request_id,
                                     approved: false,
                                     reason: Some("Operation cancelled".to_string()),
                                 });
-                                approval.state = ApprovalState::Denied("Operation cancelled".to_string());
+                                approval.state =
+                                    ApprovalState::Denied("Operation cancelled".to_string());
                             }
                         }
                         // Finalize any active tool group
@@ -566,7 +648,11 @@ impl App {
                             self.messages.push(DisplayMessage {
                                 id: Uuid::new_v4(),
                                 role: "tool_group".to_string(),
-                                content: format!("{} tool call{}", count, if count == 1 { "" } else { "s" }),
+                                content: format!(
+                                    "{} tool call{}",
+                                    count,
+                                    if count == 1 { "" } else { "s" }
+                                ),
                                 timestamp: chrono::Utc::now(),
                                 token_count: None,
                                 cost: None,
@@ -581,13 +667,11 @@ impl App {
                         self.push_system_message("Operation cancelled.".to_string());
                     } else {
                         self.escape_pending_at = Some(std::time::Instant::now());
-                        self.error_message =
-                            Some("Press Esc again to abort".to_string());
+                        self.error_message = Some("Press Esc again to abort".to_string());
                     }
                 } else {
                     self.escape_pending_at = Some(std::time::Instant::now());
-                    self.error_message =
-                        Some("Press Esc again to abort".to_string());
+                    self.error_message = Some("Press Esc again to abort".to_string());
                 }
             } else if self.input_buffer.is_empty() {
                 // Nothing to clear, just dismiss error
@@ -605,14 +689,12 @@ impl App {
                 } else {
                     // Expired — treat as first Escape again
                     self.escape_pending_at = Some(std::time::Instant::now());
-                    self.error_message =
-                        Some("Press Esc again to clear input".to_string());
+                    self.error_message = Some("Press Esc again to clear input".to_string());
                 }
             } else {
                 // First Escape — show confirmation hint
                 self.escape_pending_at = Some(std::time::Instant::now());
-                self.error_message =
-                    Some("Press Esc again to clear input".to_string());
+                self.error_message = Some("Press Esc again to clear input".to_string());
             }
         } else if event.code == KeyCode::Char('o') && event.modifiers == KeyModifiers::CONTROL {
             if self.hidden_older_messages > 0 && self.display_token_count < 300_000 {
@@ -623,9 +705,13 @@ impl App {
                 // Determine target state from the active group or most recent group
                 let target = if let Some(ref group) = self.active_tool_group {
                     !group.expanded
-                } else if let Some(msg) = self.messages.iter().rev()
-                    .find(|m| m.tool_group.is_some()) {
-                    !msg.tool_group.as_ref().expect("tool_group checked is_some above").expanded
+                } else if let Some(msg) =
+                    self.messages.iter().rev().find(|m| m.tool_group.is_some())
+                {
+                    !msg.tool_group
+                        .as_ref()
+                        .expect("tool_group checked is_some above")
+                        .expanded
                 } else {
                     true
                 };
@@ -653,7 +739,10 @@ impl App {
         } else if event.code == KeyCode::Backspace && event.modifiers.contains(KeyModifiers::ALT) {
             // Alt+Backspace — delete last word
             self.delete_last_word();
-        } else if keys::is_up(&event) && !self.slash_suggestions_active && !self.input_history.is_empty() {
+        } else if keys::is_up(&event)
+            && !self.slash_suggestions_active
+            && !self.input_history.is_empty()
+        {
             // Arrow Up — browse input history (older)
             match self.input_history_index {
                 None => {
@@ -672,7 +761,10 @@ impl App {
                 }
                 _ => {} // already at oldest
             }
-        } else if keys::is_down(&event) && !self.slash_suggestions_active && self.input_history_index.is_some() {
+        } else if keys::is_down(&event)
+            && !self.slash_suggestions_active
+            && self.input_history_index.is_some()
+        {
             // Arrow Down — browse input history (newer)
             let idx = self.input_history_index.expect("checked is_some");
             if idx + 1 < self.input_history.len() {
@@ -692,7 +784,9 @@ impl App {
                 KeyCode::Char('@') => {
                     self.open_file_picker().await?;
                 }
-                KeyCode::Char(c) if event.modifiers.is_empty() || event.modifiers == KeyModifiers::SHIFT => {
+                KeyCode::Char(c)
+                    if event.modifiers.is_empty() || event.modifiers == KeyModifiers::SHIFT =>
+                {
                     self.input_buffer.insert(self.cursor_position, c);
                     self.cursor_position += c.len_utf8();
                 }
@@ -756,7 +850,10 @@ impl App {
     }
 
     /// Handle keys in sessions mode
-    pub(crate) async fn handle_sessions_key(&mut self, event: crossterm::event::KeyEvent) -> Result<()> {
+    pub(crate) async fn handle_sessions_key(
+        &mut self,
+        event: crossterm::event::KeyEvent,
+    ) -> Result<()> {
         use super::events::keys;
         use crossterm::event::KeyCode;
 
@@ -777,13 +874,14 @@ impl App {
                             .await?;
                         // Update current session if it's the one being renamed
                         if let Some(ref mut current) = self.current_session
-                            && current.id == session_id {
-                                current.title = if self.session_rename_buffer.trim().is_empty() {
-                                    None
-                                } else {
-                                    Some(self.session_rename_buffer.trim().to_string())
-                                };
-                            }
+                            && current.id == session_id
+                        {
+                            current.title = if self.session_rename_buffer.trim().is_empty() {
+                                None
+                            } else {
+                                Some(self.session_rename_buffer.trim().to_string())
+                            };
+                        }
                         self.load_sessions().await?;
                     }
                     self.session_renaming = false;
@@ -854,7 +952,10 @@ impl App {
     }
 
     /// Handle keys in plan mode
-    pub(crate) async fn handle_plan_key(&mut self, event: crossterm::event::KeyEvent) -> Result<()> {
+    pub(crate) async fn handle_plan_key(
+        &mut self,
+        event: crossterm::event::KeyEvent,
+    ) -> Result<()> {
         use super::events::keys;
         use crossterm::event::{KeyCode, KeyModifiers};
 

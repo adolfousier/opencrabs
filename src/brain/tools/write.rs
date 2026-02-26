@@ -2,7 +2,7 @@
 //!
 //! Allows writing content to files on the filesystem.
 
-use super::error::{validate_path_safety, Result, ToolError};
+use super::error::{Result, ToolError, validate_path_safety};
 use super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -96,28 +96,29 @@ impl Tool for WriteTool {
 
         // Create parent directories if requested (before path validation)
         if input.create_dirs
-            && let Some(parent) = path.parent() {
-                // Validate parent path is within working directory
-                let canonical_wd = context.working_directory.canonicalize().map_err(|e| {
-                    ToolError::Internal(format!("Failed to canonicalize working directory: {}", e))
+            && let Some(parent) = path.parent()
+        {
+            // Validate parent path is within working directory
+            let canonical_wd = context.working_directory.canonicalize().map_err(|e| {
+                ToolError::Internal(format!("Failed to canonicalize working directory: {}", e))
+            })?;
+
+            // If parent exists, check it's within bounds
+            if parent.exists() {
+                let canonical_parent = parent.canonicalize().map_err(|e| {
+                    ToolError::InvalidInput(format!("Failed to resolve parent path: {}", e))
                 })?;
 
-                // If parent exists, check it's within bounds
-                if parent.exists() {
-                    let canonical_parent = parent.canonicalize().map_err(|e| {
-                        ToolError::InvalidInput(format!("Failed to resolve parent path: {}", e))
-                    })?;
-
-                    if !canonical_parent.starts_with(&canonical_wd) {
-                        return Ok(ToolResult::error(format!(
-                            "Access denied: Path '{}' is outside the working directory",
-                            input.path
-                        )));
-                    }
+                if !canonical_parent.starts_with(&canonical_wd) {
+                    return Ok(ToolResult::error(format!(
+                        "Access denied: Path '{}' is outside the working directory",
+                        input.path
+                    )));
                 }
-
-                fs::create_dir_all(parent).await.map_err(ToolError::Io)?;
             }
+
+            fs::create_dir_all(parent).await.map_err(ToolError::Io)?;
+        }
 
         // Validate path is safe and within working directory (prevents path traversal)
         let path = match validate_path_safety(&input.path, &context.working_directory) {
@@ -145,12 +146,13 @@ impl Tool for WriteTool {
 
         // Check if parent directory exists (safety check after validation)
         if let Some(parent) = path.parent()
-            && !parent.exists() {
-                return Ok(ToolResult::error(format!(
-                    "Parent directory does not exist: {}. Use create_dirs: true to create it.",
-                    parent.display()
-                )));
-            }
+            && !parent.exists()
+        {
+            return Ok(ToolResult::error(format!(
+                "Parent directory does not exist: {}. Use create_dirs: true to create it.",
+                parent.display()
+            )));
+        }
 
         // Write the file
         fs::write(&path, &input.content)

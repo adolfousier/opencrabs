@@ -9,7 +9,7 @@
 
 #![allow(clippy::all)]
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use qmd::Store;
 use tempfile::TempDir;
 
@@ -118,9 +118,7 @@ fn bench_hash_skip(c: &mut Criterion) {
     c.bench_function("hash_skip", |b| {
         b.iter(|| {
             let hash = Store::hash_content(body);
-            let found = store
-                .find_active_document("memory", "existing.md")
-                .unwrap();
+            let found = store.find_active_document("memory", "existing.md").unwrap();
             black_box(match found {
                 Some((_id, existing_hash, _title)) if existing_hash == hash => true,
                 _ => false,
@@ -186,36 +184,32 @@ fn bench_bulk_index(c: &mut Criterion) {
     let mut group = c.benchmark_group("bulk_index");
 
     for &count in &[10, 50] {
-        group.bench_with_input(
-            BenchmarkId::from_parameter(count),
-            &count,
-            |b, &n| {
-                b.iter(|| {
-                    let dir = TempDir::new().unwrap();
-                    let db = dir.path().join("bench.db");
-                    let store = Store::open(&db).unwrap();
-                    let now = "2026-01-01T00:00:00";
+        group.bench_with_input(BenchmarkId::from_parameter(count), &count, |b, &n| {
+            b.iter(|| {
+                let dir = TempDir::new().unwrap();
+                let db = dir.path().join("bench.db");
+                let store = Store::open(&db).unwrap();
+                let now = "2026-01-01T00:00:00";
 
-                    for i in 0..n {
-                        let body = if i < SAMPLE_ENTRIES.len() {
-                            SAMPLE_ENTRIES[i].to_string()
-                        } else {
-                            format!("# Entry {i}\n\nBenchmark content {i}.")
-                        };
-                        let hash = Store::hash_content(&body);
-                        let title = Store::extract_title(&body);
-                        let path = format!("entry-{i}.md");
+                for i in 0..n {
+                    let body = if i < SAMPLE_ENTRIES.len() {
+                        SAMPLE_ENTRIES[i].to_string()
+                    } else {
+                        format!("# Entry {i}\n\nBenchmark content {i}.")
+                    };
+                    let hash = Store::hash_content(&body);
+                    let title = Store::extract_title(&body);
+                    let path = format!("entry-{i}.md");
 
-                        store.insert_content(&hash, &body, now).unwrap();
-                        store
-                            .insert_document("memory", &path, &title, &hash, now, now)
-                            .unwrap();
-                    }
+                    store.insert_content(&hash, &body, now).unwrap();
+                    store
+                        .insert_document("memory", &path, &title, &hash, now, now)
+                        .unwrap();
+                }
 
-                    black_box(&store);
-                });
-            },
-        );
+                black_box(&store);
+            });
+        });
     }
 
     group.finish();
@@ -293,11 +287,7 @@ fn bench_search_vec(c: &mut Criterion) {
                 query[0] = 0.9;
                 query[1] = 0.5;
                 b.iter(|| {
-                    black_box(
-                        store
-                            .search_vec(&query, 5, Some("memory"))
-                            .unwrap(),
-                    );
+                    black_box(store.search_vec(&query, 5, Some("memory")).unwrap());
                 });
             },
         );

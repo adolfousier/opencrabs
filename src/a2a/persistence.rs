@@ -13,7 +13,11 @@ pub async fn upsert_task(pool: &SqlitePool, task: &Task) {
     let data = match serde_json::to_string(task) {
         Ok(d) => d,
         Err(e) => {
-            tracing::error!("A2A persistence: failed to serialize task {}: {}", task.id, e);
+            tracing::error!(
+                "A2A persistence: failed to serialize task {}: {}",
+                task.id,
+                e
+            );
             return;
         }
     };

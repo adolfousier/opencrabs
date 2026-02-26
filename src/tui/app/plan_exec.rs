@@ -108,7 +108,9 @@ impl App {
                     if self.current_plan.is_none() {
                         let plan_title = plan.title.clone();
                         let task_count = plan.tasks.len();
-                        let task_summaries: Vec<String> = plan.tasks.iter()
+                        let task_summaries: Vec<String> = plan
+                            .tasks
+                            .iter()
                             .map(|t| format!("{} ({})", t.title, t.task_type))
                             .collect();
                         self.current_plan = Some(plan);
@@ -184,7 +186,9 @@ impl App {
                             if self.current_plan.is_none() {
                                 let plan_title = plan.title.clone();
                                 let task_count = plan.tasks.len();
-                                let task_summaries: Vec<String> = plan.tasks.iter()
+                                let task_summaries: Vec<String> = plan
+                                    .tasks
+                                    .iter()
                                     .map(|t| format!("{} ({})", t.title, t.task_type))
                                     .collect();
                                 self.current_plan = Some(plan);
@@ -458,7 +462,10 @@ impl App {
             self.messages.push(completion_msg);
         } else if let Some(message) = task_message {
             // Send task message to agent
-            tracing::info!("Sending plan task to agent (is_processing={})", self.is_processing);
+            tracing::info!(
+                "Sending plan task to agent (is_processing={})",
+                self.is_processing
+            );
             self.send_message(message).await?;
             tracing::info!("Plan task sent (is_processing={})", self.is_processing);
         }

@@ -81,7 +81,6 @@ pub enum Commands {
         #[command(subcommand)]
         operation: LogCommands,
     },
-
 }
 
 #[derive(Subcommand, Debug)]
@@ -118,7 +117,6 @@ pub enum DbCommands {
     },
 }
 
-
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum OutputFormat {
     Text,
@@ -140,19 +138,20 @@ pub async fn run() -> Result<()> {
 
     // Auto-generate config.toml if API keys exist in env but no config file yet.
     // This prevents the onboarding wizard from triggering when .env is already set up.
-    let config_path = dirs::config_dir()
-        .map(|d| d.join("opencrabs").join("config.toml"));
+    let config_path = dirs::config_dir().map(|d| d.join("opencrabs").join("config.toml"));
     if let Some(ref path) = config_path
-        && !path.exists() && config.has_any_api_key() {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).ok();
-            }
-            if let Err(e) = config.save(path) {
-                tracing::warn!("Failed to auto-generate config.toml: {}", e);
-            } else {
-                tracing::info!("Auto-generated config.toml from environment");
-            }
+        && !path.exists()
+        && config.has_any_api_key()
+    {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).ok();
         }
+        if let Err(e) = config.save(path) {
+            tracing::warn!("Failed to auto-generate config.toml: {}", e);
+        } else {
+            tracing::info!("Auto-generated config.toml from environment");
+        }
+    }
 
     match cli.command {
         None | Some(Commands::Chat { .. }) => {
@@ -168,7 +167,9 @@ pub async fn run() -> Result<()> {
             ui::cmd_chat(&config, None, true).await
         }
         Some(Commands::Init { force }) => commands::cmd_init(&config, force).await,
-        Some(Commands::Config { show_secrets }) => commands::cmd_config(&config, show_secrets).await,
+        Some(Commands::Config { show_secrets }) => {
+            commands::cmd_config(&config, show_secrets).await
+        }
         Some(Commands::Db { operation }) => commands::cmd_db(&config, operation).await,
         Some(Commands::Logs { operation }) => commands::cmd_logs(operation).await,
         Some(Commands::Run {

@@ -146,15 +146,27 @@ impl ConfigTool {
     fn write_config(&self, input: &Value) -> Result<ToolResult> {
         let section = match input.get("section").and_then(|v| v.as_str()) {
             Some(s) => s,
-            None => return Ok(ToolResult::error("'section' is required for write_config".into())),
+            None => {
+                return Ok(ToolResult::error(
+                    "'section' is required for write_config".into(),
+                ));
+            }
         };
         let key = match input.get("key").and_then(|v| v.as_str()) {
             Some(k) => k,
-            None => return Ok(ToolResult::error("'key' is required for write_config".into())),
+            None => {
+                return Ok(ToolResult::error(
+                    "'key' is required for write_config".into(),
+                ));
+            }
         };
         let value = match input.get("value").and_then(|v| v.as_str()) {
             Some(v) => v,
-            None => return Ok(ToolResult::error("'value' is required for write_config".into())),
+            None => {
+                return Ok(ToolResult::error(
+                    "'value' is required for write_config".into(),
+                ));
+            }
         };
 
         match crate::config::Config::write_key(section, key, value) {
@@ -189,7 +201,11 @@ impl ConfigTool {
     fn add_command(&self, input: &Value) -> Result<ToolResult> {
         let name = match input.get("command_name").and_then(|v| v.as_str()) {
             Some(n) => n,
-            None => return Ok(ToolResult::error("'command_name' is required for add_command".into())),
+            None => {
+                return Ok(ToolResult::error(
+                    "'command_name' is required for add_command".into(),
+                ));
+            }
         };
         let description = input
             .get("command_description")
@@ -197,7 +213,11 @@ impl ConfigTool {
             .unwrap_or("User command");
         let prompt = match input.get("command_prompt").and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => return Ok(ToolResult::error("'command_prompt' is required for add_command".into())),
+            None => {
+                return Ok(ToolResult::error(
+                    "'command_prompt' is required for add_command".into(),
+                ));
+            }
         };
         let action = input
             .get("command_action")
@@ -235,7 +255,7 @@ impl ConfigTool {
             None => {
                 return Ok(ToolResult::error(
                     "'command_name' is required for remove_command".into(),
-                ))
+                ));
             }
         };
 
@@ -249,7 +269,10 @@ impl ConfigTool {
             Ok(false) => Ok(ToolResult::success(format!(
                 "Command {name} not found in commands.toml"
             ))),
-            Err(e) => Ok(ToolResult::error(format!("Failed to remove command: {}", e))),
+            Err(e) => Ok(ToolResult::error(format!(
+                "Failed to remove command: {}",
+                e
+            ))),
         }
     }
 
@@ -272,7 +295,7 @@ impl ConfigTool {
             None => {
                 return Ok(ToolResult::error(
                     "'path' is required for set_working_directory".into(),
-                ))
+                ));
             }
         };
 
@@ -295,12 +318,7 @@ impl ConfigTool {
         // Canonicalize to resolve symlinks and relative components
         let canonical = match path.canonicalize() {
             Ok(p) => p,
-            Err(e) => {
-                return Ok(ToolResult::error(format!(
-                    "Failed to resolve path: {}",
-                    e
-                )))
-            }
+            Err(e) => return Ok(ToolResult::error(format!("Failed to resolve path: {}", e))),
         };
 
         // Update runtime working directory via shared handle

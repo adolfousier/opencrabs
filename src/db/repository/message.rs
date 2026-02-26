@@ -163,9 +163,9 @@ impl MessageRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::Database;
     use crate::db::models::Session;
     use crate::db::repository::SessionRepository;
-    use crate::db::Database;
 
     #[tokio::test]
     async fn test_message_crud() {

@@ -73,7 +73,10 @@ impl Tool for RebuildTool {
                     || trimmed.starts_with("-->"))
                     && let Some(ref cb) = cb
                 {
-                    cb(ProgressEvent::IntermediateText { text: line, reasoning: None });
+                    cb(ProgressEvent::IntermediateText {
+                        text: line,
+                        reasoning: None,
+                    });
                 }
             })
             .await;

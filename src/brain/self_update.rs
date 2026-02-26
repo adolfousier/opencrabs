@@ -50,10 +50,7 @@ impl SelfUpdater {
 
         loop {
             if search_dir.join("Cargo.toml").exists() {
-                let binary_path = search_dir
-                    .join("target")
-                    .join("release")
-                    .join("opencrabs");
+                let binary_path = search_dir.join("target").join("release").join("opencrabs");
                 return Ok(Self {
                     project_root: search_dir,
                     binary_path,
@@ -78,11 +75,17 @@ impl SelfUpdater {
             // Clone the repo
             tracing::info!("Cloning OpenCrabs source to {}", source_dir.display());
             let output = std::process::Command::new("git")
-                .args(["clone", "--depth", "1", REPO_URL, &source_dir.to_string_lossy()])
+                .args([
+                    "clone",
+                    "--depth",
+                    "1",
+                    REPO_URL,
+                    &source_dir.to_string_lossy(),
+                ])
                 .output()
-                .map_err(|e| anyhow::anyhow!(
-                    "Failed to clone source (is git installed?): {}", e
-                ))?;
+                .map_err(|e| {
+                    anyhow::anyhow!("Failed to clone source (is git installed?): {}", e)
+                })?;
 
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
@@ -90,10 +93,7 @@ impl SelfUpdater {
             }
         }
 
-        let binary_path = source_dir
-            .join("target")
-            .join("release")
-            .join("opencrabs");
+        let binary_path = source_dir.join("target").join("release").join("opencrabs");
 
         Ok(Self {
             project_root: source_dir,
@@ -224,10 +224,7 @@ mod tests {
             PathBuf::from("/tmp/project"),
             PathBuf::from("/tmp/project/target/release/opencrabs"),
         );
-        assert_eq!(
-            updater.project_root(),
-            std::path::Path::new("/tmp/project")
-        );
+        assert_eq!(updater.project_root(), std::path::Path::new("/tmp/project"));
         assert_eq!(
             updater.binary_path(),
             std::path::Path::new("/tmp/project/target/release/opencrabs")

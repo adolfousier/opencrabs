@@ -3,8 +3,8 @@
 use anyhow::{Context, Result};
 use std::sync::Arc;
 
-use crate::brain::prompt_builder::RuntimeInfo;
 use crate::brain::BrainLoader;
+use crate::brain::prompt_builder::RuntimeInfo;
 
 use super::{DbCommands, LogCommands, OutputFormat};
 
@@ -223,7 +223,6 @@ pub(crate) async fn cmd_run(
     format: OutputFormat,
 ) -> Result<()> {
     use crate::{
-        db::Database,
         brain::{
             agent::AgentService,
             tools::{
@@ -231,12 +230,13 @@ pub(crate) async fn cmd_run(
                 config_tool::ConfigTool, context::ContextTool, doc_parser::DocParserTool,
                 edit::EditTool, exa_search::ExaSearchTool, glob::GlobTool, grep::GrepTool,
                 http::HttpClientTool, ls::LsTool, memory_search::MemorySearchTool,
-                notebook::NotebookEditTool, plan_tool::PlanTool,
-                read::ReadTool, registry::ToolRegistry, session_search::SessionSearchTool,
-                slash_command::SlashCommandTool,
-                task::TaskTool, web_search::WebSearchTool, write::WriteTool,
+                notebook::NotebookEditTool, plan_tool::PlanTool, read::ReadTool,
+                registry::ToolRegistry, session_search::SessionSearchTool,
+                slash_command::SlashCommandTool, task::TaskTool, web_search::WebSearchTool,
+                write::WriteTool,
             },
         },
+        db::Database,
         services::{ServiceContext, SessionService},
     };
 
@@ -278,13 +278,20 @@ pub(crate) async fn cmd_run(
     // Slash command invocation (agent can call any slash command)
     tool_registry.register(Arc::new(SlashCommandTool));
     // EXA search: always available (free via MCP), uses direct API if key is set
-    let exa_key = config.providers.web_search.as_ref()
+    let exa_key = config
+        .providers
+        .web_search
+        .as_ref()
         .and_then(|ws| ws.exa.as_ref())
         .and_then(|p| p.api_key.clone())
         .filter(|k| !k.is_empty());
     tool_registry.register(Arc::new(ExaSearchTool::new(exa_key)));
     // Brave search: requires enabled = true in config.toml AND API key in keys.toml
-    if let Some(brave_cfg) = config.providers.web_search.as_ref().and_then(|ws| ws.brave.as_ref())
+    if let Some(brave_cfg) = config
+        .providers
+        .web_search
+        .as_ref()
+        .and_then(|ws| ws.brave.as_ref())
         && brave_cfg.enabled
         && let Some(brave_key) = brave_cfg.api_key.clone()
     {
@@ -304,15 +311,13 @@ pub(crate) async fn cmd_run(
                 .to_string(),
         ),
     };
-    let system_brain =
-        brain_loader.build_system_brain(Some(&runtime_info), None);
+    let system_brain = brain_loader.build_system_brain(Some(&runtime_info), None);
 
     // Create service context and agent service
     let service_context = ServiceContext::new(db.pool().clone());
     let agent_service = AgentService::new(provider.clone(), service_context.clone())
         .with_tool_registry(Arc::new(tool_registry))
-        .with_system_brain(system_brain)
-;
+        .with_system_brain(system_brain);
 
     // Create or get session
     let session_service = SessionService::new(service_context);
@@ -394,10 +399,11 @@ pub(crate) async fn cmd_logs(operation: LogCommands) -> Result<()> {
                         if let Ok(metadata) = entry.metadata() {
                             total_size += metadata.len();
                             if let Ok(modified) = metadata.modified()
-                                && modified > newest_time {
-                                    newest_time = modified;
-                                    newest_file = Some(path);
-                                }
+                                && modified > newest_time
+                            {
+                                newest_time = modified;
+                                newest_file = Some(path);
+                            }
                         }
                     }
                 }

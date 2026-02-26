@@ -66,10 +66,18 @@ pub enum TuiEvent {
     ToolApprovalResponse(ToolApprovalResponse),
 
     /// A tool call has started executing
-    ToolCallStarted { tool_name: String, tool_input: Value },
+    ToolCallStarted {
+        tool_name: String,
+        tool_input: Value,
+    },
 
     /// A tool call has completed
-    ToolCallCompleted { tool_name: String, tool_input: Value, success: bool, summary: String },
+    ToolCallCompleted {
+        tool_name: String,
+        tool_input: Value,
+        success: bool,
+        summary: String,
+    },
 
     /// Intermediate text the agent sent between tool call batches
     IntermediateText(String, Option<String>),
@@ -103,7 +111,11 @@ pub enum TuiEvent {
     SystemMessage(String),
 
     /// Channel test message result during onboarding
-    ChannelTestResult { channel: String, success: bool, error: Option<String> },
+    ChannelTestResult {
+        channel: String,
+        success: bool,
+        error: Option<String>,
+    },
 
     /// Sudo password requested by bash tool
     SudoPasswordRequested(SudoPasswordRequest),
@@ -303,9 +315,7 @@ impl EventHandler {
                         crossterm::event::Event::FocusGained => {
                             tx.send(TuiEvent::FocusGained).is_err()
                         }
-                        crossterm::event::Event::FocusLost => {
-                            tx.send(TuiEvent::FocusLost).is_err()
-                        }
+                        crossterm::event::Event::FocusLost => tx.send(TuiEvent::FocusLost).is_err(),
                     };
                     if should_break {
                         break;
@@ -365,8 +375,7 @@ pub mod keys {
     /// Also accepts Ctrl+Enter for backwards compatibility
     pub fn is_submit(event: &KeyEvent) -> bool {
         event.code == KeyCode::Enter
-            && (event.modifiers.is_empty()
-                || event.modifiers.contains(KeyModifiers::CONTROL))
+            && (event.modifiers.is_empty() || event.modifiers.contains(KeyModifiers::CONTROL))
     }
 
     /// Alt+Enter or Shift+Enter - Insert newline

@@ -3,8 +3,8 @@
 //! Processes incoming WhatsApp messages: text + images, allowlist enforcement,
 //! session routing (owner shares TUI session, others get per-phone sessions).
 
-use crate::config::VoiceConfig;
 use crate::brain::agent::AgentService;
+use crate::config::VoiceConfig;
 use crate::services::SessionService;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -107,10 +107,7 @@ async fn download_image(msg: &Message, client: &Client) -> Option<String> {
     let msg = unwrap_message(msg);
     let img = msg.image_message.as_ref()?;
 
-    let mime = img
-        .mimetype
-        .as_deref()
-        .unwrap_or("image/jpeg");
+    let mime = img.mimetype.as_deref().unwrap_or("image/jpeg");
     let ext = match mime {
         "image/png" => "png",
         "image/webp" => "webp",
@@ -120,11 +117,8 @@ async fn download_image(msg: &Message, client: &Client) -> Option<String> {
 
     match client.download(img.as_ref()).await {
         Ok(bytes) => {
-            let path = std::env::temp_dir().join(format!(
-                "wa_img_{}.{}",
-                uuid::Uuid::new_v4(),
-                ext
-            ));
+            let path =
+                std::env::temp_dir().join(format!("wa_img_{}.{}", uuid::Uuid::new_v4(), ext));
             match std::fs::write(&path, &bytes) {
                 Ok(()) => {
                     tracing::debug!(
@@ -225,10 +219,11 @@ pub(crate) async fn handle_message(
 
     // Allowlist check — if allowed list is empty, accept all.
     // Normalize: strip '+' from allowed entries to match JID digits.
-    if !allowed.is_empty()
-        && !allowed.iter().any(|a| a.trim_start_matches('+') == phone)
-    {
-        tracing::debug!("WhatsApp: ignoring message from non-allowed phone {}", phone);
+    if !allowed.is_empty() && !allowed.iter().any(|a| a.trim_start_matches('+') == phone) {
+        tracing::debug!(
+            "WhatsApp: ignoring message from non-allowed phone {}",
+            phone
+        );
         return;
     }
 
@@ -264,7 +259,8 @@ pub(crate) async fn handle_message(
     }
 
     // Download image if present, append <<IMG:path>> marker
-    if has_img && !has_aud
+    if has_img
+        && !has_aud
         && let Some(img_path) = download_image(&msg, &client).await
     {
         if content.is_empty() {
@@ -325,7 +321,10 @@ pub(crate) async fn handle_message(
     };
 
     // Send to agent
-    match agent.send_message_with_tools(session_id, content, None).await {
+    match agent
+        .send_message_with_tools(session_id, content, None)
+        .await
+    {
         Ok(response) => {
             let reply_jid = info.source.sender.clone();
             let tagged = format!("{}\n\n{}", MSG_HEADER, response.content);

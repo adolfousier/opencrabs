@@ -6,8 +6,8 @@
 
 use super::error::Result;
 use super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
-use crate::channels::discord::DiscordState;
 use crate::channels::ChannelFactory;
+use crate::channels::discord::DiscordState;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;

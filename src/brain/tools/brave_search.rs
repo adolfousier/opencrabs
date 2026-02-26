@@ -143,10 +143,7 @@ impl Tool for BraveSearchTool {
 
         let mut output = format!("Search results for: \"{}\"\n\n", input.query);
 
-        let results = brave_response
-            .web
-            .map(|w| w.results)
-            .unwrap_or_default();
+        let results = brave_response.web.map(|w| w.results).unwrap_or_default();
 
         if results.is_empty() {
             output.push_str("No results found. Try rephrasing your query.\n");

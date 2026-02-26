@@ -94,7 +94,11 @@ pub async fn handle_send_message(
         .map(|s| s == "research")
         .unwrap_or(false);
 
-    tracing::info!("A2A: Task {} created, spawning agent (read_only={})", task_id, read_only);
+    tracing::info!(
+        "A2A: Task {} created, spawning agent (read_only={})",
+        task_id,
+        read_only
+    );
 
     let bg_store = store.clone();
     let bg_cancel_store = cancel_store.clone();
@@ -143,7 +147,14 @@ async fn process_task(
         Ok(session) => session.id,
         Err(e) => {
             tracing::error!("A2A: Failed to create session for task {}: {}", task_id, e);
-            update_task_failed(&store, &task_id, &context_id, &format!("Session creation failed: {}", e), &pool).await;
+            update_task_failed(
+                &store,
+                &task_id,
+                &context_id,
+                &format!("Session creation failed: {}", e),
+                &pool,
+            )
+            .await;
             return;
         }
     };
@@ -211,7 +222,13 @@ async fn process_task(
 }
 
 /// Mark a task as failed in the store and persist to DB.
-async fn update_task_failed(store: &TaskStore, task_id: &str, context_id: &str, error_msg: &str, pool: &sqlx::SqlitePool) {
+async fn update_task_failed(
+    store: &TaskStore,
+    task_id: &str,
+    context_id: &str,
+    error_msg: &str,
+    pool: &sqlx::SqlitePool,
+) {
     let mut tasks = store.write().await;
     if let Some(task) = tasks.get_mut(task_id) {
         task.status = TaskStatus {

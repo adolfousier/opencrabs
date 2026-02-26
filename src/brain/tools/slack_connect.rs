@@ -20,10 +20,7 @@ pub struct SlackConnectTool {
 }
 
 impl SlackConnectTool {
-    pub fn new(
-        channel_factory: Arc<ChannelFactory>,
-        slack_state: Arc<SlackState>,
-    ) -> Self {
+    pub fn new(channel_factory: Arc<ChannelFactory>, slack_state: Arc<SlackState>) -> Self {
         Self {
             channel_factory,
             slack_state,
@@ -124,9 +121,8 @@ impl Tool for SlackConnectTool {
         let _ = crate::config::Config::write_key("channels.slack", "token", &bot_token);
         let _ = crate::config::Config::write_key("channels.slack", "app_token", &app_token);
         if !allowed_ids.is_empty() {
-            let _ = crate::config::Config::write_array(
-                "channels.slack", "allowed_ids", &allowed_ids,
-            );
+            let _ =
+                crate::config::Config::write_array("channels.slack", "allowed_ids", &allowed_ids);
         }
 
         // Create and spawn the Slack agent
@@ -154,21 +150,30 @@ impl Tool for SlackConnectTool {
         loop {
             if slack_state.is_connected().await {
                 // Set owner channel if provided so send tool works immediately
-                if let Some(ch) = input.get("channel_id").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                if let Some(ch) = input
+                    .get("channel_id")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                {
                     slack_state.set_owner_channel(ch.to_string()).await;
                 }
 
                 let mut msg = "Slack bot connected successfully via Socket Mode! \
-                     Now listening for messages. Connection persists across restarts.".to_string();
+                     Now listening for messages. Connection persists across restarts."
+                    .to_string();
 
-                if input.get("channel_id").and_then(|v| v.as_str()).is_some_and(|s| !s.is_empty()) {
+                if input
+                    .get("channel_id")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| !s.is_empty())
+                {
                     msg.push_str(
                         "\n\nIMPORTANT: Send a welcome message to the user RIGHT NOW \
                          using the `slack_send` tool. Be wildly fun — talk like their \
                          best buddy from childhood. You can curse, be unhinged, hilarious, \
                          and totally informal. Use your personality, SOUL.md, and any context \
                          you have about the user. Make it memorable and uniquely yours. \
-                         No generic corporate greetings — surprise them!"
+                         No generic corporate greetings — surprise them!",
                     );
                 }
 

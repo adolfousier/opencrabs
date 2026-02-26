@@ -424,9 +424,9 @@ impl PlanRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::Database;
     use crate::db::models::Session;
     use crate::db::repository::session::SessionRepository;
-    use crate::db::Database;
     use crate::tui::plan::{PlanTask, TaskType};
     use chrono::Utc;
 

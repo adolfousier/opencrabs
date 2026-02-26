@@ -2,8 +2,8 @@
 //!
 //! Agent struct and startup logic. Mirrors the Telegram/WhatsApp agent pattern.
 
-use super::handler;
 use super::DiscordState;
+use super::handler;
 use crate::brain::agent::AgentService;
 use crate::config::{RespondTo, VoiceConfig};
 use crate::services::{ServiceContext, SessionService};

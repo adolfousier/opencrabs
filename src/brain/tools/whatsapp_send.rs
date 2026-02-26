@@ -103,7 +103,11 @@ impl Tool for WhatsAppSendTool {
         };
 
         // Prepend agent header and split long messages
-        let tagged = format!("{}\n\n{}", crate::channels::whatsapp::handler::MSG_HEADER, message);
+        let tagged = format!(
+            "{}\n\n{}",
+            crate::channels::whatsapp::handler::MSG_HEADER,
+            message
+        );
         let chunks = crate::channels::whatsapp::handler::split_message(&tagged, 4000);
         for chunk in chunks {
             let wa_msg = waproto::whatsapp::Message {

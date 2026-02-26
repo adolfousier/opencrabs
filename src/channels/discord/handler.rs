@@ -4,8 +4,8 @@
 //! session routing (owner shares TUI session, others get per-user sessions).
 
 use super::DiscordState;
-use crate::config::{RespondTo, VoiceConfig};
 use crate::brain::agent::AgentService;
+use crate::config::{RespondTo, VoiceConfig};
 use crate::services::SessionService;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -59,7 +59,10 @@ pub(crate) async fn handle_message(
 
     // Allowlist check — if allowed list is empty, accept all
     if !allowed.is_empty() && !allowed.contains(&user_id) {
-        tracing::debug!("Discord: ignoring message from non-allowed user {}", user_id);
+        tracing::debug!(
+            "Discord: ignoring message from non-allowed user {}",
+            user_id
+        );
         return;
     }
 
@@ -70,7 +73,10 @@ pub(crate) async fn handle_message(
 
         // Check allowed_channels (empty = all channels allowed)
         if !allowed_channels.is_empty() && !allowed_channels.contains(&channel_str) {
-            tracing::debug!("Discord: ignoring message in non-allowed channel {}", channel_str);
+            tracing::debug!(
+                "Discord: ignoring message in non-allowed channel {}",
+                channel_str
+            );
             return;
         }
 
@@ -81,9 +87,8 @@ pub(crate) async fn handle_message(
             }
             RespondTo::Mention => {
                 let bot_id = discord_state.bot_user_id().await;
-                let mentioned = bot_id.is_some_and(|bid| {
-                    msg.mentions.iter().any(|u| u.id.get() == bid)
-                });
+                let mentioned =
+                    bot_id.is_some_and(|bid| msg.mentions.iter().any(|u| u.id.get() == bid));
                 if !mentioned {
                     tracing::debug!("Discord: respond_to=mention, bot not mentioned — ignoring");
                     return;
@@ -124,7 +129,8 @@ pub(crate) async fn handle_message(
     }
 
     // Strip bot @mention from content when responding to a mention
-    if !is_dm && *respond_to == RespondTo::Mention
+    if !is_dm
+        && *respond_to == RespondTo::Mention
         && let Some(bot_id) = discord_state.bot_user_id().await
     {
         let mention_tag = format!("<@{}>", bot_id);
@@ -153,7 +159,12 @@ pub(crate) async fn handle_message(
     }
 
     let text_preview = &content[..content.len().min(50)];
-    tracing::info!("Discord: message from {} ({}): {}", msg.author.name, user_id, text_preview);
+    tracing::info!(
+        "Discord: message from {} ({}): {}",
+        msg.author.name,
+        user_id,
+        text_preview
+    );
 
     // Track owner's channel for proactive messaging
     let is_owner = allowed.is_empty()
@@ -209,7 +220,10 @@ pub(crate) async fn handle_message(
     };
 
     // Send to agent
-    match agent.send_message_with_tools(session_id, content, None).await {
+    match agent
+        .send_message_with_tools(session_id, content, None)
+        .await
+    {
         Ok(response) => {
             let tagged = response.content.clone();
             for chunk in split_message(&tagged, 2000) {
@@ -232,8 +246,7 @@ pub(crate) async fn handle_message(
                 .await
                 {
                     Ok(audio_bytes) => {
-                        let file =
-                            CreateAttachment::bytes(audio_bytes.as_slice(), "response.ogg");
+                        let file = CreateAttachment::bytes(audio_bytes.as_slice(), "response.ogg");
                         if let Err(e) = msg
                             .channel_id
                             .send_message(&ctx.http, CreateMessage::new().add_file(file))

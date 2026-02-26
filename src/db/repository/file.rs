@@ -149,9 +149,9 @@ impl FileRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::Database;
     use crate::db::models::Session;
     use crate::db::repository::SessionRepository;
-    use crate::db::Database;
     use std::path::PathBuf;
 
     #[tokio::test]

@@ -1,9 +1,9 @@
 //! Messaging — session CRUD, slash commands, message expansion, streaming.
 
-use super::*;
 use super::dialogs::ensure_whispercrabs;
 use super::events::{AppMode, ToolApprovalResponse, TuiEvent};
 use super::onboarding::OnboardingWizard;
+use super::*;
 use crate::brain::SelfUpdater;
 use anyhow::Result;
 use serde_json::Value;
@@ -52,11 +52,12 @@ impl App {
         let (display, hidden) = Self::trim_messages_to_display_budget(&messages, 200_000);
         self.hidden_older_messages = hidden;
         self.oldest_displayed_sequence = display.first().map(|m| m.sequence).unwrap_or(0);
-        self.display_token_count = display.iter()
+        self.display_token_count = display
+            .iter()
             .map(|m| crate::brain::tokenizer::count_tokens(&m.content))
             .sum();
-        let mut expanded: Vec<DisplayMessage> = display.into_iter()
-            .flat_map(Self::expand_message).collect();
+        let mut expanded: Vec<DisplayMessage> =
+            display.into_iter().flat_map(Self::expand_message).collect();
         if hidden > 0 {
             expanded.insert(0, Self::make_history_marker(hidden));
         }
@@ -229,7 +230,9 @@ impl App {
             }
             "/sessions" => {
                 self.mode = AppMode::Sessions;
-                let _ = self.event_sender().send(TuiEvent::SwitchMode(AppMode::Sessions));
+                let _ = self
+                    .event_sender()
+                    .send(TuiEvent::SwitchMode(AppMode::Sessions));
                 true
             }
             "/approve" => {
@@ -262,7 +265,8 @@ impl App {
                 // Trigger compaction by sending a special message to the agent
                 let sender = self.event_sender();
                 let _ = sender.send(TuiEvent::MessageSubmitted(
-                    "[SYSTEM: Compact context now. Summarize this conversation for continuity.]".to_string(),
+                    "[SYSTEM: Compact context now. Summarize this conversation for continuity.]"
+                        .to_string(),
                 ));
                 true
             }
@@ -275,38 +279,36 @@ impl App {
                     match SelfUpdater::auto_detect() {
                         Ok(updater) => {
                             let root = updater.project_root().display().to_string();
-                            let _ = sender.send(TuiEvent::SystemMessage(format!(
-                                "📁 {}", root
-                            )));
+                            let _ = sender.send(TuiEvent::SystemMessage(format!("📁 {}", root)));
                             let tx = sender.clone();
-                            match updater.build_streaming(move |line| {
-                                // Filter to only meaningful cargo lines
-                                let trimmed = line.trim();
-                                if trimmed.starts_with("Compiling")
-                                    || trimmed.starts_with("Finished")
-                                    || trimmed.starts_with("error")
-                                    || trimmed.starts_with("warning[")
-                                    || trimmed.starts_with("-->")
-                                {
-                                    let _ = tx.send(TuiEvent::SystemMessage(line));
-                                }
-                            }).await {
+                            match updater
+                                .build_streaming(move |line| {
+                                    // Filter to only meaningful cargo lines
+                                    let trimmed = line.trim();
+                                    if trimmed.starts_with("Compiling")
+                                        || trimmed.starts_with("Finished")
+                                        || trimmed.starts_with("error")
+                                        || trimmed.starts_with("warning[")
+                                        || trimmed.starts_with("-->")
+                                    {
+                                        let _ = tx.send(TuiEvent::SystemMessage(line));
+                                    }
+                                })
+                                .await
+                            {
                                 Ok(_) => {
-                                    let _ = sender.send(TuiEvent::RestartReady(
-                                        "✅ Build complete".into(),
-                                    ));
+                                    let _ = sender
+                                        .send(TuiEvent::RestartReady("✅ Build complete".into()));
                                 }
                                 Err(e) => {
-                                    let _ = sender.send(TuiEvent::Error(format!(
-                                        "Build failed: {}", e
-                                    )));
+                                    let _ = sender
+                                        .send(TuiEvent::Error(format!("Build failed: {}", e)));
                                 }
                             }
                         }
                         Err(e) => {
-                            let _ = sender.send(TuiEvent::Error(format!(
-                                "Cannot detect project: {}", e
-                            )));
+                            let _ = sender
+                                .send(TuiEvent::Error(format!("Cannot detect project: {}", e)));
                         }
                     }
                 });
@@ -333,16 +335,16 @@ impl App {
                                     ));
                                 }
                                 Err(e) => {
-                                    let _ = sender.send(TuiEvent::Error(
-                                        format!("Failed to launch WhisperCrabs: {}", e)
-                                    ));
+                                    let _ = sender.send(TuiEvent::Error(format!(
+                                        "Failed to launch WhisperCrabs: {}",
+                                        e
+                                    )));
                                 }
                             }
                         }
                         Err(e) => {
-                            let _ = sender.send(TuiEvent::Error(
-                                format!("WhisperCrabs setup failed: {}", e)
-                            ));
+                            let _ = sender
+                                .send(TuiEvent::Error(format!("WhisperCrabs setup failed: {}", e)));
                         }
                     }
                 });
@@ -387,7 +389,10 @@ impl App {
     pub fn format_tool_description(tool_name: &str, tool_input: &Value) -> String {
         match tool_name {
             "bash" => {
-                let cmd = tool_input.get("command").and_then(|v| v.as_str()).unwrap_or("?");
+                let cmd = tool_input
+                    .get("command")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
                 let short: String = cmd.chars().take(80).collect();
                 if cmd.len() > 80 {
                     format!("bash: {}...", short)
@@ -396,28 +401,49 @@ impl App {
                 }
             }
             "read_file" | "read" => {
-                let path = tool_input.get("path").and_then(|v| v.as_str()).unwrap_or("?");
+                let path = tool_input
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
                 format!("Read {}", path)
             }
             "write_file" | "write" => {
-                let path = tool_input.get("path").and_then(|v| v.as_str()).unwrap_or("?");
+                let path = tool_input
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
                 format!("Write {}", path)
             }
             "edit_file" | "edit" => {
-                let path = tool_input.get("path").and_then(|v| v.as_str()).unwrap_or("?");
+                let path = tool_input
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
                 format!("Edit {}", path)
             }
             "ls" => {
-                let path = tool_input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+                let path = tool_input
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(".");
                 format!("ls {}", path)
             }
             "glob" => {
-                let pattern = tool_input.get("pattern").and_then(|v| v.as_str()).unwrap_or("?");
+                let pattern = tool_input
+                    .get("pattern")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
                 format!("Glob {}", pattern)
             }
             "grep" => {
-                let pattern = tool_input.get("pattern").and_then(|v| v.as_str()).unwrap_or("?");
-                let path = tool_input.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                let pattern = tool_input
+                    .get("pattern")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
+                let path = tool_input
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 if path.is_empty() {
                     format!("Grep '{}'", pattern)
                 } else {
@@ -425,40 +451,70 @@ impl App {
                 }
             }
             "web_search" => {
-                let query = tool_input.get("query").and_then(|v| v.as_str()).unwrap_or("?");
+                let query = tool_input
+                    .get("query")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
                 format!("Search: {}", query)
             }
             "exa_search" => {
-                let query = tool_input.get("query").and_then(|v| v.as_str()).unwrap_or("?");
+                let query = tool_input
+                    .get("query")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
                 format!("EXA search: {}", query)
             }
             "brave_search" => {
-                let query = tool_input.get("query").and_then(|v| v.as_str()).unwrap_or("?");
+                let query = tool_input
+                    .get("query")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
                 format!("Brave search: {}", query)
             }
             "http_request" => {
-                let url = tool_input.get("url").and_then(|v| v.as_str()).unwrap_or("?");
-                let method = tool_input.get("method").and_then(|v| v.as_str()).unwrap_or("GET");
+                let url = tool_input
+                    .get("url")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
+                let method = tool_input
+                    .get("method")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("GET");
                 format!("{} {}", method, url)
             }
             "execute_code" => {
-                let lang = tool_input.get("language").and_then(|v| v.as_str()).unwrap_or("?");
+                let lang = tool_input
+                    .get("language")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
                 format!("Execute {}", lang)
             }
             "notebook_edit" => {
-                let path = tool_input.get("notebook_path").and_then(|v| v.as_str()).unwrap_or("?");
+                let path = tool_input
+                    .get("notebook_path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
                 format!("Notebook {}", path)
             }
             "parse_document" => {
-                let path = tool_input.get("path").and_then(|v| v.as_str()).unwrap_or("?");
+                let path = tool_input
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
                 format!("Parse {}", path)
             }
             "task_manager" => {
-                let op = tool_input.get("operation").and_then(|v| v.as_str()).unwrap_or("?");
+                let op = tool_input
+                    .get("operation")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
                 format!("Task: {}", op)
             }
             "plan" => {
-                let op = tool_input.get("operation").and_then(|v| v.as_str()).unwrap_or("?");
+                let op = tool_input
+                    .get("operation")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
                 format!("Plan: {}", op)
             }
             "session_context" => "Session context".to_string(),
@@ -492,7 +548,9 @@ impl App {
     }
 
     fn expand_message(msg: crate::db::models::Message) -> Vec<DisplayMessage> {
-        if msg.role != "assistant" || (!msg.content.contains("<!-- tools") && !msg.content.contains("<!-- reasoning -->")) {
+        if msg.role != "assistant"
+            || (!msg.content.contains("<!-- tools") && !msg.content.contains("<!-- reasoning -->"))
+        {
             return vec![DisplayMessage::from(msg)];
         }
 
@@ -511,7 +569,11 @@ impl App {
             let v1_pos = s.find("<!-- tools:");
             match (v2_pos, v1_pos) {
                 (Some(v2), Some(v1)) => {
-                    if v2 <= v1 { Some((v2, true)) } else { Some((v1, false)) }
+                    if v2 <= v1 {
+                        Some((v2, true))
+                    } else {
+                        Some((v1, false))
+                    }
                 }
                 (Some(v2), None) => Some((v2, true)),
                 (None, Some(v1)) => Some((v1, false)),
@@ -563,7 +625,11 @@ impl App {
                 }
             }
 
-            let marker_len = if is_v2 { "<!-- tools-v2:".len() } else { "<!-- tools:".len() };
+            let marker_len = if is_v2 {
+                "<!-- tools-v2:".len()
+            } else {
+                "<!-- tools:".len()
+            };
             let after_marker = &remaining[marker_start + marker_len..];
             if let Some(end) = after_marker.find("-->") {
                 let tools_str = after_marker[..end].trim();
@@ -576,9 +642,15 @@ impl App {
                         .map(|entry| {
                             let desc = entry["d"].as_str().unwrap_or("?").to_string();
                             let success = entry["s"].as_bool().unwrap_or(true);
-                            let output = entry["o"].as_str().map(|s| s.to_string())
+                            let output = entry["o"]
+                                .as_str()
+                                .map(|s| s.to_string())
                                 .filter(|s| !s.is_empty());
-                            ToolCallEntry { description: desc, success, details: output }
+                            ToolCallEntry {
+                                description: desc,
+                                success,
+                                details: output,
+                            }
                         })
                         .collect()
                 } else {
@@ -598,7 +670,11 @@ impl App {
                     result.push(DisplayMessage {
                         id: Uuid::new_v4(),
                         role: "tool_group".to_string(),
-                        content: format!("{} tool call{}", count, if count == 1 { "" } else { "s" }),
+                        content: format!(
+                            "{} tool call{}",
+                            count,
+                            if count == 1 { "" } else { "s" }
+                        ),
                         timestamp,
                         token_count: None,
                         cost: None,
@@ -606,7 +682,10 @@ impl App {
                         approve_menu: None,
                         details: None,
                         expanded: false,
-                        tool_group: Some(ToolCallGroup { calls, expanded: false }),
+                        tool_group: Some(ToolCallGroup {
+                            calls,
+                            expanded: false,
+                        }),
                         plan_approval: None,
                     });
                 }
@@ -691,18 +770,24 @@ impl App {
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| trimmed.to_string());
-                return (String::new(), vec![ImageAttachment {
-                    name,
-                    path: trimmed.to_string(),
-                }]);
+                return (
+                    String::new(),
+                    vec![ImageAttachment {
+                        name,
+                        path: trimmed.to_string(),
+                    }],
+                );
             }
             // URL (no spaces — just check prefix)
             if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
                 let name = trimmed.rsplit('/').next().unwrap_or(trimmed).to_string();
-                return (String::new(), vec![ImageAttachment {
-                    name,
-                    path: trimmed.to_string(),
-                }]);
+                return (
+                    String::new(),
+                    vec![ImageAttachment {
+                        name,
+                        path: trimmed.to_string(),
+                    }],
+                );
             }
         }
 
@@ -754,7 +839,12 @@ impl App {
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| path.to_string());
                 let replacement = format!("[IMG: {}]", name);
-                result = format!("{}{}{}", &result[..start], replacement, &result[start + end + 2..]);
+                result = format!(
+                    "{}{}{}",
+                    &result[..start],
+                    replacement,
+                    &result[start + end + 2..]
+                );
             } else {
                 break;
             }
@@ -783,20 +873,33 @@ impl App {
 
     /// Send a message to the agent
     pub(crate) async fn send_message(&mut self, content: String) -> Result<()> {
-        tracing::info!("[send_message] START is_processing={} has_session={} content_len={}",
+        tracing::info!(
+            "[send_message] START is_processing={} has_session={} content_len={}",
             self.is_processing,
             self.current_session.is_some(),
-            content.len());
+            content.len()
+        );
 
         // Deny stale pending approvals so they don't block streaming
-        let stale_count = self.messages.iter()
-            .filter(|m| m.approval.as_ref().is_some_and(|a| a.state == ApprovalState::Pending))
+        let stale_count = self
+            .messages
+            .iter()
+            .filter(|m| {
+                m.approval
+                    .as_ref()
+                    .is_some_and(|a| a.state == ApprovalState::Pending)
+            })
             .count();
         if stale_count > 0 {
-            tracing::warn!("[send_message] Clearing {} stale pending approvals", stale_count);
+            tracing::warn!(
+                "[send_message] Clearing {} stale pending approvals",
+                stale_count
+            );
         }
         for msg in &mut self.messages {
-            if let Some(ref mut approval) = msg.approval && approval.state == ApprovalState::Pending {
+            if let Some(ref mut approval) = msg.approval
+                && approval.state == ApprovalState::Pending
+            {
                 let _ = approval.response_tx.send(ToolApprovalResponse {
                     request_id: approval.request_id,
                     approved: false,
@@ -810,7 +913,7 @@ impl App {
             tracing::warn!("[send_message] QUEUED — agent still processing previous request");
             // DON'T add to messages yet - wait until agent processes it
             // It will be added at the end after all assistant messages
-            
+
             // Queue for injection between tool calls
             *self.message_queue.lock().await = Some(content);
             return Ok(());
@@ -861,7 +964,10 @@ impl App {
             let event_sender = self.event_sender();
             let read_only_mode = self.mode == AppMode::Plan;
 
-            tracing::info!("[send_message] Spawning agent task for session {}", session_id);
+            tracing::info!(
+                "[send_message] Spawning agent task for session {}",
+                session_id
+            );
             let panic_sender = event_sender.clone();
             let handle = tokio::spawn(async move {
                 tracing::info!("[agent_task] START calling send_message_with_tools_and_mode");
@@ -894,9 +1000,9 @@ impl App {
             tokio::spawn(async move {
                 if let Err(e) = handle.await {
                     tracing::error!("[agent_task] PANICKED: {}", e);
-                    let _ = panic_sender.send(TuiEvent::Error(
-                        format!("Agent task crashed unexpectedly: {e}. You can continue chatting."),
-                    ));
+                    let _ = panic_sender.send(TuiEvent::Error(format!(
+                        "Agent task crashed unexpectedly: {e}. You can continue chatting."
+                    )));
                 }
             });
         }
@@ -930,14 +1036,20 @@ impl App {
 
         // Clean up stale pending approvals — send deny so agent callbacks don't hang
         for msg in &mut self.messages {
-            if let Some(ref mut approval) = msg.approval && approval.state == ApprovalState::Pending {
-                tracing::warn!("Cleaning up stale pending approval for tool '{}'", approval.tool_name);
+            if let Some(ref mut approval) = msg.approval
+                && approval.state == ApprovalState::Pending
+            {
+                tracing::warn!(
+                    "Cleaning up stale pending approval for tool '{}'",
+                    approval.tool_name
+                );
                 let _ = approval.response_tx.send(ToolApprovalResponse {
                     request_id: approval.request_id,
                     approved: false,
                     reason: Some("Agent completed without resolution".to_string()),
                 });
-                approval.state = ApprovalState::Denied("Agent completed without resolution".to_string());
+                approval.state =
+                    ApprovalState::Denied("Agent completed without resolution".to_string());
             }
         }
 
@@ -995,12 +1107,18 @@ impl App {
         self.last_input_tokens = Some(response.context_tokens);
 
         // Debug: log response content length
-        tracing::debug!("Response complete: content_len={}, output_tokens={}", response.content.len(), response.usage.output_tokens);
+        tracing::debug!(
+            "Response complete: content_len={}, output_tokens={}",
+            response.content.len(),
+            response.usage.output_tokens
+        );
 
         // Check if we already added assistant messages via IntermediateText this cycle.
         // Uses a per-cycle flag (not a history search) so prior turns don't cause false positives.
         if self.intermediate_text_received {
-            tracing::debug!("Skipping duplicate assistant message - already shown via IntermediateText");
+            tracing::debug!(
+                "Skipping duplicate assistant message - already shown via IntermediateText"
+            );
         } else {
             // Add assistant message to UI only if not already added
             let assistant_msg = DisplayMessage {
@@ -1022,13 +1140,14 @@ impl App {
 
         // Update session model if not already set
         if let Some(session) = &mut self.current_session
-            && session.model.is_none() {
-                session.model = Some(response.model.clone());
-                // Save the updated session to database
-                if let Err(e) = self.session_service.update_session(session).await {
-                    tracing::warn!("Failed to update session model: {}", e);
-                }
+            && session.model.is_none()
+        {
+            session.model = Some(response.model.clone());
+            // Save the updated session to database
+            if let Err(e) = self.session_service.update_session(session).await {
+                tracing::warn!("Failed to update session model: {}", e);
             }
+        }
 
         // Auto-scroll to bottom
         self.scroll_offset = 0;

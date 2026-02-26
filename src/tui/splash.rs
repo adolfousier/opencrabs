@@ -3,11 +3,11 @@
 //! Startup welcome screen with logo and project information.
 
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
-    Frame,
 };
 
 /// Render the splash screen
@@ -49,12 +49,13 @@ fn render_splash_content(f: &mut Frame, area: Rect, provider_name: &str, model_n
         r"  \___/| .__/\___|_||_|  \___|_| \__,_|_.__//__/".to_string(),
         "       |_|".to_string(),
     ];
-    let max_len = logo_lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+    let max_len = logo_lines
+        .iter()
+        .map(|l| l.chars().count())
+        .max()
+        .unwrap_or(0);
 
-    let mut splash_text = vec![
-        Line::from(""),
-        Line::from(""),
-    ];
+    let mut splash_text = vec![Line::from(""), Line::from("")];
 
     // Add padded logo lines
     for line in &logo_lines {

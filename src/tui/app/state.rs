@@ -2,13 +2,16 @@
 //!
 //! Core state management for the terminal user interface.
 
-use super::events::{AppMode, EventHandler, SudoPasswordRequest, SudoPasswordResponse, ToolApprovalRequest, ToolApprovalResponse, TuiEvent};
+use super::events::{
+    AppMode, EventHandler, SudoPasswordRequest, SudoPasswordResponse, ToolApprovalRequest,
+    ToolApprovalResponse, TuiEvent,
+};
 use super::onboarding::OnboardingWizard;
 use super::plan::PlanDocument;
 use super::prompt_analyzer::PromptAnalyzer;
+use crate::brain::agent::AgentService;
 use crate::brain::{BrainLoader, CommandLoader, SelfUpdater, UserCommand};
 use crate::db::models::{Message, Session};
-use crate::brain::agent::AgentService;
 use crate::services::{MessageService, PlanService, ServiceContext, SessionService};
 use anyhow::Result;
 use ratatui::text::Line;
@@ -151,7 +154,8 @@ pub struct ImageAttachment {
 }
 
 /// Image file extensions for auto-detection
-pub(crate) const IMAGE_EXTENSIONS: &[&str] = &[".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"];
+pub(crate) const IMAGE_EXTENSIONS: &[&str] =
+    &[".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"];
 
 /// A single tool call entry within a grouped display
 #[derive(Debug, Clone)]
@@ -446,7 +450,8 @@ impl App {
             message_queue: Arc::new(tokio::sync::Mutex::new(None)),
             shared_session_id: Arc::new(tokio::sync::Mutex::new(None)),
             default_model_name: agent_service.provider_model().to_string(),
-            context_max_tokens: agent_service.context_window_for_model(agent_service.provider_model()),
+            context_max_tokens: agent_service
+                .context_window_for_model(agent_service.provider_model()),
             last_input_tokens: None,
             active_tool_group: None,
             rebuild_status: None,
@@ -501,7 +506,13 @@ impl App {
                     via exec(). Greet the user, confirm the restart succeeded, and continue \
                     where you left off.]";
                 match agent_service
-                    .send_message_with_tools_and_mode(session_id, wake_up.to_string(), None, false, Some(token))
+                    .send_message_with_tools_and_mode(
+                        session_id,
+                        wake_up.to_string(),
+                        None,
+                        false,
+                        Some(token),
+                    )
                     .await
                 {
                     Ok(response) => {
@@ -549,39 +560,70 @@ impl App {
     /// Rebuild agent service with a new provider
     pub(crate) async fn rebuild_agent_service(&mut self) -> Result<()> {
         use crate::brain::provider::create_provider;
-        
+
         // Load config - API keys are stored in keys.toml and merged with config
         let config = crate::config::Config::load()
             .map_err(|e| anyhow::anyhow!("Failed to load config: {}", e))?;
-        
+
         // Check all providers dynamically - log enabled providers for debugging
         let enabled_providers: Vec<&str> = vec![
-            config.providers.anthropic.as_ref().filter(|p| p.enabled).map(|_| "anthropic"),
-            config.providers.openai.as_ref().filter(|p| p.enabled).map(|_| "openai"),
-            config.providers.gemini.as_ref().filter(|p| p.enabled).map(|_| "gemini"),
-            config.providers.openrouter.as_ref().filter(|p| p.enabled).map(|_| "openrouter"),
-            config.providers.minimax.as_ref().filter(|p| p.enabled).map(|_| "minimax"),
+            config
+                .providers
+                .anthropic
+                .as_ref()
+                .filter(|p| p.enabled)
+                .map(|_| "anthropic"),
+            config
+                .providers
+                .openai
+                .as_ref()
+                .filter(|p| p.enabled)
+                .map(|_| "openai"),
+            config
+                .providers
+                .gemini
+                .as_ref()
+                .filter(|p| p.enabled)
+                .map(|_| "gemini"),
+            config
+                .providers
+                .openrouter
+                .as_ref()
+                .filter(|p| p.enabled)
+                .map(|_| "openrouter"),
+            config
+                .providers
+                .minimax
+                .as_ref()
+                .filter(|p| p.enabled)
+                .map(|_| "minimax"),
             config.providers.active_custom().map(|_| "custom"),
-        ].into_iter().flatten().collect();
-        
-        tracing::debug!("rebuild_agent_service: enabled_providers = {:?}", enabled_providers);
-        
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+
+        tracing::debug!(
+            "rebuild_agent_service: enabled_providers = {:?}",
+            enabled_providers
+        );
+
         // Create new provider from config
         let provider = create_provider(&config)
             .map_err(|e| anyhow::anyhow!("Failed to create provider: {}", e))?;
-        
+
         // Get existing context from current agent service
         let context = self.agent_service.context().clone();
-        
+
         // Get existing tool registry from current agent service
         let tool_registry = self.agent_service.tool_registry().clone();
-        
+
         // Get existing system brain from current agent service
         let system_brain = self.agent_service.system_brain().cloned();
-        
+
         // Get event sender for approval callback
         let event_sender = self.event_sender();
-        
+
         // Create approval callback that sends requests to TUI
         let approval_callback: crate::brain::agent::ApprovalCallback = Arc::new(move |tool_info| {
             let sender = event_sender.clone();
@@ -610,34 +652,36 @@ impl App {
                         ))
                     })?;
 
-                let response = tokio::time::timeout(
-                    std::time::Duration::from_secs(120),
-                    response_rx.recv(),
-                )
-                .await
-                .map_err(|_| {
-                    crate::brain::agent::AgentError::Internal(
-                        "Approval request timed out".to_string(),
-                    )
-                })?
-                .ok_or_else(|| {
-                    crate::brain::agent::AgentError::Internal(
-                        "Approval channel closed".to_string(),
-                    )
-                })?;
+                let response =
+                    tokio::time::timeout(std::time::Duration::from_secs(120), response_rx.recv())
+                        .await
+                        .map_err(|_| {
+                            crate::brain::agent::AgentError::Internal(
+                                "Approval request timed out".to_string(),
+                            )
+                        })?
+                        .ok_or_else(|| {
+                            crate::brain::agent::AgentError::Internal(
+                                "Approval channel closed".to_string(),
+                            )
+                        })?;
 
                 Ok(response.approved)
             })
         });
-        
+
         // Preserve existing callbacks from the current agent service
         let progress_callback = self.agent_service.progress_callback().clone();
         let message_queue_callback = self.agent_service.message_queue_callback().clone();
         let sudo_callback = self.agent_service.sudo_callback().clone();
-        let working_dir = self.agent_service.working_directory().read()
-            .expect("working_directory lock poisoned").clone();
+        let working_dir = self
+            .agent_service
+            .working_directory()
+            .read()
+            .expect("working_directory lock poisoned")
+            .clone();
         let brain_path = self.agent_service.brain_path().clone();
-        
+
         // Create new agent service with new provider — preserve ALL callbacks
         let mut new_agent_service = AgentService::new(provider, context)
             .with_tool_registry(tool_registry)
@@ -646,22 +690,22 @@ impl App {
             .with_message_queue_callback(message_queue_callback)
             .with_sudo_callback(sudo_callback)
             .with_working_directory(working_dir);
-        
+
         if let Some(bp) = brain_path {
             new_agent_service = new_agent_service.with_brain_path(bp);
         }
-        
+
         // Add system brain if it exists
         if let Some(brain) = system_brain {
             new_agent_service = new_agent_service.with_system_brain(brain);
         }
-        
+
         let new_agent_service = Arc::new(new_agent_service);
-        
+
         // Update app state
         self.default_model_name = new_agent_service.provider_model().to_string();
         self.agent_service = new_agent_service;
-        
+
         Ok(())
     }
 
@@ -709,7 +753,8 @@ impl App {
                     if !new_attachments.is_empty() {
                         self.attachments.extend(new_attachments);
                         if !clean_text.trim().is_empty() {
-                            self.input_buffer.insert_str(self.cursor_position, &clean_text);
+                            self.input_buffer
+                                .insert_str(self.cursor_position, &clean_text);
                             self.cursor_position += clean_text.len();
                         }
                     } else {
@@ -728,7 +773,11 @@ impl App {
                             wizard.models_fetching = true;
                             let sender = self.event_sender();
                             tokio::spawn(async move {
-                                let models = super::onboarding::fetch_provider_models(provider_idx, Some(&api_key)).await;
+                                let models = super::onboarding::fetch_provider_models(
+                                    provider_idx,
+                                    Some(&api_key),
+                                )
+                                .await;
                                 let _ = sender.send(TuiEvent::OnboardingModelsFetched(models));
                             });
                         }
@@ -744,7 +793,11 @@ impl App {
                             let api_key = self.model_selector_api_key.clone();
                             let sender = self.event_sender();
                             tokio::spawn(async move {
-                                let models = super::onboarding::fetch_provider_models(provider_idx, Some(&api_key)).await;
+                                let models = super::onboarding::fetch_provider_models(
+                                    provider_idx,
+                                    Some(&api_key),
+                                )
+                                .await;
                                 let _ = sender.send(TuiEvent::ModelSelectorModelsFetched(models));
                             });
                         }
@@ -800,17 +853,18 @@ impl App {
                 // Auto-close splash screen after 3 seconds
                 if self.mode == AppMode::Splash
                     && let Some(shown_at) = self.splash_shown_at
-                        && shown_at.elapsed() >= std::time::Duration::from_secs(3) {
-                            self.splash_shown_at = None;
-                            let is_first = super::onboarding::is_first_time();
-                            if self.force_onboard || is_first {
-                                self.force_onboard = false;
-                                self.onboarding = Some(OnboardingWizard::new());
-                                self.switch_mode(AppMode::Onboarding).await?;
-                            } else {
-                                self.switch_mode(AppMode::Chat).await?;
-                            }
-                        }
+                    && shown_at.elapsed() >= std::time::Duration::from_secs(3)
+                {
+                    self.splash_shown_at = None;
+                    let is_first = super::onboarding::is_first_time();
+                    if self.force_onboard || is_first {
+                        self.force_onboard = false;
+                        self.onboarding = Some(OnboardingWizard::new());
+                        self.switch_mode(AppMode::Onboarding).await?;
+                    } else {
+                        self.switch_mode(AppMode::Chat).await?;
+                    }
+                }
             }
             TuiEvent::ToolApprovalRequested(request) => {
                 self.handle_approval_requested(request);
@@ -821,12 +875,23 @@ impl App {
                     self.scroll_offset = 0;
                 }
             }
-            TuiEvent::ToolCallStarted { tool_name, tool_input } => {
-                tracing::info!("[TUI] ToolCallStarted: {} (active_group={}, msg_count={})",
-                    tool_name, self.active_tool_group.is_some(), self.messages.len());
+            TuiEvent::ToolCallStarted {
+                tool_name,
+                tool_input,
+            } => {
+                tracing::info!(
+                    "[TUI] ToolCallStarted: {} (active_group={}, msg_count={})",
+                    tool_name,
+                    self.active_tool_group.is_some(),
+                    self.messages.len()
+                );
                 // Show tool call in progress
                 let desc = Self::format_tool_description(&tool_name, &tool_input);
-                let entry = ToolCallEntry { description: desc, success: true, details: None };
+                let entry = ToolCallEntry {
+                    description: desc,
+                    success: true,
+                    details: None,
+                };
                 if let Some(ref mut group) = self.active_tool_group {
                     group.calls.push(entry);
                 } else {
@@ -840,8 +905,12 @@ impl App {
                 }
             }
             TuiEvent::IntermediateText(text, reasoning) => {
-                tracing::info!("[TUI] IntermediateText: len={} active_group={} streaming={}",
-                    text.len(), self.active_tool_group.is_some(), self.streaming_response.is_some());
+                tracing::info!(
+                    "[TUI] IntermediateText: len={} active_group={} streaming={}",
+                    text.len(),
+                    self.active_tool_group.is_some(),
+                    self.streaming_response.is_some()
+                );
                 // Reset timer for next thinking phase
                 self.processing_started_at = Some(std::time::Instant::now());
 
@@ -882,7 +951,11 @@ impl App {
                     self.messages.push(DisplayMessage {
                         id: Uuid::new_v4(),
                         role: "tool_group".to_string(),
-                        content: format!("{} tool call{}", count, if count == 1 { "" } else { "s" }),
+                        content: format!(
+                            "{} tool call{}",
+                            count,
+                            if count == 1 { "" } else { "s" }
+                        ),
                         timestamp: chrono::Utc::now(),
                         token_count: None,
                         cost: None,
@@ -915,16 +988,28 @@ impl App {
                     self.scroll_offset = 0;
                 }
             }
-            TuiEvent::ToolCallCompleted { tool_name, tool_input, success, summary } => {
+            TuiEvent::ToolCallCompleted {
+                tool_name,
+                tool_input,
+                success,
+                summary,
+            } => {
                 // Reset timer so "thinking..." counter restarts after each tool call
                 self.processing_started_at = Some(std::time::Instant::now());
                 let desc = Self::format_tool_description(&tool_name, &tool_input);
-                let details = if summary.is_empty() { None } else { Some(summary) };
+                let details = if summary.is_empty() {
+                    None
+                } else {
+                    Some(summary)
+                };
 
                 // Update the existing Started entry instead of pushing a duplicate.
                 // Match by description — the Started entry has the same desc but no details.
                 let updated = if let Some(ref mut group) = self.active_tool_group {
-                    if let Some(existing) = group.calls.iter_mut().rev()
+                    if let Some(existing) = group
+                        .calls
+                        .iter_mut()
+                        .rev()
                         .find(|c| c.description == desc && c.details.is_none())
                     {
                         existing.success = success;
@@ -939,7 +1024,11 @@ impl App {
 
                 // Fallback: push as new entry if no matching Started entry found
                 if !updated {
-                    let entry = ToolCallEntry { description: desc, success, details };
+                    let entry = ToolCallEntry {
+                        description: desc,
+                        success,
+                        details,
+                    };
                     if let Some(ref mut group) = self.active_tool_group {
                         group.calls.push(entry);
                     } else {
@@ -1053,7 +1142,8 @@ impl App {
             TuiEvent::WhatsAppConnected => {
                 if let Some(ref mut wizard) = self.onboarding {
                     wizard.set_whatsapp_connected();
-                    let _ = crate::config::Config::write_key("channels.whatsapp", "enabled", "true");
+                    let _ =
+                        crate::config::Config::write_key("channels.whatsapp", "enabled", "true");
                 }
             }
             TuiEvent::WhatsAppError(err) => {
@@ -1067,7 +1157,7 @@ impl App {
                         super::onboarding::ChannelTestStatus::Success
                     } else {
                         super::onboarding::ChannelTestStatus::Failed(
-                            error.unwrap_or_else(|| "Unknown error".to_string())
+                            error.unwrap_or_else(|| "Unknown error".to_string()),
                         )
                     };
                 }
@@ -1113,9 +1203,9 @@ impl App {
                 KeyCode::Esc => {
                     // Cancel sudo
                     if let Some(request) = self.sudo_pending.take() {
-                        let _ = request.response_tx.send(SudoPasswordResponse {
-                            password: None,
-                        });
+                        let _ = request
+                            .response_tx
+                            .send(SudoPasswordResponse { password: None });
                     }
                     self.sudo_input.clear();
                 }
@@ -1142,20 +1232,21 @@ impl App {
         // Ctrl+C: first press clears input, second press (within 3s) quits
         if keys::is_quit(&event) {
             if let Some(pending_at) = self.ctrl_c_pending_at
-                && pending_at.elapsed() < std::time::Duration::from_secs(3) {
-                    // Second Ctrl+C within window — quit
-                    // Cancel any running agent task
-                    if let Some(token) = &self.cancel_token {
-                        token.cancel();
-                    }
-                    self.should_quit = true;
-                    // Force exit after 1s in case spawn_blocking tasks are stuck
-                    tokio::spawn(async {
-                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                        std::process::exit(0);
-                    });
-                    return Ok(());
+                && pending_at.elapsed() < std::time::Duration::from_secs(3)
+            {
+                // Second Ctrl+C within window — quit
+                // Cancel any running agent task
+                if let Some(token) = &self.cancel_token {
+                    token.cancel();
                 }
+                self.should_quit = true;
+                // Force exit after 1s in case spawn_blocking tasks are stuck
+                tokio::spawn(async {
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    std::process::exit(0);
+                });
+                return Ok(());
+            }
             // First Ctrl+C — clear input and show hint
             self.input_buffer.clear();
             self.cursor_position = 0;
@@ -1201,7 +1292,9 @@ impl App {
             // Skip current word chars, then skip whitespace
             let word_end = after.find(char::is_whitespace).unwrap_or(after.len());
             let rest = &after[word_end..];
-            let space_end = rest.find(|c: char| !c.is_whitespace()).unwrap_or(rest.len());
+            let space_end = rest
+                .find(|c: char| !c.is_whitespace())
+                .unwrap_or(rest.len());
             self.cursor_position += word_end + space_end;
             return Ok(());
         }
@@ -1248,22 +1341,27 @@ impl App {
             AppMode::Splash => {
                 // Check if minimum display time (3 seconds) has elapsed
                 if let Some(shown_at) = self.splash_shown_at
-                    && shown_at.elapsed() >= std::time::Duration::from_secs(3) {
-                        self.splash_shown_at = None;
-                        // Check if onboarding should be shown
-                        let is_first = super::onboarding::is_first_time();
-                        tracing::debug!("[Splash] force_onboard={}, is_first_time={}", self.force_onboard, is_first);
-                        if self.force_onboard || is_first {
-                            self.force_onboard = false;
-                            tracing::info!("[Splash] Starting onboarding wizard");
-                            self.onboarding = Some(OnboardingWizard::new());
-                            self.switch_mode(AppMode::Onboarding).await?;
-                        } else {
-                            tracing::debug!("[Splash] Skipping onboarding, going to Chat");
-                            self.switch_mode(AppMode::Chat).await?;
-                        }
+                    && shown_at.elapsed() >= std::time::Duration::from_secs(3)
+                {
+                    self.splash_shown_at = None;
+                    // Check if onboarding should be shown
+                    let is_first = super::onboarding::is_first_time();
+                    tracing::debug!(
+                        "[Splash] force_onboard={}, is_first_time={}",
+                        self.force_onboard,
+                        is_first
+                    );
+                    if self.force_onboard || is_first {
+                        self.force_onboard = false;
+                        tracing::info!("[Splash] Starting onboarding wizard");
+                        self.onboarding = Some(OnboardingWizard::new());
+                        self.switch_mode(AppMode::Onboarding).await?;
+                    } else {
+                        tracing::debug!("[Splash] Skipping onboarding, going to Chat");
+                        self.switch_mode(AppMode::Chat).await?;
                     }
-                    // If not enough time has elapsed, ignore the key press
+                }
+                // If not enough time has elapsed, ignore the key press
             }
             AppMode::Chat => self.handle_chat_key(event).await?,
             AppMode::Plan => self.handle_plan_key(event).await?,
@@ -1285,11 +1383,12 @@ impl App {
                     if let Some(session) = &self.current_session {
                         let session_id = session.id;
                         if let Ok(updater) = SelfUpdater::auto_detect()
-                            && let Err(e) = updater.restart(session_id) {
-                                self.show_error(format!("Restart failed: {}", e));
-                                self.switch_mode(AppMode::Chat).await?;
-                            }
-                            // If restart succeeds, this process is replaced — we never reach here
+                            && let Err(e) = updater.restart(session_id)
+                        {
+                            self.show_error(format!("Restart failed: {}", e));
+                            self.switch_mode(AppMode::Chat).await?;
+                        }
+                        // If restart succeeds, this process is replaced — we never reach here
                     }
                 }
             }
@@ -1328,7 +1427,9 @@ impl App {
         }
         // Deny any pending approvals so agent callbacks don't hang, then remove
         for msg in &mut self.messages {
-            if let Some(ref mut approval) = msg.approval && approval.state == ApprovalState::Pending {
+            if let Some(ref mut approval) = msg.approval
+                && approval.state == ApprovalState::Pending
+            {
                 let _ = approval.response_tx.send(ToolApprovalResponse {
                     request_id: approval.request_id,
                     approved: false,
@@ -1397,11 +1498,17 @@ impl App {
 
     /// Handle tool approval request — inline in chat
     fn handle_approval_requested(&mut self, request: ToolApprovalRequest) {
-        tracing::info!("[APPROVAL] handle_approval_requested called for tool='{}' auto_session={} auto_always={}",
-            request.tool_name, self.approval_auto_session, self.approval_auto_always);
+        tracing::info!(
+            "[APPROVAL] handle_approval_requested called for tool='{}' auto_session={} auto_always={}",
+            request.tool_name,
+            self.approval_auto_session,
+            self.approval_auto_always
+        );
         // Deny stale pending approvals from previous requests (keep in chat for context)
         for msg in &mut self.messages {
-            if let Some(ref mut approval) = msg.approval && approval.state == ApprovalState::Pending {
+            if let Some(ref mut approval) = msg.approval
+                && approval.state == ApprovalState::Pending
+            {
                 let _ = approval.response_tx.send(ToolApprovalResponse {
                     request_id: approval.request_id,
                     approved: false,
@@ -1419,12 +1526,16 @@ impl App {
                 reason: None,
             };
             let _ = request.response_tx.send(response.clone());
-            let _ = self.event_sender().send(TuiEvent::ToolApprovalResponse(response));
+            let _ = self
+                .event_sender()
+                .send(TuiEvent::ToolApprovalResponse(response));
             return;
         }
 
         // Clear streaming overlay so the approval dialog is visible
-        if let Some(text) = self.streaming_response.take() && !text.trim().is_empty() {
+        if let Some(text) = self.streaming_response.take()
+            && !text.trim().is_empty()
+        {
             // Persist any streamed text as a regular message before showing approval
             self.messages.push(DisplayMessage {
                 id: Uuid::new_v4(),
@@ -1479,10 +1590,19 @@ impl App {
         }
         self.auto_scroll = true;
         self.scroll_offset = 0;
-        tracing::info!("[APPROVAL] Pushed approval message for tool='{}', total messages={}, has_pending={}",
-            self.messages.last().map(|m| m.approval.as_ref().map(|a| a.tool_name.as_str()).unwrap_or("?")).unwrap_or("?"),
+        tracing::info!(
+            "[APPROVAL] Pushed approval message for tool='{}', total messages={}, has_pending={}",
+            self.messages
+                .last()
+                .map(|m| m
+                    .approval
+                    .as_ref()
+                    .map(|a| a.tool_name.as_str())
+                    .unwrap_or("?"))
+                .unwrap_or("?"),
             self.messages.len(),
-            self.has_pending_approval());
+            self.has_pending_approval()
+        );
         // Stay in AppMode::Chat — no mode switch
     }
 

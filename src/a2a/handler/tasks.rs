@@ -59,32 +59,33 @@ pub async fn handle_cancel_task(
         let tokens = cancel_store.read().await;
         if let Some(token) = tokens.get(&cancel_params.id) {
             token.cancel();
-            tracing::info!("A2A: Sent cancellation signal for task {}", cancel_params.id);
+            tracing::info!(
+                "A2A: Sent cancellation signal for task {}",
+                cancel_params.id
+            );
         }
     }
 
     let mut tasks = store.write().await;
     match tasks.get_mut(&cancel_params.id) {
-        Some(task) => {
-            match task.status.state {
-                TaskState::Completed | TaskState::Failed | TaskState::Canceled => {
-                    JsonRpcResponse::error(
-                        id,
-                        error_codes::UNSUPPORTED_OPERATION,
-                        format!("Cannot cancel task in {:?} state", task.status.state),
-                    )
-                }
-                _ => {
-                    task.status.state = TaskState::Canceled;
-                    task.status.timestamp = Some(chrono::Utc::now().to_rfc3339());
-                    persistence::upsert_task(pool, task).await;
-                    tracing::info!("A2A: Canceled task {}", cancel_params.id);
-                    let task_json = serde_json::to_value(&*task)
-                        .unwrap_or_else(|_| serde_json::json!({"error": "serialize"}));
-                    JsonRpcResponse::success(id, task_json)
-                }
+        Some(task) => match task.status.state {
+            TaskState::Completed | TaskState::Failed | TaskState::Canceled => {
+                JsonRpcResponse::error(
+                    id,
+                    error_codes::UNSUPPORTED_OPERATION,
+                    format!("Cannot cancel task in {:?} state", task.status.state),
+                )
             }
-        }
+            _ => {
+                task.status.state = TaskState::Canceled;
+                task.status.timestamp = Some(chrono::Utc::now().to_rfc3339());
+                persistence::upsert_task(pool, task).await;
+                tracing::info!("A2A: Canceled task {}", cancel_params.id);
+                let task_json = serde_json::to_value(&*task)
+                    .unwrap_or_else(|_| serde_json::json!({"error": "serialize"}));
+                JsonRpcResponse::success(id, task_json)
+            }
+        },
         None => JsonRpcResponse::error(
             id,
             error_codes::TASK_NOT_FOUND,
@@ -113,6 +114,9 @@ mod tests {
         )
         .await;
         assert!(resp.error.is_some());
-        assert_eq!(resp.error.as_ref().expect("err").code, error_codes::TASK_NOT_FOUND);
+        assert_eq!(
+            resp.error.as_ref().expect("err").code,
+            error_codes::TASK_NOT_FOUND
+        );
     }
 }

@@ -44,14 +44,19 @@ const PARAM_ALIASES: &[(&str, &str, &str)] = &[
 fn normalize_tool_input(tool_name: &str, mut input: Value) -> Value {
     if let Some(obj) = input.as_object_mut() {
         for &(tool, wrong, correct) in PARAM_ALIASES {
-            if tool == tool_name && !obj.contains_key(correct)
-                && let Some(val) = obj.remove(wrong) {
-                    tracing::debug!(
-                        "Normalized tool param: {}.{} → {}.{}",
-                        tool_name, wrong, tool_name, correct
-                    );
-                    obj.insert(correct.to_string(), val);
-                }
+            if tool == tool_name
+                && !obj.contains_key(correct)
+                && let Some(val) = obj.remove(wrong)
+            {
+                tracing::debug!(
+                    "Normalized tool param: {}.{} → {}.{}",
+                    tool_name,
+                    wrong,
+                    tool_name,
+                    correct
+                );
+                obj.insert(correct.to_string(), val);
+            }
         }
     }
     input
