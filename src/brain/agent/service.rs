@@ -77,8 +77,9 @@ pub enum ProgressEvent {
     },
 }
 
-/// Callback for reporting progress during agent execution
-pub type ProgressCallback = Arc<dyn Fn(ProgressEvent) + Send + Sync>;
+/// Callback for reporting progress during agent execution.
+/// The first parameter is the `session_id` the event belongs to.
+pub type ProgressCallback = Arc<dyn Fn(Uuid, ProgressEvent) + Send + Sync>;
 
 /// Callback for requesting sudo password from the user.
 /// Takes the command string, returns Ok(Some(password)) or Ok(None) if cancelled.
@@ -93,8 +94,8 @@ pub type MessageQueueCallback =
 
 /// Agent Service for managing AI conversations
 pub struct AgentService {
-    /// LLM provider
-    provider: Arc<dyn Provider>,
+    /// LLM provider (RwLock allows runtime swap for per-session providers)
+    provider: std::sync::RwLock<Arc<dyn Provider>>,
 
     /// Service context for database operations
     context: ServiceContext,
@@ -142,7 +143,7 @@ impl AgentService {
         let config = crate::config::Config::load().unwrap_or_default();
 
         Self {
-            provider,
+            provider: std::sync::RwLock::new(provider),
             context,
             tool_registry: Arc::new(ToolRegistry::new()),
             max_tool_iterations: 0, // 0 = unlimited (loop detection is the safety net)
@@ -291,8 +292,8 @@ impl AgentService {
     }
 
     /// Get the provider name
-    pub fn provider_name(&self) -> &str {
-        self.provider.name()
+    pub fn provider_name(&self) -> String {
+        self.provider.read().expect("provider lock poisoned").name().to_string()
     }
 
     /// Get the system brain
@@ -301,23 +302,29 @@ impl AgentService {
     }
 
     /// Get the default model for this provider
-    pub fn provider_model(&self) -> &str {
-        self.provider.default_model()
+    pub fn provider_model(&self) -> String {
+        self.provider.read().expect("provider lock poisoned").default_model().to_string()
     }
 
     /// Get the list of supported models for this provider (hardcoded fallback)
     pub fn supported_models(&self) -> Vec<String> {
-        self.provider.supported_models()
+        self.provider.read().expect("provider lock poisoned").supported_models()
     }
 
     /// Fetch available models from the provider API (live)
     pub async fn fetch_models(&self) -> Vec<String> {
-        self.provider.fetch_models().await
+        let provider = self.provider.read().expect("provider lock poisoned").clone();
+        provider.fetch_models().await
     }
 
-    /// Get a reference to the underlying LLM provider
-    pub fn provider(&self) -> &Arc<dyn Provider> {
-        &self.provider
+    /// Get a clone of the underlying LLM provider
+    pub fn provider(&self) -> Arc<dyn Provider> {
+        self.provider.read().expect("provider lock poisoned").clone()
+    }
+
+    /// Swap the active provider at runtime (for per-session provider switching)
+    pub fn swap_provider(&self, new_provider: Arc<dyn Provider>) {
+        *self.provider.write().expect("provider lock poisoned") = new_provider;
     }
 
     /// Get context window size for a given model
@@ -345,8 +352,8 @@ impl AgentService {
             .await?;
 
         // Send to provider
-        let response = self
-            .provider
+        let provider = self.provider.read().expect("provider lock poisoned").clone();
+        let response = provider
             .complete(request)
             .await
             .map_err(AgentError::Provider)?;
@@ -362,7 +369,7 @@ impl AgentService {
 
         // Calculate total tokens and cost for this message
         let total_tokens = response.usage.input_tokens + response.usage.output_tokens;
-        let cost = self.provider.calculate_cost(
+        let cost = self.provider.read().expect("provider lock poisoned").calculate_cost(
             &response.model,
             response.usage.input_tokens,
             response.usage.output_tokens,
@@ -409,8 +416,8 @@ impl AgentService {
         let request = request.with_streaming();
 
         // Get streaming response from provider
-        let stream = self
-            .provider
+        let provider = self.provider.read().expect("provider lock poisoned").clone();
+        let stream = provider
             .stream(request)
             .await
             .map_err(AgentError::Provider)?;
@@ -464,7 +471,8 @@ impl AgentService {
             .await
             .map_err(|e| AgentError::Database(e.to_string()))?;
 
-        let model_name = model.unwrap_or_else(|| self.provider.default_model().to_string());
+        let model_name =
+            model.unwrap_or_else(|| self.provider.read().expect("provider lock poisoned").default_model().to_string());
         let context_window = self.context_limit;
 
         let db_messages = Self::trim_messages_to_budget(
@@ -517,11 +525,11 @@ impl AgentService {
                 effective_usage,
                 tool_overhead,
             );
-            match self.compact_context(&mut context, &model_name).await {
+            match self.compact_context(session_id, &mut context, &model_name).await {
                 Ok(summary) => {
                     // Stream the summary to chat so user can see it
                     if let Some(ref cb) = self.progress_callback {
-                        cb(ProgressEvent::CompactionSummary { summary });
+                        cb(session_id, ProgressEvent::CompactionSummary { summary });
                     }
                     let mut cont_text =
                         "[SYSTEM: Context was auto-compacted. The summary above has full context. \
@@ -536,7 +544,7 @@ impl AgentService {
                 Err(e) => {
                     tracing::error!("Pre-loop compaction failed: {}", e);
                     if let Some(ref cb) = self.progress_callback {
-                        cb(ProgressEvent::IntermediateText {
+                        cb(session_id, ProgressEvent::IntermediateText {
                             text: format!(
                                 "Context compaction failed: {}. Continuing with current context.",
                                 e
@@ -610,7 +618,7 @@ impl AgentService {
 
             // Emit thinking progress
             if let Some(ref cb) = self.progress_callback {
-                cb(ProgressEvent::Thinking);
+                cb(session_id, ProgressEvent::Thinking);
             }
 
             // --- HARD CONTEXT BUDGET CHECK (every iteration) ---
@@ -630,11 +638,11 @@ impl AgentService {
                     effective_usage,
                     iteration,
                 );
-                match self.compact_context(&mut context, &model_name).await {
+                match self.compact_context(session_id, &mut context, &model_name).await {
                     Ok(summary) => {
                         // Stream the summary to chat so user can see it
                         if let Some(ref cb) = self.progress_callback {
-                            cb(ProgressEvent::CompactionSummary { summary });
+                            cb(session_id, ProgressEvent::CompactionSummary { summary });
                         }
                         // Inject continuation — no "acknowledge first", go straight to tools
                         let mut cont_text = "[SYSTEM: Context was auto-compacted. The summary above has full context. \
@@ -689,7 +697,7 @@ impl AgentService {
 
             // Send to provider via streaming — retry once after emergency compaction if prompt is too long
             let (response, reasoning_text) = match self
-                .stream_complete(request, cancel_token.as_ref())
+                .stream_complete(session_id, request, cancel_token.as_ref())
                 .await
             {
                 Ok(resp) => resp,
@@ -699,7 +707,7 @@ impl AgentService {
                 {
                     tracing::warn!("Prompt too long for provider — emergency compaction");
                     let err_msg = e.to_string();
-                    match self.compact_context(&mut context, &model_name).await {
+                    match self.compact_context(session_id, &mut context, &model_name).await {
                         Ok(_) => {
                             let mut cont_text =
                                 "[SYSTEM: Emergency compaction — provider rejected the prompt as \
@@ -731,7 +739,7 @@ impl AgentService {
                     if self.tool_registry.count() > 0 {
                         retry_req = retry_req.with_tools(self.tool_registry.get_tool_definitions());
                     }
-                    self.stream_complete(retry_req, cancel_token.as_ref())
+                    self.stream_complete(session_id, retry_req, cancel_token.as_ref())
                         .await
                         .map_err(AgentError::Provider)?
                 }
@@ -772,7 +780,7 @@ impl AgentService {
             }
             // Fire real-time token count update after every API response
             if let Some(ref cb) = self.progress_callback {
-                cb(ProgressEvent::TokenCount(context.token_count));
+                cb(session_id, ProgressEvent::TokenCount(context.token_count));
             }
 
             // --- CANCEL CHECK BEFORE STREAM DROP RETRY ---
@@ -926,7 +934,7 @@ impl AgentService {
                     if !iteration_text.is_empty()
                         && let Some(ref cb) = self.progress_callback
                     {
-                        cb(ProgressEvent::IntermediateText {
+                        cb(session_id, ProgressEvent::IntermediateText {
                             text: iteration_text,
                             reasoning: reasoning_text,
                         });
@@ -942,7 +950,7 @@ impl AgentService {
             if !iteration_text.is_empty()
                 && let Some(ref cb) = self.progress_callback
             {
-                cb(ProgressEvent::IntermediateText {
+                cb(session_id, ProgressEvent::IntermediateText {
                     text: iteration_text,
                     reasoning: reasoning_text,
                 });
@@ -1034,7 +1042,7 @@ impl AgentService {
 
                 // Emit tool started progress
                 if let Some(ref cb) = self.progress_callback {
-                    cb(ProgressEvent::ToolStarted {
+                    cb(session_id, ProgressEvent::ToolStarted {
                         tool_name: tool_name.clone(),
                         tool_input: tool_input_for_progress.clone(),
                     });
@@ -1142,7 +1150,7 @@ impl AgentService {
                                             content.chars().take(2000).collect();
                                         tool_outputs.push((success, output_summary.clone()));
                                         if let Some(ref cb) = self.progress_callback {
-                                            cb(ProgressEvent::ToolCompleted {
+                                            cb(session_id, ProgressEvent::ToolCompleted {
                                                 tool_name: tool_name.clone(),
                                                 tool_input: tool_input_for_progress.clone(),
                                                 success,
@@ -1167,7 +1175,7 @@ impl AgentService {
                                             err_msg.chars().take(2000).collect();
                                         tool_outputs.push((false, output_summary.clone()));
                                         if let Some(ref cb) = self.progress_callback {
-                                            cb(ProgressEvent::ToolCompleted {
+                                            cb(session_id, ProgressEvent::ToolCompleted {
                                                 tool_name: tool_name.clone(),
                                                 tool_input: tool_input_for_progress.clone(),
                                                 success: false,
@@ -1245,7 +1253,7 @@ impl AgentService {
                         let output_summary: String = content.chars().take(2000).collect();
                         tool_outputs.push((success, output_summary.clone()));
                         if let Some(ref cb) = self.progress_callback {
-                            cb(ProgressEvent::ToolCompleted {
+                            cb(session_id, ProgressEvent::ToolCompleted {
                                 tool_name: tool_name.clone(),
                                 tool_input: tool_input_for_progress.clone(),
                                 success,
@@ -1265,7 +1273,7 @@ impl AgentService {
                         let output_summary: String = err_msg.chars().take(2000).collect();
                         tool_outputs.push((false, output_summary.clone()));
                         if let Some(ref cb) = self.progress_callback {
-                            cb(ProgressEvent::ToolCompleted {
+                            cb(session_id, ProgressEvent::ToolCompleted {
                                 tool_name: tool_name.clone(),
                                 tool_input: tool_input_for_progress.clone(),
                                 success: false,
@@ -1334,7 +1342,7 @@ impl AgentService {
 
             // Fire token count update after tool results are added — keeps TUI in sync
             if let Some(ref cb) = self.progress_callback {
-                cb(ProgressEvent::TokenCount(context.token_count));
+                cb(session_id, ProgressEvent::TokenCount(context.token_count));
             }
 
             // Budget re-check: ensure we haven't blown past the context window
@@ -1347,7 +1355,7 @@ impl AgentService {
                     usage_pct,
                     context.token_count
                 );
-                match self.compact_context(&mut context, &model_name).await {
+                match self.compact_context(session_id, &mut context, &model_name).await {
                     Ok(summary) => {
                         tracing::info!(
                             "Mid-loop compaction complete: {} tokens, summary len={}",
@@ -1411,7 +1419,7 @@ impl AgentService {
             // Also save token usage for what we consumed
             let partial_tokens = total_input_tokens + total_output_tokens;
             if partial_tokens > 0 {
-                let partial_cost = self.provider.calculate_cost(
+                let partial_cost = self.provider.read().expect("provider lock poisoned").calculate_cost(
                     &model_name,
                     total_input_tokens,
                     total_output_tokens,
@@ -1438,8 +1446,11 @@ impl AgentService {
         // Calculate total cost
         let total_tokens = total_input_tokens + total_output_tokens;
         let cost =
-            self.provider
-                .calculate_cost(&response.model, total_input_tokens, total_output_tokens);
+            self.provider.read().expect("provider lock poisoned").calculate_cost(
+                &response.model,
+                total_input_tokens,
+                total_output_tokens,
+            );
 
         // Update message with usage info
         message_service
@@ -1492,7 +1503,8 @@ impl AgentService {
             .await
             .map_err(|e| AgentError::Database(e.to_string()))?;
 
-        let model_name = model.unwrap_or_else(|| self.provider.default_model().to_string());
+        let model_name =
+            model.unwrap_or_else(|| self.provider.read().expect("provider lock poisoned").default_model().to_string());
         let context_window = self.context_limit;
 
         let db_messages = Self::trim_messages_to_budget(
@@ -1540,6 +1552,7 @@ impl AgentService {
     /// once the stream completes, ready for tool extraction.
     async fn stream_complete(
         &self,
+        session_id: Uuid,
         request: LLMRequest,
         cancel_token: Option<&CancellationToken>,
     ) -> std::result::Result<(LLMResponse, Option<String>), crate::brain::provider::ProviderError>
@@ -1548,7 +1561,8 @@ impl AgentService {
         use futures::StreamExt;
 
         let request_model = request.model.clone();
-        let mut stream = self.provider.stream(request).await?;
+        let provider = self.provider.read().expect("provider lock poisoned").clone();
+        let mut stream = provider.stream(request).await?;
 
         // Accumulate state from stream events
         let mut id = String::new();
@@ -1613,7 +1627,7 @@ impl AgentService {
                             ContentDelta::TextDelta { text } => {
                                 // Forward to TUI for real-time display
                                 if let Some(ref cb) = self.progress_callback {
-                                    cb(ProgressEvent::StreamingChunk { text: text.clone() });
+                                    cb(session_id, ProgressEvent::StreamingChunk { text: text.clone() });
                                 }
                                 // Accumulate into block
                                 if let ContentBlock::Text { text: ref mut t } =
@@ -1628,7 +1642,7 @@ impl AgentService {
                             ContentDelta::ReasoningDelta { text } => {
                                 // Forward reasoning content to TUI for real-time display
                                 if let Some(ref cb) = self.progress_callback {
-                                    cb(ProgressEvent::ReasoningChunk { text: text.clone() });
+                                    cb(session_id, ProgressEvent::ReasoningChunk { text: text.clone() });
                                 }
                                 // Accumulate for persistence
                                 reasoning_buf.push_str(&text);
@@ -1773,12 +1787,13 @@ impl AgentService {
     /// OpenCrabs can continue working seamlessly after compaction.
     async fn compact_context(
         &self,
+        session_id: Uuid,
         context: &mut AgentContext,
         model_name: &str,
     ) -> Result<String> {
         // Emit compacting progress
         if let Some(ref cb) = self.progress_callback {
-            cb(ProgressEvent::Compacting);
+            cb(session_id, ProgressEvent::Compacting);
         }
 
         let remaining_budget = context.max_tokens.saturating_sub(context.token_count);
@@ -1896,7 +1911,7 @@ impl AgentService {
         // Use streaming so the TUI shows the summary being written in real-time
         // instead of freezing silently for 2-5 minutes on large contexts
         let (response, _reasoning) = self
-            .stream_complete(request, None)
+            .stream_complete(session_id, request, None)
             .await
             .map_err(AgentError::Provider)?;
 
@@ -1928,7 +1943,7 @@ impl AgentService {
 
         // Show the summary to the user in chat
         if let Some(ref cb) = self.progress_callback {
-            cb(ProgressEvent::CompactionSummary {
+            cb(session_id, ProgressEvent::CompactionSummary {
                 summary: summary.clone(),
             });
         }
@@ -2701,7 +2716,10 @@ mod tests {
 
         let request = LLMRequest::new("mock-model".to_string(), vec![Message::user("Hello")]);
 
-        let (response, reasoning) = agent_service.stream_complete(request, None).await.unwrap();
+        let (response, reasoning) = agent_service
+            .stream_complete(Uuid::nil(), request, None)
+            .await
+            .unwrap();
         assert!(
             reasoning.is_none(),
             "mock provider should not produce reasoning"
@@ -2730,7 +2748,10 @@ mod tests {
 
         let request = LLMRequest::new("mock-model".to_string(), vec![Message::user("Use a tool")]);
 
-        let (response, reasoning) = agent_service.stream_complete(request, None).await.unwrap();
+        let (response, reasoning) = agent_service
+            .stream_complete(Uuid::nil(), request, None)
+            .await
+            .unwrap();
         assert!(
             reasoning.is_none(),
             "mock provider should not produce reasoning"
@@ -2772,7 +2793,7 @@ mod tests {
         let chunks_received: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let chunks_clone = chunks_received.clone();
 
-        let progress_cb: ProgressCallback = Arc::new(move |event| {
+        let progress_cb: ProgressCallback = Arc::new(move |_session_id, event| {
             if let ProgressEvent::StreamingChunk { text } = event {
                 chunks_clone.lock().unwrap().push(text);
             }
@@ -2783,7 +2804,10 @@ mod tests {
 
         let request = LLMRequest::new("mock-model".to_string(), vec![Message::user("Hello")]);
 
-        let (response, reasoning) = agent_service.stream_complete(request, None).await.unwrap();
+        let (response, reasoning) = agent_service
+            .stream_complete(Uuid::nil(), request, None)
+            .await
+            .unwrap();
         assert!(
             reasoning.is_none(),
             "mock provider should not produce reasoning"

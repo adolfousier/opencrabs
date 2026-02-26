@@ -29,6 +29,7 @@ async fn setup_test_env() -> (Database, ServiceContext, PlanService, Session, Te
     let session = Session::new(
         Some("Integration Test Session".to_string()),
         Some("claude-sonnet-4-5".to_string()),
+        None,
     );
     session_repo
         .create(&session)
@@ -270,6 +271,7 @@ async fn test_multiple_sessions_with_separate_plans() {
     let session2 = Session::new(
         Some("Second Test Session".to_string()),
         Some("claude-sonnet-4-5".to_string()),
+        None,
     );
     session_repo
         .create(&session2)

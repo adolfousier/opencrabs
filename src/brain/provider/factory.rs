@@ -80,6 +80,67 @@ pub fn create_provider(config: &Config) -> Result<Arc<dyn Provider>> {
     Ok(Arc::new(super::PlaceholderProvider))
 }
 
+/// Create a provider by name, ignoring the `enabled` flag.
+/// Used for per-session provider restoration without toggling disk config.
+/// Accepts names like "anthropic", "openai", "minimax", "openrouter", or "custom:<name>".
+pub fn create_provider_by_name(config: &Config, name: &str) -> Result<Arc<dyn Provider>> {
+    match name {
+        "anthropic" => try_create_anthropic(config)?
+            .ok_or_else(|| anyhow::anyhow!("Anthropic not configured (missing API key)")),
+        "openai" => try_create_openai(config)?
+            .ok_or_else(|| anyhow::anyhow!("OpenAI not configured (missing API key)")),
+        "minimax" => try_create_minimax(config)?
+            .ok_or_else(|| anyhow::anyhow!("Minimax not configured (missing API key)")),
+        "openrouter" => try_create_openrouter(config)?
+            .ok_or_else(|| anyhow::anyhow!("OpenRouter not configured (missing API key)")),
+        n if n.starts_with("custom:") => {
+            let custom_name = &n["custom:".len()..];
+            try_create_custom_by_name(config, custom_name)?
+                .ok_or_else(|| anyhow::anyhow!("Custom provider '{}' not configured", custom_name))
+        }
+        // Try as a custom provider name directly (legacy sessions)
+        other => try_create_custom_by_name(config, other)?
+            .ok_or_else(|| anyhow::anyhow!("Unknown provider: {}", other)),
+    }
+}
+
+/// Try to create a specific named custom provider (ignores enabled flag).
+fn try_create_custom_by_name(config: &Config, name: &str) -> Result<Option<Arc<dyn Provider>>> {
+    let customs = match &config.providers.custom {
+        Some(map) => map,
+        None => return Ok(None),
+    };
+
+    let custom_config = match customs.get(name) {
+        Some(cfg) => cfg.clone(),
+        None => return Ok(None),
+    };
+
+    let Some(api_key) = &custom_config.api_key else {
+        return Ok(None);
+    };
+
+    let mut base_url = custom_config
+        .base_url
+        .clone()
+        .unwrap_or_else(|| "http://localhost:1234/v1/chat/completions".to_string());
+
+    if !base_url.contains("/chat/completions") {
+        base_url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    }
+
+    tracing::info!(
+        "Creating custom provider '{}' at: {}",
+        name,
+        base_url
+    );
+    let provider = configure_openai_compatible(
+        OpenAIProvider::with_base_url(api_key.clone(), base_url).with_name(name),
+        &custom_config,
+    );
+    Ok(Some(Arc::new(provider)))
+}
+
 /// Create fallback provider
 fn create_fallback(config: &Config, fallback_type: &str) -> Result<Arc<dyn Provider>> {
     match fallback_type {

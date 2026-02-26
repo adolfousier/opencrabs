@@ -36,13 +36,16 @@ pub enum TuiEvent {
     AgentProcessing,
 
     /// Agent sent a response chunk (streaming)
-    ResponseChunk(String),
+    ResponseChunk { session_id: Uuid, text: String },
 
     /// Agent completed response
-    ResponseComplete(AgentResponse),
+    ResponseComplete {
+        session_id: Uuid,
+        response: AgentResponse,
+    },
 
     /// An error occurred
-    Error(String),
+    Error { session_id: Uuid, message: String },
 
     /// Request to switch UI mode
     SwitchMode(AppMode),
@@ -67,12 +70,14 @@ pub enum TuiEvent {
 
     /// A tool call has started executing
     ToolCallStarted {
+        session_id: Uuid,
         tool_name: String,
         tool_input: Value,
     },
 
     /// A tool call has completed
     ToolCallCompleted {
+        session_id: Uuid,
         tool_name: String,
         tool_input: Value,
         success: bool,
@@ -80,19 +85,23 @@ pub enum TuiEvent {
     },
 
     /// Intermediate text the agent sent between tool call batches
-    IntermediateText(String, Option<String>),
+    IntermediateText {
+        session_id: Uuid,
+        text: String,
+        reasoning: Option<String>,
+    },
 
     /// Context was auto-compacted — show the summary to the user
-    CompactionSummary(String),
+    CompactionSummary { session_id: Uuid, summary: String },
 
     /// Build completed — offer restart to the user
-    RestartReady(String),
+    RestartReady(String),  // global, not per-session
 
     /// Configuration was reloaded (e.g. after config_tool write)
     ConfigReloaded,
 
     /// Real-time token count update from the agent loop
-    TokenCountUpdated(usize),
+    TokenCountUpdated { session_id: Uuid, count: usize },
 
     /// Onboarding wizard received fetched model list from provider API
     OnboardingModelsFetched(Vec<String>),
@@ -121,7 +130,7 @@ pub enum TuiEvent {
     SudoPasswordRequested(SudoPasswordRequest),
 
     /// Reasoning/thinking content chunk from providers like MiniMax (display-only)
-    ReasoningChunk(String),
+    ReasoningChunk { session_id: Uuid, text: String },
 }
 
 /// Sudo password request from the bash tool

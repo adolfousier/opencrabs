@@ -444,6 +444,7 @@ mod tests {
         let session = Session::new(
             Some("Test Session".to_string()),
             Some("claude-sonnet-4-5".to_string()),
+            None,
         );
         session_repo
             .create(&session)
@@ -990,6 +991,7 @@ mod tests {
         let session2 = Session::new(
             Some("Test Session 2".to_string()),
             Some("claude-sonnet-4-5".to_string()),
+            None,
         );
         session_repo
             .create(&session2)

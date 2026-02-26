@@ -604,6 +604,10 @@ impl App {
                         if let Some(token) = &self.cancel_token {
                             token.cancel();
                         }
+                        if let Some(ref session) = self.current_session {
+                            self.processing_sessions.remove(&session.id);
+                            self.session_cancel_tokens.remove(&session.id);
+                        }
                         self.is_processing = false;
                         self.processing_started_at = None;
                         // Preserve partial streaming response as a message before clearing

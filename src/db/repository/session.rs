@@ -46,14 +46,15 @@ impl SessionRepository {
     pub async fn create(&self, session: &Session) -> Result<()> {
         sqlx::query(
             r#"
-            INSERT INTO sessions (id, title, model, created_at, updated_at,
+            INSERT INTO sessions (id, title, model, provider_name, created_at, updated_at,
                                  archived_at, token_count, total_cost)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(session.id.to_string())
         .bind(&session.title)
         .bind(&session.model)
+        .bind(&session.provider_name)
         .bind(session.created_at.timestamp())
         .bind(session.updated_at.timestamp())
         .bind(session.archived_at.map(|dt| dt.timestamp()))
@@ -72,13 +73,14 @@ impl SessionRepository {
         sqlx::query(
             r#"
             UPDATE sessions
-            SET title = ?, model = ?, updated_at = ?,
+            SET title = ?, model = ?, provider_name = ?, updated_at = ?,
                 archived_at = ?, token_count = ?, total_cost = ?
             WHERE id = ?
             "#,
         )
         .bind(&session.title)
         .bind(&session.model)
+        .bind(&session.provider_name)
         .bind(session.updated_at.timestamp())
         .bind(session.archived_at.map(|dt| dt.timestamp()))
         .bind(session.token_count)
@@ -256,6 +258,7 @@ mod tests {
         let session = Session::new(
             Some("Test Session".to_string()),
             Some("claude-sonnet-4-5".to_string()),
+            Some("anthropic".to_string()),
         );
         repo.create(&session)
             .await
@@ -304,7 +307,7 @@ mod tests {
         db.run_migrations().await.expect("Failed to run migrations");
         let repo = SessionRepository::new(db.pool().clone());
 
-        let session = Session::new(Some("Test".to_string()), Some("model".to_string()));
+        let session = Session::new(Some("Test".to_string()), Some("model".to_string()), None);
         repo.create(&session)
             .await
             .expect("Failed to create session");

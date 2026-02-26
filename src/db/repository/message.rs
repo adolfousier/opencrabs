@@ -177,7 +177,7 @@ mod tests {
         let message_repo = MessageRepository::new(db.pool().clone());
 
         // Create session first
-        let session = Session::new(Some("Test".to_string()), Some("model".to_string()));
+        let session = Session::new(Some("Test".to_string()), Some("model".to_string()), None);
         session_repo
             .create(&session)
             .await
@@ -233,7 +233,7 @@ mod tests {
         let session_repo = SessionRepository::new(db.pool().clone());
         let message_repo = MessageRepository::new(db.pool().clone());
 
-        let session = Session::new(Some("Test".to_string()), Some("model".to_string()));
+        let session = Session::new(Some("Test".to_string()), Some("model".to_string()), None);
         session_repo
             .create(&session)
             .await

@@ -48,7 +48,7 @@ impl Tool for RebuildTool {
         vec![ToolCapability::SystemModification]
     }
 
-    async fn execute(&self, _input: Value, _context: &ToolExecutionContext) -> Result<ToolResult> {
+    async fn execute(&self, _input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
         let updater = match SelfUpdater::auto_detect() {
             Ok(u) => u,
             Err(e) => {
@@ -60,6 +60,7 @@ impl Tool for RebuildTool {
         };
 
         let cb = self.progress.clone();
+        let sid = context.session_id;
 
         // Stream build progress lines through the progress callback
         let result = updater
@@ -73,7 +74,7 @@ impl Tool for RebuildTool {
                     || trimmed.starts_with("-->"))
                     && let Some(ref cb) = cb
                 {
-                    cb(ProgressEvent::IntermediateText {
+                    cb(sid, ProgressEvent::IntermediateText {
                         text: line,
                         reasoning: None,
                     });
@@ -85,7 +86,7 @@ impl Tool for RebuildTool {
             Ok(path) => {
                 // Signal auto-restart — TuiEvent::RestartReady triggers exec() with no prompt
                 if let Some(ref cb) = self.progress {
-                    cb(ProgressEvent::RestartReady {
+                    cb(sid, ProgressEvent::RestartReady {
                         status: format!("Build successful: {}", path.display()),
                     });
                 }

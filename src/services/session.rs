@@ -25,6 +25,16 @@ impl SessionService {
 
     /// Create a new session
     pub async fn create_session(&self, title: Option<String>) -> Result<Session> {
+        self.create_session_with_provider(title, None, None).await
+    }
+
+    /// Create a new session with explicit provider and model
+    pub async fn create_session_with_provider(
+        &self,
+        title: Option<String>,
+        provider_name: Option<String>,
+        model: Option<String>,
+    ) -> Result<Session> {
         let repo = SessionRepository::new(self.context.pool());
 
         let session = Session {
@@ -33,7 +43,8 @@ impl SessionService {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             archived_at: None,
-            model: None,
+            model,
+            provider_name,
             token_count: 0,
             total_cost: 0.0,
         };

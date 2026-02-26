@@ -205,7 +205,7 @@ impl Tool for WhatsAppConnectTool {
         vec![ToolCapability::Network, ToolCapability::SystemModification]
     }
 
-    async fn execute(&self, input: Value, _context: &ToolExecutionContext) -> Result<ToolResult> {
+    async fn execute(&self, input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
         let allowed_phones: Vec<String> = input
             .get("allowed_phones")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
@@ -347,13 +347,14 @@ impl Tool for WhatsAppConnectTool {
         });
 
         // 6. Wait for QR code, render with Unicode block characters
+        let sid = context.session_id;
         let qr_displayed = tokio::time::timeout(Duration::from_secs(30), qr_rx.recv()).await;
 
         match qr_displayed {
             Ok(Some(qr_code)) => match render_qr_unicode(&qr_code) {
                 Some(qr_text) => {
                     if let Some(ref cb) = self.progress {
-                        cb(ProgressEvent::IntermediateText {
+                        cb(sid, ProgressEvent::IntermediateText {
                             text: format!(
                                 "Scan this QR code with WhatsApp on your phone:\n\n{}",
                                 qr_text
@@ -364,7 +365,7 @@ impl Tool for WhatsAppConnectTool {
                 }
                 None => {
                     if let Some(ref cb) = self.progress {
-                        cb(ProgressEvent::IntermediateText {
+                        cb(sid, ProgressEvent::IntermediateText {
                             text: format!(
                                 "QR code generated but couldn't render. Raw code: {}",
                                 qr_code
