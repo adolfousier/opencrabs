@@ -253,10 +253,11 @@ impl Tool for BashTool {
         // Execute command with timeout — use piped stdin for sudo password
         let output = if let Some(password) = sudo_password {
             // Rewrite command to read password from stdin via -S flag
+            // Use -p "" to suppress sudo's own prompt (we handle it in the TUI)
             let sudo_cmd = if input.command.trim_start().starts_with("sudo -S ") {
                 input.command.clone()
             } else {
-                input.command.replacen("sudo ", "sudo -S ", 1)
+                input.command.replacen("sudo ", "sudo -S -p \"\" ", 1)
             };
 
             let command_future = async {
