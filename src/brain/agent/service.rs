@@ -41,21 +41,37 @@ pub type ApprovalCallback = Arc<
 #[derive(Debug, Clone)]
 pub enum ProgressEvent {
     Thinking,
-    ToolStarted { tool_name: String, tool_input: Value },
-    ToolCompleted { tool_name: String, tool_input: Value, success: bool, summary: String },
+    ToolStarted {
+        tool_name: String,
+        tool_input: Value,
+    },
+    ToolCompleted {
+        tool_name: String,
+        tool_input: Value,
+        success: bool,
+        summary: String,
+    },
     /// Intermediate text the agent sends between tool call batches
-    IntermediateText { text: String },
+    IntermediateText {
+        text: String,
+    },
     /// Real-time streaming chunk from the LLM (word-by-word)
-    StreamingChunk { text: String },
+    StreamingChunk {
+        text: String,
+    },
     Compacting,
     /// Compaction finished — carry the summary so the TUI can display it
-    CompactionSummary { summary: String },
+    CompactionSummary {
+        summary: String,
+    },
     /// Build completed — TUI should offer restart
-    RestartReady { status: String },
+    RestartReady {
+        status: String,
+    },
     /// Real-time token count update — fire after every API response and tool execution
     TokenCount(usize),
-//    /// A queued user message was injected into the agent context between tool iterations
-//    QueuedMessageInjected { content: String },
+    //    /// A queued user message was injected into the agent context between tool iterations
+    //    QueuedMessageInjected { content: String },
 }
 
 /// Callback for reporting progress during agent execution
@@ -69,9 +85,8 @@ pub type SudoCallback = Arc<
 
 /// Callback for checking if a user message has been queued during tool execution.
 /// Returns Some(message) if a message is waiting, None otherwise. Must not block.
-pub type MessageQueueCallback = Arc<
-    dyn Fn() -> Pin<Box<dyn Future<Output = Option<String>> + Send>> + Send + Sync,
->;
+pub type MessageQueueCallback =
+    Arc<dyn Fn() -> Pin<Box<dyn Future<Output = Option<String>> + Send>> + Send + Sync>;
 
 /// Agent Service for managing AI conversations
 pub struct AgentService {
@@ -122,7 +137,7 @@ impl AgentService {
     /// Create a new agent service
     pub fn new(provider: Arc<dyn Provider>, context: ServiceContext) -> Self {
         let config = crate::config::Config::load().unwrap_or_default();
-        
+
         Self {
             provider,
             context,
@@ -136,7 +151,9 @@ impl AgentService {
             progress_callback: None,
             message_queue_callback: None,
             sudo_callback: None,
-            working_directory: Arc::new(std::sync::RwLock::new(std::env::current_dir().unwrap_or_default())),
+            working_directory: Arc::new(std::sync::RwLock::new(
+                std::env::current_dir().unwrap_or_default(),
+            )),
             brain_path: None,
         }
     }
@@ -211,18 +228,27 @@ impl AgentService {
 
     /// Set the working directory for tool execution
     pub fn with_working_directory(self, working_directory: std::path::PathBuf) -> Self {
-        *self.working_directory.write().expect("working_directory lock poisoned") = working_directory;
+        *self
+            .working_directory
+            .write()
+            .expect("working_directory lock poisoned") = working_directory;
         self
     }
 
     /// Get the current working directory
     pub fn working_directory(&self) -> std::path::PathBuf {
-        self.working_directory.read().expect("working_directory lock poisoned").clone()
+        self.working_directory
+            .read()
+            .expect("working_directory lock poisoned")
+            .clone()
     }
 
     /// Change the working directory at runtime (called from /cd or agent tools)
     pub fn set_working_directory(&self, path: std::path::PathBuf) {
-        *self.working_directory.write().expect("working_directory lock poisoned") = path;
+        *self
+            .working_directory
+            .write()
+            .expect("working_directory lock poisoned") = path;
     }
 
     /// Get a shared handle to the working directory (for tools that need to mutate it)
@@ -462,9 +488,11 @@ impl AgentService {
                     if let Some(ref cb) = self.progress_callback {
                         cb(ProgressEvent::CompactionSummary { summary });
                     }
-                    let mut cont_text = "[SYSTEM: Context was auto-compacted. The summary above has full context. \
+                    let mut cont_text =
+                        "[SYSTEM: Context was auto-compacted. The summary above has full context. \
                          Continue the task immediately using tools. Do NOT repeat completed work. \
-                         Do NOT ask for instructions.]".to_string();
+                         Do NOT ask for instructions.]"
+                            .to_string();
                     if !self.auto_approve_tools {
                         cont_text.push_str("\n\nCRITICAL: Tool approval is REQUIRED. You MUST wait for user approval before EVERY tool execution. Do NOT batch tool calls without approval.");
                     }
@@ -474,7 +502,10 @@ impl AgentService {
                     tracing::error!("Pre-loop compaction failed: {}", e);
                     if let Some(ref cb) = self.progress_callback {
                         cb(ProgressEvent::IntermediateText {
-                            text: format!("Context compaction failed: {}. Continuing with current context.", e),
+                            text: format!(
+                                "Context compaction failed: {}. Continuing with current context.",
+                                e
+                            ),
                         });
                     }
                 }
@@ -500,7 +531,12 @@ impl AgentService {
         // Create tool execution context
         let mut tool_context = ToolExecutionContext::new(session_id)
             .with_auto_approve(self.auto_approve_tools)
-            .with_working_directory(self.working_directory.read().expect("working_directory lock poisoned").clone())
+            .with_working_directory(
+                self.working_directory
+                    .read()
+                    .expect("working_directory lock poisoned")
+                    .clone(),
+            )
             .with_read_only_mode(read_only_mode);
         tool_context.sudo_callback = self.sudo_callback.clone();
         tool_context.shared_working_directory = Some(Arc::clone(&self.working_directory));
@@ -529,9 +565,10 @@ impl AgentService {
             }
             // Check for cancellation
             if let Some(ref token) = cancel_token
-                && token.is_cancelled() {
-                    break;
-                }
+                && token.is_cancelled()
+            {
+                break;
+            }
 
             iteration += 1;
 
@@ -596,8 +633,8 @@ impl AgentService {
             }
 
             // Build LLM request with tools if available
-            let mut request =
-                LLMRequest::new(model_name.clone(), context.messages.clone()).with_max_tokens(self.max_tokens);
+            let mut request = LLMRequest::new(model_name.clone(), context.messages.clone())
+                .with_max_tokens(self.max_tokens);
 
             if let Some(system) = &context.system_brain {
                 request = request.with_system(system.clone());
@@ -617,15 +654,20 @@ impl AgentService {
             // Send to provider via streaming — retry once after emergency compaction if prompt is too long
             let response = match self.stream_complete(request, cancel_token.as_ref()).await {
                 Ok(resp) => resp,
-                Err(ref e) if e.to_string().contains("prompt is too long") || e.to_string().contains("too many tokens") => {
+                Err(ref e)
+                    if e.to_string().contains("prompt is too long")
+                        || e.to_string().contains("too many tokens") =>
+                {
                     tracing::warn!("Prompt too long for provider — emergency compaction");
                     let err_msg = e.to_string();
                     match self.compact_context(&mut context, &model_name).await {
                         Ok(_) => {
-                            let mut cont_text = "[SYSTEM: Emergency compaction — provider rejected the prompt as \
+                            let mut cont_text =
+                                "[SYSTEM: Emergency compaction — provider rejected the prompt as \
                                  too large. Context has been compacted. Acknowledge the compaction \
                                  briefly with a fun/cheeky remark, then resume the task from where \
-                                 you left off. Do NOT repeat completed work.]".to_string();
+                                 you left off. Do NOT repeat completed work.]"
+                                    .to_string();
                             if !self.auto_approve_tools {
                                 cont_text.push_str("\n\nCRITICAL: Tool approval is REQUIRED. You MUST wait for user approval before EVERY tool execution. Do NOT batch tool calls without approval.");
                             }
@@ -633,29 +675,42 @@ impl AgentService {
                         }
                         Err(compact_err) => {
                             tracing::error!("Emergency compaction also failed: {}", compact_err);
-                            return Err(AgentError::Internal(
-                                format!("Provider rejected prompt ({}) and emergency compaction failed: {}", err_msg, compact_err)
-                            ));
+                            return Err(AgentError::Internal(format!(
+                                "Provider rejected prompt ({}) and emergency compaction failed: {}",
+                                err_msg, compact_err
+                            )));
                         }
                     }
 
                     // Rebuild request with compacted context
-                    let mut retry_req = LLMRequest::new(model_name.clone(), context.messages.clone())
-                        .with_max_tokens(self.max_tokens);
+                    let mut retry_req =
+                        LLMRequest::new(model_name.clone(), context.messages.clone())
+                            .with_max_tokens(self.max_tokens);
                     if let Some(system) = &context.system_brain {
                         retry_req = retry_req.with_system(system.clone());
                     }
                     if self.tool_registry.count() > 0 {
                         retry_req = retry_req.with_tools(self.tool_registry.get_tool_definitions());
                     }
-                    self.stream_complete(retry_req, cancel_token.as_ref()).await.map_err(AgentError::Provider)?
+                    self.stream_complete(retry_req, cancel_token.as_ref())
+                        .await
+                        .map_err(AgentError::Provider)?
                 }
                 Err(e) => return Err(AgentError::Provider(e)),
             };
 
-            // Track token usage
-            last_input_tokens = response.usage.input_tokens;
-            total_input_tokens += response.usage.input_tokens;
+            // Track token usage — fall back to tiktoken estimate when provider
+            // doesn't report usage (e.g. MiniMax streaming ignores include_usage)
+            last_input_tokens = if response.usage.input_tokens > 0 {
+                response.usage.input_tokens
+            } else {
+                tracing::debug!(
+                    "Provider reported 0 input tokens, using tiktoken estimate: {}",
+                    context.token_count
+                );
+                context.token_count as u32
+            };
+            total_input_tokens += last_input_tokens;
             total_output_tokens += response.usage.output_tokens;
 
             // Calibrate context token count with the API's real input_tokens.
@@ -669,7 +724,9 @@ impl AgentService {
                 if drift > 5000.0 {
                     tracing::info!(
                         "Token calibration: estimated {} → API actual {} (drift: {:.0})",
-                        context.token_count, real_message_tokens, drift,
+                        context.token_count,
+                        real_message_tokens,
+                        drift,
                     );
                     context.token_count = real_message_tokens;
                 }
@@ -690,7 +747,9 @@ impl AgentService {
                     tracing::warn!(
                         "🔄 Stream dropped without completion (no stop_reason) at iteration {}. \
                          Retrying ({}/{}) — partial content discarded.",
-                        iteration, stream_retry_count, MAX_STREAM_RETRIES,
+                        iteration,
+                        stream_retry_count,
+                        MAX_STREAM_RETRIES,
                     );
                     // Subtract the tokens we just counted — they'll be re-counted on retry
                     total_input_tokens -= response.usage.input_tokens;
@@ -703,7 +762,9 @@ impl AgentService {
                         "🚨 Stream dropped {} times consecutively at iteration {}. \
                          Proceeding with partial response to avoid infinite retry loop. \
                          Content blocks: {}, stop_reason: None",
-                        MAX_STREAM_RETRIES, iteration, response.content.len(),
+                        MAX_STREAM_RETRIES,
+                        iteration,
+                        response.content.len(),
                     );
                     // Reset retry counter — we're accepting the partial response
                     stream_retry_count = 0;
@@ -736,20 +797,26 @@ impl AgentService {
                     }
                     ContentBlock::ToolUse { id, name, input } => {
                         // GRANULAR LOG: Tool call received from provider
-                        let input_keys: Vec<_> = input.as_object().map(|o| o.keys().cloned().collect()).unwrap_or_default();
+                        let input_keys: Vec<_> = input
+                            .as_object()
+                            .map(|o| o.keys().cloned().collect())
+                            .unwrap_or_default();
                         tracing::info!(
                             "[TOOL_EXEC] 📥 Tool call received: name={}, id={}, input_keys={:?}",
-                            name, id, input_keys
+                            name,
+                            id,
+                            input_keys
                         );
-                        
+
                         // Check for empty/Invalid input
                         if input.as_object().map(|o| o.is_empty()).unwrap_or(true) {
                             tracing::error!(
                                 "[TOOL_EXEC] ⚠️ Tool '{}' received EMPTY input! This will fail. Full input: {:?}",
-                                name, input
+                                name,
+                                input
                             );
                         }
-                        
+
                         tool_uses.push((id.clone(), name.clone(), input.clone()));
                     }
                     _ => {
@@ -771,6 +838,14 @@ impl AgentService {
             if tool_uses.is_empty() {
                 if iteration > 0 {
                     tracing::info!("Agent completed after {} tool iterations", iteration);
+                    // Emit final text so TUI persists it as a permanent message
+                    if !iteration_text.is_empty() {
+                        if let Some(ref cb) = self.progress_callback {
+                            cb(ProgressEvent::IntermediateText {
+                                text: iteration_text,
+                            });
+                        }
+                    }
                 } else {
                     tracing::info!("Agent responded with text only (no tool calls)");
                 }
@@ -780,9 +855,12 @@ impl AgentService {
 
             // Emit intermediate text to TUI so it appears before the tool calls
             if !iteration_text.is_empty()
-                && let Some(ref cb) = self.progress_callback {
-                    cb(ProgressEvent::IntermediateText { text: iteration_text });
-                }
+                && let Some(ref cb) = self.progress_callback
+            {
+                cb(ProgressEvent::IntermediateText {
+                    text: iteration_text,
+                });
+            }
 
             // Detect tool loops: Track the current batch of tool calls
             // Include arguments in signature to distinguish different calls
@@ -871,7 +949,10 @@ impl AgentService {
 
                         // session_search: include operation + query to distinguish calls
                         "session_search" => {
-                            let op = input.get("operation").and_then(|v| v.as_str()).unwrap_or("");
+                            let op = input
+                                .get("operation")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
                             let query = input.get("query").and_then(|v| v.as_str()).unwrap_or("");
                             format!("session_search:{}:{}", op, query)
                         }
@@ -953,15 +1034,12 @@ impl AgentService {
             for (tool_id, tool_name, tool_input) in tool_uses {
                 // Check for cancellation before each tool
                 if let Some(ref token) = cancel_token
-                    && token.is_cancelled() {
-                        break;
-                    }
+                    && token.is_cancelled()
+                {
+                    break;
+                }
 
-                tracing::info!(
-                    "Executing tool '{}' (iteration {})",
-                    tool_name,
-                    iteration,
-                );
+                tracing::info!("Executing tool '{}' (iteration {})", tool_name, iteration,);
 
                 // Save tool input for progress reporting (before it's moved to execute)
                 let tool_input_for_progress = tool_input.clone();
@@ -1019,7 +1097,8 @@ impl AgentService {
                             Ok(approved) => {
                                 if !approved {
                                     tracing::warn!("User denied approval for tool '{}'", tool_name);
-                                    tool_outputs.push((false, "User denied permission".to_string()));
+                                    tool_outputs
+                                        .push((false, "User denied permission".to_string()));
                                     tool_results.push(ContentBlock::ToolResult {
                                         tool_use_id: tool_id,
                                         content: "User denied permission to execute this tool"
@@ -1038,7 +1117,9 @@ impl AgentService {
                                     timeout_secs: tool_context.timeout_secs,
                                     read_only_mode: tool_context.read_only_mode,
                                     sudo_callback: tool_context.sudo_callback.clone(),
-                                    shared_working_directory: tool_context.shared_working_directory.clone(),
+                                    shared_working_directory: tool_context
+                                        .shared_working_directory
+                                        .clone(),
                                 };
 
                                 // Execute the tool with approved context
@@ -1056,7 +1137,7 @@ impl AgentService {
                                                 "Tool execution failed".to_string()
                                             })
                                         };
-                                        
+
                                         // GRANULAR LOG: Tool execution result
                                         if success {
                                             tracing::info!(
@@ -1071,8 +1152,9 @@ impl AgentService {
                                                 content.chars().take(200).collect::<String>()
                                             );
                                         }
-                                        
-                                        let output_summary: String = content.chars().take(2000).collect();
+
+                                        let output_summary: String =
+                                            content.chars().take(2000).collect();
                                         tool_outputs.push((success, output_summary.clone()));
                                         if let Some(ref cb) = self.progress_callback {
                                             cb(ProgressEvent::ToolCompleted {
@@ -1096,7 +1178,8 @@ impl AgentService {
                                             tool_name,
                                             err_msg
                                         );
-                                        let output_summary: String = err_msg.chars().take(2000).collect();
+                                        let output_summary: String =
+                                            err_msg.chars().take(2000).collect();
                                         tool_outputs.push((false, output_summary.clone()));
                                         if let Some(ref cb) = self.progress_callback {
                                             cb(ProgressEvent::ToolCompleted {
@@ -1158,7 +1241,7 @@ impl AgentService {
                                 .error
                                 .unwrap_or_else(|| "Tool execution failed".to_string())
                         };
-                        
+
                         // GRANULAR LOG: Direct tool execution result
                         if success {
                             tracing::info!(
@@ -1173,7 +1256,7 @@ impl AgentService {
                                 content.chars().take(200).collect::<String>()
                             );
                         }
-                        
+
                         let output_summary: String = content.chars().take(2000).collect();
                         tool_outputs.push((success, output_summary.clone()));
                         if let Some(ref cb) = self.progress_callback {
@@ -1193,11 +1276,7 @@ impl AgentService {
                     Err(e) => {
                         let err_msg = format!("Tool execution error: {}", e);
                         // GRANULAR LOG: Direct tool execution error
-                        tracing::error!(
-                            "[TOOL_EXEC] 💥 Tool '{}' error: {}",
-                            tool_name,
-                            err_msg
-                        );
+                        tracing::error!("[TOOL_EXEC] 💥 Tool '{}' error: {}", tool_name, err_msg);
                         let output_summary: String = err_msg.chars().take(2000).collect();
                         tool_outputs.push((false, output_summary.clone()));
                         if let Some(ref cb) = self.progress_callback {
@@ -1239,7 +1318,9 @@ impl AgentService {
             }
 
             // Add assistant message with tool use to context (filter empty text blocks)
-            let clean_content: Vec<ContentBlock> = response.content.iter()
+            let clean_content: Vec<ContentBlock> = response
+                .content
+                .iter()
                 .filter(|b| !matches!(b, ContentBlock::Text { text } if text.is_empty()))
                 .cloned()
                 .collect();
@@ -1268,13 +1349,15 @@ impl AgentService {
             if usage_pct > 80.0 {
                 tracing::warn!(
                     "Context at {:.0}% ({} tokens) inside tool loop — forcing compaction",
-                    usage_pct, context.token_count
+                    usage_pct,
+                    context.token_count
                 );
                 match self.compact_context(&mut context, &model_name).await {
                     Ok(summary) => {
                         tracing::info!(
                             "Mid-loop compaction complete: {} tokens, summary len={}",
-                            context.token_count, summary.len()
+                            context.token_count,
+                            summary.len()
                         );
                         // Inject continuation prompt so the LLM resumes the task
                         let mut cont_text = "[SYSTEM: Mid-loop context compaction complete. The summary above has \
@@ -1308,21 +1391,22 @@ impl AgentService {
             // Check for queued user messages to inject between tool iterations.
             // This lets the user provide follow-up feedback mid-execution (like Claude Code).
             if let Some(ref queue_cb) = self.message_queue_callback
-                && let Some(queued_msg) = queue_cb().await {
-                    tracing::info!("Injecting queued user message between tool iterations");
-                    let injected = Message::user(queued_msg.clone());
-                    context.add_message(injected);
+                && let Some(queued_msg) = queue_cb().await
+            {
+                tracing::info!("Injecting queued user message between tool iterations");
+                let injected = Message::user(queued_msg.clone());
+                context.add_message(injected);
 
-                    // Save to database so conversation history stays consistent
-                    let _ = message_service
-                        .create_message(session_id, "user".to_string(), queued_msg)
-                        .await;
-                }
-
+                // Save to database so conversation history stays consistent
+                let _ = message_service
+                    .create_message(session_id, "user".to_string(), queued_msg)
+                    .await;
+            }
         }
 
         let response = final_response.ok_or_else(|| {
-            let reason = loop_break_reason.unwrap_or_else(|| "Tool loop ended without final response".to_string());
+            let reason = loop_break_reason
+                .unwrap_or_else(|| "Tool loop ended without final response".to_string());
             AgentError::Internal(reason)
         })?;
 
@@ -1422,8 +1506,8 @@ impl AgentService {
             .map_err(|e| AgentError::Database(e.to_string()))?;
 
         // Build base LLM request
-        let request =
-            LLMRequest::new(model_name.clone(), context.messages.clone()).with_max_tokens(self.max_tokens);
+        let request = LLMRequest::new(model_name.clone(), context.messages.clone())
+            .with_max_tokens(self.max_tokens);
 
         let request = if let Some(system) = context.system_brain {
             request.with_system(system)
@@ -1439,7 +1523,11 @@ impl AgentService {
     /// Sends text deltas to the progress callback as `StreamingChunk` events
     /// so the TUI can display them in real-time. Returns the full response
     /// once the stream completes, ready for tool extraction.
-    async fn stream_complete(&self, request: LLMRequest, cancel_token: Option<&CancellationToken>) -> std::result::Result<LLMResponse, crate::brain::provider::ProviderError> {
+    async fn stream_complete(
+        &self,
+        request: LLMRequest,
+        cancel_token: Option<&CancellationToken>,
+    ) -> std::result::Result<LLMResponse, crate::brain::provider::ProviderError> {
         use crate::brain::provider::{ContentDelta, StreamEvent, TokenUsage};
         use futures::StreamExt;
 
@@ -1464,7 +1552,9 @@ impl AgentService {
 
         while let Some(event_result) = stream.next().await {
             // Check for cancellation between stream events
-            if let Some(token) = cancel_token && token.is_cancelled() {
+            if let Some(token) = cancel_token
+                && token.is_cancelled()
+            {
                 tracing::info!("Stream cancelled by user");
                 break;
             }
@@ -1482,11 +1572,16 @@ impl AgentService {
                     model = message.model;
                     input_tokens = message.usage.input_tokens;
                 }
-                StreamEvent::ContentBlockStart { index, content_block } => {
+                StreamEvent::ContentBlockStart {
+                    index,
+                    content_block,
+                } => {
                     // Ensure block_states has enough capacity
                     while block_states.len() <= index {
                         block_states.push(BlockState {
-                            block: ContentBlock::Text { text: String::new() },
+                            block: ContentBlock::Text {
+                                text: String::new(),
+                            },
                             json_buf: String::new(),
                         });
                     }
@@ -1504,7 +1599,9 @@ impl AgentService {
                                     cb(ProgressEvent::StreamingChunk { text: text.clone() });
                                 }
                                 // Accumulate into block
-                                if let ContentBlock::Text { text: ref mut t } = block_states[index].block {
+                                if let ContentBlock::Text { text: ref mut t } =
+                                    block_states[index].block
+                                {
                                     t.push_str(&text);
                                 }
                             }
@@ -1520,8 +1617,9 @@ impl AgentService {
                         // Finalize tool use blocks: parse accumulated JSON
                         if let ContentBlock::ToolUse { ref mut input, .. } = state.block
                             && !state.json_buf.is_empty()
-                            && let Ok(parsed) = serde_json::from_str(&state.json_buf) {
-                                *input = parsed;
+                            && let Ok(parsed) = serde_json::from_str(&state.json_buf)
+                        {
+                            *input = parsed;
                         }
                     }
                 }
@@ -1551,7 +1649,8 @@ impl AgentService {
             tracing::warn!(
                 "⚠️ Stream ended without MessageStop/[DONE]. {} content blocks accumulated, \
                  {} output tokens counted. Possible network interruption or provider timeout.",
-                block_states.len(), output_tokens,
+                block_states.len(),
+                output_tokens,
             );
         }
 
@@ -1567,10 +1666,17 @@ impl AgentService {
             id,
             // Some providers (e.g. MiniMax) don't include the model name in stream chunks.
             // Fall back to the request model so pricing lookup never gets an empty string.
-            model: if model.is_empty() { request_model } else { model },
+            model: if model.is_empty() {
+                request_model
+            } else {
+                model
+            },
             content: content_blocks,
             stop_reason,
-            usage: TokenUsage { input_tokens, output_tokens },
+            usage: TokenUsage {
+                input_tokens,
+                output_tokens,
+            },
         })
     }
 
@@ -1593,7 +1699,8 @@ impl AgentService {
             .saturating_sub(tool_budget)
             .saturating_sub(brain_budget)
             .saturating_sub(16384) // reserve for response
-            * 60 / 100; // Target 60% to leave headroom for tool results and overhead
+            * 60
+            / 100; // Target 60% to leave headroom for tool results and overhead
 
         let mut token_acc = 0usize;
         let mut keep_from = 0usize;
@@ -1613,7 +1720,11 @@ impl AgentService {
             let kept = all_messages.len() - keep_from;
             tracing::info!(
                 "Context budget: keeping last {} of {} messages ({} tokens via tiktoken, budget {}, window {})",
-                kept, all_messages.len(), token_acc, history_budget, context_window
+                kept,
+                all_messages.len(),
+                token_acc,
+                history_budget,
+                context_window
             );
             all_messages[keep_from..].to_vec()
         } else {
@@ -1652,9 +1763,9 @@ impl AgentService {
             .position(|m| {
                 !(m.role == crate::brain::provider::Role::User
                     && !m.content.is_empty()
-                    && m.content
-                        .iter()
-                        .all(|b| matches!(b, crate::brain::provider::ContentBlock::ToolResult { .. })))
+                    && m.content.iter().all(|b| {
+                        matches!(b, crate::brain::provider::ContentBlock::ToolResult { .. })
+                    }))
             })
             .unwrap_or(context.messages.len());
 
@@ -1669,7 +1780,10 @@ impl AgentService {
         // Also cap at 75% of context window to leave headroom — compaction request
         // must itself fit within the provider limit.
         let max_budget = (context.max_tokens as f64 * 0.75) as usize;
-        let summary_budget = context.max_tokens.saturating_sub(compaction_overhead).min(max_budget);
+        let summary_budget = context
+            .max_tokens
+            .saturating_sub(compaction_overhead)
+            .min(max_budget);
         let mut running_tokens = 0usize;
         let all_msgs = &context.messages[start..];
         // Walk backwards from most-recent until we hit the budget
@@ -1730,7 +1844,11 @@ impl AgentService {
             context.token_count,
             context.max_tokens,
             remaining_budget,
-            if self.auto_approve_tools { "AUTO-APPROVE ON (tools run freely)" } else { "AUTO-APPROVE OFF — tool approval is REQUIRED for every tool call" },
+            if self.auto_approve_tools {
+                "AUTO-APPROVE ON (tools run freely)"
+            } else {
+                "AUTO-APPROVE OFF — tool approval is REQUIRED for every tool call"
+            },
         );
 
         summary_messages.push(Message::user(compaction_prompt));
@@ -1777,7 +1895,9 @@ impl AgentService {
 
         // Show the summary to the user in chat
         if let Some(ref cb) = self.progress_callback {
-            cb(ProgressEvent::CompactionSummary { summary: summary.clone() });
+            cb(ProgressEvent::CompactionSummary {
+                summary: summary.clone(),
+            });
         }
 
         Ok(summary)
@@ -1829,7 +1949,9 @@ impl AgentService {
                 // URL image
                 if img_path.starts_with("http://") || img_path.starts_with("https://") {
                     image_blocks.push(ContentBlock::Image {
-                        source: ImageSource::Url { url: img_path.to_string() },
+                        source: ImageSource::Url {
+                            url: img_path.to_string(),
+                        },
                     });
                     tracing::info!("Auto-attached image URL: {}", img_path);
                 }
@@ -1855,7 +1977,12 @@ impl AgentService {
                                 data: b64,
                             },
                         });
-                        tracing::info!("Auto-attached image: {} ({}, {} bytes)", img_path, media_type, data.len());
+                        tracing::info!(
+                            "Auto-attached image: {} ({}, {} bytes)",
+                            img_path,
+                            media_type,
+                            data.len()
+                        );
                     } else {
                         tracing::warn!("Could not read image file: {}", img_path);
                     }
@@ -1887,48 +2014,85 @@ impl AgentService {
     fn format_tool_summary(tool_name: &str, tool_input: &Value) -> String {
         match tool_name {
             "bash" => {
-                let cmd = tool_input.get("command").and_then(|v| v.as_str()).unwrap_or("?");
+                let cmd = tool_input
+                    .get("command")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
                 let short: String = cmd.chars().take(60).collect();
-                if cmd.len() > 60 { format!("bash: {}…", short) } else { format!("bash: {}", short) }
+                if cmd.len() > 60 {
+                    format!("bash: {}…", short)
+                } else {
+                    format!("bash: {}", short)
+                }
             }
             "read_file" | "read" => {
-                let path = tool_input.get("path").and_then(|v| v.as_str()).unwrap_or("?");
+                let path = tool_input
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
                 format!("Read {}", path)
             }
             "write_file" | "write" => {
-                let path = tool_input.get("path").and_then(|v| v.as_str()).unwrap_or("?");
+                let path = tool_input
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
                 format!("Write {}", path)
             }
             "edit_file" | "edit" => {
-                let path = tool_input.get("path").and_then(|v| v.as_str()).unwrap_or("?");
+                let path = tool_input
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
                 format!("Edit {}", path)
             }
             "ls" => {
-                let path = tool_input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+                let path = tool_input
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(".");
                 format!("ls {}", path)
             }
             "glob" => {
-                let p = tool_input.get("pattern").and_then(|v| v.as_str()).unwrap_or("?");
+                let p = tool_input
+                    .get("pattern")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
                 format!("Glob {}", p)
             }
             "grep" => {
-                let p = tool_input.get("pattern").and_then(|v| v.as_str()).unwrap_or("?");
+                let p = tool_input
+                    .get("pattern")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
                 format!("Grep '{}'", p)
             }
             "web_search" | "exa_search" | "brave_search" => {
-                let q = tool_input.get("query").and_then(|v| v.as_str()).unwrap_or("?");
+                let q = tool_input
+                    .get("query")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
                 format!("Search: {}", q)
             }
             "plan" => {
-                let op = tool_input.get("operation").and_then(|v| v.as_str()).unwrap_or("?");
+                let op = tool_input
+                    .get("operation")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
                 format!("Plan: {}", op)
             }
             "task_manager" => {
-                let op = tool_input.get("operation").and_then(|v| v.as_str()).unwrap_or("?");
+                let op = tool_input
+                    .get("operation")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
                 format!("Task: {}", op)
             }
             "memory_search" => {
-                let q = tool_input.get("query").and_then(|v| v.as_str()).unwrap_or("?");
+                let q = tool_input
+                    .get("query")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
                 format!("Memory: {}", q)
             }
             other => other.to_string(),
@@ -1998,8 +2162,8 @@ pub struct AgentStreamResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::Database;
     use crate::brain::provider::{LLMRequest, LLMResponse, TokenUsage};
+    use crate::db::Database;
     use async_trait::async_trait;
 
     /// Mock provider for testing
@@ -2032,21 +2196,21 @@ mod tests {
             use crate::brain::provider::{ContentDelta, MessageDelta, StreamEvent, StreamMessage};
 
             let response = self.complete(request).await?;
-            let mut events = vec![
-                Ok(StreamEvent::MessageStart {
-                    message: StreamMessage {
-                        id: response.id.clone(),
-                        model: response.model.clone(),
-                        role: Role::Assistant,
-                        usage: response.usage,
-                    },
-                }),
-            ];
+            let mut events = vec![Ok(StreamEvent::MessageStart {
+                message: StreamMessage {
+                    id: response.id.clone(),
+                    model: response.model.clone(),
+                    role: Role::Assistant,
+                    usage: response.usage,
+                },
+            })];
             for (i, block) in response.content.iter().enumerate() {
                 if let ContentBlock::Text { text } = block {
                     events.push(Ok(StreamEvent::ContentBlockStart {
                         index: i,
-                        content_block: ContentBlock::Text { text: String::new() },
+                        content_block: ContentBlock::Text {
+                            text: String::new(),
+                        },
                     }));
                     events.push(Ok(StreamEvent::ContentBlockDelta {
                         index: i,
@@ -2211,16 +2375,14 @@ mod tests {
 
             // Get the response that complete() would return, then convert to stream events
             let response = self.complete(request).await?;
-            let mut events = vec![
-                Ok(StreamEvent::MessageStart {
-                    message: StreamMessage {
-                        id: response.id.clone(),
-                        model: response.model.clone(),
-                        role: Role::Assistant,
-                        usage: response.usage,
-                    },
-                }),
-            ];
+            let mut events = vec![Ok(StreamEvent::MessageStart {
+                message: StreamMessage {
+                    id: response.id.clone(),
+                    model: response.model.clone(),
+                    role: Role::Assistant,
+                    usage: response.usage,
+                },
+            })];
 
             for (i, block) in response.content.iter().enumerate() {
                 // ContentBlockStart sends empty shells; actual content comes via deltas
@@ -2228,7 +2390,9 @@ mod tests {
                     ContentBlock::Text { text } => {
                         events.push(Ok(StreamEvent::ContentBlockStart {
                             index: i,
-                            content_block: ContentBlock::Text { text: String::new() },
+                            content_block: ContentBlock::Text {
+                                text: String::new(),
+                            },
                         }));
                         events.push(Ok(StreamEvent::ContentBlockDelta {
                             index: i,
@@ -2425,10 +2589,7 @@ mod tests {
             .await
             .unwrap();
 
-        let user_messages: Vec<_> = messages
-            .iter()
-            .filter(|m| m.role == "user")
-            .collect();
+        let user_messages: Vec<_> = messages.iter().filter(|m| m.role == "user").collect();
 
         // Should have original message + injected follow-up
         assert!(
@@ -2438,7 +2599,10 @@ mod tests {
         );
 
         let has_followup = user_messages.iter().any(|m| m.content == "user follow-up");
-        assert!(has_followup, "injected follow-up message not found in database");
+        assert!(
+            has_followup,
+            "injected follow-up message not found in database"
+        );
     }
 
     #[tokio::test]
@@ -2488,12 +2652,13 @@ mod tests {
             .await
             .unwrap();
 
-        let user_messages: Vec<_> = messages
-            .iter()
-            .filter(|m| m.role == "user")
-            .collect();
+        let user_messages: Vec<_> = messages.iter().filter(|m| m.role == "user").collect();
 
-        assert_eq!(user_messages.len(), 1, "should only have original user message");
+        assert_eq!(
+            user_messages.len(),
+            1,
+            "should only have original user message"
+        );
     }
 
     #[tokio::test]
@@ -2501,17 +2666,17 @@ mod tests {
         // Verify stream_complete reconstructs a text-only response correctly
         let (agent_service, _) = create_test_service().await;
 
-        let request = LLMRequest::new(
-            "mock-model".to_string(),
-            vec![Message::user("Hello")],
-        );
+        let request = LLMRequest::new("mock-model".to_string(), vec![Message::user("Hello")]);
 
         let response = agent_service.stream_complete(request, None).await.unwrap();
         assert_eq!(response.model, "mock-model");
         assert!(!response.content.is_empty());
 
         // Should have a text block
-        let has_text = response.content.iter().any(|b| matches!(b, ContentBlock::Text { text } if !text.is_empty()));
+        let has_text = response
+            .content
+            .iter()
+            .any(|b| matches!(b, ContentBlock::Text { text } if !text.is_empty()));
         assert!(has_text, "response should contain non-empty text");
         assert_eq!(response.stop_reason, Some(StopReason::EndTurn));
         assert!(response.usage.input_tokens > 0 || response.usage.output_tokens > 0);
@@ -2526,16 +2691,21 @@ mod tests {
         let context = ServiceContext::new(db.pool().clone());
         let agent_service = AgentService::new(provider, context);
 
-        let request = LLMRequest::new(
-            "mock-model".to_string(),
-            vec![Message::user("Use a tool")],
-        );
+        let request = LLMRequest::new("mock-model".to_string(), vec![Message::user("Use a tool")]);
 
         let response = agent_service.stream_complete(request, None).await.unwrap();
 
         // First call to MockProviderWithTools returns text + tool_use
-        let text_blocks: Vec<_> = response.content.iter().filter(|b| matches!(b, ContentBlock::Text { .. })).collect();
-        let tool_blocks: Vec<_> = response.content.iter().filter(|b| matches!(b, ContentBlock::ToolUse { .. })).collect();
+        let text_blocks: Vec<_> = response
+            .content
+            .iter()
+            .filter(|b| matches!(b, ContentBlock::Text { .. }))
+            .collect();
+        let tool_blocks: Vec<_> = response
+            .content
+            .iter()
+            .filter(|b| matches!(b, ContentBlock::ToolUse { .. }))
+            .collect();
 
         assert!(!text_blocks.is_empty(), "should have text block");
         assert!(!tool_blocks.is_empty(), "should have tool_use block");
@@ -2567,13 +2737,10 @@ mod tests {
             }
         });
 
-        let agent_service = AgentService::new(provider, context)
-            .with_progress_callback(Some(progress_cb));
+        let agent_service =
+            AgentService::new(provider, context).with_progress_callback(Some(progress_cb));
 
-        let request = LLMRequest::new(
-            "mock-model".to_string(),
-            vec![Message::user("Hello")],
-        );
+        let request = LLMRequest::new("mock-model".to_string(), vec![Message::user("Hello")]);
 
         let _response = agent_service.stream_complete(request, None).await.unwrap();
 

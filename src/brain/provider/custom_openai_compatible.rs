@@ -21,6 +21,55 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(120);
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
 
+/// Filter `<think>...</think>` reasoning blocks from a streaming chunk.
+///
+/// Tracks state across chunks via `inside_think`. Returns the portion of `text`
+/// that is outside any think block. Handles tags split across chunk boundaries.
+fn filter_think_tags(text: &str, inside_think: &mut bool) -> String {
+    let mut result = String::new();
+    let mut remaining = text;
+
+    loop {
+        if *inside_think {
+            if let Some(end) = remaining.find("</think>") {
+                remaining = &remaining[end + 8..];
+                *inside_think = false;
+            } else {
+                // Still inside think block, discard everything
+                break;
+            }
+        } else {
+            if let Some(start) = remaining.find("<think>") {
+                result.push_str(&remaining[..start]);
+                remaining = &remaining[start + 7..];
+                *inside_think = true;
+            } else {
+                result.push_str(remaining);
+                break;
+            }
+        }
+    }
+
+    result
+}
+
+/// Strip complete `<think>...</think>` blocks from non-streaming content.
+fn strip_think_blocks(text: &str) -> String {
+    let mut result = String::new();
+    let mut remaining = text;
+    while let Some(start) = remaining.find("<think>") {
+        result.push_str(&remaining[..start]);
+        if let Some(end) = remaining[start..].find("</think>") {
+            remaining = &remaining[start + end + 8..];
+        } else {
+            // Unclosed <think> — discard the rest
+            return result.trim().to_string();
+        }
+    }
+    result.push_str(remaining);
+    result.trim().to_string()
+}
+
 /// OpenAI provider for GPT models
 #[derive(Clone)]
 pub struct OpenAIProvider {
@@ -109,10 +158,12 @@ impl OpenAIProvider {
         if self.api_key != "not-needed" {
             // Sanitize API key: trim whitespace/newlines that may have leaked from input
             let clean_key = self.api_key.trim();
-            let header_value: reqwest::header::HeaderValue = format!("Bearer {}", clean_key)
-                .parse()
-                .map_err(|_| {
-                    tracing::error!("API key contains invalid characters (length={}). Check keys.toml.", clean_key.len());
+            let header_value: reqwest::header::HeaderValue =
+                format!("Bearer {}", clean_key).parse().map_err(|_| {
+                    tracing::error!(
+                        "API key contains invalid characters (length={}). Check keys.toml.",
+                        clean_key.len()
+                    );
                     ProviderError::InvalidApiKey
                 })?;
             headers.insert(reqwest::header::AUTHORIZATION, header_value);
@@ -286,9 +337,14 @@ impl OpenAIProvider {
 
         // Add text content if present
         if let Some(content) = choice.message.content
-            && !content.is_empty() {
-                content_blocks.push(ContentBlock::Text { text: content });
+            && !content.is_empty()
+        {
+            // Strip <think>...</think> reasoning blocks (MiniMax, DeepSeek, etc.)
+            let clean = strip_think_blocks(&content);
+            if !clean.is_empty() {
+                content_blocks.push(ContentBlock::Text { text: clean });
             }
+        }
 
         // Convert tool_calls to ToolUse content blocks
         if let Some(tool_calls) = choice.message.tool_calls {
@@ -408,7 +464,7 @@ impl OpenAIProvider {
 #[async_trait]
 impl Provider for OpenAIProvider {
     async fn complete(&self, request: LLMRequest) -> Result<LLMResponse> {
-        use super::retry::{retry_with_backoff, RetryConfig};
+        use super::retry::{RetryConfig, retry_with_backoff};
 
         let model = request.model.clone();
         let message_count = request.messages.len();
@@ -472,25 +528,34 @@ impl Provider for OpenAIProvider {
     }
 
     async fn stream(&self, request: LLMRequest) -> Result<ProviderStream> {
-        use super::retry::{retry_with_backoff, RetryConfig};
+        use super::retry::{RetryConfig, retry_with_backoff};
 
         let model = request.model.clone();
         let message_count = request.messages.len();
-        
+
         tracing::info!(
             "{} streaming request: model={}, messages={}, base_url={}",
             self.name(),
-            model, message_count, self.base_url
+            model,
+            message_count,
+            self.base_url
         );
 
         let mut openai_request = self.to_openai_request(request);
         openai_request.stream = Some(true);
-        openai_request.stream_options = Some(StreamOptions { include_usage: true });
-        
+        openai_request.stream_options = Some(StreamOptions {
+            include_usage: true,
+        });
+
         let tools_count = openai_request.tools.as_ref().map(|t| t.len()).unwrap_or(0);
         tracing::debug!("OpenAI request has {} tools", tools_count);
-        tracing::debug!("OpenAI request payload: {:?}", serde_json::to_string(&openai_request).map(|s| s.chars().take(1000).collect::<String>()).unwrap_or_default());
-        
+        tracing::debug!(
+            "OpenAI request payload: {:?}",
+            serde_json::to_string(&openai_request)
+                .map(|s| s.chars().take(1000).collect::<String>())
+                .unwrap_or_default()
+        );
+
         let retry_config = RetryConfig::default();
 
         // Retry the stream connection establishment
@@ -519,7 +584,7 @@ impl Provider for OpenAIProvider {
         // Parse Server-Sent Events stream - return Vec to emit multiple events like Anthropic
         let byte_stream = response.bytes_stream();
         let buffer = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
-        
+
         // Accumulated state for a single streamed tool call
         #[derive(Debug, Clone, Default)]
         struct ToolCallAccum {
@@ -536,6 +601,8 @@ impl Provider for OpenAIProvider {
             seen_delta_content: bool,
             /// Index -> accumulated tool call
             tool_calls: std::collections::HashMap<usize, ToolCallAccum>,
+            /// True while inside a `<think>...</think>` reasoning block
+            inside_think: bool,
         }
 
         let state = std::sync::Arc::new(std::sync::Mutex::new(StreamState {
@@ -543,8 +610,9 @@ impl Provider for OpenAIProvider {
             emitted_content_start: false,
             seen_delta_content: false,
             tool_calls: std::collections::HashMap::new(),
+            inside_think: false,
         }));
-        
+
         let event_stream = byte_stream
             .map(move |chunk_result| -> Vec<std::result::Result<StreamEvent, ProviderError>> {
                 match chunk_result {
@@ -578,7 +646,7 @@ impl Provider for OpenAIProvider {
                                             accum.id, accum.name, &accum.arguments.chars().take(200).collect::<String>()
                                         );
                                         events.push(Ok(StreamEvent::ContentBlockStart {
-                                            index: _idx,
+                                            index: _idx + 1,
                                             content_block: ContentBlock::ToolUse {
                                                 id: accum.id,
                                                 name: accum.name,
@@ -691,7 +759,7 @@ impl Provider for OpenAIProvider {
                                                         idx, accum.id, accum.name, accum.arguments.len()
                                                     );
                                                     events.push(Ok(StreamEvent::ContentBlockStart {
-                                                        index: idx,
+                                                        index: idx + 1,
                                                         content_block: ContentBlock::ToolUse {
                                                             id: accum.id,
                                                             name: accum.name,
@@ -701,51 +769,66 @@ impl Provider for OpenAIProvider {
                                                 }
                                             }
 
-                                        // Emit text content
+                                        // Emit text content, filtering out <think>...</think> reasoning blocks
                                         if let Some(ref c) = content {
-                                            if !st.emitted_content_start && c.is_empty() {
-                                                st.emitted_content_start = true;
-                                                events.push(Ok(StreamEvent::ContentBlockStart {
-                                                    index: 0,
-                                                    content_block: ContentBlock::Text { text: String::new() },
-                                                }));
-                                            }
+                                            // Filter reasoning tokens that some providers (MiniMax, DeepSeek)
+                                            // embed as <think>...</think> in the content field
+                                            let filtered = filter_think_tags(c, &mut st.inside_think);
 
-                                            if !c.is_empty() {
+                                            if !filtered.trim().is_empty() {
+                                                if !st.emitted_content_start {
+                                                    st.emitted_content_start = true;
+                                                    events.push(Ok(StreamEvent::ContentBlockStart {
+                                                        index: 0,
+                                                        content_block: ContentBlock::Text { text: String::new() },
+                                                    }));
+                                                }
+
                                                 events.push(Ok(StreamEvent::ContentBlockDelta {
                                                     index: 0,
                                                     delta: ContentDelta::TextDelta {
-                                                        text: c.clone(),
+                                                        text: filtered,
                                                     },
                                                 }));
                                             }
                                         }
 
-                                        // Extract usage from final chunk
-                                        if let Some(ref usage) = chunk.usage
-                                            && finish_reason_str.is_some() {
-                                                let input_tokens = usage.prompt_tokens.unwrap_or(0);
-                                                let output_tokens = usage.completion_tokens.unwrap_or(0);
+                                        // Emit MessageDelta when finish_reason is present
+                                        // (decoupled from usage — MiniMax and some providers
+                                        // send finish_reason without usage in the same chunk)
+                                        if let Some(reason) = finish_reason_str {
+                                            let (input_tokens, output_tokens) = if let Some(ref usage) = chunk.usage {
+                                                (usage.prompt_tokens.unwrap_or(0), usage.completion_tokens.unwrap_or(0))
+                                            } else {
+                                                (0, 0)
+                                            };
+                                            if input_tokens > 0 || output_tokens > 0 {
                                                 tracing::info!("[STREAM_USAGE] Final usage: input={}, output={}", input_tokens, output_tokens);
-
-                                                let stop_reason = finish_reason_str.map(|s| match s.as_str() {
-                                                    "stop" => crate::brain::provider::types::StopReason::EndTurn,
-                                                    "length" => crate::brain::provider::types::StopReason::MaxTokens,
-                                                    "tool_calls" | "function_call" => crate::brain::provider::types::StopReason::ToolUse,
-                                                    _ => crate::brain::provider::types::StopReason::EndTurn,
-                                                });
-
-                                                events.push(Ok(StreamEvent::MessageDelta {
-                                                    delta: crate::brain::provider::types::MessageDelta {
-                                                        stop_reason,
-                                                        stop_sequence: None,
-                                                    },
-                                                    usage: crate::brain::provider::types::TokenUsage {
-                                                        input_tokens,
-                                                        output_tokens,
-                                                    },
-                                                }));
                                             }
+
+                                            let stop_reason = Some(match reason.as_str() {
+                                                "stop" => crate::brain::provider::types::StopReason::EndTurn,
+                                                "length" => crate::brain::provider::types::StopReason::MaxTokens,
+                                                "tool_calls" | "function_call" => crate::brain::provider::types::StopReason::ToolUse,
+                                                _ => crate::brain::provider::types::StopReason::EndTurn,
+                                            });
+
+                                            events.push(Ok(StreamEvent::MessageDelta {
+                                                delta: crate::brain::provider::types::MessageDelta {
+                                                    stop_reason,
+                                                    stop_sequence: None,
+                                                },
+                                                usage: crate::brain::provider::types::TokenUsage {
+                                                    input_tokens,
+                                                    output_tokens,
+                                                },
+                                            }));
+
+                                            // Emit MessageStop — not all providers send [DONE]
+                                            // (e.g. MiniMax). Safe for those that do, since the
+                                            // first MessageStop breaks the consumer loop.
+                                            events.push(Ok(StreamEvent::MessageStop));
+                                        }
                                     }
                                     Err(e) => {
                                         let json_preview = json_str.chars().take(300).collect::<String>();
@@ -806,41 +889,33 @@ impl Provider for OpenAIProvider {
 
     async fn fetch_models(&self) -> Vec<String> {
         // Derive models URL from base_url (replace /chat/completions with /models)
-        let models_url = self
-            .base_url
-            .replace("/chat/completions", "/models");
+        let models_url = self.base_url.replace("/chat/completions", "/models");
 
         #[derive(Deserialize)]
-        struct ModelEntry { id: String }
+        struct ModelEntry {
+            id: String,
+        }
         #[derive(Deserialize)]
-        struct ModelsResponse { data: Vec<ModelEntry> }
+        struct ModelsResponse {
+            data: Vec<ModelEntry>,
+        }
 
         let headers = match self.headers() {
             Ok(h) => h,
             Err(_) => return self.supported_models(),
         };
-        match self.client
-            .get(&models_url)
-            .headers(headers)
-            .send()
-            .await
-        {
-            Ok(resp) if resp.status().is_success() => {
-                match resp.json::<ModelsResponse>().await {
-                    Ok(body) => {
-                        let mut models: Vec<String> = body.data
-                            .into_iter()
-                            .map(|m| m.id)
-                            .collect();
-                        models.sort();
-                        if models.is_empty() {
-                            return self.supported_models();
-                        }
-                        models
+        match self.client.get(&models_url).headers(headers).send().await {
+            Ok(resp) if resp.status().is_success() => match resp.json::<ModelsResponse>().await {
+                Ok(body) => {
+                    let mut models: Vec<String> = body.data.into_iter().map(|m| m.id).collect();
+                    models.sort();
+                    if models.is_empty() {
+                        return self.supported_models();
                     }
-                    Err(_) => self.supported_models(),
+                    models
                 }
-            }
+                Err(_) => self.supported_models(),
+            },
             _ => self.supported_models(),
         }
     }
