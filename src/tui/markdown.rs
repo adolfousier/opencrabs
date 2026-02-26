@@ -169,7 +169,6 @@ pub fn parse_markdown(markdown: &str) -> Vec<Line<'static>> {
                     format!("`{}`", code),
                     Style::default()
                         .fg(Color::Rgb(184, 134, 11))
-                        .bg(Color::Black)
                         .add_modifier(Modifier::BOLD),
                 ));
             }

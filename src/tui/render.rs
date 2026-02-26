@@ -312,6 +312,7 @@ fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
         // Render tool call groups (finalized)
         if let Some(ref group) = app.messages[msg_idx].tool_group {
+            lines.push(Line::from(""));
             render_tool_group(&mut lines, group, false);
             lines.push(Line::from(""));
             continue;
@@ -449,23 +450,24 @@ fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
         // Render reasoning details on assistant messages (collapsible)
         if !is_user && app.messages[msg_idx].details.is_some() {
+            lines.push(Line::from(""));
             let hint_text = if app.messages[msg_idx].expanded {
                 "  ▾ Thinking (ctrl+o to collapse)"
             } else {
                 "  ▸ Thinking (ctrl+o to expand)"
             };
-            lines.push(Line::from(Span::styled(
-                hint_text,
+            lines.push(Line::from(vec![Span::styled(
+                hint_text.to_string(),
                 Style::default()
-                    .fg(Color::DarkGray)
+                    .fg(Color::Rgb(90, 90, 90))
                     .add_modifier(Modifier::ITALIC),
-            )));
+            )]));
             if app.messages[msg_idx].expanded
                 && let Some(ref details) = app.messages[msg_idx].details
             {
                 let reasoning_lines = parse_markdown(details);
                 let reasoning_style = Style::default()
-                    .fg(Color::DarkGray)
+                    .fg(Color::Rgb(80, 80, 80))
                     .add_modifier(Modifier::ITALIC);
                 for line in reasoning_lines {
                     let mut padded_spans = vec![Span::styled("  ", Style::default())];
@@ -564,6 +566,7 @@ fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     // Render active tool group (live, during processing) — below streaming text
     // so it's always visible at the bottom with auto-scroll
     if let Some(ref group) = app.active_tool_group {
+        lines.push(Line::from(""));
         render_tool_group(&mut lines, group, true);
     }
 
@@ -838,7 +841,7 @@ fn render_tool_group<'a>(
     let mut header_spans = vec![Span::styled(
         format!("  {} {}", "●", header),
         Style::default()
-            .fg(Color::Rgb(70, 130, 180))
+            .fg(Color::Green)
             .add_modifier(Modifier::BOLD),
     )];
     header_spans.push(Span::styled(
