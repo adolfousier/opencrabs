@@ -2511,75 +2511,105 @@ fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     let model_focused = (focused_field == 2 && !is_custom) || (focused_field == 3 && is_custom);
     const MAX_VISIBLE_MODELS: usize = 8;
 
-    if model_focused {
-        // Show filter input
-        let filter_cursor = if model_focused { "█" } else { "" };
-        let filter_display = if app.model_selector_filter.is_empty() {
-            format!("  / filter{}", filter_cursor)
+    if is_custom {
+        // Custom provider: free-text model name input (no filter/search)
+        let model_cursor = if model_focused { "█" } else { "" };
+        let model_display = if app.model_selector_custom_model.is_empty() {
+            format!("enter model name (e.g. gpt-4o){}", model_cursor)
         } else {
-            format!("  / {}{}", app.model_selector_filter, filter_cursor)
+            format!("{}{}", app.model_selector_custom_model, model_cursor)
         };
-        lines.push(Line::from(Span::styled(
-            filter_display,
-            Style::default().fg(if model_focused {
-                BRAND_BLUE
-            } else {
-                Color::DarkGray
-            }),
-        )));
-    }
-
-    let total = display_models.len();
-    let max_sel = if total > 0 { total - 1 } else { 0 };
-    let safe_selected = app.model_selector_selected.min(max_sel);
-    let (start, end) = if total <= MAX_VISIBLE_MODELS {
-        (0, total)
-    } else {
-        let half = MAX_VISIBLE_MODELS / 2;
-        let s = safe_selected
-            .saturating_sub(half)
-            .min(total - MAX_VISIBLE_MODELS);
-        (s, s + MAX_VISIBLE_MODELS)
-    };
-
-    if start > 0 {
-        lines.push(Line::from(Span::styled(
-            format!("  ↑ {} more", start),
-            Style::default().fg(Color::DarkGray),
-        )));
-    }
-
-    for (offset, model) in display_models[start..end].iter().enumerate() {
-        let i = start + offset;
-        let selected = i == safe_selected;
-        let active = *model == current_model;
-
-        let prefix = if selected && model_focused {
-            " > "
-        } else {
-            "   "
-        };
-
-        let style = if selected && model_focused {
-            Style::default()
-                .fg(Color::Black)
-                .bg(BRAND_BLUE)
-                .add_modifier(Modifier::BOLD)
-        } else if active {
-            Style::default()
-                .fg(Color::Blue)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::White)
-        };
-
-        let suffix = if active { " (active)" } else { "" };
-
         lines.push(Line::from(vec![
-            Span::styled(prefix, style),
-            Span::styled(*model, style),
-            Span::styled(suffix, Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "  Model: ",
+                Style::default().fg(if model_focused {
+                    BRAND_BLUE
+                } else {
+                    Color::DarkGray
+                }),
+            ),
+            Span::styled(
+                model_display,
+                Style::default().fg(if model_focused {
+                    Color::White
+                } else if app.model_selector_custom_model.is_empty() {
+                    Color::DarkGray
+                } else {
+                    Color::Green
+                }),
+            ),
         ]));
+    } else {
+        // Non-custom: filter/search model list
+        if model_focused {
+            let filter_cursor = if model_focused { "█" } else { "" };
+            let filter_display = if app.model_selector_filter.is_empty() {
+                format!("  / filter{}", filter_cursor)
+            } else {
+                format!("  / {}{}", app.model_selector_filter, filter_cursor)
+            };
+            lines.push(Line::from(Span::styled(
+                filter_display,
+                Style::default().fg(if model_focused {
+                    BRAND_BLUE
+                } else {
+                    Color::DarkGray
+                }),
+            )));
+        }
+
+        let total = display_models.len();
+        let max_sel = if total > 0 { total - 1 } else { 0 };
+        let safe_selected = app.model_selector_selected.min(max_sel);
+        let (start, end) = if total <= MAX_VISIBLE_MODELS {
+            (0, total)
+        } else {
+            let half = MAX_VISIBLE_MODELS / 2;
+            let s = safe_selected
+                .saturating_sub(half)
+                .min(total - MAX_VISIBLE_MODELS);
+            (s, s + MAX_VISIBLE_MODELS)
+        };
+
+        if start > 0 {
+            lines.push(Line::from(Span::styled(
+                format!("  ↑ {} more", start),
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+
+        for (offset, model) in display_models[start..end].iter().enumerate() {
+            let i = start + offset;
+            let selected = i == safe_selected;
+            let active = *model == current_model;
+
+            let prefix = if selected && model_focused {
+                " > "
+            } else {
+                "   "
+            };
+
+            let style = if selected && model_focused {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(BRAND_BLUE)
+                    .add_modifier(Modifier::BOLD)
+            } else if active {
+                Style::default()
+                    .fg(Color::Blue)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+
+            let suffix = if active { " (active)" } else { "" };
+
+            lines.push(Line::from(vec![
+                Span::styled(prefix, style),
+                Span::styled(*model, style),
+                Span::styled(suffix, Style::default().fg(Color::DarkGray)),
+            ]));
+        }
     }
 
     lines.push(Line::from(""));
@@ -2595,8 +2625,7 @@ fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
             1 => vec![("[Type]", "Base URL"), ("[Enter]", "Next")],
             2 => vec![("[Type]", "API Key"), ("[Enter]", "Next")],
             3 => vec![
-                ("[Type]", "Filter"),
-                ("[↑/↓]", "Select"),
+                ("[Type]", "Model name"),
                 ("[Enter]", "Confirm"),
             ],
             _ => vec![],

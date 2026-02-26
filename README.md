@@ -232,6 +232,31 @@ default_model = "mistral"
 
 The name after `custom.` is just a label you choose. The first one with `enabled = true` is used. Keys go in `keys.toml` using the same label (e.g. `[providers.custom.lm_studio]`).
 
+#### Free Prototyping with NVIDIA API + Kimi K2.5
+
+[Kimi K2.5](https://build.nvidia.com/moonshotai/kimi-k2.5) is a frontier-scale multimodal Mixture-of-Experts (MoE) model available **for free** on the NVIDIA API Catalog — no billing setup or credit card required. It handles complex reasoning and image/video understanding, making it a strong free alternative to paid models like Claude or Gemini for experimentation and agentic workflows.
+
+**Tested and verified** with OpenCrabs Custom provider setup.
+
+**Quick start:**
+
+1. Sign up at the [NVIDIA API Catalog](https://build.nvidia.com/) and verify your account
+2. Go to the [Kimi K2.5 model page](https://build.nvidia.com/moonshotai/kimi-k2.5) and click **Get API Key** (or "View Code" to see an auto-generated key)
+3. Configure in OpenCrabs via `/models` or `config.toml`:
+
+```toml
+[providers.custom.nvidia]
+enabled = true
+base_url = "https://integrate.api.nvidia.com/v1"
+default_model = "moonshotai/kimi-k2.5"
+```
+
+```toml
+# keys.toml
+[providers.custom.nvidia]
+api_key = "nvapi-..."
+```
+
 **Provider priority:** MiniMax > OpenRouter > Anthropic > OpenAI > Custom. The first provider with `enabled = true` is used. Each provider has its own API key in `keys.toml` — no sharing or confusion.
 
 ---

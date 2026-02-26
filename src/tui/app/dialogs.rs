@@ -44,12 +44,13 @@ impl App {
                     .as_ref()
                     .is_some_and(|p| p.api_key.as_ref().is_some_and(|k| !k.is_empty())),
                 5 => {
-                    // Custom provider - also load base_url and model
-                    if let Some((_name, c)) = config.providers.active_custom() {
+                    // Custom provider - also load base_url, model, and name
+                    if let Some((name, c)) = config.providers.active_custom() {
+                        self.model_selector_custom_name = name.to_string();
+                        self.model_selector_base_url = c.base_url.clone().unwrap_or_default();
+                        self.model_selector_custom_model =
+                            c.default_model.clone().unwrap_or_default();
                         if c.api_key.as_ref().is_some_and(|k| !k.is_empty()) {
-                            self.model_selector_base_url = c.base_url.clone().unwrap_or_default();
-                            self.model_selector_custom_model =
-                                c.default_model.clone().unwrap_or_default();
                             self.model_selector_api_key =
                                 MODEL_SELECTOR_EXISTING_KEY_SENTINEL.to_string();
                         }
@@ -186,11 +187,16 @@ impl App {
                     .as_ref()
                     .and_then(|p| p.api_key.clone()),
             )
-        } else if let Some((_name, custom_cfg)) = config.providers.active_custom() {
-            tracing::debug!("[open_model_selector] Custom provider enabled");
+        } else if let Some((name, custom_cfg)) = config.providers.active_custom() {
+            tracing::debug!("[open_model_selector] Custom provider '{}' enabled", name);
             if let Some(base_url) = &custom_cfg.base_url {
                 self.model_selector_base_url = base_url.clone();
             }
+            // Load existing model name so /models doesn't lose it
+            self.model_selector_custom_model =
+                custom_cfg.default_model.clone().unwrap_or_default();
+            // Remember the custom provider name for saving
+            self.model_selector_custom_name = name.to_string();
             (5, custom_cfg.api_key.clone())
         } else {
             tracing::debug!("[open_model_selector] No provider enabled, defaulting to Anthropic");
@@ -354,12 +360,23 @@ impl App {
                 }
                 _ => {}
             }
-        } else if (self.model_selector_focused_field == 2
-            && self.model_selector_provider_selected != 5)
-            || (self.model_selector_focused_field == 3
-                && self.model_selector_provider_selected == 5)
+        } else if self.model_selector_focused_field == 3
+            && self.model_selector_provider_selected == 5
         {
-            // Model selection (field 2 for non-Custom, field 3 for Custom)
+            // Custom provider: free-text model name input (field 3)
+            match event.code {
+                crossterm::event::KeyCode::Char(c) => {
+                    self.model_selector_custom_model.push(c);
+                }
+                crossterm::event::KeyCode::Backspace => {
+                    self.model_selector_custom_model.pop();
+                }
+                _ => {}
+            }
+        } else if self.model_selector_focused_field == 2
+            && self.model_selector_provider_selected != 5
+        {
+            // Non-custom: filter/search model list (field 2)
             match event.code {
                 crossterm::event::KeyCode::Char(c) => {
                     // Type to filter models
@@ -650,14 +667,20 @@ impl App {
             }
             5 => {
                 // Custom OpenAI-compatible (named provider)
+                let custom_model = self.model_selector_custom_model.clone();
+                let custom_name = if self.model_selector_custom_name.is_empty() {
+                    "default".to_string()
+                } else {
+                    self.model_selector_custom_name.clone()
+                };
                 let mut customs = config.providers.custom.unwrap_or_default();
                 customs.insert(
-                    "default".to_string(),
+                    custom_name,
                     ProviderConfig {
                         enabled: true,
                         api_key: api_key.clone(),
                         base_url: Some(self.model_selector_base_url.clone()),
-                        default_model: Some(default_model.to_string()),
+                        default_model: Some(custom_model),
                         models: vec![],
                     },
                 );
@@ -675,7 +698,12 @@ impl App {
             3 => "providers.openrouter",
             4 => "providers.minimax",
             5 => {
-                custom_section = "providers.custom.default".to_string();
+                let name = if self.model_selector_custom_name.is_empty() {
+                    "default"
+                } else {
+                    &self.model_selector_custom_name
+                };
+                custom_section = format!("providers.custom.{}", name);
                 &custom_section
             }
             _ => {
@@ -743,9 +771,13 @@ impl App {
             return Err(e);
         }
 
-        // Get the selected model - use filtered display list to get actual model name
-        let selected_model = if !self.model_selector_models.is_empty() {
-            // Get model from fetched list using filtered index
+        // Get the selected model
+        let is_custom = provider_idx == 5;
+        let selected_model = if is_custom {
+            // Custom provider: use free-text model name — must be set
+            self.model_selector_custom_model.clone()
+        } else if !self.model_selector_models.is_empty() {
+            // Non-custom: use filtered display list to get actual model name
             let filter = self.model_selector_filter.to_lowercase();
             let filtered: Vec<_> = self
                 .model_selector_models
@@ -755,17 +787,16 @@ impl App {
             if let Some(model) = filtered.get(self.model_selector_selected) {
                 model.to_string()
             } else {
-                self.model_selector_models
-                    .first()
-                    .cloned()
-                    .unwrap_or_else(|| "gpt-4o-mini".to_string())
+                self.model_selector_models.first().cloned().unwrap_or_else(
+                    || self.default_model_name.clone(),
+                )
             }
         } else if let Some(model) = provider.models.get(self.model_selector_selected) {
             model.to_string()
         } else if let Some(model) = provider.models.first() {
             model.to_string()
         } else {
-            "gpt-4o-mini".to_string()
+            self.default_model_name.clone()
         };
 
         // Save the model to config
@@ -777,7 +808,12 @@ impl App {
             3 => "providers.openrouter",
             4 => "providers.minimax",
             5 => {
-                custom_section2 = "providers.custom.default".to_string();
+                let name = if self.model_selector_custom_name.is_empty() {
+                    "default"
+                } else {
+                    &self.model_selector_custom_name
+                };
+                custom_section2 = format!("providers.custom.{}", name);
                 &custom_section2
             }
             _ => "providers.anthropic",
@@ -826,9 +862,24 @@ impl App {
                     if let Some(ref wizard) = self.onboarding {
                         match wizard.apply_config() {
                             Ok(()) => {
-                                let provider_name =
-                                    super::onboarding::PROVIDERS[wizard.selected_provider].name;
-                                let model_name = wizard.selected_model_name().to_string();
+                                let (provider_name, model_name) =
+                                    if wizard.is_custom_provider() {
+                                        (
+                                            format!(
+                                                "Custom ({})",
+                                                wizard.custom_provider_name
+                                            ),
+                                            wizard.custom_model.clone(),
+                                        )
+                                    } else {
+                                        (
+                                            super::onboarding::PROVIDERS
+                                                [wizard.selected_provider]
+                                                .name
+                                                .to_string(),
+                                            wizard.selected_model_name().to_string(),
+                                        )
+                                    };
                                 self.push_system_message(format!(
                                     "Setup complete! Provider: {} | Model: {}",
                                     provider_name, model_name

@@ -297,6 +297,8 @@ pub struct App {
     pub model_selector_api_key: String,
     pub model_selector_base_url: String,
     pub model_selector_custom_model: String,
+    /// Custom provider name (from config, e.g. "nvidia", "default")
+    pub model_selector_custom_name: String,
     /// Focused field: 0=provider, 1=api_key, 2=model
     pub model_selector_focused_field: usize,
     pub model_selector_filter: String,
@@ -435,6 +437,7 @@ impl App {
             model_selector_api_key: String::new(),
             model_selector_base_url: String::new(),
             model_selector_custom_model: String::new(),
+            model_selector_custom_name: String::new(),
             model_selector_focused_field: 0,
             model_selector_filter: String::new(),
             input_history: Self::load_history(),
@@ -801,12 +804,15 @@ impl App {
                                 let _ = sender.send(TuiEvent::ModelSelectorModelsFetched(models));
                             });
                         }
-                        // Custom: field 1 = base URL, field 2 = API key
+                        // Custom: field 1 = base URL, field 2 = API key, field 3 = model
                         (1, true) => {
                             self.model_selector_base_url.push_str(&text);
                         }
                         (2, true) => {
                             self.model_selector_api_key.push_str(&text);
+                        }
+                        (3, true) => {
+                            self.model_selector_custom_model.push_str(&text);
                         }
                         _ => {}
                     }

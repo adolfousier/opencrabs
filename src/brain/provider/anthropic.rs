@@ -26,7 +26,7 @@ use std::time::Duration;
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_MODELS_URL: &str = "https://api.anthropic.com/v1/models";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(120); // Total request timeout
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(300); // Total request timeout
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10); // Connection timeout
 const DEFAULT_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(90); // Keep connections alive
 

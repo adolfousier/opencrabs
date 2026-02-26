@@ -51,7 +51,7 @@ pub const PROVIDERS: &[ProviderInfo] = &[
     ProviderInfo {
         name: "Custom OpenAI-Compatible",
         models: &[],
-        key_label: "Base URL",
+        key_label: "API Key",
         help_lines: &["Enter your own API endpoint"],
     },
 ];
@@ -1499,9 +1499,11 @@ impl OnboardingWizard {
                     self.custom_provider_name.pop();
                 }
                 KeyCode::Enter | KeyCode::Tab => {
-                    // Default to "default" if empty
+                    // Default to "default" if empty, always lowercase for config consistency
                     if self.custom_provider_name.is_empty() {
                         self.custom_provider_name = "default".to_string();
+                    } else {
+                        self.custom_provider_name = self.custom_provider_name.to_lowercase();
                     }
                     self.auth_field = AuthField::CustomBaseUrl;
                 }
@@ -2666,16 +2668,12 @@ Respond with EXACTLY six sections using these delimiters. No extra text before t
         for section in &all_provider_sections {
             let _ = Config::write_key(section, "enabled", "false");
         }
-        // Disable all custom providers (flat and named)
+        // Disable all custom providers
         if let Ok(config) = Config::load()
             && let Some(customs) = &config.providers.custom
         {
             for name in customs.keys() {
-                let section = if name == "default" {
-                    "providers.custom".to_string()
-                } else {
-                    format!("providers.custom.{}", name)
-                };
+                let section = format!("providers.custom.{}", name);
                 let _ = Config::write_key(&section, "enabled", "false");
             }
         }
@@ -2689,19 +2687,11 @@ Respond with EXACTLY six sections using these delimiters. No extra text before t
             3 => "providers.openrouter",
             4 => "providers.minimax",
             5 => {
-                custom_section = if self.custom_provider_name == "default" {
-                    "providers.custom".to_string()
-                } else {
-                    format!("providers.custom.{}", self.custom_provider_name)
-                };
+                custom_section = format!("providers.custom.{}", self.custom_provider_name);
                 &custom_section
             }
             _ => {
-                custom_section = if self.custom_provider_name == "default" {
-                    "providers.custom".to_string()
-                } else {
-                    format!("providers.custom.{}", self.custom_provider_name)
-                };
+                custom_section = format!("providers.custom.{}", self.custom_provider_name);
                 &custom_section
             }
         };
