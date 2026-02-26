@@ -313,7 +313,7 @@ fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         // Render tool call groups (finalized)
         if let Some(ref group) = app.messages[msg_idx].tool_group {
             lines.push(Line::from(""));
-            render_tool_group(&mut lines, group, false);
+            render_tool_group(&mut lines, group, false, app.animation_frame);
             lines.push(Line::from(""));
             continue;
         }
@@ -465,6 +465,7 @@ fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             if app.messages[msg_idx].expanded
                 && let Some(ref details) = app.messages[msg_idx].details
             {
+                lines.push(Line::from(""));
                 let reasoning_lines = parse_markdown(details);
                 let reasoning_style = Style::default()
                     .fg(Color::Rgb(80, 80, 80))
@@ -566,8 +567,35 @@ fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     // Render active tool group (live, during processing) — below streaming text
     // so it's always visible at the bottom with auto-scroll
     if let Some(ref group) = app.active_tool_group {
+        // Show thinking indicator inline above the tool group
+        if app.is_processing && app.streaming_response.is_none() && !app.has_pending_approval() {
+            let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+            let frame = spinner_frames[app.animation_frame % spinner_frames.len()];
+            let elapsed = app
+                .processing_started_at
+                .map(|t| t.elapsed().as_secs())
+                .unwrap_or(0);
+            let timer_str = if elapsed > 0 {
+                format!(" ({}s)", elapsed)
+            } else {
+                String::new()
+            };
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("  {} ", frame),
+                    Style::default()
+                        .fg(Color::Rgb(70, 130, 180))
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("OpenCrabs is thinking...{}", timer_str),
+                    Style::default().fg(Color::Rgb(184, 134, 11)),
+                ),
+            ]));
+        }
         lines.push(Line::from(""));
-        render_tool_group(&mut lines, group, true);
+        render_tool_group(&mut lines, group, true, app.animation_frame);
     }
 
     // Show error message if present
@@ -674,8 +702,13 @@ fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 /// This ensures users can always see it's responding
 fn render_thinking_indicator(f: &mut Frame, app: &App, chat_area: Rect) {
     // Only show when processing and no streaming response
+    // Skip when active tool group is visible (thinking is rendered inline above it)
     let has_pending_approval = app.has_pending_approval();
-    if !app.is_processing || app.streaming_response.is_some() || has_pending_approval {
+    if !app.is_processing
+        || app.streaming_response.is_some()
+        || has_pending_approval
+        || app.active_tool_group.is_some()
+    {
         return;
     }
 
@@ -825,6 +858,7 @@ fn render_tool_group<'a>(
     lines: &mut Vec<Line<'a>>,
     group: &super::app::ToolCallGroup,
     is_active: bool,
+    animation_frame: usize,
 ) {
     // Header line: ● Processing: <tool> or ● N tool calls
     let header = if is_active {
@@ -838,8 +872,15 @@ fn render_tool_group<'a>(
         format!("{} tool call{}", count, if count == 1 { "" } else { "s" })
     };
 
+    // Flash the dot while active (slow pulse: ~3 ticks on, ~3 ticks off)
+    let dot = if is_active && (animation_frame / 3).is_multiple_of(2) {
+        "○"
+    } else {
+        "●"
+    };
+
     let mut header_spans = vec![Span::styled(
-        format!("  {} {}", "●", header),
+        format!("  {} {}", dot, header),
         Style::default()
             .fg(Color::Green)
             .add_modifier(Modifier::BOLD),
