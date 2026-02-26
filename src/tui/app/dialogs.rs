@@ -7,14 +7,14 @@ use crate::brain::provider::{ContentBlock, LLMRequest};
 use anyhow::Result;
 use std::path::PathBuf;
 
-/// Sentinel for model selector - same as onboarding
-const MODEL_SELECTOR_EXISTING_KEY_SENTINEL: &str = "__EXISTING_KEY__";
 
 impl App {
     /// Detect existing API key for the currently selected provider in model selector.
-    /// Uses sentinel pattern - doesn't load actual key into memory.
+    /// Sets a boolean flag — never loads the actual key into memory.
     pub(crate) fn detect_model_selector_key_for_provider(&mut self) {
         let provider_idx = self.model_selector_provider_selected;
+        self.model_selector_api_key.clear();
+        self.model_selector_has_existing_key = false;
 
         if let Ok(config) = crate::config::Config::load() {
             let has_key = match provider_idx {
@@ -50,11 +50,7 @@ impl App {
                         self.model_selector_base_url = c.base_url.clone().unwrap_or_default();
                         self.model_selector_custom_model =
                             c.default_model.clone().unwrap_or_default();
-                        if c.api_key.as_ref().is_some_and(|k| !k.is_empty()) {
-                            self.model_selector_api_key =
-                                MODEL_SELECTOR_EXISTING_KEY_SENTINEL.to_string();
-                        }
-                        c.base_url.as_ref().is_some_and(|u| !u.is_empty())
+                        c.api_key.as_ref().is_some_and(|k| !k.is_empty())
                     } else {
                         false
                     }
@@ -62,13 +58,7 @@ impl App {
                 _ => false,
             };
 
-            if provider_idx != 5 {
-                if has_key {
-                    self.model_selector_api_key = MODEL_SELECTOR_EXISTING_KEY_SENTINEL.to_string();
-                } else {
-                    self.model_selector_api_key.clear();
-                }
-            }
+            self.model_selector_has_existing_key = has_key;
         }
 
         // Clear model selection when provider changes
@@ -211,13 +201,9 @@ impl App {
 
         self.model_selector_provider_selected = provider_idx;
 
-        // Use sentinel pattern - don't load actual key into memory, just signal "key exists"
-        // The actual key stays in keys.toml, we only need to know if it exists
-        if api_key.is_some() {
-            self.model_selector_api_key = MODEL_SELECTOR_EXISTING_KEY_SENTINEL.to_string();
-        } else {
-            self.model_selector_api_key.clear();
-        }
+        // Track whether key exists — never load the actual key into UI state
+        self.model_selector_has_existing_key = api_key.is_some();
+        self.model_selector_api_key.clear();
 
         // Fetch models from enabled provider using config's API key
         tracing::debug!(
@@ -459,20 +445,13 @@ impl App {
                 // On API key field (field 1 for non-Custom, field 2 for Custom)
                 let provider_idx = self.model_selector_provider_selected;
 
-                // Check if sentinel (existing key) or user-typed key
-                let is_existing_key =
-                    self.model_selector_api_key == MODEL_SELECTOR_EXISTING_KEY_SENTINEL;
-                let api_key = if is_existing_key {
-                    // Don't save anything - key already exists in config
-                    None
-                } else if self.model_selector_api_key.is_empty() {
-                    None
-                } else {
+                // User typed a new key, or field is empty (existing key untouched)
+                let key_changed = !self.model_selector_api_key.is_empty();
+                let api_key = if key_changed {
                     Some(self.model_selector_api_key.clone())
+                } else {
+                    None
                 };
-
-                // Skip saving if key already exists (sentinel) - no need to update
-                let key_changed = !is_existing_key && !self.model_selector_api_key.is_empty();
 
                 // Save provider config - DON'T close
                 if let Err(e) = self
@@ -496,7 +475,7 @@ impl App {
                 }
             } else {
                 // On model field - save and close (this one CAN close)
-                self.save_provider_selection(self.model_selector_provider_selected, true)
+                self.save_provider_selection(self.model_selector_provider_selected, false)
                     .await?;
             }
         }
@@ -594,13 +573,9 @@ impl App {
             _ => None,
         };
 
-        // Use existing key if not changed, otherwise use user input
-        let api_key = if key_changed {
-            if self.model_selector_api_key.is_empty() {
-                None
-            } else {
-                Some(self.model_selector_api_key.clone())
-            }
+        // Only use a key if the user actually typed one — never pull from config
+        let api_key = if key_changed && !self.model_selector_api_key.is_empty() {
+            Some(self.model_selector_api_key.clone())
         } else {
             existing_key
         };
@@ -712,6 +687,28 @@ impl App {
             }
         };
 
+        // Disable ALL other providers on disk before enabling the selected one.
+        // rebuild_agent_service() reloads from disk, so this is the only source of truth.
+        for s in [
+            "providers.anthropic",
+            "providers.openai",
+            "providers.gemini",
+            "providers.openrouter",
+            "providers.minimax",
+        ] {
+            if s != section {
+                let _ = crate::config::Config::write_key(s, "enabled", "false");
+            }
+        }
+        if let Some(ref customs) = config.providers.custom {
+            for name in customs.keys() {
+                let cs = format!("providers.custom.{}", name);
+                if cs != section {
+                    let _ = crate::config::Config::write_key(&cs, "enabled", "false");
+                }
+            }
+        }
+
         if let Err(e) = crate::config::Config::write_key(section, "enabled", "true") {
             tracing::warn!("Failed to write {}.enabled: {}", section, e);
         }
@@ -744,8 +741,9 @@ impl App {
             _ => {}
         }
 
-        // Save API key to keys.toml via merge
-        if let Some(ref key) = api_key
+        // Only write key to keys.toml if the user typed a new one
+        if key_changed
+            && let Some(ref key) = api_key
             && !key.is_empty()
             && let Err(e) = crate::config::write_secret_key(section, "api_key", key)
         {

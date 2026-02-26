@@ -295,6 +295,8 @@ pub struct App {
     pub model_selector_showing_providers: bool,
     pub model_selector_provider_selected: usize,
     pub model_selector_api_key: String,
+    /// True when the provider already has an API key in config (don't overwrite on save)
+    pub model_selector_has_existing_key: bool,
     pub model_selector_base_url: String,
     pub model_selector_custom_model: String,
     /// Custom provider name (from config, e.g. "nvidia", "default")
@@ -435,6 +437,7 @@ impl App {
             model_selector_showing_providers: false,
             model_selector_provider_selected: 0,
             model_selector_api_key: String::new(),
+            model_selector_has_existing_key: false,
             model_selector_base_url: String::new(),
             model_selector_custom_model: String::new(),
             model_selector_custom_name: String::new(),

@@ -692,33 +692,41 @@ fn load_keys_from_file() -> Result<KeysFile> {
 /// Merge API keys from keys.toml into existing provider configs
 /// Keys from keys.toml override values in config.toml
 fn merge_provider_keys(mut base: ProviderConfigs, keys: ProviderConfigs) -> ProviderConfigs {
+    // Guard: never merge the sentinel placeholder that /models uses internally
+    let is_real_key = |k: &str| !k.is_empty() && k != "__EXISTING_KEY__";
+
     // Merge each provider's api_key if present in keys
     if let Some(k) = keys.anthropic
         && let Some(key) = k.api_key
+        && is_real_key(&key)
     {
         let entry = base.anthropic.get_or_insert_with(ProviderConfig::default);
         entry.api_key = Some(key);
     }
     if let Some(k) = keys.openai
         && let Some(key) = k.api_key
+        && is_real_key(&key)
     {
         let entry = base.openai.get_or_insert_with(ProviderConfig::default);
         entry.api_key = Some(key);
     }
     if let Some(k) = keys.openrouter
         && let Some(key) = k.api_key
+        && is_real_key(&key)
     {
         let entry = base.openrouter.get_or_insert_with(ProviderConfig::default);
         entry.api_key = Some(key);
     }
     if let Some(k) = keys.minimax
         && let Some(key) = k.api_key
+        && is_real_key(&key)
     {
         let entry = base.minimax.get_or_insert_with(ProviderConfig::default);
         entry.api_key = Some(key);
     }
     if let Some(k) = keys.gemini
         && let Some(key) = k.api_key
+        && is_real_key(&key)
     {
         let entry = base.gemini.get_or_insert_with(ProviderConfig::default);
         entry.api_key = Some(key);
@@ -726,7 +734,9 @@ fn merge_provider_keys(mut base: ProviderConfigs, keys: ProviderConfigs) -> Prov
     if let Some(custom_keys) = keys.custom {
         let base_customs = base.custom.get_or_insert_with(BTreeMap::new);
         for (name, key_cfg) in custom_keys {
-            if let Some(key) = key_cfg.api_key {
+            if let Some(key) = key_cfg.api_key
+                && is_real_key(&key)
+            {
                 let entry = base_customs.entry(name).or_default();
                 entry.api_key = Some(key);
             }

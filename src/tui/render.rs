@@ -2532,10 +2532,8 @@ fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     let key_focused = (focused_field == 1 && !is_custom) || (focused_field == 2 && is_custom);
     let key_label = selected_provider.key_label;
 
-    // Check if we have an existing key (sentinel) or user-typed key
-    // Note: This matches the sentinel value from dialogs.rs
-    let has_existing_key = app.model_selector_api_key == "__EXISTING_KEY__";
-    let has_user_key = !app.model_selector_api_key.is_empty() && !has_existing_key;
+    let has_existing_key = app.model_selector_has_existing_key;
+    let has_user_key = !app.model_selector_api_key.is_empty();
 
     let (masked_key, key_hint) = if has_user_key {
         // User typed a new key - show asterisks for what they typed
