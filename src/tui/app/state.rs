@@ -1427,6 +1427,7 @@ impl App {
         self.streaming_response = None;
         self.streaming_reasoning = None;
         self.cancel_token = None;
+        self.escape_pending_at = None;
         // Preserve context token count from real-time updates if we never got a complete response
         if self.last_input_tokens.is_none() && self.display_token_count > 0 {
             self.last_input_tokens = Some(self.display_token_count as u32);

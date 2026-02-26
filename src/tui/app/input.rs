@@ -673,13 +673,23 @@ impl App {
                     self.escape_pending_at = Some(std::time::Instant::now());
                     self.error_message = Some("Press Esc again to abort".to_string());
                 }
+            } else if !self.auto_scroll {
+                // User is scrolled up — scroll to bottom first
+                self.scroll_offset = 0;
+                self.auto_scroll = true;
+                self.error_message = None;
+                self.escape_pending_at = None;
             } else if self.input_buffer.is_empty() {
                 // Nothing to clear, just dismiss error
                 self.error_message = None;
                 self.escape_pending_at = None;
             } else if let Some(pending_at) = self.escape_pending_at {
                 if pending_at.elapsed() < std::time::Duration::from_secs(3) {
-                    // Second Escape within 3 seconds — clear input
+                    // Second Escape within 3 seconds — stash input then clear
+                    // Arrow Up will recover the stashed text
+                    if !self.input_buffer.is_empty() {
+                        self.input_history_stash = self.input_buffer.clone();
+                    }
                     self.input_buffer.clear();
                     self.cursor_position = 0;
                     self.attachments.clear();
@@ -739,6 +749,15 @@ impl App {
         } else if event.code == KeyCode::Backspace && event.modifiers.contains(KeyModifiers::ALT) {
             // Alt+Backspace — delete last word
             self.delete_last_word();
+        } else if keys::is_up(&event)
+            && !self.slash_suggestions_active
+            && self.input_buffer.is_empty()
+            && !self.input_history_stash.is_empty()
+            && self.input_history_index.is_none()
+        {
+            // Arrow Up on empty input — restore stashed text first (cleared via Esc)
+            self.input_buffer = std::mem::take(&mut self.input_history_stash);
+            self.cursor_position = self.input_buffer.len();
         } else if keys::is_up(&event)
             && !self.slash_suggestions_active
             && !self.input_history.is_empty()

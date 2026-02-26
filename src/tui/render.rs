@@ -754,32 +754,110 @@ fn render_thinking_indicator(f: &mut Frame, app: &App, chat_area: Rect) {
 
 /// Render the input box
 fn render_input(f: &mut Frame, app: &App, area: Rect) {
-    let mut input_text = app.input_buffer.clone();
-
-    // Insert cursor block at the current cursor position
-    input_text.insert(app.cursor_position, '\u{2588}');
-
     let input_content_width = area.width.saturating_sub(2) as usize; // borders
     let mut input_lines: Vec<Line> = Vec::new();
 
-    for (line_idx, line) in input_text.lines().enumerate() {
-        let padded = if line_idx == 0 {
-            Line::from(vec![
-                Span::styled("\u{276F} ", Style::default().fg(Color::Rgb(100, 100, 100))),
-                Span::raw(line.to_string()),
-            ])
+    // Build input text with cursor highlight on the character (not inserting a block)
+    let cursor_style = Style::default().fg(Color::Black).bg(Color::Rgb(70, 130, 180));
+
+    if app.input_buffer.is_empty() {
+        // Empty input — just show prompt with cursor block
+        input_lines.push(Line::from(vec![
+            Span::styled("\u{276F} ", Style::default().fg(Color::Rgb(100, 100, 100))),
+            Span::styled(" ", cursor_style),
+        ]));
+    } else {
+        // Split input into lines, apply cursor highlight on the char at cursor_position
+        let buf = &app.input_buffer;
+        let cursor_pos = app.cursor_position;
+
+        // Find which char the cursor is on
+        let (before_cursor, cursor_char, after_cursor) = if cursor_pos >= buf.len() {
+            // Cursor at end — highlight a space
+            (buf.as_str(), None, "")
         } else {
-            Line::from(format!("  {}", line))
+            let next = buf[cursor_pos..]
+                .char_indices()
+                .nth(1)
+                .map(|(i, _)| cursor_pos + i)
+                .unwrap_or(buf.len());
+            (
+                &buf[..cursor_pos],
+                Some(&buf[cursor_pos..next]),
+                &buf[next..],
+            )
         };
-        for wrapped in wrap_line_with_padding(padded, input_content_width, "  ") {
-            input_lines.push(wrapped);
+
+        // Build full string with spans per line
+        let full_text = format!(
+            "{}{}{}",
+            before_cursor,
+            cursor_char.unwrap_or(""),
+            after_cursor
+        );
+
+        for (line_idx, line) in full_text.lines().enumerate() {
+            // Calculate where this line sits in the overall buffer
+            let line_start_in_full: usize = full_text.lines().take(line_idx).map(|l| l.len() + 1).sum();
+            let line_end_in_full = line_start_in_full + line.len();
+
+            // Check if cursor falls within this line
+            let cursor_in_line = cursor_pos >= line_start_in_full && cursor_pos < line_end_in_full;
+            let cursor_at_end_of_last_line =
+                cursor_pos >= buf.len() && line_idx == full_text.lines().count() - 1;
+
+            let prefix = if line_idx == 0 {
+                Span::styled("\u{276F} ", Style::default().fg(Color::Rgb(100, 100, 100)))
+            } else {
+                Span::raw("  ")
+            };
+
+            if cursor_in_line {
+                let local_pos = cursor_pos - line_start_in_full;
+                let before = &line[..local_pos];
+                let (ch, after) = if local_pos < line.len() {
+                    let next_boundary = line[local_pos..]
+                        .char_indices()
+                        .nth(1)
+                        .map(|(i, _)| local_pos + i)
+                        .unwrap_or(line.len());
+                    (&line[local_pos..next_boundary], &line[next_boundary..])
+                } else {
+                    (" ", "")
+                };
+                let padded = Line::from(vec![
+                    prefix,
+                    Span::raw(before.to_string()),
+                    Span::styled(ch.to_string(), cursor_style),
+                    Span::raw(after.to_string()),
+                ]);
+                for wrapped in wrap_line_with_padding(padded, input_content_width, "  ") {
+                    input_lines.push(wrapped);
+                }
+            } else if cursor_at_end_of_last_line {
+                let padded = Line::from(vec![
+                    prefix,
+                    Span::raw(line.to_string()),
+                    Span::styled(" ", cursor_style),
+                ]);
+                for wrapped in wrap_line_with_padding(padded, input_content_width, "  ") {
+                    input_lines.push(wrapped);
+                }
+            } else {
+                let padded = Line::from(vec![prefix, Span::raw(line.to_string())]);
+                for wrapped in wrap_line_with_padding(padded, input_content_width, "  ") {
+                    input_lines.push(wrapped);
+                }
+            }
         }
-    }
-    if input_lines.is_empty() {
-        input_lines.push(Line::from(vec![Span::styled(
-            "\u{276F} ",
-            Style::default().fg(Color::Rgb(100, 100, 100)),
-        )]));
+
+        // If cursor is at end of buffer and buffer ends with newline, add cursor on new line
+        if cursor_pos >= buf.len() && buf.ends_with('\n') {
+            input_lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(" ", cursor_style),
+            ]));
+        }
     }
 
     // Always keep steel blue border

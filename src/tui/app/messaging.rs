@@ -1033,6 +1033,7 @@ impl App {
         self.streaming_response = None;
         let reasoning_details = self.streaming_reasoning.take();
         self.cancel_token = None;
+        self.escape_pending_at = None; // Reset so abort hint doesn't leak to input clear
 
         // Clean up stale pending approvals — send deny so agent callbacks don't hang
         for msg in &mut self.messages {
