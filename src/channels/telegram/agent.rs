@@ -2,8 +2,8 @@
 //!
 //! Agent struct and startup logic.
 
-use super::handler::handle_message;
 use super::TelegramState;
+use super::handler::handle_message;
 use crate::brain::agent::AgentService;
 use crate::config::{RespondTo, VoiceConfig};
 use crate::services::{ServiceContext, SessionService};

@@ -37,11 +37,11 @@ pub mod services;
 pub mod tui;
 pub mod utils;
 
-pub mod channels;
 pub mod a2a;
+pub mod channels;
 
 // Re-export commonly used types
-pub use error::{OpenCrabsError, ErrorCode};
+pub use error::{ErrorCode, OpenCrabsError};
 
 /// Version information
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

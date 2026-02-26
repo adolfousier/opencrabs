@@ -669,8 +669,11 @@ impl Tool for PlanTool {
                 }
 
                 // Now get mutable reference and update (verified to exist above)
-                let task = current_plan.get_task_by_order_mut(task_order)
-                    .ok_or_else(|| ToolError::InvalidInput(format!("Task #{} not found.", task_order)))?;
+                let task = current_plan
+                    .get_task_by_order_mut(task_order)
+                    .ok_or_else(|| {
+                        ToolError::InvalidInput(format!("Task #{} not found.", task_order))
+                    })?;
                 task.start_execution();
                 let task_title = task.title.clone();
 

@@ -12,11 +12,11 @@ use crossterm::{
         EnableFocusChange, EnableMouseCapture,
     },
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
-    backend::{Backend, CrosstermBackend},
     Terminal,
+    backend::{Backend, CrosstermBackend},
 };
 use std::io;
 
@@ -109,7 +109,9 @@ where
             if pending_scroll > 0 {
                 app.scroll_offset = app.scroll_offset.saturating_add(pending_scroll as usize);
             } else if pending_scroll < 0 {
-                app.scroll_offset = app.scroll_offset.saturating_sub(pending_scroll.unsigned_abs() as usize);
+                app.scroll_offset = app
+                    .scroll_offset
+                    .saturating_sub(pending_scroll.unsigned_abs() as usize);
             }
         }
     }

@@ -113,9 +113,7 @@ impl ExaSearchTool {
             .map_err(|e| ToolError::Execution(format!("Failed to create HTTP client: {}", e)))?;
 
         // Try with existing session, re-init on 404
-        let result = self
-            .try_mcp_tool_call(&client, query, num_results)
-            .await;
+        let result = self.try_mcp_tool_call(&client, query, num_results).await;
 
         match result {
             Ok(tool_result) => Ok(tool_result),
@@ -212,8 +210,9 @@ impl ExaSearchTool {
                 last_json = Some(parsed);
             }
         }
-        last_json
-            .ok_or_else(|| ToolError::Execution("No JSON-RPC response found in SSE stream".to_string()))
+        last_json.ok_or_else(|| {
+            ToolError::Execution("No JSON-RPC response found in SSE stream".to_string())
+        })
     }
 
     /// Extract the text result from a JSON-RPC tools/call response.
@@ -240,7 +239,10 @@ impl ExaSearchTool {
                 .and_then(|item| item.get("text"))
                 .and_then(|t| t.as_str())
                 .unwrap_or("Unknown error");
-            return Ok(ToolResult::error(format!("EXA search error: {}", error_text)));
+            return Ok(ToolResult::error(format!(
+                "EXA search error: {}",
+                error_text
+            )));
         }
 
         // Extract content text

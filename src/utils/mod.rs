@@ -3,5 +3,5 @@
 pub mod retry;
 mod string;
 
-pub use retry::{retry, retry_with_check, RetryConfig, RetryableError};
+pub use retry::{RetryConfig, RetryableError, retry, retry_with_check};
 pub use string::truncate_str;

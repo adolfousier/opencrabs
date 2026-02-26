@@ -98,7 +98,9 @@ impl PricingConfig {
             return cfg;
         }
 
-        tracing::warn!("usage_pricing.toml failed to parse with both schemas — using built-in defaults");
+        tracing::warn!(
+            "usage_pricing.toml failed to parse with both schemas — using built-in defaults"
+        );
         Self::defaults()
     }
 
@@ -123,10 +125,8 @@ impl PricingConfig {
         if let toml::Value::Table(table) = pricing_val {
             for (provider_name, entries_val) in table {
                 if let toml::Value::Array(arr) = entries_val {
-                    let entries: Vec<PricingEntry> = arr
-                        .into_iter()
-                        .filter_map(|v| v.try_into().ok())
-                        .collect();
+                    let entries: Vec<PricingEntry> =
+                        arr.into_iter().filter_map(|v| v.try_into().ok()).collect();
                     if !entries.is_empty() {
                         providers.insert(provider_name, ProviderBlock { entries });
                     }

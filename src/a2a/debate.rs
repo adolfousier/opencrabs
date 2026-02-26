@@ -257,18 +257,9 @@ impl DebateSession {
                     parts: vec![Part::text(&prompt)],
                     metadata: Some({
                         let mut m = HashMap::new();
-                        m.insert(
-                            "debate_round".to_string(),
-                            serde_json::json!(round_num),
-                        );
-                        m.insert(
-                            "bee_index".to_string(),
-                            serde_json::json!(i),
-                        );
-                        m.insert(
-                            "debate_session_id".to_string(),
-                            serde_json::json!(self.id),
-                        );
+                        m.insert("debate_round".to_string(), serde_json::json!(round_num));
+                        m.insert("bee_index".to_string(), serde_json::json!(i));
+                        m.insert("debate_session_id".to_string(), serde_json::json!(self.id));
                         m
                     }),
                 };
@@ -309,8 +300,7 @@ impl DebateSession {
             .map(|(pos, count)| format!("{} ({}/{} agree)", pos, count, total))
             .collect();
 
-        let consensus_reached =
-            avg_confidence >= threshold && !agreement_points.is_empty();
+        let consensus_reached = avg_confidence >= threshold && !agreement_points.is_empty();
 
         ConsensusAnalysis {
             avg_confidence,
@@ -328,10 +318,8 @@ impl DebateSession {
         prompt: String,
         responses: Vec<BeeResponse>,
     ) {
-        let consensus =
-            Self::analyze_consensus(&responses, self.config.consensus_threshold);
-        let concluded = consensus.consensus_reached
-            || round_number >= self.config.max_rounds;
+        let consensus = Self::analyze_consensus(&responses, self.config.consensus_threshold);
+        let concluded = consensus.consensus_reached || round_number >= self.config.max_rounds;
 
         self.rounds.push(DebateRound {
             round_number,
@@ -342,7 +330,9 @@ impl DebateSession {
         self.current_round = round_number;
 
         if concluded {
-            self.state = if self.rounds.last()
+            self.state = if self
+                .rounds
+                .last()
                 .and_then(|r| r.consensus.as_ref())
                 .is_some_and(|c| c.consensus_reached)
             {
@@ -371,10 +361,7 @@ impl DebateSession {
         );
 
         for round in &self.rounds {
-            report.push_str(&format!(
-                "## Round {}\n\n",
-                round.round_number
-            ));
+            report.push_str(&format!("## Round {}\n\n", round.round_number));
 
             for resp in &round.responses {
                 report.push_str(&format!(
@@ -779,16 +766,14 @@ mod tests {
         let config = test_config();
         let mut session = DebateSession::new(config);
 
-        let responses = vec![
-            BeeResponse {
-                bee_id: "bee-1".to_string(),
-                endpoint: "http://bee-1:18789".to_string(),
-                content: "My analysis...".to_string(),
-                confidence: 0.9,
-                position: Some("pro".to_string()),
-                key_points: vec![],
-            },
-        ];
+        let responses = vec![BeeResponse {
+            bee_id: "bee-1".to_string(),
+            endpoint: "http://bee-1:18789".to_string(),
+            content: "My analysis...".to_string(),
+            confidence: 0.9,
+            position: Some("pro".to_string()),
+            key_points: vec![],
+        }];
 
         session.record_round(1, "Round 1 prompt".to_string(), responses);
         assert_eq!(session.current_round, 1);

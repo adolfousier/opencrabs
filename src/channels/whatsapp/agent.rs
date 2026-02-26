@@ -2,10 +2,10 @@
 //!
 //! Agent struct and startup logic. Mirrors the Telegram agent pattern.
 
-use super::handler;
 use super::WhatsAppState;
-use crate::config::VoiceConfig;
+use super::handler;
 use crate::brain::agent::AgentService;
+use crate::config::VoiceConfig;
 use crate::services::{ServiceContext, SessionService};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -99,8 +99,7 @@ impl WhatsAppAgent {
 
             let agent = self.agent_service.clone();
             let session_svc = self.session_service.clone();
-            let allowed: Arc<HashSet<String>> =
-                Arc::new(self.allowed_phones.into_iter().collect());
+            let allowed: Arc<HashSet<String>> = Arc::new(self.allowed_phones.into_iter().collect());
             let voice_config = Arc::new(self.voice_config);
             let shared_session = self.shared_session_id.clone();
             let wa_state = self.whatsapp_state.clone();
@@ -132,7 +131,9 @@ impl WhatsAppAgent {
                             }
                             Event::Connected(_) => {
                                 tracing::info!("WhatsApp: connected successfully");
-                                wa_state.set_connected(client.clone(), owner_jid.clone()).await;
+                                wa_state
+                                    .set_connected(client.clone(), owner_jid.clone())
+                                    .await;
                             }
                             Event::PairSuccess(_) => {
                                 tracing::info!("WhatsApp: pairing successful");

@@ -17,8 +17,8 @@ pub use types::*;
 
 // Provider implementations
 pub mod anthropic;
-pub mod factory;
 pub mod custom_openai_compatible;
+pub mod factory;
 
 pub use anthropic::AnthropicProvider;
 pub use custom_openai_compatible::OpenAIProvider;

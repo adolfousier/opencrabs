@@ -7,15 +7,14 @@
 //! Socket Mode callbacks require plain function pointers (not closures).
 
 use super::SlackState;
-use crate::config::RespondTo;
 use crate::brain::agent::AgentService;
+use crate::config::RespondTo;
 use crate::services::SessionService;
 use slack_morphism::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock};
 use tokio::sync::Mutex;
 use uuid::Uuid;
-
 
 /// Global handler state — set once by the agent before starting the listener.
 pub static HANDLER_STATE: OnceLock<Arc<HandlerState>> = OnceLock::new();
@@ -67,7 +66,12 @@ pub async fn on_push_event(
     tracing::debug!("Slack: received push event");
     match event.event {
         SlackEventCallbackBody::Message(msg) => {
-            tracing::debug!("Slack: message event from user={:?}, channel={:?}, bot_id={:?}", msg.sender.user, msg.origin.channel, msg.sender.bot_id);
+            tracing::debug!(
+                "Slack: message event from user={:?}, channel={:?}, bot_id={:?}",
+                msg.sender.user,
+                msg.origin.channel,
+                msg.sender.bot_id
+            );
             handle_message(&msg, client).await;
         }
         _ => {
@@ -99,7 +103,10 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
 
     // Skip bot messages
     if msg.sender.bot_id.is_some() {
-        tracing::debug!("Slack: skipping bot message (bot_id={:?})", msg.sender.bot_id);
+        tracing::debug!(
+            "Slack: skipping bot message (bot_id={:?})",
+            msg.sender.bot_id
+        );
         return;
     }
 
@@ -147,7 +154,10 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
     if !is_dm {
         // Check allowed_channels (empty = all channels allowed)
         if !state.allowed_channels.is_empty() && !state.allowed_channels.contains(&channel_id) {
-            tracing::debug!("Slack: ignoring message in non-allowed channel {}", channel_id);
+            tracing::debug!(
+                "Slack: ignoring message in non-allowed channel {}",
+                channel_id
+            );
             return;
         }
 
@@ -157,9 +167,10 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                 return;
             }
             RespondTo::Mention => {
-                let mentioned = state.bot_user_id.as_ref().is_some_and(|bid| {
-                    text.contains(&format!("<@{}>", bid))
-                });
+                let mentioned = state
+                    .bot_user_id
+                    .as_ref()
+                    .is_some_and(|bid| text.contains(&format!("<@{}>", bid)));
                 if !mentioned {
                     tracing::debug!("Slack: respond_to=mention, bot not mentioned — ignoring");
                     return;
@@ -193,7 +204,10 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
             .unwrap_or(false);
 
     if is_owner {
-        state.slack_state.set_owner_channel(channel_id.clone()).await;
+        state
+            .slack_state
+            .set_owner_channel(channel_id.clone())
+            .await;
     }
 
     // Resolve session: owner shares TUI session, others get per-user sessions

@@ -13,7 +13,6 @@ pub(crate) async fn cmd_chat(
     force_onboard: bool,
 ) -> Result<()> {
     use crate::{
-        db::Database,
         brain::{
             agent::AgentService,
             tools::{
@@ -21,12 +20,13 @@ pub(crate) async fn cmd_chat(
                 config_tool::ConfigTool, context::ContextTool, doc_parser::DocParserTool,
                 edit::EditTool, exa_search::ExaSearchTool, glob::GlobTool, grep::GrepTool,
                 http::HttpClientTool, ls::LsTool, memory_search::MemorySearchTool,
-                notebook::NotebookEditTool, plan_tool::PlanTool,
-                read::ReadTool, registry::ToolRegistry, session_search::SessionSearchTool,
-                slash_command::SlashCommandTool,
-                task::TaskTool, web_search::WebSearchTool, write::WriteTool,
+                notebook::NotebookEditTool, plan_tool::PlanTool, read::ReadTool,
+                registry::ToolRegistry, session_search::SessionSearchTool,
+                slash_command::SlashCommandTool, task::TaskTool, web_search::WebSearchTool,
+                write::WriteTool,
             },
         },
+        db::Database,
         services::ServiceContext,
         tui,
     };
@@ -98,15 +98,26 @@ pub(crate) async fn cmd_chat(
     // Slash command invocation (agent can call any slash command)
     tool_registry.register(Arc::new(SlashCommandTool));
     // EXA search: always available (free via MCP), uses direct API if key is set
-    let exa_key = config.providers.web_search.as_ref()
+    let exa_key = config
+        .providers
+        .web_search
+        .as_ref()
         .and_then(|ws| ws.exa.as_ref())
         .and_then(|p| p.api_key.clone())
         .filter(|k| !k.is_empty());
-    let exa_mode = if exa_key.is_some() { "direct API" } else { "MCP (free)" };
+    let exa_mode = if exa_key.is_some() {
+        "direct API"
+    } else {
+        "MCP (free)"
+    };
     tool_registry.register(Arc::new(ExaSearchTool::new(exa_key)));
     tracing::info!("Registered EXA search tool (mode: {})", exa_mode);
     // Brave search: requires enabled = true in config.toml AND API key in keys.toml
-    if let Some(brave_cfg) = config.providers.web_search.as_ref().and_then(|ws| ws.brave.as_ref())
+    if let Some(brave_cfg) = config
+        .providers
+        .web_search
+        .as_ref()
+        .and_then(|ws| ws.brave.as_ref())
         && brave_cfg.enabled
         && let Some(brave_key) = brave_cfg.api_key.clone()
     {
@@ -117,12 +128,10 @@ pub(crate) async fn cmd_chat(
     // Index existing memory files and warm up embedding engine in the background
     tokio::spawn(async {
         match crate::memory::get_store() {
-            Ok(store) => {
-                match crate::memory::reindex(store).await {
-                    Ok(n) => tracing::info!("Startup memory reindex: {n} files"),
-                    Err(e) => tracing::warn!("Startup memory reindex failed: {e}"),
-                }
-            }
+            Ok(store) => match crate::memory::reindex(store).await {
+                Ok(n) => tracing::info!("Startup memory reindex: {n} files"),
+                Err(e) => tracing::warn!("Startup memory reindex failed: {e}"),
+            },
             Err(e) => tracing::warn!("Memory store init failed at startup: {e}"),
         }
         // Warm up embedding engine so first search doesn't pay model download cost.
@@ -157,19 +166,15 @@ pub(crate) async fn cmd_chat(
         .iter()
         .map(|c| (c.name, c.description))
         .collect();
-    let commands_section =
-        CommandLoader::commands_section(&builtin_commands, &user_commands);
+    let commands_section = CommandLoader::commands_section(&builtin_commands, &user_commands);
 
-    let system_brain = brain_loader.build_system_brain(
-        Some(&runtime_info),
-        Some(&commands_section),
-    );
+    let system_brain =
+        brain_loader.build_system_brain(Some(&runtime_info), Some(&commands_section));
 
     // Create agent service with dynamic system brain
     let agent_service = Arc::new(
         AgentService::new(provider.clone(), service_context.clone())
             .with_system_brain(system_brain.clone())
-
             .with_working_directory(working_directory.clone()),
     );
 
@@ -212,23 +217,21 @@ pub(crate) async fn cmd_chat(
                 })?;
 
             // Wait for response with timeout to prevent indefinite hang
-            let response = tokio::time::timeout(
-                std::time::Duration::from_secs(120),
-                response_rx.recv(),
-            )
-            .await
-            .map_err(|_| {
-                tracing::warn!("Approval request timed out after 120s, auto-denying");
-                crate::brain::agent::AgentError::Internal(
-                    "Approval request timed out (120s) — auto-denied".to_string(),
-                )
-            })?
-            .ok_or_else(|| {
-                tracing::warn!("Approval response channel closed unexpectedly");
-                crate::brain::agent::AgentError::Internal(
-                    "Approval response channel closed".to_string(),
-                )
-            })?;
+            let response =
+                tokio::time::timeout(std::time::Duration::from_secs(120), response_rx.recv())
+                    .await
+                    .map_err(|_| {
+                        tracing::warn!("Approval request timed out after 120s, auto-denying");
+                        crate::brain::agent::AgentError::Internal(
+                            "Approval request timed out (120s) — auto-denied".to_string(),
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        tracing::warn!("Approval response channel closed unexpectedly");
+                        crate::brain::agent::AgentError::Internal(
+                            "Approval response channel closed".to_string(),
+                        )
+                    })?;
 
             Ok(response.approved)
         })
@@ -241,12 +244,24 @@ pub(crate) async fn cmd_chat(
         use crate::tui::events::TuiEvent;
 
         let result = match event {
-            ProgressEvent::ToolStarted { tool_name, tool_input } => {
-                progress_sender.send(TuiEvent::ToolCallStarted { tool_name, tool_input })
-            }
-            ProgressEvent::ToolCompleted { tool_name, tool_input, success, summary } => {
-                progress_sender.send(TuiEvent::ToolCallCompleted { tool_name, tool_input, success, summary })
-            }
+            ProgressEvent::ToolStarted {
+                tool_name,
+                tool_input,
+            } => progress_sender.send(TuiEvent::ToolCallStarted {
+                tool_name,
+                tool_input,
+            }),
+            ProgressEvent::ToolCompleted {
+                tool_name,
+                tool_input,
+                success,
+                summary,
+            } => progress_sender.send(TuiEvent::ToolCallCompleted {
+                tool_name,
+                tool_input,
+                success,
+                summary,
+            }),
             ProgressEvent::IntermediateText { text, reasoning } => {
                 progress_sender.send(TuiEvent::IntermediateText(text, reasoning))
             }
@@ -254,9 +269,7 @@ pub(crate) async fn cmd_chat(
                 progress_sender.send(TuiEvent::ResponseChunk(text))
             }
             ProgressEvent::Thinking => return, // spinner handles this already
-            ProgressEvent::Compacting => {
-                progress_sender.send(TuiEvent::AgentProcessing)
-            }
+            ProgressEvent::Compacting => progress_sender.send(TuiEvent::AgentProcessing),
             ProgressEvent::CompactionSummary { summary } => {
                 progress_sender.send(TuiEvent::CompactionSummary(summary))
             }
@@ -283,13 +296,16 @@ pub(crate) async fn cmd_chat(
     });
 
     // Register rebuild tool (needs the progress callback for restart signaling)
-    tool_registry.register(Arc::new(
-        crate::brain::tools::rebuild::RebuildTool::new(Some(progress_callback.clone())),
-    ));
+    tool_registry.register(Arc::new(crate::brain::tools::rebuild::RebuildTool::new(
+        Some(progress_callback.clone()),
+    )));
 
     // Create ChannelFactory (shared by static channel spawn + WhatsApp connect tool).
     // Tool registry is set lazily after Arc wrapping to break circular dependency.
-    let openai_tts_key = config.providers.tts.as_ref()
+    let openai_tts_key = config
+        .providers
+        .tts
+        .as_ref()
         .and_then(|t| t.openai.as_ref())
         .and_then(|p| p.api_key.clone());
     let channel_factory = Arc::new(crate::channels::ChannelFactory::new(
@@ -406,21 +422,19 @@ pub(crate) async fn cmd_chat(
                 })?;
 
             // Wait for user response with timeout
-            let response = tokio::time::timeout(
-                std::time::Duration::from_secs(120),
-                response_rx.recv(),
-            )
-            .await
-            .map_err(|_| {
-                crate::brain::agent::AgentError::Internal(
-                    "Sudo password request timed out (120s)".to_string(),
-                )
-            })?
-            .ok_or_else(|| {
-                crate::brain::agent::AgentError::Internal(
-                    "Sudo password channel closed".to_string(),
-                )
-            })?;
+            let response =
+                tokio::time::timeout(std::time::Duration::from_secs(120), response_rx.recv())
+                    .await
+                    .map_err(|_| {
+                        crate::brain::agent::AgentError::Internal(
+                            "Sudo password request timed out (120s)".to_string(),
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        crate::brain::agent::AgentError::Internal(
+                            "Sudo password channel closed".to_string(),
+                        )
+                    })?;
 
             Ok(response.password)
         })
@@ -466,7 +480,8 @@ pub(crate) async fn cmd_chat(
         let a2a_ctx = service_context.clone();
         let a2a_config = config.a2a.clone();
         tokio::spawn(async move {
-            if let Err(e) = crate::a2a::server::start_server(&a2a_config, a2a_agent, a2a_ctx).await {
+            if let Err(e) = crate::a2a::server::start_server(&a2a_config, a2a_agent, a2a_ctx).await
+            {
                 tracing::error!("A2A gateway error: {}", e);
             }
         });
@@ -477,30 +492,39 @@ pub(crate) async fn cmd_chat(
     let _telegram_handle = {
         let tg = &config.channels.telegram;
         let tg_token = tg.token.clone();
-        let has_valid_token = tg_token.as_ref().map(|t| {
-            if t.is_empty() || !t.contains(':') {
-                return false;
-            }
-            let parts: Vec<&str> = t.splitn(2, ':').collect();
-            parts.len() == 2 && parts[0].parse::<u64>().is_ok() && parts[1].len() >= 30
-        }).unwrap_or(false);
-        
-        tracing::debug!("[Telegram] enabled={}, has_token={}, has_valid_token={}", 
-            tg.enabled, tg_token.is_some(), has_valid_token);
-        
+        let has_valid_token = tg_token
+            .as_ref()
+            .map(|t| {
+                if t.is_empty() || !t.contains(':') {
+                    return false;
+                }
+                let parts: Vec<&str> = t.splitn(2, ':').collect();
+                parts.len() == 2 && parts[0].parse::<u64>().is_ok() && parts[1].len() >= 30
+            })
+            .unwrap_or(false);
+
+        tracing::debug!(
+            "[Telegram] enabled={}, has_token={}, has_valid_token={}",
+            tg.enabled,
+            tg_token.is_some(),
+            has_valid_token
+        );
+
         if tg.enabled && has_valid_token {
             if let Some(ref token) = tg_token {
                 let tg_agent = channel_factory.create_agent_service();
                 // Extract OpenAI API key for TTS (from providers.tts.openai)
-                let openai_key = config.providers.tts.as_ref()
+                let openai_key = config
+                    .providers
+                    .tts
+                    .as_ref()
                     .and_then(|t| t.openai.as_ref())
                     .and_then(|p| p.api_key.clone());
                 // Extract STT provider config from providers.stt.*
                 let mut voice_cfg = config.voice.clone();
-                voice_cfg.stt_provider = config.providers.stt.as_ref()
-                    .and_then(|s| s.groq.clone());
-                voice_cfg.tts_provider = config.providers.tts.as_ref()
-                    .and_then(|t| t.openai.clone());
+                voice_cfg.stt_provider = config.providers.stt.as_ref().and_then(|s| s.groq.clone());
+                voice_cfg.tts_provider =
+                    config.providers.tts.as_ref().and_then(|t| t.openai.clone());
                 let bot = crate::channels::telegram::TelegramAgent::new(
                     tg_agent,
                     service_context.clone(),
@@ -512,7 +536,10 @@ pub(crate) async fn cmd_chat(
                     tg.respond_to.clone(),
                     tg.allowed_channels.clone(),
                 );
-                tracing::info!("Spawning Telegram bot ({} allowed users)", tg.allowed_users.len());
+                tracing::info!(
+                    "Spawning Telegram bot ({} allowed users)",
+                    tg.allowed_users.len()
+                );
                 Some(bot.start(token.clone()))
             } else {
                 tracing::debug!("Telegram enabled but no valid token configured");
@@ -552,11 +579,17 @@ pub(crate) async fn cmd_chat(
         let dc = &config.channels.discord;
         let dc_token = dc.token.clone();
         // Discord tokens are typically ~70 chars, base64-like
-        let has_valid_token = dc_token.as_ref().map(|t| !t.is_empty() && t.len() > 50).unwrap_or(false);
+        let has_valid_token = dc_token
+            .as_ref()
+            .map(|t| !t.is_empty() && t.len() > 50)
+            .unwrap_or(false);
         if dc.enabled && has_valid_token {
             if let Some(ref token) = dc_token {
                 // Extract OpenAI API key for TTS (from providers.tts.openai in keys.toml)
-                let openai_key = config.providers.tts.as_ref()
+                let openai_key = config
+                    .providers
+                    .tts
+                    .as_ref()
                     .and_then(|t| t.openai.as_ref())
                     .and_then(|p| p.api_key.clone());
                 let dc_agent = crate::channels::discord::DiscordAgent::new(
@@ -590,8 +623,14 @@ pub(crate) async fn cmd_chat(
         let sl = &config.channels.slack;
         let sl_token = sl.token.clone();
         let sl_app_token = sl.app_token.clone();
-        let has_valid_tokens = sl_token.as_ref().map(|t| !t.is_empty() && t.starts_with("xoxb-")).unwrap_or(false)
-            && sl_app_token.as_ref().map(|t| !t.is_empty() && t.starts_with("xapp-")).unwrap_or(false);
+        let has_valid_tokens = sl_token
+            .as_ref()
+            .map(|t| !t.is_empty() && t.starts_with("xoxb-"))
+            .unwrap_or(false)
+            && sl_app_token
+                .as_ref()
+                .map(|t| !t.is_empty() && t.starts_with("xapp-"))
+                .unwrap_or(false);
         if sl.enabled && has_valid_tokens {
             if let (Some(bot_tok), Some(app_tok)) = (sl_token, sl_app_token) {
                 let sl_agent = crate::channels::slack::SlackAgent::new(
@@ -603,10 +642,7 @@ pub(crate) async fn cmd_chat(
                     sl.respond_to.clone(),
                     sl.allowed_channels.clone(),
                 );
-                tracing::info!(
-                    "Spawning Slack bot ({} allowed IDs)",
-                    sl.allowed_ids.len()
-                );
+                tracing::info!("Spawning Slack bot ({} allowed IDs)", sl.allowed_ids.len());
                 Some(sl_agent.start(bot_tok, app_tok))
             } else {
                 tracing::debug!("Slack enabled but missing valid tokens");
@@ -640,7 +676,7 @@ pub(crate) async fn cmd_chat(
             .unwrap_or_default()
             .subsec_nanos() as usize)
             % BYES.len();
-        
+
         // Print logo
         let logo_style = "\x1b[38;2;218;165;32m"; // Gold RGB
         let reset = "\x1b[0m";

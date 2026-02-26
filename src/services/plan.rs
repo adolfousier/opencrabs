@@ -293,9 +293,9 @@ impl PlanService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::Database;
     use crate::db::models::Session;
     use crate::db::repository::session::SessionRepository;
-    use crate::db::Database;
     use crate::tui::plan::{PlanStatus, PlanTask, TaskStatus, TaskType};
     use tempfile::TempDir;
 

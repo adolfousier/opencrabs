@@ -94,10 +94,7 @@ impl Tool for SessionSearchTool {
                     .get("session")
                     .and_then(|v| v.as_str())
                     .map(str::to_string);
-                let n = input
-                    .get("n")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(10) as usize;
+                let n = input.get("n").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
                 self.search_sessions(&query, session_filter.as_deref(), n)
                     .await
             }
@@ -131,10 +128,7 @@ impl SessionSearchTool {
 
         let mut output = String::new();
         for (i, session) in sessions.iter().enumerate() {
-            let count = message_repo
-                .count_by_session(session.id)
-                .await
-                .unwrap_or(0);
+            let count = message_repo.count_by_session(session.id).await.unwrap_or(0);
             let title = session.title.as_deref().unwrap_or("Untitled");
             let date = session.updated_at.format("%Y-%m-%d").to_string();
             output.push_str(&format!(
@@ -197,7 +191,10 @@ impl SessionSearchTool {
             }
         };
 
-        tracing::info!("[session_search] Found {} target sessions", target_sessions.len());
+        tracing::info!(
+            "[session_search] Found {} target sessions",
+            target_sessions.len()
+        );
 
         if target_sessions.is_empty() {
             return Ok(ToolResult::success(
@@ -220,13 +217,13 @@ impl SessionSearchTool {
 
         // Index target sessions into QMD — hash-skipped if content unchanged
         for (i, session) in target_sessions.iter().enumerate() {
-            let title = session
-                .title
-                .as_deref()
-                .unwrap_or("Untitled");
+            let title = session.title.as_deref().unwrap_or("Untitled");
             tracing::info!(
                 "[session_search] Indexing session {}/{}: {} ({})",
-                i + 1, target_sessions.len(), title, session.id
+                i + 1,
+                target_sessions.len(),
+                title,
+                session.id
             );
 
             let messages = message_repo
@@ -235,16 +232,25 @@ impl SessionSearchTool {
                 .unwrap_or_default();
 
             if messages.is_empty() {
-                tracing::debug!("[session_search] Session {} has no messages, skipping", session.id);
+                tracing::debug!(
+                    "[session_search] Session {} has no messages, skipping",
+                    session.id
+                );
                 continue;
             }
 
-            tracing::debug!("[session_search] Session {} has {} messages", session.id, messages.len());
+            tracing::debug!(
+                "[session_search] Session {} has {} messages",
+                session.id,
+                messages.len()
+            );
 
             let title_str = title.to_string();
             let date = session.updated_at.format("%Y-%m-%d").to_string();
-            let mut body =
-                format!("# {}\nDate: {}\nSession: {}\n\n", title_str, date, session.id);
+            let mut body = format!(
+                "# {}\nDate: {}\nSession: {}\n\n",
+                title_str, date, session.id
+            );
 
             for msg in &messages {
                 let role = if msg.role == "user" {
@@ -268,7 +274,10 @@ impl SessionSearchTool {
             let title_owned = title_str.clone();
             let body_owned = body;
 
-            tracing::info!("[session_search] spawn_blocking index for session {}", session.id);
+            tracing::info!(
+                "[session_search] spawn_blocking index for session {}",
+                session.id
+            );
             if let Err(e) = tokio::task::spawn_blocking(move || {
                 index_session_body(store, &doc_path, &title_owned, body_owned)
             })
@@ -276,9 +285,17 @@ impl SessionSearchTool {
             .map_err(|e| e.to_string())
             .and_then(|r| r)
             {
-                tracing::warn!("[session_search] Failed to index session {}: {}", session.id, e);
+                tracing::warn!(
+                    "[session_search] Failed to index session {}: {}",
+                    session.id,
+                    e
+                );
             }
-            tracing::info!("[session_search] Done indexing session {}/{}", i + 1, target_sessions.len());
+            tracing::info!(
+                "[session_search] Done indexing session {}/{}",
+                i + 1,
+                target_sessions.len()
+            );
         }
 
         tracing::info!("[session_search] All sessions indexed, preparing search");
@@ -305,7 +322,11 @@ impl SessionSearchTool {
             return Ok(ToolResult::error("Query cannot be empty.".to_string()));
         }
 
-        tracing::info!("[session_search] spawn_blocking search (fts_query={:?}, n={})", fts_query, n);
+        tracing::info!(
+            "[session_search] spawn_blocking search (fts_query={:?}, n={})",
+            fts_query,
+            n
+        );
         let query_owned = query.to_string();
         let results = tokio::task::spawn_blocking(move || {
             search_in_sessions(store, &fts_query, &query_owned, n, &target_paths)
@@ -314,7 +335,10 @@ impl SessionSearchTool {
         .map_err(|e| super::error::ToolError::Execution(e.to_string()))?
         .map_err(super::error::ToolError::Execution)?;
 
-        tracing::info!("[session_search] Search complete, {} results", results.len());
+        tracing::info!(
+            "[session_search] Search complete, {} results",
+            results.len()
+        );
 
         if results.is_empty() {
             return Ok(ToolResult::success(format!(
@@ -345,9 +369,7 @@ fn index_session_body(
     body: String,
 ) -> std::result::Result<(), String> {
     let hash = Store::hash_content(&body);
-    let now = chrono::Local::now()
-        .format("%Y-%m-%dT%H:%M:%S")
-        .to_string();
+    let now = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
 
     tracing::debug!("[index_session] Acquiring store lock for {}", doc_path);
     let s = store
@@ -355,7 +377,8 @@ fn index_session_body(
         .map_err(|e| format!("Store lock poisoned: {e}"))?;
     tracing::debug!("[index_session] Store lock acquired for {}", doc_path);
 
-    if matches!(s.find_active_document(COLLECTION, doc_path), Ok(Some((_, ref h, _))) if h == &hash) {
+    if matches!(s.find_active_document(COLLECTION, doc_path), Ok(Some((_, ref h, _))) if h == &hash)
+    {
         tracing::debug!("[index_session] Hash unchanged, skipping {}", doc_path);
         return Ok(());
     }
@@ -368,22 +391,27 @@ fn index_session_body(
     s.insert_document(COLLECTION, doc_path, title, &hash, &now, &now)
         .map_err(|e| format!("insert_document failed: {e}"))?;
 
-    tracing::info!("[index_session] Indexed {} ({} bytes)", doc_path, body.len());
+    tracing::info!(
+        "[index_session] Indexed {} ({} bytes)",
+        doc_path,
+        body.len()
+    );
 
     // Release store lock before embedding
     drop(s);
 
     // Non-blocking embed — skip if engine is busy (backfill running)
     if let Some(em) = crate::memory::engine_if_ready()
-        && let Ok(mut engine) = em.try_lock() {
-            let doc_title = Store::extract_title(&body);
-            if let Ok(emb) = engine.embed_document(&body, Some(&doc_title)) {
-                drop(engine); // release engine before re-acquiring store
-                if let Ok(st) = store.lock() {
-                    let _ = st.insert_embedding(&hash, 0, 0, &emb.embedding, &emb.model, &now);
-                }
+        && let Ok(mut engine) = em.try_lock()
+    {
+        let doc_title = Store::extract_title(&body);
+        if let Ok(emb) = engine.embed_document(&body, Some(&doc_title)) {
+            drop(engine); // release engine before re-acquiring store
+            if let Ok(st) = store.lock() {
+                let _ = st.insert_embedding(&hash, 0, 0, &emb.embedding, &emb.model, &now);
             }
         }
+    }
 
     Ok(())
 }
@@ -398,21 +426,24 @@ fn search_in_sessions(
 ) -> std::result::Result<Vec<(String, String)>, String> {
     // Non-blocking engine check — try_lock to avoid blocking if backfill holds the mutex
     tracing::info!("[search_in_sessions] Checking embedding engine");
-    let query_embedding = crate::memory::engine_if_ready().and_then(|em| {
-        match em.try_lock() {
-            Ok(mut e) => {
-                tracing::info!("[search_in_sessions] Engine lock acquired, embedding query");
-                let result = e.embed_query(raw_query).ok().map(|r| r.embedding);
-                tracing::info!("[search_in_sessions] Query embedding done");
-                result
-            }
-            Err(_) => {
-                tracing::info!("[search_in_sessions] Engine busy (backfill?), falling back to FTS-only");
-                None
-            }
+    let query_embedding = crate::memory::engine_if_ready().and_then(|em| match em.try_lock() {
+        Ok(mut e) => {
+            tracing::info!("[search_in_sessions] Engine lock acquired, embedding query");
+            let result = e.embed_query(raw_query).ok().map(|r| r.embedding);
+            tracing::info!("[search_in_sessions] Query embedding done");
+            result
+        }
+        Err(_) => {
+            tracing::info!(
+                "[search_in_sessions] Engine busy (backfill?), falling back to FTS-only"
+            );
+            None
         }
     });
-    tracing::info!("[search_in_sessions] Embedding phase complete (has_embedding={})", query_embedding.is_some());
+    tracing::info!(
+        "[search_in_sessions] Embedding phase complete (has_embedding={})",
+        query_embedding.is_some()
+    );
 
     tracing::info!("[search_in_sessions] Acquiring store lock for search");
     let s = store

@@ -50,10 +50,7 @@ impl Tool for SlashCommandTool {
     }
 
     async fn execute(&self, input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
-        let command = input
-            .get("command")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let command = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
         let args = input.get("args").and_then(|v| v.as_str()).unwrap_or("");
 
         if !command.starts_with('/') {
@@ -95,8 +92,7 @@ impl SlashCommandTool {
         let path_str = args.trim();
         if path_str.is_empty() {
             return Ok(ToolResult::error(
-                "No directory specified. Usage: slash_command /cd with args='/path/to/dir'"
-                    .into(),
+                "No directory specified. Usage: slash_command /cd with args='/path/to/dir'".into(),
             ));
         }
 
@@ -178,10 +174,7 @@ impl SlashCommandTool {
                         "Approval policy set to: {}",
                         policy
                     ))),
-                    Err(e) => Ok(ToolResult::error(format!(
-                        "Failed to write config: {}",
-                        e
-                    ))),
+                    Err(e) => Ok(ToolResult::error(format!("Failed to write config: {}", e))),
                 }
             }
             _ => Ok(ToolResult::error(format!(
@@ -214,8 +207,17 @@ impl SlashCommandTool {
             // List available commands for context
             let available: Vec<String> = commands.iter().map(|c| c.name.clone()).collect();
             let builtin = [
-                "/cd", "/compact", "/rebuild", "/approve", "/models", "/sessions", "/help",
-                "/onboard", "/usage", "/whisper", "/settings",
+                "/cd",
+                "/compact",
+                "/rebuild",
+                "/approve",
+                "/models",
+                "/sessions",
+                "/help",
+                "/onboard",
+                "/usage",
+                "/whisper",
+                "/settings",
             ];
             Ok(ToolResult::error(format!(
                 "Unknown command: '{}'. Built-in: {}. User-defined: {}",

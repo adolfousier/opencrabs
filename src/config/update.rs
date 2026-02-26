@@ -133,8 +133,12 @@ impl ProviderUpdater {
 
     /// Update a named custom provider (stored in BTreeMap)
     fn update_custom_provider_config(&self, config: &mut Config, provider: &Provider) -> bool {
-        let customs = config.providers.custom.get_or_insert_with(std::collections::BTreeMap::new);
-        let entry = customs.entry("default".to_string())
+        let customs = config
+            .providers
+            .custom
+            .get_or_insert_with(std::collections::BTreeMap::new);
+        let entry = customs
+            .entry("default".to_string())
             .or_insert_with(|| ProviderConfig {
                 enabled: true,
                 api_key: None,
@@ -151,7 +155,10 @@ impl ProviderUpdater {
     }
 
     /// Apply a provider update to an Option<ProviderConfig>
-    fn apply_provider_update(provider_config: &mut Option<ProviderConfig>, provider: &Provider) -> bool {
+    fn apply_provider_update(
+        provider_config: &mut Option<ProviderConfig>,
+        provider: &Provider,
+    ) -> bool {
         // Create or update provider config
         let mut updated = false;
         let new_config = provider_config.get_or_insert_with(|| {
@@ -167,10 +174,11 @@ impl ProviderUpdater {
 
         // Update base URL if provider specifies one
         if let Some(api_endpoint) = &provider.api_endpoint
-            && new_config.base_url.as_ref() != Some(api_endpoint) {
-                new_config.base_url = Some(api_endpoint.clone());
-                updated = true;
-            }
+            && new_config.base_url.as_ref() != Some(api_endpoint)
+        {
+            new_config.base_url = Some(api_endpoint.clone());
+            updated = true;
+        }
 
         // Update default model if not set and provider has models
         if new_config.default_model.is_none() && !provider.models.is_empty() {

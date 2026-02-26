@@ -2,11 +2,7 @@
 //!
 //! Creates providers based on config.toml settings.
 
-use super::{
-    anthropic::AnthropicProvider,
-    custom_openai_compatible::OpenAIProvider,
-    Provider,
-};
+use super::{Provider, anthropic::AnthropicProvider, custom_openai_compatible::OpenAIProvider};
 use crate::config::{Config, ProviderConfig};
 use anyhow::Result;
 use std::sync::Arc;
@@ -15,7 +11,7 @@ use std::sync::Arc;
 /// No hardcoded priority - providers are enabled/disabled in config
 pub fn create_provider(config: &Config) -> Result<Arc<dyn Provider>> {
     // Check which providers are enabled in config.toml
-    
+
     // Try Minimax first
     if config.providers.minimax.as_ref().is_some_and(|p| p.enabled) {
         tracing::info!("Using enabled provider: Minimax");
@@ -24,14 +20,24 @@ pub fn create_provider(config: &Config) -> Result<Arc<dyn Provider>> {
     }
 
     // Try OpenRouter
-    if config.providers.openrouter.as_ref().is_some_and(|p| p.enabled) {
+    if config
+        .providers
+        .openrouter
+        .as_ref()
+        .is_some_and(|p| p.enabled)
+    {
         tracing::info!("Using enabled provider: OpenRouter");
         return try_create_openrouter(config)?
             .ok_or_else(|| anyhow::anyhow!("OpenRouter enabled but failed to create"));
     }
 
     // Try Anthropic
-    if config.providers.anthropic.as_ref().is_some_and(|p| p.enabled) {
+    if config
+        .providers
+        .anthropic
+        .as_ref()
+        .is_some_and(|p| p.enabled)
+    {
         tracing::info!("Using enabled provider: Anthropic");
         return try_create_anthropic(config)?
             .ok_or_else(|| anyhow::anyhow!("Anthropic enabled but failed to create"));
@@ -54,18 +60,20 @@ pub fn create_provider(config: &Config) -> Result<Arc<dyn Provider>> {
     // Try Gemini
     if config.providers.gemini.as_ref().is_some_and(|p| p.enabled) {
         tracing::info!("Using enabled provider: Google Gemini");
-        return Err(anyhow::anyhow!(
-            "Gemini provider not yet implemented"
-        ));
+        return Err(anyhow::anyhow!("Gemini provider not yet implemented"));
     }
 
     // Try fallback if primary fails
     if let Some(fallback) = &config.providers.fallback
         && fallback.enabled
-            && let Some(fallback_type) = &fallback.provider {
-                tracing::warn!("No primary provider enabled, trying fallback: {}", fallback_type);
-                return create_fallback(config, fallback_type);
-            }
+        && let Some(fallback_type) = &fallback.provider
+    {
+        tracing::warn!(
+            "No primary provider enabled, trying fallback: {}",
+            fallback_type
+        );
+        return create_fallback(config, fallback_type);
+    }
 
     // No provider enabled - return placeholder provider so app can start and show onboarding
     tracing::info!("No provider configured, using placeholder provider");
@@ -82,25 +90,25 @@ fn create_fallback(config: &Config, fallback_type: &str) -> Result<Arc<dyn Provi
         }
         "minimax" => {
             tracing::info!("Using fallback: Minimax");
-            try_create_minimax(config)?
-                .ok_or_else(|| anyhow::anyhow!("Minimax not configured"))
+            try_create_minimax(config)?.ok_or_else(|| anyhow::anyhow!("Minimax not configured"))
         }
         "anthropic" => {
             tracing::info!("Using fallback: Anthropic");
-            try_create_anthropic(config)?
-                .ok_or_else(|| anyhow::anyhow!("Anthropic not configured"))
+            try_create_anthropic(config)?.ok_or_else(|| anyhow::anyhow!("Anthropic not configured"))
         }
         "openai" => {
             tracing::info!("Using fallback: OpenAI");
-            try_create_openai(config)?
-                .ok_or_else(|| anyhow::anyhow!("OpenAI not configured"))
+            try_create_openai(config)?.ok_or_else(|| anyhow::anyhow!("OpenAI not configured"))
         }
         "custom" => {
             tracing::info!("Using fallback: Custom OpenAI-Compatible");
             try_create_custom(config)?
                 .ok_or_else(|| anyhow::anyhow!("Custom provider not configured"))
         }
-        _ => Err(anyhow::anyhow!("Unknown fallback provider: {}", fallback_type)),
+        _ => Err(anyhow::anyhow!(
+            "Unknown fallback provider: {}",
+            fallback_type
+        )),
     }
 }
 
@@ -115,7 +123,9 @@ fn try_create_openrouter(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         return Ok(None);
     };
 
-    let base_url = openrouter_config.base_url.clone()
+    let base_url = openrouter_config
+        .base_url
+        .clone()
         .unwrap_or_else(|| "https://openrouter.ai/api/v1/chat/completions".to_string());
 
     tracing::info!("Using OpenRouter at: {}", base_url);
@@ -138,9 +148,11 @@ fn try_create_minimax(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     };
 
     // MiniMax requires specific endpoint path, not just /v1
-    let base_url = minimax_config.base_url.clone()
+    let base_url = minimax_config
+        .base_url
+        .clone()
         .unwrap_or_else(|| "https://api.minimax.io/v1".to_string());
-    
+
     // Append correct path if not already present
     let full_url = if base_url.contains("minimax.io") && !base_url.contains("/text/") {
         format!("{}/text/chatcompletion_v2", base_url.trim_end_matches('/'))
@@ -168,7 +180,9 @@ fn try_create_custom(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         return Ok(None);
     };
 
-    let mut base_url = custom_config.base_url.clone()
+    let mut base_url = custom_config
+        .base_url
+        .clone()
         .unwrap_or_else(|| "http://localhost:1234/v1/chat/completions".to_string());
 
     // Auto-append /chat/completions if missing — all OpenAI-compatible APIs need it
@@ -185,8 +199,14 @@ fn try_create_custom(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
 }
 
 /// Configure OpenAI-compatible provider with custom model
-fn configure_openai_compatible(mut provider: OpenAIProvider, config: &ProviderConfig) -> OpenAIProvider {
-    tracing::debug!("configure_openai_compatible: default_model = {:?}", config.default_model);
+fn configure_openai_compatible(
+    mut provider: OpenAIProvider,
+    config: &ProviderConfig,
+) -> OpenAIProvider {
+    tracing::debug!(
+        "configure_openai_compatible: default_model = {:?}",
+        config.default_model
+    );
     if let Some(model) = &config.default_model {
         tracing::info!("Using custom default model: {}", model);
         provider = provider.with_default_model(model.clone());
@@ -206,14 +226,16 @@ fn try_create_openai(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         && openai_config.api_key.is_none()
     {
         tracing::info!("Using local LLM at: {}", base_url);
-        let provider = configure_openai_compatible(OpenAIProvider::local(base_url.clone()), openai_config);
+        let provider =
+            configure_openai_compatible(OpenAIProvider::local(base_url.clone()), openai_config);
         return Ok(Some(Arc::new(provider)));
     }
 
     // Official OpenAI API - has api_key
     if let Some(api_key) = &openai_config.api_key {
         tracing::info!("Using OpenAI provider");
-        let provider = configure_openai_compatible(OpenAIProvider::new(api_key.clone()), openai_config);
+        let provider =
+            configure_openai_compatible(OpenAIProvider::new(api_key.clone()), openai_config);
         return Ok(Some(Arc::new(provider)));
     }
 

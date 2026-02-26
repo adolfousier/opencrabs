@@ -31,10 +31,12 @@ mod tests {
 
         let result = validate_plan_file_path(&plan_file, working_dir);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("within the session directory"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("within the session directory")
+        );
     }
 
     #[test]
@@ -61,10 +63,12 @@ mod tests {
 
         let result = validate_plan_file_path(&plan_file, working_dir);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("must match pattern"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("must match pattern")
+        );
     }
 
     #[test]
@@ -120,10 +124,12 @@ mod tests {
         let long_string = "a".repeat(300);
         let result = validate_string(&long_string, MAX_TITLE_LENGTH, "Title");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("exceeds maximum length"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("exceeds maximum length")
+        );
     }
 
     #[test]

@@ -142,9 +142,21 @@ async fn process_task_streaming(
     let session_id = match session_service.create_session(Some(title)).await {
         Ok(session) => session.id,
         Err(e) => {
-            tracing::error!("A2A stream: Failed to create session for task {}: {}", task_id, e);
-            send_final_status(&store, &task_id, &context_id, TaskState::Failed,
-                &format!("Session creation failed: {}", e), &pool, &tx).await;
+            tracing::error!(
+                "A2A stream: Failed to create session for task {}: {}",
+                task_id,
+                e
+            );
+            send_final_status(
+                &store,
+                &task_id,
+                &context_id,
+                TaskState::Failed,
+                &format!("Session creation failed: {}", e),
+                &pool,
+                &tx,
+            )
+            .await;
             return;
         }
     };
@@ -182,15 +194,17 @@ async fn process_task_streaming(
                 metadata: None,
             };
 
-            let _ = tx.send(StreamEvent::ArtifactUpdate(TaskArtifactUpdateEvent {
-                kind: "artifact-update".to_string(),
-                task_id: task_id.clone(),
-                context_id: context_id.clone(),
-                artifact: artifact.clone(),
-                append: Some(false),
-                last_chunk: Some(true),
-                metadata: None,
-            })).await;
+            let _ = tx
+                .send(StreamEvent::ArtifactUpdate(TaskArtifactUpdateEvent {
+                    kind: "artifact-update".to_string(),
+                    task_id: task_id.clone(),
+                    context_id: context_id.clone(),
+                    artifact: artifact.clone(),
+                    append: Some(false),
+                    last_chunk: Some(true),
+                    metadata: None,
+                }))
+                .await;
 
             // Update store
             {
@@ -214,8 +228,16 @@ async fn process_task_streaming(
             }
 
             // Send final status update
-            send_final_status(&store, &task_id, &context_id, TaskState::Completed,
-                "Task completed.", &pool, &tx).await;
+            send_final_status(
+                &store,
+                &task_id,
+                &context_id,
+                TaskState::Completed,
+                "Task completed.",
+                &pool,
+                &tx,
+            )
+            .await;
 
             tracing::info!(
                 "A2A stream: Task {} completed ({} tokens used)",
@@ -225,8 +247,16 @@ async fn process_task_streaming(
         }
         Err(e) => {
             tracing::error!("A2A stream: Task {} failed: {}", task_id, e);
-            send_final_status(&store, &task_id, &context_id, TaskState::Failed,
-                &format!("Task failed: {}", e), &pool, &tx).await;
+            send_final_status(
+                &store,
+                &task_id,
+                &context_id,
+                TaskState::Failed,
+                &format!("Task failed: {}", e),
+                &pool,
+                &tx,
+            )
+            .await;
         }
     }
 }
@@ -264,12 +294,14 @@ async fn send_final_status(
     }
 
     // Send final SSE event
-    let _ = tx.send(StreamEvent::StatusUpdate(TaskStatusUpdateEvent {
-        kind: "status-update".to_string(),
-        task_id: task_id.to_string(),
-        context_id: context_id.to_string(),
-        status,
-        is_final: true,
-        metadata: None,
-    })).await;
+    let _ = tx
+        .send(StreamEvent::StatusUpdate(TaskStatusUpdateEvent {
+            kind: "status-update".to_string(),
+            task_id: task_id.to_string(),
+            context_id: context_id.to_string(),
+            status,
+            is_final: true,
+            metadata: None,
+        }))
+        .await;
 }

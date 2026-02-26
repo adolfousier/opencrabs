@@ -202,7 +202,7 @@ impl AnthropicProvider {
 #[async_trait]
 impl Provider for AnthropicProvider {
     async fn complete(&self, request: LLMRequest) -> Result<LLMResponse> {
-        use super::retry::{retry_with_backoff, RetryConfig};
+        use super::retry::{RetryConfig, retry_with_backoff};
 
         let model = request.model.clone();
         let message_count = request.messages.len();
@@ -259,7 +259,7 @@ impl Provider for AnthropicProvider {
     }
 
     async fn stream(&self, request: LLMRequest) -> Result<ProviderStream> {
-        use super::retry::{retry_with_backoff, RetryConfig};
+        use super::retry::{RetryConfig, retry_with_backoff};
 
         let model = request.model.clone();
         let message_count = request.messages.len();

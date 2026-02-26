@@ -25,9 +25,10 @@ async fn main() -> Result<()> {
     // Clean up old log files (keep last 7 days)
     if cli_args.debug
         && let Ok(removed) = logging::cleanup_old_logs(7)
-            && removed > 0 {
-                tracing::info!("🧹 Cleaned up {} old log file(s)", removed);
-            }
+        && removed > 0
+    {
+        tracing::info!("🧹 Cleaned up {} old log file(s)", removed);
+    }
 
     // Run CLI application
     let result = cli::run().await;

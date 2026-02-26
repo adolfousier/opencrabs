@@ -1,7 +1,7 @@
 //! Database connection management, pool configuration, and extension traits.
 
 use anyhow::{Context, Result};
-use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
+use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
 use std::path::Path;
 
 /// Type alias for database pool
@@ -19,12 +19,12 @@ impl Database {
 
         // Create parent directory if it doesn't exist
         if let Some(parent) = path.parent()
-            && !parent.exists() {
-                tracing::debug!("Creating database directory: {:?}", parent);
-                std::fs::create_dir_all(parent).with_context(|| {
-                    format!("Failed to create database directory: {:?}", parent)
-                })?;
-            }
+            && !parent.exists()
+        {
+            tracing::debug!("Creating database directory: {:?}", parent);
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create database directory: {:?}", parent))?;
+        }
 
         let path_str = path.to_string_lossy().into_owned();
         let url = format!("sqlite://{}?mode=rwc", path_str);

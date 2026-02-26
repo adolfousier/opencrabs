@@ -3,8 +3,8 @@
 //! Agent struct and startup logic. Uses Socket Mode (WebSocket) —
 //! no public HTTPS endpoint required, perfect for a CLI tool.
 
-use super::handler;
 use super::SlackState;
+use super::handler;
 use crate::brain::agent::AgentService;
 use crate::config::RespondTo;
 use crate::services::{ServiceContext, SessionService};

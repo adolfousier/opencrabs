@@ -187,7 +187,11 @@ mod tests {
         mock.assert_async().await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("401"), "error should mention status code: {}", err);
+        assert!(
+            err.contains("401"),
+            "error should mention status code: {}",
+            err
+        );
     }
 
     #[tokio::test]
@@ -312,14 +316,9 @@ mod tests {
             .create_async()
             .await;
 
-        let result = synthesize_speech_with_url(
-            "Hello",
-            "key",
-            "ash",
-            "gpt-4o-mini-tts",
-            &server.url(),
-        )
-        .await;
+        let result =
+            synthesize_speech_with_url("Hello", "key", "ash", "gpt-4o-mini-tts", &server.url())
+                .await;
 
         mock.assert_async().await;
         assert!(result.is_err());
@@ -336,14 +335,8 @@ mod tests {
             .create_async()
             .await;
 
-        let result = synthesize_speech_with_url(
-            "Hello",
-            "key",
-            "ash",
-            "tts-1",
-            &server.url(),
-        )
-        .await;
+        let result =
+            synthesize_speech_with_url("Hello", "key", "ash", "tts-1", &server.url()).await;
 
         mock.assert_async().await;
         assert!(result.is_err());
@@ -359,14 +352,8 @@ mod tests {
             .create_async()
             .await;
 
-        let result = synthesize_speech_with_url(
-            "Hello",
-            "key",
-            "ash",
-            "tts-1",
-            &server.url(),
-        )
-        .await;
+        let result =
+            synthesize_speech_with_url("Hello", "key", "ash", "tts-1", &server.url()).await;
 
         mock.assert_async().await;
         assert!(result.is_ok());
@@ -379,22 +366,17 @@ mod tests {
             let mut server = mockito::Server::new_async().await;
             let mock = server
                 .mock("POST", "/")
-                .match_body(mockito::Matcher::PartialJsonString(
-                    format!(r#"{{"voice":"{}"}}"#, voice),
-                ))
+                .match_body(mockito::Matcher::PartialJsonString(format!(
+                    r#"{{"voice":"{}"}}"#,
+                    voice
+                )))
                 .with_status(200)
                 .with_body(vec![1u8; 10])
                 .create_async()
                 .await;
 
-            let result = synthesize_speech_with_url(
-                "Test",
-                "key",
-                voice,
-                "tts-1",
-                &server.url(),
-            )
-            .await;
+            let result =
+                synthesize_speech_with_url("Test", "key", voice, "tts-1", &server.url()).await;
 
             mock.assert_async().await;
             assert!(result.is_ok(), "voice '{}' should work", voice);

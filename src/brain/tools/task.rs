@@ -104,17 +104,18 @@ impl FileLock {
                     if attempt >= max_attempts {
                         // Check if lock is stale (older than 60 seconds)
                         if let Ok(metadata) = fs::metadata(&lock_path).await
-                            && let Ok(modified) = metadata.modified() {
-                                let age = std::time::SystemTime::now()
-                                    .duration_since(modified)
-                                    .unwrap_or_default();
-                                if age > Duration::from_secs(60) {
-                                    // Stale lock, force remove it
-                                    tracing::warn!("Removing stale lock file (age: {:?})", age);
-                                    let _ = fs::remove_file(&lock_path).await;
-                                    continue;
-                                }
+                            && let Ok(modified) = metadata.modified()
+                        {
+                            let age = std::time::SystemTime::now()
+                                .duration_since(modified)
+                                .unwrap_or_default();
+                            if age > Duration::from_secs(60) {
+                                // Stale lock, force remove it
+                                tracing::warn!("Removing stale lock file (age: {:?})", age);
+                                let _ = fs::remove_file(&lock_path).await;
+                                continue;
                             }
+                        }
 
                         return Err(ToolError::Execution(format!(
                             "Failed to acquire lock after {} attempts. \
@@ -404,14 +405,16 @@ impl Tool for TaskTool {
                         }
                         if let Some(ref s) = status
                             && let Ok(target_status) = parse_status(s)
-                                && t.status != target_status {
-                                    return false;
-                                }
+                            && t.status != target_status
+                        {
+                            return false;
+                        }
                         if let Some(ref p) = priority
                             && let Ok(target_priority) = parse_priority(p)
-                                && t.priority != target_priority {
-                                    return false;
-                                }
+                            && t.priority != target_priority
+                        {
+                            return false;
+                        }
                         true
                     })
                     .collect();
@@ -597,12 +600,13 @@ impl Tool for TaskTool {
                                 .clone();
                             for dep_id in &task_deps {
                                 if let Some(dep_task) = store.tasks.get(dep_id)
-                                    && dep_task.status != TaskStatus::Completed {
-                                        return Err(ToolError::InvalidInput(format!(
-                                            "Cannot update task: dependency {} is not completed",
-                                            dep_id
-                                        )));
-                                    }
+                                    && dep_task.status != TaskStatus::Completed
+                                {
+                                    return Err(ToolError::InvalidInput(format!(
+                                        "Cannot update task: dependency {} is not completed",
+                                        dep_id
+                                    )));
+                                }
                             }
                         }
                     }

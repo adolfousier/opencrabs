@@ -2,7 +2,7 @@
 //!
 //! Allows reading file contents from the filesystem.
 
-use super::error::{validate_file_path, Result, ToolError};
+use super::error::{Result, ToolError, validate_file_path};
 use super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

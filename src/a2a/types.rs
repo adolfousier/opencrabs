@@ -372,10 +372,8 @@ mod tests {
 
     #[test]
     fn test_json_rpc_success_response() {
-        let resp = JsonRpcResponse::success(
-            serde_json::json!(1),
-            serde_json::json!({"status": "ok"}),
-        );
+        let resp =
+            JsonRpcResponse::success(serde_json::json!(1), serde_json::json!({"status": "ok"}));
         assert_eq!(resp.jsonrpc, "2.0");
         assert!(resp.result.is_some());
         assert!(resp.error.is_none());

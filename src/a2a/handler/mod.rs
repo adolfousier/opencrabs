@@ -44,11 +44,26 @@ pub async fn dispatch(
     match req.method.as_str() {
         "message/send" => {
             send::handle_send_message(
-                req.id, req.params, store, cancel_store, agent_service, service_context,
-            ).await
+                req.id,
+                req.params,
+                store,
+                cancel_store,
+                agent_service,
+                service_context,
+            )
+            .await
         }
         "tasks/get" => tasks::handle_get_task(req.id, req.params, store).await,
-        "tasks/cancel" => tasks::handle_cancel_task(req.id, req.params, store, cancel_store, &service_context.pool()).await,
+        "tasks/cancel" => {
+            tasks::handle_cancel_task(
+                req.id,
+                req.params,
+                store,
+                cancel_store,
+                &service_context.pool(),
+            )
+            .await
+        }
         _ => JsonRpcResponse::error(
             req.id,
             error_codes::METHOD_NOT_FOUND,

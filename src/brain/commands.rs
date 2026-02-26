@@ -47,7 +47,10 @@ impl CommandLoader {
     /// Create a new CommandLoader pointing at a specific TOML file path.
     pub fn new(path: PathBuf) -> Self {
         let json_path = path.with_extension("json");
-        Self { toml_path: path, json_path }
+        Self {
+            toml_path: path,
+            json_path,
+        }
     }
 
     /// Resolve the commands paths from the brain path.
@@ -94,10 +97,7 @@ impl CommandLoader {
                     if let Err(e) = self.save(&commands) {
                         tracing::warn!("Failed to auto-migrate commands to TOML: {}", e);
                     } else {
-                        tracing::info!(
-                            "Migrated commands.json → {}",
-                            self.toml_path.display()
-                        );
+                        tracing::info!("Migrated commands.json → {}", self.toml_path.display());
                     }
                     return commands;
                 }
@@ -124,7 +124,9 @@ impl CommandLoader {
             std::fs::create_dir_all(parent)?;
         }
 
-        let file = CommandsFile { commands: commands.to_vec() };
+        let file = CommandsFile {
+            commands: commands.to_vec(),
+        };
         let toml_str = toml::to_string_pretty(&file)?;
         std::fs::write(&self.toml_path, toml_str)?;
         tracing::info!(
@@ -160,10 +162,7 @@ impl CommandLoader {
     }
 
     /// Generate a slash commands section for the system brain.
-    pub fn commands_section(
-        builtin: &[(&str, &str)],
-        user_commands: &[UserCommand],
-    ) -> String {
+    pub fn commands_section(builtin: &[(&str, &str)], user_commands: &[UserCommand]) -> String {
         let mut section = String::new();
 
         section.push_str("Built-in commands:\n");
@@ -258,30 +257,36 @@ mod tests {
         let path = dir.path().join("commands.toml");
         let loader = CommandLoader::new(path);
 
-        loader.add_command(UserCommand {
-            name: "/first".to_string(),
-            description: "First".to_string(),
-            action: "prompt".to_string(),
-            prompt: "first".to_string(),
-        }).unwrap();
+        loader
+            .add_command(UserCommand {
+                name: "/first".to_string(),
+                description: "First".to_string(),
+                action: "prompt".to_string(),
+                prompt: "first".to_string(),
+            })
+            .unwrap();
 
-        loader.add_command(UserCommand {
-            name: "/second".to_string(),
-            description: "Second".to_string(),
-            action: "prompt".to_string(),
-            prompt: "second".to_string(),
-        }).unwrap();
+        loader
+            .add_command(UserCommand {
+                name: "/second".to_string(),
+                description: "Second".to_string(),
+                action: "prompt".to_string(),
+                prompt: "second".to_string(),
+            })
+            .unwrap();
 
         let loaded = loader.load();
         assert_eq!(loaded.len(), 2);
 
         // Update existing
-        loader.add_command(UserCommand {
-            name: "/first".to_string(),
-            description: "Updated first".to_string(),
-            action: "prompt".to_string(),
-            prompt: "updated".to_string(),
-        }).unwrap();
+        loader
+            .add_command(UserCommand {
+                name: "/first".to_string(),
+                description: "Updated first".to_string(),
+                action: "prompt".to_string(),
+                prompt: "updated".to_string(),
+            })
+            .unwrap();
 
         let loaded = loader.load();
         assert_eq!(loaded.len(), 2);

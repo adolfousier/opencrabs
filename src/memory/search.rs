@@ -26,13 +26,15 @@ pub async fn search(
     tokio::task::spawn_blocking(move || {
         // Engine lock → embed query → release (before store lock)
         let query_embedding: Option<Vec<f32>> = engine_if_ready().and_then(|em| {
-            em.lock().ok().and_then(|mut e| {
-                e.embed_query(&query_owned).ok().map(|r| r.embedding)
-            })
+            em.lock()
+                .ok()
+                .and_then(|mut e| e.embed_query(&query_owned).ok().map(|r| r.embedding))
         });
 
         // Store lock → search
-        let store = store.lock().map_err(|e| format!("Store lock poisoned: {e}"))?;
+        let store = store
+            .lock()
+            .map_err(|e| format!("Store lock poisoned: {e}"))?;
         let home = crate::config::opencrabs_home();
 
         let fts_results = store
@@ -179,8 +181,7 @@ mod tests {
 
     #[test]
     fn test_extract_snippet() {
-        let body =
-            "# Today\nFixed the authentication bug in login flow. Also refactored database.";
+        let body = "# Today\nFixed the authentication bug in login flow. Also refactored database.";
         let snippet = extract_snippet(body, "\"authentication\"", 60);
         assert!(snippet.contains("authentication"));
     }

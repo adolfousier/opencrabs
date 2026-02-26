@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use tracing::Level;
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Logging configuration
 #[derive(Debug, Clone)]
@@ -254,11 +254,13 @@ pub fn cleanup_old_logs(max_age_days: u64) -> Result<usize, Box<dyn std::error::
 
         if path.extension().map(|ext| ext == "log").unwrap_or(false)
             && let Ok(metadata) = entry.metadata()
-                && let Ok(modified) = metadata.modified()
-                    && let Ok(age) = now.duration_since(modified)
-                        && age > max_age && std::fs::remove_file(&path).is_ok() {
-                            removed += 1;
-                        }
+            && let Ok(modified) = metadata.modified()
+            && let Ok(age) = now.duration_since(modified)
+            && age > max_age
+            && std::fs::remove_file(&path).is_ok()
+        {
+            removed += 1;
+        }
     }
 
     Ok(removed)

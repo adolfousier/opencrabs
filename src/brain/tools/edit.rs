@@ -2,7 +2,7 @@
 //!
 //! Intelligently modify portions of files (find/replace, line-based edits).
 
-use super::error::{validate_file_path, Result, ToolError};
+use super::error::{Result, ToolError, validate_file_path};
 use super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -330,8 +330,12 @@ fn build_edit_diff(old: &str, new: &str) -> String {
             j += 1;
         } else {
             // Find how far ahead the old line appears in new (or vice versa)
-            let new_ahead = new_lines[j..].iter().position(|l| i < old_lines.len() && *l == old_lines[i]);
-            let old_ahead = old_lines[i..].iter().position(|l| j < new_lines.len() && *l == new_lines[j]);
+            let new_ahead = new_lines[j..]
+                .iter()
+                .position(|l| i < old_lines.len() && *l == old_lines[i]);
+            let old_ahead = old_lines[i..]
+                .iter()
+                .position(|l| j < new_lines.len() && *l == new_lines[j]);
 
             match (new_ahead, old_ahead) {
                 (Some(na), Some(oa)) if na <= oa => {
@@ -339,7 +343,9 @@ fn build_edit_diff(old: &str, new: &str) -> String {
                     for line in &new_lines[j..j + na] {
                         diff.push_str(&format!("+ {}\n", line));
                         diff_lines += 1;
-                        if diff_lines >= max_diff_lines { break; }
+                        if diff_lines >= max_diff_lines {
+                            break;
+                        }
                     }
                     j += na;
                 }
@@ -348,7 +354,9 @@ fn build_edit_diff(old: &str, new: &str) -> String {
                     for line in &old_lines[i..i + oa] {
                         diff.push_str(&format!("- {}\n", line));
                         diff_lines += 1;
-                        if diff_lines >= max_diff_lines { break; }
+                        if diff_lines >= max_diff_lines {
+                            break;
+                        }
                     }
                     i += oa;
                 }
@@ -356,7 +364,9 @@ fn build_edit_diff(old: &str, new: &str) -> String {
                     for line in &new_lines[j..j + na] {
                         diff.push_str(&format!("+ {}\n", line));
                         diff_lines += 1;
-                        if diff_lines >= max_diff_lines { break; }
+                        if diff_lines >= max_diff_lines {
+                            break;
+                        }
                     }
                     j += na;
                 }
@@ -364,7 +374,9 @@ fn build_edit_diff(old: &str, new: &str) -> String {
                     for line in &old_lines[i..i + oa] {
                         diff.push_str(&format!("- {}\n", line));
                         diff_lines += 1;
-                        if diff_lines >= max_diff_lines { break; }
+                        if diff_lines >= max_diff_lines {
+                            break;
+                        }
                     }
                     i += oa;
                 }

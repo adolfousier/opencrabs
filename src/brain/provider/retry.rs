@@ -231,10 +231,11 @@ fn parse_retry_seconds(msg: &str) -> Option<u64> {
     for pattern in patterns {
         if let Ok(re) = Regex::new(pattern)
             && let Some(captures) = re.captures(msg)
-                && let Some(num_str) = captures.get(1)
-                    && let Ok(secs) = num_str.as_str().parse::<u64>() {
-                        return Some(secs);
-                    }
+            && let Some(num_str) = captures.get(1)
+            && let Ok(secs) = num_str.as_str().parse::<u64>()
+        {
+            return Some(secs);
+        }
     }
 
     None
@@ -287,8 +288,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_retry_success_immediate() {
-        use std::sync::atomic::{AtomicU32, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicU32, Ordering};
 
         let config = RetryConfig::default();
         let call_count = Arc::new(AtomicU32::new(0));
@@ -313,8 +314,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_retry_success_after_retries() {
-        use std::sync::atomic::{AtomicU32, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicU32, Ordering};
 
         let config = RetryConfig::new(3, Duration::from_millis(10));
         let call_count = Arc::new(AtomicU32::new(0));
@@ -343,8 +344,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_retry_max_attempts_exceeded() {
-        use std::sync::atomic::{AtomicU32, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicU32, Ordering};
 
         let config = RetryConfig::new(2, Duration::from_millis(10));
         let call_count = Arc::new(AtomicU32::new(0));
@@ -368,8 +369,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_retry_non_retryable_error() {
-        use std::sync::atomic::{AtomicU32, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicU32, Ordering};
 
         let config = RetryConfig::default();
         let call_count = Arc::new(AtomicU32::new(0));

@@ -60,10 +60,7 @@ impl Tool for MemorySearchTool {
             return Ok(ToolResult::error("query parameter is required".to_string()));
         }
 
-        let n = input
-            .get("n")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(5) as usize;
+        let n = input.get("n").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
 
         // Get memory qmd store
         let store = match crate::memory::get_store() {
@@ -79,18 +76,13 @@ impl Tool for MemorySearchTool {
         };
 
         match crate::memory::search(store, &query, n).await {
-            Ok(results) if results.is_empty() => {
-                Ok(ToolResult::success("No matching memories found.".to_string()))
-            }
+            Ok(results) if results.is_empty() => Ok(ToolResult::success(
+                "No matching memories found.".to_string(),
+            )),
             Ok(results) => {
                 let mut output = String::new();
                 for (i, r) in results.iter().enumerate() {
-                    output.push_str(&format!(
-                        "{}. **{}**\n   {}\n\n",
-                        i + 1,
-                        r.path,
-                        r.snippet
-                    ));
+                    output.push_str(&format!("{}. **{}**\n   {}\n\n", i + 1, r.path, r.snippet));
                 }
                 Ok(ToolResult::success(output))
             }

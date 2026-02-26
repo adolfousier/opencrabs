@@ -33,7 +33,9 @@ pub async fn index_file(store: &'static Mutex<Store>, path: &Path) -> Result<(),
     let path = path.to_path_buf();
     tokio::task::spawn_blocking(move || {
         let indexed = {
-            let s = store.lock().map_err(|e| format!("Store lock poisoned: {e}"))?;
+            let s = store
+                .lock()
+                .map_err(|e| format!("Store lock poisoned: {e}"))?;
             index_file_sync(&s, COLLECTION_MEMORY, &path, &body)?
         };
 
@@ -68,9 +70,7 @@ fn index_file_sync(
         return Ok(false);
     }
 
-    let now = chrono::Local::now()
-        .format("%Y-%m-%dT%H:%M:%S")
-        .to_string();
+    let now = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
     let title = Store::extract_title(body);
 
     store
@@ -132,8 +132,9 @@ pub async fn reindex(store: &'static Mutex<Store>) -> Result<usize, String> {
             let result: Result<bool, String> = tokio::task::spawn_blocking({
                 let path = path.clone();
                 move || {
-                    let store =
-                        store.lock().map_err(|e| format!("Store lock poisoned: {e}"))?;
+                    let store = store
+                        .lock()
+                        .map_err(|e| format!("Store lock poisoned: {e}"))?;
                     index_file_sync(&store, COLLECTION_BRAIN, &path, &body)
                 }
             })
@@ -150,7 +151,9 @@ pub async fn reindex(store: &'static Mutex<Store>) -> Result<usize, String> {
     // --- Prune deleted files from both collections ---
     let prune_result: Result<(), String> = tokio::task::spawn_blocking({
         move || {
-            let store = store.lock().map_err(|e| format!("Store lock poisoned: {e}"))?;
+            let store = store
+                .lock()
+                .map_err(|e| format!("Store lock poisoned: {e}"))?;
 
             if let Ok(db_paths) = store.get_active_document_paths(COLLECTION_MEMORY) {
                 for db_path in &db_paths {

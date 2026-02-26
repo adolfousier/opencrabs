@@ -154,10 +154,12 @@ impl OpenAIProvider {
         if self.api_key != "not-needed" {
             // Sanitize API key: trim whitespace/newlines that may have leaked from input
             let clean_key = self.api_key.trim();
-            let header_value: reqwest::header::HeaderValue = format!("Bearer {}", clean_key)
-                .parse()
-                .map_err(|_| {
-                    tracing::error!("API key contains invalid characters (length={}). Check keys.toml.", clean_key.len());
+            let header_value: reqwest::header::HeaderValue =
+                format!("Bearer {}", clean_key).parse().map_err(|_| {
+                    tracing::error!(
+                        "API key contains invalid characters (length={}). Check keys.toml.",
+                        clean_key.len()
+                    );
                     ProviderError::InvalidApiKey
                 })?;
             headers.insert(reqwest::header::AUTHORIZATION, header_value);
@@ -331,12 +333,13 @@ impl OpenAIProvider {
 
         // Add text content if present, stripping <think>...</think> reasoning blocks
         if let Some(content) = choice.message.content
-            && !content.is_empty() {
-                let clean = strip_think_blocks(&content);
-                if !clean.is_empty() {
-                    content_blocks.push(ContentBlock::Text { text: clean });
-                }
+            && !content.is_empty()
+        {
+            let clean = strip_think_blocks(&content);
+            if !clean.is_empty() {
+                content_blocks.push(ContentBlock::Text { text: clean });
             }
+        }
 
         // Convert tool_calls to ToolUse content blocks
         if let Some(tool_calls) = choice.message.tool_calls {
@@ -456,7 +459,7 @@ impl OpenAIProvider {
 #[async_trait]
 impl Provider for OpenAIProvider {
     async fn complete(&self, request: LLMRequest) -> Result<LLMResponse> {
-        use super::retry::{retry_with_backoff, RetryConfig};
+        use super::retry::{RetryConfig, retry_with_backoff};
 
         let model = request.model.clone();
         let message_count = request.messages.len();
@@ -520,25 +523,34 @@ impl Provider for OpenAIProvider {
     }
 
     async fn stream(&self, request: LLMRequest) -> Result<ProviderStream> {
-        use super::retry::{retry_with_backoff, RetryConfig};
+        use super::retry::{RetryConfig, retry_with_backoff};
 
         let model = request.model.clone();
         let message_count = request.messages.len();
-        
+
         tracing::info!(
             "{} streaming request: model={}, messages={}, base_url={}",
             self.name(),
-            model, message_count, self.base_url
+            model,
+            message_count,
+            self.base_url
         );
 
         let mut openai_request = self.to_openai_request(request);
         openai_request.stream = Some(true);
-        openai_request.stream_options = Some(StreamOptions { include_usage: true });
-        
+        openai_request.stream_options = Some(StreamOptions {
+            include_usage: true,
+        });
+
         let tools_count = openai_request.tools.as_ref().map(|t| t.len()).unwrap_or(0);
         tracing::debug!("OpenAI request has {} tools", tools_count);
-        tracing::debug!("OpenAI request payload: {:?}", serde_json::to_string(&openai_request).map(|s| s.chars().take(1000).collect::<String>()).unwrap_or_default());
-        
+        tracing::debug!(
+            "OpenAI request payload: {:?}",
+            serde_json::to_string(&openai_request)
+                .map(|s| s.chars().take(1000).collect::<String>())
+                .unwrap_or_default()
+        );
+
         let retry_config = RetryConfig::default();
 
         // Retry the stream connection establishment
@@ -567,7 +579,7 @@ impl Provider for OpenAIProvider {
         // Parse Server-Sent Events stream - return Vec to emit multiple events like Anthropic
         let byte_stream = response.bytes_stream();
         let buffer = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
-        
+
         // Accumulated state for a single streamed tool call
         #[derive(Debug, Clone, Default)]
         struct ToolCallAccum {
@@ -595,7 +607,7 @@ impl Provider for OpenAIProvider {
             tool_calls: std::collections::HashMap::new(),
             inside_think: false,
         }));
-        
+
         let event_stream = byte_stream
             .map(move |chunk_result| -> Vec<std::result::Result<StreamEvent, ProviderError>> {
                 match chunk_result {
@@ -892,41 +904,33 @@ impl Provider for OpenAIProvider {
 
     async fn fetch_models(&self) -> Vec<String> {
         // Derive models URL from base_url (replace /chat/completions with /models)
-        let models_url = self
-            .base_url
-            .replace("/chat/completions", "/models");
+        let models_url = self.base_url.replace("/chat/completions", "/models");
 
         #[derive(Deserialize)]
-        struct ModelEntry { id: String }
+        struct ModelEntry {
+            id: String,
+        }
         #[derive(Deserialize)]
-        struct ModelsResponse { data: Vec<ModelEntry> }
+        struct ModelsResponse {
+            data: Vec<ModelEntry>,
+        }
 
         let headers = match self.headers() {
             Ok(h) => h,
             Err(_) => return self.supported_models(),
         };
-        match self.client
-            .get(&models_url)
-            .headers(headers)
-            .send()
-            .await
-        {
-            Ok(resp) if resp.status().is_success() => {
-                match resp.json::<ModelsResponse>().await {
-                    Ok(body) => {
-                        let mut models: Vec<String> = body.data
-                            .into_iter()
-                            .map(|m| m.id)
-                            .collect();
-                        models.sort();
-                        if models.is_empty() {
-                            return self.supported_models();
-                        }
-                        models
+        match self.client.get(&models_url).headers(headers).send().await {
+            Ok(resp) if resp.status().is_success() => match resp.json::<ModelsResponse>().await {
+                Ok(body) => {
+                    let mut models: Vec<String> = body.data.into_iter().map(|m| m.id).collect();
+                    models.sort();
+                    if models.is_empty() {
+                        return self.supported_models();
                     }
-                    Err(_) => self.supported_models(),
+                    models
                 }
-            }
+                Err(_) => self.supported_models(),
+            },
             _ => self.supported_models(),
         }
     }

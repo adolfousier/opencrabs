@@ -12,8 +12,17 @@ use tokio::fs;
 
 /// Directories that are almost never useful to grep through.
 const SKIP_DIRS: &[&str] = &[
-    "target", "node_modules", ".git", "dist", "build", "__pycache__",
-    ".mypy_cache", ".tox", ".eggs", "vendor", ".bundle",
+    "target",
+    "node_modules",
+    ".git",
+    "dist",
+    "build",
+    "__pycache__",
+    ".mypy_cache",
+    ".tox",
+    ".eggs",
+    "vendor",
+    ".bundle",
 ];
 
 /// Grep search tool
@@ -259,9 +268,10 @@ impl GrepTool {
 
                 // Check limit
                 if let Some(limit) = input.limit
-                    && matches.len() >= limit {
-                        return Ok(());
-                    }
+                    && matches.len() >= limit
+                {
+                    return Ok(());
+                }
 
                 let mut result = String::new();
                 result.push_str(&format!("{}:", display_path));
@@ -317,9 +327,10 @@ impl GrepTool {
 
                 // Check limit
                 if let Some(limit) = input.limit
-                    && matches.len() >= limit {
-                        return Ok(());
-                    }
+                    && matches.len() >= limit
+                {
+                    return Ok(());
+                }
 
                 if path.is_file() {
                     self.search_file(&path, regex, input, matches, total_matches)
@@ -327,9 +338,10 @@ impl GrepTool {
                 } else if path.is_dir() {
                     // Skip hidden and heavy directories
                     if let Some(name) = path.file_name().and_then(|n| n.to_str())
-                        && (name.starts_with('.') || SKIP_DIRS.contains(&name)) {
-                            continue;
-                        }
+                        && (name.starts_with('.') || SKIP_DIRS.contains(&name))
+                    {
+                        continue;
+                    }
                     self.search_directory(&path, regex, input, matches, total_matches)
                         .await?;
                 }

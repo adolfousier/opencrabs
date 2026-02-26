@@ -5,7 +5,7 @@
 use super::error::{Result, ToolError};
 use super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
-use reqwest::{header::HeaderMap, Client, Method};
+use reqwest::{Client, Method, header::HeaderMap};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;

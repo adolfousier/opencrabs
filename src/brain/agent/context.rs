@@ -351,7 +351,10 @@ mod tests {
 
         // Add several messages with longer text to ensure they exceed limit
         for i in 0..5 {
-            let long_text = format!("This is a longer message {} that will use more tokens to ensure we actually need to trim", i);
+            let long_text = format!(
+                "This is a longer message {} that will use more tokens to ensure we actually need to trim",
+                i
+            );
             let message = Message::user(long_text);
             context.add_message(message);
         }

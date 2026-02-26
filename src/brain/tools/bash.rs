@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 
 /// Bash execution tool
 pub struct BashTool;
@@ -232,9 +232,7 @@ impl Tool for BashTool {
         };
 
         // Determine timeout: use input override if provided, else context default, cap at 600s
-        let effective_timeout = input.timeout_secs
-            .unwrap_or(context.timeout_secs)
-            .min(600);
+        let effective_timeout = input.timeout_secs.unwrap_or(context.timeout_secs).min(600);
 
         // Detect sudo commands and request password via callback
         let is_sudo = input.command.trim_start().starts_with("sudo ");
