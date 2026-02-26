@@ -354,24 +354,30 @@ impl Tool for WhatsAppConnectTool {
             Ok(Some(qr_code)) => match render_qr_unicode(&qr_code) {
                 Some(qr_text) => {
                     if let Some(ref cb) = self.progress {
-                        cb(sid, ProgressEvent::IntermediateText {
-                            text: format!(
-                                "Scan this QR code with WhatsApp on your phone:\n\n{}",
-                                qr_text
-                            ),
-                            reasoning: None,
-                        });
+                        cb(
+                            sid,
+                            ProgressEvent::IntermediateText {
+                                text: format!(
+                                    "Scan this QR code with WhatsApp on your phone:\n\n{}",
+                                    qr_text
+                                ),
+                                reasoning: None,
+                            },
+                        );
                     }
                 }
                 None => {
                     if let Some(ref cb) = self.progress {
-                        cb(sid, ProgressEvent::IntermediateText {
-                            text: format!(
-                                "QR code generated but couldn't render. Raw code: {}",
-                                qr_code
-                            ),
-                            reasoning: None,
-                        });
+                        cb(
+                            sid,
+                            ProgressEvent::IntermediateText {
+                                text: format!(
+                                    "QR code generated but couldn't render. Raw code: {}",
+                                    qr_code
+                                ),
+                                reasoning: None,
+                            },
+                        );
                     }
                 }
             },

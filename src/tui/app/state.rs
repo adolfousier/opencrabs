@@ -884,7 +884,10 @@ impl App {
                     self.sessions_with_unread.insert(session_id);
                 }
             }
-            TuiEvent::Error { session_id, message } => {
+            TuiEvent::Error {
+                session_id,
+                message,
+            } => {
                 if self.is_current_session(session_id) {
                     self.show_error(message);
                 } else {
@@ -1107,7 +1110,10 @@ impl App {
                     self.scroll_offset = 0;
                 }
             }
-            TuiEvent::CompactionSummary { session_id, summary } if self.is_current_session(session_id) => {
+            TuiEvent::CompactionSummary {
+                session_id,
+                summary,
+            } if self.is_current_session(session_id) => {
                 // Agent has summarized history — clear the TUI view for a fresh start.
                 self.messages.clear();
                 self.render_cache.clear();
@@ -1177,7 +1183,9 @@ impl App {
                 self.reload_user_commands();
                 tracing::info!("Config reloaded — refreshed commands and settings");
             }
-            TuiEvent::TokenCountUpdated { session_id, count } if self.is_current_session(session_id) => {
+            TuiEvent::TokenCountUpdated { session_id, count }
+                if self.is_current_session(session_id) =>
+            {
                 self.display_token_count = count;
             }
             // Silently ignore events for background sessions (already handled above for ResponseComplete/Error)

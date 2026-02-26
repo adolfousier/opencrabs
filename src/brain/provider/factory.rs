@@ -129,11 +129,7 @@ fn try_create_custom_by_name(config: &Config, name: &str) -> Result<Option<Arc<d
         base_url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     }
 
-    tracing::info!(
-        "Creating custom provider '{}' at: {}",
-        name,
-        base_url
-    );
+    tracing::info!("Creating custom provider '{}' at: {}", name, base_url);
     let provider = configure_openai_compatible(
         OpenAIProvider::with_base_url(api_key.clone(), base_url).with_name(name),
         &custom_config,

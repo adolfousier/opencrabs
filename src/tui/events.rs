@@ -95,7 +95,7 @@ pub enum TuiEvent {
     CompactionSummary { session_id: Uuid, summary: String },
 
     /// Build completed — offer restart to the user
-    RestartReady(String),  // global, not per-session
+    RestartReady(String), // global, not per-session
 
     /// Configuration was reloaded (e.g. after config_tool write)
     ConfigReloaded,

@@ -288,10 +288,7 @@ pub(crate) async fn cmd_chat(
                     progress_sender.send(TuiEvent::RestartReady(status))
                 }
                 ProgressEvent::TokenCount(count) => {
-                    progress_sender.send(TuiEvent::TokenCountUpdated {
-                        session_id,
-                        count,
-                    })
+                    progress_sender.send(TuiEvent::TokenCountUpdated { session_id, count })
                 }
                 ProgressEvent::ReasoningChunk { text } => {
                     progress_sender.send(TuiEvent::ReasoningChunk { session_id, text })

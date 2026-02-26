@@ -339,7 +339,11 @@ impl App {
                     "🔨 Building from source... (streaming output below)".to_string(),
                 );
                 let sender = self.event_sender();
-                let sid = self.current_session.as_ref().map(|s| s.id).unwrap_or(Uuid::nil());
+                let sid = self
+                    .current_session
+                    .as_ref()
+                    .map(|s| s.id)
+                    .unwrap_or(Uuid::nil());
                 tokio::spawn(async move {
                     match SelfUpdater::auto_detect() {
                         Ok(updater) => {
@@ -386,7 +390,11 @@ impl App {
             "/whisper" => {
                 self.push_system_message("Setting up WhisperCrabs...".to_string());
                 let sender = self.event_sender();
-                let sid = self.current_session.as_ref().map(|s| s.id).unwrap_or(Uuid::nil());
+                let sid = self
+                    .current_session
+                    .as_ref()
+                    .map(|s| s.id)
+                    .unwrap_or(Uuid::nil());
                 tokio::spawn(async move {
                     match ensure_whispercrabs().await {
                         Ok(binary_path) => {
@@ -1003,7 +1011,10 @@ impl App {
         if let Some(session) = &self.current_session
             && self.processing_sessions.contains(&session.id)
         {
-            tracing::warn!("[send_message] QUEUED — session {} still processing", session.id);
+            tracing::warn!(
+                "[send_message] QUEUED — session {} still processing",
+                session.id
+            );
             // DON'T add to messages yet - wait until agent processes it
             // It will be added at the end after all assistant messages
 

@@ -74,10 +74,13 @@ impl Tool for RebuildTool {
                     || trimmed.starts_with("-->"))
                     && let Some(ref cb) = cb
                 {
-                    cb(sid, ProgressEvent::IntermediateText {
-                        text: line,
-                        reasoning: None,
-                    });
+                    cb(
+                        sid,
+                        ProgressEvent::IntermediateText {
+                            text: line,
+                            reasoning: None,
+                        },
+                    );
                 }
             })
             .await;
@@ -86,9 +89,12 @@ impl Tool for RebuildTool {
             Ok(path) => {
                 // Signal auto-restart — TuiEvent::RestartReady triggers exec() with no prompt
                 if let Some(ref cb) = self.progress {
-                    cb(sid, ProgressEvent::RestartReady {
-                        status: format!("Build successful: {}", path.display()),
-                    });
+                    cb(
+                        sid,
+                        ProgressEvent::RestartReady {
+                            status: format!("Build successful: {}", path.display()),
+                        },
+                    );
                 }
                 Ok(ToolResult::success(format!(
                     "Build successful: {}. Restarting now.",

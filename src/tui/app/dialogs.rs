@@ -48,8 +48,7 @@ impl App {
                     if let Some(map) = &config.providers.custom {
                         if let Some((name, c)) = map.iter().next() {
                             self.model_selector_custom_name = name.to_string();
-                            self.model_selector_base_url =
-                                c.base_url.clone().unwrap_or_default();
+                            self.model_selector_base_url = c.base_url.clone().unwrap_or_default();
                             self.model_selector_custom_model =
                                 c.default_model.clone().unwrap_or_default();
                             c.api_key.as_ref().is_some_and(|k| !k.is_empty())
@@ -87,17 +86,56 @@ impl App {
         // Resolve provider index + API key from session provider name
         let from_session: Option<(usize, Option<String>)> = session_provider.map(|name| {
             match name {
-                "anthropic" => (0, config.providers.anthropic.as_ref().and_then(|p| p.api_key.clone())),
-                "openai" => (1, config.providers.openai.as_ref().and_then(|p| p.api_key.clone())),
-                "gemini" => (2, config.providers.gemini.as_ref().and_then(|p| p.api_key.clone())),
-                "openrouter" => (3, config.providers.openrouter.as_ref().and_then(|p| p.api_key.clone())),
-                "minimax" => (4, config.providers.minimax.as_ref().and_then(|p| p.api_key.clone())),
+                "anthropic" => (
+                    0,
+                    config
+                        .providers
+                        .anthropic
+                        .as_ref()
+                        .and_then(|p| p.api_key.clone()),
+                ),
+                "openai" => (
+                    1,
+                    config
+                        .providers
+                        .openai
+                        .as_ref()
+                        .and_then(|p| p.api_key.clone()),
+                ),
+                "gemini" => (
+                    2,
+                    config
+                        .providers
+                        .gemini
+                        .as_ref()
+                        .and_then(|p| p.api_key.clone()),
+                ),
+                "openrouter" => (
+                    3,
+                    config
+                        .providers
+                        .openrouter
+                        .as_ref()
+                        .and_then(|p| p.api_key.clone()),
+                ),
+                "minimax" => (
+                    4,
+                    config
+                        .providers
+                        .minimax
+                        .as_ref()
+                        .and_then(|p| p.api_key.clone()),
+                ),
                 cname => {
                     // Any other name is a custom provider (e.g. "nvidia", "ollama")
-                    let api_key = config.providers.custom_by_name(cname).and_then(|p| p.api_key.clone());
+                    let api_key = config
+                        .providers
+                        .custom_by_name(cname)
+                        .and_then(|p| p.api_key.clone());
                     if let Some(c) = config.providers.custom_by_name(cname) {
                         self.model_selector_base_url = c.base_url.clone().unwrap_or_default();
-                        self.model_selector_custom_model = c.default_model.clone().unwrap_or_default();
+                        self.model_selector_custom_model =
+                            c.default_model.clone().unwrap_or_default();
                         self.model_selector_custom_name = cname.to_string();
                     }
                     (5, api_key)
@@ -452,7 +490,10 @@ impl App {
                             2 => c.providers.gemini.and_then(|p| p.api_key),
                             3 => c.providers.openrouter.and_then(|p| p.api_key),
                             4 => c.providers.minimax.and_then(|p| p.api_key),
-                            5 => c.providers.active_custom().and_then(|(_, p)| p.api_key.clone()),
+                            5 => c
+                                .providers
+                                .active_custom()
+                                .and_then(|(_, p)| p.api_key.clone()),
                             _ => None,
                         }
                         .filter(|k| !k.is_empty())
