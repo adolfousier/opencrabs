@@ -256,6 +256,18 @@ entries = [
   { prefix = "gemini-1.5-flash",   input_per_m = 0.075,output_per_m = 0.30  },
 ]
 
+[providers.moonshot]
+entries = [
+  # Kimi K2.5 (multimodal) — $0.60/$3.00
+  { prefix = "kimi-k2.5",          input_per_m = 0.60, output_per_m = 3.0   },
+  # Kimi K2 Turbo — $1.15/$8.00
+  { prefix = "kimi-k2-turbo",      input_per_m = 1.15, output_per_m = 8.0   },
+  # Kimi K2 — $0.60/$2.50
+  { prefix = "kimi-k2",            input_per_m = 0.60, output_per_m = 2.50  },
+  # Kimi generic fallback
+  { prefix = "kimi",               input_per_m = 0.60, output_per_m = 2.50  },
+]
+
 [providers.deepseek]
 entries = [
   { prefix = "deepseek-r1",        input_per_m = 0.55, output_per_m = 2.19  },
@@ -301,6 +313,14 @@ mod tests {
         let cfg = PricingConfig::defaults();
         let cost = cfg.calculate_cost("MiniMax-M2.5", 1_000_000, 1_000_000);
         assert_eq!(cost, 1.50); // $0.30 + $1.20
+    }
+
+    #[test]
+    fn test_calculate_cost_kimi_k25() {
+        let cfg = PricingConfig::defaults();
+        // NVIDIA model name: moonshotai/kimi-k2.5 — prefix "kimi-k2.5" matches
+        let cost = cfg.calculate_cost("moonshotai/kimi-k2.5", 1_000_000, 1_000_000);
+        assert_eq!(cost, 3.60); // $0.60 + $3.00
     }
 
     #[test]

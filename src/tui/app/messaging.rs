@@ -528,23 +528,42 @@ impl App {
     /// Extract `<!-- reasoning -->...<!-- /reasoning -->` blocks from text.
     /// Returns (reasoning_text, remaining_text_without_markers).
     fn extract_reasoning(text: &str) -> (Option<String>, String) {
-        if let Some(start) = text.find("<!-- reasoning -->") {
-            let after_tag = &text[start + "<!-- reasoning -->".len()..];
-            if let Some(end) = after_tag.find("<!-- /reasoning -->") {
-                let reasoning = after_tag[..end].trim().to_string();
-                let remaining = format!(
-                    "{}{}",
-                    &text[..start],
-                    &after_tag[end + "<!-- /reasoning -->".len()..]
-                );
-                let remaining = remaining.trim().to_string();
-                if reasoning.is_empty() {
-                    return (None, remaining);
+        let open_tag = "<!-- reasoning -->";
+        let close_tag = "<!-- /reasoning -->";
+        let mut reasoning_parts = Vec::new();
+        let mut remaining = String::new();
+        let mut rest = text;
+
+        loop {
+            if let Some(start) = rest.find(open_tag) {
+                remaining.push_str(&rest[..start]);
+                let after_tag = &rest[start + open_tag.len()..];
+                if let Some(end) = after_tag.find(close_tag) {
+                    let part = after_tag[..end].trim();
+                    if !part.is_empty() {
+                        reasoning_parts.push(part.to_string());
+                    }
+                    rest = &after_tag[end + close_tag.len()..];
+                } else {
+                    // Unclosed tag — treat rest as reasoning
+                    let part = after_tag.trim();
+                    if !part.is_empty() {
+                        reasoning_parts.push(part.to_string());
+                    }
+                    break;
                 }
-                return (Some(reasoning), remaining);
+            } else {
+                remaining.push_str(rest);
+                break;
             }
         }
-        (None, text.to_string())
+
+        let remaining = remaining.trim().to_string();
+        if reasoning_parts.is_empty() {
+            (None, remaining)
+        } else {
+            (Some(reasoning_parts.join("\n\n")), remaining)
+        }
     }
 
     fn expand_message(msg: crate::db::models::Message) -> Vec<DisplayMessage> {

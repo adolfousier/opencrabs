@@ -21,48 +21,69 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(300);
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
 
-/// Filter `<think>...</think>` reasoning blocks from a streaming chunk.
+/// Open/close tag pairs to strip from streaming/non-streaming content.
+/// Covers DeepSeek-style `<think>` and Kimi-style `<!-- reasoning -->` blocks,
+/// plus Kimi's hallucinated `<!-- tools-v2: ... -->` tool-call markup.
+const STRIP_OPEN_TAGS: &[&str] = &["<think>", "<!-- reasoning -->", "<!-- tools-v2:"];
+const STRIP_CLOSE_TAGS: &[&str] = &["</think>", "<!-- /reasoning -->", "-->"];
+
+/// Filter reasoning/markup blocks from a streaming chunk.
 ///
 /// Tracks state across chunks via `inside_think`. Returns the portion of `text`
-/// that is outside any think block. Handles tags split across chunk boundaries.
-fn filter_think_tags(text: &str, inside_think: &mut bool) -> String {
+/// that is outside any stripped block. Handles tags split across chunk boundaries.
+fn filter_think_tags(text: &str, inside_think: &mut bool, active_close_tag: &mut usize) -> String {
     let mut result = String::new();
     let mut remaining = text;
 
     loop {
         if *inside_think {
-            if let Some(end) = remaining.find("</think>") {
-                remaining = &remaining[end + 8..];
+            let close = STRIP_CLOSE_TAGS[*active_close_tag];
+            if let Some(end) = remaining.find(close) {
+                remaining = &remaining[end + close.len()..];
                 *inside_think = false;
             } else {
                 break;
             }
-        } else if let Some(start) = remaining.find("<think>") {
-            result.push_str(&remaining[..start]);
-            remaining = &remaining[start + 7..];
-            *inside_think = true;
         } else {
-            result.push_str(remaining);
-            break;
+            // Find the earliest open tag
+            let mut earliest: Option<(usize, usize)> = None; // (position, tag_index)
+            for (i, open) in STRIP_OPEN_TAGS.iter().enumerate() {
+                if let Some(pos) = remaining.find(open)
+                    && earliest.is_none_or(|(best, _)| pos < best)
+                {
+                    earliest = Some((pos, i));
+                }
+            }
+
+            if let Some((pos, tag_idx)) = earliest {
+                result.push_str(&remaining[..pos]);
+                remaining = &remaining[pos + STRIP_OPEN_TAGS[tag_idx].len()..];
+                *inside_think = true;
+                *active_close_tag = tag_idx;
+            } else {
+                result.push_str(remaining);
+                break;
+            }
         }
     }
 
     result
 }
 
-/// Strip complete `<think>...</think>` blocks from non-streaming content.
+/// Strip complete reasoning/markup blocks from non-streaming content.
 fn strip_think_blocks(text: &str) -> String {
-    let mut result = String::new();
-    let mut remaining = text;
-    while let Some(start) = remaining.find("<think>") {
-        result.push_str(&remaining[..start]);
-        if let Some(end) = remaining[start..].find("</think>") {
-            remaining = &remaining[start + end + 8..];
-        } else {
-            return result.trim().to_string();
+    let mut result = text.to_string();
+    for (open, close) in STRIP_OPEN_TAGS.iter().zip(STRIP_CLOSE_TAGS.iter()) {
+        while let Some(start) = result.find(open) {
+            if let Some(end) = result[start..].find(close) {
+                result = format!("{}{}", &result[..start], &result[start + end + close.len()..]);
+            } else {
+                // Unclosed tag — strip from open tag to end
+                result = result[..start].to_string();
+                break;
+            }
         }
     }
-    result.push_str(remaining);
     result.trim().to_string()
 }
 
@@ -596,8 +617,10 @@ impl Provider for OpenAIProvider {
             seen_delta_content: bool,
             /// Index -> accumulated tool call
             tool_calls: std::collections::HashMap<usize, ToolCallAccum>,
-            /// True while inside a `<think>...</think>` reasoning block
+            /// True while inside a stripped block (think/reasoning/tools-v2)
             inside_think: bool,
+            /// Index into STRIP_CLOSE_TAGS for the currently active block
+            active_close_tag: usize,
         }
 
         let state = std::sync::Arc::new(std::sync::Mutex::new(StreamState {
@@ -606,6 +629,7 @@ impl Provider for OpenAIProvider {
             seen_delta_content: false,
             tool_calls: std::collections::HashMap::new(),
             inside_think: false,
+            active_close_tag: 0,
         }));
 
         let event_stream = byte_stream
@@ -767,7 +791,10 @@ impl Provider for OpenAIProvider {
 
                                         // Emit text content, filtering <think>...</think> reasoning blocks
                                         if let Some(ref c) = content {
-                                            let filtered = filter_think_tags(c, &mut st.inside_think);
+                                            let (mut inside, mut close_idx) = (st.inside_think, st.active_close_tag);
+                                            let filtered = filter_think_tags(c, &mut inside, &mut close_idx);
+                                            st.inside_think = inside;
+                                            st.active_close_tag = close_idx;
 
                                             if !filtered.trim().is_empty() {
                                                 if !st.emitted_content_start {

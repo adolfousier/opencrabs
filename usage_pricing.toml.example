@@ -77,6 +77,14 @@ entries = [
   { prefix = "grok",               input_per_m = 5.0,   output_per_m = 15.0  },
 ]
 
+[providers.moonshot]
+entries = [
+  { prefix = "kimi-k2.5",          input_per_m = 0.60,  output_per_m = 3.0   },
+  { prefix = "kimi-k2-turbo",      input_per_m = 1.15,  output_per_m = 8.0   },
+  { prefix = "kimi-k2",            input_per_m = 0.60,  output_per_m = 2.50  },
+  { prefix = "kimi",               input_per_m = 0.60,  output_per_m = 2.50  },
+]
+
 [providers.mistral]
 entries = [
   { prefix = "mistral-large",      input_per_m = 2.0,   output_per_m = 6.0   },
