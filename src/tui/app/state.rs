@@ -839,12 +839,15 @@ impl App {
                     self.scroll_offset = 0;
                 }
             }
-            TuiEvent::IntermediateText(text) => {
+            TuiEvent::IntermediateText(text, reasoning) => {
                 tracing::info!("[TUI] IntermediateText: len={} active_group={} streaming={}",
                     text.len(), self.active_tool_group.is_some(), self.streaming_response.is_some());
                 // Reset timer for next thinking phase
                 self.processing_started_at = Some(std::time::Instant::now());
-                
+
+                // Capture reasoning from either the event or the streaming accumulator
+                let reasoning_details = reasoning.or_else(|| self.streaming_reasoning.take());
+
                 // Clear streaming response - text is now going to be a permanent message
                 self.streaming_response = None;
                 self.streaming_reasoning = None;
@@ -902,7 +905,7 @@ impl App {
                     cost: None,
                     approval: None,
                     approve_menu: None,
-                    details: None,
+                    details: reasoning_details,
                     expanded: false,
                     tool_group: None,
                     plan_approval: None,

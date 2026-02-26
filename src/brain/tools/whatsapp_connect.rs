@@ -356,6 +356,7 @@ impl Tool for WhatsAppConnectTool {
                                     "Scan this QR code with WhatsApp on your phone:\n\n{}",
                                     qr_text
                                 ),
+                                reasoning: None,
                             });
                         }
                     }
@@ -366,6 +367,7 @@ impl Tool for WhatsAppConnectTool {
                                     "QR code generated but couldn't render. Raw code: {}",
                                     qr_code
                                 ),
+                                reasoning: None,
                             });
                         }
                     }

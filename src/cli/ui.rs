@@ -247,8 +247,8 @@ pub(crate) async fn cmd_chat(
             ProgressEvent::ToolCompleted { tool_name, tool_input, success, summary } => {
                 progress_sender.send(TuiEvent::ToolCallCompleted { tool_name, tool_input, success, summary })
             }
-            ProgressEvent::IntermediateText { text } => {
-                progress_sender.send(TuiEvent::IntermediateText(text))
+            ProgressEvent::IntermediateText { text, reasoning } => {
+                progress_sender.send(TuiEvent::IntermediateText(text, reasoning))
             }
             ProgressEvent::StreamingChunk { text } => {
                 progress_sender.send(TuiEvent::ResponseChunk(text))

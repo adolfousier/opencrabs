@@ -692,7 +692,7 @@ impl Provider for OpenAIProvider {
                                                         idx, accum.id, accum.name, accum.arguments.len()
                                                     );
                                                     events.push(Ok(StreamEvent::ContentBlockStart {
-                                                        index: idx,
+                                                        index: idx + 1, // Offset by 1 to avoid collision with text block at index 0
                                                         content_block: ContentBlock::ToolUse {
                                                             id: accum.id,
                                                             name: accum.name,

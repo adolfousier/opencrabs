@@ -469,8 +469,30 @@ impl App {
     /// Expand a DB message into one or more DisplayMessages.
     /// Assistant messages may contain tool markers that get reconstructed into ToolCallGroup display messages.
     /// Supports both v1 (`<!-- tools: desc1 | desc2 -->`) and v2 (`<!-- tools-v2: [JSON] -->`) formats.
+    /// Extract `<!-- reasoning -->...<!-- /reasoning -->` blocks from text.
+    /// Returns (reasoning_text, remaining_text_without_markers).
+    fn extract_reasoning(text: &str) -> (Option<String>, String) {
+        if let Some(start) = text.find("<!-- reasoning -->") {
+            let after_tag = &text[start + "<!-- reasoning -->".len()..];
+            if let Some(end) = after_tag.find("<!-- /reasoning -->") {
+                let reasoning = after_tag[..end].trim().to_string();
+                let remaining = format!(
+                    "{}{}",
+                    &text[..start],
+                    &after_tag[end + "<!-- /reasoning -->".len()..]
+                );
+                let remaining = remaining.trim().to_string();
+                if reasoning.is_empty() {
+                    return (None, remaining);
+                }
+                return (Some(reasoning), remaining);
+            }
+        }
+        (None, text.to_string())
+    }
+
     fn expand_message(msg: crate::db::models::Message) -> Vec<DisplayMessage> {
-        if msg.role != "assistant" || !msg.content.contains("<!-- tools") {
+        if msg.role != "assistant" || (!msg.content.contains("<!-- tools") && !msg.content.contains("<!-- reasoning -->")) {
             return vec![DisplayMessage::from(msg)];
         }
 
@@ -503,21 +525,42 @@ impl App {
             // Text before marker
             let text_before = remaining[..marker_start].trim();
             if !text_before.is_empty() {
-                result.push(DisplayMessage {
-                    id: if first_text { id } else { Uuid::new_v4() },
-                    role: "assistant".to_string(),
-                    content: text_before.to_string(),
-                    timestamp,
-                    token_count: if first_text { token_count } else { None },
-                    cost: if first_text { cost } else { None },
-                    approval: None,
-                    approve_menu: None,
-                    details: None,
-                    expanded: false,
-                    tool_group: None,
-                    plan_approval: None,
-                });
-                first_text = false;
+                let (reasoning, clean_text) = Self::extract_reasoning(text_before);
+                if !clean_text.is_empty() {
+                    result.push(DisplayMessage {
+                        id: if first_text { id } else { Uuid::new_v4() },
+                        role: "assistant".to_string(),
+                        content: clean_text,
+                        timestamp,
+                        token_count: if first_text { token_count } else { None },
+                        cost: if first_text { cost } else { None },
+                        approval: None,
+                        approve_menu: None,
+                        details: reasoning,
+                        expanded: false,
+                        tool_group: None,
+                        plan_approval: None,
+                    });
+                    first_text = false;
+                } else if let Some(r) = reasoning {
+                    // Reasoning-only block (no visible text) — attach to next text segment
+                    // For now, create a placeholder so reasoning is not lost
+                    result.push(DisplayMessage {
+                        id: if first_text { id } else { Uuid::new_v4() },
+                        role: "assistant".to_string(),
+                        content: String::new(),
+                        timestamp,
+                        token_count: if first_text { token_count } else { None },
+                        cost: if first_text { cost } else { None },
+                        approval: None,
+                        approve_menu: None,
+                        details: Some(r),
+                        expanded: false,
+                        tool_group: None,
+                        plan_approval: None,
+                    });
+                    first_text = false;
+                }
             }
 
             let marker_len = if is_v2 { "<!-- tools-v2:".len() } else { "<!-- tools:".len() };
@@ -577,20 +620,38 @@ impl App {
         // Any remaining text after the last marker
         let trailing = remaining.trim();
         if !trailing.is_empty() {
-            result.push(DisplayMessage {
-                id: if first_text { id } else { Uuid::new_v4() },
-                role: "assistant".to_string(),
-                content: trailing.to_string(),
-                timestamp,
-                token_count: if first_text { token_count } else { None },
-                cost: if first_text { cost } else { None },
-                approval: None,
-                approve_menu: None,
-                details: None,
-                expanded: false,
-                tool_group: None,
-                plan_approval: None,
-            });
+            let (reasoning, clean_text) = Self::extract_reasoning(trailing);
+            if !clean_text.is_empty() {
+                result.push(DisplayMessage {
+                    id: if first_text { id } else { Uuid::new_v4() },
+                    role: "assistant".to_string(),
+                    content: clean_text,
+                    timestamp,
+                    token_count: if first_text { token_count } else { None },
+                    cost: if first_text { cost } else { None },
+                    approval: None,
+                    approve_menu: None,
+                    details: reasoning,
+                    expanded: false,
+                    tool_group: None,
+                    plan_approval: None,
+                });
+            } else if let Some(r) = reasoning {
+                result.push(DisplayMessage {
+                    id: if first_text { id } else { Uuid::new_v4() },
+                    role: "assistant".to_string(),
+                    content: String::new(),
+                    timestamp,
+                    token_count: if first_text { token_count } else { None },
+                    cost: if first_text { cost } else { None },
+                    approval: None,
+                    approve_menu: None,
+                    details: Some(r),
+                    expanded: false,
+                    tool_group: None,
+                    plan_approval: None,
+                });
+            }
         }
 
         if result.is_empty() {
@@ -864,7 +925,7 @@ impl App {
         self.is_processing = false;
         self.processing_started_at = None;
         self.streaming_response = None;
-        self.streaming_reasoning = None;
+        let reasoning_details = self.streaming_reasoning.take();
         self.cancel_token = None;
 
         // Clean up stale pending approvals — send deny so agent callbacks don't hang
@@ -951,7 +1012,7 @@ impl App {
                 cost: Some(response.cost),
                 approval: None,
                 approve_menu: None,
-                details: None,
+                details: reasoning_details,
                 expanded: false,
                 tool_group: None,
                 plan_approval: None,

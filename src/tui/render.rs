@@ -445,6 +445,41 @@ fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             }
         }
 
+        // Render reasoning details on assistant messages (collapsible)
+        if !is_user && app.messages[msg_idx].details.is_some() {
+            let hint_text = if app.messages[msg_idx].expanded {
+                "  ▾ Thinking (ctrl+o to collapse)"
+            } else {
+                "  ▸ Thinking (ctrl+o to expand)"
+            };
+            lines.push(Line::from(Span::styled(
+                hint_text,
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
+            )));
+            if app.messages[msg_idx].expanded
+                && let Some(ref details) = app.messages[msg_idx].details {
+                    let reasoning_lines = parse_markdown(details);
+                    let reasoning_style = Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::ITALIC);
+                    for line in reasoning_lines {
+                        let mut padded_spans = vec![Span::styled("  ", Style::default())];
+                        for span in line.spans {
+                            padded_spans.push(Span::styled(
+                                span.content.to_string(),
+                                reasoning_style,
+                            ));
+                        }
+                        let padded_line = Line::from(padded_spans);
+                        for wrapped in wrap_line_with_padding(padded_line, content_width, "  ") {
+                            lines.push(wrapped);
+                        }
+                    }
+            }
+        }
+
         // Spacing between messages
         lines.push(Line::from(""));
     }

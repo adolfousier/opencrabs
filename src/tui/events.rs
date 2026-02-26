@@ -72,7 +72,7 @@ pub enum TuiEvent {
     ToolCallCompleted { tool_name: String, tool_input: Value, success: bool, summary: String },
 
     /// Intermediate text the agent sent between tool call batches
-    IntermediateText(String),
+    IntermediateText(String, Option<String>),
 
     /// Context was auto-compacted — show the summary to the user
     CompactionSummary(String),

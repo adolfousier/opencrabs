@@ -529,8 +529,8 @@ impl App {
                         self.is_processing = false;
                         self.processing_started_at = None;
                         // Preserve partial streaming response as a message before clearing
-                        if let Some(text) = self.streaming_response.take() {
-                            if !text.trim().is_empty() {
+                        if let Some(text) = self.streaming_response.take()
+                            && !text.trim().is_empty() {
                                 self.messages.push(DisplayMessage {
                                     id: Uuid::new_v4(),
                                     role: "assistant".to_string(),
@@ -545,7 +545,6 @@ impl App {
                                     tool_group: None,
                                     plan_approval: None,
                                 });
-                            }
                         }
                         self.streaming_reasoning = None;
                         self.cancel_token = None;
@@ -636,6 +635,10 @@ impl App {
                 for msg in self.messages.iter_mut() {
                     if let Some(ref mut group) = msg.tool_group {
                         group.expanded = target;
+                    }
+                    // Also toggle expanded on messages with reasoning details
+                    if msg.details.is_some() {
+                        msg.expanded = target;
                     }
                 }
             }

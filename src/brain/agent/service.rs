@@ -44,7 +44,7 @@ pub enum ProgressEvent {
     ToolStarted { tool_name: String, tool_input: Value },
     ToolCompleted { tool_name: String, tool_input: Value, success: bool, summary: String },
     /// Intermediate text the agent sends between tool call batches
-    IntermediateText { text: String },
+    IntermediateText { text: String, reasoning: Option<String> },
     /// Real-time streaming chunk from the LLM (word-by-word)
     StreamingChunk { text: String },
     Compacting,
@@ -507,6 +507,7 @@ impl AgentService {
                     if let Some(ref cb) = self.progress_callback {
                         cb(ProgressEvent::IntermediateText {
                             text: format!("Context compaction failed: {}. Continuing with current context.", e),
+                            reasoning: None,
                         });
                     }
                 }
@@ -647,7 +648,7 @@ impl AgentService {
             }
 
             // Send to provider via streaming — retry once after emergency compaction if prompt is too long
-            let response = match self.stream_complete(request, cancel_token.as_ref()).await {
+            let (response, reasoning_text) = match self.stream_complete(request, cancel_token.as_ref()).await {
                 Ok(resp) => resp,
                 Err(ref e) if e.to_string().contains("prompt is too long") || e.to_string().contains("too many tokens") => {
                     tracing::warn!("Prompt too long for provider — emergency compaction");
@@ -713,8 +714,8 @@ impl AgentService {
 
             // --- CANCEL CHECK BEFORE STREAM DROP RETRY ---
             // If the user cancelled during streaming, don't retry — save partial text and break.
-            if response.stop_reason.is_none() {
-                if let Some(ref token) = cancel_token && token.is_cancelled() {
+            if response.stop_reason.is_none()
+                && let Some(ref token) = cancel_token && token.is_cancelled() {
                     // Extract any text from the partial response for persistence
                     for block in &response.content {
                         if let ContentBlock::Text { text } = block && !text.trim().is_empty() {
@@ -730,7 +731,6 @@ impl AgentService {
                     }
                     tracing::info!("Stream cancelled by user — saving partial text ({} chars)", accumulated_text.len());
                     break;
-                }
             }
 
             // --- STREAM DROP DETECTION ---
@@ -812,13 +812,22 @@ impl AgentService {
                 }
             }
 
+            // Persist reasoning content to DB (before iteration text)
+            if let Some(ref reasoning) = reasoning_text
+                && !reasoning.trim().is_empty() {
+                    let _ = message_service
+                        .append_content(assistant_db_msg.id,
+                            &format!("<!-- reasoning -->\n{}\n<!-- /reasoning -->\n\n", reasoning))
+                        .await;
+            }
+
             // Accumulate text from every iteration
             if !iteration_text.is_empty() {
                 if !accumulated_text.is_empty() {
                     accumulated_text.push_str("\n\n");
                 }
                 accumulated_text.push_str(&iteration_text);
-                
+
                 // REAL-TIME PERSISTENCE: Save to DB immediately after each iteration's text
                 let _ = message_service
                     .append_content(assistant_db_msg.id, &format!("{}\n\n", iteration_text))
@@ -840,7 +849,7 @@ impl AgentService {
             // Emit intermediate text to TUI so it appears before the tool calls
             if !iteration_text.is_empty()
                 && let Some(ref cb) = self.progress_callback {
-                    cb(ProgressEvent::IntermediateText { text: iteration_text });
+                    cb(ProgressEvent::IntermediateText { text: iteration_text, reasoning: reasoning_text });
                 }
 
             // Detect tool loops: hash the full input for every tool.
@@ -1430,7 +1439,7 @@ impl AgentService {
     /// Sends text deltas to the progress callback as `StreamingChunk` events
     /// so the TUI can display them in real-time. Returns the full response
     /// once the stream completes, ready for tool extraction.
-    async fn stream_complete(&self, request: LLMRequest, cancel_token: Option<&CancellationToken>) -> std::result::Result<LLMResponse, crate::brain::provider::ProviderError> {
+    async fn stream_complete(&self, request: LLMRequest, cancel_token: Option<&CancellationToken>) -> std::result::Result<(LLMResponse, Option<String>), crate::brain::provider::ProviderError> {
         use crate::brain::provider::{ContentDelta, StreamEvent, TokenUsage};
         use futures::StreamExt;
 
@@ -1452,6 +1461,7 @@ impl AgentService {
             json_buf: String, // for tool use JSON accumulation
         }
         let mut block_states: Vec<BlockState> = Vec::new();
+        let mut reasoning_buf = String::new();
 
         while let Some(event_result) = stream.next().await {
             // Check for cancellation between stream events
@@ -1503,11 +1513,12 @@ impl AgentService {
                                 block_states[index].json_buf.push_str(&partial_json);
                             }
                             ContentDelta::ReasoningDelta { text } => {
-                                // Forward reasoning content to TUI for display-only
-                                // (not accumulated into response content blocks)
+                                // Forward reasoning content to TUI for real-time display
                                 if let Some(ref cb) = self.progress_callback {
-                                    cb(ProgressEvent::ReasoningChunk { text });
+                                    cb(ProgressEvent::ReasoningChunk { text: text.clone() });
                                 }
+                                // Accumulate for persistence
+                                reasoning_buf.push_str(&text);
                             }
                         }
                     }
@@ -1561,7 +1572,8 @@ impl AgentService {
             .filter(|b| !matches!(b, ContentBlock::Text { text } if text.is_empty()))
             .collect();
 
-        Ok(LLMResponse {
+        let reasoning = if reasoning_buf.is_empty() { None } else { Some(reasoning_buf) };
+        Ok((LLMResponse {
             id,
             // Some providers (e.g. MiniMax) don't include the model name in stream chunks.
             // Fall back to the request model so pricing lookup never gets an empty string.
@@ -1569,7 +1581,7 @@ impl AgentService {
             content: content_blocks,
             stop_reason,
             usage: TokenUsage { input_tokens, output_tokens },
-        })
+        }, reasoning))
     }
 
     /// Trim DB messages to fit within the context budget.
@@ -1742,7 +1754,7 @@ impl AgentService {
 
         // Use streaming so the TUI shows the summary being written in real-time
         // instead of freezing silently for 2-5 minutes on large contexts
-        let response = self
+        let (response, _reasoning) = self
             .stream_complete(request, None)
             .await
             .map_err(AgentError::Provider)?;
