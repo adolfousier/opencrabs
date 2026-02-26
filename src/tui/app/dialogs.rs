@@ -643,10 +643,10 @@ impl App {
             5 => {
                 // Custom OpenAI-compatible (named provider)
                 let custom_model = self.model_selector_custom_model.clone();
-                let custom_name = if self.model_selector_custom_name.is_empty() {
-                    "default".to_string()
-                } else {
+                let custom_name = if !self.model_selector_custom_name.is_empty() {
                     self.model_selector_custom_name.clone()
+                } else {
+                    "custom".to_string()
                 };
                 let mut customs = config.providers.custom.unwrap_or_default();
                 customs.insert(
@@ -673,18 +673,14 @@ impl App {
             3 => "providers.openrouter",
             4 => "providers.minimax",
             5 => {
-                let name = if self.model_selector_custom_name.is_empty() {
-                    "default"
+                if self.model_selector_custom_name.is_empty() {
+                    "providers.custom"
                 } else {
-                    &self.model_selector_custom_name
-                };
-                custom_section = format!("providers.custom.{}", name);
-                &custom_section
+                    custom_section = format!("providers.custom.{}", self.model_selector_custom_name);
+                    &custom_section
+                }
             }
-            _ => {
-                custom_section = "providers.custom.default".to_string();
-                &custom_section
-            }
+            _ => "providers.custom",
         };
 
         // Disable ALL other providers on disk before enabling the selected one.
@@ -806,13 +802,12 @@ impl App {
             3 => "providers.openrouter",
             4 => "providers.minimax",
             5 => {
-                let name = if self.model_selector_custom_name.is_empty() {
-                    "default"
+                if self.model_selector_custom_name.is_empty() {
+                    "providers.custom"
                 } else {
-                    &self.model_selector_custom_name
-                };
-                custom_section2 = format!("providers.custom.{}", name);
-                &custom_section2
+                    custom_section2 = format!("providers.custom.{}", self.model_selector_custom_name);
+                    &custom_section2
+                }
             }
             _ => "providers.anthropic",
         };
@@ -827,16 +822,26 @@ impl App {
 
         // Only close dialog if explicitly requested
         if close_dialog {
-            let provider_name = provider
-                .name
-                .split('(')
-                .next()
-                .unwrap_or(provider.name)
-                .trim();
-            self.push_system_message(format!(
-                "Provider: {}, Model: {}",
-                provider_name, selected_model
-            ));
+            // Use user-configured name for custom providers (e.g. "nvidia"), fall back to generic
+            let provider_name = if provider_idx == 5 && !self.model_selector_custom_name.is_empty() {
+                self.model_selector_custom_name.clone()
+            } else {
+                provider
+                    .name
+                    .split('(')
+                    .next()
+                    .unwrap_or(provider.name)
+                    .trim()
+                    .to_string()
+            };
+
+            let change_msg = format!(
+                "[Model changed to {} (provider: {})]",
+                selected_model, provider_name
+            );
+            self.push_system_message(change_msg.clone());
+            self.pending_context.push(change_msg);
+
             self.mode = AppMode::Chat;
         }
 
