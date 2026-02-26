@@ -314,6 +314,7 @@ mod tests {
         let session = Session::new(
             Some("Test Session".to_string()),
             Some("claude-sonnet-4-5".to_string()),
+            None,
         );
         session_repo
             .create(&session)

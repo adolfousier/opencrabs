@@ -10,13 +10,14 @@ use super::onboarding::OnboardingWizard;
 use super::plan::PlanDocument;
 use super::prompt_analyzer::PromptAnalyzer;
 use crate::brain::agent::AgentService;
+use crate::brain::provider::Provider;
 use crate::brain::{BrainLoader, CommandLoader, SelfUpdater, UserCommand};
 use crate::db::models::{Message, Session};
 use crate::services::{MessageService, PlanService, ServiceContext, SessionService};
 use anyhow::Result;
 use ratatui::text::Line;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -328,6 +329,17 @@ pub struct App {
     pub onboarding: Option<OnboardingWizard>,
     pub force_onboard: bool,
 
+    /// Sessions currently processing (have in-flight agent tasks)
+    pub(crate) processing_sessions: HashSet<Uuid>,
+    /// Per-session cancel tokens
+    pub(crate) session_cancel_tokens: HashMap<Uuid, CancellationToken>,
+    /// Sessions that completed while user was in a different session (unread responses)
+    pub(crate) sessions_with_unread: HashSet<Uuid>,
+    /// Sessions that have pending approval requests waiting
+    pub(crate) sessions_with_pending_approval: HashSet<Uuid>,
+    /// Cached provider instances keyed by provider name (e.g., "anthropic", "custom:nvidia")
+    pub(crate) provider_cache: HashMap<String, Arc<dyn Provider>>,
+
     /// Cancellation token for aborting in-progress requests
     pub(crate) cancel_token: Option<CancellationToken>,
 
@@ -452,12 +464,17 @@ impl App {
             user_commands,
             onboarding: None,
             force_onboard: false,
+            processing_sessions: HashSet::new(),
+            session_cancel_tokens: HashMap::new(),
+            sessions_with_unread: HashSet::new(),
+            sessions_with_pending_approval: HashSet::new(),
+            provider_cache: HashMap::new(),
             cancel_token: None,
             message_queue: Arc::new(tokio::sync::Mutex::new(None)),
             shared_session_id: Arc::new(tokio::sync::Mutex::new(None)),
-            default_model_name: agent_service.provider_model().to_string(),
+            default_model_name: agent_service.provider_model(),
             context_max_tokens: agent_service
-                .context_window_for_model(agent_service.provider_model()),
+                .context_window_for_model(&agent_service.provider_model()),
             last_input_tokens: None,
             active_tool_group: None,
             rebuild_status: None,
@@ -478,13 +495,18 @@ impl App {
     }
 
     /// Get the provider name
-    pub fn provider_name(&self) -> &str {
+    pub fn provider_name(&self) -> String {
         self.agent_service.provider_name()
     }
 
     /// Get the provider model
-    pub fn provider_model(&self) -> &str {
+    pub fn provider_model(&self) -> String {
         self.agent_service.provider_model()
+    }
+
+    /// Check if a session_id matches the currently active session
+    pub(crate) fn is_current_session(&self, session_id: Uuid) -> bool {
+        self.current_session.as_ref().map(|s| s.id) == Some(session_id)
     }
 
     /// Get the shared session ID handle (for channels like Telegram/WhatsApp)
@@ -501,6 +523,7 @@ impl App {
             self.mode = AppMode::Chat;
             self.splash_shown_at = None;
             // Send a hidden wake-up message to the agent (not shown in UI)
+            self.processing_sessions.insert(session_id);
             self.is_processing = true;
             self.processing_started_at = Some(std::time::Instant::now());
             let agent_service = self.agent_service.clone();
@@ -522,10 +545,16 @@ impl App {
                     .await
                 {
                     Ok(response) => {
-                        let _ = event_sender.send(TuiEvent::ResponseComplete(response));
+                        let _ = event_sender.send(TuiEvent::ResponseComplete {
+                            session_id,
+                            response,
+                        });
                     }
                     Err(e) => {
-                        let _ = event_sender.send(TuiEvent::Error(e.to_string()));
+                        let _ = event_sender.send(TuiEvent::Error {
+                            session_id,
+                            message: e.to_string(),
+                        });
                     }
                 }
             });
@@ -559,7 +588,7 @@ impl App {
 
     /// Set agent service (used to inject configured agent after app creation)
     pub fn set_agent_service(&mut self, agent_service: Arc<AgentService>) {
-        self.default_model_name = agent_service.provider_model().to_string();
+        self.default_model_name = agent_service.provider_model();
         self.agent_service = agent_service;
     }
 
@@ -709,7 +738,7 @@ impl App {
         let new_agent_service = Arc::new(new_agent_service);
 
         // Update app state
-        self.default_model_name = new_agent_service.provider_model().to_string();
+        self.default_model_name = new_agent_service.provider_model();
         self.agent_service = new_agent_service;
 
         Ok(())
@@ -824,24 +853,44 @@ impl App {
             TuiEvent::MessageSubmitted(content) => {
                 self.send_message(content).await?;
             }
-            TuiEvent::ResponseChunk(chunk) => {
-                self.append_streaming_chunk(chunk);
+            TuiEvent::ResponseChunk { session_id, text } => {
+                if self.is_current_session(session_id) {
+                    self.append_streaming_chunk(text);
+                }
             }
-            TuiEvent::ReasoningChunk(text) => {
-                if let Some(ref mut existing) = self.streaming_reasoning {
-                    existing.push_str(&text);
+            TuiEvent::ReasoningChunk { session_id, text } => {
+                if self.is_current_session(session_id) {
+                    if let Some(ref mut existing) = self.streaming_reasoning {
+                        existing.push_str(&text);
+                    } else {
+                        self.streaming_reasoning = Some(text);
+                    }
+                    if self.auto_scroll {
+                        self.scroll_offset = 0;
+                    }
+                }
+            }
+            TuiEvent::ResponseComplete {
+                session_id,
+                response,
+            } => {
+                if self.is_current_session(session_id) {
+                    self.complete_response(response).await?;
                 } else {
-                    self.streaming_reasoning = Some(text);
-                }
-                if self.auto_scroll {
-                    self.scroll_offset = 0;
+                    // Background session completed — mark as unread
+                    self.processing_sessions.remove(&session_id);
+                    self.session_cancel_tokens.remove(&session_id);
+                    self.sessions_with_unread.insert(session_id);
                 }
             }
-            TuiEvent::ResponseComplete(response) => {
-                self.complete_response(response).await?;
-            }
-            TuiEvent::Error(error) => {
-                self.show_error(error);
+            TuiEvent::Error { session_id, message } => {
+                if self.is_current_session(session_id) {
+                    self.show_error(message);
+                } else {
+                    self.processing_sessions.remove(&session_id);
+                    self.session_cancel_tokens.remove(&session_id);
+                    tracing::warn!("Background session {} error: {}", session_id, message);
+                }
             }
             TuiEvent::SwitchMode(mode) => {
                 self.switch_mode(mode).await?;
@@ -885,9 +934,10 @@ impl App {
                 }
             }
             TuiEvent::ToolCallStarted {
+                session_id,
                 tool_name,
                 tool_input,
-            } => {
+            } if self.is_current_session(session_id) => {
                 tracing::info!(
                     "[TUI] ToolCallStarted: {} (active_group={}, msg_count={})",
                     tool_name,
@@ -913,7 +963,11 @@ impl App {
                     self.scroll_offset = 0;
                 }
             }
-            TuiEvent::IntermediateText(text, reasoning) => {
+            TuiEvent::IntermediateText {
+                session_id,
+                text,
+                reasoning,
+            } if self.is_current_session(session_id) => {
                 tracing::info!(
                     "[TUI] IntermediateText: len={} active_group={} streaming={}",
                     text.len(),
@@ -998,11 +1052,12 @@ impl App {
                 }
             }
             TuiEvent::ToolCallCompleted {
+                session_id,
                 tool_name,
                 tool_input,
                 success,
                 summary,
-            } => {
+            } if self.is_current_session(session_id) => {
                 // Reset timer so "thinking..." counter restarts after each tool call
                 self.processing_started_at = Some(std::time::Instant::now());
                 let desc = Self::format_tool_description(&tool_name, &tool_input);
@@ -1051,7 +1106,7 @@ impl App {
                     self.scroll_offset = 0;
                 }
             }
-            TuiEvent::CompactionSummary(summary) => {
+            TuiEvent::CompactionSummary { session_id, summary } if self.is_current_session(session_id) => {
                 // Agent has summarized history — clear the TUI view for a fresh start.
                 self.messages.clear();
                 self.render_cache.clear();
@@ -1121,9 +1176,16 @@ impl App {
                 self.reload_user_commands();
                 tracing::info!("Config reloaded — refreshed commands and settings");
             }
-            TuiEvent::TokenCountUpdated(count) => {
+            TuiEvent::TokenCountUpdated { session_id, count } if self.is_current_session(session_id) => {
                 self.display_token_count = count;
             }
+            // Silently ignore events for background sessions (already handled above for ResponseComplete/Error)
+            TuiEvent::ToolCallStarted { .. }
+            | TuiEvent::ToolCallCompleted { .. }
+            | TuiEvent::IntermediateText { .. }
+            | TuiEvent::CompactionSummary { .. }
+            | TuiEvent::TokenCountUpdated { .. } => {}
+
             TuiEvent::OnboardingModelsFetched(models) => {
                 if let Some(ref mut wizard) = self.onboarding {
                     wizard.models_fetching = false;

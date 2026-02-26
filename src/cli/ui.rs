@@ -239,54 +239,67 @@ pub(crate) async fn cmd_chat(
 
     // Create progress callback that sends tool events to TUI
     let progress_sender = app.event_sender();
-    let progress_callback: crate::brain::agent::ProgressCallback = Arc::new(move |event| {
-        use crate::brain::agent::ProgressEvent;
-        use crate::tui::events::TuiEvent;
+    let progress_callback: crate::brain::agent::ProgressCallback =
+        Arc::new(move |session_id, event| {
+            use crate::brain::agent::ProgressEvent;
+            use crate::tui::events::TuiEvent;
 
-        let result = match event {
-            ProgressEvent::ToolStarted {
-                tool_name,
-                tool_input,
-            } => progress_sender.send(TuiEvent::ToolCallStarted {
-                tool_name,
-                tool_input,
-            }),
-            ProgressEvent::ToolCompleted {
-                tool_name,
-                tool_input,
-                success,
-                summary,
-            } => progress_sender.send(TuiEvent::ToolCallCompleted {
-                tool_name,
-                tool_input,
-                success,
-                summary,
-            }),
-            ProgressEvent::IntermediateText { text, reasoning } => {
-                progress_sender.send(TuiEvent::IntermediateText(text, reasoning))
+            let result = match event {
+                ProgressEvent::ToolStarted {
+                    tool_name,
+                    tool_input,
+                } => progress_sender.send(TuiEvent::ToolCallStarted {
+                    session_id,
+                    tool_name,
+                    tool_input,
+                }),
+                ProgressEvent::ToolCompleted {
+                    tool_name,
+                    tool_input,
+                    success,
+                    summary,
+                } => progress_sender.send(TuiEvent::ToolCallCompleted {
+                    session_id,
+                    tool_name,
+                    tool_input,
+                    success,
+                    summary,
+                }),
+                ProgressEvent::IntermediateText { text, reasoning } => {
+                    progress_sender.send(TuiEvent::IntermediateText {
+                        session_id,
+                        text,
+                        reasoning,
+                    })
+                }
+                ProgressEvent::StreamingChunk { text } => {
+                    progress_sender.send(TuiEvent::ResponseChunk { session_id, text })
+                }
+                ProgressEvent::Thinking => return, // spinner handles this already
+                ProgressEvent::Compacting => progress_sender.send(TuiEvent::AgentProcessing),
+                ProgressEvent::CompactionSummary { summary } => {
+                    progress_sender.send(TuiEvent::CompactionSummary {
+                        session_id,
+                        summary,
+                    })
+                }
+                ProgressEvent::RestartReady { status } => {
+                    progress_sender.send(TuiEvent::RestartReady(status))
+                }
+                ProgressEvent::TokenCount(count) => {
+                    progress_sender.send(TuiEvent::TokenCountUpdated {
+                        session_id,
+                        count,
+                    })
+                }
+                ProgressEvent::ReasoningChunk { text } => {
+                    progress_sender.send(TuiEvent::ReasoningChunk { session_id, text })
+                }
+            };
+            if let Err(e) = result {
+                tracing::error!("Progress event channel closed: {}", e);
             }
-            ProgressEvent::StreamingChunk { text } => {
-                progress_sender.send(TuiEvent::ResponseChunk(text))
-            }
-            ProgressEvent::Thinking => return, // spinner handles this already
-            ProgressEvent::Compacting => progress_sender.send(TuiEvent::AgentProcessing),
-            ProgressEvent::CompactionSummary { summary } => {
-                progress_sender.send(TuiEvent::CompactionSummary(summary))
-            }
-            ProgressEvent::RestartReady { status } => {
-                progress_sender.send(TuiEvent::RestartReady(status))
-            }
-            ProgressEvent::TokenCount(count) => {
-                progress_sender.send(TuiEvent::TokenCountUpdated(count))
-            }
-            ProgressEvent::ReasoningChunk { text } => {
-                progress_sender.send(TuiEvent::ReasoningChunk(text))
-            }
-        };
-        if let Err(e) = result {
-            tracing::error!("Progress event channel closed: {}", e);
-        }
-    });
+        });
 
     // Create message queue callback that checks for queued user messages
     let message_queue = app.message_queue.clone();

@@ -13,6 +13,7 @@ pub struct Session {
     pub id: Uuid,
     pub title: Option<String>,
     pub model: Option<String>,
+    pub provider_name: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub archived_at: Option<DateTime<Utc>>,
@@ -118,12 +119,17 @@ pub struct PlanTask {
 
 impl Session {
     /// Create a new session
-    pub fn new(title: Option<String>, model: Option<String>) -> Self {
+    pub fn new(
+        title: Option<String>,
+        model: Option<String>,
+        provider_name: Option<String>,
+    ) -> Self {
         let now = Utc::now();
         Self {
             id: Uuid::new_v4(),
             title,
             model,
+            provider_name,
             created_at: now,
             updated_at: now,
             archived_at: None,
@@ -179,6 +185,7 @@ impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for Session {
                 .map_err(|e| sqlx::Error::Decode(Box::new(e)))?,
             title: row.try_get("title")?,
             model: row.try_get("model")?,
+            provider_name: row.try_get("provider_name")?,
             created_at: DateTime::from_timestamp(row.try_get("created_at")?, 0)
                 .ok_or_else(|| sqlx::Error::Decode("Invalid timestamp for created_at".into()))?,
             updated_at: DateTime::from_timestamp(row.try_get("updated_at")?, 0)
@@ -292,6 +299,7 @@ mod tests {
         let session = Session::new(
             Some("Test Session".to_string()),
             Some("claude-sonnet-4-5".to_string()),
+            Some("anthropic".to_string()),
         );
 
         assert_eq!(session.title, Some("Test Session".to_string()));
@@ -325,7 +333,7 @@ mod tests {
 
     #[test]
     fn test_session_archived() {
-        let mut session = Session::new(Some("Test".to_string()), Some("model".to_string()));
+        let mut session = Session::new(Some("Test".to_string()), Some("model".to_string()), None);
 
         assert!(!session.is_archived());
 

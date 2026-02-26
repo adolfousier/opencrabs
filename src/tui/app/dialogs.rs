@@ -671,15 +671,18 @@ impl App {
             3 => "providers.openrouter",
             4 => "providers.minimax",
             5 => {
-                if self.model_selector_custom_name.is_empty() {
-                    "providers.custom"
+                // Resolve custom provider name: UI field > config active > "default"
+                let cname = if !self.model_selector_custom_name.is_empty() {
+                    self.model_selector_custom_name.clone()
+                } else if let Some((name, _)) = config.providers.active_custom() {
+                    name.to_string()
                 } else {
-                    custom_section =
-                        format!("providers.custom.{}", self.model_selector_custom_name);
-                    &custom_section
-                }
+                    "default".to_string()
+                };
+                custom_section = format!("providers.custom.{}", cname);
+                &custom_section
             }
-            _ => "providers.custom",
+            _ => "providers.anthropic",
         };
 
         // Disable ALL other providers on disk before enabling the selected one.
@@ -802,13 +805,15 @@ impl App {
             3 => "providers.openrouter",
             4 => "providers.minimax",
             5 => {
-                if self.model_selector_custom_name.is_empty() {
-                    "providers.custom"
+                let cname = if !self.model_selector_custom_name.is_empty() {
+                    self.model_selector_custom_name.clone()
+                } else if let Some((name, _)) = config.providers.active_custom() {
+                    name.to_string()
                 } else {
-                    custom_section2 =
-                        format!("providers.custom.{}", self.model_selector_custom_name);
-                    &custom_section2
-                }
+                    "default".to_string()
+                };
+                custom_section2 = format!("providers.custom.{}", cname);
+                &custom_section2
             }
             _ => "providers.anthropic",
         };
@@ -820,6 +825,21 @@ impl App {
 
         // Update app state
         self.default_model_name = selected_model.clone();
+
+        // Persist provider + model to current session DB record
+        let agent_provider_name = self.agent_service.provider_name();
+        if let Some(ref mut session) = self.current_session {
+            session.provider_name = Some(agent_provider_name.clone());
+            session.model = Some(selected_model.clone());
+            let session_copy = session.clone();
+            if let Err(e) = self.session_service.update_session(&session_copy).await {
+                tracing::warn!("Failed to persist provider to session: {}", e);
+            }
+        }
+        // Cache the provider instance for fast session switching
+        let provider_arc = self.agent_service.provider();
+        self.provider_cache
+            .insert(agent_provider_name, provider_arc);
 
         // Only close dialog if explicitly requested
         if close_dialog {

@@ -13,12 +13,16 @@ use uuid::Uuid;
 impl App {
     /// Create a new session
     pub(crate) async fn create_new_session(&mut self) -> Result<()> {
+        // Inherit provider and model from the current agent service
+        let provider_name = Some(self.agent_service.provider_name());
+        let model = Some(self.default_model_name.clone());
         let session = self
             .session_service
-            .create_session(Some("New Chat".to_string()))
+            .create_session_with_provider(Some("New Chat".to_string()), provider_name, model)
             .await?;
 
         self.current_session = Some(session.clone());
+        self.is_processing = false; // New session is never processing
         self.messages.clear();
         self.auto_scroll = true;
         self.scroll_offset = 0;
@@ -49,6 +53,8 @@ impl App {
             .await?;
 
         self.current_session = Some(session.clone());
+        // Sync is_processing flag with per-session state
+        self.is_processing = self.processing_sessions.contains(&session.id);
         let (display, hidden) = Self::trim_messages_to_display_budget(&messages, 200_000);
         self.hidden_older_messages = hidden;
         self.oldest_displayed_sequence = display.first().map(|m| m.sequence).unwrap_or(0);
@@ -75,6 +81,64 @@ impl App {
         // overestimates actual context window usage. Instead, show no percentage
         // until the next API response provides real input_tokens from the model.
         self.last_input_tokens = None;
+
+        // Clear unread indicator for this session
+        self.sessions_with_unread.remove(&session_id);
+
+        // Auto-restore provider if session has a different one than current
+        if let Some(ref saved_provider) = session.provider_name {
+            let current_provider = self.agent_service.provider_name();
+            if *saved_provider != current_provider {
+                // Try cache first
+                if let Some(cached) = self.provider_cache.get(saved_provider) {
+                    self.agent_service.swap_provider(cached.clone());
+                    tracing::info!(
+                        "Restored provider '{}' from cache for session {}",
+                        saved_provider,
+                        session_id
+                    );
+                } else {
+                    // Cache miss — create from config
+                    match crate::config::Config::load() {
+                        Ok(config) => {
+                            match crate::brain::provider::factory::create_provider_by_name(
+                                &config,
+                                saved_provider,
+                            ) {
+                                Ok(provider) => {
+                                    self.provider_cache
+                                        .insert(saved_provider.clone(), provider.clone());
+                                    self.agent_service.swap_provider(provider);
+                                    tracing::info!(
+                                        "Created and cached provider '{}' for session {}",
+                                        saved_provider,
+                                        session_id
+                                    );
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "Failed to restore provider '{}': {}. Using current.",
+                                        saved_provider,
+                                        e
+                                    );
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to load config for provider restore: {}", e);
+                        }
+                    }
+                }
+                // Update display model name from restored provider
+                self.default_model_name = session
+                    .model
+                    .clone()
+                    .unwrap_or_else(|| self.agent_service.provider_model());
+                self.context_max_tokens = self
+                    .agent_service
+                    .context_window_for_model(&self.default_model_name);
+            }
+        }
 
         Ok(())
     }
@@ -275,6 +339,7 @@ impl App {
                     "🔨 Building from source... (streaming output below)".to_string(),
                 );
                 let sender = self.event_sender();
+                let sid = self.current_session.as_ref().map(|s| s.id).unwrap_or(Uuid::nil());
                 tokio::spawn(async move {
                     match SelfUpdater::auto_detect() {
                         Ok(updater) => {
@@ -301,14 +366,18 @@ impl App {
                                         .send(TuiEvent::RestartReady("✅ Build complete".into()));
                                 }
                                 Err(e) => {
-                                    let _ = sender
-                                        .send(TuiEvent::Error(format!("Build failed: {}", e)));
+                                    let _ = sender.send(TuiEvent::Error {
+                                        session_id: sid,
+                                        message: format!("Build failed: {}", e),
+                                    });
                                 }
                             }
                         }
                         Err(e) => {
-                            let _ = sender
-                                .send(TuiEvent::Error(format!("Cannot detect project: {}", e)));
+                            let _ = sender.send(TuiEvent::Error {
+                                session_id: sid,
+                                message: format!("Cannot detect project: {}", e),
+                            });
                         }
                     }
                 });
@@ -317,6 +386,7 @@ impl App {
             "/whisper" => {
                 self.push_system_message("Setting up WhisperCrabs...".to_string());
                 let sender = self.event_sender();
+                let sid = self.current_session.as_ref().map(|s| s.id).unwrap_or(Uuid::nil());
                 tokio::spawn(async move {
                     match ensure_whispercrabs().await {
                         Ok(binary_path) => {
@@ -335,16 +405,18 @@ impl App {
                                     ));
                                 }
                                 Err(e) => {
-                                    let _ = sender.send(TuiEvent::Error(format!(
-                                        "Failed to launch WhisperCrabs: {}",
-                                        e
-                                    )));
+                                    let _ = sender.send(TuiEvent::Error {
+                                        session_id: sid,
+                                        message: format!("Failed to launch WhisperCrabs: {}", e),
+                                    });
                                 }
                             }
                         }
                         Err(e) => {
-                            let _ = sender
-                                .send(TuiEvent::Error(format!("WhisperCrabs setup failed: {}", e)));
+                            let _ = sender.send(TuiEvent::Error {
+                                session_id: sid,
+                                message: format!("WhisperCrabs setup failed: {}", e),
+                            });
                         }
                     }
                 });
@@ -928,16 +1000,19 @@ impl App {
             }
         }
 
-        if self.is_processing {
-            tracing::warn!("[send_message] QUEUED — agent still processing previous request");
-            // DON'T add to messages yet - wait until agent processes it
-            // It will be added at the end after all assistant messages
+        if let Some(session) = &self.current_session {
+            if self.processing_sessions.contains(&session.id) {
+                tracing::warn!("[send_message] QUEUED — session {} still processing", session.id);
+                // DON'T add to messages yet - wait until agent processes it
+                // It will be added at the end after all assistant messages
 
-            // Queue for injection between tool calls
-            *self.message_queue.lock().await = Some(content);
-            return Ok(());
+                // Queue for injection between tool calls
+                *self.message_queue.lock().await = Some(content);
+                return Ok(());
+            }
         }
         if let Some(session) = &self.current_session {
+            self.processing_sessions.insert(session.id);
             self.is_processing = true;
             self.processing_started_at = Some(std::time::Instant::now());
             self.error_message = None;
@@ -1016,13 +1091,19 @@ impl App {
                 match result {
                     Ok(response) => {
                         tracing::info!("[agent_task] OK — sending ResponseComplete");
-                        if let Err(e) = event_sender.send(TuiEvent::ResponseComplete(response)) {
+                        if let Err(e) = event_sender.send(TuiEvent::ResponseComplete {
+                            session_id,
+                            response,
+                        }) {
                             tracing::error!("[agent_task] FAILED to send ResponseComplete: {}", e);
                         }
                     }
                     Err(e) => {
                         tracing::error!("[agent_task] ERROR: {}", e);
-                        if let Err(e2) = event_sender.send(TuiEvent::Error(e.to_string())) {
+                        if let Err(e2) = event_sender.send(TuiEvent::Error {
+                            session_id,
+                            message: e.to_string(),
+                        }) {
                             tracing::error!("[agent_task] FAILED to send Error event: {}", e2);
                         }
                     }
@@ -1032,9 +1113,12 @@ impl App {
             tokio::spawn(async move {
                 if let Err(e) = handle.await {
                     tracing::error!("[agent_task] PANICKED: {}", e);
-                    let _ = panic_sender.send(TuiEvent::Error(format!(
-                        "Agent task crashed unexpectedly: {e}. You can continue chatting."
-                    )));
+                    let _ = panic_sender.send(TuiEvent::Error {
+                        session_id,
+                        message: format!(
+                            "Agent task crashed unexpectedly: {e}. You can continue chatting."
+                        ),
+                    });
                 }
             });
         }
@@ -1060,6 +1144,10 @@ impl App {
         &mut self,
         response: crate::brain::agent::AgentResponse,
     ) -> Result<()> {
+        if let Some(ref session) = self.current_session {
+            self.processing_sessions.remove(&session.id);
+            self.session_cancel_tokens.remove(&session.id);
+        }
         self.is_processing = false;
         self.processing_started_at = None;
         self.streaming_response = None;

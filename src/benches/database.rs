@@ -34,7 +34,7 @@ fn bench_session_create(c: &mut Criterion) {
                 let pool = db.pool();
 
                 black_box({
-                    let session = Session::new(Some("Test Session".to_string()), Some("claude-3-5-sonnet".to_string()));
+                    let session = Session::new(Some("Test Session".to_string()), Some("claude-3-5-sonnet".to_string()), None);
                     sqlx::query(
                         r#"
                         INSERT INTO sessions (id, title, model, created_at, updated_at, token_count, total_cost)
@@ -71,7 +71,7 @@ fn bench_session_get(c: &mut Criterion) {
                 let pool = db.pool();
 
                 // Create a session first
-                let session = Session::new(Some("Test Session".to_string()), Some("claude-3-5-sonnet".to_string()));
+                let session = Session::new(Some("Test Session".to_string()), Some("claude-3-5-sonnet".to_string()), None);
                 sqlx::query(
                     r#"
                     INSERT INTO sessions (id, title, model, created_at, updated_at, token_count, total_cost)
@@ -125,7 +125,8 @@ fn bench_session_list(c: &mut Criterion) {
                     for i in 0..count {
                         let session = Session::new(
                             Some(format!("Test Session {}", i)),
-                            Some("claude-3-5-sonnet".to_string())
+                            Some("claude-3-5-sonnet".to_string()),
+                            None,
                         );
                         sqlx::query(
                             r#"
@@ -177,7 +178,7 @@ fn bench_message_insert(c: &mut Criterion) {
                 let pool = db.pool();
 
                 // Create a session first
-                let session = Session::new(Some("Test Session".to_string()), Some("claude-3-5-sonnet".to_string()));
+                let session = Session::new(Some("Test Session".to_string()), Some("claude-3-5-sonnet".to_string()), None);
                 sqlx::query(
                     r#"
                     INSERT INTO sessions (id, title, model, created_at, updated_at, token_count, total_cost)
@@ -240,7 +241,7 @@ fn bench_message_query(c: &mut Criterion) {
                     let pool = db.pool();
 
                     // Create a session
-                    let session = Session::new(Some("Test Session".to_string()), Some("claude-3-5-sonnet".to_string()));
+                    let session = Session::new(Some("Test Session".to_string()), Some("claude-3-5-sonnet".to_string()), None);
                     sqlx::query(
                         r#"
                         INSERT INTO sessions (id, title, model, created_at, updated_at, token_count, total_cost)

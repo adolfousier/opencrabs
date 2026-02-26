@@ -1563,11 +1563,42 @@ fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
                 ),
             ];
 
+            // Provider badge
+            if let Some(ref prov) = session.provider_name {
+                let model_label = session.model.as_deref().unwrap_or("default");
+                spans.push(Span::styled(
+                    format!(" [{}/{}]", prov, model_label),
+                    Style::default().fg(Color::Rgb(120, 120, 120)),
+                ));
+            }
+
             // History size badge
             if session.token_count > 0 {
                 spans.push(Span::styled(
                     format!(" {}", history_label),
                     Style::default().fg(Color::Rgb(100, 100, 100)),
+                ));
+            }
+
+            // Status indicators for background sessions
+            if app.processing_sessions.contains(&session.id) {
+                let spinner_chars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+                let frame = app.animation_frame % spinner_chars.len();
+                spans.push(Span::styled(
+                    format!(" {}", spinner_chars[frame]),
+                    Style::default().fg(Color::Yellow),
+                ));
+            } else if app.sessions_with_pending_approval.contains(&session.id) {
+                spans.push(Span::styled(
+                    " !",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ));
+            } else if app.sessions_with_unread.contains(&session.id) {
+                spans.push(Span::styled(
+                    " ●",
+                    Style::default().fg(Color::Green),
                 ));
             }
 
@@ -2093,10 +2124,11 @@ fn render_settings(f: &mut Frame, app: &App, area: Rect) {
     let brain_display = app.brain_path.display().to_string();
     let wd_display = app.working_directory.display().to_string();
 
+    let provider_name = app.provider_name();
     let mut lines = vec![
         Line::from(""),
         section("PROVIDER"),
-        kv("Provider", app.provider_name()),
+        kv("Provider", &provider_name),
         kv("Model", &app.default_model_name),
         Line::from(""),
         section("APPROVAL"),
@@ -2433,7 +2465,7 @@ fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     let current_model = app
         .current_session
         .as_ref()
-        .and_then(|s| s.model.as_deref())
+        .and_then(|s| s.model.clone())
         .unwrap_or_else(|| app.provider_model());
 
     let dialog_height = (model_count as u16 + 20).min(area.height.saturating_sub(4));
@@ -2772,7 +2804,7 @@ fn render_usage_dialog(f: &mut Frame, app: &App, area: Rect) {
     let model = app
         .current_session
         .as_ref()
-        .and_then(|s| s.model.as_deref())
+        .and_then(|s| s.model.clone())
         .unwrap_or_else(|| app.provider_model());
 
     let message_count = app.messages.len();
@@ -2785,7 +2817,7 @@ fn render_usage_dialog(f: &mut Frame, app: &App, area: Rect) {
             (stored, false)
         } else if cur_tokens > 0 {
             (
-                estimate_cost_from_tokens(model, cur_tokens as i64).unwrap_or(0.0),
+                estimate_cost_from_tokens(&model, cur_tokens as i64).unwrap_or(0.0),
                 true,
             )
         } else {
