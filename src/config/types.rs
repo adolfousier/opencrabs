@@ -395,23 +395,55 @@ where
         return Ok(None);
     };
 
-    // If it has "enabled", "api_key", "base_url", "default_model", or "models" at top level,
-    // it's old flat format — wrap as "default"
-    if value.get("enabled").is_some()
-        || value.get("api_key").is_some()
-        || value.get("base_url").is_some()
-        || value.get("default_model").is_some()
-        || value.get("models").is_some()
-    {
-        let config: ProviderConfig = value.try_into().map_err(de::Error::custom)?;
+    // Check if there are nested tables (named providers like [providers.custom.nvidia])
+    // alongside top-level keys (flat format like [providers.custom] with enabled/api_key).
+    // If both exist, extract the flat keys as "default" and parse named tables separately.
+    let table = match value.as_table() {
+        Some(t) => t,
+        None => return Ok(None),
+    };
+
+    let flat_keys = ["enabled", "api_key", "base_url", "default_model", "models"];
+    let has_flat = flat_keys.iter().any(|k| table.contains_key(*k));
+    let has_named = table.values().any(|v| v.is_table());
+
+    if has_flat && has_named {
+        // Mixed: flat "default" provider + named providers in same section
+        let mut map = BTreeMap::new();
+        let mut flat_table = toml::map::Map::new();
+        for key in &flat_keys {
+            if let Some(v) = table.get(*key) {
+                flat_table.insert(key.to_string(), v.clone());
+            }
+        }
+        let default_cfg: ProviderConfig =
+            toml::Value::Table(flat_table).try_into().map_err(de::Error::custom)?;
+        map.insert("default".to_string(), default_cfg);
+        for (name, val) in table {
+            if flat_keys.contains(&name.as_str()) {
+                continue;
+            }
+            if val.is_table() {
+                let cfg: ProviderConfig = val.clone().try_into().map_err(de::Error::custom)?;
+                map.insert(name.clone(), cfg);
+            }
+        }
+        Ok(Some(map))
+    } else if has_flat {
+        // Pure flat format — wrap as "default"
+        let config: ProviderConfig = toml::Value::Table(table.clone())
+            .try_into()
+            .map_err(de::Error::custom)?;
         let mut map = BTreeMap::new();
         map.insert("default".to_string(), config);
-        return Ok(Some(map));
+        Ok(Some(map))
+    } else {
+        // Pure named map format
+        let map: BTreeMap<String, ProviderConfig> = toml::Value::Table(table.clone())
+            .try_into()
+            .map_err(de::Error::custom)?;
+        Ok(if map.is_empty() { None } else { Some(map) })
     }
-
-    // Otherwise parse as named map
-    let map: BTreeMap<String, ProviderConfig> = value.try_into().map_err(de::Error::custom)?;
-    Ok(if map.is_empty() { None } else { Some(map) })
 }
 
 /// Fallback provider configuration

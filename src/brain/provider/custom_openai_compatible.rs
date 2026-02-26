@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 const DEFAULT_OPENAI_API_URL: &str = "https://api.openai.com/v1/chat/completions";
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(120);
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(300);
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
 
@@ -887,9 +887,13 @@ impl Provider for OpenAIProvider {
     }
 
     fn default_model(&self) -> &str {
-        self.custom_default_model
-            .as_deref()
-            .unwrap_or("gpt-4-turbo-preview")
+        self.custom_default_model.as_deref().unwrap_or_else(|| {
+            tracing::error!(
+                "No default_model configured for provider '{}' — check config.toml",
+                self.name
+            );
+            "MISSING_MODEL"
+        })
     }
 
     fn supported_models(&self) -> Vec<String> {
