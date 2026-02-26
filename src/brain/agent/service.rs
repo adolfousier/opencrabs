@@ -21,6 +21,8 @@ use uuid::Uuid;
 /// Tool approval request information
 #[derive(Debug, Clone)]
 pub struct ToolApprovalInfo {
+    /// Session this tool call belongs to
+    pub session_id: Uuid,
     /// Tool name
     pub tool_name: String,
     /// Tool description
@@ -1063,6 +1065,7 @@ impl AgentService {
                         // Get tool details for approval request
                         let tool_info = if let Some(tool) = self.tool_registry.get(&tool_name) {
                             ToolApprovalInfo {
+                                session_id,
                                 tool_name: tool_name.clone(),
                                 tool_description: tool.description().to_string(),
                                 tool_input: tool_input.clone(),

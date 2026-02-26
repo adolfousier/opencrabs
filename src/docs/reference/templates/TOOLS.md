@@ -90,6 +90,58 @@ API keys go in `~/.opencrabs/keys.toml` (chmod 600). Channel settings go in `con
 
 **As an OpenCrabs tool:** When user asks to transcribe voice or set up voice input, use D-Bus to control WhisperCrabs — check if running, start recording, configure provider, etc.
 
+### SocialCrabs — Social Media Automation
+[SocialCrabs](https://github.com/adolfousier/socialcrabs) is a web-based social media automation tool with human-like behavior simulation (Playwright).
+
+**Supported platforms:** Twitter/X, Instagram, LinkedIn
+
+**Interfaces:**
+- **CLI** — `node dist/cli.js <platform> <command>`
+- **REST API** — port 3847
+- **WebSocket** — port 3848
+- **SDK** — TypeScript/JavaScript programmatic access
+
+**Setup:**
+1. Clone the repo and install dependencies
+2. Add platform cookies/credentials to `.env` (see SocialCrabs README)
+3. Run `node dist/cli.js session login <platform>` to authenticate
+
+**Twitter/X commands:**
+```bash
+node dist/cli.js x whoami                     # Check logged-in account
+node dist/cli.js x mentions -n 5              # Your mentions
+node dist/cli.js x home -n 5                  # Your timeline
+node dist/cli.js x search "query" -n 10       # Search tweets
+node dist/cli.js x read <tweet-url>           # Read a specific tweet
+node dist/cli.js x tweet "Hello world"        # Post a tweet
+node dist/cli.js x reply <tweet-url> "text"   # Reply to tweet
+node dist/cli.js x like <tweet-url>           # Like a tweet
+node dist/cli.js x follow <username>          # Follow a user
+```
+
+**Instagram commands:**
+```bash
+node dist/cli.js ig like <post-url>
+node dist/cli.js ig comment <post-url> "text"
+node dist/cli.js ig dm <username> "message"
+node dist/cli.js ig follow <username>
+node dist/cli.js ig followers <username> -n 10
+node dist/cli.js ig posts <username> -n 3
+```
+
+**LinkedIn commands:**
+```bash
+node dist/cli.js linkedin like <post-url>
+node dist/cli.js linkedin comment <post-url> "text"
+node dist/cli.js linkedin connect <profile-url>
+node dist/cli.js linkedin search <query>
+node dist/cli.js linkedin engage --query=<query>   # Full engagement session
+```
+
+**Key features:** Human-like behavior (randomized delays, natural typing), session persistence, built-in rate limiting, anti-detection, research-first workflow.
+
+**As an OpenCrabs tool:** When user asks to post, engage, or monitor social media, use SocialCrabs CLI commands. Read operations (search, mentions, timeline) are safe. Write operations (tweet, like, follow, comment) **require explicit user approval**.
+
 ### Agent-to-Agent (A2A) Gateway
 OpenCrabs exposes an A2A Protocol HTTP gateway for peer-to-peer agent communication.
 

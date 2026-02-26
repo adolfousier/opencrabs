@@ -78,9 +78,39 @@ impl App {
         // Load config to get enabled provider
         let config = crate::config::Config::load().unwrap_or_default();
 
+        // Try session's provider first, then fall back to config
+        let session_provider = self
+            .current_session
+            .as_ref()
+            .and_then(|s| s.provider_name.as_deref());
+
+        // Resolve provider index + API key from session provider name
+        let from_session: Option<(usize, Option<String>)> = session_provider.map(|name| {
+            match name {
+                "anthropic" => (0, config.providers.anthropic.as_ref().and_then(|p| p.api_key.clone())),
+                "openai" => (1, config.providers.openai.as_ref().and_then(|p| p.api_key.clone())),
+                "gemini" => (2, config.providers.gemini.as_ref().and_then(|p| p.api_key.clone())),
+                "openrouter" => (3, config.providers.openrouter.as_ref().and_then(|p| p.api_key.clone())),
+                "minimax" => (4, config.providers.minimax.as_ref().and_then(|p| p.api_key.clone())),
+                cname => {
+                    // Any other name is a custom provider (e.g. "nvidia", "ollama")
+                    let api_key = config.providers.custom_by_name(cname).and_then(|p| p.api_key.clone());
+                    if let Some(c) = config.providers.custom_by_name(cname) {
+                        self.model_selector_base_url = c.base_url.clone().unwrap_or_default();
+                        self.model_selector_custom_model = c.default_model.clone().unwrap_or_default();
+                        self.model_selector_custom_name = cname.to_string();
+                    }
+                    (5, api_key)
+                }
+            }
+        });
+
         // Determine which provider is enabled
         // Indices: 0=Anthropic, 1=OpenAI, 2=Gemini, 3=OpenRouter, 4=Minimax, 5=Custom
-        let (provider_idx, api_key) = if config
+        let (provider_idx, api_key) = if let Some(resolved) = from_session {
+            tracing::debug!("[open_model_selector] From session: {:?}", session_provider);
+            resolved
+        } else if config
             .providers
             .anthropic
             .as_ref()
@@ -209,76 +239,22 @@ impl App {
         self.model_selector_has_existing_key = api_key.is_some();
         self.model_selector_api_key.clear();
 
-        // Fetch models from enabled provider using config's API key
-        tracing::debug!(
-            "[open_model_selector] Fetching models for provider_idx={}",
-            provider_idx
-        );
-        self.model_selector_models =
-            super::onboarding::fetch_provider_models(provider_idx, api_key.as_deref()).await;
-        tracing::debug!(
-            "[open_model_selector] Fetched {} models",
-            self.model_selector_models.len()
-        );
+        // Spawn async model fetch — dialog opens immediately, models arrive via event
+        let sender = self.event_sender();
+        tokio::spawn(async move {
+            let models =
+                super::onboarding::fetch_provider_models(provider_idx, api_key.as_deref()).await;
+            let _ = sender.send(TuiEvent::ModelSelectorModelsFetched(models));
+        });
 
-        // Pre-select current model from config
-        let current = config
-            .providers
-            .openai
-            .as_ref()
-            .and_then(|p| p.default_model.as_deref())
-            .or_else(|| {
-                config
-                    .providers
-                    .anthropic
-                    .as_ref()
-                    .and_then(|p| p.default_model.as_deref())
-            })
-            .or_else(|| {
-                config
-                    .providers
-                    .gemini
-                    .as_ref()
-                    .and_then(|p| p.default_model.as_deref())
-            })
-            .or_else(|| {
-                config
-                    .providers
-                    .openrouter
-                    .as_ref()
-                    .and_then(|p| p.default_model.as_deref())
-            })
-            .or_else(|| {
-                config
-                    .providers
-                    .minimax
-                    .as_ref()
-                    .and_then(|p| p.default_model.as_deref())
-            })
-            .or_else(|| {
-                config
-                    .providers
-                    .active_custom()
-                    .and_then(|(_, p)| p.default_model.as_deref())
-            })
-            .unwrap_or("default")
-            .to_string();
-
-        tracing::debug!(
-            "[open_model_selector] Current model from config: {}",
-            current
-        );
-
-        self.model_selector_selected = self
-            .model_selector_models
-            .iter()
-            .position(|m| m == &current)
-            .unwrap_or(0);
+        // Clear models until fetch completes
+        self.model_selector_models.clear();
 
         // Reset view state
         self.model_selector_showing_providers = false;
         self.model_selector_filter.clear();
         self.model_selector_focused_field = 0;
+        self.model_selector_selected = 0;
 
         self.mode = AppMode::ModelSelector;
     }

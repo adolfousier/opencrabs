@@ -670,6 +670,7 @@ impl App {
 
                 let request = ToolApprovalRequest {
                     request_id: uuid::Uuid::new_v4(),
+                    session_id: tool_info.session_id,
                     tool_name: tool_info.tool_name,
                     tool_description: tool_info.tool_description,
                     tool_input: tool_info.tool_input,
@@ -1197,12 +1198,16 @@ impl App {
             }
             TuiEvent::ModelSelectorModelsFetched(models) => {
                 if self.mode == AppMode::ModelSelector && !models.is_empty() {
+                    // Pre-select session model or config model
+                    let current_model = self
+                        .current_session
+                        .as_ref()
+                        .and_then(|s| s.model.as_deref())
+                        .unwrap_or(&self.default_model_name);
+                    let selected = models.iter().position(|m| m == current_model).unwrap_or(0);
                     self.model_selector_models = models;
-                    self.model_selector_selected = 0;
+                    self.model_selector_selected = selected;
                     self.model_selector_filter.clear();
-                    // Advance to model selection field
-                    let is_custom = self.model_selector_provider_selected == 5;
-                    self.model_selector_focused_field = if is_custom { 3 } else { 2 };
                 }
             }
             TuiEvent::WhatsAppQrCode(qr_data) => {
@@ -1568,27 +1573,17 @@ impl App {
         self.messages.iter().filter_map(|m| m.cost).sum()
     }
 
-    /// Handle tool approval request — inline in chat
+    /// Handle tool approval request — inline in chat (session-aware)
     fn handle_approval_requested(&mut self, request: ToolApprovalRequest) {
+        let is_current = self.is_current_session(request.session_id);
         tracing::info!(
-            "[APPROVAL] handle_approval_requested called for tool='{}' auto_session={} auto_always={}",
+            "[APPROVAL] handle_approval_requested tool='{}' session={} is_current={} auto_session={} auto_always={}",
             request.tool_name,
+            request.session_id,
+            is_current,
             self.approval_auto_session,
             self.approval_auto_always
         );
-        // Deny stale pending approvals from previous requests (keep in chat for context)
-        for msg in &mut self.messages {
-            if let Some(ref mut approval) = msg.approval
-                && approval.state == ApprovalState::Pending
-            {
-                let _ = approval.response_tx.send(ToolApprovalResponse {
-                    request_id: approval.request_id,
-                    approved: false,
-                    reason: Some("Superseded by new request".to_string()),
-                });
-                approval.state = ApprovalState::Denied("Superseded by new request".to_string());
-            }
-        }
 
         // Auto-approve silently if policy allows
         if self.approval_auto_always || self.approval_auto_session {
@@ -1602,6 +1597,40 @@ impl App {
                 .event_sender()
                 .send(TuiEvent::ToolApprovalResponse(response));
             return;
+        }
+
+        // Background session approval — auto-approve (user can't interact with it)
+        // They'll see the results when they switch to that session
+        if !is_current {
+            tracing::info!(
+                "[APPROVAL] Auto-approving background session {} tool '{}'",
+                request.session_id,
+                request.tool_name
+            );
+            let response = ToolApprovalResponse {
+                request_id: request.request_id,
+                approved: true,
+                reason: Some("Auto-approved (background session)".to_string()),
+            };
+            let _ = request.response_tx.send(response.clone());
+            let _ = self
+                .event_sender()
+                .send(TuiEvent::ToolApprovalResponse(response));
+            return;
+        }
+
+        // Deny stale pending approvals from previous requests in THIS session only
+        for msg in &mut self.messages {
+            if let Some(ref mut approval) = msg.approval
+                && approval.state == ApprovalState::Pending
+            {
+                let _ = approval.response_tx.send(ToolApprovalResponse {
+                    request_id: approval.request_id,
+                    approved: false,
+                    reason: Some("Superseded by new request".to_string()),
+                });
+                approval.state = ApprovalState::Denied("Superseded by new request".to_string());
+            }
         }
 
         // Clear streaming overlay so the approval dialog is visible

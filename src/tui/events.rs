@@ -168,6 +168,9 @@ pub struct ToolApprovalRequest {
     /// Unique ID for this approval request
     pub request_id: Uuid,
 
+    /// Session this approval belongs to
+    pub session_id: Uuid,
+
     /// Tool name
     pub tool_name: String,
 

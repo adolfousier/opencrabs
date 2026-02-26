@@ -198,6 +198,7 @@ pub(crate) async fn cmd_chat(
             // Create approval request
             let request = ToolApprovalRequest {
                 request_id: uuid::Uuid::new_v4(),
+                session_id: tool_info.session_id,
                 tool_name: tool_info.tool_name,
                 tool_description: tool_info.tool_description,
                 tool_input: tool_info.tool_input,

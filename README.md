@@ -83,7 +83,7 @@
 ### AI & Providers
 | Feature | Description |
 |---------|-------------|
-| **Multi-Provider** | Anthropic Claude, OpenAI, OpenRouter (400+ models), MiniMax, and any OpenAI-compatible API (Ollama, LM Studio, LocalAI). Model lists fetched live from provider APIs — new models available instantly |
+| **Multi-Provider** | Anthropic Claude, OpenAI, OpenRouter (400+ models), MiniMax, and any OpenAI-compatible API (Ollama, LM Studio, LocalAI). Model lists fetched live from provider APIs — new models available instantly. Each session remembers its provider + model and restores it on switch |
 | **Real-time Streaming** | Character-by-character response streaming with animated spinner showing model name and live text |
 | **Local LLM Support** | Run with LM Studio, Ollama, or any OpenAI-compatible endpoint — 100% private, zero-cost |
 | **Cost Tracking** | Per-message token count and cost displayed in header; `/usage` shows all-time breakdown grouped by model with real costs + estimates for historical sessions |
@@ -116,7 +116,8 @@
 | **Input History** | Persistent command history (`~/.opencrabs/history.txt`), loaded on startup, capped at 500 entries |
 | **Inline Tool Approval** | Claude Code-style `❯ Yes / Always / No` selector with arrow key navigation |
 | **Inline Plan Approval** | Interactive plan review selector (Approve / Reject / Request Changes / View Plan) |
-| **Session Management** | Create, rename, delete sessions with persistent SQLite storage; token counts and context % per session |
+| **Session Management** | Create, rename, delete sessions with persistent SQLite storage; each session remembers its provider + model — switching sessions auto-restores the provider (no manual `/models` needed); token counts and context % per session |
+| **Parallel Sessions** | Multiple sessions can have in-flight requests to different providers simultaneously. Send a message in one session, switch to another, send another — both process in parallel. Background sessions auto-approve tool calls; you'll see results when you switch back |
 | **Scroll While Streaming** | Scroll up during streaming without being yanked back to bottom; auto-scroll re-enables when you scroll back down or send a message |
 | **Compaction Summary** | Auto-compaction shows the full summary in chat as a system message — see exactly what the agent remembered |
 | **Syntax Highlighting** | 100+ languages with line numbers via syntect |
@@ -129,6 +130,7 @@
 | Feature | Description |
 |---------|-------------|
 | **Built-in Tools** | Read/write/edit files, bash, glob, grep, web search (DuckDuckGo + EXA default, no key needed; Brave optional), plan mode, and more |
+| **Per-Session Isolation** | Each session is an independent agent with its own provider, model, context, and tool state. Sessions can run tasks in parallel against different providers — ask Claude a question in one session while Kimi works on code in another |
 | **Plan Mode** | Structured task decomposition with dependency graphs, complexity ratings, and inline approval workflow |
 | **Self-Sustaining** | Agent can modify its own source, build, test, and hot-restart via Unix `exec()` |
 | **Natural Language Commands** | Tell OpenCrabs to create slash commands — it writes them to `commands.toml` autonomously via the `config_manager` tool |
@@ -257,7 +259,9 @@ default_model = "moonshotai/kimi-k2.5"
 api_key = "nvapi-..."
 ```
 
-**Provider priority:** MiniMax > OpenRouter > Anthropic > OpenAI > Custom. The first provider with `enabled = true` is used. Each provider has its own API key in `keys.toml` — no sharing or confusion.
+**Provider priority:** MiniMax > OpenRouter > Anthropic > OpenAI > Custom. The first provider with `enabled = true` is used on new sessions. Each provider has its own API key in `keys.toml` — no sharing or confusion.
+
+**Per-session provider:** Each session remembers which provider and model it was using. Switch to Claude in one session, Kimi in another — when you `/sessions` switch between them, the provider restores automatically. No need to `/models` every time. New sessions inherit the current provider.
 
 ---
 
@@ -864,17 +868,19 @@ See [Plan Mode User Guide](src/docs/PLAN_MODE_USER_GUIDE.md) for full documentat
 
 ### Sessions Mode
 
+Each session shows its provider/model badge (e.g. `[anthropic/claude-sonnet-4-6]`) and token count. Sessions processing in the background show a spinner; sessions with unread responses show a green dot.
+
 | Shortcut | Action |
 |----------|--------|
 | `↑` / `↓` | Navigate sessions |
-| `Enter` | Load selected session |
+| `Enter` | Load selected session (auto-restores its provider + model) |
 | `R` | Rename session |
 | `D` | Delete session |
 | `Esc` | Back to chat |
 
 ### Tool Approval (Inline)
 
-When the AI requests a tool that needs permission, an inline approval prompt appears in chat:
+When the AI requests a tool that needs permission, an inline approval prompt appears in chat. Approvals are session-aware: background sessions auto-approve tool calls so they don't block, and switching sessions never loses a pending approval.
 
 | Shortcut | Action |
 |----------|--------|
