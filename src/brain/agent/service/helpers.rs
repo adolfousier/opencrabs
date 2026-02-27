@@ -48,15 +48,35 @@ impl AgentService {
         let mut block_states: Vec<BlockState> = Vec::new();
         let mut reasoning_buf = String::new();
 
-        while let Some(event_result) = stream.next().await {
-            // Check for cancellation between stream events
+        // Maximum idle time between SSE events before treating as a dropped connection.
+        // NVIDIA/Kimi and some other providers occasionally hang silently without sending
+        // [DONE] — this timeout lets the retry logic in tool_loop.rs recover instead of
+        // blocking the TUI forever.
+        const STREAM_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+        loop {
+            // Check for cancellation before waiting for the next event
             if let Some(token) = cancel_token
                 && token.is_cancelled()
             {
                 tracing::info!("Stream cancelled by user");
                 break;
             }
-            let event = match event_result {
+
+            let next = match tokio::time::timeout(STREAM_IDLE_TIMEOUT, stream.next()).await {
+                Ok(Some(item)) => item,
+                Ok(None) => break, // Stream ended normally
+                Err(_elapsed) => {
+                    tracing::warn!(
+                        "⏱️ Stream idle timeout after {}s — no event received from provider. \
+                         Treating as dropped stream (stop_reason=None → will retry).",
+                        STREAM_IDLE_TIMEOUT.as_secs()
+                    );
+                    break; // stop_reason stays None → triggers retry in tool_loop
+                }
+            };
+
+            let event = match next {
                 Ok(e) => e,
                 Err(e) => {
                     tracing::warn!("Stream error: {}", e);
