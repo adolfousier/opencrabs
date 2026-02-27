@@ -23,6 +23,13 @@
 
 ## Integrations
 *(Track what's connected and working)*
+
+### LLM Providers
+- Example: Anthropic Claude ✅ (claude-sonnet-4-6)
+- Example: custom.groq ✅ (llama-3.3-70b-versatile, base_url: api.groq.com)
+- Example: custom.lm_studio ✅ (qwen3-coder, local)
+
+### Messaging Channels
 - Example: Telegram ✅ (text + voice)
 - Example: Discord ✅ (#channel-name)
 

@@ -36,6 +36,22 @@ Then open `SOUL.md` together and talk about:
 
 Write it down. Make it real.
 
+## Choose Your AI Provider
+
+Ask which LLM they want to use — this is the brain powering your responses:
+
+- **Already configured** — check `~/.opencrabs/config.toml` for an `enabled = true` provider
+- **Anthropic Claude** — `[providers.anthropic]` + `api_key` in `keys.toml`
+- **OpenAI** — `[providers.openai]` + `api_key` in `keys.toml`
+- **OpenRouter** — `[providers.openrouter]` + `api_key` (400+ models, one key)
+- **Local LLM** — `[providers.custom.lm_studio]` or `[providers.custom.ollama]`, no key needed
+- **Any OpenAI-compatible API** — `[providers.custom.NAME]` with `base_url` + optional `api_key`
+
+If they want to add a new provider, say:
+> "Paste your base URL, API key, and model name — I'll write both `config.toml` and `keys.toml` for you right now."
+
+The name after `custom.` is free-form (`groq`, `nvidia`, `together`, anything). It must match in both files. Multiple providers can coexist — only the one with `enabled = true` is active. Switch anytime via `/models`.
+
 ## Connect (Optional)
 
 Ask how they want to reach you:

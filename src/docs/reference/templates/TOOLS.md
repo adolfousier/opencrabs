@@ -62,6 +62,79 @@ Things like:
 - OpenCrabs tools operate on the directory you launched from. Use `/cd` to change at runtime, or use `config_manager` with `set_working_directory` to change via natural language.
 - **Env files:** `~/.opencrabs/.env` — chmod 600 (owner-only read)
 
+## LLM Provider Configuration
+
+OpenCrabs supports multiple LLM providers simultaneously. Each session can use a different provider + model.
+
+### Adding a New Custom Provider
+
+When a user asks to add a new AI provider (e.g. "add Groq", "connect to my OpenRouter", "add this new API"), offer them two paths:
+
+**Path 1 — You handle it (preferred):**
+> "Paste your provider details (base URL, API key, model name) and I'll add it to your config right now."
+
+Then write these two blocks:
+
+**`~/.opencrabs/config.toml`** — add a named section under `[providers.custom]`:
+```toml
+[providers.custom.groq]          # name can be anything: groq, nvidia, together, etc.
+enabled = true                   # set to true to make it active; set others to false
+base_url = "https://api.groq.com/openai/v1/chat/completions"
+default_model = "llama-3.3-70b-versatile"
+models = ["llama-3.3-70b-versatile", "mixtral-8x7b-32768"]
+```
+
+**`~/.opencrabs/keys.toml`** — add a matching section with the same label:
+```toml
+[providers.custom.groq]
+api_key = "gsk_..."
+```
+
+**Critical rules:**
+- The label after `custom.` MUST match exactly in both files (e.g. `custom.groq` ↔ `custom.groq`)
+- Only one provider should have `enabled = true` at a time (the active one)
+- For local LLMs (Ollama, LM Studio) — `api_key = ""` (empty is fine)
+- Use `config_manager` tool with `read_config` / `write_config` to inspect and update these files safely
+
+**Path 2 — User edits manually:**
+> "Add this to `~/.opencrabs/config.toml` and the matching key to `~/.opencrabs/keys.toml`"
+> Then show them the TOML blocks above filled in with their details.
+
+### Multiple Providers Coexisting
+
+All named providers persist — switching via `/models` just toggles `enabled`:
+
+```toml
+[providers.custom.lm_studio]
+enabled = false          # currently inactive
+base_url = "http://localhost:1234/v1/chat/completions"
+default_model = "qwen3-coder"
+
+[providers.custom.groq]
+enabled = true           # currently active
+base_url = "https://api.groq.com/openai/v1/chat/completions"
+default_model = "llama-3.3-70b-versatile"
+
+[providers.custom.nvidia]
+enabled = false
+base_url = "https://integrate.api.nvidia.com/v1/chat/completions"
+default_model = "moonshotai/kimi-k2.5"
+```
+
+User can switch between them via `/models` in the TUI — no need to edit files manually each time.
+
+### Per-Session Provider
+
+Each session remembers its own provider + model. When the user switches sessions, the provider auto-restores. No need to `/models` every time.
+
+To run two providers in parallel: open session A → send message → press `Ctrl+N` for new session B → switch provider via `/models` → send another message. Both process simultaneously.
+
+### Provider Priority (new sessions inherit first enabled)
+
+`providers.custom.*` → `providers.minimax` → `providers.openrouter` → `providers.anthropic` → `providers.openai`
+
+The first provider with `enabled = true` (in config file order) is used for new sessions.
+
 ## Integrations
 
 ### Channel Connections
