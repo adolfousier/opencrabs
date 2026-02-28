@@ -49,7 +49,9 @@ pub(crate) async fn cmd_chat(
             .unwrap_or_default()
             .subsec_nanos() as usize)
             % STARTS.len();
-        println!("{}\n", STARTS[i]);
+        let orange = "\x1b[38;2;215;100;20m";
+        let reset = "\x1b[0m";
+        println!("\n{}{}{}", orange, STARTS[i], reset);
     }
 
     // Initialize database
@@ -689,10 +691,9 @@ pub(crate) async fn cmd_chat(
             % BYES.len();
 
         // Print logo
-        let logo_style = "\x1b[38;2;218;165;32m"; // Gold RGB
+        let logo_style = "\x1b[38;2;215;100;20m"; // Muted orange
         let reset = "\x1b[0m";
-        let logo = r"
-   ___                    ___           _
+        let logo = r"   ___                    ___           _
   / _ \ _ __  ___ _ _    / __|_ _ __ _| |__  ___
  | (_) | '_ \/ -_) ' \  | (__| '_/ _` | '_ \(_-<
   \___/| .__/\___|_||_|  \___|_| \__,_|_.__//__/
@@ -700,7 +701,8 @@ pub(crate) async fn cmd_chat(
         println!();
         println!("{}{}{}", logo_style, logo, reset);
         println!();
-        println!("{}", BYES[i]);
+        println!("{}{}{}", logo_style, BYES[i], reset);
+        println!();
     }
 
     Ok(())

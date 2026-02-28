@@ -68,7 +68,7 @@ fn render_splash_content(f: &mut Frame, area: Rect, provider_name: &str, model_n
     splash_text.extend(vec![
         Line::from(""),
         Line::from(Span::styled(
-            "🦀 Shell Yeah! AI Orchestration at Rust Speed.",
+            "Shell Yeah! AI Orchestration at Rust Speed.",
             Style::default()
                 .fg(Color::Rgb(215, 100, 20))
                 .add_modifier(Modifier::BOLD | Modifier::ITALIC),
