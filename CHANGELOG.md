@@ -5,6 +5,31 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.40] - 2026-02-28
+
+### Added
+- **Live plan checklist widget** (`7e1b4db`) — A real-time task panel appears above the input box whenever the agent is executing a plan. Shows plan title, progress bar (`N/M  ████░░  X%`), and per-task status rows (`✓` completed, `▶` in-progress, `·` pending, `✗` failed) with per-status colors. Height is `min(task_count + 2, 8)` rows; zero height when no plan is active. Panel is session-isolated — each session tracks its own plan file (`~/.opencrabs/agents/session/.opencrabs_plan_{uuid}.json`) and reloads on session switch
+  - `src/tui/render/plan_widget.rs` (new), `src/tui/render/mod.rs`, `src/tui/app/state.rs`, `src/tui/app/messaging.rs`
+
+### Fixed
+- **Live ctx counter during agent tool loops** (`1cb46a9`) — `TokenCountUpdated` events now sync `last_input_tokens` so the `ctx: N/M` display in the status bar ticks up live during streaming and tool execution instead of freezing until `ResponseComplete`
+  - `src/tui/app/state.rs`
+- **Ctx shows base context on session load and new session** (`1cb46a9`) — Status bar no longer starts at `–` or `0` on a fresh session. It immediately reflects system prompt + tool definition token cost via `base_context_tokens()` (system prompt tokens + tool count × 60)
+  - `src/brain/agent/service/builder.rs`, `src/tui/app/messaging.rs`
+- **Plan tool auto-approves on finalize** (`9fca3ec`) — `finalize` now sets `PlanStatus::Approved` directly and instructs the agent to begin executing tasks immediately. Previously the tool returned `PendingApproval` and printed "STOP — wait for user response", causing a double-approval (tool dialog + follow-up message) and blocking task execution
+  - `src/brain/tools/plan_tool.rs`, `src/brain/prompt_builder.rs`
+- **`read_only_mode` dead code removed** (`9fca3ec`) — Remnant field and all callers from the deleted Plan Mode feature purged from `ToolExecutionContext`, tool implementations, `send_message_with_tools_and_mode`, A2A handlers, and tests
+  - `src/tui/app/messaging.rs`, `src/tui/app/state.rs`, `src/brain/tools/bash.rs`, `src/brain/tools/edit_file.rs`, `src/brain/tools/write_file.rs`, `src/brain/tools/code_exec.rs`, `src/brain/tools/notebook.rs`
+- **MiniMax `</think>` block stripping** (`9b0b8d0`) — MiniMax sometimes closes reasoning blocks with `</think>` instead of `<!-- /reasoning -->`. Extended the think-tag filter to handle this closing variant
+  - `src/brain/provider/custom_openai_compatible.rs`
+
+### Changed
+- **Complete TUI color overhaul — gray, orange, and cyan palette** (`2796889`, `3d88f11`, `a33fddc`) — All three legacy accent colors replaced for a cohesive warm-neutral scheme:
+  - `Color::Blue` / `Rgb(70,130,180)` → `Color::Gray` / `Rgb(120,120,120)` — borders, titles, section headers
+  - `Color::Yellow` / `Rgb(184,134,11)` → `Color::Rgb(215,100,20)` muted orange — active/pending states, ctx warning, approval badge
+  - `Color::Green` / green-dominant `Rgb` values → `Color::Cyan` / `Rgb(60–80,165–190,165–190)` — success states, completed tasks, diff additions, ctx-ok indicator
+  - `src/tui/render/chat.rs`, `src/tui/render/dialogs.rs`, `src/tui/render/help.rs`, `src/tui/render/input.rs`, `src/tui/render/plan_widget.rs`, `src/tui/render/sessions.rs`, `src/tui/render/tools.rs`, `src/tui/onboarding_render.rs`
+
 ## [0.2.39] - 2026-02-28
 
 ### Added
@@ -725,6 +750,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.40]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.40
 [0.2.39]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.39
 [0.2.38]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.38
 [0.2.37]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.37

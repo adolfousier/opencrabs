@@ -56,7 +56,7 @@
 
 ## 📸 Screenshots
 
-[![Demo](src/screenshots/opencrabs-demo.gif)](https://github.com/user-attachments/assets/98779eba-030e-4dc3-8b02-ab93fab83ab3)
+[![Demo](src/screenshots/opencrabs-demo.gif)](https://github.com/user-attachments/assets/7f45c5f8-acdf-48d5-b6a4-0e4811a9ee23)
 
 ![Splash](src/screenshots/splash.png)
 
@@ -68,11 +68,9 @@
 
 ![Home Base](src/screenshots/onboard4.png)
 
-![Chat](src/screenshots/opencrabs-ui.png)
+![Sessions](src/screenshots/usage.png)
 
-![Session Usage](src/screenshots/session-usage.png)
-
-![Rebuild Complete](src/screenshots/rebuild-dialog.png)
+![Usage](src/screenshots/session_usage.png)
 
 ---
 
