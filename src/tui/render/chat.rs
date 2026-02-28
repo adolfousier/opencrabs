@@ -97,7 +97,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                         if let Some(stripped) = detail_line.strip_prefix("+ ") {
                             (
                                 Style::default()
-                                    .fg(Color::Rgb(80, 200, 120)) // Green for additions
+                                    .fg(Color::Rgb(60, 185, 185)) // Cyan for additions
                                     .bg(Color::Rgb(20, 30, 20)), // Dim green bg
                                 stripped,
                             )
@@ -447,7 +447,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             Span::styled(
                 "  [Enter] ",
                 Style::default()
-                    .fg(Color::Green)
+                    .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled("Submit  ", Style::default().fg(Color::DarkGray)),

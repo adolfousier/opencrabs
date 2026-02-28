@@ -54,7 +54,7 @@ pub(super) fn render_plan_checklist(f: &mut Frame, app: &App, area: Rect) {
                 .fg(Color::Rgb(160, 160, 160))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(bar, Style::default().fg(Color::Rgb(100, 180, 100))),
+        Span::styled(bar, Style::default().fg(Color::Rgb(80, 175, 175))),
         Span::styled(
             format!("  {}%", percent),
             Style::default().fg(Color::Rgb(160, 160, 160)),
@@ -69,8 +69,8 @@ pub(super) fn render_plan_checklist(f: &mut Frame, app: &App, area: Rect) {
 
     for task in &visible {
         let (icon, color) = match &task.status {
-            TaskStatus::Completed => ("✓", Color::Rgb(80, 160, 80)),
-            TaskStatus::Skipped => ("✓", Color::Rgb(80, 160, 80)),
+            TaskStatus::Completed => ("✓", Color::Rgb(60, 165, 165)),
+            TaskStatus::Skipped => ("✓", Color::Rgb(60, 165, 165)),
             TaskStatus::InProgress => ("▶", Color::Rgb(215, 100, 20)),
             TaskStatus::Failed => ("✗", Color::Red),
             TaskStatus::Blocked(_) => ("·", Color::DarkGray),

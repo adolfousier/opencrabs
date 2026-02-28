@@ -34,7 +34,7 @@ pub(super) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(
             "[N] ",
             Style::default()
-                .fg(Color::Green)
+                .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled("New  ", Style::default().fg(Color::White)),
@@ -159,7 +159,7 @@ pub(super) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
                         .add_modifier(Modifier::BOLD),
                 ));
             } else if app.sessions_with_unread.contains(&session.id) {
-                spans.push(Span::styled(" ●", Style::default().fg(Color::Green)));
+                spans.push(Span::styled(" ●", Style::default().fg(Color::Cyan)));
             }
 
             // Context usage for current session
@@ -171,7 +171,7 @@ pub(super) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
                     } else if ctx_pct > 50.0 {
                         Color::Rgb(215, 100, 20)
                     } else {
-                        Color::Green
+                        Color::Cyan
                     }
                 } else {
                     Color::DarkGray

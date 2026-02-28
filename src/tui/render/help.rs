@@ -198,7 +198,7 @@ pub(super) fn render_settings(f: &mut Frame, app: &App, area: Rect) {
 
     fn status_dot<'a>(label: &'a str, enabled: bool) -> Line<'a> {
         let (dot, color) = if enabled {
-            ("●", Color::Green)
+            ("●", Color::Cyan)
         } else {
             ("○", Color::DarkGray)
         };

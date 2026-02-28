@@ -36,7 +36,7 @@ pub(super) fn render_tool_group<'a>(
     let mut header_spans = vec![Span::styled(
         format!("  {} {}", dot, header),
         Style::default()
-            .fg(Color::Green)
+            .fg(Color::Cyan)
             .add_modifier(Modifier::BOLD),
     )];
     header_spans.push(Span::styled(
@@ -78,7 +78,7 @@ pub(super) fn render_tool_group<'a>(
                 for detail_line in details.lines().take(30) {
                     // Diff-aware coloring: red for deletions, green for additions
                     let line_style = if detail_line.starts_with("+ ") {
-                        Style::default().fg(Color::Rgb(80, 200, 80))
+                        Style::default().fg(Color::Rgb(60, 185, 185))
                     } else if detail_line.starts_with("- ") {
                         Style::default().fg(Color::Rgb(220, 80, 80))
                     } else if detail_line.starts_with("@@ ") {
@@ -233,7 +233,7 @@ pub(super) fn render_inline_approval<'a>(
                 Style::default().fg(Color::DarkGray),
             )]));
             let options = [
-                ("Yes", Color::Green),
+                ("Yes", Color::Cyan),
                 ("Always", Color::Rgb(215, 100, 20)),
                 ("No", Color::Red),
             ];
@@ -354,7 +354,7 @@ pub(super) fn render_approve_menu<'a>(
         }
         ApproveMenuState::Selected(choice) => {
             let (label, color) = match choice {
-                0 => ("Approve-only", Color::Green),
+                0 => ("Approve-only", Color::Cyan),
                 1 => ("Allow all (session)", Color::Rgb(215, 100, 20)),
                 2 => ("Yolo mode", Color::Red),
                 _ => ("Cancelled", Color::DarkGray),

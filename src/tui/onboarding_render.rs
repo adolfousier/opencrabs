@@ -485,7 +485,7 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
             Span::styled(
                 format!("{}{}", key_display, cursor),
                 Style::default().fg(if has_existing {
-                    Color::Green
+                    Color::Cyan
                 } else if api_key_focused {
                     Color::White
                 } else {
@@ -567,7 +567,7 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
             Span::styled(
                 format!("{}{}", masked_key, cursor),
                 Style::default().fg(if wizard.has_existing_key() {
-                    Color::Green
+                    Color::Cyan
                 } else if key_focused {
                     Color::White
                 } else {
@@ -992,7 +992,7 @@ fn render_telegram_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWiza
         Span::styled(
             format!("{}{}", masked_token, cursor),
             Style::default().fg(if wizard.has_existing_telegram_token() {
-                Color::Green
+                Color::Cyan
             } else if token_focused {
                 Color::White
             } else {
@@ -1040,7 +1040,7 @@ fn render_telegram_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWiza
         Span::styled(
             format!("{}{}", uid_display, uid_cursor),
             Style::default().fg(if wizard.has_existing_telegram_user_id() {
-                Color::Green
+                Color::Cyan
             } else if uid_focused {
                 Color::White
             } else {
@@ -1137,7 +1137,7 @@ fn render_discord_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
         Span::styled(
             format!("{}{}", masked_token, cursor),
             Style::default().fg(if wizard.has_existing_discord_token() {
-                Color::Green
+                Color::Cyan
             } else if token_focused {
                 Color::White
             } else {
@@ -1188,7 +1188,7 @@ fn render_discord_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
         Span::styled(
             format!("{}{}", ch_display, ch_cursor),
             Style::default().fg(if wizard.has_existing_discord_channel_id() {
-                Color::Green
+                Color::Cyan
             } else if ch_focused {
                 Color::White
             } else {
@@ -1239,7 +1239,7 @@ fn render_discord_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
         Span::styled(
             format!("{}{}", al_display, al_cursor),
             Style::default().fg(if wizard.has_existing_discord_allowed_list() {
-                Color::Green
+                Color::Cyan
             } else if al_focused {
                 Color::White
             } else {
@@ -1276,7 +1276,7 @@ fn render_whatsapp_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWiza
         lines.push(Line::from(Span::styled(
             "  WhatsApp connected!",
             Style::default()
-                .fg(Color::Green)
+                .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         )));
     } else if let Some(ref qr) = wizard.whatsapp_qr_text {
@@ -1351,7 +1351,7 @@ fn render_whatsapp_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWiza
         Span::styled(
             format!("{}{}", phone_display, phone_cursor),
             Style::default().fg(if wizard.has_existing_whatsapp_phone() {
-                Color::Green
+                Color::Cyan
             } else if phone_focused {
                 Color::White
             } else {
@@ -1438,7 +1438,7 @@ fn render_slack_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard)
         Span::styled(
             format!("{}{}", masked_bot, cursor_b),
             Style::default().fg(if wizard.has_existing_slack_bot_token() {
-                Color::Green
+                Color::Cyan
             } else if bot_focused {
                 Color::White
             } else {
@@ -1489,7 +1489,7 @@ fn render_slack_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard)
         Span::styled(
             format!("{}{}", masked_app, cursor_a),
             Style::default().fg(if wizard.has_existing_slack_app_token() {
-                Color::Green
+                Color::Cyan
             } else if app_focused {
                 Color::White
             } else {
@@ -1537,7 +1537,7 @@ fn render_slack_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard)
         Span::styled(
             format!("{}{}", ch_display, ch_cursor),
             Style::default().fg(if wizard.has_existing_slack_channel_id() {
-                Color::Green
+                Color::Cyan
             } else if ch_focused {
                 Color::White
             } else {
@@ -1588,7 +1588,7 @@ fn render_slack_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard)
         Span::styled(
             format!("{}{}", al_display, al_cursor),
             Style::default().fg(if wizard.has_existing_slack_allowed_list() {
-                Color::Green
+                Color::Cyan
             } else if al_focused {
                 Color::White
             } else {
@@ -1632,7 +1632,7 @@ fn render_channel_test_status(lines: &mut Vec<Line<'static>>, wizard: &Onboardin
             lines.push(Line::from(Span::styled(
                 "  Connected! Press Enter to continue",
                 Style::default()
-                    .fg(Color::Green)
+                    .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             )));
         }
@@ -1698,7 +1698,7 @@ fn render_voice_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard)
         Span::styled(
             format!("{}{}", masked_key, cursor),
             Style::default().fg(if wizard.has_existing_groq_key() {
-                Color::Green
+                Color::Cyan
             } else if groq_focused {
                 Color::White
             } else {
@@ -1838,7 +1838,7 @@ fn render_health_check(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard
         let (icon, color) = match status {
             HealthStatus::Pending => ("...", Color::DarkGray),
             HealthStatus::Running => ("...", ACCENT_GOLD),
-            HealthStatus::Pass => ("OK", Color::Green),
+            HealthStatus::Pass => ("OK", Color::Cyan),
             HealthStatus::Fail(_) => ("FAIL", Color::Red),
         };
 
@@ -1865,7 +1865,7 @@ fn render_health_check(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard
             lines.push(Line::from(Span::styled(
                 "  All checks passed!".to_string(),
                 Style::default()
-                    .fg(Color::Green)
+                    .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             )));
             lines.push(Line::from(Span::styled(
@@ -1916,7 +1916,7 @@ fn render_brain_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard)
         lines.push(Line::from(Span::styled(
             "  Brain files locked in!".to_string(),
             Style::default()
-                .fg(Color::Green)
+                .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         )));
         lines.push(Line::from(Span::styled(
