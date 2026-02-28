@@ -232,7 +232,7 @@ pub(super) fn render_directory_picker(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(
             "[Space/Tab]",
             Style::default()
-                .fg(Color::Rgb(50, 205, 50))
+                .fg(Color::Rgb(60, 190, 190))
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(" Select here  ", Style::default().fg(Color::White)),
@@ -386,7 +386,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
                 Style::default().fg(if base_focused {
                     Color::White
                 } else {
-                    Color::Green
+                    Color::Cyan
                 }),
             ),
         ]));
@@ -432,7 +432,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(if key_focused {
                 Color::White
             } else {
-                Color::Green
+                Color::Cyan
             }),
         ),
     ]));
@@ -476,7 +476,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
                 } else if app.model_selector_custom_model.is_empty() {
                     Color::DarkGray
                 } else {
-                    Color::Green
+                    Color::Cyan
                 }),
             ),
         ]));
@@ -579,7 +579,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
                 } else if app.model_selector_custom_name.is_empty() {
                     Color::DarkGray
                 } else {
-                    Color::Green
+                    Color::Cyan
                 }),
             ),
         ]));
@@ -937,7 +937,7 @@ pub(super) fn render_restart_dialog(f: &mut Frame, app: &App, area: Rect) {
         Line::from(Span::styled(
             format!("  {}", status),
             Style::default()
-                .fg(Color::Green)
+                .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
@@ -947,7 +947,7 @@ pub(super) fn render_restart_dialog(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(
                 "  [Enter] ",
                 Style::default()
-                    .fg(Color::Green)
+                    .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw("Restart  "),
@@ -963,7 +963,7 @@ pub(super) fn render_restart_dialog(f: &mut Frame, app: &App, area: Rect) {
         Block::default()
             .title(" Rebuild Complete ")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Green)),
+            .border_style(Style::default().fg(Color::Cyan)),
     );
     f.render_widget(dialog, dialog_area);
 }

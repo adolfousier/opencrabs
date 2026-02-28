@@ -132,7 +132,7 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
         } else if pct > 60.0 {
             Color::Rgb(215, 100, 20)
         } else {
-            Color::Green
+            Color::Cyan
         };
         let ctx_label = format_token_count_raw(input_tok as i32);
         let max_label = format_token_count_raw(app.context_max_tokens as i32);
@@ -165,7 +165,7 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
         Line::from(Span::styled(
             format!(" [{}] ", names.join(" | ")),
             Style::default()
-                .fg(Color::Rgb(70, 200, 130))
+                .fg(Color::Rgb(60, 185, 185))
                 .add_modifier(Modifier::BOLD),
         ))
         .alignment(Alignment::Right)
