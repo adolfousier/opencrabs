@@ -492,29 +492,16 @@ impl App {
         self.reload_plan();
     }
 
-    /// Reload the plan document from disk.
-    /// If the plan exists but is no longer active (not InProgress), the file is
-    /// deleted immediately — the chat history is the canonical record.
+    /// Reload the plan document from disk (read-only — never deletes the file).
+    /// The plan file is the agent tool's IPC storage; it must not be deleted while
+    /// the agent is still writing to it (create → add_task → finalize → execute).
+    /// The render layer only shows the widget when status == InProgress.
+    /// File cleanup is handled by send_message after the agent exchange completes.
     pub(crate) fn reload_plan(&mut self) {
-        let loaded = self.plan_file_path.as_ref().and_then(|path| {
+        self.plan_document = self.plan_file_path.as_ref().and_then(|path| {
             let content = std::fs::read_to_string(path).ok()?;
             serde_json::from_str::<crate::tui::plan::PlanDocument>(&content).ok()
         });
-
-        match loaded {
-            Some(plan) if matches!(plan.status, crate::tui::plan::PlanStatus::InProgress) => {
-                self.plan_document = Some(plan);
-            }
-            Some(_) => {
-                // Plan is stale (Draft / PendingApproval / Completed / Rejected / etc.)
-                // Chat history already contains the plan; delete the file.
-                self.discard_plan_file();
-                self.plan_document = None;
-            }
-            None => {
-                self.plan_document = None;
-            }
-        }
     }
 
     /// Clear the in-memory plan and delete the backing file.
@@ -1200,6 +1187,8 @@ impl App {
                 if self.is_current_session(session_id) =>
             {
                 self.display_token_count = count;
+                // Keep last_input_tokens in sync so the ctx display updates live during tool loops
+                self.last_input_tokens = Some(count as u32);
             }
             // Silently ignore events for background sessions (already handled above for ResponseComplete/Error)
             TuiEvent::ToolCallStarted { .. }

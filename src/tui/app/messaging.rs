@@ -30,6 +30,8 @@ impl App {
         self.mode = AppMode::Chat;
         self.approval_auto_session = false;
         self.approval_auto_always = false;
+        // Show the system prompt + tools baseline immediately — new sessions are never 0
+        self.last_input_tokens = Some(self.agent_service.base_context_tokens());
 
         // Sync shared session ID for channels (Telegram, WhatsApp)
         *self.shared_session_id.lock().await = Some(session.id);
@@ -78,9 +80,23 @@ impl App {
         // Sync shared session ID for channels (Telegram, WhatsApp)
         *self.shared_session_id.lock().await = Some(session.id);
 
-        // Restore last known context size for this session (set by previous responses).
-        // Falls back to None (shows –) on first ever load before any response.
-        self.last_input_tokens = self.session_context_cache.get(&session_id).copied();
+        // Restore last known context size for this session.
+        // Priority: cached value from a real response > message token sum > agent baseline.
+        // The agent baseline (system prompt + tools) ensures ctx never shows "–",
+        // even on a brand-new session that hasn't sent its first message yet.
+        let base = self.agent_service.base_context_tokens();
+        self.last_input_tokens = self
+            .session_context_cache
+            .get(&session_id)
+            .copied()
+            .or_else(|| {
+                if self.display_token_count > 0 {
+                    Some(self.display_token_count as u32 + base)
+                } else {
+                    None
+                }
+            })
+            .or(Some(base));
 
         // Clear unread indicator for this session
         self.sessions_with_unread.remove(&session_id);
@@ -596,7 +612,8 @@ impl App {
                 match op {
                     "create" => {
                         let name = tool_input
-                            .get("name")
+                            .get("title")
+                            .or_else(|| tool_input.get("name"))
                             .and_then(|v| v.as_str())
                             .unwrap_or("plan");
                         format!("Plan: create '{}'", name)
@@ -1013,16 +1030,28 @@ impl App {
             content.len()
         );
 
-        // Clear plan widget if the plan is not actively executing.
-        // This ensures that a Draft/PendingApproval/Completed plan from a previous
-        // exchange doesn't persist in the UI once the user moves on.
-        // If the user sends a new message and no plan is actively running, discard
-        // the plan file. Chat history is the canonical record — no need to keep the file.
-        if let Some(ref plan) = self.plan_document
-            && !matches!(plan.status, crate::tui::plan::PlanStatus::InProgress)
-        {
-            self.discard_plan_file();
-            self.plan_document = None;
+        // On every new user message, decide what to do with any in-memory plan:
+        //
+        // Plan file lifecycle on user message:
+        // • Terminal (Completed/Rejected/Cancelled): delete file + clear memory.
+        // • InProgress: plan is actively executing — keep file and widget.
+        // • Everything else (Draft/PendingApproval/Approved): user moved on.
+        //   Clear widget from memory but keep file on disk so the agent tool can
+        //   still read/write it if the exchange continues.
+        if let Some(ref plan) = self.plan_document {
+            use crate::tui::plan::PlanStatus;
+            match plan.status {
+                PlanStatus::Completed | PlanStatus::Rejected | PlanStatus::Cancelled => {
+                    self.discard_plan_file();
+                    self.plan_document = None;
+                }
+                PlanStatus::InProgress => {
+                    // Actively executing — leave widget showing
+                }
+                _ => {
+                    self.plan_document = None;
+                }
+            }
         }
 
         // Deny stale pending approvals so they don't block streaming

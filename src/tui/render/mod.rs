@@ -72,9 +72,8 @@ pub fn render(f: &mut Frame, app: &mut App) {
     };
     let input_height = (input_line_count as u16 + 2).min(10);
 
-    // Plan checklist height: only shown while the plan is actively executing.
-    // Draft / PendingApproval / Completed / Rejected plans are not displayed —
-    // they already appear in chat history or the user has moved on.
+    // Show the plan checklist only while tasks are actively executing.
+    // Any other status means the plan is not running (user moved on, cancelled, etc.).
     let plan_height = app
         .plan_document
         .as_ref()

@@ -295,11 +295,12 @@ impl Tool for PlanTool {
     }
 
     fn requires_approval_for_input(&self, input: &Value) -> bool {
-        // `finalize` = review/approve the plan; `start_task` = confirm each task before execution
+        // Only finalize needs approval — it's the one user-visible gate before execution.
+        // start_task no longer requires per-task approval; the finalize approval covers the plan.
         input
             .get("operation")
             .and_then(|v| v.as_str())
-            .map(|op| op == "finalize" || op == "start_task")
+            .map(|op| op == "finalize")
             .unwrap_or(false)
     }
 
@@ -550,9 +551,10 @@ impl Tool for PlanTool {
                     String::new()
                 };
 
-                // Change status
+                // Auto-approve: the tool-call approval dialog is the user's gate.
+                // No second "waiting for approval" step needed.
                 let old_status = current_plan.status.clone();
-                current_plan.status = PlanStatus::PendingApproval;
+                current_plan.status = PlanStatus::Approved;
                 current_plan.updated_at = Utc::now();
 
                 tracing::info!(
@@ -561,7 +563,7 @@ impl Tool for PlanTool {
                     current_plan.status
                 );
 
-                // Build task list for the agent to present directly to the user
+                // Build task list summary
                 let task_list = current_plan
                     .tasks
                     .iter()
@@ -571,11 +573,11 @@ impl Tool for PlanTool {
                     .join("\n");
 
                 format!(
-                    "✓ Plan finalized and ready for review!\n\n\
+                    "✓ Plan approved! Proceed to execute tasks in order using 'start_task' and 'complete_task'.\n\n\
                      📋 Plan: {}\n\
                      📝 Description: {}\n\n\
                      Tasks ({} total):\n{}{}\n\n\
-                     The user will be shown an approval dialog. Wait for their response before executing any tasks.",
+                     Start executing now — begin with task #1.",
                     current_plan.title,
                     current_plan
                         .description

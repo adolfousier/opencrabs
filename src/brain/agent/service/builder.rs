@@ -217,6 +217,21 @@ impl AgentService {
         self.default_system_brain.as_ref()
     }
 
+    /// Estimate the baseline token cost of every request for this agent:
+    /// system prompt + tool definitions. This is the floor for the ctx display
+    /// even on a brand-new session with no messages.
+    pub fn base_context_tokens(&self) -> u32 {
+        use crate::brain::tokenizer::count_tokens;
+        let system_tokens = self
+            .default_system_brain
+            .as_deref()
+            .map(count_tokens)
+            .unwrap_or(0);
+        // Rough per-tool overhead: name + description ≈ 60 tokens each
+        let tool_tokens = self.tool_registry.list_tools().len() * 60;
+        (system_tokens + tool_tokens) as u32
+    }
+
     /// Get the default model for this provider
     pub fn provider_model(&self) -> String {
         self.provider
