@@ -19,7 +19,7 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
     // Build input text with cursor highlight on the character (not inserting a block)
     let cursor_style = Style::default()
         .fg(Color::Black)
-        .bg(Color::Rgb(70, 130, 180));
+        .bg(Color::Rgb(120, 120, 120));
 
     if app.input_buffer.is_empty() {
         // Empty input — just show prompt with cursor block
@@ -233,7 +233,7 @@ pub(super) fn render_slash_autocomplete(f: &mut Frame, app: &App, input_area: Re
             let style = if is_selected {
                 Style::default()
                     .fg(Color::Black)
-                    .bg(Color::Rgb(70, 130, 180))
+                    .bg(Color::Rgb(120, 120, 120))
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White)
@@ -242,7 +242,7 @@ pub(super) fn render_slash_autocomplete(f: &mut Frame, app: &App, input_area: Re
             let desc_style = if is_selected {
                 Style::default()
                     .fg(Color::Black)
-                    .bg(Color::Rgb(70, 130, 180))
+                    .bg(Color::Rgb(120, 120, 120))
             } else {
                 Style::default().fg(Color::DarkGray)
             };

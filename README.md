@@ -56,7 +56,7 @@
 
 ## 📸 Screenshots
 
-[![Demo](src/screenshots/opencrabs-demo.gif)](https://github.com/user-attachments/assets/6c5f01e2-8444-467e-97f1-61639fac8c37)
+[![Demo](src/screenshots/opencrabs-demo.gif)](https://github.com/user-attachments/assets/98779eba-030e-4dc3-8b02-ab93fab83ab3)
 
 ![Splash](src/screenshots/splash.png)
 

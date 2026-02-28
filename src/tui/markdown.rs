@@ -44,7 +44,7 @@ pub fn parse_markdown(markdown: &str) -> Vec<Line<'static>> {
                             Span::styled(
                                 code_language.clone(),
                                 Style::default()
-                                    .fg(Color::Rgb(70, 130, 180))
+                                    .fg(Color::Rgb(120, 120, 120))
                                     .add_modifier(Modifier::BOLD),
                             ),
                             Span::styled(" ─", Style::default().fg(Color::DarkGray)),
@@ -82,7 +82,7 @@ pub fn parse_markdown(markdown: &str) -> Vec<Line<'static>> {
                         let mut styled_line = vec![Span::styled(
                             prefix.to_string(),
                             Style::default()
-                                .fg(Color::Rgb(70, 130, 180))
+                                .fg(Color::Rgb(120, 120, 120))
                                 .add_modifier(Modifier::BOLD),
                         )];
 
@@ -90,7 +90,7 @@ pub fn parse_markdown(markdown: &str) -> Vec<Line<'static>> {
                             // Apply heading style to all spans in the line
                             *span = span.clone().style(
                                 Style::default()
-                                    .fg(Color::Rgb(70, 130, 180))
+                                    .fg(Color::Rgb(120, 120, 120))
                                     .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
                             );
                         }
@@ -168,7 +168,7 @@ pub fn parse_markdown(markdown: &str) -> Vec<Line<'static>> {
                 current_line.push(Span::styled(
                     format!("`{}`", code),
                     Style::default()
-                        .fg(Color::Rgb(184, 134, 11))
+                        .fg(Color::Rgb(215, 100, 20))
                         .add_modifier(Modifier::BOLD),
                 ));
             }

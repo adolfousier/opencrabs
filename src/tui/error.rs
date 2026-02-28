@@ -22,8 +22,8 @@ impl ErrorSeverity {
     pub fn color(&self) -> ratatui::style::Color {
         use ratatui::style::Color;
         match self {
-            ErrorSeverity::Info => Color::Rgb(70, 130, 180),
-            ErrorSeverity::Warning => Color::Rgb(184, 134, 11),
+            ErrorSeverity::Info => Color::Rgb(120, 120, 120),
+            ErrorSeverity::Warning => Color::Rgb(215, 100, 20),
             ErrorSeverity::Error => Color::Red,
             ErrorSeverity::Critical => Color::Magenta,
         }
@@ -234,8 +234,8 @@ mod tests {
     fn test_error_severity_color() {
         use ratatui::style::Color;
 
-        assert_eq!(ErrorSeverity::Info.color(), Color::Rgb(70, 130, 180));
-        assert_eq!(ErrorSeverity::Warning.color(), Color::Rgb(184, 134, 11));
+        assert_eq!(ErrorSeverity::Info.color(), Color::Rgb(120, 120, 120));
+        assert_eq!(ErrorSeverity::Warning.color(), Color::Rgb(215, 100, 20));
         assert_eq!(ErrorSeverity::Error.color(), Color::Red);
         assert_eq!(ErrorSeverity::Critical.color(), Color::Magenta);
     }

@@ -20,14 +20,14 @@ pub(super) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(
             "  [↑↓] ",
             Style::default()
-                .fg(Color::Rgb(70, 130, 180))
+                .fg(Color::Rgb(120, 120, 120))
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled("Navigate  ", Style::default().fg(Color::White)),
         Span::styled(
             "[Enter] ",
             Style::default()
-                .fg(Color::Rgb(70, 130, 180))
+                .fg(Color::Rgb(120, 120, 120))
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled("Select  ", Style::default().fg(Color::White)),
@@ -41,7 +41,7 @@ pub(super) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(
             "[R] ",
             Style::default()
-                .fg(Color::Rgb(184, 134, 11))
+                .fg(Color::Rgb(215, 100, 20))
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled("Rename  ", Style::default().fg(Color::White)),
@@ -95,7 +95,7 @@ pub(super) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
         if is_renaming {
             // Show rename input
             lines.push(Line::from(vec![
-                Span::styled(prefix, Style::default().fg(Color::Rgb(184, 134, 11))),
+                Span::styled(prefix, Style::default().fg(Color::Rgb(215, 100, 20))),
                 Span::styled(
                     format!("{}█", app.session_rename_buffer),
                     Style::default()
@@ -110,10 +110,10 @@ pub(super) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
         } else {
             let name_style = if is_selected {
                 Style::default()
-                    .fg(Color::Rgb(184, 134, 11))
+                    .fg(Color::Rgb(215, 100, 20))
                     .add_modifier(Modifier::BOLD)
             } else if is_current {
-                Style::default().fg(Color::Blue)
+                Style::default().fg(Color::Gray)
             } else {
                 Style::default().fg(Color::White)
             };
@@ -184,7 +184,7 @@ pub(super) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
                 spans.push(Span::styled(
                     current_suffix,
                     Style::default()
-                        .fg(Color::Rgb(70, 130, 180))
+                        .fg(Color::Rgb(120, 120, 120))
                         .add_modifier(Modifier::BOLD),
                 ));
             }

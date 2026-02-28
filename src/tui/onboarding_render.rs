@@ -15,9 +15,9 @@ use ratatui::{
 };
 
 /// Main color palette (matches existing OpenCrabs theme)
-const BRAND_BLUE: Color = Color::Rgb(70, 130, 180);
-const BRAND_GOLD: Color = Color::Rgb(218, 165, 32);
-const ACCENT_GOLD: Color = Color::Rgb(184, 134, 11);
+const BRAND_BLUE: Color = Color::Rgb(120, 120, 120);
+const BRAND_GOLD: Color = Color::Rgb(215, 100, 20);
+const ACCENT_GOLD: Color = Color::Rgb(215, 100, 20);
 
 /// Render the entire onboarding wizard
 pub fn render_onboarding(f: &mut Frame, wizard: &OnboardingWizard) {
@@ -1936,7 +1936,7 @@ fn render_brain_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard)
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             format!("  {} — rolling with defaults", err),
-            Style::default().fg(Color::Yellow),
+            Style::default().fg(Color::Rgb(215, 100, 20)),
         )));
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(

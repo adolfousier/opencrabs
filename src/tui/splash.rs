@@ -38,7 +38,7 @@ fn render_splash_content(f: &mut Frame, area: Rect, provider_name: &str, model_n
     let version = env!("CARGO_PKG_VERSION");
 
     let logo_style = Style::default()
-        .fg(Color::Rgb(218, 165, 32))
+        .fg(Color::Rgb(215, 100, 20))
         .add_modifier(Modifier::BOLD);
 
     // Pad all ASCII art lines to the same width so centering keeps them aligned
@@ -70,7 +70,7 @@ fn render_splash_content(f: &mut Frame, area: Rect, provider_name: &str, model_n
         Line::from(Span::styled(
             "🦀 Shell Yeah! AI Orchestration at Rust Speed.",
             Style::default()
-                .fg(Color::Rgb(184, 134, 11))
+                .fg(Color::Rgb(215, 100, 20))
                 .add_modifier(Modifier::BOLD | Modifier::ITALIC),
         )),
         Line::from(""),
@@ -80,13 +80,13 @@ fn render_splash_content(f: &mut Frame, area: Rect, provider_name: &str, model_n
             Span::styled(
                 "🦀 OpenCrabs",
                 Style::default()
-                    .fg(Color::Rgb(218, 165, 32))
+                    .fg(Color::Rgb(215, 100, 20))
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 format!(" v{} ", version),
                 Style::default()
-                    .fg(Color::Rgb(184, 134, 11))
+                    .fg(Color::Rgb(215, 100, 20))
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled("───╮", Style::default().fg(Color::Rgb(90, 110, 150))),
@@ -118,7 +118,7 @@ fn render_splash_content(f: &mut Frame, area: Rect, provider_name: &str, model_n
         Line::from(Span::styled(
             "Press any key to continue...",
             Style::default()
-                .fg(Color::Rgb(184, 134, 11))
+                .fg(Color::Rgb(215, 100, 20))
                 .add_modifier(Modifier::BOLD),
         )),
     ]);
