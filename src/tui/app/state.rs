@@ -346,6 +346,11 @@ pub struct App {
     /// Raw password text being typed (never displayed, only dots)
     pub sudo_input: String,
 
+    /// Active plan document for the current session (loaded from disk)
+    pub plan_document: Option<crate::tui::plan::PlanDocument>,
+    /// Path to the plan JSON file for the current session
+    pub plan_file_path: Option<std::path::PathBuf>,
+
     /// Services
     pub(crate) agent_service: Arc<AgentService>,
     pub(crate) session_service: SessionService,
@@ -451,6 +456,8 @@ impl App {
             display_token_count: 0,
             sudo_pending: None,
             sudo_input: String::new(),
+            plan_document: None,
+            plan_file_path: None,
             session_service: SessionService::new(context.clone()),
             message_service: MessageService::new(context),
             agent_service,
@@ -472,6 +479,49 @@ impl App {
     /// Check if a session_id matches the currently active session
     pub(crate) fn is_current_session(&self, session_id: Uuid) -> bool {
         self.current_session.as_ref().map(|s| s.id) == Some(session_id)
+    }
+
+    /// Set the plan file path for a session and attempt to load it.
+    pub(crate) fn set_plan_file_for_session(&mut self, session_id: Uuid) {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        let path = std::path::PathBuf::from(format!(
+            "{}/.opencrabs/agents/session/.opencrabs_plan_{}.json",
+            home, session_id
+        ));
+        self.plan_file_path = Some(path);
+        self.reload_plan();
+    }
+
+    /// Reload the plan document from disk.
+    /// If the plan exists but is no longer active (not InProgress), the file is
+    /// deleted immediately — the chat history is the canonical record.
+    pub(crate) fn reload_plan(&mut self) {
+        let loaded = self.plan_file_path.as_ref().and_then(|path| {
+            let content = std::fs::read_to_string(path).ok()?;
+            serde_json::from_str::<crate::tui::plan::PlanDocument>(&content).ok()
+        });
+
+        match loaded {
+            Some(plan) if matches!(plan.status, crate::tui::plan::PlanStatus::InProgress) => {
+                self.plan_document = Some(plan);
+            }
+            Some(_) => {
+                // Plan is stale (Draft / PendingApproval / Completed / Rejected / etc.)
+                // Chat history already contains the plan; delete the file.
+                self.discard_plan_file();
+                self.plan_document = None;
+            }
+            None => {
+                self.plan_document = None;
+            }
+        }
+    }
+
+    /// Clear the in-memory plan and delete the backing file.
+    pub(crate) fn discard_plan_file(&mut self) {
+        if let Some(path) = &self.plan_file_path {
+            let _ = std::fs::remove_file(path);
+        }
     }
 
     /// Get the shared session ID handle (for channels like Telegram/WhatsApp)
@@ -1066,6 +1116,10 @@ impl App {
                             expanded: false,
                         });
                     }
+                }
+                // Reload plan from disk whenever the plan tool completes
+                if tool_name == "plan" {
+                    self.reload_plan();
                 }
                 if self.auto_scroll {
                     self.scroll_offset = 0;

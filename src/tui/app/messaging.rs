@@ -22,6 +22,7 @@ impl App {
             .await?;
 
         self.current_session = Some(session.clone());
+        self.set_plan_file_for_session(session.id);
         self.is_processing = false; // New session is never processing
         self.messages.clear();
         self.auto_scroll = true;
@@ -53,6 +54,7 @@ impl App {
             .await?;
 
         self.current_session = Some(session.clone());
+        self.set_plan_file_for_session(session.id);
         // Sync is_processing flag with per-session state
         self.is_processing = self.processing_sessions.contains(&session.id);
         let (display, hidden) = Self::trim_messages_to_display_budget(&messages, 200_000);
@@ -1010,6 +1012,18 @@ impl App {
             self.current_session.is_some(),
             content.len()
         );
+
+        // Clear plan widget if the plan is not actively executing.
+        // This ensures that a Draft/PendingApproval/Completed plan from a previous
+        // exchange doesn't persist in the UI once the user moves on.
+        // If the user sends a new message and no plan is actively running, discard
+        // the plan file. Chat history is the canonical record — no need to keep the file.
+        if let Some(ref plan) = self.plan_document
+            && !matches!(plan.status, crate::tui::plan::PlanStatus::InProgress)
+        {
+            self.discard_plan_file();
+            self.plan_document = None;
+        }
 
         // Deny stale pending approvals so they don't block streaming
         let stale_count = self

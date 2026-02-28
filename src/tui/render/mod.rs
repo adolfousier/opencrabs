@@ -6,6 +6,7 @@ mod chat;
 mod dialogs;
 mod help;
 mod input;
+mod plan_widget;
 mod sessions;
 mod tools;
 mod utils;
@@ -33,6 +34,7 @@ use dialogs::{
 };
 use help::{render_help, render_settings};
 use input::{render_input, render_slash_autocomplete, render_status_bar};
+use plan_widget::render_plan_checklist;
 use sessions::render_sessions;
 
 /// Render the entire UI
@@ -70,21 +72,33 @@ pub fn render(f: &mut Frame, app: &mut App) {
     };
     let input_height = (input_line_count as u16 + 2).min(10);
 
+    // Plan checklist height: only shown while the plan is actively executing.
+    // Draft / PendingApproval / Completed / Rejected plans are not displayed —
+    // they already appear in chat history or the user has moved on.
+    let plan_height = app
+        .plan_document
+        .as_ref()
+        .filter(|p| p.status == crate::tui::plan::PlanStatus::InProgress)
+        .map(|p| (p.tasks.len() + 2).min(8) as u16)
+        .unwrap_or(0);
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(10),              // Main content
-            Constraint::Length(input_height), // Input (dynamic)
-            Constraint::Length(1),            // Status bar
+            Constraint::Min(10),              // [0] Chat messages
+            Constraint::Length(plan_height),  // [1] Plan checklist (0 when no plan)
+            Constraint::Length(input_height), // [2] Input (dynamic)
+            Constraint::Length(1),            // [3] Status bar
         ])
         .split(f.area());
 
     // Full area for modes that replace the chat+input (Sessions, Help, etc.)
+    // These modes do not show the plan checklist.
     let full_content_area = Rect {
         x: chunks[0].x,
         y: chunks[0].y,
         width: chunks[0].width,
-        height: chunks[0].height + chunks[1].height + chunks[2].height,
+        height: chunks[0].height + chunks[1].height + chunks[2].height + chunks[3].height,
     };
 
     match app.mode {
@@ -93,10 +107,13 @@ pub fn render(f: &mut Frame, app: &mut App) {
         }
         AppMode::Chat => {
             render_chat(f, app, chunks[0]);
-            render_input(f, app, chunks[1]);
-            render_status_bar(f, app, chunks[2]);
+            if plan_height > 0 {
+                render_plan_checklist(f, app, chunks[1]);
+            }
+            render_input(f, app, chunks[2]);
+            render_status_bar(f, app, chunks[3]);
             if app.slash_suggestions_active {
-                render_slash_autocomplete(f, app, chunks[1]);
+                render_slash_autocomplete(f, app, chunks[2]);
             }
         }
         AppMode::Sessions => {
@@ -122,20 +139,29 @@ pub fn render(f: &mut Frame, app: &mut App) {
         }
         AppMode::ModelSelector => {
             render_chat(f, app, chunks[0]);
-            render_input(f, app, chunks[1]);
-            render_status_bar(f, app, chunks[2]);
+            if plan_height > 0 {
+                render_plan_checklist(f, app, chunks[1]);
+            }
+            render_input(f, app, chunks[2]);
+            render_status_bar(f, app, chunks[3]);
             render_model_selector(f, app, f.area());
         }
         AppMode::UsageDialog => {
             render_chat(f, app, chunks[0]);
-            render_input(f, app, chunks[1]);
-            render_status_bar(f, app, chunks[2]);
+            if plan_height > 0 {
+                render_plan_checklist(f, app, chunks[1]);
+            }
+            render_input(f, app, chunks[2]);
+            render_status_bar(f, app, chunks[3]);
             render_usage_dialog(f, app, f.area());
         }
         AppMode::RestartPending => {
             render_chat(f, app, chunks[0]);
-            render_input(f, app, chunks[1]);
-            render_status_bar(f, app, chunks[2]);
+            if plan_height > 0 {
+                render_plan_checklist(f, app, chunks[1]);
+            }
+            render_input(f, app, chunks[2]);
+            render_status_bar(f, app, chunks[3]);
             render_restart_dialog(f, app, f.area());
         }
     }
