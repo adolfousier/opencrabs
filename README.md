@@ -58,20 +58,6 @@
 
 [![Demo](src/screenshots/opencrabs-demo.gif)](https://github.com/user-attachments/assets/7f45c5f8-acdf-48d5-b6a4-0e4811a9ee23)
 
-![Splash](src/screenshots/splash.png)
-
-![Onboarding](src/screenshots/onboard1.png)
-
-![Provider Auth](src/screenshots/onboard2.png)
-
-![Workspace](src/screenshots/onboard3.png)
-
-![Home Base](src/screenshots/onboard4.png)
-
-![Sessions](src/screenshots/sessions_screen.png)
-
-![Usage](src/screenshots/usage_screen.png)
-
 ---
 
 ## 🎯 Core Features
