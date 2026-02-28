@@ -68,9 +68,9 @@
 
 ![Home Base](src/screenshots/onboard4.png)
 
-![Sessions](src/screenshots/sessions.png)
+![Sessions](src/screenshots/sessions_screen.png)
 
-![Usage](src/screenshots/usage.png)
+![Usage](src/screenshots/usage_screen.png)
 
 ---
 
