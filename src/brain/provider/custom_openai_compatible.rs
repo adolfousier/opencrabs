@@ -25,8 +25,14 @@ const DEFAULT_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
 /// Open/close tag pairs to strip from streaming/non-streaming content.
 /// Covers DeepSeek-style `<think>` and Kimi-style `<!-- reasoning -->` blocks,
 /// plus Kimi's hallucinated `<!-- tools-v2: ... -->` tool-call markup.
+/// Each entry in STRIP_CLOSE_TAGS is a list of accepted close tags (first match wins).
+/// MiniMax closes `<!-- reasoning -->` with `</think>` instead of `<!-- /reasoning -->`.
 const STRIP_OPEN_TAGS: &[&str] = &["<think>", "<!-- reasoning -->", "<!-- tools-v2:"];
-const STRIP_CLOSE_TAGS: &[&str] = &["</think>", "<!-- /reasoning -->", "-->"];
+const STRIP_CLOSE_TAGS: &[&[&str]] = &[
+    &["</think>"],
+    &["<!-- /reasoning -->", "</think>"], // Kimi uses <!-- /reasoning -->, MiniMax uses </think>
+    &["-->"],
+];
 
 /// Filter reasoning/markup blocks from a streaming chunk.
 ///
@@ -38,8 +44,13 @@ fn filter_think_tags(text: &str, inside_think: &mut bool, active_close_tag: &mut
 
     loop {
         if *inside_think {
-            let close = STRIP_CLOSE_TAGS[*active_close_tag];
-            if let Some(end) = remaining.find(close) {
+            // Find the earliest matching close tag among the candidates for this block.
+            let close_candidates = STRIP_CLOSE_TAGS[*active_close_tag];
+            let earliest_close = close_candidates.iter().filter_map(|close| {
+                remaining.find(close).map(|pos| (pos, *close))
+            }).min_by_key(|(pos, _)| *pos);
+
+            if let Some((end, close)) = earliest_close {
                 remaining = &remaining[end + close.len()..];
                 *inside_think = false;
             } else {
@@ -74,9 +85,14 @@ fn filter_think_tags(text: &str, inside_think: &mut bool, active_close_tag: &mut
 /// Strip complete reasoning/markup blocks from non-streaming content.
 fn strip_think_blocks(text: &str) -> String {
     let mut result = text.to_string();
-    for (open, close) in STRIP_OPEN_TAGS.iter().zip(STRIP_CLOSE_TAGS.iter()) {
+    for (open, close_candidates) in STRIP_OPEN_TAGS.iter().zip(STRIP_CLOSE_TAGS.iter()) {
         while let Some(start) = result.find(open) {
-            if let Some(end) = result[start..].find(close) {
+            // Find the earliest close tag among the candidates.
+            let earliest_close = close_candidates.iter().filter_map(|close| {
+                result[start..].find(close).map(|end| (end, *close))
+            }).min_by_key(|(end, _)| *end);
+
+            if let Some((end, close)) = earliest_close {
                 result = format!(
                     "{}{}",
                     &result[..start],
