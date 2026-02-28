@@ -5,6 +5,28 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.39] - 2026-02-28
+
+### Added
+- **Status bar below input** (`02220e7`, `9dd4cab`) — Persistent one-line status bar replaces the old sticky overlay. Displays session name (orange), provider / model, working directory, and approval policy badge. Session and directory were moved from the header into the status bar; the full-width header bar was removed entirely
+  - `src/tui/render/mod.rs`, `src/tui/render/input.rs`
+- **Immediate thinking spinner in chat** (`57ffc40`) — A spinner and "OpenCrabs is thinking..." line appears in the chat area as soon as a request is submitted, before any streaming content arrives. Eliminates the blank gap while the provider is warming up
+  - `src/tui/render/chat.rs`
+- **Per-session context token cache** (`57ffc40`) — When switching between sessions or reloading, the last known input token count is restored from an in-memory cache instead of showing `–`. Accurate token counts are re-confirmed on the next API response
+  - `src/tui/app/state.rs`, `src/tui/app/messaging.rs`
+
+### Fixed
+- **ctx shows accurate token count for providers that report zero usage** (`033043f`) — Providers like MiniMax always return `usage: {total_tokens: 0}` in streaming responses. The provider now uses its pre-computed `message_tokens + tool_schema_tokens` (serialised OpenAI JSON) as the fallback, so the ctx display (e.g. `29K/200K`) matches the debug log exactly instead of showing the lower raw-text estimate (~14K)
+  - `src/brain/provider/custom_openai_compatible.rs`, `src/brain/agent/service/tool_loop.rs`
+- **Compact app title in sessions/help screens** (`bc80a0f`) — Removed blank lines and border from the app title block in non-chat screens. Title now occupies exactly one row, reclaiming vertical space
+  - `src/tui/render/mod.rs`
+- **Extra blank space below chat history** (`d469f01`) — Scroll calculation used `reserved = 3` left over from removed borders/overlay. Changed to `reserved = 1` (top padding only), eliminating the gap at the bottom of the chat area
+  - `src/tui/render/chat.rs`
+- **Duplicate thinking indicators removed** (`aa08d68`, `57ffc40`) — "OpenCrabs is thinking" was appearing twice: once as an inline tool-group hint and once in the status bar. Removed both; the single spinner in the chat area is the sole indicator
+  - `src/tui/render/chat.rs`, `src/tui/render/input.rs`
+- **Muted orange replaces bright yellow** (`02220e7`) — `Color::Yellow` replaced with `Color::Rgb(215, 100, 20)` for ctx percentage, sessions spinner, and pending-approval badge. Intentional dark-golden `Rgb(184, 134, 11)` unchanged
+  - `src/tui/render/input.rs`, `src/tui/render/sessions.rs`
+
 ## [0.2.38] - 2026-02-27
 
 ### Fixed
@@ -703,6 +725,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.39]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.39
 [0.2.38]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.38
 [0.2.37]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.37
 [0.2.36]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.36
