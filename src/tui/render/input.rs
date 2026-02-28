@@ -310,7 +310,8 @@ pub(super) fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let session_text = format!(" {}", session_name);
-    let provider_model_dir_text = format!("  ·  {} / {}  ·  {}", provider_str, model_str, display_dir);
+    let provider_model_dir_text =
+        format!("  ·  {} / {}  ·  {}", provider_str, model_str, display_dir);
     let sep_text = "  ·  ";
 
     // --- Approval policy (centre-left) ---
@@ -323,8 +324,14 @@ pub(super) fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let spans = vec![
-        Span::styled(session_text, Style::default().fg(orange).add_modifier(Modifier::BOLD)),
-        Span::styled(provider_model_dir_text, Style::default().fg(Color::Rgb(90, 110, 150))),
+        Span::styled(
+            session_text,
+            Style::default().fg(orange).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            provider_model_dir_text,
+            Style::default().fg(Color::Rgb(90, 110, 150)),
+        ),
         Span::styled(sep_text, Style::default().fg(Color::DarkGray)),
         Span::styled(policy_text, Style::default().fg(policy_color)),
     ];

@@ -159,15 +159,6 @@ impl Tool for NotebookEditTool {
     }
 
     async fn execute(&self, input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
-        // Check if in read-only mode (Plan mode)
-        if context.read_only_mode {
-            return Ok(ToolResult::error(
-                "Notebook editing is not allowed in Plan mode. \
-                 Please approve the plan and switch to execution mode (Ctrl+A) to edit notebooks."
-                    .to_string(),
-            ));
-        }
-
         let input: NotebookInput = serde_json::from_value(input)?;
 
         // Resolve path

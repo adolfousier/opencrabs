@@ -591,7 +591,50 @@ impl App {
                     .get("operation")
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
-                format!("Plan: {}", op)
+                match op {
+                    "create" => {
+                        let name = tool_input
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("plan");
+                        format!("Plan: create '{}'", name)
+                    }
+                    "add_task" => {
+                        let title = tool_input
+                            .get("title")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("task");
+                        format!("Plan: add task '{}'", title)
+                    }
+                    "finalize" => "Plan: finalize — awaiting approval".to_string(),
+                    "start_task" => {
+                        let id = tool_input
+                            .get("task_id")
+                            .and_then(|v| v.as_u64())
+                            .map(|n| n.to_string())
+                            .unwrap_or_else(|| "?".to_string());
+                        format!("Plan: start task #{}", id)
+                    }
+                    "complete_task" => {
+                        let id = tool_input
+                            .get("task_id")
+                            .and_then(|v| v.as_u64())
+                            .map(|n| n.to_string())
+                            .unwrap_or_else(|| "?".to_string());
+                        format!("Plan: complete task #{}", id)
+                    }
+                    "update_task" => {
+                        let id = tool_input
+                            .get("task_id")
+                            .and_then(|v| v.as_u64())
+                            .map(|n| n.to_string())
+                            .unwrap_or_else(|| "?".to_string());
+                        format!("Plan: update task #{}", id)
+                    }
+                    "summary" => "Plan: summary".to_string(),
+                    "get_status" => "Plan: status".to_string(),
+                    _ => format!("Plan: {}", op),
+                }
             }
             "session_context" => "Session context".to_string(),
             other => other.to_string(),
@@ -1068,7 +1111,6 @@ impl App {
             let agent_service = self.agent_service.clone();
             let session_id = session.id;
             let event_sender = self.event_sender();
-            let read_only_mode = false;
 
             tracing::info!(
                 "[send_message] Spawning agent task for session {}",
@@ -1082,7 +1124,6 @@ impl App {
                         session_id,
                         transformed_content,
                         None,
-                        read_only_mode,
                         Some(token),
                     )
                     .await;

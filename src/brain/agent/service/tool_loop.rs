@@ -11,13 +11,12 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 impl AgentService {
-    /// Send a message with automatic tool execution and explicit read-only mode control
+    /// Send a message with automatic tool execution
     pub async fn send_message_with_tools_and_mode(
         &self,
         session_id: Uuid,
         user_message: String,
         model: Option<String>,
-        read_only_mode: bool,
         cancel_token: Option<CancellationToken>,
     ) -> Result<AgentResponse> {
         // Get or create session
@@ -155,8 +154,7 @@ impl AgentService {
                     .read()
                     .expect("working_directory lock poisoned")
                     .clone(),
-            )
-            .with_read_only_mode(read_only_mode);
+            );
         tool_context.sudo_callback = self.sudo_callback.clone();
         tool_context.shared_working_directory = Some(Arc::clone(&self.working_directory));
 
@@ -341,7 +339,9 @@ impl AgentService {
                 let estimate = context.token_count as u32 + tool_tokens;
                 tracing::debug!(
                     "Provider reported 0 input tokens, using tiktoken estimate: {} ({} msg + {} tool schemas)",
-                    estimate, context.token_count, tool_tokens
+                    estimate,
+                    context.token_count,
+                    tool_tokens
                 );
                 estimate
             };
@@ -647,7 +647,7 @@ impl AgentService {
 
                 // Check if approval is needed
                 let needs_approval = if let Some(tool) = self.tool_registry.get(&tool_name) {
-                    tool.requires_approval()
+                    tool.requires_approval_for_input(&tool_input)
                         && !self.auto_approve_tools
                         && !tool_context.auto_approve
                 } else {
@@ -706,7 +706,6 @@ impl AgentService {
                                     env_vars: tool_context.env_vars.clone(),
                                     auto_approve: true, // User approved this execution
                                     timeout_secs: tool_context.timeout_secs,
-                                    read_only_mode: tool_context.read_only_mode,
                                     sudo_callback: tool_context.sudo_callback.clone(),
                                     shared_working_directory: tool_context
                                         .shared_working_directory

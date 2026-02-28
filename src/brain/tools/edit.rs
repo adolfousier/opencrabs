@@ -148,15 +148,6 @@ impl Tool for EditTool {
     }
 
     async fn execute(&self, input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
-        // Check if in read-only mode (Plan mode)
-        if context.read_only_mode {
-            return Ok(ToolResult::error(
-                "Edit operations are not allowed in Plan mode. \
-                 Please approve the plan and switch to execution mode (Ctrl+A) to edit files."
-                    .to_string(),
-            ));
-        }
-
         let input: EditInput = serde_json::from_value(input)?;
 
         // Validate path: safety check, existence, and file type

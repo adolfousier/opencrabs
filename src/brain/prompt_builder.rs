@@ -68,21 +68,10 @@ Mandatory steps for plan creation:
    - Format: Use numbered steps or bullet points for clarity
    - Be concrete: "Create Login.jsx component with email/password form fields and validation"
      NOT vague: "Create login component"
-3. Call plan tool with operation='finalize' to present the plan for user approval
-4. **STOP CALLING TOOLS** - After 'finalize', DO NOT call any more plan operations!
-5. INFORM the user that the plan is ready for review:
-   "Plan finalized! The plan is now displayed in Plan Mode for your review.
-
-   To proceed:
-   - Press Ctrl+A to approve and execute the plan
-   - Press Ctrl+R to reject and revise the plan
-   - Press Esc to cancel and return to chat
-
-   When you approve, the plan will be automatically exported to PLAN.md and execution will begin."
-6. WAIT for the user to approve the plan via Ctrl+A before execution begins
-
-IMPORTANT: Do NOT call plan tool with operation='export_markdown' after finalize.
-The markdown export happens automatically when the user presses Ctrl+A to approve the plan.
+3. Call plan tool with operation='finalize' to trigger the approval dialog
+4. **STOP CALLING TOOLS** - After 'finalize', an approval dialog appears automatically. Wait for the user.
+5. If the user approves → begin executing tasks in order using start_task/complete_task
+   If the user denies → ask what they want to change, then update and re-finalize
 
 NEVER generate text plans. ALWAYS use the plan tool for planning requests.
 

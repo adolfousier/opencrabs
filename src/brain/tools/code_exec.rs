@@ -126,15 +126,6 @@ impl Tool for CodeExecTool {
     }
 
     async fn execute(&self, input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
-        // Check if in read-only mode (Plan mode)
-        if context.read_only_mode {
-            return Ok(ToolResult::error(
-                "Code execution is not allowed in Plan mode. \
-                 Please approve the plan and switch to execution mode (Ctrl+A) to execute code."
-                    .to_string(),
-            ));
-        }
-
         let input: CodeExecInput = serde_json::from_value(input)?;
 
         // Determine interpreter and file extension

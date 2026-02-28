@@ -76,15 +76,6 @@ impl Tool for WriteTool {
     }
 
     async fn execute(&self, input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
-        // Check if in read-only mode (Plan mode)
-        if context.read_only_mode {
-            return Ok(ToolResult::error(
-                "Write operations are not allowed in Plan mode. \
-                 Please approve the plan and switch to execution mode (Ctrl+A) to write files."
-                    .to_string(),
-            ));
-        }
-
         let input: WriteInput = serde_json::from_value(input)?;
 
         // Resolve path relative to working directory

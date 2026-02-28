@@ -148,7 +148,6 @@ async fn test_cancel_one_session_other_continues() {
             id_a,
             "Use the tool".to_string(),
             None,
-            false,
             Some(cancel_a_clone),
         ),
         svc_b_clone.send_message_with_tools(id_b, "Use the tool".to_string(), None),

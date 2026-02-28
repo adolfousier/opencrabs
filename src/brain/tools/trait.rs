@@ -25,9 +25,6 @@ pub struct ToolExecutionContext {
     /// Maximum execution timeout in seconds
     pub timeout_secs: u64,
 
-    /// Whether in read-only mode (Plan mode) - restricts write operations
-    pub read_only_mode: bool,
-
     /// Callback for requesting sudo password from the user (set by TUI)
     pub sudo_callback: Option<crate::brain::agent::SudoCallback>,
 
@@ -43,7 +40,6 @@ impl std::fmt::Debug for ToolExecutionContext {
             .field("working_directory", &self.working_directory)
             .field("auto_approve", &self.auto_approve)
             .field("timeout_secs", &self.timeout_secs)
-            .field("read_only_mode", &self.read_only_mode)
             .field("sudo_callback", &self.sudo_callback.is_some())
             .finish()
     }
@@ -58,7 +54,6 @@ impl ToolExecutionContext {
             env_vars: HashMap::new(),
             auto_approve: false,
             timeout_secs: 120,
-            read_only_mode: false,
             sudo_callback: None,
             shared_working_directory: None,
         }
@@ -79,12 +74,6 @@ impl ToolExecutionContext {
     /// Set timeout
     pub fn with_timeout(mut self, timeout_secs: u64) -> Self {
         self.timeout_secs = timeout_secs;
-        self
-    }
-
-    /// Set read-only mode (for Plan mode)
-    pub fn with_read_only_mode(mut self, read_only: bool) -> Self {
-        self.read_only_mode = read_only;
         self
     }
 }
@@ -177,6 +166,12 @@ pub trait Tool: Send + Sync {
         self.capabilities()
             .iter()
             .any(|cap| dangerous_capabilities.contains(cap))
+    }
+
+    /// Check if this specific invocation requires approval.
+    /// Override for tools where only certain operations need approval (e.g. plan finalize).
+    fn requires_approval_for_input(&self, _input: &Value) -> bool {
+        self.requires_approval()
     }
 
     /// Execute the tool with given input

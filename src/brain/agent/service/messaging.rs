@@ -127,7 +127,7 @@ impl AgentService {
         user_message: String,
         model: Option<String>,
     ) -> Result<AgentResponse> {
-        self.send_message_with_tools_and_mode(session_id, user_message, model, false, None)
+        self.send_message_with_tools_and_mode(session_id, user_message, model, None)
             .await
     }
 }

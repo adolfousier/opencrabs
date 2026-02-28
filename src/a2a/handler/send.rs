@@ -85,20 +85,7 @@ pub async fn handle_send_message(
     }
     persistence::upsert_task(&service_context.pool(), &task).await;
 
-    // Determine skill and read-only mode from configuration metadata
-    let read_only = send_params
-        .configuration
-        .as_ref()
-        .and_then(|c| c.get("skill"))
-        .and_then(|s| s.as_str())
-        .map(|s| s == "research")
-        .unwrap_or(false);
-
-    tracing::info!(
-        "A2A: Task {} created, spawning agent (read_only={})",
-        task_id,
-        read_only
-    );
+    tracing::info!("A2A: Task {} created, spawning agent", task_id);
 
     let bg_store = store.clone();
     let bg_cancel_store = cancel_store.clone();
@@ -114,7 +101,6 @@ pub async fn handle_send_message(
             user_text,
             agent_service,
             service_context,
-            read_only,
             bg_pool,
         )
         .await;
@@ -135,7 +121,6 @@ async fn process_task(
     user_text: String,
     agent_service: Arc<AgentService>,
     service_context: ServiceContext,
-    read_only: bool,
     pool: sqlx::SqlitePool,
 ) {
     let session_service = SessionService::new(service_context);
@@ -166,13 +151,7 @@ async fn process_task(
     }
 
     let result = agent_service
-        .send_message_with_tools_and_mode(
-            session_id,
-            user_text,
-            None,
-            read_only,
-            Some(cancel_token),
-        )
+        .send_message_with_tools_and_mode(session_id, user_text, None, Some(cancel_token))
         .await;
 
     // Clean up cancel token

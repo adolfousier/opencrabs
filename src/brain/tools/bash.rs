@@ -28,118 +28,6 @@ struct BashInput {
     timeout_secs: Option<u64>,
 }
 
-/// Check if a bash command is safe for read-only mode (Plan mode)
-fn is_read_only_command(command: &str) -> bool {
-    let cmd_lower = command.trim().to_lowercase();
-
-    // Check for output redirection (dangerous in read-only mode)
-    if cmd_lower.contains('>') || cmd_lower.contains(">>") {
-        return false;
-    }
-
-    // Check for dangerous pipe patterns (piping to tee, writing to files)
-    if cmd_lower.contains("| tee") || cmd_lower.contains("|tee") {
-        return false;
-    }
-
-    // Check for command substitution (can hide dangerous commands)
-    if cmd_lower.contains("$(") || cmd_lower.contains("`") {
-        return false;
-    }
-
-    // Check for subshell execution
-    if cmd_lower.contains("bash ") || cmd_lower.contains("sh ") || cmd_lower.contains("eval ") {
-        return false;
-    }
-
-    // Get the first command (before pipes or &&)
-    let first_cmd = cmd_lower
-        .split('|')
-        .next()
-        .unwrap_or(&cmd_lower)
-        .split("&&")
-        .next()
-        .unwrap_or(&cmd_lower)
-        .split(';')
-        .next()
-        .unwrap_or(&cmd_lower)
-        .trim();
-
-    // Get the command name (first word) - this is what we'll validate
-    let cmd_name = first_cmd.split_whitespace().next().unwrap_or("");
-
-    // List of safe read-only single commands (exact command name match)
-    let safe_single_commands = [
-        "ls", "cat", "head", "tail", "less", "more", "grep", "find", "tree", "file", "pwd",
-        "whoami", "hostname", "date", "echo", "which", "type", "env", "printenv", "df", "du", "wc",
-        "curl", "wget", "rg", "fd", "bat", "exa", "eza",
-    ];
-
-    // List of safe git subcommands (read-only)
-    let safe_git_subcommands = [
-        "status",
-        "log",
-        "diff",
-        "branch",
-        "show",
-        "remote",
-        "tag",
-        "describe",
-        "rev-parse",
-        "config",
-        "ls-files",
-        "ls-tree",
-        "shortlog",
-        "blame",
-        "reflog",
-    ];
-
-    // List of safe cargo subcommands (read-only)
-    let safe_cargo_subcommands = [
-        "version",
-        "check",
-        "clippy",
-        "fmt",
-        "test",
-        "build",
-        "doc",
-        "tree",
-        "metadata",
-        "verify-project",
-    ];
-
-    // Check if command is in safe single commands list (exact match)
-    if safe_single_commands.contains(&cmd_name) {
-        return true;
-    }
-
-    // Check for git commands with safe subcommands
-    if cmd_name == "git" {
-        let parts: Vec<&str> = first_cmd.split_whitespace().collect();
-        if parts.len() >= 2 {
-            let subcommand = parts[1];
-            // Check if the git subcommand is in our safe list
-            return safe_git_subcommands.contains(&subcommand);
-        }
-        // Bare "git" command is safe (just shows help)
-        return true;
-    }
-
-    // Check for cargo commands with safe subcommands
-    if cmd_name == "cargo" {
-        let parts: Vec<&str> = first_cmd.split_whitespace().collect();
-        if parts.len() >= 2 {
-            let subcommand = parts[1];
-            // Check if the cargo subcommand is in our safe list
-            return safe_cargo_subcommands.contains(&subcommand);
-        }
-        // Bare "cargo" command is safe (just shows help)
-        return true;
-    }
-
-    false
-}
-
 #[async_trait]
 impl Tool for BashTool {
     fn name(&self) -> &str {
@@ -198,16 +86,6 @@ impl Tool for BashTool {
 
     async fn execute(&self, input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
         let input: BashInput = serde_json::from_value(input)?;
-
-        // Check if in read-only mode and validate command safety
-        if context.read_only_mode && !is_read_only_command(&input.command) {
-            return Ok(ToolResult::error(format!(
-                "Command '{}' is not allowed in Plan mode (read-only). \
-                 Only safe read-only commands are permitted (git status, ls, cat, grep, etc.). \
-                 Please approve the plan and switch to execution mode (Ctrl+A) to run write commands.",
-                input.command
-            )));
-        }
 
         // Determine working directory
         let working_dir = if let Some(ref dir) = input.working_dir {

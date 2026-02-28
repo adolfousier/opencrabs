@@ -86,14 +86,6 @@ pub async fn handle_stream_message(
     }
     persistence::upsert_task(&service_context.pool(), &task).await;
 
-    let read_only = send_params
-        .configuration
-        .as_ref()
-        .and_then(|c| c.get("skill"))
-        .and_then(|s| s.as_str())
-        .map(|s| s == "research")
-        .unwrap_or(false);
-
     // Channel for SSE events -- buffer a few events
     let (tx, rx) = mpsc::channel::<StreamEvent>(32);
 
@@ -110,7 +102,6 @@ pub async fn handle_stream_message(
             user_text,
             agent_service,
             service_context,
-            read_only,
             pool,
             tx,
         )
@@ -130,7 +121,6 @@ async fn process_task_streaming(
     user_text: String,
     agent_service: Arc<AgentService>,
     service_context: ServiceContext,
-    read_only: bool,
     pool: sqlx::SqlitePool,
     tx: StreamTx,
 ) {
@@ -168,13 +158,7 @@ async fn process_task_streaming(
     }
 
     let result = agent_service
-        .send_message_with_tools_and_mode(
-            session_id,
-            user_text,
-            None,
-            read_only,
-            Some(cancel_token),
-        )
+        .send_message_with_tools_and_mode(session_id, user_text, None, Some(cancel_token))
         .await;
 
     // Clean up cancel token

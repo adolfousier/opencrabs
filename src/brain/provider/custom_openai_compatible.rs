@@ -46,9 +46,10 @@ fn filter_think_tags(text: &str, inside_think: &mut bool, active_close_tag: &mut
         if *inside_think {
             // Find the earliest matching close tag among the candidates for this block.
             let close_candidates = STRIP_CLOSE_TAGS[*active_close_tag];
-            let earliest_close = close_candidates.iter().filter_map(|close| {
-                remaining.find(close).map(|pos| (pos, *close))
-            }).min_by_key(|(pos, _)| *pos);
+            let earliest_close = close_candidates
+                .iter()
+                .filter_map(|close| remaining.find(close).map(|pos| (pos, *close)))
+                .min_by_key(|(pos, _)| *pos);
 
             if let Some((end, close)) = earliest_close {
                 remaining = &remaining[end + close.len()..];
@@ -88,9 +89,10 @@ fn strip_think_blocks(text: &str) -> String {
     for (open, close_candidates) in STRIP_OPEN_TAGS.iter().zip(STRIP_CLOSE_TAGS.iter()) {
         while let Some(start) = result.find(open) {
             // Find the earliest close tag among the candidates.
-            let earliest_close = close_candidates.iter().filter_map(|close| {
-                result[start..].find(close).map(|end| (end, *close))
-            }).min_by_key(|(end, _)| *end);
+            let earliest_close = close_candidates
+                .iter()
+                .filter_map(|close| result[start..].find(close).map(|end| (end, *close)))
+                .min_by_key(|(end, _)| *end);
 
             if let Some((end, close)) = earliest_close {
                 result = format!(
@@ -1025,7 +1027,7 @@ impl Provider for OpenAIProvider {
             "gpt-4-32k" => Some(32_768),
             "gpt-3.5-turbo" => Some(4_096),
             "gpt-3.5-turbo-16k" => Some(16_384),
-_ => None,
+            _ => None,
         }
     }
 

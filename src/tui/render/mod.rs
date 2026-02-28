@@ -160,9 +160,9 @@ fn split_title_area(area: Rect) -> (Rect, Rect) {
 fn render_app_title(f: &mut Frame, area: Rect) {
     let para = Paragraph::new(vec![Line::from(Span::styled(
         " 🦀 OpenCrabs AI Orchestration Agent",
-            Style::default()
-                .fg(Color::Rgb(120, 120, 120))
-                .add_modifier(Modifier::BOLD),
-        ))]);
+        Style::default()
+            .fg(Color::Rgb(120, 120, 120))
+            .add_modifier(Modifier::BOLD),
+    ))]);
     f.render_widget(para, area);
 }

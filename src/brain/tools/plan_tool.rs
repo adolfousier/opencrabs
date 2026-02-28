@@ -291,7 +291,16 @@ impl Tool for PlanTool {
     }
 
     fn requires_approval(&self) -> bool {
-        false // Plan management doesn't require approval, only viewing/creation
+        false
+    }
+
+    fn requires_approval_for_input(&self, input: &Value) -> bool {
+        // `finalize` = review/approve the plan; `start_task` = confirm each task before execution
+        input
+            .get("operation")
+            .and_then(|v| v.as_str())
+            .map(|op| op == "finalize" || op == "start_task")
+            .unwrap_or(false)
     }
 
     fn validate_input(&self, input: &Value) -> Result<()> {
@@ -356,25 +365,17 @@ impl Tool for PlanTool {
                     validate_string(&ctx, MAX_CONTEXT_LENGTH, "Plan context")?;
                 }
 
-                // Check if plan exists
+                // The plan file is session-scoped (filename = session_id), so any loaded
+                // plan belongs to this session. Always allow overwriting stale plans —
+                // different sessions automatically use different files.
                 if let Some(existing_plan) = plan.as_ref() {
-                    // Allow replacing empty Draft plans (likely stale/abandoned)
-                    if existing_plan.status == PlanStatus::Draft && existing_plan.tasks.is_empty() {
-                        tracing::info!(
-                            "📝 Replacing empty Draft plan '{}' with new plan '{}'",
-                            existing_plan.title,
-                            title
-                        );
-                        // Continue to create new plan (will replace existing)
-                    } else {
-                        // Don't allow replacing plans with tasks or in other states
-                        return Ok(ToolResult::error(format!(
-                            "A plan already exists: '{}' ({:?}, {} tasks). Use 'update_plan' to modify it or 'finalize' to complete it.",
-                            existing_plan.title,
-                            existing_plan.status,
-                            existing_plan.tasks.len()
-                        )));
-                    }
+                    tracing::info!(
+                        "📝 Overwriting existing plan '{}' ({:?}, {} tasks) with new plan '{}'",
+                        existing_plan.title,
+                        existing_plan.status,
+                        existing_plan.tasks.len(),
+                        title
+                    );
                 }
 
                 let mut new_plan =
@@ -560,13 +561,29 @@ impl Tool for PlanTool {
                     current_plan.status
                 );
 
+                // Build task list for the agent to present directly to the user
+                let task_list = current_plan
+                    .tasks
+                    .iter()
+                    .enumerate()
+                    .map(|(i, t)| format!("  {}. {} — {}", i + 1, t.title, t.description))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
                 format!(
                     "✓ Plan finalized and ready for review!\n\n\
                      📋 Plan: {}\n\
-                     📝 {} tasks ready for execution{}\n\
-                     Press Ctrl+P to review the plan.",
+                     📝 Description: {}\n\n\
+                     Tasks ({} total):\n{}{}\n\n\
+                     The user will be shown an approval dialog. Wait for their response before executing any tasks.",
                     current_plan.title,
+                    current_plan
+                        .description
+                        .chars()
+                        .take(200)
+                        .collect::<String>(),
                     current_plan.tasks.len(),
+                    task_list,
                     warning_text
                 )
             }
@@ -842,31 +859,48 @@ impl Tool for PlanTool {
 
                 let summary = current_plan.execution_summary();
 
+                let task_lines = current_plan
+                    .tasks
+                    .iter()
+                    .enumerate()
+                    .map(|(i, t)| {
+                        let status_icon = match t.status {
+                            crate::tui::plan::TaskStatus::Completed => "✅",
+                            crate::tui::plan::TaskStatus::Failed => "❌",
+                            crate::tui::plan::TaskStatus::InProgress => "▶️",
+                            crate::tui::plan::TaskStatus::Pending => "⏸️",
+                            crate::tui::plan::TaskStatus::Skipped => "⏭️",
+                            crate::tui::plan::TaskStatus::Blocked(_) => "🚫",
+                        };
+                        format!("  {} {}. {}", status_icon, i + 1, t.title)
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
                 format!(
-                    "📊 Execution Summary\n\n\
+                    "📊 Plan Summary\n\n\
                      Plan: {}\n\
-                     Status: {:?}\n\n\
-                     Tasks: {} total\n\
-                     ✅ Completed: {}\n\
-                     ❌ Failed: {}\n\
-                     ▶️ In Progress: {}\n\
-                     ⏸️ Pending: {}\n\
-                     ⏭️ Skipped: {}\n\
-                     🚫 Blocked: {}\n\n\
-                     Progress: {:.1}%\n\
-                     Success Rate: {:.1}%\n\
-                     Total Retries: {}\n\
-                     Total Tool Calls: {}",
+                     Status: {:?}\n\
+                     Description: {}\n\n\
+                     Tasks ({} total):\n{}\n\n\
+                     Progress: {:.1}% — ✅{} ❌{} ▶️{} ⏸️{} ⏭️{} 🚫{}\n\
+                     Success Rate: {:.1}% | Retries: {} | Tool Calls: {}",
                     current_plan.title,
                     current_plan.status,
+                    current_plan
+                        .description
+                        .chars()
+                        .take(200)
+                        .collect::<String>(),
                     summary.total_tasks,
+                    task_lines,
+                    current_plan.progress_percentage(),
                     summary.completed,
                     summary.failed,
                     summary.in_progress,
                     summary.pending,
                     summary.skipped,
                     summary.blocked,
-                    current_plan.progress_percentage(),
                     summary.success_rate,
                     summary.total_retries,
                     summary.total_tool_calls

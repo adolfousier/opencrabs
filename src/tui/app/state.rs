@@ -504,7 +504,6 @@ impl App {
                         session_id,
                         wake_up.to_string(),
                         None,
-                        false,
                         Some(token),
                     )
                     .await
