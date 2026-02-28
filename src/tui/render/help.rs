@@ -5,10 +5,10 @@
 use super::super::app::App;
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, Borders, Paragraph},
 };
 
 /// Render the help screen
@@ -51,7 +51,6 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
         kv("Ctrl+N", "New session", gold),
         kv("Ctrl+L", "List sessions", gold),
         kv("Ctrl+K", "Clear session", gold),
-        kv("Ctrl+P", "Toggle Plan Mode", gold),
         Line::from(""),
         section_header("CHAT"),
         kv("Enter", "Send message", blue),
@@ -103,12 +102,6 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
         kv("D", "Delete", mag),
         kv("Esc", "Back to chat", mag),
         Line::from(""),
-        section_header("PLAN MODE"),
-        kv("Ctrl+A", "Approve & execute", blue),
-        kv("Ctrl+R", "Reject plan", blue),
-        kv("Ctrl+I", "Request changes", blue),
-        kv("↑ / ↓", "Scroll plan", blue),
-        Line::from(""),
         section_header("TOOL APPROVAL"),
         kv("↑ / ↓", "Navigate options", blue),
         kv("Enter", "Confirm selection", blue),
@@ -140,13 +133,6 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
         Line::from(vec![
             Span::styled(" ✓ ", Style::default().fg(Color::Blue)),
             Span::styled("Token & Cost Tracking", Style::default().fg(Color::White)),
-        ]),
-        Line::from(vec![
-            Span::styled(" ✓ ", Style::default().fg(Color::Blue)),
-            Span::styled(
-                "Plan Mode & Tool Approval",
-                Style::default().fg(Color::White),
-            ),
         ]),
         Line::from(vec![
             Span::styled(" ✓ ", Style::default().fg(Color::Blue)),
@@ -187,243 +173,6 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
 
     f.render_widget(left_para, columns[0]);
     f.render_widget(right_para, columns[1]);
-}
-
-/// Render help text in the input area during Plan Mode
-pub(super) fn render_plan_help(f: &mut Frame, area: Rect) {
-    let help_text = vec![Line::from(vec![
-        Span::styled(
-            "[Ctrl+A] ",
-            Style::default()
-                .fg(Color::Blue)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("Approve & Execute  ", Style::default().fg(Color::White)),
-        Span::styled(
-            "[Ctrl+R] ",
-            Style::default()
-                .fg(Color::Rgb(184, 134, 11))
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("Reject  ", Style::default().fg(Color::White)),
-        Span::styled(
-            "[Ctrl+I] ",
-            Style::default()
-                .fg(Color::Blue)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("Request Changes  ", Style::default().fg(Color::White)),
-        Span::styled(
-            "[Esc] ",
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("Back  ", Style::default().fg(Color::White)),
-        Span::styled(
-            "[↑↓] ",
-            Style::default()
-                .fg(Color::Magenta)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("Scroll", Style::default().fg(Color::White)),
-    ])];
-
-    let paragraph = Paragraph::new(help_text)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Rgb(70, 130, 180)))
-                .title(Span::styled(
-                    " Plan Mode - Review & Approve ",
-                    Style::default()
-                        .fg(Color::Rgb(70, 130, 180))
-                        .add_modifier(Modifier::BOLD),
-                )),
-        )
-        .alignment(Alignment::Center);
-
-    f.render_widget(paragraph, area);
-}
-
-/// Render the plan mode view
-#[allow(clippy::vec_init_then_push)]
-pub(super) fn render_plan(f: &mut Frame, app: &App, area: Rect) {
-    if let Some(plan) = &app.current_plan {
-        // Render the plan document
-        let mut lines = vec![];
-
-        // Plan header
-        lines.push(Line::from(vec![
-            Span::styled("📋 ", Style::default().fg(Color::Rgb(70, 130, 180))),
-            Span::styled(
-                &plan.title,
-                Style::default()
-                    .fg(Color::Rgb(70, 130, 180))
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]));
-
-        lines.push(Line::from(""));
-
-        // Status
-        lines.push(Line::from(vec![
-            Span::styled("Status: ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                plan.status.to_string(),
-                Style::default().fg(Color::Rgb(184, 134, 11)),
-            ),
-        ]));
-
-        lines.push(Line::from(""));
-
-        // Description
-        if !plan.description.is_empty() {
-            lines.push(Line::from(Span::styled(
-                "📝 Description:",
-                Style::default()
-                    .fg(Color::Blue)
-                    .add_modifier(Modifier::BOLD),
-            )));
-            lines.push(Line::from(Span::styled(
-                &plan.description,
-                Style::default().fg(Color::White),
-            )));
-            lines.push(Line::from(""));
-        }
-
-        // Technical Stack
-        if !plan.technical_stack.is_empty() {
-            lines.push(Line::from(Span::styled(
-                "🛠️  Technical Stack:",
-                Style::default()
-                    .fg(Color::Blue)
-                    .add_modifier(Modifier::BOLD),
-            )));
-            for tech in &plan.technical_stack {
-                lines.push(Line::from(vec![
-                    Span::styled("    • ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(tech, Style::default().fg(Color::White)),
-                ]));
-            }
-            lines.push(Line::from(""));
-        }
-
-        // Test Strategy
-        if !plan.test_strategy.is_empty() {
-            lines.push(Line::from(Span::styled(
-                "🧪 Test Strategy:",
-                Style::default()
-                    .fg(Color::Magenta)
-                    .add_modifier(Modifier::BOLD),
-            )));
-            lines.push(Line::from(Span::styled(
-                &plan.test_strategy,
-                Style::default().fg(Color::White),
-            )));
-            lines.push(Line::from(""));
-        }
-
-        // Tasks
-        lines.push(Line::from(Span::styled(
-            format!("📋 Tasks ({}):", plan.tasks.len()),
-            Style::default()
-                .fg(Color::Rgb(70, 130, 180))
-                .add_modifier(Modifier::BOLD),
-        )));
-        lines.push(Line::from(""));
-
-        for (idx, task) in plan.tasks.iter().enumerate() {
-            // Task line
-            lines.push(Line::from(vec![
-                Span::styled(format!(" {} ", task.status.icon()), Style::default()),
-                Span::styled(
-                    format!("{}. ", idx + 1),
-                    Style::default().fg(Color::DarkGray),
-                ),
-                Span::styled(&task.title, Style::default().fg(Color::White)),
-            ]));
-
-            // Task details (type and complexity)
-            lines.push(Line::from(vec![
-                Span::styled("    ", Style::default()),
-                Span::styled("Type: ", Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    task.task_type.to_string(),
-                    Style::default().fg(Color::Rgb(70, 130, 180)),
-                ),
-                Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
-                Span::styled("Complexity: ", Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    task.complexity_stars(),
-                    Style::default().fg(Color::Rgb(184, 134, 11)),
-                ),
-            ]));
-
-            // Acceptance Criteria
-            if !task.acceptance_criteria.is_empty() {
-                lines.push(Line::from(vec![
-                    Span::styled("    ", Style::default()),
-                    Span::styled("✓ Acceptance Criteria:", Style::default().fg(Color::Blue)),
-                ]));
-                for criterion in &task.acceptance_criteria {
-                    lines.push(Line::from(vec![
-                        Span::styled("      • ", Style::default().fg(Color::DarkGray)),
-                        Span::styled(criterion, Style::default().fg(Color::White)),
-                    ]));
-                }
-            }
-
-            lines.push(Line::from(""));
-        }
-
-        // Action bar
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "─".repeat(area.width as usize),
-            Style::default().fg(Color::DarkGray),
-        )));
-        lines.push(Line::from(vec![
-            Span::styled("[Ctrl+A] ", Style::default().fg(Color::Blue)),
-            Span::styled("Approve  ", Style::default().fg(Color::White)),
-            Span::styled("[Ctrl+R] ", Style::default().fg(Color::Rgb(184, 134, 11))),
-            Span::styled("Reject  ", Style::default().fg(Color::White)),
-            Span::styled("[Esc] ", Style::default().fg(Color::Red)),
-            Span::styled("Cancel", Style::default().fg(Color::White)),
-        ]));
-
-        let paragraph = Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(" 📋 PLAN MODE ")
-                    .border_style(Style::default().fg(Color::Rgb(70, 130, 180))),
-            )
-            .wrap(Wrap { trim: false })
-            .scroll((app.plan_scroll_offset as u16, 0));
-
-        f.render_widget(paragraph, area);
-    } else {
-        // No plan available
-        let text = vec![
-            Line::from(""),
-            Line::from(Span::styled(
-                "📋 Plan Mode",
-                Style::default()
-                    .fg(Color::Rgb(70, 130, 180))
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                "No active plan. Switch to Chat mode to create a plan.",
-                Style::default().fg(Color::DarkGray),
-            )),
-        ];
-
-        let paragraph = Paragraph::new(text)
-            .block(Block::default().borders(Borders::ALL))
-            .alignment(ratatui::layout::Alignment::Center);
-
-        f.render_widget(paragraph, area);
-    }
 }
 
 /// Render the settings screen

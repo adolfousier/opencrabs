@@ -34,8 +34,14 @@ async fn test_concurrent_sessions_independent() {
     let resp_a = resp_a.unwrap();
     let resp_b = resp_b.unwrap();
 
-    assert!(!resp_a.content.is_empty(), "session A should have a response");
-    assert!(!resp_b.content.is_empty(), "session B should have a response");
+    assert!(
+        !resp_a.content.is_empty(),
+        "session A should have a response"
+    );
+    assert!(
+        !resp_b.content.is_empty(),
+        "session B should have a response"
+    );
     assert_eq!(resp_a.model, "mock-model");
     assert_eq!(resp_b.model, "mock-model");
 }
@@ -153,7 +159,10 @@ async fn test_cancel_one_session_other_continues() {
     let _ = result_a; // cancelled session result is fine either way
 
     let resp_b = result_b.unwrap();
-    assert!(!resp_b.content.is_empty(), "session B should complete normally");
+    assert!(
+        !resp_b.content.is_empty(),
+        "session B should complete normally"
+    );
 }
 
 #[tokio::test]
@@ -179,20 +188,12 @@ async fn test_message_isolation_between_sessions() {
 
     // Send distinct messages to each session
     agent_service
-        .send_message(
-            session_a.id,
-            "Message only in session A".to_string(),
-            None,
-        )
+        .send_message(session_a.id, "Message only in session A".to_string(), None)
         .await
         .unwrap();
 
     agent_service
-        .send_message(
-            session_b.id,
-            "Message only in session B".to_string(),
-            None,
-        )
+        .send_message(session_b.id, "Message only in session B".to_string(), None)
         .await
         .unwrap();
 

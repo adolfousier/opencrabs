@@ -177,7 +177,6 @@ impl App {
             details: None,
             expanded: false,
             tool_group: None,
-            plan_approval: None,
         }
     }
 
@@ -315,7 +314,6 @@ impl App {
                     details: None,
                     expanded: false,
                     tool_group: None,
-                    plan_approval: None,
                 });
                 self.scroll_offset = 0;
                 true
@@ -700,7 +698,6 @@ impl App {
                         details: reasoning,
                         expanded: false,
                         tool_group: None,
-                        plan_approval: None,
                     });
                     first_text = false;
                 } else if let Some(r) = reasoning {
@@ -718,7 +715,6 @@ impl App {
                         details: Some(r),
                         expanded: false,
                         tool_group: None,
-                        plan_approval: None,
                     });
                     first_text = false;
                 }
@@ -785,7 +781,6 @@ impl App {
                             calls,
                             expanded: false,
                         }),
-                        plan_approval: None,
                     });
                 }
                 remaining = &after_marker[end + 3..];
@@ -812,7 +807,6 @@ impl App {
                     details: reasoning,
                     expanded: false,
                     tool_group: None,
-                    plan_approval: None,
                 });
             } else if let Some(r) = reasoning {
                 result.push(DisplayMessage {
@@ -827,7 +821,6 @@ impl App {
                     details: Some(r),
                     expanded: false,
                     tool_group: None,
-                    plan_approval: None,
                 });
             }
         }
@@ -846,7 +839,6 @@ impl App {
                 details: None,
                 expanded: false,
                 tool_group: None,
-                plan_approval: None,
             });
         }
 
@@ -965,7 +957,6 @@ impl App {
             details: None,
             expanded: false,
             tool_group: None,
-            plan_approval: None,
         });
         self.scroll_offset = 0;
     }
@@ -1064,7 +1055,6 @@ impl App {
                 details: None,
                 expanded: false,
                 tool_group: None,
-                plan_approval: None,
             };
             self.messages.push(user_msg);
 
@@ -1080,7 +1070,7 @@ impl App {
             let agent_service = self.agent_service.clone();
             let session_id = session.id;
             let event_sender = self.event_sender();
-            let read_only_mode = self.mode == AppMode::Plan;
+            let read_only_mode = false;
 
             tracing::info!(
                 "[send_message] Spawning agent task for session {}",
@@ -1161,6 +1151,14 @@ impl App {
         }
         self.is_processing = false;
         self.processing_started_at = None;
+        tracing::debug!(
+            "[TUI] complete_response: clearing streaming_response (was {} chars), intermediate_text_received={}",
+            self.streaming_response
+                .as_ref()
+                .map(|s| s.len())
+                .unwrap_or(0),
+            self.intermediate_text_received
+        );
         self.streaming_response = None;
         let reasoning_details = self.streaming_reasoning.take();
         self.cancel_token = None;
@@ -1199,7 +1197,6 @@ impl App {
                 details: Some("queued".to_string()),
                 expanded: false,
                 tool_group: None,
-                plan_approval: None,
             };
             self.messages.push(queued_msg);
             tracing::info!("[TUI] Added queued message at response complete");
@@ -1221,19 +1218,11 @@ impl App {
                 details: None,
                 expanded: false,
                 tool_group: Some(group),
-                plan_approval: None,
             });
         }
 
         // Reload user commands (agent may have written new ones to commands.json)
         self.reload_user_commands();
-
-        // Check task completion FIRST (before moving response.content)
-        let task_failed = if self.executing_plan {
-            self.check_task_completion(&response.content).await?
-        } else {
-            false
-        };
 
         // Track context usage from latest response
         self.last_input_tokens = Some(response.context_tokens);
@@ -1265,7 +1254,6 @@ impl App {
                 details: reasoning_details,
                 expanded: false,
                 tool_group: None,
-                plan_approval: None,
             };
             self.messages.push(assistant_msg);
         }
@@ -1284,83 +1272,6 @@ impl App {
         // Auto-scroll to bottom
         self.scroll_offset = 0;
 
-        // Handle plan execution
-        if self.executing_plan {
-            if task_failed {
-                // Stop execution on failure
-                self.executing_plan = false;
-                let error_msg = DisplayMessage {
-                    id: uuid::Uuid::new_v4(),
-                    role: "system".to_string(),
-                    content: "Plan execution stopped due to task failure. \
-                             Review the error above and decide how to proceed."
-                        .to_string(),
-                    timestamp: chrono::Utc::now(),
-                    token_count: None,
-                    cost: None,
-                    approval: None,
-                    approve_menu: None,
-                    details: None,
-                    expanded: false,
-                    tool_group: None,
-                    plan_approval: None,
-                };
-                self.messages.push(error_msg);
-            } else {
-                // Execute next task if current one succeeded
-                self.execute_next_plan_task().await?;
-            }
-        } else {
-            // Check if a plan was created/finalized
-            self.check_and_load_plan().await?;
-        }
-
         Ok(())
-    }
-
-    /// Check if the current task completed successfully or failed
-    /// Returns true if task failed, false if succeeded
-    async fn check_task_completion(&mut self, response_content: &str) -> Result<bool> {
-        let Some(plan) = &mut self.current_plan else {
-            return Ok(false);
-        };
-
-        // Find the in-progress task
-        let task_result = plan
-            .tasks
-            .iter_mut()
-            .find(|t| matches!(t.status, crate::tui::plan::TaskStatus::InProgress))
-            .map(|task| {
-                // Check for error indicators in the response
-                let response_lower = response_content.to_lowercase();
-                let has_error = response_lower.contains("error:")
-                    || response_lower.contains("failed to")
-                    || response_lower.contains("cannot")
-                    || response_lower.contains("unable to")
-                    || response_lower.contains("fatal:")
-                    || (response_lower.contains("error") && response_lower.contains("executing"))
-                    || response_lower.contains("compilation error")
-                    || response_lower.contains("build failed");
-
-                if has_error {
-                    // Mark task as failed
-                    task.status = crate::tui::plan::TaskStatus::Failed;
-                    task.notes = Some(
-                        "Task failed during execution. Error detected in response.".to_string(),
-                    );
-                    true // Task failed
-                } else {
-                    // Mark task as completed successfully
-                    task.status = crate::tui::plan::TaskStatus::Completed;
-                    task.completed_at = Some(chrono::Utc::now());
-                    task.notes = Some("Task completed successfully".to_string());
-                    false // Task succeeded
-                }
-            });
-
-        // Save updated plan
-        self.save_plan().await?;
-
-        Ok(task_result.unwrap_or(false))
     }
 }

@@ -37,7 +37,10 @@ async fn test_auto_approve_skips_callback() {
         .await
         .unwrap();
 
-    assert!(!response.content.is_empty(), "tool should execute and produce response");
+    assert!(
+        !response.content.is_empty(),
+        "tool should execute and produce response"
+    );
     assert!(
         !callback_called.load(Ordering::SeqCst),
         "approval callback should NOT be called when auto_approve_tools is true"
@@ -100,8 +103,7 @@ async fn test_approval_denied_sends_error_result() {
     registry.register(Arc::new(MockToolRequiresApproval));
 
     // Always deny
-    let approval_cb: ApprovalCallback =
-        Arc::new(move |_info| Box::pin(async move { Ok(false) }));
+    let approval_cb: ApprovalCallback = Arc::new(move |_info| Box::pin(async move { Ok(false) }));
 
     let agent_service = AgentService::new(provider, context.clone())
         .with_tool_registry(Arc::new(registry))
@@ -245,7 +247,10 @@ async fn test_non_approval_tool_executes_directly() {
         .await
         .unwrap();
 
-    assert!(!response.content.is_empty(), "tool should execute successfully");
+    assert!(
+        !response.content.is_empty(),
+        "tool should execute successfully"
+    );
     assert!(
         !callback_called.load(Ordering::SeqCst),
         "approval callback should NOT be called for tools where requires_approval() -> false"
@@ -264,7 +269,10 @@ async fn test_mixed_tools_approval_and_auto() {
     let approval_count_clone = Arc::clone(&approval_count);
 
     // Provider that emits two tool calls: "approval_tool" and "test_tool"
-    let provider = Arc::new(MockProviderWithTwoToolCalls::new("approval_tool", "test_tool"));
+    let provider = Arc::new(MockProviderWithTwoToolCalls::new(
+        "approval_tool",
+        "test_tool",
+    ));
 
     let mut registry = ToolRegistry::new();
     registry.register(Arc::new(MockToolRequiresApproval)); // requires approval
@@ -291,7 +299,10 @@ async fn test_mixed_tools_approval_and_auto() {
         .await
         .unwrap();
 
-    assert!(!response.content.is_empty(), "both tools should execute and produce final response");
+    assert!(
+        !response.content.is_empty(),
+        "both tools should execute and produce final response"
+    );
 
     // Exactly one approval request: only approval_tool needed it
     assert_eq!(

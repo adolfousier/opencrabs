@@ -2,7 +2,6 @@
 [![Rust Edition](https://img.shields.io/badge/rust-2024_edition-orange.svg)](https://www.rust-lang.org/)
 [![Ratatui](https://img.shields.io/badge/ratatui-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white)](https://ratatui.rs)
 [![Docker](https://img.shields.io/badge/docker-%23000000.svg?style=for-the-badge&logo=docker&logoColor=white)](https://docker.com)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
 [![CI](https://github.com/adolfousier/opencrabs/actions/workflows/ci.yml/badge.svg)](https://github.com/adolfousier/opencrabs/actions/workflows/ci.yml)
 [![GitHub Stars](https://img.shields.io/github/stars/adolfousier/opencrabs?style=social)](https://github.com/adolfousier/opencrabs)
 
@@ -41,7 +40,6 @@
 - [Using Local LLMs](#-using-local-llms)
 - [Configuration](#-configuration)
 - [Tool System](#-tool-system)
-- [Plan Mode](#-plan-mode)
 - [Keyboard Shortcuts](#-keyboard-shortcuts)
 - [Debug and Logging](#-debug-and-logging)
 - [Architecture](#-architecture)
@@ -129,9 +127,8 @@
 ### Agent Capabilities
 | Feature | Description |
 |---------|-------------|
-| **Built-in Tools** | Read/write/edit files, bash, glob, grep, web search (DuckDuckGo + EXA default, no key needed; Brave optional), plan mode, and more |
+| **Built-in Tools** | Read/write/edit files, bash, glob, grep, web search (DuckDuckGo + EXA default, no key needed; Brave optional), and more |
 | **Per-Session Isolation** | Each session is an independent agent with its own provider, model, context, and tool state. Sessions can run tasks in parallel against different providers — ask Claude a question in one session while Kimi works on code in another |
-| **Plan Mode** | Structured task decomposition with dependency graphs, complexity ratings, and inline approval workflow |
 | **Self-Sustaining** | Agent can modify its own source, build, test, and hot-restart via Unix `exec()` |
 | **Natural Language Commands** | Tell OpenCrabs to create slash commands — it writes them to `commands.toml` autonomously via the `config_manager` tool |
 | **Live Settings** | Agent can read/write `config.toml` at runtime; Settings TUI screen (press `S`) shows current config; approval policy persists across restarts |
@@ -772,61 +769,6 @@ OpenCrabs includes a built-in tool execution system. The AI can use these tools 
 
 ---
 
-## 📋 Plan Mode
-
-Plan Mode breaks complex tasks into structured, reviewable, executable plans.
-
-### Workflow
-
-1. **Request:** Ask the AI to create a plan using the plan tool
-2. **AI creates:** Structured tasks with dependencies, complexity estimates, and types
-3. **Review:** Press `Ctrl+P` to view the plan in a visual TUI panel
-4. **Decide:** An inline selector appears with arrow key navigation:
-   - **Approve** — Execute the plan
-   - **Reject** — Discard the plan
-   - **Request Changes** — Returns to chat with context for revisions
-   - **View Plan** — Open the full plan panel (`Ctrl+P`)
-
-### Plan States
-
-Plans progress through: **Draft** → **PendingApproval** → **Approved** → **InProgress** → **Completed**
-
-Tasks have 10 types: Research, Edit, Create, Delete, Test, Refactor, Documentation, Configuration, Build, Other
-
-Each task tracks: status (Pending/InProgress/Completed/Skipped/Failed/Blocked), dependencies, complexity (1-5), and timestamps.
-
-### Example
-
-```
-You: Use the plan tool to create a plan for implementing JWT authentication.
-     Add tasks for: adding dependencies, token generation, validation
-     middleware, updating login endpoint, and writing tests.
-     Call operation=finalize when done.
-
-OpenCrabs: [Creates plan with 5 tasks, dependencies, complexity ratings]
-         ✓ Plan finalized! Press Ctrl+P to review.
-```
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│ 📋 Plan: JWT Authentication                                 │
-│ Status: Pending Approval • Tasks: 5 • Complexity: Medium    │
-├─────────────────────────────────────────────────────────────┤
-│ 1. [⏹] Add jsonwebtoken dependency (⭐⭐)                   │
-│ 2. [⏹] Implement token generation (⭐⭐⭐⭐) → depends on #1 │
-│ 3. [⏹] Build validation middleware (⭐⭐⭐⭐⭐) → depends on #2│
-│ 4. [⏹] Update login endpoint (⭐⭐⭐) → depends on #2       │
-│ 5. [⏹] Write integration tests (⭐⭐⭐) → depends on #3, #4 │
-├─────────────────────────────────────────────────────────────┤
-│ [Ctrl+A] Approve  [Ctrl+R] Reject  [Ctrl+I] Changes  [Esc]│
-└─────────────────────────────────────────────────────────────┘
-```
-
-**Tip for local LLMs:** Be explicit about tool usage — say "use the plan tool with operation=create" rather than "create a plan".
-
-See [Plan Mode User Guide](src/docs/PLAN_MODE_USER_GUIDE.md) for full documentation.
-
----
 
 ## ⌨️ Keyboard Shortcuts
 
@@ -904,16 +846,6 @@ Use `/approve` to change your approval policy at any time (persisted to `config.
 | **Approve-only** | Always ask before executing tools (default) |
 | **Allow all (session)** | Auto-approve all tools for the current session |
 | **Yolo mode** | Execute everything without approval until reset |
-
-### Plan Approval (Inline)
-
-When a plan is submitted for approval, an inline selector appears in chat:
-
-| Shortcut | Action |
-|----------|--------|
-| `↑` / `↓` | Navigate approval options (Approve / Reject / Request Changes / View Plan) |
-| `Enter` | Confirm selected option |
-| `Ctrl+P` | View full plan panel |
 
 ---
 

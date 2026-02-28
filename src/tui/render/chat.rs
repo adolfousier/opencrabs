@@ -4,9 +4,7 @@
 
 use super::super::app::App;
 use super::super::markdown::parse_markdown;
-use super::tools::{
-    render_approve_menu, render_inline_approval, render_inline_plan_approval, render_tool_group,
-};
+use super::tools::{render_approve_menu, render_inline_approval, render_tool_group};
 use super::utils::wrap_line_with_padding;
 use ratatui::{
     Frame,
@@ -28,13 +26,6 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         // Render inline approval messages
         if let Some(ref approval) = app.messages[msg_idx].approval {
             render_inline_approval(&mut lines, approval, content_width);
-            lines.push(Line::from(""));
-            continue;
-        }
-
-        // Render inline plan approval selector
-        if let Some(ref plan_approval) = app.messages[msg_idx].plan_approval {
-            render_inline_plan_approval(&mut lines, plan_approval, content_width);
             lines.push(Line::from(""));
             continue;
         }
@@ -304,6 +295,69 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         for line in streaming_lines {
             let mut padded_spans = vec![Span::raw("  ")];
             padded_spans.extend(line.spans);
+            let padded_line = Line::from(padded_spans);
+            for wrapped in wrap_line_with_padding(padded_line, content_width, "  ") {
+                lines.push(wrapped);
+            }
+        }
+    }
+
+    // Render standalone reasoning during thinking-only phase
+    // (before first text token — Kimi K2.5, DeepSeek-R1, etc.)
+    // streaming_response=None but reasoning is already streaming in
+    if !has_pending_approval
+        && app.streaming_response.is_none()
+        && let Some(ref reasoning) = app.streaming_reasoning
+    {
+        let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        let frame = spinner_frames[app.animation_frame % spinner_frames.len()];
+        let elapsed = app
+            .processing_started_at
+            .map(|t| t.elapsed().as_secs())
+            .unwrap_or(0);
+        let mut header_spans = vec![
+            Span::styled(
+                format!("{} ", frame),
+                Style::default()
+                    .fg(Color::Rgb(70, 130, 180))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "🦀 OpenCrabs ",
+                Style::default()
+                    .fg(Color::Blue)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "is thinking...",
+                Style::default().fg(Color::Rgb(184, 134, 11)),
+            ),
+        ];
+        if elapsed > 0 {
+            header_spans.push(Span::styled(
+                format!(" ({}s)", elapsed),
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
+        lines.push(Line::from(header_spans));
+        lines.push(Line::from(vec![
+            Span::styled("  ", Style::default()),
+            Span::styled(
+                "Thinking...",
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC | Modifier::BOLD),
+            ),
+        ]));
+        let reasoning_lines = parse_markdown(reasoning);
+        let reasoning_style = Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::ITALIC);
+        for rline in reasoning_lines {
+            let mut padded_spans = vec![Span::styled("  ", Style::default())];
+            for span in rline.spans {
+                padded_spans.push(Span::styled(span.content.to_string(), reasoning_style));
+            }
             let padded_line = Line::from(padded_spans);
             for wrapped in wrap_line_with_padding(padded_line, content_width, "  ") {
                 lines.push(wrapped);

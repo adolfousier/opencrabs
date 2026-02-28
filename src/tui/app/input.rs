@@ -97,14 +97,6 @@ impl App {
         })
     }
 
-    pub fn has_pending_plan_approval(&self) -> bool {
-        self.messages.iter().rev().any(|msg| {
-            msg.plan_approval
-                .as_ref()
-                .is_some_and(|p| p.state == PlanApprovalState::Pending)
-        })
-    }
-
     pub(crate) fn has_pending_approve_menu(&self) -> bool {
         self.messages.iter().rev().any(|msg| {
             msg.approve_menu
@@ -384,140 +376,6 @@ impl App {
             return Ok(());
         }
 
-        // Intercept keys when an inline plan approval is pending
-        // Options: Approve(0), Reject(1), Request Changes(2), View Plan(3)
-        if self.has_pending_plan_approval() {
-            if keys::is_left(&event) || keys::is_up(&event) {
-                if let Some(pa) = self
-                    .messages
-                    .iter_mut()
-                    .rev()
-                    .find_map(|m| m.plan_approval.as_mut())
-                    .filter(|p| p.state == PlanApprovalState::Pending)
-                {
-                    pa.selected_option = pa.selected_option.saturating_sub(1);
-                }
-                return Ok(());
-            } else if keys::is_right(&event) || keys::is_down(&event) {
-                if let Some(pa) = self
-                    .messages
-                    .iter_mut()
-                    .rev()
-                    .find_map(|m| m.plan_approval.as_mut())
-                    .filter(|p| p.state == PlanApprovalState::Pending)
-                {
-                    pa.selected_option = (pa.selected_option + 1).min(3);
-                }
-                return Ok(());
-            } else if keys::is_enter(&event) || keys::is_submit(&event) {
-                let selected = self
-                    .messages
-                    .iter()
-                    .rev()
-                    .find_map(|m| m.plan_approval.as_ref())
-                    .filter(|p| p.state == PlanApprovalState::Pending)
-                    .map(|p| p.selected_option);
-
-                if let Some(selected) = selected {
-                    match selected {
-                        0 => {
-                            // Approve — same as Ctrl+A
-                            if let Some(pa) = self
-                                .messages
-                                .iter_mut()
-                                .rev()
-                                .find_map(|m| m.plan_approval.as_mut())
-                                .filter(|p| p.state == PlanApprovalState::Pending)
-                            {
-                                pa.state = PlanApprovalState::Approved;
-                            }
-                            if let Some(plan) = &mut self.current_plan {
-                                plan.approve();
-                                plan.start_execution();
-                                self.export_plan_to_markdown("PLAN.md").await?;
-                                self.save_plan().await?;
-                                self.execute_plan_tasks().await?;
-                            }
-                        }
-                        1 => {
-                            // Reject — same as Ctrl+R
-                            if let Some(pa) = self
-                                .messages
-                                .iter_mut()
-                                .rev()
-                                .find_map(|m| m.plan_approval.as_mut())
-                                .filter(|p| p.state == PlanApprovalState::Pending)
-                            {
-                                pa.state = PlanApprovalState::Rejected;
-                            }
-                            if let Some(plan) = &mut self.current_plan {
-                                plan.reject();
-                                self.save_plan().await?;
-                            }
-                            self.current_plan = None;
-                        }
-                        2 => {
-                            // Request changes — same as Ctrl+I
-                            if let Some(pa) = self
-                                .messages
-                                .iter_mut()
-                                .rev()
-                                .find_map(|m| m.plan_approval.as_mut())
-                                .filter(|p| p.state == PlanApprovalState::Pending)
-                            {
-                                pa.state = PlanApprovalState::RevisionRequested;
-                            }
-                            if let Some(plan) = &self.current_plan {
-                                let plan_summary = format!(
-                                    "Current plan '{}' has {} tasks:\n{}",
-                                    plan.title,
-                                    plan.tasks.len(),
-                                    plan.tasks
-                                        .iter()
-                                        .enumerate()
-                                        .map(|(i, t)| format!(
-                                            "  {}. {} ({})",
-                                            i + 1,
-                                            t.title,
-                                            t.task_type
-                                        ))
-                                        .collect::<Vec<_>>()
-                                        .join("\n")
-                                );
-                                self.input_buffer = format!(
-                                    "Please revise this plan:\n\n{}\n\nRequested changes: ",
-                                    plan_summary
-                                );
-                                self.cursor_position = self.input_buffer.len();
-                            }
-                        }
-                        3 => {
-                            // View plan — switch to Plan Mode
-                            self.load_plan_for_viewing().await?;
-                            if self.current_plan.is_some() {
-                                self.switch_mode(AppMode::Plan).await?;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                return Ok(());
-            } else if keys::is_view_details(&event) {
-                // V key — toggle task list
-                if let Some(pa) = self
-                    .messages
-                    .iter_mut()
-                    .rev()
-                    .find_map(|m| m.plan_approval.as_mut())
-                    .filter(|p| p.state == PlanApprovalState::Pending)
-                {
-                    pa.show_details = !pa.show_details;
-                }
-                return Ok(());
-            }
-            // Other keys fall through — plan approval is non-blocking, user can still type
-        }
-
         // When slash suggestions are active, intercept navigation keys
         if self.slash_suggestions_active {
             if keys::is_up(&event) {
@@ -638,7 +496,6 @@ impl App {
                                 details: None,
                                 expanded: false,
                                 tool_group: None,
-                                plan_approval: None,
                             });
                         }
                         self.streaming_reasoning = None;
@@ -677,7 +534,6 @@ impl App {
                                 details: None,
                                 expanded: false,
                                 tool_group: Some(group),
-                                plan_approval: None,
                             });
                         }
                         self.push_system_message("Operation cancelled.".to_string());
@@ -1025,111 +881,6 @@ impl App {
                     self.selected_session_index = self.sessions.len().saturating_sub(1);
                 }
             }
-        }
-
-        Ok(())
-    }
-
-    /// Handle keys in plan mode
-    pub(crate) async fn handle_plan_key(
-        &mut self,
-        event: crossterm::event::KeyEvent,
-    ) -> Result<()> {
-        use super::events::keys;
-        use crossterm::event::{KeyCode, KeyModifiers};
-
-        // Cancel/Escape - return to chat
-        if keys::is_cancel(&event) {
-            self.switch_mode(AppMode::Chat).await?;
-            return Ok(());
-        }
-
-        // Ctrl+A - Approve plan
-        if event.code == KeyCode::Char('a') && event.modifiers.contains(KeyModifiers::CONTROL) {
-            tracing::info!("✅ Ctrl+A pressed - Approving plan");
-            if let Some(plan) = &mut self.current_plan {
-                plan.approve();
-                plan.start_execution();
-
-                // Export plan to markdown file
-                self.export_plan_to_markdown("PLAN.md").await?;
-
-                // Save plan to file
-                self.save_plan().await?;
-                self.switch_mode(AppMode::Chat).await?;
-                // Start executing tasks sequentially
-                self.execute_plan_tasks().await?;
-            }
-            return Ok(());
-        }
-
-        // Ctrl+R - Reject plan
-        if event.code == KeyCode::Char('r') && event.modifiers.contains(KeyModifiers::CONTROL) {
-            tracing::info!("❌ Ctrl+R pressed - Rejecting plan");
-            if let Some(plan) = &mut self.current_plan {
-                plan.reject();
-                // Save plan to file
-                self.save_plan().await?;
-                // Clear the plan from memory and return to chat
-                self.current_plan = None;
-                self.switch_mode(AppMode::Chat).await?;
-            }
-            return Ok(());
-        }
-
-        // Ctrl+I - Request plan revision
-        if event.code == KeyCode::Char('i') && event.modifiers.contains(KeyModifiers::CONTROL) {
-            tracing::info!("🔄 Ctrl+I pressed - Requesting plan revision");
-            if let Some(plan) = &self.current_plan {
-                // Build plan summary for context
-                let plan_summary = format!(
-                    "Current plan '{}' has {} tasks:\n{}",
-                    plan.title,
-                    plan.tasks.len(),
-                    plan.tasks
-                        .iter()
-                        .enumerate()
-                        .map(|(i, t)| format!("  {}. {} ({})", i + 1, t.title, t.task_type))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                );
-
-                // Switch back to chat mode
-                self.switch_mode(AppMode::Chat).await?;
-
-                // Pre-fill input with revision request
-                self.input_buffer = format!(
-                    "Please revise this plan:\n\n{}\n\nRequested changes: ",
-                    plan_summary
-                );
-                self.cursor_position = self.input_buffer.len();
-
-                // Keep plan in memory for reference (don't clear it)
-            }
-            return Ok(());
-        }
-
-        // Arrow keys for scrolling tasks
-        match event.code {
-            KeyCode::Up => {
-                self.plan_scroll_offset = self.plan_scroll_offset.saturating_sub(1);
-            }
-            KeyCode::Down => {
-                if let Some(plan) = &self.current_plan {
-                    let max_scroll = plan.tasks.len().saturating_sub(1);
-                    self.plan_scroll_offset = (self.plan_scroll_offset + 1).min(max_scroll);
-                }
-            }
-            KeyCode::PageUp => {
-                self.plan_scroll_offset = self.plan_scroll_offset.saturating_sub(10);
-            }
-            KeyCode::PageDown => {
-                if let Some(plan) = &self.current_plan {
-                    let max_scroll = plan.tasks.len().saturating_sub(1);
-                    self.plan_scroll_offset = (self.plan_scroll_offset + 10).min(max_scroll);
-                }
-            }
-            _ => {}
         }
 
         Ok(())

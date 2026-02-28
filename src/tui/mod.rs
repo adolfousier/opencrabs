@@ -22,6 +22,5 @@ pub mod components;
 // Re-exports
 pub use app::{App, DisplayMessage};
 pub use events::{AppMode, EventHandler, TuiEvent};
-pub use plan::{PlanDocument, PlanStatus, PlanTask, TaskStatus, TaskType};
 pub use prompt_analyzer::PromptAnalyzer;
 pub use runner::run;

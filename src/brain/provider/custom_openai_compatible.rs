@@ -571,9 +571,7 @@ impl Provider for OpenAIProvider {
         tracing::debug!("OpenAI request has {} tools", tools_count);
         tracing::debug!(
             "OpenAI request payload: {:?}",
-            serde_json::to_string(&openai_request)
-                .map(|s| s.chars().take(1000).collect::<String>())
-                .unwrap_or_default()
+            serde_json::to_string(&openai_request).unwrap_or_default()
         );
 
         let retry_config = RetryConfig::default();

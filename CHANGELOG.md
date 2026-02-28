@@ -5,6 +5,28 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.38] - 2026-02-27
+
+### Fixed
+- **Splash screen shows actual custom provider name** — `resolve_provider_from_config()` was returning the hardcoded string `"Custom"` instead of the actual provider name (e.g. `"nvidia"`, `"moonshot"`). Now correctly returns the name key from `providers.active_custom()`
+  - `src/config/types.rs`
+- **Full request payload in debug logs** — Removed `.take(1000)` truncation from OpenAI-compatible request debug log. The API request itself was never truncated; only the log display was. Now logs the full payload for accurate debugging
+  - `src/brain/provider/custom_openai_compatible.rs`
+- **Standalone reasoning render during thinking-only phase** — Providers that emit reasoning before any response text (e.g. Kimi K2.5, DeepSeek) now render a visible `🦀 OpenCrabs is thinking...` block with live reasoning content while `streaming_response` is still empty. Previously the screen was blank until the first response chunk
+  - `src/tui/render/chat.rs`
+- **Streaming redraws per chunk** — Drain loop in runner now breaks immediately on `ResponseChunk` events, triggering a redraw after each text chunk. Previously `ReasoningChunk` events also broke the loop, preventing response text from rendering in real-time on some providers
+  - `src/tui/runner.rs`
+- **Approval dialog shows full tool parameters** — Tool approval dialog previously truncated parameter values at 60 characters. Now renders all parameters line-by-line without truncation so the full context is visible when deciding whether to approve
+  - `src/tui/render/tools.rs`
+- **Tool approval waits indefinitely** — Removed 120-second timeout on tool approval callbacks. The dialog now waits as long as needed for the user to approve or deny
+  - `src/tui/app/state.rs`
+- **Green dot pulse slowed** — Animated `●` dot in tool call groups now pulses on a ~1.6s cycle (`animation_frame / 8`) instead of the previous fast flicker (`animation_frame / 3`)
+  - `src/tui/render/tools.rs`
+
+### Removed
+- **Plan Mode completely removed** (~1400 lines deleted) — All plan execution code, UI, keyboard shortcuts, and state removed. Includes `plan_exec.rs` module, `AppMode::Plan` variant, `PlanApprovalState`/`PlanApprovalData` structs, Ctrl+P/Ctrl+A/Ctrl+R/Ctrl+I shortcuts, plan approval intercept in input handler, plan help screen section, and plan re-exports. Plan Mode section removed from README
+  - `src/tui/app/plan_exec.rs` (deleted), `src/tui/app/input.rs`, `src/tui/app/messaging.rs`, `src/tui/app/mod.rs`, `src/tui/app/state.rs`, `src/tui/events.rs`, `src/tui/mod.rs`, `src/tui/render/chat.rs`, `src/tui/render/help.rs`, `src/tui/render/mod.rs`, `src/tui/render/tools.rs`, `README.md`
+
 ## [0.2.37] - 2026-02-26
 
 ### Added
@@ -681,6 +703,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.38]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.38
+[0.2.37]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.37
 [0.2.36]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.36
 [0.2.35]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.35
 [0.2.34]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.34

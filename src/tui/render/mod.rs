@@ -31,7 +31,7 @@ use dialogs::{
     render_directory_picker, render_file_picker, render_model_selector, render_restart_dialog,
     render_usage_dialog,
 };
-use help::{render_help, render_plan, render_plan_help, render_settings};
+use help::{render_help, render_settings};
 use input::{render_input, render_slash_autocomplete};
 use sessions::render_sessions;
 use utils::char_boundary_at_width_from_end;
@@ -110,11 +110,6 @@ pub fn render(f: &mut Frame, app: &mut App) {
             if app.slash_suggestions_active {
                 render_slash_autocomplete(f, app, chunks[2]);
             }
-        }
-        AppMode::Plan => {
-            render_plan(f, app, chunks[1]);
-            // Clear the input area (render help text instead)
-            render_plan_help(f, chunks[2]);
         }
         AppMode::Sessions => {
             render_sessions(f, app, full_content_area);

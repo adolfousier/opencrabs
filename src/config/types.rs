@@ -1654,10 +1654,7 @@ pub fn resolve_provider_from_config(config: &Config) -> (&str, &str) {
     }
     if let Some((name, cfg)) = config.providers.active_custom() {
         let model = cfg.default_model.as_deref().unwrap_or("default");
-        // Return a static string for the provider name; we can't return the dynamic name
-        // from a borrowed reference easily, so we use "Custom" with the model
-        let _ = name; // name is available but we return a static str
-        return ("Custom", model);
+        return (name, model);
     }
     // Default - nothing configured
     ("Not configured", "N/A")

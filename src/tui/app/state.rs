@@ -7,13 +7,12 @@ use super::events::{
     ToolApprovalResponse, TuiEvent,
 };
 use super::onboarding::OnboardingWizard;
-use super::plan::PlanDocument;
 use super::prompt_analyzer::PromptAnalyzer;
 use crate::brain::agent::AgentService;
 use crate::brain::provider::Provider;
 use crate::brain::{BrainLoader, CommandLoader, SelfUpdater, UserCommand};
 use crate::db::models::{Message, Session};
-use crate::services::{MessageService, PlanService, ServiceContext, SessionService};
+use crate::services::{MessageService, ServiceContext, SessionService};
 use anyhow::Result;
 use ratatui::text::Line;
 use serde_json::Value;
@@ -123,28 +122,6 @@ pub struct ApproveMenu {
     pub state: ApproveMenuState,
 }
 
-/// State of an inline plan approval
-#[derive(Debug, Clone, PartialEq)]
-pub enum PlanApprovalState {
-    Pending,
-    Approved,
-    Rejected,
-    RevisionRequested,
-}
-
-/// Data for an inline plan approval selector embedded in a DisplayMessage
-#[derive(Debug, Clone)]
-pub struct PlanApprovalData {
-    pub plan_title: String,
-    pub task_count: usize,
-    pub task_summaries: Vec<String>,
-    pub state: PlanApprovalState,
-    /// 0=Approve, 1=Reject, 2=Request Changes, 3=View Plan
-    pub selected_option: usize,
-    /// Toggle task list
-    pub show_details: bool,
-}
-
 /// An image file attached to the input (detected from pasted paths)
 #[derive(Debug, Clone)]
 pub struct ImageAttachment {
@@ -190,8 +167,6 @@ pub struct DisplayMessage {
     pub expanded: bool,
     /// Grouped tool calls (for role == "tool_group")
     pub tool_group: Option<ToolCallGroup>,
-    /// Inline plan approval selector
-    pub plan_approval: Option<PlanApprovalData>,
 }
 
 impl From<Message> for DisplayMessage {
@@ -208,7 +183,6 @@ impl From<Message> for DisplayMessage {
             details: None,
             expanded: false,
             tool_group: None,
-            plan_approval: None,
         }
     }
 }
@@ -267,12 +241,6 @@ pub struct App {
     /// Approval policy state
     pub approval_auto_session: bool,
     pub approval_auto_always: bool,
-
-    /// Plan mode state
-    pub current_plan: Option<PlanDocument>,
-    pub plan_scroll_offset: usize,
-    pub selected_task_index: Option<usize>,
-    pub executing_plan: bool,
 
     /// File picker state
     pub file_picker_files: Vec<std::path::PathBuf>,
@@ -380,7 +348,6 @@ pub struct App {
     pub(crate) agent_service: Arc<AgentService>,
     pub(crate) session_service: SessionService,
     pub(crate) message_service: MessageService,
-    pub(crate) plan_service: PlanService,
 
     /// Events
     pub(crate) event_handler: EventHandler,
@@ -431,10 +398,6 @@ impl App {
             help_scroll_offset: 0,
             approval_auto_session,
             approval_auto_always,
-            current_plan: None,
-            plan_scroll_offset: 0,
-            selected_task_index: None,
-            executing_plan: false,
             file_picker_files: Vec::new(),
             file_picker_selected: 0,
             file_picker_scroll_offset: 0,
@@ -486,8 +449,7 @@ impl App {
             sudo_pending: None,
             sudo_input: String::new(),
             session_service: SessionService::new(context.clone()),
-            message_service: MessageService::new(context.clone()),
-            plan_service: PlanService::new(context),
+            message_service: MessageService::new(context),
             agent_service,
             event_handler: EventHandler::new(),
             prompt_analyzer: PromptAnalyzer::new(),
@@ -688,19 +650,9 @@ impl App {
                         ))
                     })?;
 
-                let response =
-                    tokio::time::timeout(std::time::Duration::from_secs(120), response_rx.recv())
-                        .await
-                        .map_err(|_| {
-                            crate::brain::agent::AgentError::Internal(
-                                "Approval request timed out".to_string(),
-                            )
-                        })?
-                        .ok_or_else(|| {
-                            crate::brain::agent::AgentError::Internal(
-                                "Approval channel closed".to_string(),
-                            )
-                        })?;
+                let response = response_rx.recv().await.ok_or_else(|| {
+                    crate::brain::agent::AgentError::Internal("Approval channel closed".to_string())
+                })?;
 
                 Ok(response.approved)
             })
@@ -855,7 +807,17 @@ impl App {
                 self.send_message(content).await?;
             }
             TuiEvent::ResponseChunk { session_id, text } => {
-                if self.is_current_session(session_id) {
+                let is_current = self.is_current_session(session_id);
+                tracing::debug!(
+                    "[TUI] ResponseChunk: len={} is_current={} streaming_len={}",
+                    text.len(),
+                    is_current,
+                    self.streaming_response
+                        .as_ref()
+                        .map(|s| s.len())
+                        .unwrap_or(0)
+                );
+                if is_current {
                     self.append_streaming_chunk(text);
                 }
             }
@@ -1004,7 +966,6 @@ impl App {
                         details: Some("queued".to_string()), // Mark as queued
                         expanded: false,
                         tool_group: None,
-                        plan_approval: None,
                     };
                     // Push at the END so it appears below everything
                     self.messages.push(queued_msg);
@@ -1031,7 +992,6 @@ impl App {
                         details: None,
                         expanded: false,
                         tool_group: Some(group),
-                        plan_approval: None,
                     });
                 }
 
@@ -1048,7 +1008,6 @@ impl App {
                     details: reasoning_details,
                     expanded: false,
                     tool_group: None,
-                    plan_approval: None,
                 });
 
                 if self.auto_scroll {
@@ -1138,7 +1097,6 @@ impl App {
                     details: None,
                     expanded: false,
                     tool_group: None,
-                    plan_approval: None,
                 });
 
                 // Summary rendered as a real assistant message in chat — tool calls follow below
@@ -1154,7 +1112,6 @@ impl App {
                     details: None,
                     expanded: false,
                     tool_group: None,
-                    plan_approval: None,
                 });
                 // auto_scroll stays true — new messages continue below
             }
@@ -1304,15 +1261,6 @@ impl App {
             return Ok(());
         }
 
-        // DEBUG: Log key events when in Plan mode
-        if matches!(self.mode, AppMode::Plan) {
-            tracing::debug!(
-                "🔑 Plan Mode Key: code={:?}, modifiers={:?}",
-                event.code,
-                event.modifiers
-            );
-        }
-
         // Ctrl+C: first press clears input, second press (within 3s) quits
         if keys::is_quit(&event) {
             if let Some(pending_at) = self.ctrl_c_pending_at
@@ -1398,27 +1346,6 @@ impl App {
             return Ok(());
         }
 
-        if keys::is_toggle_plan(&event) {
-            // Toggle between Chat and Plan modes
-            match self.mode {
-                AppMode::Chat => {
-                    // Try to load any plan (not just PendingApproval)
-                    self.load_plan_for_viewing().await?;
-                    // Only switch if a plan was loaded
-                    if self.current_plan.is_some() {
-                        self.switch_mode(AppMode::Plan).await?;
-                    } else {
-                        tracing::info!("No plan available to display");
-                        self.error_message =
-                            Some("No plan available. Create a plan first.".to_string());
-                    }
-                }
-                AppMode::Plan => self.switch_mode(AppMode::Chat).await?,
-                _ => {} // Do nothing in other modes
-            }
-            return Ok(());
-        }
-
         // Mode-specific handling
         tracing::trace!("Current mode: {:?}", self.mode);
         match self.mode {
@@ -1448,7 +1375,6 @@ impl App {
                 // If not enough time has elapsed, ignore the key press
             }
             AppMode::Chat => self.handle_chat_key(event).await?,
-            AppMode::Plan => self.handle_plan_key(event).await?,
             AppMode::Sessions => self.handle_sessions_key(event).await?,
             AppMode::FilePicker => self.handle_file_picker_key(event).await?,
             AppMode::DirectoryPicker => self.handle_directory_picker_key(event).await?,
@@ -1538,7 +1464,6 @@ impl App {
                 details: None,
                 expanded: false,
                 tool_group: Some(group),
-                plan_approval: None,
             });
         }
         self.error_message = Some(error);
@@ -1658,7 +1583,6 @@ impl App {
                 details: None,
                 expanded: false,
                 tool_group: None,
-                plan_approval: None,
             });
         }
 
@@ -1686,7 +1610,6 @@ impl App {
             details: None,
             expanded: false,
             tool_group: None,
-            plan_approval: None,
         });
         // Auto-collapse all tool groups so the approval dialog is immediately visible
         if let Some(ref mut group) = self.active_tool_group {

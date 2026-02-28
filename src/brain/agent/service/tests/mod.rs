@@ -711,9 +711,7 @@ async fn create_test_service() -> (AgentService, Uuid) {
     create_test_service_with_provider(Arc::new(MockProvider)).await
 }
 
-async fn create_test_service_with_provider(
-    provider: Arc<dyn Provider>,
-) -> (AgentService, Uuid) {
+async fn create_test_service_with_provider(provider: Arc<dyn Provider>) -> (AgentService, Uuid) {
     let db = Database::connect_in_memory().await.unwrap();
     db.run_migrations().await.unwrap();
     let pool = db.pool().clone();

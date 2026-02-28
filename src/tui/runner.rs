@@ -90,6 +90,7 @@ where
 
             // Drain all remaining queued events before re-rendering.
             // Coalesce Ticks and Scrolls to avoid redundant re-renders.
+            // Break on streaming chunks so each chunk triggers an immediate redraw.
             let mut pending_scroll: i32 = 0;
             loop {
                 match app.try_next_event() {
@@ -98,8 +99,15 @@ where
                         pending_scroll += dir as i32;
                     }
                     Some(event) => {
+                        // Break on ResponseChunk so text appears immediately.
+                        // ReasoningChunk is NOT broken on — reasoning can batch
+                        // within the 100ms tick so it doesn't starve response text.
+                        let is_response_chunk = matches!(event, TuiEvent::ResponseChunk { .. });
                         if let Err(e) = app.handle_event(event).await {
                             app.error_message = Some(e.to_string());
+                        }
+                        if is_response_chunk {
+                            break; // Redraw immediately so each text chunk shows in real-time
                         }
                     }
                     None => break,

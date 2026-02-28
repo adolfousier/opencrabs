@@ -2,12 +2,10 @@
 //!
 //! Tool group display, inline approval dialogs, and approval policy menu.
 
-use super::utils::char_boundary_at_width;
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
 };
-use unicode_width::UnicodeWidthStr;
 
 /// Render a grouped tool call display (● bullet with tree lines)
 pub(super) fn render_tool_group<'a>(
@@ -28,8 +26,8 @@ pub(super) fn render_tool_group<'a>(
         format!("{} tool call{}", count, if count == 1 { "" } else { "s" })
     };
 
-    // Flash the dot while active (slow pulse: ~3 ticks on, ~3 ticks off)
-    let dot = if is_active && (animation_frame / 3).is_multiple_of(2) {
+    // Flash the dot while active (slow pulse: ~8 ticks on, ~8 ticks off = ~1.6s cycle)
+    let dot = if is_active && (animation_frame / 8).is_multiple_of(2) {
         "○"
     } else {
         "●"
@@ -144,7 +142,7 @@ pub(super) fn render_inline_approval<'a>(
 
     match &approval.state {
         ApprovalState::Pending => {
-            // Line 1: tool description
+            // Header: brief description of what's being requested
             let desc = super::super::app::App::format_tool_description(
                 &approval.tool_name,
                 &approval.tool_input,
@@ -159,38 +157,73 @@ pub(super) fn render_inline_approval<'a>(
                 ),
             ]));
 
-            // Show params if expanded (V toggle)
-            if approval.show_details
-                && let Some(obj) = approval.tool_input.as_object()
-            {
-                for (key, value) in obj.iter().take(5) {
-                    let val_str = match value {
-                        serde_json::Value::String(s) => {
-                            if s.width() > 60 {
-                                let end = char_boundary_at_width(s, 57);
-                                format!("\"{}...\"", &s[..end])
-                            } else {
-                                format!("\"{}\"", s)
+            // Always show hint so users know V expands full details
+            lines.push(Line::from(vec![Span::styled(
+                if approval.show_details {
+                    "  [V] collapse  [←→] navigate  [Enter] confirm"
+                } else {
+                    "  [V] expand full details  [←→] navigate  [Enter] confirm"
+                },
+                Style::default().fg(Color::Rgb(80, 80, 80)),
+            )]));
+
+            // Expanded details: show all params fully, no truncation
+            if approval.show_details {
+                if let Some(obj) = approval.tool_input.as_object() {
+                    for (key, value) in obj.iter() {
+                        lines.push(Line::from(vec![Span::styled(
+                            format!("    {}:", key),
+                            Style::default()
+                                .fg(Color::DarkGray)
+                                .add_modifier(Modifier::BOLD),
+                        )]));
+                        // Build owned lines so there are no borrow conflicts
+                        let value_lines: Vec<String> = match value {
+                            serde_json::Value::String(s) => {
+                                s.lines().map(|l| l.to_string()).collect()
                             }
+                            _ => vec![value.to_string()],
+                        };
+                        let total = value_lines.len();
+                        for vline in value_lines.iter().take(60) {
+                            lines.push(Line::from(vec![
+                                Span::styled("      ", Style::default()),
+                                Span::styled(
+                                    vline.clone(),
+                                    Style::default().fg(Color::Rgb(200, 200, 200)),
+                                ),
+                            ]));
                         }
-                        _ => {
-                            let s = value.to_string();
-                            if s.width() > 60 {
-                                let end = char_boundary_at_width(&s, 57);
-                                format!("{}...", &s[..end])
-                            } else {
-                                s
-                            }
+                        if total > 60 {
+                            lines.push(Line::from(vec![
+                                Span::styled("      ", Style::default()),
+                                Span::styled(
+                                    format!("... ({} more lines)", total - 60),
+                                    Style::default()
+                                        .fg(Color::Rgb(120, 120, 120))
+                                        .add_modifier(Modifier::ITALIC),
+                                ),
+                            ]));
                         }
-                    };
+                    }
+                }
+                // Show capabilities if the tool declares any
+                if !approval.capabilities.is_empty() {
+                    lines.push(Line::from(vec![Span::styled(
+                        "    capabilities:",
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::BOLD),
+                    )]));
                     lines.push(Line::from(vec![
+                        Span::styled("      ", Style::default()),
                         Span::styled(
-                            format!("    {}: ", key),
-                            Style::default().fg(Color::DarkGray),
+                            approval.capabilities.join(", "),
+                            Style::default().fg(Color::Rgb(184, 134, 11)),
                         ),
-                        Span::styled(val_str, Style::default().fg(Color::Rgb(120, 120, 120))),
                     ]));
                 }
+                lines.push(Line::from(""));
             }
 
             // "Do you approve?" + vertical option list with ❯ selector
@@ -241,122 +274,6 @@ pub(super) fn render_inline_approval<'a>(
                 format!("  {} -- denied{}", desc, suffix),
                 Style::default()
                     .fg(Color::Red)
-                    .add_modifier(Modifier::ITALIC),
-            )]));
-        }
-    }
-}
-
-/// Render an inline plan approval selector (Approve / Reject / Request Changes / View Plan)
-pub(super) fn render_inline_plan_approval<'a>(
-    lines: &mut Vec<Line<'a>>,
-    plan: &super::super::app::PlanApprovalData,
-    _content_width: usize,
-) {
-    use super::super::app::PlanApprovalState;
-
-    match &plan.state {
-        PlanApprovalState::Pending => {
-            // Plan title line
-            lines.push(Line::from(vec![
-                Span::styled("  ", Style::default()),
-                Span::styled(
-                    "\u{1F4CB} ", // 📋
-                    Style::default(),
-                ),
-                Span::styled(
-                    format!("Plan: {}", plan.plan_title),
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]));
-
-            // Task count
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("  {} tasks", plan.task_count),
-                    Style::default().fg(Color::DarkGray),
-                ),
-                Span::styled(
-                    " (V to show tasks)",
-                    Style::default().fg(Color::Rgb(80, 80, 80)),
-                ),
-            ]));
-
-            // Show task list if expanded
-            if plan.show_details {
-                for (i, summary) in plan.task_summaries.iter().enumerate() {
-                    lines.push(Line::from(vec![
-                        Span::styled(
-                            format!("    {}. ", i + 1),
-                            Style::default().fg(Color::Rgb(100, 100, 100)),
-                        ),
-                        Span::styled(
-                            summary.clone(),
-                            Style::default().fg(Color::Rgb(140, 140, 140)),
-                        ),
-                    ]));
-                }
-            }
-
-            // Blank line before options
-            lines.push(Line::from(""));
-
-            // Options: Approve(0), Reject(1), Request Changes(2), View Plan(3)
-            let options = [
-                ("Approve & Execute", Color::Green),
-                ("Reject", Color::Red),
-                ("Request Changes", Color::Yellow),
-                ("View Full Plan", Color::Rgb(70, 130, 180)),
-            ];
-            for (i, (label, color)) in options.iter().enumerate() {
-                if i == plan.selected_option {
-                    lines.push(Line::from(vec![
-                        Span::styled(
-                            format!("  {} ", "\u{276F}"), // ❯
-                            Style::default().fg(*color).add_modifier(Modifier::BOLD),
-                        ),
-                        Span::styled(
-                            label.to_string(),
-                            Style::default().fg(*color).add_modifier(Modifier::BOLD),
-                        ),
-                    ]));
-                } else {
-                    lines.push(Line::from(vec![
-                        Span::styled("    ", Style::default()),
-                        Span::styled(label.to_string(), Style::default().fg(Color::DarkGray)),
-                    ]));
-                }
-            }
-        }
-        PlanApprovalState::Approved => {
-            lines.push(Line::from(vec![Span::styled(
-                format!(
-                    "  \u{2705} Plan '{}' approved — executing...",
-                    plan.plan_title
-                ),
-                Style::default()
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::ITALIC),
-            )]));
-        }
-        PlanApprovalState::Rejected => {
-            lines.push(Line::from(vec![Span::styled(
-                format!("  \u{274C} Plan '{}' rejected", plan.plan_title),
-                Style::default()
-                    .fg(Color::Red)
-                    .add_modifier(Modifier::ITALIC),
-            )]));
-        }
-        PlanApprovalState::RevisionRequested => {
-            lines.push(Line::from(vec![Span::styled(
-                format!(
-                    "  \u{1F504} Plan '{}' — revision requested",
-                    plan.plan_title
-                ),
-                Style::default()
-                    .fg(Color::Yellow)
                     .add_modifier(Modifier::ITALIC),
             )]));
         }

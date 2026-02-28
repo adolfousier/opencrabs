@@ -41,7 +41,10 @@ async fn test_default_model_fallback() {
     let pool = db.pool().clone();
     let context = ServiceContext::new(pool);
 
-    let provider = Arc::new(MockProviderWithModel::new("test-provider", "provider-default"));
+    let provider = Arc::new(MockProviderWithModel::new(
+        "test-provider",
+        "provider-default",
+    ));
     let agent_service = AgentService::new(provider, context.clone());
 
     let session_service = SessionService::new(context);
@@ -139,7 +142,11 @@ async fn test_model_in_response_matches_request() {
 
     let requested_model = "requested-model-xyz".to_string();
     let response = agent_service
-        .send_message(session.id, "Hello".to_string(), Some(requested_model.clone()))
+        .send_message(
+            session.id,
+            "Hello".to_string(),
+            Some(requested_model.clone()),
+        )
         .await
         .unwrap();
 
