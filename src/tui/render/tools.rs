@@ -219,7 +219,7 @@ pub(super) fn render_inline_approval<'a>(
                         Span::styled("      ", Style::default()),
                         Span::styled(
                             approval.capabilities.join(", "),
-                            Style::default().fg(Color::Rgb(184, 134, 11)),
+                            Style::default().fg(Color::Rgb(215, 100, 20)),
                         ),
                     ]));
                 }
@@ -234,7 +234,7 @@ pub(super) fn render_inline_approval<'a>(
             )]));
             let options = [
                 ("Yes", Color::Green),
-                ("Always", Color::Yellow),
+                ("Always", Color::Rgb(215, 100, 20)),
                 ("No", Color::Red),
             ];
             for (i, (label, color)) in options.iter().enumerate() {
@@ -290,7 +290,7 @@ pub(super) fn render_approve_menu<'a>(
 
     match &menu.state {
         ApproveMenuState::Pending => {
-            let gold = Color::Rgb(255, 200, 50);
+            let gold = Color::Rgb(215, 100, 20);
 
             lines.push(Line::from(vec![Span::styled(
                 "  TOOL APPROVAL POLICY",
@@ -355,7 +355,7 @@ pub(super) fn render_approve_menu<'a>(
         ApproveMenuState::Selected(choice) => {
             let (label, color) = match choice {
                 0 => ("Approve-only", Color::Green),
-                1 => ("Allow all (session)", Color::Yellow),
+                1 => ("Allow all (session)", Color::Rgb(215, 100, 20)),
                 2 => ("Yolo mode", Color::Red),
                 _ => ("Cancelled", Color::DarkGray),
             };

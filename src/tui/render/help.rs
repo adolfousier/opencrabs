@@ -29,7 +29,7 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
         Line::from(Span::styled(
             format!(" {} ", title),
             Style::default()
-                .fg(Color::Rgb(70, 130, 180))
+                .fg(Color::Rgb(120, 120, 120))
                 .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
         ))
     }
@@ -41,8 +41,8 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
         .split(area);
 
     // ── LEFT COLUMN ──
-    let gold = Color::Rgb(184, 134, 11);
-    let blue = Color::Blue;
+    let gold = Color::Rgb(215, 100, 20);
+    let blue = Color::Gray;
 
     let mut left = vec![
         Line::from(""),
@@ -76,7 +76,7 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(
                 " [↑↓ PgUp/Dn]",
                 Style::default()
-                    .fg(Color::Rgb(70, 130, 180))
+                    .fg(Color::Rgb(120, 120, 120))
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(" Scroll  ", Style::default().fg(Color::DarkGray)),
@@ -110,32 +110,32 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
         Line::from(""),
         section_header("FEATURES"),
         Line::from(vec![
-            Span::styled(" ✓ ", Style::default().fg(Color::Blue)),
+            Span::styled(" ✓ ", Style::default().fg(Color::Gray)),
             Span::styled(
                 "Markdown & Syntax Highlighting",
                 Style::default().fg(Color::White),
             ),
         ]),
         Line::from(vec![
-            Span::styled(" ✓ ", Style::default().fg(Color::Blue)),
+            Span::styled(" ✓ ", Style::default().fg(Color::Gray)),
             Span::styled(
                 "Multi-line Input & Streaming",
                 Style::default().fg(Color::White),
             ),
         ]),
         Line::from(vec![
-            Span::styled(" ✓ ", Style::default().fg(Color::Blue)),
+            Span::styled(" ✓ ", Style::default().fg(Color::Gray)),
             Span::styled(
                 "Session Management & History",
                 Style::default().fg(Color::White),
             ),
         ]),
         Line::from(vec![
-            Span::styled(" ✓ ", Style::default().fg(Color::Blue)),
+            Span::styled(" ✓ ", Style::default().fg(Color::Gray)),
             Span::styled("Token & Cost Tracking", Style::default().fg(Color::White)),
         ]),
         Line::from(vec![
-            Span::styled(" ✓ ", Style::default().fg(Color::Blue)),
+            Span::styled(" ✓ ", Style::default().fg(Color::Gray)),
             Span::styled(
                 "Inline Tool Approval (3 policies)",
                 Style::default().fg(Color::White),
@@ -156,10 +156,10 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
                 .title(Span::styled(
                     " 📚 Help & Commands ",
                     Style::default()
-                        .fg(Color::Rgb(70, 130, 180))
+                        .fg(Color::Rgb(120, 120, 120))
                         .add_modifier(Modifier::BOLD),
                 ))
-                .border_style(Style::default().fg(Color::Rgb(70, 130, 180))),
+                .border_style(Style::default().fg(Color::Rgb(120, 120, 120))),
         )
         .scroll((app.help_scroll_offset as u16, 0));
 
@@ -167,7 +167,7 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Rgb(70, 130, 180))),
+                .border_style(Style::default().fg(Color::Rgb(120, 120, 120))),
         )
         .scroll((app.help_scroll_offset as u16, 0));
 
@@ -181,7 +181,7 @@ pub(super) fn render_settings(f: &mut Frame, app: &App, area: Rect) {
         Line::from(Span::styled(
             format!("  {} ", title),
             Style::default()
-                .fg(Color::Rgb(70, 130, 180))
+                .fg(Color::Rgb(120, 120, 120))
                 .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
         ))
     }
@@ -190,7 +190,7 @@ pub(super) fn render_settings(f: &mut Frame, app: &App, area: Rect) {
         Line::from(vec![
             Span::styled(
                 format!("   {:<20}", key),
-                Style::default().fg(Color::Rgb(184, 134, 11)),
+                Style::default().fg(Color::Rgb(215, 100, 20)),
             ),
             Span::styled(val, Style::default().fg(Color::White)),
         ])
@@ -205,7 +205,7 @@ pub(super) fn render_settings(f: &mut Frame, app: &App, area: Rect) {
         Line::from(vec![
             Span::styled(
                 format!("   {:<20}", label),
-                Style::default().fg(Color::Rgb(184, 134, 11)),
+                Style::default().fg(Color::Rgb(215, 100, 20)),
             ),
             Span::styled(dot, Style::default().fg(color)),
             Span::styled(
@@ -270,14 +270,14 @@ pub(super) fn render_settings(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(
                 "  [↑↓ PgUp/Dn]",
                 Style::default()
-                    .fg(Color::Rgb(70, 130, 180))
+                    .fg(Color::Rgb(120, 120, 120))
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(" Scroll  ", Style::default().fg(Color::DarkGray)),
             Span::styled(
                 "[Esc]",
                 Style::default()
-                    .fg(Color::Rgb(184, 134, 11))
+                    .fg(Color::Rgb(215, 100, 20))
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(" Back", Style::default().fg(Color::DarkGray)),
@@ -298,10 +298,10 @@ pub(super) fn render_settings(f: &mut Frame, app: &App, area: Rect) {
                 .title(Span::styled(
                     " Settings ",
                     Style::default()
-                        .fg(Color::Rgb(70, 130, 180))
+                        .fg(Color::Rgb(120, 120, 120))
                         .add_modifier(Modifier::BOLD),
                 ))
-                .border_style(Style::default().fg(Color::Rgb(70, 130, 180))),
+                .border_style(Style::default().fg(Color::Rgb(120, 120, 120))),
         )
         .scroll((app.help_scroll_offset as u16, 0));
 

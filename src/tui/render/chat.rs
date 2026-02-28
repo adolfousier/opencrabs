@@ -157,7 +157,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                     vec![Span::styled(
                         "\u{25CF} ",
                         Style::default()
-                            .fg(Color::Rgb(70, 130, 180))
+                            .fg(Color::Rgb(120, 120, 120))
                             .add_modifier(Modifier::BOLD),
                     )]
                 }
@@ -241,18 +241,18 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             Span::styled(
                 format!("{} ", frame),
                 Style::default()
-                    .fg(Color::Rgb(70, 130, 180))
+                    .fg(Color::Rgb(120, 120, 120))
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "🦀 OpenCrabs ",
                 Style::default()
-                    .fg(Color::Blue)
+                    .fg(Color::Gray)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "is responding...",
-                Style::default().fg(Color::Rgb(184, 134, 11)),
+                Style::default().fg(Color::Rgb(215, 100, 20)),
             ),
         ];
         if elapsed > 0 {
@@ -316,12 +316,12 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             Span::styled(
                 format!("  {} ", frame),
                 Style::default()
-                    .fg(Color::Rgb(70, 130, 180))
+                    .fg(Color::Rgb(120, 120, 120))
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "OpenCrabs is thinking...",
-                Style::default().fg(Color::Rgb(184, 134, 11)),
+                Style::default().fg(Color::Rgb(215, 100, 20)),
             ),
         ]));
     }
@@ -343,18 +343,18 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             Span::styled(
                 format!("{} ", frame),
                 Style::default()
-                    .fg(Color::Rgb(70, 130, 180))
+                    .fg(Color::Rgb(120, 120, 120))
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "🦀 OpenCrabs ",
                 Style::default()
-                    .fg(Color::Blue)
+                    .fg(Color::Gray)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "is thinking...",
-                Style::default().fg(Color::Rgb(184, 134, 11)),
+                Style::default().fg(Color::Rgb(215, 100, 20)),
             ),
         ];
         if elapsed > 0 {
@@ -414,12 +414,12 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         lines.push(Line::from(vec![
             Span::styled(
                 "  \u{1F512} ",
-                Style::default().fg(Color::Rgb(184, 134, 11)),
+                Style::default().fg(Color::Rgb(215, 100, 20)),
             ),
             Span::styled(
                 "sudo password required",
                 Style::default()
-                    .fg(Color::Rgb(184, 134, 11))
+                    .fg(Color::Rgb(215, 100, 20))
                     .add_modifier(Modifier::BOLD),
             ),
         ]));
@@ -440,7 +440,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                 "\u{2022}".repeat(app.sudo_input.len()),
                 Style::default().fg(Color::White),
             ),
-            Span::styled("\u{2588}", Style::default().fg(Color::Rgb(70, 130, 180))),
+            Span::styled("\u{2588}", Style::default().fg(Color::Rgb(120, 120, 120))),
         ]));
         // Help line
         lines.push(Line::from(vec![

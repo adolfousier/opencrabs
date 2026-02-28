@@ -20,13 +20,13 @@ pub(super) fn render_file_picker(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(
             "📁 File Picker",
             Style::default()
-                .fg(Color::Rgb(70, 130, 180))
+                .fg(Color::Rgb(120, 120, 120))
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled("  │  ", Style::default().fg(Color::DarkGray)),
         Span::styled(
             app.file_picker_current_dir.to_string_lossy().to_string(),
-            Style::default().fg(Color::Rgb(184, 134, 11)),
+            Style::default().fg(Color::Rgb(215, 100, 20)),
         ),
     ]));
     lines.push(Line::from(""));
@@ -60,10 +60,10 @@ pub(super) fn render_file_picker(f: &mut Frame, app: &App, area: Rect) {
         let style = if is_selected {
             Style::default()
                 .fg(Color::Black)
-                .bg(Color::Rgb(70, 130, 180))
+                .bg(Color::Rgb(120, 120, 120))
                 .add_modifier(Modifier::BOLD)
         } else if is_dir {
-            Style::default().fg(Color::Rgb(70, 130, 180))
+            Style::default().fg(Color::Rgb(120, 120, 120))
         } else {
             Style::default().fg(Color::White)
         };
@@ -96,14 +96,14 @@ pub(super) fn render_file_picker(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(
             "[↑↓]",
             Style::default()
-                .fg(Color::Rgb(70, 130, 180))
+                .fg(Color::Rgb(120, 120, 120))
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(" Navigate  ", Style::default().fg(Color::White)),
         Span::styled(
             "[Enter]",
             Style::default()
-                .fg(Color::Blue)
+                .fg(Color::Gray)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(" Select  ", Style::default().fg(Color::White)),
@@ -118,11 +118,11 @@ pub(super) fn render_file_picker(f: &mut Frame, app: &App, area: Rect) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Rgb(70, 130, 180)))
+                .border_style(Style::default().fg(Color::Rgb(120, 120, 120)))
                 .title(Span::styled(
                     " Select a file ",
                     Style::default()
-                        .fg(Color::Rgb(70, 130, 180))
+                        .fg(Color::Rgb(120, 120, 120))
                         .add_modifier(Modifier::BOLD),
                 )),
         )
@@ -140,13 +140,13 @@ pub(super) fn render_directory_picker(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(
             "📂 Directory Picker",
             Style::default()
-                .fg(Color::Rgb(70, 130, 180))
+                .fg(Color::Rgb(120, 120, 120))
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled("  │  ", Style::default().fg(Color::DarkGray)),
         Span::styled(
             app.file_picker_current_dir.to_string_lossy().to_string(),
-            Style::default().fg(Color::Rgb(184, 134, 11)),
+            Style::default().fg(Color::Rgb(215, 100, 20)),
         ),
     ]));
     lines.push(Line::from(""));
@@ -179,10 +179,10 @@ pub(super) fn render_directory_picker(f: &mut Frame, app: &App, area: Rect) {
         let style = if is_selected {
             Style::default()
                 .fg(Color::Black)
-                .bg(Color::Rgb(70, 130, 180))
+                .bg(Color::Rgb(120, 120, 120))
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(Color::Rgb(70, 130, 180))
+            Style::default().fg(Color::Rgb(120, 120, 120))
         };
 
         let prefix = if is_selected { "▶ " } else { "  " };
@@ -218,14 +218,14 @@ pub(super) fn render_directory_picker(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(
             "[↑↓]",
             Style::default()
-                .fg(Color::Rgb(70, 130, 180))
+                .fg(Color::Rgb(120, 120, 120))
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(" Navigate  ", Style::default().fg(Color::White)),
         Span::styled(
             "[Enter]",
             Style::default()
-                .fg(Color::Blue)
+                .fg(Color::Gray)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(" Open  ", Style::default().fg(Color::White)),
@@ -247,11 +247,11 @@ pub(super) fn render_directory_picker(f: &mut Frame, app: &App, area: Rect) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Rgb(70, 130, 180)))
+                .border_style(Style::default().fg(Color::Rgb(120, 120, 120)))
                 .title(Span::styled(
                     " Change working directory ",
                     Style::default()
-                        .fg(Color::Rgb(70, 130, 180))
+                        .fg(Color::Rgb(120, 120, 120))
                         .add_modifier(Modifier::BOLD),
                 )),
         )
@@ -264,8 +264,8 @@ pub(super) fn render_directory_picker(f: &mut Frame, app: &App, area: Rect) {
 pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     use crate::tui::onboarding::PROVIDERS;
 
-    const BRAND_BLUE: Color = Color::Rgb(70, 130, 180);
-    const BRAND_GOLD: Color = Color::Rgb(218, 165, 32);
+    const BRAND_BLUE: Color = Color::Rgb(120, 120, 120);
+    const BRAND_GOLD: Color = Color::Rgb(215, 100, 20);
 
     let focused_field = app.model_selector_focused_field; // 0=provider, 1=api_key, 2=model
     let provider_idx = app.model_selector_provider_selected;
@@ -537,7 +537,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
                     .add_modifier(Modifier::BOLD)
             } else if active {
                 Style::default()
-                    .fg(Color::Blue)
+                    .fg(Color::Gray)
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White)
@@ -622,7 +622,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         help_spans.push(Span::styled(
             key,
             Style::default()
-                .fg(Color::Yellow)
+                .fg(Color::Rgb(215, 100, 20))
                 .add_modifier(Modifier::BOLD),
         ));
         help_spans.push(Span::styled(
@@ -757,9 +757,9 @@ pub(super) fn render_usage_dialog(f: &mut Frame, app: &App, area: Rect) {
         .add_modifier(Modifier::BOLD);
     let dim_style = Style::default().fg(Color::DarkGray);
     let header_style = Style::default()
-        .fg(Color::Rgb(70, 130, 180))
+        .fg(Color::Rgb(120, 120, 120))
         .add_modifier(Modifier::BOLD);
-    let est_style = Style::default().fg(Color::Yellow);
+    let est_style = Style::default().fg(Color::Rgb(215, 100, 20));
 
     let fmt_tokens = |t: i64| -> String {
         if t >= 1_000_000 {
@@ -893,11 +893,11 @@ pub(super) fn render_usage_dialog(f: &mut Frame, app: &App, area: Rect) {
     let dialog = Paragraph::new(lines).block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Rgb(70, 130, 180)))
+            .border_style(Style::default().fg(Color::Rgb(120, 120, 120)))
             .title(Span::styled(
                 " Usage Stats ",
                 Style::default()
-                    .fg(Color::Rgb(70, 130, 180))
+                    .fg(Color::Rgb(120, 120, 120))
                     .add_modifier(Modifier::BOLD),
             )),
     );

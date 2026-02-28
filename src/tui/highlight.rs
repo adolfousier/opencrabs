@@ -82,7 +82,7 @@ pub fn highlight_code(code: &str, language: &str) -> Vec<Line<'static>> {
                             format!("{:3} ", idx + 1),
                             Style::default().fg(Color::DarkGray),
                         ),
-                        Span::styled(format!("│ {}", line), Style::default().fg(Color::Blue)),
+                        Span::styled(format!("│ {}", line), Style::default().fg(Color::Gray)),
                     ])
                 })
                 .collect();
@@ -105,7 +105,7 @@ pub fn highlight_code(code: &str, language: &str) -> Vec<Line<'static>> {
                     ),
                     Span::styled(
                         format!("│ {}", line.trim_end()),
-                        Style::default().fg(Color::Blue),
+                        Style::default().fg(Color::Gray),
                     ),
                 ]));
                 continue;
