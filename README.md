@@ -56,7 +56,7 @@
 
 ## 📸 Screenshots
 
-[![Demo](src/screenshots/opencrabs-demo.gif)](https://github.com/user-attachments/assets/dfc44f70-52e1-44f7-8aef-b57faf453761)
+[![Demo](src/screenshots/opencrabs-demo.gif)](https://github.com/user-attachments/assets/6c5f01e2-8444-467e-97f1-61639fac8c37)
 
 ![Splash](src/screenshots/splash.png)
 
@@ -156,7 +156,7 @@ OAuth tokens (`sk-ant-oat` prefix) are auto-detected — uses `Authorization: Be
 
 ### OpenAI
 
-**Models:** GPT-4 Turbo, GPT-4, GPT-3.5 Turbo
+**Models:** GPT-5 Turbo, GPT-5
 
 **Setup** in `keys.toml`:
 ```toml

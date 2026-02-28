@@ -464,11 +464,8 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Calculate scroll offset — lines are pre-wrapped so count is accurate
     let total_lines = lines.len();
-    // Reserve 1 extra line when thinking indicator is visible so it doesn't overlap content
-    let thinking_visible =
-        app.is_processing && app.streaming_response.is_none() && !app.has_pending_approval();
-    let reserved = if thinking_visible { 4 } else { 3 }; // borders + top padding + indicator
-    let visible_height = area.height.saturating_sub(reserved) as usize;
+    // Only 1 row of top padding (Borders::NONE + Padding::new(1,1,1,0)); no border rows
+    let visible_height = area.height.saturating_sub(1) as usize;
     let max_scroll = total_lines.saturating_sub(visible_height);
     let actual_scroll_offset = max_scroll.saturating_sub(app.scroll_offset);
 
