@@ -302,6 +302,30 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         }
     }
 
+    // Immediate feedback: show spinner as soon as processing starts,
+    // before any streaming content or reasoning has arrived yet.
+    if !has_pending_approval
+        && app.is_processing
+        && app.streaming_response.is_none()
+        && app.streaming_reasoning.is_none()
+        && app.active_tool_group.is_none()
+    {
+        let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        let frame = spinner_frames[app.animation_frame % spinner_frames.len()];
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("  {} ", frame),
+                Style::default()
+                    .fg(Color::Rgb(70, 130, 180))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "OpenCrabs is thinking...",
+                Style::default().fg(Color::Rgb(184, 134, 11)),
+            ),
+        ]));
+    }
+
     // Render standalone reasoning during thinking-only phase
     // (before first text token — Kimi K2.5, DeepSeek-R1, etc.)
     // streaming_response=None but reasoning is already streaming in

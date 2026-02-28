@@ -332,11 +332,15 @@ impl AgentService {
             last_input_tokens = if response.usage.input_tokens > 0 {
                 response.usage.input_tokens
             } else {
+                // Include tool schema overhead — context.token_count tracks message
+                // tokens only; tool schemas are excluded from that count.
+                let tool_est = (self.tool_registry.count() * 500) as u32;
+                let estimate = context.token_count as u32 + tool_est;
                 tracing::debug!(
-                    "Provider reported 0 input tokens, using tiktoken estimate: {}",
-                    context.token_count
+                    "Provider reported 0 input tokens, using tiktoken estimate: {} ({} msg + {} tool schemas)",
+                    estimate, context.token_count, tool_est
                 );
-                context.token_count as u32
+                estimate
             };
             total_input_tokens += last_input_tokens;
             total_output_tokens += response.usage.output_tokens;

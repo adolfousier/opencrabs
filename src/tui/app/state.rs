@@ -320,6 +320,8 @@ pub struct App {
     /// Context window tracking
     pub context_max_tokens: u32,
     pub last_input_tokens: Option<u32>,
+    /// Per-session cache of last known input token count — survives session switches
+    pub(crate) session_context_cache: HashMap<Uuid, u32>,
 
     /// Active tool call group (during processing)
     pub active_tool_group: Option<ToolCallGroup>,
@@ -439,6 +441,7 @@ impl App {
             context_max_tokens: agent_service
                 .context_window_for_model(&agent_service.provider_model()),
             last_input_tokens: None,
+            session_context_cache: HashMap::new(),
             active_tool_group: None,
             rebuild_status: None,
             resume_session_id: None,

@@ -76,10 +76,9 @@ impl App {
         // Sync shared session ID for channels (Telegram, WhatsApp)
         *self.shared_session_id.lock().await = Some(session.id);
 
-        // Reset to unknown — display_token_count only covers visible message text and
-        // would massively under-report the real input (missing system prompt + tool schemas).
-        // The accurate value arrives with the first API response via context_tokens.
-        self.last_input_tokens = None;
+        // Restore last known context size for this session (set by previous responses).
+        // Falls back to None (shows –) on first ever load before any response.
+        self.last_input_tokens = self.session_context_cache.get(&session_id).copied();
 
         // Clear unread indicator for this session
         self.sessions_with_unread.remove(&session_id);
@@ -1223,8 +1222,12 @@ impl App {
         // Reload user commands (agent may have written new ones to commands.json)
         self.reload_user_commands();
 
-        // Track context usage from latest response
+        // Track context usage from latest response and cache per session
         self.last_input_tokens = Some(response.context_tokens);
+        if let Some(ref session) = self.current_session {
+            self.session_context_cache
+                .insert(session.id, response.context_tokens);
+        }
 
         // Debug: log response content length
         tracing::debug!(
