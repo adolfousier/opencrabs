@@ -332,13 +332,16 @@ impl AgentService {
             last_input_tokens = if response.usage.input_tokens > 0 {
                 response.usage.input_tokens
             } else {
-                // Include tool schema overhead — context.token_count tracks message
-                // tokens only; tool schemas are excluded from that count.
-                let tool_est = (self.tool_registry.count() * 500) as u32;
-                let estimate = context.token_count as u32 + tool_est;
+                // Serialize actual tool definitions to count their real token cost,
+                // matching how the provider computes it before each request.
+                let tool_defs = self.tool_registry.get_tool_definitions();
+                let tool_tokens = crate::brain::tokenizer::count_tokens(
+                    &serde_json::to_string(&tool_defs).unwrap_or_default(),
+                ) as u32;
+                let estimate = context.token_count as u32 + tool_tokens;
                 tracing::debug!(
                     "Provider reported 0 input tokens, using tiktoken estimate: {} ({} msg + {} tool schemas)",
-                    estimate, context.token_count, tool_est
+                    estimate, context.token_count, tool_tokens
                 );
                 estimate
             };
