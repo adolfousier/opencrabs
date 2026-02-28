@@ -22,7 +22,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::Paragraph,
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -141,9 +141,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
     }
 }
 
-/// Split 2 rows off the top of an area for the app title bar.
+/// Split 1 row off the top of an area for the app title bar.
 fn split_title_area(area: Rect) -> (Rect, Rect) {
-    let title_height = 2u16; // 1 content + 1 bottom border
+    let title_height = 1u16; // title only
     let title_area = Rect {
         height: title_height.min(area.height),
         ..area
@@ -158,16 +158,11 @@ fn split_title_area(area: Rect) -> (Rect, Rect) {
 
 /// Render the app name header used on Sessions, Help, and Settings screens.
 fn render_app_title(f: &mut Frame, area: Rect) {
-    let line = Line::from(Span::styled(
+    let para = Paragraph::new(vec![Line::from(Span::styled(
         " 🦀 OpenCrabs AI Orchestration Agent",
-        Style::default()
-            .fg(Color::Rgb(120, 120, 120))
-            .add_modifier(Modifier::BOLD),
-    ));
-    let para = Paragraph::new(line).block(
-        Block::default()
-            .borders(Borders::BOTTOM)
-            .border_style(Style::default().fg(Color::Rgb(120, 120, 120))),
-    );
+            Style::default()
+                .fg(Color::Rgb(120, 120, 120))
+                .add_modifier(Modifier::BOLD),
+        ))]);
     f.render_widget(para, area);
 }
