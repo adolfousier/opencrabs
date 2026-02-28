@@ -76,11 +76,16 @@ impl App {
         // Sync shared session ID for channels (Telegram, WhatsApp)
         *self.shared_session_id.lock().await = Some(session.id);
 
-        // Don't estimate context from stored messages — the chars/3 heuristic
-        // counts ALL messages (including compacted ones still in DB) which wildly
-        // overestimates actual context window usage. Instead, show no percentage
-        // until the next API response provides real input_tokens from the model.
-        self.last_input_tokens = None;
+        // Use the displayed message token count as an initial estimate so the ctx
+        // indicator shows something immediately on load instead of "–".
+        // display_token_count only covers non-compacted (visible) messages, making it
+        // a reasonable baseline. The real value from the API will replace it on the
+        // next response.
+        self.last_input_tokens = if self.display_token_count > 0 {
+            Some(self.display_token_count as u32)
+        } else {
+            None
+        };
 
         // Clear unread indicator for this session
         self.sessions_with_unread.remove(&session_id);

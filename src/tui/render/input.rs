@@ -11,6 +11,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
 };
+use unicode_width::UnicodeWidthStr;
 /// Render the input box
 pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
     let input_content_width = area.width.saturating_sub(2) as usize; // borders
@@ -122,8 +123,7 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    // Always keep steel blue border
-    let border_style = Style::default().fg(Color::Rgb(70, 130, 180));
+    let border_style = Style::default().fg(Color::Rgb(120, 120, 120));
 
     // Context usage indicator (right-side bottom title)
     let context_title = if let Some(input_tok) = app.last_input_tokens {
@@ -131,7 +131,7 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
         let context_color = if pct > 80.0 {
             Color::Red
         } else if pct > 60.0 {
-            Color::Yellow
+            Color::Rgb(215, 100, 20)
         } else {
             Color::Green
         };
@@ -175,7 +175,7 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let mut block = Block::default()
-        .borders(Borders::ALL)
+        .borders(Borders::TOP | Borders::BOTTOM)
         .title_bottom(context_title)
         .border_style(border_style);
 
@@ -266,7 +266,104 @@ pub(super) fn render_slash_autocomplete(f: &mut Frame, app: &App, input_area: Re
     let dropdown = Paragraph::new(padded_lines).block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Rgb(70, 130, 180))),
+            .border_style(Style::default().fg(Color::Rgb(120, 120, 120))),
     );
     f.render_widget(dropdown, dropdown_area);
+}
+
+/// Render the single-line status bar below the input box.
+///
+/// Layout:  provider / model  ·  [policy]          ⠙ OpenCrabs is thinking... (3s)
+pub(super) fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+
+    let orange = Color::Rgb(215, 100, 20);
+
+    // --- Session name (left) ---
+    let session_name = app
+        .current_session
+        .as_ref()
+        .and_then(|s| s.title.as_deref())
+        .unwrap_or("Chat")
+        .to_string();
+
+    // --- Provider / model ---
+    let provider_str = app
+        .current_session
+        .as_ref()
+        .and_then(|s| s.provider_name.clone())
+        .unwrap_or_else(|| app.agent_service.provider_name());
+    let model_str = app
+        .current_session
+        .as_ref()
+        .and_then(|s| s.model.as_deref())
+        .unwrap_or(&app.default_model_name)
+        .to_string();
+
+    let left_text = format!(" {}  ·  {} / {}", session_name, provider_str, model_str);
+    let sep_text = "  ·  ";
+
+    // --- Approval policy (centre-left) ---
+    let (policy_text, policy_color) = if app.approval_auto_always {
+        ("⚡ yolo", Color::Red)
+    } else if app.approval_auto_session {
+        ("⚡ auto (session)", orange)
+    } else {
+        ("🔒 approve", Color::DarkGray)
+    };
+
+    // --- Thinking / responding indicator (right, only when processing) ---
+    let right_text = if app.is_processing {
+        let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        let frame = spinner_frames[app.animation_frame % spinner_frames.len()];
+        let elapsed = app
+            .processing_started_at
+            .map(|t| t.elapsed().as_secs())
+            .unwrap_or(0);
+        let status = if app.streaming_response.is_some() {
+            "responding..."
+        } else {
+            "thinking..."
+        };
+        let timer = if elapsed > 0 {
+            format!(" ({}s)", elapsed)
+        } else {
+            String::new()
+        };
+        format!("{} OpenCrabs is {}{} ", frame, status, timer)
+    } else {
+        String::new()
+    };
+
+    // --- Build the line with right-aligned thinking indicator ---
+    let left_width =
+        UnicodeWidthStr::width(left_text.as_str()) + UnicodeWidthStr::width(sep_text) + UnicodeWidthStr::width(policy_text);
+    let right_width = UnicodeWidthStr::width(right_text.as_str());
+    let total = area.width as usize;
+
+    let padding_width = total.saturating_sub(left_width + right_width);
+    let padding = " ".repeat(padding_width);
+
+    let mut spans = vec![
+        Span::styled(
+            left_text,
+            Style::default().fg(Color::Rgb(90, 110, 150)),
+        ),
+        Span::styled(sep_text, Style::default().fg(Color::DarkGray)),
+        Span::styled(policy_text, Style::default().fg(policy_color)),
+        Span::raw(padding),
+    ];
+
+    if !right_text.is_empty() {
+        spans.push(Span::styled(
+            right_text,
+            Style::default().fg(orange).add_modifier(Modifier::BOLD),
+        ));
+    }
+
+    let line = Line::from(spans);
+    let para = Paragraph::new(line).alignment(Alignment::Left);
+    f.render_widget(para, area);
 }

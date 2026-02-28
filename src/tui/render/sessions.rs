@@ -149,13 +149,13 @@ pub(super) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
                 let frame = app.animation_frame % spinner_chars.len();
                 spans.push(Span::styled(
                     format!(" {}", spinner_chars[frame]),
-                    Style::default().fg(Color::Yellow),
+                    Style::default().fg(Color::Rgb(215, 100, 20)),
                 ));
             } else if app.sessions_with_pending_approval.contains(&session.id) {
                 spans.push(Span::styled(
                     " !",
                     Style::default()
-                        .fg(Color::Yellow)
+                        .fg(Color::Rgb(215, 100, 20))
                         .add_modifier(Modifier::BOLD),
                 ));
             } else if app.sessions_with_unread.contains(&session.id) {
@@ -169,7 +169,7 @@ pub(super) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
                     if ctx_pct > 80.0 {
                         Color::Red
                     } else if ctx_pct > 50.0 {
-                        Color::Yellow
+                        Color::Rgb(215, 100, 20)
                     } else {
                         Color::Green
                     }
