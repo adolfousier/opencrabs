@@ -302,7 +302,16 @@ pub(super) fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
         .unwrap_or(&app.default_model_name)
         .to_string();
 
-    let left_text = format!(" {}  ·  {} / {}", session_name, provider_str, model_str);
+    // Working directory (truncated if long)
+    let raw_dir = app.working_directory.to_string_lossy();
+    let display_dir = if raw_dir.len() > 40 {
+        format!("...{}", &raw_dir[raw_dir.len().saturating_sub(37)..])
+    } else {
+        raw_dir.to_string()
+    };
+
+    let session_text = format!(" {}", session_name);
+    let provider_model_dir_text = format!("  ·  {} / {}  ·  {}", provider_str, model_str, display_dir);
     let sep_text = "  ·  ";
 
     // --- Approval policy (centre-left) ---
@@ -338,8 +347,10 @@ pub(super) fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
     };
 
     // --- Build the line with right-aligned thinking indicator ---
-    let left_width =
-        UnicodeWidthStr::width(left_text.as_str()) + UnicodeWidthStr::width(sep_text) + UnicodeWidthStr::width(policy_text);
+    let left_width = UnicodeWidthStr::width(session_text.as_str())
+        + UnicodeWidthStr::width(provider_model_dir_text.as_str())
+        + UnicodeWidthStr::width(sep_text)
+        + UnicodeWidthStr::width(policy_text);
     let right_width = UnicodeWidthStr::width(right_text.as_str());
     let total = area.width as usize;
 
@@ -347,10 +358,8 @@ pub(super) fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
     let padding = " ".repeat(padding_width);
 
     let mut spans = vec![
-        Span::styled(
-            left_text,
-            Style::default().fg(Color::Rgb(90, 110, 150)),
-        ),
+        Span::styled(session_text, Style::default().fg(orange).add_modifier(Modifier::BOLD)),
+        Span::styled(provider_model_dir_text, Style::default().fg(Color::Rgb(90, 110, 150))),
         Span::styled(sep_text, Style::default().fg(Color::DarkGray)),
         Span::styled(policy_text, Style::default().fg(policy_color)),
         Span::raw(padding),

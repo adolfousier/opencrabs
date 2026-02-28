@@ -472,7 +472,6 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     let max_scroll = total_lines.saturating_sub(visible_height);
     let actual_scroll_offset = max_scroll.saturating_sub(app.scroll_offset);
 
-
     let chat = Paragraph::new(lines)
         .block(
             Block::default()

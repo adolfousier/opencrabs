@@ -10,6 +10,7 @@
 use super::error::{ProviderError, Result};
 use super::r#trait::{Provider, ProviderStream};
 use super::types::*;
+use crate::brain::tokenizer::{count_message_tokens, count_tokens};
 use async_trait::async_trait;
 use futures::stream::StreamExt;
 use reqwest::Client;
@@ -568,10 +569,35 @@ impl Provider for OpenAIProvider {
         });
 
         let tools_count = openai_request.tools.as_ref().map(|t| t.len()).unwrap_or(0);
-        tracing::debug!("OpenAI request has {} tools", tools_count);
+
+        // Count input tokens via tiktoken (cl100k_base) to monitor context window usage.
+        // Each message: content tokens + serialized tool_calls tokens + 4 overhead per message.
+        let message_tokens: usize = openai_request
+            .messages
+            .iter()
+            .map(|m| {
+                let content = m.content.as_deref().map(count_message_tokens).unwrap_or(4);
+                let tool_calls = m
+                    .tool_calls
+                    .as_ref()
+                    .map(|tc| count_tokens(&serde_json::to_string(tc).unwrap_or_default()))
+                    .unwrap_or(0);
+                content + tool_calls
+            })
+            .sum();
+        let tool_schema_tokens = openai_request
+            .tools
+            .as_ref()
+            .map(|tools| count_tokens(&serde_json::to_string(tools).unwrap_or_default()))
+            .unwrap_or(0);
+        let total_input_tokens = message_tokens + tool_schema_tokens;
+        let context_pct = (total_input_tokens as f32 / 200_000.0 * 100.0).round() as u32;
         tracing::debug!(
-            "OpenAI request payload: {:?}",
-            serde_json::to_string(&openai_request).unwrap_or_default()
+            "OpenAI stream request: ~{} input tokens ({}% of 200k window) — {} messages, {} tool schemas",
+            total_input_tokens,
+            context_pct,
+            openai_request.messages.len(),
+            tools_count
         );
 
         let retry_config = RetryConfig::default();

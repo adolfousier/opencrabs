@@ -98,20 +98,6 @@ pub(in crate::tui) fn char_boundary_at_width(s: &str, target_width: usize) -> us
     s.len()
 }
 
-/// Find the byte index to start a suffix of approximately `target_width` display columns.
-/// Always returns a valid char boundary.
-pub(super) fn char_boundary_at_width_from_end(s: &str, target_width: usize) -> usize {
-    let mut width = 0;
-    for (idx, ch) in s.char_indices().rev() {
-        let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
-        width += ch_width;
-        if width >= target_width {
-            return idx;
-        }
-    }
-    0
-}
-
 /// Format token count with a custom label (e.g. "1.2M total", "150K total")
 pub(super) fn format_token_count_with_label(tokens: i32, label: &str) -> String {
     let tokens = tokens.max(0) as f64;
