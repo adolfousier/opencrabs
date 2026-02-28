@@ -996,12 +996,13 @@ impl Provider for OpenAIProvider {
 
     fn context_window(&self, model: &str) -> Option<u32> {
         match model {
+            // OpenAI
             "gpt-4-turbo-preview" => Some(128_000),
             "gpt-4" => Some(8_192),
             "gpt-4-32k" => Some(32_768),
             "gpt-3.5-turbo" => Some(4_096),
             "gpt-3.5-turbo-16k" => Some(16_384),
-            _ => None,
+_ => None,
         }
     }
 

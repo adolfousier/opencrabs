@@ -11,7 +11,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
 };
-use unicode_width::UnicodeWidthStr;
 /// Render the input box
 pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
     let input_content_width = area.width.saturating_sub(2) as usize; // borders
@@ -323,54 +322,12 @@ pub(super) fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
         ("🔒 approve", Color::DarkGray)
     };
 
-    // --- Thinking / responding indicator (right, only when processing) ---
-    let right_text = if app.is_processing {
-        let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-        let frame = spinner_frames[app.animation_frame % spinner_frames.len()];
-        let elapsed = app
-            .processing_started_at
-            .map(|t| t.elapsed().as_secs())
-            .unwrap_or(0);
-        let status = if app.streaming_response.is_some() {
-            "responding..."
-        } else {
-            "thinking..."
-        };
-        let timer = if elapsed > 0 {
-            format!(" ({}s)", elapsed)
-        } else {
-            String::new()
-        };
-        format!("{} OpenCrabs is {}{} ", frame, status, timer)
-    } else {
-        String::new()
-    };
-
-    // --- Build the line with right-aligned thinking indicator ---
-    let left_width = UnicodeWidthStr::width(session_text.as_str())
-        + UnicodeWidthStr::width(provider_model_dir_text.as_str())
-        + UnicodeWidthStr::width(sep_text)
-        + UnicodeWidthStr::width(policy_text);
-    let right_width = UnicodeWidthStr::width(right_text.as_str());
-    let total = area.width as usize;
-
-    let padding_width = total.saturating_sub(left_width + right_width);
-    let padding = " ".repeat(padding_width);
-
-    let mut spans = vec![
+    let spans = vec![
         Span::styled(session_text, Style::default().fg(orange).add_modifier(Modifier::BOLD)),
         Span::styled(provider_model_dir_text, Style::default().fg(Color::Rgb(90, 110, 150))),
         Span::styled(sep_text, Style::default().fg(Color::DarkGray)),
         Span::styled(policy_text, Style::default().fg(policy_color)),
-        Span::raw(padding),
     ];
-
-    if !right_text.is_empty() {
-        spans.push(Span::styled(
-            right_text,
-            Style::default().fg(orange).add_modifier(Modifier::BOLD),
-        ));
-    }
 
     let line = Line::from(spans);
     let para = Paragraph::new(line).alignment(Alignment::Left);

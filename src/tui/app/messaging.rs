@@ -76,16 +76,10 @@ impl App {
         // Sync shared session ID for channels (Telegram, WhatsApp)
         *self.shared_session_id.lock().await = Some(session.id);
 
-        // Use the displayed message token count as an initial estimate so the ctx
-        // indicator shows something immediately on load instead of "–".
-        // display_token_count only covers non-compacted (visible) messages, making it
-        // a reasonable baseline. The real value from the API will replace it on the
-        // next response.
-        self.last_input_tokens = if self.display_token_count > 0 {
-            Some(self.display_token_count as u32)
-        } else {
-            None
-        };
+        // Reset to unknown — display_token_count only covers visible message text and
+        // would massively under-report the real input (missing system prompt + tool schemas).
+        // The accurate value arrives with the first API response via context_tokens.
+        self.last_input_tokens = None;
 
         // Clear unread indicator for this session
         self.sessions_with_unread.remove(&session_id);

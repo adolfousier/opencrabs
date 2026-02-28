@@ -368,32 +368,6 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     // Render active tool group (live, during processing) — below streaming text
     // so it's always visible at the bottom with auto-scroll
     if let Some(ref group) = app.active_tool_group {
-        // Show thinking indicator inline above the tool group
-        if app.is_processing && app.streaming_response.is_none() && !app.has_pending_approval() {
-            let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-            let frame = spinner_frames[app.animation_frame % spinner_frames.len()];
-            let elapsed = app
-                .processing_started_at
-                .map(|t| t.elapsed().as_secs())
-                .unwrap_or(0);
-            let timer_str = if elapsed > 0 {
-                format!(" ({}s)", elapsed)
-            } else {
-                String::new()
-            };
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("  {} ", frame),
-                    Style::default()
-                        .fg(Color::Rgb(70, 130, 180))
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    format!("OpenCrabs is thinking...{}", timer_str),
-                    Style::default().fg(Color::Rgb(184, 134, 11)),
-                ),
-            ]));
-        }
         render_tool_group(&mut lines, group, true, app.animation_frame);
     }
 
