@@ -76,7 +76,7 @@ fn render_splash_content(f: &mut Frame, area: Rect, provider_name: &str, model_n
         Line::from(""),
         // Project name and version
         Line::from(vec![
-            Span::styled("╭─── ", Style::default().fg(Color::Rgb(70, 130, 180))),
+            Span::styled("╭─── ", Style::default().fg(Color::Rgb(90, 110, 150))),
             Span::styled(
                 "🦀 OpenCrabs",
                 Style::default()
@@ -89,7 +89,7 @@ fn render_splash_content(f: &mut Frame, area: Rect, provider_name: &str, model_n
                     .fg(Color::Rgb(184, 134, 11))
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("───╮", Style::default().fg(Color::Rgb(70, 130, 180))),
+            Span::styled("───╮", Style::default().fg(Color::Rgb(90, 110, 150))),
         ]),
         Line::from(""),
         // Model and details
@@ -98,13 +98,13 @@ fn render_splash_content(f: &mut Frame, area: Rect, provider_name: &str, model_n
             Span::styled(
                 model_name,
                 Style::default()
-                    .fg(Color::Blue)
+                    .fg(Color::Rgb(90, 110, 150))
                     .add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(vec![
             Span::styled("Provider: ", Style::default().fg(Color::DarkGray)),
-            Span::styled(provider_name, Style::default().fg(Color::Rgb(70, 130, 180))),
+            Span::styled(provider_name, Style::default().fg(Color::Rgb(90, 110, 150))),
         ]),
         Line::from(""),
         Line::from(Span::styled(
@@ -127,7 +127,7 @@ fn render_splash_content(f: &mut Frame, area: Rect, provider_name: &str, model_n
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Rgb(70, 130, 180))),
+                .border_style(Style::default().fg(Color::Rgb(120, 120, 120))),
         )
         .alignment(Alignment::Center);
 

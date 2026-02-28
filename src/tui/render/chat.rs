@@ -472,84 +472,14 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     let max_scroll = total_lines.saturating_sub(visible_height);
     let actual_scroll_offset = max_scroll.saturating_sub(app.scroll_offset);
 
-    let session_name = app
-        .current_session
-        .as_ref()
-        .and_then(|s| s.title.as_deref())
-        .unwrap_or("New Session");
-    let chat_title = format!(" {} ", session_name);
 
     let chat = Paragraph::new(lines)
         .block(
             Block::default()
-                .borders(Borders::ALL)
-                .padding(Padding::new(1, 1, 1, 0))
-                .title(Span::styled(
-                    chat_title,
-                    Style::default()
-                        .fg(Color::Rgb(70, 130, 180))
-                        .add_modifier(Modifier::BOLD),
-                ))
-                .border_style(Style::default().fg(Color::Rgb(70, 130, 180))),
+                .borders(Borders::NONE)
+                .padding(Padding::new(1, 1, 1, 0)),
         )
         .scroll(((actual_scroll_offset.min(u16::MAX as usize)) as u16, 0));
 
     f.render_widget(chat, area);
-}
-
-/// Render the thinking indicator STICKY at bottom of chat (above input field)
-/// This ensures users can always see it's responding
-pub(super) fn render_thinking_indicator(f: &mut Frame, app: &App, chat_area: Rect) {
-    // Only show when processing and no streaming response
-    // Skip when active tool group is visible (thinking is rendered inline above it)
-    let has_pending_approval = app.has_pending_approval();
-    if !app.is_processing
-        || app.streaming_response.is_some()
-        || has_pending_approval
-        || app.active_tool_group.is_some()
-    {
-        return;
-    }
-
-    let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-    let frame = spinner_frames[app.animation_frame % spinner_frames.len()];
-
-    let elapsed = app
-        .processing_started_at
-        .map(|t| t.elapsed().as_secs())
-        .unwrap_or(0);
-
-    let timer_str = if elapsed > 0 {
-        format!(" ({}s)", elapsed)
-    } else {
-        String::new()
-    };
-
-    // Create the thinking line
-    let thinking_line = Line::from(vec![
-        Span::styled(
-            format!("{} ", frame),
-            Style::default()
-                .fg(Color::Rgb(70, 130, 180))
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!("🦀 OpenCrabs is thinking...{}", timer_str),
-            Style::default().fg(Color::Rgb(184, 134, 11)),
-        ),
-    ]);
-
-    // Render at the bottom of the chat area (sticky)
-    // We use a paragraph that's positioned at the bottom of the chat area
-    let para = Paragraph::new(thinking_line).style(Style::default().bg(Color::Rgb(20, 20, 28)));
-
-    // Position at bottom of chat area, just above the bottom border
-    let indicator_area = Rect {
-        x: chat_area.x + 2,
-        y: chat_area.y + chat_area.height.saturating_sub(2),
-        width: chat_area.width.saturating_sub(4),
-        height: 1,
-    };
-
-    f.render_widget(para, indicator_area);
 }

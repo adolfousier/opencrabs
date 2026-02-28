@@ -73,6 +73,12 @@ fn index_file_sync(
     let now = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
     let title = Store::extract_title(body);
 
+    // Pre-clear any existing FTS entry so the ON CONFLICT UPDATE branch in
+    // insert_document fires a plain INSERT into documents_fts (not OR REPLACE,
+    // which SQLite FTS5 rejects with "constraint failed").
+    // Safe for new documents: deactivate_document matches 0 rows → no-op.
+    let _ = store.deactivate_document(collection, &rel_path);
+
     store
         .insert_content(&hash, body, &now)
         .map_err(|e| format!("Failed to insert content: {e}"))?;

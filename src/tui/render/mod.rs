@@ -26,13 +26,13 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
-use chat::{render_chat, render_thinking_indicator};
+use chat::render_chat;
 use dialogs::{
     render_directory_picker, render_file_picker, render_model_selector, render_restart_dialog,
     render_usage_dialog,
 };
 use help::{render_help, render_settings};
-use input::{render_input, render_slash_autocomplete};
+use input::{render_input, render_slash_autocomplete, render_status_bar};
 use sessions::render_sessions;
 use utils::char_boundary_at_width_from_end;
 
@@ -80,18 +80,19 @@ pub fn render(f: &mut Frame, app: &mut App) {
             Constraint::Length(3),            // Header (1 content line + borders)
             Constraint::Min(10),              // Main content
             Constraint::Length(input_height), // Input (dynamic)
+            Constraint::Length(1),            // Status bar
         ])
         .split(f.area());
 
     // Render components based on mode
     render_header(f, app, chunks[0]);
 
-    // Merge main content + input area for modes that don't need the input box
+    // Merge main content + input + status bar for modes that don't need the input box
     let full_content_area = Rect {
         x: chunks[1].x,
         y: chunks[1].y,
         width: chunks[1].width,
-        height: chunks[1].height + chunks[2].height,
+        height: chunks[1].height + chunks[2].height + chunks[3].height,
     };
 
     match app.mode {
@@ -100,12 +101,8 @@ pub fn render(f: &mut Frame, app: &mut App) {
         }
         AppMode::Chat => {
             render_chat(f, app, chunks[1]);
-
-            // Render thinking indicator STICKY at bottom (right above input field)
-            // This ensures users can always see it's responding
-            render_thinking_indicator(f, app, chunks[1]);
-
             render_input(f, app, chunks[2]);
+            render_status_bar(f, app, chunks[3]);
             // Render slash autocomplete dropdown above the input area
             if app.slash_suggestions_active {
                 render_slash_autocomplete(f, app, chunks[2]);
@@ -129,16 +126,19 @@ pub fn render(f: &mut Frame, app: &mut App) {
         AppMode::ModelSelector => {
             render_chat(f, app, chunks[1]);
             render_input(f, app, chunks[2]);
+            render_status_bar(f, app, chunks[3]);
             render_model_selector(f, app, f.area());
         }
         AppMode::UsageDialog => {
             render_chat(f, app, chunks[1]);
             render_input(f, app, chunks[2]);
+            render_status_bar(f, app, chunks[3]);
             render_usage_dialog(f, app, f.area());
         }
         AppMode::RestartPending => {
             render_chat(f, app, chunks[1]);
             render_input(f, app, chunks[2]);
+            render_status_bar(f, app, chunks[3]);
             render_restart_dialog(f, app, f.area());
         }
         AppMode::Onboarding => {
@@ -164,21 +164,21 @@ fn render_header(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(
             display_dir,
             Style::default()
-                .fg(Color::Blue)
+                .fg(Color::Rgb(90, 110, 150))
                 .add_modifier(Modifier::BOLD),
         ),
     ]);
 
     let header = Paragraph::new(vec![header_line]).block(
         Block::default()
-            .borders(Borders::ALL)
+            .borders(Borders::TOP | Borders::BOTTOM)
             .title(Span::styled(
                 " 🦀 OpenCrabs AI Orchestration Agent ",
                 Style::default()
-                    .fg(Color::Rgb(70, 130, 180))
+                    .fg(Color::Rgb(120, 120, 120))
                     .add_modifier(Modifier::BOLD),
             ))
-            .border_style(Style::default().fg(Color::Rgb(70, 130, 180))),
+            .border_style(Style::default().fg(Color::Rgb(120, 120, 120))),
     );
 
     f.render_widget(header, area);
