@@ -29,7 +29,7 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
         Line::from(Span::styled(
             format!(" {} ", title),
             Style::default()
-                .fg(Color::Rgb(120, 120, 120))
+                .fg(Color::Rgb(90, 110, 150))
                 .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
         ))
     }
@@ -42,7 +42,7 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
 
     // ── LEFT COLUMN ──
     let gold = Color::Rgb(215, 100, 20);
-    let blue = Color::Gray;
+    let blue = Color::Rgb(90, 110, 150);
 
     let mut left = vec![
         Line::from(""),
@@ -76,7 +76,7 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(
                 " [↑↓ PgUp/Dn]",
                 Style::default()
-                    .fg(Color::Rgb(120, 120, 120))
+                    .fg(Color::Rgb(90, 110, 150))
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(" Scroll  ", Style::default().fg(Color::DarkGray)),
@@ -110,32 +110,32 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
         Line::from(""),
         section_header("FEATURES"),
         Line::from(vec![
-            Span::styled(" ✓ ", Style::default().fg(Color::Gray)),
+            Span::styled(" ✓ ", Style::default().fg(Color::Rgb(90, 110, 150))),
             Span::styled(
                 "Markdown & Syntax Highlighting",
                 Style::default().fg(Color::White),
             ),
         ]),
         Line::from(vec![
-            Span::styled(" ✓ ", Style::default().fg(Color::Gray)),
+            Span::styled(" ✓ ", Style::default().fg(Color::Rgb(90, 110, 150))),
             Span::styled(
                 "Multi-line Input & Streaming",
                 Style::default().fg(Color::White),
             ),
         ]),
         Line::from(vec![
-            Span::styled(" ✓ ", Style::default().fg(Color::Gray)),
+            Span::styled(" ✓ ", Style::default().fg(Color::Rgb(90, 110, 150))),
             Span::styled(
                 "Session Management & History",
                 Style::default().fg(Color::White),
             ),
         ]),
         Line::from(vec![
-            Span::styled(" ✓ ", Style::default().fg(Color::Gray)),
+            Span::styled(" ✓ ", Style::default().fg(Color::Rgb(90, 110, 150))),
             Span::styled("Token & Cost Tracking", Style::default().fg(Color::White)),
         ]),
         Line::from(vec![
-            Span::styled(" ✓ ", Style::default().fg(Color::Gray)),
+            Span::styled(" ✓ ", Style::default().fg(Color::Rgb(90, 110, 150))),
             Span::styled(
                 "Inline Tool Approval (3 policies)",
                 Style::default().fg(Color::White),
@@ -156,7 +156,7 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
                 .title(Span::styled(
                     " 📚 Help & Commands ",
                     Style::default()
-                        .fg(Color::Rgb(120, 120, 120))
+                        .fg(Color::Rgb(90, 110, 150))
                         .add_modifier(Modifier::BOLD),
                 ))
                 .border_style(Style::default().fg(Color::Rgb(120, 120, 120))),
@@ -181,7 +181,7 @@ pub(super) fn render_settings(f: &mut Frame, app: &App, area: Rect) {
         Line::from(Span::styled(
             format!("  {} ", title),
             Style::default()
-                .fg(Color::Rgb(120, 120, 120))
+                .fg(Color::Rgb(90, 110, 150))
                 .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
         ))
     }
@@ -270,7 +270,7 @@ pub(super) fn render_settings(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(
                 "  [↑↓ PgUp/Dn]",
                 Style::default()
-                    .fg(Color::Rgb(120, 120, 120))
+                    .fg(Color::Rgb(90, 110, 150))
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(" Scroll  ", Style::default().fg(Color::DarkGray)),
@@ -298,7 +298,7 @@ pub(super) fn render_settings(f: &mut Frame, app: &App, area: Rect) {
                 .title(Span::styled(
                     " Settings ",
                     Style::default()
-                        .fg(Color::Rgb(120, 120, 120))
+                        .fg(Color::Rgb(90, 110, 150))
                         .add_modifier(Modifier::BOLD),
                 ))
                 .border_style(Style::default().fg(Color::Rgb(120, 120, 120))),
