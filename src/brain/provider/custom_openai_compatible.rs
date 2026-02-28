@@ -869,10 +869,17 @@ impl Provider for OpenAIProvider {
                                         // (decoupled from usage — MiniMax sends finish_reason
                                         // without usage in the same chunk)
                                         if let Some(reason) = finish_reason_str {
-                                            let (input_tokens, output_tokens) = if let Some(ref usage) = chunk.usage {
+                                            let (raw_input, output_tokens) = if let Some(ref usage) = chunk.usage {
                                                 (usage.prompt_tokens.unwrap_or(0), usage.completion_tokens.unwrap_or(0))
                                             } else {
                                                 (0, 0)
+                                            };
+                                            // Fall back to pre-computed token count when provider
+                                            // reports 0 (e.g. MiniMax always returns 0 in stream).
+                                            let input_tokens = if raw_input > 0 {
+                                                raw_input
+                                            } else {
+                                                total_input_tokens as u32
                                             };
                                             if input_tokens > 0 || output_tokens > 0 {
                                                 tracing::info!("[STREAM_USAGE] Final usage: input={}, output={}", input_tokens, output_tokens);
