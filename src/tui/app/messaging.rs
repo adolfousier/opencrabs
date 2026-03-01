@@ -284,6 +284,7 @@ impl App {
             self.streaming_response = None;
             self.streaming_reasoning = None;
             self.error_message = None;
+            self.error_message_shown_at = None;
         }
 
         Ok(())
@@ -1104,6 +1105,7 @@ impl App {
             self.is_processing = true;
             self.processing_started_at = Some(std::time::Instant::now());
             self.error_message = None;
+            self.error_message_shown_at = None;
             self.intermediate_text_received = false;
 
             // Drain pending context hints (model changes, /cd, etc.) and prepend to message
