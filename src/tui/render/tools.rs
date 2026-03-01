@@ -75,56 +75,54 @@ pub(super) fn render_tool_group<'a>(
             ]));
 
             // Show full tool input parameters (untruncated) below the header
-            if !call.tool_input.is_null() {
-                if let Some(obj) = call.tool_input.as_object() {
-                    for (key, value) in obj.iter() {
-                        // Key label
+            if !call.tool_input.is_null()
+                && let Some(obj) = call.tool_input.as_object()
+            {
+                for (key, value) in obj.iter() {
+                    // Key label
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            format!("    {}  ", continuation),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                        Span::styled(
+                            format!("{}:", key),
+                            Style::default()
+                                .fg(Color::Rgb(100, 100, 100))
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]));
+                    // Value — expand strings line by line, cap at 80 lines
+                    let value_lines: Vec<String> = match value {
+                        serde_json::Value::String(s) => s.lines().map(|l| l.to_string()).collect(),
+                        _ => vec![value.to_string()],
+                    };
+                    let total = value_lines.len();
+                    for vline in value_lines.iter().take(80) {
                         lines.push(Line::from(vec![
                             Span::styled(
-                                format!("    {}  ", continuation),
+                                format!("    {}    ", continuation),
                                 Style::default().fg(Color::DarkGray),
                             ),
                             Span::styled(
-                                format!("{}:", key),
-                                Style::default()
-                                    .fg(Color::Rgb(100, 100, 100))
-                                    .add_modifier(Modifier::BOLD),
+                                vline.clone(),
+                                Style::default().fg(Color::Rgb(170, 170, 170)),
                             ),
                         ]));
-                        // Value — expand strings line by line, cap at 80 lines
-                        let value_lines: Vec<String> = match value {
-                            serde_json::Value::String(s) => {
-                                s.lines().map(|l| l.to_string()).collect()
-                            }
-                            _ => vec![value.to_string()],
-                        };
-                        let total = value_lines.len();
-                        for vline in value_lines.iter().take(80) {
-                            lines.push(Line::from(vec![
-                                Span::styled(
-                                    format!("    {}    ", continuation),
-                                    Style::default().fg(Color::DarkGray),
-                                ),
-                                Span::styled(
-                                    vline.clone(),
-                                    Style::default().fg(Color::Rgb(170, 170, 170)),
-                                ),
-                            ]));
-                        }
-                        if total > 80 {
-                            lines.push(Line::from(vec![
-                                Span::styled(
-                                    format!("    {}    ", continuation),
-                                    Style::default().fg(Color::DarkGray),
-                                ),
-                                Span::styled(
-                                    format!("... ({} more lines)", total - 80),
-                                    Style::default()
-                                        .fg(Color::Rgb(120, 120, 120))
-                                        .add_modifier(Modifier::ITALIC),
-                                ),
-                            ]));
-                        }
+                    }
+                    if total > 80 {
+                        lines.push(Line::from(vec![
+                            Span::styled(
+                                format!("    {}    ", continuation),
+                                Style::default().fg(Color::DarkGray),
+                            ),
+                            Span::styled(
+                                format!("... ({} more lines)", total - 80),
+                                Style::default()
+                                    .fg(Color::Rgb(120, 120, 120))
+                                    .add_modifier(Modifier::ITALIC),
+                            ),
+                        ]));
                     }
                 }
             }

@@ -958,11 +958,11 @@ impl App {
                 self.animation_frame = self.animation_frame.wrapping_add(1);
 
                 // Auto-dismiss error/warning messages after 2.5 seconds
-                if let Some(shown_at) = self.error_message_shown_at {
-                    if shown_at.elapsed() >= std::time::Duration::from_millis(2500) {
-                        self.error_message = None;
-                        self.error_message_shown_at = None;
-                    }
+                if let Some(shown_at) = self.error_message_shown_at
+                    && shown_at.elapsed() >= std::time::Duration::from_millis(2500)
+                {
+                    self.error_message = None;
+                    self.error_message_shown_at = None;
                 }
 
                 // Auto-close splash screen after 3 seconds

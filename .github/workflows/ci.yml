@@ -17,14 +17,14 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        rust: [stable, beta]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
+      - name: Install Rust (from rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ matrix.rust }}
+          toolchain: nightly
+          components: rustfmt, clippy
 
       - name: Install CMake (Windows)
         if: runner.os == 'Windows'
@@ -46,7 +46,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: target
-          key: ${{ runner.os }}-target-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-target-nightly-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Run tests (Windows)
         if: runner.os == 'Windows'
@@ -56,23 +56,16 @@ jobs:
         if: runner.os != 'Windows'
         run: cargo test --all-features --verbose
 
-      - name: Run doc tests (Windows)
-        if: runner.os == 'Windows'
-        run: cargo test --doc --features telegram,discord,slack
-
-      - name: Run doc tests (Unix)
-        if: runner.os != 'Windows'
-        run: cargo test --doc --all-features
-
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust (from rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: nightly
           components: clippy
 
       - name: Run clippy
@@ -84,9 +77,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust (from rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: nightly
           components: rustfmt
 
       - name: Check formatting
@@ -101,8 +95,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust (from rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
 
       - name: Install CMake (Windows)
         if: runner.os == 'Windows'
@@ -129,8 +125,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust (from rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
 
       - name: Install tarpaulin
         run: cargo install cargo-tarpaulin
