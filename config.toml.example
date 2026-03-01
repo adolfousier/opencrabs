@@ -133,18 +133,20 @@ allowed_ids = ["U12345678"]             # Who the bot replies to (Slack user ID,
 # respond_to = "all"                    # "all" | "dm_only" | "mention"
 
 # ========================================
-# Trello — board polling + card management
+# Trello — board card management
 # ========================================
 # API keys/tokens go in keys.toml under [channels.trello]
-# The agent polls each allowed_channels board every 30 s for new card comments,
-# routes them to the AI, and posts replies back as card comments.
-# allowed_users filters by Trello member ID (empty = reply to everyone)
+# Default mode: tool-only — no automatic polling. The AI acts on Trello only
+# when you explicitly ask it to via trello_send / trello_connect.
+# Opt-in polling: set poll_interval_secs > 0 to have the agent watch boards
+# for @mentions of the bot username and respond to them.
 [channels.trello]
 enabled = false
 # Board IDs or names to monitor — you can mix 24-char hex IDs and human-readable board names.
 # The agent resolves names at startup. Comma-separated in the wizard; TOML array here.
 allowed_channels = ["your-board-name", "abc123def456abc123def456"]
-allowed_users = []                      # Trello member IDs to reply to (empty = all members)
+allowed_users = []                      # Trello member IDs allowed to @mention the bot (empty = all)
+# poll_interval_secs = 30              # Opt-in: poll boards every N seconds for @mentions. Default = disabled.
 
 # ========================================
 # Agent-to-Agent (A2A) Protocol

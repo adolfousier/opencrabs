@@ -220,6 +220,10 @@ pub struct ChannelConfig {
     /// Restrict bot to specific channel IDs. Empty = all channels. DMs always pass.
     #[serde(default)]
     pub allowed_channels: Vec<String>,
+    /// Optional polling interval in seconds (Trello only). Absent or 0 = no polling.
+    /// When set, the agent polls for @mentions on monitored boards at this interval.
+    #[serde(default)]
+    pub poll_interval_secs: Option<u64>,
 }
 
 /// Voice processing configuration (STT + TTS)

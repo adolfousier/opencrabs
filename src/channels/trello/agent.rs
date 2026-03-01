@@ -13,7 +13,6 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-const POLL_INTERVAL_SECS: u64 = 30;
 
 /// Background agent that polls Trello boards for new card comments.
 pub struct TrelloAgent {
@@ -23,6 +22,8 @@ pub struct TrelloAgent {
     shared_session_id: Arc<Mutex<Option<Uuid>>>,
     trello_state: Arc<TrelloState>,
     board_ids: Vec<String>,
+    /// Polling interval in seconds. None or 0 = no polling (tool-only mode).
+    poll_interval_secs: Option<u64>,
 }
 
 impl TrelloAgent {
@@ -34,6 +35,7 @@ impl TrelloAgent {
         shared_session_id: Arc<Mutex<Option<Uuid>>>,
         trello_state: Arc<TrelloState>,
         board_ids: Vec<String>,
+        poll_interval_secs: Option<u64>,
     ) -> Self {
         Self {
             agent_service,
@@ -42,10 +44,14 @@ impl TrelloAgent {
             shared_session_id,
             trello_state,
             board_ids,
+            poll_interval_secs,
         }
     }
 
-    /// Spawn the polling loop as a background task.
+    /// Spawn the Trello agent as a background task.
+    /// Verifies credentials and stores state. Only enters the polling loop
+    /// if `poll_interval_secs` is configured and > 0 — otherwise runs in
+    /// tool-only mode (credentials available, no automatic polling).
     pub fn start(self, api_key: String, api_token: String) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             if api_key.is_empty() || api_token.is_empty() {
@@ -64,19 +70,30 @@ impl TrelloAgent {
                 }
             };
 
-            tracing::info!(
-                "Trello: authenticated as @{} ({}), polling {} board(s) every {}s",
-                bot_member.username,
-                bot_member.id,
-                self.board_ids.len(),
-                POLL_INTERVAL_SECS,
-            );
-
             self.trello_state
                 .set_bot_member_id(bot_member.id.clone())
                 .await;
             self.trello_state.set_credentials(api_key, api_token).await;
             self.trello_state.set_connected(true).await;
+
+            // Determine polling interval — None or 0 means tool-only mode.
+            let interval_secs = self.poll_interval_secs.unwrap_or(0);
+            if interval_secs == 0 {
+                tracing::info!(
+                    "Trello: authenticated as @{} — tool-only mode (no polling). \
+                     Set poll_interval_secs in config to enable @mention polling.",
+                    bot_member.username,
+                );
+                return;
+            }
+
+            tracing::info!(
+                "Trello: authenticated as @{} ({}), polling {} board(s) every {}s for @mentions",
+                bot_member.username,
+                bot_member.id,
+                self.board_ids.len(),
+                interval_secs,
+            );
 
             let session_svc = SessionService::new(self.service_context.clone());
             let extra_sessions: Arc<Mutex<HashMap<String, Uuid>>> =
@@ -90,9 +107,7 @@ impl TrelloAgent {
             let mut last_checked = chrono::Utc::now().to_rfc3339();
 
             loop {
-                // Sleep first — on startup we want to establish last_checked
-                // and then start polling from that point forward.
-                tokio::time::sleep(std::time::Duration::from_secs(POLL_INTERVAL_SECS)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(interval_secs)).await;
 
                 // Snapshot "now" before fetching, so any comments that arrive
                 // during processing are caught in the next tick.
@@ -122,6 +137,15 @@ impl TrelloAgent {
 
                         // Skip the bot's own comments
                         if action.id_member_creator == bot_member.id {
+                            continue;
+                        }
+
+                        // Only respond when the bot is explicitly @mentioned
+                        let mention = format!("@{}", bot_member.username);
+                        if !action.data.text.contains(&mention) {
+                            tracing::debug!(
+                                "Trello: skipping comment — bot not @mentioned"
+                            );
                             continue;
                         }
 

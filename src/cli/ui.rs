@@ -713,11 +713,13 @@ pub(crate) async fn cmd_chat(
                     app.shared_session_id(),
                     trello_state.clone(),
                     board_ids,
+                    tr.poll_interval_secs,
                 );
                 tracing::info!(
-                    "Spawning Trello polling agent ({} board(s), {} allowed user(s))",
+                    "Spawning Trello agent ({} board(s), {} allowed user(s), poll={}s)",
                     tr.allowed_channels.len(),
                     tr.allowed_users.len(),
+                    tr.poll_interval_secs.unwrap_or(0),
                 );
                 Some(tr_agent.start(api_key, api_token))
             } else {

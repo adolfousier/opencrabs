@@ -193,6 +193,7 @@ impl Tool for TrelloConnectTool {
             shared_session,
             trello_state.clone(),
             board_ids,
+            None, // no polling by default — tool-only mode
         );
 
         let _handle = trello_agent.start(api_key, api_token);
