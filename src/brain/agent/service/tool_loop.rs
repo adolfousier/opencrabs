@@ -441,7 +441,6 @@ impl AgentService {
 
             // Separate text blocks and tool use blocks from the response
             tracing::debug!("Response has {} content blocks", response.content.len());
-            tracing::debug!("Response raw: {:?}", response);
             let mut iteration_text = String::new();
             let mut tool_uses: Vec<(String, String, Value)> = Vec::new();
 
@@ -476,9 +475,8 @@ impl AgentService {
                         // Check for empty/Invalid input
                         if input.as_object().map(|o| o.is_empty()).unwrap_or(true) {
                             tracing::error!(
-                                "[TOOL_EXEC] ⚠️ Tool '{}' received EMPTY input! This will fail. Full input: {:?}",
-                                name,
-                                input
+                                "[TOOL_EXEC] ⚠️ Tool '{}' received empty input — tool call will fail",
+                                name
                             );
                         }
 
