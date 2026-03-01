@@ -49,6 +49,38 @@ pub const SLASH_COMMANDS: &[SlashCommand] = &[
         description: "Run setup wizard",
     },
     SlashCommand {
+        name: "/onboard:provider",
+        description: "Jump to AI provider setup",
+    },
+    SlashCommand {
+        name: "/onboard:workspace",
+        description: "Jump to workspace settings",
+    },
+    SlashCommand {
+        name: "/onboard:channels",
+        description: "Jump to channel config",
+    },
+    SlashCommand {
+        name: "/onboard:voice",
+        description: "Jump to voice STT/TTS setup",
+    },
+    SlashCommand {
+        name: "/onboard:gateway",
+        description: "Jump to API gateway settings",
+    },
+    SlashCommand {
+        name: "/onboard:health",
+        description: "Run connection health check",
+    },
+    SlashCommand {
+        name: "/onboard:brain",
+        description: "Jump to brain/persona setup",
+    },
+    SlashCommand {
+        name: "/doctor",
+        description: "Run connection health check",
+    },
+    SlashCommand {
         name: "/sessions",
         description: "List all sessions",
     },

@@ -58,9 +58,13 @@ pub(super) fn render_tool_group<'a>(
             let in_flight = call.details.is_none();
 
             let header_style = if call.success || in_flight {
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC)
             } else {
-                Style::default().fg(Color::Red).add_modifier(Modifier::ITALIC)
+                Style::default()
+                    .fg(Color::Red)
+                    .add_modifier(Modifier::ITALIC)
             };
             lines.push(Line::from(vec![
                 Span::styled(
@@ -134,10 +138,7 @@ pub(super) fn render_tool_group<'a>(
                         format!("    {}  {} ", continuation, frame),
                         Style::default().fg(Color::Rgb(120, 120, 120)),
                     ),
-                    Span::styled(
-                        "running...",
-                        Style::default().fg(Color::Rgb(215, 100, 20)),
-                    ),
+                    Span::styled("running...", Style::default().fg(Color::Rgb(215, 100, 20))),
                 ]));
             } else {
                 // Show tool output details

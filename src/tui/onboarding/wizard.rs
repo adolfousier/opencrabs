@@ -397,13 +397,13 @@ impl OnboardingWizard {
         if let Some(ref token) = config.channels.telegram.token {
             wizard.telegram_token_input = token.clone();
         }
-        if let Some(&user_id) = config.channels.telegram.allowed_users.first() {
-            wizard.telegram_user_id_input = user_id.to_string();
+        if let Some(user_id) = config.channels.telegram.allowed_users.first() {
+            wizard.telegram_user_id_input = user_id.clone();
         }
         if let Some(ref token) = config.channels.discord.token {
             wizard.discord_token_input = token.clone();
         }
-        if let Some(channel_id) = config.channels.discord.allowed_ids.first() {
+        if let Some(channel_id) = config.channels.discord.allowed_channels.first() {
             wizard.discord_channel_id_input = channel_id.clone();
         }
         if let Some(ref token) = config.channels.slack.token {
@@ -412,12 +412,13 @@ impl OnboardingWizard {
         if let Some(ref app_token) = config.channels.slack.app_token {
             wizard.slack_app_token_input = app_token.clone();
         }
-        if let Some(channel_id) = config.channels.slack.allowed_ids.first() {
+        if let Some(channel_id) = config.channels.slack.allowed_channels.first() {
             wizard.slack_channel_id_input = channel_id.clone();
         }
         // WhatsApp: check if session.db exists (means it's paired)
         let wa_session = crate::config::opencrabs_home()
-            .join("agents/session/session.db");
+            .join("whatsapp")
+            .join("session.db");
         wizard.whatsapp_connected = wa_session.exists();
 
         // Jump directly to provider auth step since config exists

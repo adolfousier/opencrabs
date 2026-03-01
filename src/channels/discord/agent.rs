@@ -21,7 +21,7 @@ use serenity::prelude::*;
 pub struct DiscordAgent {
     agent_service: Arc<AgentService>,
     session_service: SessionService,
-    allowed_users: Vec<i64>,
+    allowed_users: Vec<String>,
     voice_config: VoiceConfig,
     openai_api_key: Option<String>,
     shared_session_id: Arc<Mutex<Option<Uuid>>>,
@@ -35,7 +35,7 @@ impl DiscordAgent {
     pub fn new(
         agent_service: Arc<AgentService>,
         service_context: ServiceContext,
-        allowed_users: Vec<i64>,
+        allowed_users: Vec<String>,
         voice_config: VoiceConfig,
         openai_api_key: Option<String>,
         shared_session_id: Arc<Mutex<Option<Uuid>>>,
@@ -72,7 +72,12 @@ impl DiscordAgent {
                 self.voice_config.tts_enabled,
             );
 
-            let allowed: Arc<HashSet<i64>> = Arc::new(self.allowed_users.into_iter().collect());
+            let allowed: Arc<HashSet<i64>> = Arc::new(
+                self.allowed_users
+                    .into_iter()
+                    .filter_map(|s| s.parse().ok())
+                    .collect(),
+            );
             let extra_sessions: Arc<Mutex<HashMap<u64, Uuid>>> =
                 Arc::new(Mutex::new(HashMap::new()));
 

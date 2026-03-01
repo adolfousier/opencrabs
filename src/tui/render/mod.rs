@@ -83,26 +83,25 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
     // Sticky "OpenCrabs is thinking..." row: visible only during the brief
     // window between submitting a prompt and the first streaming token/tool.
-    let thinking_height: u16 =
-        if !app.has_pending_approval()
-            && app.is_processing
-            && app.streaming_response.is_none()
-            && app.streaming_reasoning.is_none()
-            && app.active_tool_group.is_none()
-        {
-            1
-        } else {
-            0
-        };
+    let thinking_height: u16 = if !app.has_pending_approval()
+        && app.is_processing
+        && app.streaming_response.is_none()
+        && app.streaming_reasoning.is_none()
+        && app.active_tool_group.is_none()
+    {
+        1
+    } else {
+        0
+    };
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(10),                    // [0] Chat messages
-            Constraint::Length(plan_height),        // [1] Plan checklist (0 when no plan)
-            Constraint::Length(thinking_height),    // [2] Thinking indicator (0 or 1)
-            Constraint::Length(input_height),       // [3] Input (dynamic)
-            Constraint::Length(1),                  // [4] Status bar
+            Constraint::Min(10),                 // [0] Chat messages
+            Constraint::Length(plan_height),     // [1] Plan checklist (0 when no plan)
+            Constraint::Length(thinking_height), // [2] Thinking indicator (0 or 1)
+            Constraint::Length(input_height),    // [3] Input (dynamic)
+            Constraint::Length(1),               // [4] Status bar
         ])
         .split(f.area());
 

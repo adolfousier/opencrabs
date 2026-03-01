@@ -32,7 +32,7 @@ impl TelegramAgent {
     pub fn new(
         agent_service: Arc<AgentService>,
         service_context: ServiceContext,
-        allowed_users: Vec<i64>,
+        allowed_users: Vec<String>,
         voice_config: VoiceConfig,
         openai_api_key: Option<String>,
         shared_session_id: Arc<Mutex<Option<Uuid>>>,
@@ -43,7 +43,10 @@ impl TelegramAgent {
         Self {
             agent_service,
             session_service: SessionService::new(service_context),
-            allowed_users: allowed_users.into_iter().collect(),
+            allowed_users: allowed_users
+                .into_iter()
+                .filter_map(|s| s.parse().ok())
+                .collect(),
             voice_config,
             openai_api_key,
             shared_session_id,

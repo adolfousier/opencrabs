@@ -151,7 +151,7 @@ impl OnboardingWizard {
     /// Detect existing Slack allowed IDs from config.toml
     pub(super) fn detect_existing_slack_allowed_list(&mut self) {
         if let Ok(config) = crate::config::Config::load()
-            && !config.channels.slack.allowed_ids.is_empty()
+            && !config.channels.slack.allowed_users.is_empty()
         {
             self.slack_allowed_list_input = EXISTING_KEY_SENTINEL.to_string();
         }

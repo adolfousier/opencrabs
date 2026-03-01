@@ -18,7 +18,7 @@ use uuid::Uuid;
 pub struct SlackAgent {
     agent_service: Arc<AgentService>,
     session_service: SessionService,
-    allowed_ids: Vec<String>,
+    allowed_users: Vec<String>,
     shared_session_id: Arc<Mutex<Option<Uuid>>>,
     slack_state: Arc<SlackState>,
     respond_to: RespondTo,
@@ -29,7 +29,7 @@ impl SlackAgent {
     pub fn new(
         agent_service: Arc<AgentService>,
         service_context: ServiceContext,
-        allowed_ids: Vec<String>,
+        allowed_users: Vec<String>,
         shared_session_id: Arc<Mutex<Option<Uuid>>>,
         slack_state: Arc<SlackState>,
         respond_to: RespondTo,
@@ -38,7 +38,7 @@ impl SlackAgent {
         Self {
             agent_service,
             session_service: SessionService::new(service_context),
-            allowed_ids,
+            allowed_users,
             shared_session_id,
             slack_state,
             respond_to,
@@ -61,7 +61,7 @@ impl SlackAgent {
 
             tracing::info!(
                 "Starting Slack bot via Socket Mode with {} allowed user(s)",
-                self.allowed_ids.len(),
+                self.allowed_users.len(),
             );
 
             let client = match SlackClientHyperConnector::new() {
@@ -101,7 +101,7 @@ impl SlackAgent {
             let handler_state = handler::HandlerState {
                 agent: self.agent_service,
                 session_svc: self.session_service,
-                allowed: Arc::new(self.allowed_ids.into_iter().collect()),
+                allowed: Arc::new(self.allowed_users.into_iter().collect()),
                 extra_sessions: Arc::new(Mutex::new(HashMap::new())),
                 shared_session: self.shared_session_id,
                 slack_state: self.slack_state.clone(),

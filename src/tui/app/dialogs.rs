@@ -1145,8 +1145,7 @@ impl App {
                     let user_id_str = if wizard.has_existing_telegram_user_id() {
                         crate::config::Config::load()
                             .ok()
-                            .and_then(|c| c.channels.telegram.allowed_users.first().copied())
-                            .map(|id| id.to_string())
+                            .and_then(|c| c.channels.telegram.allowed_users.into_iter().next())
                             .unwrap_or_default()
                     } else {
                         wizard.telegram_user_id_input.clone()

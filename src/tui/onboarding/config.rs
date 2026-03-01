@@ -51,7 +51,7 @@ impl OnboardingWizard {
     }
 
     /// Initialize health check results
-    pub(super) fn start_health_check(&mut self) {
+    pub fn start_health_check(&mut self) {
         let mut checks = vec![
             ("API Key Present".to_string(), HealthStatus::Pending),
             ("Config File".to_string(), HealthStatus::Pending),
@@ -398,11 +398,12 @@ impl OnboardingWizard {
         }
 
         // Persist channel IDs/user IDs to config.toml (if new)
-        if !self.telegram_user_id_input.is_empty()
-            && !self.has_existing_telegram_user_id()
-            && let Ok(uid) = self.telegram_user_id_input.parse::<i64>()
-        {
-            let _ = Config::write_i64_array("channels.telegram", "allowed_users", &[uid]);
+        if !self.telegram_user_id_input.is_empty() && !self.has_existing_telegram_user_id() {
+            let _ = Config::write_array(
+                "channels.telegram",
+                "allowed_users",
+                std::slice::from_ref(&self.telegram_user_id_input),
+            );
         }
         if !self.discord_channel_id_input.is_empty() && !self.has_existing_discord_channel_id() {
             let _ = Config::write_array(
@@ -418,16 +419,18 @@ impl OnboardingWizard {
                 std::slice::from_ref(&self.slack_channel_id_input),
             );
         }
-        if !self.discord_allowed_list_input.is_empty()
-            && !self.has_existing_discord_allowed_list()
-            && let Ok(uid) = self.discord_allowed_list_input.parse::<i64>()
+        if !self.discord_allowed_list_input.is_empty() && !self.has_existing_discord_allowed_list()
         {
-            let _ = Config::write_i64_array("channels.discord", "allowed_users", &[uid]);
+            let _ = Config::write_array(
+                "channels.discord",
+                "allowed_users",
+                std::slice::from_ref(&self.discord_allowed_list_input),
+            );
         }
         if !self.slack_allowed_list_input.is_empty() && !self.has_existing_slack_allowed_list() {
             let _ = Config::write_array(
                 "channels.slack",
-                "allowed_ids",
+                "allowed_users",
                 std::slice::from_ref(&self.slack_allowed_list_input),
             );
         }

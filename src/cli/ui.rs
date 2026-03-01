@@ -322,10 +322,8 @@ pub(crate) async fn cmd_chat(
         .and_then(|t| t.openai.as_ref())
         .and_then(|p| p.api_key.clone());
     let mut factory_voice_cfg = config.voice.clone();
-    factory_voice_cfg.stt_provider =
-        config.providers.stt.as_ref().and_then(|s| s.groq.clone());
-    factory_voice_cfg.tts_provider =
-        config.providers.tts.as_ref().and_then(|t| t.openai.clone());
+    factory_voice_cfg.stt_provider = config.providers.stt.as_ref().and_then(|s| s.groq.clone());
+    factory_voice_cfg.tts_provider = config.providers.tts.as_ref().and_then(|t| t.openai.clone());
     let channel_factory = Arc::new(crate::channels::ChannelFactory::new(
         provider.clone(),
         service_context.clone(),
@@ -654,13 +652,16 @@ pub(crate) async fn cmd_chat(
                 let sl_agent = crate::channels::slack::SlackAgent::new(
                     channel_factory.create_agent_service(),
                     service_context.clone(),
-                    sl.allowed_ids.clone(),
+                    sl.allowed_users.clone(),
                     app.shared_session_id(),
                     slack_state.clone(),
                     sl.respond_to.clone(),
                     sl.allowed_channels.clone(),
                 );
-                tracing::info!("Spawning Slack bot ({} allowed IDs)", sl.allowed_ids.len());
+                tracing::info!(
+                    "Spawning Slack bot ({} allowed user(s))",
+                    sl.allowed_users.len()
+                );
                 Some(sl_agent.start(bot_tok, app_tok))
             } else {
                 tracing::debug!("Slack enabled but missing valid tokens");

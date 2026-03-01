@@ -60,7 +60,7 @@ impl Tool for SlackConnectTool {
                                     (e.g. 'C12345678'). Right-click a channel → View channel details → \
                                     copy the Channel ID at the bottom."
                 },
-                "allowed_ids": {
+                "allowed_users": {
                     "type": "array",
                     "items": { "type": "string" },
                     "description": "Slack user IDs allowed to talk to the bot (e.g. 'U12345678'). \
@@ -68,7 +68,7 @@ impl Tool for SlackConnectTool {
                                     If empty, all workspace users can message the bot."
                 }
             },
-            "required": ["bot_token", "app_token", "allowed_ids"]
+            "required": ["bot_token", "app_token", "allowed_users"]
         })
     }
 
@@ -107,8 +107,8 @@ impl Tool for SlackConnectTool {
             }
         };
 
-        let allowed_ids: Vec<String> = input
-            .get("allowed_ids")
+        let allowed_users: Vec<String> = input
+            .get("allowed_users")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
 
@@ -120,9 +120,12 @@ impl Tool for SlackConnectTool {
         let _ = crate::config::Config::write_key("channels.slack", "enabled", "true");
         let _ = crate::config::Config::write_key("channels.slack", "token", &bot_token);
         let _ = crate::config::Config::write_key("channels.slack", "app_token", &app_token);
-        if !allowed_ids.is_empty() {
-            let _ =
-                crate::config::Config::write_array("channels.slack", "allowed_ids", &allowed_ids);
+        if !allowed_users.is_empty() {
+            let _ = crate::config::Config::write_array(
+                "channels.slack",
+                "allowed_users",
+                &allowed_users,
+            );
         }
 
         // Create and spawn the Slack agent
@@ -146,7 +149,7 @@ impl Tool for SlackConnectTool {
         let sl_agent = crate::channels::slack::SlackAgent::new(
             agent,
             service_context,
-            allowed_ids,
+            allowed_users,
             shared_session,
             slack_state.clone(),
             respond_to,

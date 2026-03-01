@@ -81,13 +81,13 @@ impl Tool for TelegramConnectTool {
             }
         };
 
-        let allowed_users: Vec<i64> = input
+        let allowed_users_raw: Vec<i64> = input
             .get("allowed_users")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
-
-        // Capture owner ID before vec is moved into TelegramAgent
-        let owner_chat_id = allowed_users.first().copied();
+        let owner_chat_id = allowed_users_raw.first().copied();
+        let allowed_users: Vec<String> =
+            allowed_users_raw.iter().map(|id| id.to_string()).collect();
 
         // Save token to keys.toml for persistence
         let _ = crate::config::write_secret_key("channels.telegram", "token", &token);

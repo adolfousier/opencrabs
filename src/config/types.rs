@@ -173,6 +173,28 @@ pub enum RespondTo {
     Mention,
 }
 
+/// Deserialize `allowed_users` from either a TOML integer array (legacy) or string array.
+fn deser_users_compat<'de, D>(d: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum NumOrStr {
+        Int(i64),
+        Str(String),
+    }
+    Vec::<NumOrStr>::deserialize(d).map(|v| {
+        v.into_iter()
+            .map(|x| match x {
+                NumOrStr::Int(n) => n.to_string(),
+                NumOrStr::Str(s) => s,
+            })
+            .collect()
+    })
+}
+
 /// Individual channel configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ChannelConfig {
@@ -183,15 +205,13 @@ pub struct ChannelConfig {
     /// Secondary token (Slack app-level token `xapp-...`)
     #[serde(default)]
     pub app_token: Option<String>,
-    /// Allowlisted user IDs (Telegram user IDs, Discord user IDs, etc.)
-    #[serde(default)]
-    pub allowed_users: Vec<i64>,
+    /// Allowlisted user IDs — Telegram/Discord numeric IDs or Slack `U12345678` strings.
+    /// Accepts both integer and string arrays in TOML for backward compatibility.
+    #[serde(default, deserialize_with = "deser_users_compat")]
+    pub allowed_users: Vec<String>,
     /// Allowlisted phone numbers for WhatsApp (E.164 format: "+15551234567")
     #[serde(default)]
     pub allowed_phones: Vec<String>,
-    /// String-based user IDs (Slack `U12345678`, future channels)
-    #[serde(default)]
-    pub allowed_ids: Vec<String>,
     /// When the bot should respond: "all", "dm_only", or "mention" (default)
     #[serde(default)]
     pub respond_to: RespondTo,
@@ -1122,8 +1142,8 @@ impl Config {
     }
 
     /// Write a string array to a dotted config section.
-    /// e.g. `write_array("channels.slack", "allowed_ids", &["U123"])` →
-    /// `[channels.slack] allowed_ids = ["U123"]`
+    /// e.g. `write_array("channels.slack", "allowed_users", &["U123"])` →
+    /// `[channels.slack] allowed_users = ["U123"]`
     pub fn write_array(section: &str, key: &str, values: &[String]) -> Result<()> {
         let path =
             Self::system_config_path().unwrap_or_else(|| opencrabs_home().join("config.toml"));
@@ -1164,53 +1184,6 @@ impl Config {
         fs::write(&path, toml_str)?;
         tracing::info!(
             "Wrote config array [{section}].{key} ({} items)",
-            values.len()
-        );
-        Ok(())
-    }
-
-    /// Write an array of integers to config.toml under `[section]`, creating
-    /// intermediate tables as needed.
-    ///
-    /// e.g. `write_i64_array("channels.telegram", "allowed_users", &[123456])` →
-    /// `[channels.telegram] allowed_users = [123456]`
-    pub fn write_i64_array(section: &str, key: &str, values: &[i64]) -> Result<()> {
-        let path =
-            Self::system_config_path().unwrap_or_else(|| opencrabs_home().join("config.toml"));
-
-        let mut doc: toml::Value = if path.exists() {
-            let content = fs::read_to_string(&path)?;
-            toml::from_str(&content).unwrap_or(toml::Value::Table(toml::map::Map::new()))
-        } else {
-            toml::Value::Table(toml::map::Map::new())
-        };
-
-        // Navigate/create nested section
-        let parts: Vec<&str> = section.split('.').collect();
-        let mut current = doc.as_table_mut().context("config root is not a table")?;
-
-        for part in &parts {
-            if !current.contains_key(*part) {
-                current.insert(part.to_string(), toml::Value::Table(toml::map::Map::new()));
-            }
-            current = current
-                .get_mut(*part)
-                .context("section not found after insert")?
-                .as_table_mut()
-                .with_context(|| format!("'{}' is not a table", part))?;
-        }
-
-        let arr = values.iter().map(|v| toml::Value::Integer(*v)).collect();
-        current.insert(key.to_string(), toml::Value::Array(arr));
-
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        Self::backup_config(&path, 5);
-        let toml_str = toml::to_string_pretty(&doc)?;
-        fs::write(&path, toml_str)?;
-        tracing::info!(
-            "Wrote config i64 array [{section}].{key} ({} items)",
             values.len()
         );
         Ok(())

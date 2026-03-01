@@ -302,10 +302,32 @@ impl App {
                 self.mode = AppMode::UsageDialog;
                 true
             }
-            "/onboard" => {
+            s if s.starts_with("/onboard") || s == "/doctor" => {
+                use crate::tui::onboarding::OnboardingStep;
+                let suffix = if s == "/doctor" {
+                    "health"
+                } else {
+                    s.strip_prefix("/onboard")
+                        .unwrap_or("")
+                        .trim_start_matches(':')
+                };
+                let step = match suffix {
+                    "provider" => OnboardingStep::ProviderAuth,
+                    "workspace" => OnboardingStep::Workspace,
+                    "channels" => OnboardingStep::Channels,
+                    "gateway" => OnboardingStep::Gateway,
+                    "voice" => OnboardingStep::VoiceSetup,
+                    "daemon" => OnboardingStep::Daemon,
+                    "health" => OnboardingStep::HealthCheck,
+                    "brain" => OnboardingStep::BrainSetup,
+                    _ => OnboardingStep::ModeSelect,
+                };
                 let config = crate::config::Config::load().unwrap_or_default();
                 let mut wizard = OnboardingWizard::from_config(&config);
-                wizard.step = crate::tui::onboarding::OnboardingStep::ModeSelect;
+                wizard.step = step;
+                if step == OnboardingStep::HealthCheck {
+                    wizard.start_health_check();
+                }
                 self.onboarding = Some(wizard);
                 self.mode = AppMode::Onboarding;
                 true

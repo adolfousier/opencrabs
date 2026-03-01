@@ -90,10 +90,13 @@ impl Tool for DiscordConnectTool {
             }
         };
 
-        let allowed_users: Vec<i64> = input
+        let allowed_users: Vec<String> = input
             .get("allowed_users")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default();
+            .and_then(|v| serde_json::from_value::<Vec<i64>>(v.clone()).ok())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|id| id.to_string())
+            .collect();
 
         // Save token to keys.toml for persistence
         let _ = crate::config::write_secret_key("channels.discord", "token", &token);
