@@ -186,23 +186,25 @@ pub(crate) async fn handle_message(
 ) {
     let phone = sender_phone(&info);
     tracing::debug!(
-        "WhatsApp handler: from={}, is_from_me={}, has_text={}, has_image={}",
+        "WhatsApp handler: from={}, is_from_me={}, has_text={}, has_image={}, has_audio={}",
         phone,
         info.source.is_from_me,
         extract_text(&msg).is_some(),
         has_image(&msg),
+        has_audio(&msg),
     );
 
     // Skip bot's own outgoing replies (they echo back as is_from_me).
     // User messages from their phone are also is_from_me (same account),
     // so we only skip if the text starts with our agent header.
+    // Never skip audio/image — those are real user messages even when is_from_me.
     if info.source.is_from_me {
         if let Some(text) = extract_text(&msg) {
             if text.starts_with(MSG_HEADER) {
                 return;
             }
-        } else {
-            // No text and is_from_me — likely a media echo, skip
+        } else if !has_audio(&msg) && !has_image(&msg) {
+            // No text, no audio, no image and is_from_me — non-content echo, skip
             return;
         }
     }

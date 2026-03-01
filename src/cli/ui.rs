@@ -321,6 +321,11 @@ pub(crate) async fn cmd_chat(
         .as_ref()
         .and_then(|t| t.openai.as_ref())
         .and_then(|p| p.api_key.clone());
+    let mut factory_voice_cfg = config.voice.clone();
+    factory_voice_cfg.stt_provider =
+        config.providers.stt.as_ref().and_then(|s| s.groq.clone());
+    factory_voice_cfg.tts_provider =
+        config.providers.tts.as_ref().and_then(|t| t.openai.clone());
     let channel_factory = Arc::new(crate::channels::ChannelFactory::new(
         provider.clone(),
         service_context.clone(),
@@ -328,7 +333,7 @@ pub(crate) async fn cmd_chat(
         working_directory.clone(),
         brain_path.clone(),
         app.shared_session_id(),
-        config.voice.clone(),
+        factory_voice_cfg,
         openai_tts_key,
     ));
 
