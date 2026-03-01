@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.42] - 2026-03-01
 
 ### Added
-- **Native Trello channel** (`80c7b05`) — TrelloAgent polls configured boards every 30 s for new card comments, routes them to the AI, and posts replies back as card comments. Board names resolved automatically — mix human-readable names and 24-char IDs freely. Owner shares TUI session; other commenters get per-member sessions
+- **Native Trello channel** (`80c7b05`) — TrelloAgent authenticates and makes credentials available for tool use. Default mode is tool-only — the AI acts on Trello only when explicitly asked via `trello_send`. Opt-in polling available via `poll_interval_secs` in config; when enabled, only responds to explicit `@bot_username` mentions from allowed users. Board names resolved automatically — mix human-readable names and 24-char IDs freely
   - `src/channels/trello/` (agent, client, handler, models, mod)
 - **`trello_connect` tool** (`80c7b05`) — Verify credentials, resolve boards by name, persist to config, spawn agent, confirm with open card count. Accepts comma-separated board names or IDs
   - `src/brain/tools/trello_connect.rs`
@@ -36,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `src/tui/app/messaging.rs`, `src/tui/onboarding/wizard.rs`
 - **CI Windows build** (`001ed00`) — Replaced removed `aws-bedrock`/`openai` features with `telegram,discord,slack` in Windows CI workflow
   - `.github/workflows/ci.yml`
+- **Trello agent tool-only by default** (`7ca6b6b`) — Removed automatic polling and auto-replies. Agent starts in tool-only mode (credentials stored, no polling). `poll_interval_secs` in `[channels.trello]` config opts in to polling; even then only @mentions from allowed users trigger a response. Adds `poll_interval_secs: Option<u64>` to `ChannelConfig`
+  - `src/channels/trello/agent.rs`, `src/config/types.rs`, `src/cli/ui.rs`, `src/brain/tools/trello_connect.rs`, `config.toml.example`
 
 ## [0.2.41] - 2026-03-01
 
