@@ -75,8 +75,9 @@ pub(super) fn render_tool_group<'a>(
             ]));
 
             // Show full tool input parameters (untruncated) below the header
-            if !call.tool_input.is_null()
-                && let Some(obj) = call.tool_input.as_object()
+            let safe_call_input = crate::utils::redact_tool_input(&call.tool_input);
+            if !safe_call_input.is_null()
+                && let Some(obj) = safe_call_input.as_object()
             {
                 for (key, value) in obj.iter() {
                     // Key label
@@ -234,8 +235,9 @@ pub(super) fn render_inline_approval<'a>(
             )]));
 
             // Expanded details: show all params fully, no truncation
+            let safe_approval_input = crate::utils::redact_tool_input(&approval.tool_input);
             if approval.show_details {
-                if let Some(obj) = approval.tool_input.as_object() {
+                if let Some(obj) = safe_approval_input.as_object() {
                     for (key, value) in obj.iter() {
                         lines.push(Line::from(vec![Span::styled(
                             format!("    {}:", key),
