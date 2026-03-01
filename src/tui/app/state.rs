@@ -351,6 +351,11 @@ pub struct App {
     /// Path to the plan JSON file for the current session
     pub plan_file_path: Option<std::path::PathBuf>,
 
+    /// WhatsApp client captured during onboarding QR pairing — used to send the test message.
+    #[cfg(feature = "whatsapp")]
+    pub(crate) whatsapp_test_client:
+        Arc<tokio::sync::Mutex<Option<Arc<whatsapp_rust::client::Client>>>>,
+
     /// Services
     pub(crate) agent_service: Arc<AgentService>,
     pub(crate) session_service: SessionService,
@@ -458,6 +463,8 @@ impl App {
             sudo_input: String::new(),
             plan_document: None,
             plan_file_path: None,
+            #[cfg(feature = "whatsapp")]
+            whatsapp_test_client: Arc::new(tokio::sync::Mutex::new(None)),
             session_service: SessionService::new(context.clone()),
             message_service: MessageService::new(context),
             agent_service,

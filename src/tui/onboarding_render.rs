@@ -8,7 +8,7 @@ use super::onboarding::{
 };
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Flex, Layout},
+    layout::{Alignment, Constraint, Direction, Flex, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
@@ -265,6 +265,67 @@ pub fn render_onboarding(f: &mut Frame, wizard: &OnboardingWizard) {
     };
 
     f.render_widget(paragraph, wizard_area);
+
+    // WhatsApp QR popup — rendered as a centered overlay with white bg so the
+    // QR modules have the contrast needed to be scannable by a phone camera.
+    if wizard.step == OnboardingStep::WhatsAppSetup
+        && let Some(ref qr_text) = wizard.whatsapp_qr_text
+    {
+        render_whatsapp_qr_popup(f, qr_text, area);
+    }
+}
+
+/// Render the WhatsApp QR code as a centered full-screen popup with white
+/// background and black foreground so the code is always scannable.
+fn render_whatsapp_qr_popup(f: &mut Frame, qr_text: &str, area: Rect) {
+    let qr_lines: Vec<&str> = qr_text.lines().collect();
+    let qr_w = qr_lines.iter().map(|l| l.len()).max().unwrap_or(0) as u16;
+    let qr_h = qr_lines.len() as u16;
+
+    // popup = QR + 2 border + 2 header rows (instruction + blank) + 1 footer
+    let popup_w = (qr_w + 4).min(area.width);
+    let popup_h = (qr_h + 5).min(area.height);
+
+    let x = area.x + area.width.saturating_sub(popup_w) / 2;
+    let y = area.y + area.height.saturating_sub(popup_h) / 2;
+    let popup_area = Rect {
+        x,
+        y,
+        width: popup_w,
+        height: popup_h,
+    };
+
+    // Build content lines — white block chars on dark bg (inverted QR, scannable by phone)
+    let qr_style = Style::default().fg(Color::White).bg(Color::Rgb(18, 18, 18));
+    let mut lines: Vec<Line<'static>> = Vec::with_capacity(qr_h as usize + 3);
+    lines.push(Line::from(Span::styled(
+        " Open WhatsApp › Linked Devices › Link a Device ",
+        Style::default().fg(Color::DarkGray),
+    )));
+    lines.push(Line::from(""));
+    for qr_line in qr_lines {
+        lines.push(Line::from(Span::styled(
+            format!("  {}  ", qr_line),
+            qr_style,
+        )));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        " Waiting for scan... ",
+        Style::default().fg(BRAND_GOLD),
+    )));
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Rgb(120, 120, 120)))
+        .style(Style::default().bg(Color::Rgb(18, 18, 18)));
+
+    let para = Paragraph::new(lines)
+        .block(block)
+        .alignment(Alignment::Center);
+
+    f.render_widget(ratatui::widgets::Clear, popup_area);
+    f.render_widget(para, popup_area);
 }
 
 /// Render progress dots (filled for completed, hollow for remaining)
@@ -1279,18 +1340,14 @@ fn render_whatsapp_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWiza
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         )));
-    } else if let Some(ref qr) = wizard.whatsapp_qr_text {
+    } else if wizard.whatsapp_qr_text.is_some() {
+        // QR is rendered as a full-screen popup overlay — just show a placeholder here
         lines.push(Line::from(Span::styled(
-            "  Open WhatsApp > Linked Devices > Link a Device",
+            "  QR code displayed — scan with WhatsApp",
             Style::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::ITALIC),
         )));
-        lines.push(Line::from(""));
-        for qr_line in qr.lines() {
-            lines.push(Line::from(Span::raw(format!("  {}", qr_line))));
-        }
-        lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             "  Waiting for scan...",
             Style::default().fg(BRAND_GOLD),
@@ -1313,25 +1370,32 @@ fn render_whatsapp_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWiza
             )));
         }
     } else if conn_focused {
-        lines.push(Line::from(Span::styled(
-            "  Press Enter to show QR code",
-            Style::default().fg(Color::DarkGray),
-        )));
+        let session_db = crate::config::opencrabs_home()
+            .join("whatsapp")
+            .join("session.db");
+        if session_db.exists() {
+            lines.push(Line::from(Span::styled(
+                "  Previously connected  ·  Press Enter to re-scan QR code",
+                Style::default().fg(Color::DarkGray),
+            )));
+        } else {
+            lines.push(Line::from(Span::styled(
+                "  Press Enter to show QR code",
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
     }
 
     lines.push(Line::from(""));
 
     // Phone allowlist field
     let phone_focused = wizard.whatsapp_field == WhatsAppField::PhoneAllowlist;
-    let (phone_display, phone_hint) = if wizard.has_existing_whatsapp_phone() {
-        (
-            "**********".to_string(),
-            " (already configured)".to_string(),
-        )
+    let phone_display = if wizard.has_existing_whatsapp_phone() {
+        "**********".to_string()
     } else if wizard.whatsapp_phone_input.is_empty() {
-        ("+15551234567".to_string(), String::new())
+        "+15551234567".to_string()
     } else {
-        (wizard.whatsapp_phone_input.clone(), String::new())
+        wizard.whatsapp_phone_input.clone()
     };
     let phone_cursor = if phone_focused && !wizard.has_existing_whatsapp_phone() {
         "\u{2588}"
@@ -1360,25 +1424,28 @@ fn render_whatsapp_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWiza
         ),
     ]));
 
-    if !phone_hint.is_empty() && phone_focused {
+    if wizard.has_existing_whatsapp_phone() && phone_focused {
         lines.push(Line::from(Span::styled(
-            format!("  {}", phone_hint.trim()),
+            "  Type a new number to replace, or press Enter to keep existing",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
+        )));
+    } else if wizard.whatsapp_phone_input.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  Optional — leave empty to allow all numbers",
             Style::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::ITALIC),
         )));
     }
 
-    lines.push(Line::from(Span::styled(
-        "  Optional — leave empty to allow all numbers",
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::ITALIC),
-    )));
+    // Test status (shown after phone is confirmed and test fires)
+    render_channel_test_status(lines, wizard);
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "  Tab: next field | Enter: continue | S: skip | Esc: back",
+        "  Tab: next field | Enter: test/continue | S: skip | Esc: back",
         Style::default().fg(Color::DarkGray),
     )));
 }

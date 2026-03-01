@@ -5,6 +5,22 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.41] - 2026-03-01
+
+### Fixed
+- **WhatsApp onboarding — always test connection on Enter** (`676ab29`) — Pressing Enter on the phone field now always triggers a test message, matching Telegram/Discord/Slack behavior. Previously the test was gated on `whatsapp_connected`, so re-opening the app with an existing session silently skipped the test and just advanced
+  - `src/tui/onboarding/channels.rs`
+- **WhatsApp onboarding — reconnect from existing session for test** (`676ab29`) — When no live client is in memory (app reopened after prior pairing), `test_whatsapp_connection` now calls `reconnect_whatsapp()` which reuses the stored `session.db` without wiping it — no new QR scan required
+  - `src/brain/tools/whatsapp_connect.rs`, `src/tui/app/dialogs.rs`
+- **WhatsApp test message includes brand header** (`676ab29`) — Test message now prepends `🦀 *OpenCrabs*\n\n` (the `MSG_HEADER` constant) so it reads consistently with all other WhatsApp messages sent by the agent
+  - `src/tui/app/dialogs.rs`
+- **WhatsApp onboarding — post-QR UX overhaul** (`676ab29`) — After scanning the QR code the popup dismisses, the wizard advances to the phone allowlist field, shows any previously configured number (sentinel pattern), and allows confirm-or-replace before testing. Navigation keys (Tab/BackTab/S) always work regardless of test state; only Enter is blocked while a test is in-flight
+  - `src/tui/onboarding/channels.rs`, `src/tui/onboarding_render.rs`, `src/tui/app/dialogs.rs`, `src/tui/app/state.rs`, `src/brain/tools/whatsapp_connect.rs`
+- **Clippy `collapsible_match` errors** (`ff66828`) — Collapsed nested `if`-in-`match` arms into match guards across `input.rs` (WhatsApp paste handler) and `markdown.rs` (`Tag::BlockQuote`, `TagEnd::Heading`, `TagEnd::Item`, `Event::HardBreak|SoftBreak`)
+  - `src/tui/onboarding/input.rs`, `src/tui/markdown.rs`
+- **CI nightly clippy/rustfmt** (`a65c0ab`) — Added `rustfmt` and `clippy` components to `rust-toolchain.toml` so nightly CI jobs resolve the tools without network fallback; pinned workflow to `main` branch trigger
+  - `rust-toolchain.toml`, `.github/workflows/`
+
 ## [0.2.40] - 2026-02-28
 
 ### Added
@@ -750,6 +766,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.41]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.41
 [0.2.40]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.40
 [0.2.39]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.39
 [0.2.38]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.38

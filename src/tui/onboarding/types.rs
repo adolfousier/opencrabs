@@ -281,4 +281,6 @@ pub enum WizardAction {
     TestDiscord,
     /// Trigger async Slack test message
     TestSlack,
+    /// Trigger async WhatsApp test message
+    TestWhatsApp,
 }
