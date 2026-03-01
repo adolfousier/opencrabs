@@ -385,6 +385,7 @@ impl App {
                 crossterm::event::KeyCode::Char(c) => {
                     self.model_selector_custom_name.push(c);
                     self.error_message = None;
+                    self.error_message_shown_at = None;
                 }
                 crossterm::event::KeyCode::Backspace => {
                     self.model_selector_custom_name.pop();
@@ -528,8 +529,10 @@ impl App {
                 if self.model_selector_custom_name.is_empty() {
                     self.error_message =
                         Some("Enter a name identifier for this provider".to_string());
+                    self.error_message_shown_at = Some(std::time::Instant::now());
                 } else {
                     self.error_message = None;
+                    self.error_message_shown_at = None;
                     self.save_provider_selection(self.model_selector_provider_selected, false)
                         .await?;
                 }

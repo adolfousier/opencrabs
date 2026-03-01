@@ -540,20 +540,24 @@ impl App {
                     } else {
                         self.escape_pending_at = Some(std::time::Instant::now());
                         self.error_message = Some("Press Esc again to abort".to_string());
+                        self.error_message_shown_at = Some(std::time::Instant::now());
                     }
                 } else {
                     self.escape_pending_at = Some(std::time::Instant::now());
                     self.error_message = Some("Press Esc again to abort".to_string());
+                    self.error_message_shown_at = Some(std::time::Instant::now());
                 }
             } else if !self.auto_scroll {
                 // User is scrolled up — scroll to bottom first
                 self.scroll_offset = 0;
                 self.auto_scroll = true;
                 self.error_message = None;
+                self.error_message_shown_at = None;
                 self.escape_pending_at = None;
             } else if self.input_buffer.is_empty() {
                 // Nothing to clear, just dismiss error
                 self.error_message = None;
+                self.error_message_shown_at = None;
                 self.escape_pending_at = None;
             } else if let Some(pending_at) = self.escape_pending_at {
                 if pending_at.elapsed() < std::time::Duration::from_secs(3) {
@@ -566,17 +570,20 @@ impl App {
                     self.cursor_position = 0;
                     self.attachments.clear();
                     self.error_message = None;
+                    self.error_message_shown_at = None;
                     self.escape_pending_at = None;
                     self.slash_suggestions_active = false;
                 } else {
                     // Expired — treat as first Escape again
                     self.escape_pending_at = Some(std::time::Instant::now());
                     self.error_message = Some("Press Esc again to clear input".to_string());
+                    self.error_message_shown_at = Some(std::time::Instant::now());
                 }
             } else {
                 // First Escape — show confirmation hint
                 self.escape_pending_at = Some(std::time::Instant::now());
                 self.error_message = Some("Press Esc again to clear input".to_string());
+                self.error_message_shown_at = Some(std::time::Instant::now());
             }
         } else if event.code == KeyCode::Char('o') && event.modifiers == KeyModifiers::CONTROL {
             if self.hidden_older_messages > 0 && self.display_token_count < 300_000 {
