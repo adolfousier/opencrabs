@@ -50,7 +50,7 @@ jobs:
 
       - name: Run tests (Windows)
         if: runner.os == 'Windows'
-        run: cargo test --features openai,aws-bedrock --verbose
+        run: cargo test --features telegram,discord,slack --verbose
 
       - name: Run tests (Unix)
         if: runner.os != 'Windows'
@@ -58,7 +58,7 @@ jobs:
 
       - name: Run doc tests (Windows)
         if: runner.os == 'Windows'
-        run: cargo test --doc --features openai,aws-bedrock
+        run: cargo test --doc --features telegram,discord,slack
 
       - name: Run doc tests (Unix)
         if: runner.os != 'Windows'
@@ -110,7 +110,7 @@ jobs:
 
       - name: Build (Windows)
         if: matrix.os == 'windows-latest'
-        run: cargo build --release --features openai,aws-bedrock
+        run: cargo build --release --features telegram,discord,slack
 
       - name: Build (Unix)
         if: matrix.os != 'windows-latest'
