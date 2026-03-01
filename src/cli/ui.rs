@@ -577,7 +577,7 @@ pub(crate) async fn cmd_chat(
                 channel_factory.create_agent_service(),
                 service_context.clone(),
                 wa.allowed_phones.clone(),
-                config.voice.clone(),
+                channel_factory.voice_config().clone(),
                 app.shared_session_id(),
                 whatsapp_state.clone(),
             );
@@ -614,7 +614,7 @@ pub(crate) async fn cmd_chat(
                     channel_factory.create_agent_service(),
                     service_context.clone(),
                     dc.allowed_users.clone(),
-                    config.voice.clone(),
+                    channel_factory.voice_config().clone(),
                     openai_key,
                     app.shared_session_id(),
                     discord_state.clone(),

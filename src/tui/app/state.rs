@@ -217,6 +217,8 @@ pub struct App {
     /// Reasoning/thinking content from providers like MiniMax (display-only, cleared on complete)
     pub streaming_reasoning: Option<String>,
     pub error_message: Option<String>,
+    /// When error_message was set — used to auto-dismiss after 2.5s
+    pub error_message_shown_at: Option<std::time::Instant>,
     /// Set to true when IntermediateText arrives during the current response cycle.
     /// Reset to false at the start of each new send_message call.
     /// Used in complete_response to avoid double-adding the assistant message.
@@ -404,6 +406,7 @@ impl App {
             streaming_response: None,
             streaming_reasoning: None,
             error_message: None,
+            error_message_shown_at: None,
             intermediate_text_received: false,
             animation_frame: 0,
             splash_shown_at: Some(std::time::Instant::now()),
@@ -922,6 +925,14 @@ impl App {
                 // Update animation frame for spinner
                 self.animation_frame = self.animation_frame.wrapping_add(1);
 
+                // Auto-dismiss error/warning messages after 2.5 seconds
+                if let Some(shown_at) = self.error_message_shown_at {
+                    if shown_at.elapsed() >= std::time::Duration::from_millis(2500) {
+                        self.error_message = None;
+                        self.error_message_shown_at = None;
+                    }
+                }
+
                 // Auto-close splash screen after 3 seconds
                 if self.mode == AppMode::Splash
                     && let Some(shown_at) = self.splash_shown_at
@@ -1340,6 +1351,7 @@ impl App {
             self.cursor_position = 0;
             self.slash_suggestions_active = false;
             self.error_message = Some("Press Ctrl+C again to quit".to_string());
+            self.error_message_shown_at = Some(std::time::Instant::now());
             self.ctrl_c_pending_at = Some(std::time::Instant::now());
             return Ok(());
         }
@@ -1523,6 +1535,7 @@ impl App {
             });
         }
         self.error_message = Some(error);
+        self.error_message_shown_at = Some(std::time::Instant::now());
         // Auto-scroll to show the error
         self.scroll_offset = 0;
     }

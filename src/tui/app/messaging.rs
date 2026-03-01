@@ -304,7 +304,9 @@ impl App {
             }
             "/onboard" => {
                 let config = crate::config::Config::load().unwrap_or_default();
-                self.onboarding = Some(OnboardingWizard::from_config(&config));
+                let mut wizard = OnboardingWizard::from_config(&config);
+                wizard.step = crate::tui::onboarding::OnboardingStep::ModeSelect;
+                self.onboarding = Some(wizard);
                 self.mode = AppMode::Onboarding;
                 true
             }
