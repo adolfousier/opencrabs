@@ -104,23 +104,33 @@ model = "gpt-4o-mini-tts" # TTS model
 # Channels (Telegram / WhatsApp / Slack / Discord)
 # ==================================================
 
+# respond_to controls which messages the bot replies to (applies to Telegram, Discord, Slack):
+#   "all"      — reply to every message in allowed channels (default)
+#   "dm_only"  — reply only to direct/private messages
+#   "mention"  — reply only when the bot is @mentioned or replied-to
+
 [channels.whatsapp]
 enabled = false
+# Phone numbers allowed to message the bot (E.164 format, leading + optional)
 allowed_phones = ["+15551234567"]
 
 [channels.discord]
 enabled = false
-allowed_channels = ["channel_id"]   # Where the bot operates (empty = all channels)
-allowed_users = [123456789012345]   # Who the bot replies to (empty = everyone)
+allowed_channels = ["channel_id"]       # Where the bot operates (empty = all channels)
+allowed_users = [123456789012345]        # Who the bot replies to (numeric user ID, empty = everyone)
+# respond_to = "all"                    # "all" | "dm_only" | "mention"
 
 [channels.telegram]
 enabled = false
-allowed_users = [123456789]         # Who the bot replies to (empty = everyone)
+allowed_users = [123456789]             # Who the bot replies to (numeric user ID, empty = everyone)
+# allowed_channels = ["-100123456789"]  # Chat/group IDs to restrict to (empty = all chats)
+# respond_to = "all"                    # "all" | "dm_only" | "mention"
 
 [channels.slack]
 enabled = false
-allowed_channels = ["C12345678"]    # Where the bot operates (empty = all channels)
-allowed_ids = ["U12345678"]         # Who the bot replies to (empty = everyone)
+allowed_channels = ["C12345678"]        # Where the bot operates (Slack channel ID, empty = all)
+allowed_ids = ["U12345678"]             # Who the bot replies to (Slack user ID, empty = everyone)
+# respond_to = "all"                    # "all" | "dm_only" | "mention"
 
 # ========================================
 # Agent-to-Agent (A2A) Protocol

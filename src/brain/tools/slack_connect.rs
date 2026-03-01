@@ -132,14 +132,25 @@ impl Tool for SlackConnectTool {
         let shared_session = factory.shared_session_id();
         let slack_state = self.slack_state.clone();
 
+        // Load respond_to and allowed_channels from persisted config
+        let cfg = crate::config::Config::load().ok();
+        let respond_to = cfg
+            .as_ref()
+            .map(|c| c.channels.slack.respond_to.clone())
+            .unwrap_or_default();
+        let allowed_channels = cfg
+            .as_ref()
+            .map(|c| c.channels.slack.allowed_channels.clone())
+            .unwrap_or_default();
+
         let sl_agent = crate::channels::slack::SlackAgent::new(
             agent,
             service_context,
             allowed_ids,
             shared_session,
             slack_state.clone(),
-            crate::config::RespondTo::default(),
-            vec![],
+            respond_to,
+            allowed_channels,
         );
 
         let _handle = sl_agent.start(bot_token, app_token);

@@ -106,6 +106,17 @@ impl Tool for TelegramConnectTool {
         // Get OpenAI TTS key from config (keys.toml)
         let openai_key = factory.openai_tts_key();
 
+        // Load respond_to and allowed_channels from persisted config
+        let cfg = crate::config::Config::load().ok();
+        let respond_to = cfg
+            .as_ref()
+            .map(|c| c.channels.telegram.respond_to.clone())
+            .unwrap_or_default();
+        let allowed_channels = cfg
+            .as_ref()
+            .map(|c| c.channels.telegram.allowed_channels.clone())
+            .unwrap_or_default();
+
         let tg_agent = crate::channels::telegram::TelegramAgent::new(
             agent,
             service_context,
@@ -114,8 +125,8 @@ impl Tool for TelegramConnectTool {
             openai_key,
             shared_session,
             telegram_state.clone(),
-            crate::config::RespondTo::default(),
-            vec![],
+            respond_to,
+            allowed_channels,
         );
 
         let _handle = tg_agent.start(token);

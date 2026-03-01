@@ -110,6 +110,17 @@ impl Tool for DiscordConnectTool {
         let shared_session = factory.shared_session_id();
         let discord_state = self.discord_state.clone();
 
+        // Load respond_to and allowed_channels from persisted config
+        let cfg = crate::config::Config::load().ok();
+        let respond_to = cfg
+            .as_ref()
+            .map(|c| c.channels.discord.respond_to.clone())
+            .unwrap_or_default();
+        let allowed_channels = cfg
+            .as_ref()
+            .map(|c| c.channels.discord.allowed_channels.clone())
+            .unwrap_or_default();
+
         let dc_agent = crate::channels::discord::DiscordAgent::new(
             agent,
             service_context,
@@ -118,8 +129,8 @@ impl Tool for DiscordConnectTool {
             openai_tts_key,
             shared_session,
             discord_state.clone(),
-            crate::config::RespondTo::default(),
-            vec![],
+            respond_to,
+            allowed_channels,
         );
 
         let _handle = dc_agent.start(token);

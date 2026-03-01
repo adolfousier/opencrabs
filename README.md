@@ -86,10 +86,10 @@
 ### Messaging Integrations
 | Feature | Description |
 |---------|-------------|
-| **Telegram Bot** | Full-featured Telegram bot running alongside the TUI — shared session, photo/voice support, allowlisted user IDs |
-| **WhatsApp** | Connect via QR code pairing at runtime ("connect my WhatsApp") or from onboarding wizard. Text + image support, shared session with TUI, phone allowlist, session persists across restarts |
-| **Discord** | Full Discord bot — text + image + voice, allowlisted users/channels, shared session with TUI |
-| **Slack** | Coming soon |
+| **Telegram Bot** | Full-featured Telegram bot — shared session with TUI, photo/voice support, allowed user IDs, allowed chat/group IDs, `respond_to` filter (`all`/`dm_only`/`mention`) |
+| **WhatsApp** | Connect via QR code pairing at runtime or from onboarding wizard. Text + image, shared session with TUI, phone allowlist, session persists across restarts |
+| **Discord** | Full Discord bot — text + image + voice, allowed user IDs, allowed channel IDs, `respond_to` filter, shared session with TUI |
+| **Slack** | Full Slack bot via Socket Mode — allowed user IDs, allowed channel IDs, `respond_to` filter, shared session with TUI |
 
 ### Terminal UI
 | Feature | Description |
@@ -457,7 +457,7 @@ First-time users are guided through an 8-step setup wizard that appears automati
 | 2 | **Model & Auth** | Pick provider (Anthropic, OpenAI, Gemini, OpenRouter, Minimax, Custom) → enter token/key → model list fetched live from API → select model. Auto-detects existing keys from `keys.toml` |
 | 3 | **Workspace** | Set brain workspace path (default `~/.opencrabs/`) → seed template files (SOUL.md, IDENTITY.md, etc.) |
 | 4 | **Gateway** | Configure HTTP API gateway: port, bind address, auth mode |
-| 5 | **Channels** | Toggle messaging integrations (Telegram, Discord, WhatsApp, Signal, Google Chat, iMessage) |
+| 5 | **Channels** | Toggle messaging integrations (Telegram, Discord, WhatsApp, Slack) |
 | 6 | **Daemon** | Install background service (systemd on Linux, LaunchAgent on macOS) |
 | 7 | **Health Check** | Verify API key, config, workspace — shows pass/fail summary |
 | 8 | **Brain Personalization** | Tell the agent about yourself and how you want it to behave → AI generates personalized brain files (SOUL.md, IDENTITY.md, USER.md, etc.) |
@@ -509,7 +509,7 @@ api_key = "your-minimax-key"
 [providers.custom.your_name]
 api_key = "your-key"                 # not required for local LLMs
 
-# Messaging Channels
+# Messaging Channels — tokens/secrets only (config.toml holds allowed_users, allowed_channels, etc.)
 [channels.telegram]
 token = "123456789:ABCdef..."
 
@@ -518,7 +518,7 @@ token = "your-discord-bot-token"
 
 [channels.slack]
 token = "xoxb-your-bot-token"
-app_token = "xapp-your-app-token"
+app_token = "xapp-your-app-token"   # Required for Socket Mode
 
 # Web Search
 [providers.web_search.exa]
