@@ -73,6 +73,12 @@ impl OnboardingWizard {
                             self.detect_existing_slack_channel_id();
                             self.detect_existing_slack_allowed_list();
                         }
+                        4 => {
+                            self.step = OnboardingStep::TrelloSetup;
+                            self.trello_field = TrelloField::ApiKey;
+                            self.channel_test_status = ChannelTestStatus::Idle;
+                            self.detect_existing_trello_credentials();
+                        }
                         _ => {}
                     }
                 }
@@ -104,6 +110,11 @@ impl OnboardingWizard {
     /// Check if Slack channel is enabled (index 3 in channel_toggles)
     pub(super) fn is_slack_enabled(&self) -> bool {
         self.channel_toggles.get(3).is_some_and(|t| t.1)
+    }
+
+    /// Check if Trello channel is enabled (index 4 in channel_toggles)
+    pub(super) fn is_trello_enabled(&self) -> bool {
+        self.channel_toggles.get(4).is_some_and(|t| t.1)
     }
 
     pub(super) fn handle_telegram_setup_key(&mut self, event: KeyEvent) -> WizardAction {
@@ -416,6 +427,127 @@ impl OnboardingWizard {
     pub fn set_whatsapp_error(&mut self, err: String) {
         self.whatsapp_error = Some(err);
         self.whatsapp_connecting = false;
+    }
+
+    pub(super) fn handle_trello_setup_key(&mut self, event: KeyEvent) -> WizardAction {
+        // Handle test status interactions first
+        match &self.channel_test_status {
+            ChannelTestStatus::Success => {
+                if event.code == KeyCode::Enter {
+                    self.channel_test_status = ChannelTestStatus::Idle;
+                    self.next_step();
+                    return WizardAction::None;
+                }
+            }
+            ChannelTestStatus::Failed(_) => {
+                if event.code == KeyCode::Enter {
+                    self.channel_test_status = ChannelTestStatus::Idle;
+                    return WizardAction::TestTrello;
+                }
+                if matches!(event.code, KeyCode::Char('s') | KeyCode::Char('S')) {
+                    self.channel_test_status = ChannelTestStatus::Idle;
+                    self.next_step();
+                    return WizardAction::None;
+                }
+            }
+            ChannelTestStatus::Testing => return WizardAction::None,
+            ChannelTestStatus::Idle => {}
+        }
+
+        match self.trello_field {
+            TrelloField::ApiKey => match event.code {
+                KeyCode::Char(c) => {
+                    if self.has_existing_trello_api_key() {
+                        self.trello_api_key_input.clear();
+                    }
+                    self.trello_api_key_input.push(c);
+                }
+                KeyCode::Backspace => {
+                    if self.has_existing_trello_api_key() {
+                        self.trello_api_key_input.clear();
+                    } else {
+                        self.trello_api_key_input.pop();
+                    }
+                }
+                KeyCode::Tab | KeyCode::Enter => {
+                    self.trello_field = TrelloField::ApiToken;
+                }
+                _ => {}
+            },
+            TrelloField::ApiToken => match event.code {
+                KeyCode::Char(c) => {
+                    if self.has_existing_trello_api_token() {
+                        self.trello_api_token_input.clear();
+                    }
+                    self.trello_api_token_input.push(c);
+                }
+                KeyCode::Backspace => {
+                    if self.has_existing_trello_api_token() {
+                        self.trello_api_token_input.clear();
+                    } else {
+                        self.trello_api_token_input.pop();
+                    }
+                }
+                KeyCode::BackTab => {
+                    self.trello_field = TrelloField::ApiKey;
+                }
+                KeyCode::Tab | KeyCode::Enter => {
+                    self.trello_field = TrelloField::BoardId;
+                }
+                _ => {}
+            },
+            TrelloField::BoardId => match event.code {
+                KeyCode::Char(c) => {
+                    if self.has_existing_trello_board_id() {
+                        self.trello_board_id_input.clear();
+                    }
+                    self.trello_board_id_input.push(c);
+                }
+                KeyCode::Backspace => {
+                    if self.has_existing_trello_board_id() {
+                        self.trello_board_id_input.clear();
+                    } else {
+                        self.trello_board_id_input.pop();
+                    }
+                }
+                KeyCode::BackTab => {
+                    self.trello_field = TrelloField::ApiToken;
+                }
+                KeyCode::Tab | KeyCode::Enter => {
+                    self.trello_field = TrelloField::AllowedUsers;
+                }
+                _ => {}
+            },
+            TrelloField::AllowedUsers => match event.code {
+                KeyCode::Char(c) => {
+                    if self.has_existing_trello_allowed_users() {
+                        self.trello_allowed_users_input.clear();
+                    }
+                    self.trello_allowed_users_input.push(c);
+                }
+                KeyCode::Backspace => {
+                    if self.has_existing_trello_allowed_users() {
+                        self.trello_allowed_users_input.clear();
+                    } else {
+                        self.trello_allowed_users_input.pop();
+                    }
+                }
+                KeyCode::BackTab => {
+                    self.trello_field = TrelloField::BoardId;
+                }
+                KeyCode::Enter => {
+                    let has_key = !self.trello_api_key_input.is_empty();
+                    let has_token = !self.trello_api_token_input.is_empty();
+                    let has_board = !self.trello_board_id_input.is_empty();
+                    if has_key && has_token && has_board {
+                        return WizardAction::TestTrello;
+                    }
+                    self.next_step();
+                }
+                _ => {}
+            },
+        }
+        WizardAction::None
     }
 
     pub(super) fn handle_slack_setup_key(&mut self, event: KeyEvent) -> WizardAction {

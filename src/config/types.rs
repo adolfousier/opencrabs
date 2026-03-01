@@ -152,6 +152,8 @@ pub struct ChannelsConfig {
     #[serde(default)]
     pub slack: ChannelConfig,
     #[serde(default)]
+    pub trello: ChannelConfig,
+    #[serde(default)]
     pub signal: ChannelConfig,
     #[serde(default)]
     pub google_chat: ChannelConfig,
@@ -836,6 +838,18 @@ fn merge_channel_keys(mut base: ChannelsConfig, keys: ChannelsConfig) -> Channel
         && !token.is_empty()
     {
         base.whatsapp.token = Some(token.clone());
+    }
+
+    // Trello (app_token = API Key, token = API Token)
+    if let Some(ref app_token) = keys.trello.app_token
+        && !app_token.is_empty()
+    {
+        base.trello.app_token = Some(app_token.clone());
+    }
+    if let Some(ref token) = keys.trello.token
+        && !token.is_empty()
+    {
+        base.trello.token = Some(token.clone());
     }
 
     base

@@ -53,12 +53,13 @@ pub struct ProviderInfo {
 }
 
 /// Channel definitions for the unified Channels step.
-/// Index mapping: 0=Telegram, 1=Discord, 2=WhatsApp, 3=Slack, 4=Signal, 5=Google Chat, 6=iMessage
+/// Index mapping: 0=Telegram, 1=Discord, 2=WhatsApp, 3=Slack, 4=Trello, 5=Signal, 6=Google Chat, 7=iMessage
 pub const CHANNEL_NAMES: &[(&str, &str)] = &[
     ("Telegram", "Bot token (via @BotFather)"),
     ("Discord", "Bot token (via Developer Portal)"),
     ("WhatsApp", "QR code pairing"),
     ("Slack", "Socket Mode (bot + app tokens)"),
+    ("Trello", "API Key + Token from trello.com/power-ups/admin"),
     ("Signal", "Coming soon"),
     ("Google Chat", "Coming soon"),
     ("iMessage", "Coming soon"),
@@ -103,6 +104,7 @@ pub enum OnboardingStep {
     DiscordSetup,
     WhatsAppSetup,
     SlackSetup,
+    TrelloSetup,
     Gateway,
     VoiceSetup,
     Daemon,
@@ -123,6 +125,7 @@ impl OnboardingStep {
             Self::DiscordSetup => 4,  // sub-step of Channels
             Self::WhatsAppSetup => 4, // sub-step of Channels
             Self::SlackSetup => 4,    // sub-step of Channels
+            Self::TrelloSetup => 4,   // sub-step of Channels
             Self::Gateway => 5,
             Self::VoiceSetup => 6,
             Self::Daemon => 7,
@@ -148,6 +151,7 @@ impl OnboardingStep {
             Self::DiscordSetup => "Discord Bot",
             Self::WhatsAppSetup => "WhatsApp",
             Self::SlackSetup => "Slack Bot",
+            Self::TrelloSetup => "Trello",
             Self::Gateway => "API Gateway",
             Self::VoiceSetup => "Voice Superpowers",
             Self::Daemon => "Always On",
@@ -168,6 +172,7 @@ impl OnboardingStep {
             Self::DiscordSetup => "Hook up your Discord bot token",
             Self::WhatsAppSetup => "Scan the QR code with your phone",
             Self::SlackSetup => "Hook up your Slack bot and app tokens",
+            Self::TrelloSetup => "Hook up your Trello API Key and Token",
             Self::Gateway => "Open up an HTTP API if you want one",
             Self::VoiceSetup => "Talk to me, literally",
             Self::Daemon => "Keep me running in the background",
@@ -237,6 +242,15 @@ pub enum WhatsAppField {
     PhoneAllowlist,
 }
 
+/// Which field is focused in TrelloSetup step
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrelloField {
+    ApiKey,
+    ApiToken,
+    BoardId,
+    AllowedUsers,
+}
+
 /// Channel test connection status
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChannelTestStatus {
@@ -283,4 +297,6 @@ pub enum WizardAction {
     TestSlack,
     /// Trigger async WhatsApp test message
     TestWhatsApp,
+    /// Trigger async Trello connection test
+    TestTrello,
 }

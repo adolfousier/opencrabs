@@ -101,7 +101,7 @@ model = "gpt-4o-mini-tts" # TTS model
 #    - Location: LM Studio > Model Settings > Context Length
 
 # ==================================================
-# Channels (Telegram / WhatsApp / Slack / Discord)
+# Channels (Telegram / WhatsApp / Slack / Discord / Trello)
 # ==================================================
 
 # respond_to controls which messages the bot replies to (applies to Telegram, Discord, Slack):
@@ -131,6 +131,20 @@ enabled = false
 allowed_channels = ["C12345678"]        # Where the bot operates (Slack channel ID, empty = all)
 allowed_ids = ["U12345678"]             # Who the bot replies to (Slack user ID, empty = everyone)
 # respond_to = "all"                    # "all" | "dm_only" | "mention"
+
+# ========================================
+# Trello — board polling + card management
+# ========================================
+# API keys/tokens go in keys.toml under [channels.trello]
+# The agent polls each allowed_channels board every 30 s for new card comments,
+# routes them to the AI, and posts replies back as card comments.
+# allowed_users filters by Trello member ID (empty = reply to everyone)
+[channels.trello]
+enabled = false
+# Board IDs or names to monitor — you can mix 24-char hex IDs and human-readable board names.
+# The agent resolves names at startup. Comma-separated in the wizard; TOML array here.
+allowed_channels = ["your-board-name", "abc123def456abc123def456"]
+allowed_users = []                      # Trello member IDs to reply to (empty = all members)
 
 # ========================================
 # Agent-to-Agent (A2A) Protocol

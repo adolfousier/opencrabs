@@ -209,6 +209,56 @@ impl OnboardingWizard {
         self.whatsapp_phone_input == EXISTING_KEY_SENTINEL
     }
 
+    /// Detect existing Trello credentials (API Key, API Token, Board ID) from config/keys.toml
+    pub(super) fn detect_existing_trello_credentials(&mut self) {
+        if let Ok(config) = crate::config::Config::load() {
+            if config
+                .channels
+                .trello
+                .app_token
+                .as_ref()
+                .is_some_and(|t| !t.is_empty())
+            {
+                self.trello_api_key_input = EXISTING_KEY_SENTINEL.to_string();
+            }
+            if config
+                .channels
+                .trello
+                .token
+                .as_ref()
+                .is_some_and(|t| !t.is_empty())
+            {
+                self.trello_api_token_input = EXISTING_KEY_SENTINEL.to_string();
+            }
+            if !config.channels.trello.allowed_channels.is_empty() {
+                self.trello_board_id_input = EXISTING_KEY_SENTINEL.to_string();
+            }
+            if !config.channels.trello.allowed_users.is_empty() {
+                self.trello_allowed_users_input = EXISTING_KEY_SENTINEL.to_string();
+            }
+        }
+    }
+
+    /// Check if Trello API Key holds a pre-existing value
+    pub fn has_existing_trello_api_key(&self) -> bool {
+        self.trello_api_key_input == EXISTING_KEY_SENTINEL
+    }
+
+    /// Check if Trello API Token holds a pre-existing value
+    pub fn has_existing_trello_api_token(&self) -> bool {
+        self.trello_api_token_input == EXISTING_KEY_SENTINEL
+    }
+
+    /// Check if Trello Board ID holds a pre-existing value
+    pub fn has_existing_trello_board_id(&self) -> bool {
+        self.trello_board_id_input == EXISTING_KEY_SENTINEL
+    }
+
+    /// Check if Trello Allowed Users holds a pre-existing value
+    pub fn has_existing_trello_allowed_users(&self) -> bool {
+        self.trello_allowed_users_input == EXISTING_KEY_SENTINEL
+    }
+
     /// Detect existing Groq API key from keys.toml
     pub fn detect_existing_groq_key(&mut self) {
         if let Ok(config) = crate::config::Config::load()

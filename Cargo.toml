@@ -132,10 +132,11 @@ mockito = "1.7"
 pprof = { version = "0.15", features = ["flamegraph", "frame-pointer"], optional = true }
 
 [features]
-default = ["telegram", "whatsapp", "discord", "slack"]
+default = ["telegram", "whatsapp", "discord", "slack", "trello"]
 # Profiling feature enables pprof on Unix only (no-op on Windows)
 profiling = []
 telegram = ["teloxide"]
+trello = []
 whatsapp = ["whatsapp-rust", "whatsapp-rust-tokio-transport", "whatsapp-rust-ureq-http-client", "wacore", "wacore-binary", "waproto", "dep:qrcode", "dep:rmp-serde"]
 discord = ["serenity"]
 slack = ["slack-morphism", "rustls"]

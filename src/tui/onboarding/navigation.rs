@@ -54,7 +54,8 @@ impl OnboardingWizard {
             OnboardingStep::TelegramSetup
             | OnboardingStep::DiscordSetup
             | OnboardingStep::WhatsAppSetup
-            | OnboardingStep::SlackSetup => {
+            | OnboardingStep::SlackSetup
+            | OnboardingStep::TrelloSetup => {
                 // Return to channel list after completing a channel setup
                 self.step = OnboardingStep::Channels;
             }
@@ -116,7 +117,8 @@ impl OnboardingWizard {
             }
             OnboardingStep::DiscordSetup
             | OnboardingStep::WhatsAppSetup
-            | OnboardingStep::SlackSetup => {
+            | OnboardingStep::SlackSetup
+            | OnboardingStep::TrelloSetup => {
                 self.step = OnboardingStep::Channels;
             }
             OnboardingStep::Gateway => {

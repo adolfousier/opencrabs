@@ -1216,6 +1216,34 @@ impl App {
                         });
                     });
                 }
+                WizardAction::TestTrello => {
+                    wizard.channel_test_status = super::onboarding::ChannelTestStatus::Testing;
+                    let api_key = if wizard.has_existing_trello_api_key() {
+                        crate::config::Config::load()
+                            .ok()
+                            .and_then(|c| c.channels.trello.app_token.clone())
+                            .unwrap_or_default()
+                    } else {
+                        wizard.trello_api_key_input.clone()
+                    };
+                    let api_token = if wizard.has_existing_trello_api_token() {
+                        crate::config::Config::load()
+                            .ok()
+                            .and_then(|c| c.channels.trello.token.clone())
+                            .unwrap_or_default()
+                    } else {
+                        wizard.trello_api_token_input.clone()
+                    };
+                    let sender = self.event_sender();
+                    tokio::spawn(async move {
+                        let result = test_trello_connection(&api_key, &api_token).await;
+                        let _ = sender.send(TuiEvent::ChannelTestResult {
+                            channel: "trello".to_string(),
+                            success: result.is_ok(),
+                            error: result.err(),
+                        });
+                    });
+                }
                 WizardAction::GenerateBrain => {
                     self.generate_brain_files().await;
                 }
@@ -1718,4 +1746,19 @@ async fn test_whatsapp_connection(
         .map_err(|e| format!("WhatsApp send error: {}", e))?;
 
     Ok(())
+}
+
+#[cfg(feature = "trello")]
+async fn test_trello_connection(api_key: &str, api_token: &str) -> Result<(), String> {
+    let client = crate::channels::trello::TrelloClient::new(api_key, api_token);
+    client
+        .get_member_me()
+        .await
+        .map(|_me| ())
+        .map_err(|e| format!("Trello API error: {}", e))
+}
+
+#[cfg(not(feature = "trello"))]
+async fn test_trello_connection(_api_key: &str, _api_token: &str) -> Result<(), String> {
+    Err("Trello feature not enabled".to_string())
 }

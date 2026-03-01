@@ -4,7 +4,8 @@
 
 use super::onboarding::{
     AuthField, BrainField, CHANNEL_NAMES, ChannelTestStatus, DiscordField, HealthStatus,
-    OnboardingStep, OnboardingWizard, PROVIDERS, SlackField, TelegramField, VoiceField, WizardMode,
+    OnboardingStep, OnboardingWizard, PROVIDERS, SlackField, TelegramField, TrelloField,
+    VoiceField, WizardMode,
 };
 use ratatui::{
     Frame,
@@ -63,6 +64,7 @@ pub fn render_onboarding(f: &mut Frame, wizard: &OnboardingWizard) {
                 OnboardingStep::DiscordSetup => render_discord_setup(&mut lines, wizard),
                 OnboardingStep::WhatsAppSetup => render_whatsapp_setup(&mut lines, wizard),
                 OnboardingStep::SlackSetup => render_slack_setup(&mut lines, wizard),
+                OnboardingStep::TrelloSetup => render_trello_setup(&mut lines, wizard),
                 OnboardingStep::VoiceSetup => render_voice_setup(&mut lines, wizard),
                 OnboardingStep::Daemon => render_daemon(&mut lines, wizard),
                 OnboardingStep::HealthCheck => render_health_check(&mut lines, wizard),
@@ -2212,5 +2214,241 @@ fn render_complete(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
         Style::default()
             .fg(ACCENT_GOLD)
             .add_modifier(Modifier::BOLD | Modifier::ITALIC),
+    )));
+}
+
+fn render_trello_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
+    // Help text
+    lines.push(Line::from(Span::styled(
+        "  1. Go to trello.com/power-ups/admin > Create Power-Up",
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::ITALIC),
+    )));
+    lines.push(Line::from(Span::styled(
+        "  2. Click 'API Key' tab > copy your API Key",
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::ITALIC),
+    )));
+    lines.push(Line::from(Span::styled(
+        "  3. Click 'Token' link > authorize > copy Token",
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::ITALIC),
+    )));
+    lines.push(Line::from(""));
+
+    // API Key input (masked)
+    let ak_focused = wizard.trello_field == TrelloField::ApiKey;
+    let (masked_ak, ak_hint) = if wizard.has_existing_trello_api_key() {
+        (
+            "**************************".to_string(),
+            " (already configured)".to_string(),
+        )
+    } else if wizard.trello_api_key_input.is_empty() {
+        ("trello-api-key".to_string(), String::new())
+    } else {
+        (
+            "*".repeat(wizard.trello_api_key_input.len().min(30)),
+            String::new(),
+        )
+    };
+    let cursor_ak = if ak_focused && !wizard.has_existing_trello_api_key() {
+        "\u{2588}"
+    } else {
+        ""
+    };
+
+    lines.push(Line::from(vec![
+        Span::styled(
+            "  API Key: ",
+            Style::default().fg(if ak_focused {
+                BRAND_BLUE
+            } else {
+                Color::DarkGray
+            }),
+        ),
+        Span::styled(
+            format!("{}{}", masked_ak, cursor_ak),
+            Style::default().fg(if wizard.has_existing_trello_api_key() {
+                Color::Cyan
+            } else if ak_focused {
+                Color::White
+            } else {
+                Color::DarkGray
+            }),
+        ),
+    ]));
+
+    if !ak_hint.is_empty() && ak_focused {
+        lines.push(Line::from(Span::styled(
+            format!("  {}", ak_hint.trim()),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
+        )));
+    }
+
+    // API Token input (masked)
+    let at_focused = wizard.trello_field == TrelloField::ApiToken;
+    let (masked_at, at_hint) = if wizard.has_existing_trello_api_token() {
+        (
+            "**************************".to_string(),
+            " (already configured)".to_string(),
+        )
+    } else if wizard.trello_api_token_input.is_empty() {
+        ("trello-api-token".to_string(), String::new())
+    } else {
+        (
+            "*".repeat(wizard.trello_api_token_input.len().min(30)),
+            String::new(),
+        )
+    };
+    let cursor_at = if at_focused && !wizard.has_existing_trello_api_token() {
+        "\u{2588}"
+    } else {
+        ""
+    };
+
+    lines.push(Line::from(vec![
+        Span::styled(
+            "  API Token: ",
+            Style::default().fg(if at_focused {
+                BRAND_BLUE
+            } else {
+                Color::DarkGray
+            }),
+        ),
+        Span::styled(
+            format!("{}{}", masked_at, cursor_at),
+            Style::default().fg(if wizard.has_existing_trello_api_token() {
+                Color::Cyan
+            } else if at_focused {
+                Color::White
+            } else {
+                Color::DarkGray
+            }),
+        ),
+    ]));
+
+    if !at_hint.is_empty() && at_focused {
+        lines.push(Line::from(Span::styled(
+            format!("  {}", at_hint.trim()),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
+        )));
+    }
+
+    // Board(s) input — comma-separated IDs or names (visible)
+    let bd_focused = wizard.trello_field == TrelloField::BoardId;
+    let (bd_display, bd_hint) = if wizard.has_existing_trello_board_id() {
+        (
+            "**********".to_string(),
+            " (already configured)".to_string(),
+        )
+    } else if wizard.trello_board_id_input.is_empty() {
+        (
+            "board-name, id1, workspace-board (comma-separated)".to_string(),
+            String::new(),
+        )
+    } else {
+        (wizard.trello_board_id_input.clone(), String::new())
+    };
+    let bd_cursor = if bd_focused && !wizard.has_existing_trello_board_id() {
+        "\u{2588}"
+    } else {
+        ""
+    };
+
+    lines.push(Line::from(vec![
+        Span::styled(
+            "  Board(s): ",
+            Style::default().fg(if bd_focused {
+                BRAND_BLUE
+            } else {
+                Color::DarkGray
+            }),
+        ),
+        Span::styled(
+            format!("{}{}", bd_display, bd_cursor),
+            Style::default().fg(if wizard.has_existing_trello_board_id() {
+                Color::Cyan
+            } else if bd_focused {
+                Color::White
+            } else {
+                Color::DarkGray
+            }),
+        ),
+    ]));
+
+    if !bd_hint.is_empty() && bd_focused {
+        lines.push(Line::from(Span::styled(
+            format!("  {}", bd_hint.trim()),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
+        )));
+    }
+
+    // Allowed Users input (member IDs, optional)
+    let au_focused = wizard.trello_field == TrelloField::AllowedUsers;
+    let (au_display, au_hint) = if wizard.has_existing_trello_allowed_users() {
+        (
+            "**********".to_string(),
+            " (already configured)".to_string(),
+        )
+    } else if wizard.trello_allowed_users_input.is_empty() {
+        (
+            "memberid1,memberid2 (optional — empty = reply to all)".to_string(),
+            String::new(),
+        )
+    } else {
+        (wizard.trello_allowed_users_input.clone(), String::new())
+    };
+    let au_cursor = if au_focused && !wizard.has_existing_trello_allowed_users() {
+        "\u{2588}"
+    } else {
+        ""
+    };
+
+    lines.push(Line::from(vec![
+        Span::styled(
+            "  Allowed Users: ",
+            Style::default().fg(if au_focused {
+                BRAND_BLUE
+            } else {
+                Color::DarkGray
+            }),
+        ),
+        Span::styled(
+            format!("{}{}", au_display, au_cursor),
+            Style::default().fg(if wizard.has_existing_trello_allowed_users() {
+                Color::Cyan
+            } else if au_focused {
+                Color::White
+            } else {
+                Color::DarkGray
+            }),
+        ),
+    ]));
+
+    if !au_hint.is_empty() && au_focused {
+        lines.push(Line::from(Span::styled(
+            format!("  {}", au_hint.trim()),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
+        )));
+    }
+
+    // Test status
+    render_channel_test_status(lines, wizard);
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  Tab: next field | Enter: test/continue | Esc: back",
+        Style::default().fg(Color::DarkGray),
     )));
 }

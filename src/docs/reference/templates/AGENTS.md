@@ -243,6 +243,7 @@ opencrabs cron add \
 - **Discord/WhatsApp:** No markdown tables! Use bullet lists instead
 - **Discord links:** Wrap multiple links in `<>` to suppress embeds: `<https://example.com>`
 - **WhatsApp:** No headers — use **bold** or CAPS for emphasis
+- **Trello:** Replies are posted as card comments. Markdown renders in Trello. Keep responses focused on the card context. Use `trello_send` with `add_comment`, `create_card`, `move_card`, `find_cards`, or `list_boards` for proactive board management.
 
 **🎤 Voice Message Response (WhatsApp & Telegram):**
 When receiving a voice message on WhatsApp or Telegram, ALWAYS:
