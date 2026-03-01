@@ -142,10 +142,13 @@ async fn download_image(msg: &Message, client: &Client) -> Option<String> {
 }
 
 /// Extract the sender's phone number (digits only) from message info.
-/// JID format is "351933536442@s.whatsapp.net" — we return just "351933536442".
+/// JID format is "351933536442@s.whatsapp.net" or "351933536442:34@s.whatsapp.net"
+/// (linked device suffix) — we return just "351933536442" in both cases.
 fn sender_phone(info: &MessageInfo) -> String {
     let full = info.source.sender.to_string();
-    full.split('@').next().unwrap_or(&full).to_string()
+    let without_server = full.split('@').next().unwrap_or(&full);
+    // Strip linked-device suffix (e.g. ":34" for WhatsApp Web/Desktop)
+    without_server.split(':').next().unwrap_or(without_server).to_string()
 }
 
 /// Split a message into chunks that fit WhatsApp's limit (~65536 chars, but we use 4000 for readability).
@@ -341,9 +344,29 @@ pub(crate) async fn handle_message(
         }
     };
 
+    // For non-owner contacts, prepend sender identity so the agent knows who
+    // it's talking to and doesn't assume it's the owner messaging themselves.
+    let agent_input = if !is_owner {
+        let name = info.push_name.trim().to_string();
+        let from = if name.is_empty() {
+            format!("+{}", phone)
+        } else {
+            format!("{} (+{})", name, phone)
+        };
+        if info.source.is_group {
+            let group = info.source.chat.to_string();
+            let group_id = group.split('@').next().unwrap_or(&group);
+            format!("[WhatsApp group message from {} in group {}]\n{}", from, group_id, content)
+        } else {
+            format!("[WhatsApp message from {}]\n{}", from, content)
+        }
+    } else {
+        content
+    };
+
     // Send to agent
     match agent
-        .send_message_with_tools(session_id, content, None)
+        .send_message_with_tools(session_id, agent_input, None)
         .await
     {
         Ok(response) => {
