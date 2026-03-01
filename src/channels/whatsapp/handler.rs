@@ -148,7 +148,11 @@ fn sender_phone(info: &MessageInfo) -> String {
     let full = info.source.sender.to_string();
     let without_server = full.split('@').next().unwrap_or(&full);
     // Strip linked-device suffix (e.g. ":34" for WhatsApp Web/Desktop)
-    without_server.split(':').next().unwrap_or(without_server).to_string()
+    without_server
+        .split(':')
+        .next()
+        .unwrap_or(without_server)
+        .to_string()
 }
 
 /// Split a message into chunks that fit WhatsApp's limit (~65536 chars, but we use 4000 for readability).
@@ -356,7 +360,10 @@ pub(crate) async fn handle_message(
         if info.source.is_group {
             let group = info.source.chat.to_string();
             let group_id = group.split('@').next().unwrap_or(&group);
-            format!("[WhatsApp group message from {} in group {}]\n{}", from, group_id, content)
+            format!(
+                "[WhatsApp group message from {} in group {}]\n{}",
+                from, group_id, content
+            )
         } else {
             format!("[WhatsApp message from {}]\n{}", from, content)
         }

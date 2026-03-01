@@ -458,6 +458,31 @@ pub(crate) async fn handle_message(
         .register_session_chat(session_id, msg.chat.id.0)
         .await;
 
+    // For non-owner users, prepend sender identity so the agent knows who
+    // it's talking to and doesn't assume it's the owner.
+    let agent_input = if !is_owner {
+        let mut name = user.first_name.clone();
+        if let Some(ref last) = user.last_name {
+            name.push(' ');
+            name.push_str(last);
+        }
+        let handle = user
+            .username
+            .as_ref()
+            .map(|u| format!(" (@{})", u))
+            .unwrap_or_default();
+        if is_dm {
+            format!("[Telegram DM from {name}{handle}, ID {user_id}]\n{text}")
+        } else {
+            let chat_title = msg.chat.title().unwrap_or("group");
+            format!(
+                "[Telegram message from {name}{handle}, ID {user_id} in group {chat_title}]\n{text}"
+            )
+        }
+    } else {
+        text
+    };
+
     // ── Streaming setup ───────────────────────────────────────────────────────
     let streaming = Arc::new(Mutex::new(StreamingState {
         msg_id: None,
@@ -540,7 +565,7 @@ pub(crate) async fn handle_message(
     let result = agent
         .send_message_with_tools_and_callback(
             session_id,
-            text.clone(),
+            agent_input.clone(),
             None,
             None,
             Some(approval_cb),
@@ -571,7 +596,7 @@ pub(crate) async fn handle_message(
                     agent
                         .send_message_with_tools_and_callback(
                             new_id,
-                            text,
+                            agent_input,
                             None,
                             None,
                             Some(approval_cb2),
