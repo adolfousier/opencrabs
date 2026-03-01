@@ -8,8 +8,13 @@ pub(crate) mod handler;
 
 pub use agent::TelegramAgent;
 
+use crate::brain::agent::{ApprovalCallback, ToolApprovalInfo};
+use std::collections::HashMap;
+use std::sync::Arc;
 use teloxide::prelude::Bot;
-use tokio::sync::Mutex;
+use teloxide::types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup};
+use tokio::sync::{Mutex, oneshot};
+use uuid::Uuid;
 
 /// Shared Telegram state for proactive messaging.
 ///
@@ -22,6 +27,10 @@ pub struct TelegramState {
     owner_chat_id: Mutex<Option<i64>>,
     /// Bot's @username — set at startup via get_me(), used for @mention detection in groups
     bot_username: Mutex<Option<String>>,
+    /// Maps session_id → Telegram chat_id for approval routing
+    session_chats: Mutex<HashMap<Uuid, i64>>,
+    /// Pending approval channels: approval_id → oneshot sender
+    pending_approvals: Mutex<HashMap<String, oneshot::Sender<bool>>>,
 }
 
 impl Default for TelegramState {
@@ -36,6 +45,8 @@ impl TelegramState {
             bot: Mutex::new(None),
             owner_chat_id: Mutex::new(None),
             bot_username: Mutex::new(None),
+            session_chats: Mutex::new(HashMap::new()),
+            pending_approvals: Mutex::new(HashMap::new()),
         }
     }
 
@@ -73,4 +84,123 @@ impl TelegramState {
     pub async fn is_connected(&self) -> bool {
         self.bot.lock().await.is_some()
     }
+
+    /// Record which chat_id corresponds to a given session (for approval routing).
+    pub async fn register_session_chat(&self, session_id: Uuid, chat_id: i64) {
+        self.session_chats.lock().await.insert(session_id, chat_id);
+    }
+
+    /// Look up the chat_id for a given session_id.
+    pub async fn session_chat(&self, session_id: Uuid) -> Option<i64> {
+        self.session_chats.lock().await.get(&session_id).copied()
+    }
+
+    /// Register a pending approval channel by id.
+    pub async fn register_pending_approval(&self, id: String, tx: oneshot::Sender<bool>) {
+        self.pending_approvals.lock().await.insert(id, tx);
+    }
+
+    /// Resolve a pending approval — returns true if the channel existed and was resolved.
+    pub async fn resolve_pending_approval(&self, id: &str, approved: bool) -> bool {
+        if let Some(tx) = self.pending_approvals.lock().await.remove(id) {
+            let _ = tx.send(approved);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Build an `ApprovalCallback` that sends an inline-keyboard message to Telegram
+    /// and waits (up to 5 min) for the user to tap Approve or Deny.
+    pub fn make_approval_callback(state: Arc<TelegramState>) -> ApprovalCallback {
+        Arc::new(move |info: ToolApprovalInfo| {
+            let state = state.clone();
+            Box::pin(async move {
+                // Find the chat this session is active in
+                let chat_id = match state.session_chat(info.session_id).await {
+                    Some(id) => id,
+                    None => {
+                        // Fall back to owner chat
+                        match state.owner_chat_id().await {
+                            Some(id) => id,
+                            None => {
+                                tracing::warn!(
+                                    "Telegram approval: no chat_id for session {}",
+                                    info.session_id
+                                );
+                                return Ok(false);
+                            }
+                        }
+                    }
+                };
+
+                let bot = match state.bot().await {
+                    Some(b) => b,
+                    None => {
+                        tracing::warn!("Telegram approval: bot not connected");
+                        return Ok(false);
+                    }
+                };
+
+                // Build unique approval id
+                let approval_id = Uuid::new_v4().to_string();
+
+                // Build inline keyboard
+                let keyboard = InlineKeyboardMarkup::new(vec![vec![
+                    InlineKeyboardButton::callback(
+                        "✅ Approve",
+                        format!("approve:{}", approval_id),
+                    ),
+                    InlineKeyboardButton::callback("❌ Deny", format!("deny:{}", approval_id)),
+                ]]);
+
+                // Format message
+                let input_pretty = serde_json::to_string_pretty(&info.tool_input)
+                    .unwrap_or_else(|_| info.tool_input.to_string());
+                let text = format!(
+                    "🔐 <b>Tool Approval Required</b>\n\nTool: <code>{}</code>\nInput:\n<pre>{}</pre>",
+                    info.tool_name,
+                    html_escape_pre(&input_pretty),
+                );
+
+                use teloxide::payloads::SendMessageSetters;
+                use teloxide::prelude::Requester;
+                use teloxide::types::ParseMode;
+
+                match bot
+                    .send_message(ChatId(chat_id), &text)
+                    .parse_mode(ParseMode::Html)
+                    .reply_markup(keyboard)
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::error!("Telegram approval: failed to send message: {}", e);
+                        return Ok(false);
+                    }
+                }
+
+                // Register oneshot channel
+                let (tx, rx) = oneshot::channel();
+                state.register_pending_approval(approval_id, tx).await;
+
+                // Wait up to 5 minutes
+                match tokio::time::timeout(std::time::Duration::from_secs(300), rx).await {
+                    Ok(Ok(approved)) => Ok(approved),
+                    Ok(Err(_)) => Ok(false), // channel closed
+                    Err(_) => {
+                        tracing::warn!("Telegram approval: 5-minute timeout — auto-denying");
+                        Ok(false)
+                    }
+                }
+            })
+        })
+    }
+}
+
+/// Escape HTML for use inside <pre> blocks (only & < > needed)
+fn html_escape_pre(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }

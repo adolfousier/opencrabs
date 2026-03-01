@@ -11,14 +11,24 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 impl AgentService {
-    /// Send a message with automatic tool execution
-    pub async fn send_message_with_tools_and_mode(
+    /// Core tool-execution loop — called by all public shims.
+    /// `override_approval_callback` and `override_progress_callback` take
+    /// precedence over the service-level callbacks (used by Telegram, etc.)
+    pub(super) async fn run_tool_loop(
         &self,
         session_id: Uuid,
         user_message: String,
         model: Option<String>,
         cancel_token: Option<CancellationToken>,
+        override_approval_callback: Option<ApprovalCallback>,
+        override_progress_callback: Option<ProgressCallback>,
     ) -> Result<AgentResponse> {
+        // Per-call effective callbacks (override wins over service-level)
+        let approval_callback: Option<ApprovalCallback> =
+            override_approval_callback.or_else(|| self.approval_callback.clone());
+        let progress_callback: Option<ProgressCallback> =
+            override_progress_callback.or_else(|| self.progress_callback.clone());
+
         // Get or create session
         let session_service = SessionService::new(self.context.clone());
         let _session = session_service
@@ -99,7 +109,7 @@ impl AgentService {
             {
                 Ok(summary) => {
                     // Stream the summary to chat so user can see it
-                    if let Some(ref cb) = self.progress_callback {
+                    if let Some(ref cb) = progress_callback {
                         cb(session_id, ProgressEvent::CompactionSummary { summary });
                     }
                     let mut cont_text =
@@ -114,7 +124,7 @@ impl AgentService {
                 }
                 Err(e) => {
                     tracing::error!("Pre-loop compaction failed: {}", e);
-                    if let Some(ref cb) = self.progress_callback {
+                    if let Some(ref cb) = progress_callback {
                         cb(
                             session_id,
                             ProgressEvent::IntermediateText {
@@ -190,7 +200,7 @@ impl AgentService {
             iteration += 1;
 
             // Emit thinking progress
-            if let Some(ref cb) = self.progress_callback {
+            if let Some(ref cb) = progress_callback {
                 cb(session_id, ProgressEvent::Thinking);
             }
 
@@ -217,7 +227,7 @@ impl AgentService {
                 {
                     Ok(summary) => {
                         // Stream the summary to chat so user can see it
-                        if let Some(ref cb) = self.progress_callback {
+                        if let Some(ref cb) = progress_callback {
                             cb(session_id, ProgressEvent::CompactionSummary { summary });
                         }
                         // Inject continuation — no "acknowledge first", go straight to tools
@@ -273,7 +283,12 @@ impl AgentService {
 
             // Send to provider via streaming — retry once after emergency compaction if prompt is too long
             let (response, reasoning_text) = match self
-                .stream_complete(session_id, request, cancel_token.as_ref())
+                .stream_complete(
+                    session_id,
+                    request,
+                    cancel_token.as_ref(),
+                    progress_callback.as_ref(),
+                )
                 .await
             {
                 Ok(resp) => resp,
@@ -318,9 +333,14 @@ impl AgentService {
                     if self.tool_registry.count() > 0 {
                         retry_req = retry_req.with_tools(self.tool_registry.get_tool_definitions());
                     }
-                    self.stream_complete(session_id, retry_req, cancel_token.as_ref())
-                        .await
-                        .map_err(AgentError::Provider)?
+                    self.stream_complete(
+                        session_id,
+                        retry_req,
+                        cancel_token.as_ref(),
+                        progress_callback.as_ref(),
+                    )
+                    .await
+                    .map_err(AgentError::Provider)?
                 }
                 Err(e) => return Err(AgentError::Provider(e)),
             };
@@ -367,7 +387,7 @@ impl AgentService {
                 }
             }
             // Fire real-time token count update after every API response
-            if let Some(ref cb) = self.progress_callback {
+            if let Some(ref cb) = progress_callback {
                 cb(session_id, ProgressEvent::TokenCount(context.token_count));
             }
 
@@ -520,7 +540,7 @@ impl AgentService {
                     tracing::info!("Agent completed after {} tool iterations", iteration);
                     // Emit final text so TUI persists it as a permanent message
                     if !iteration_text.is_empty()
-                        && let Some(ref cb) = self.progress_callback
+                        && let Some(ref cb) = progress_callback
                     {
                         cb(
                             session_id,
@@ -539,7 +559,7 @@ impl AgentService {
 
             // Emit intermediate text to TUI so it appears before the tool calls
             if !iteration_text.is_empty()
-                && let Some(ref cb) = self.progress_callback
+                && let Some(ref cb) = progress_callback
             {
                 cb(
                     session_id,
@@ -635,7 +655,7 @@ impl AgentService {
                 tool_descriptions.push(Self::format_tool_summary(&tool_name, &tool_input));
 
                 // Emit tool started progress
-                if let Some(ref cb) = self.progress_callback {
+                if let Some(ref cb) = progress_callback {
                     cb(
                         session_id,
                         ProgressEvent::ToolStarted {
@@ -656,7 +676,7 @@ impl AgentService {
 
                 // Request approval if needed
                 if needs_approval {
-                    if let Some(ref approval_callback) = self.approval_callback {
+                    if let Some(ref approval_cb) = approval_callback {
                         // Get tool details for approval request
                         let tool_info = if let Some(tool) = self.tool_registry.get(&tool_name) {
                             ToolApprovalInfo {
@@ -684,7 +704,7 @@ impl AgentService {
 
                         // Call approval callback
                         tracing::info!("Requesting user approval for tool '{}'", tool_name);
-                        match approval_callback(tool_info).await {
+                        match approval_cb(tool_info).await {
                             Ok(approved) => {
                                 if !approved {
                                     tracing::warn!("User denied approval for tool '{}'", tool_name);
@@ -746,7 +766,7 @@ impl AgentService {
                                         let output_summary: String =
                                             content.chars().take(2000).collect();
                                         tool_outputs.push((success, output_summary.clone()));
-                                        if let Some(ref cb) = self.progress_callback {
+                                        if let Some(ref cb) = progress_callback {
                                             cb(
                                                 session_id,
                                                 ProgressEvent::ToolCompleted {
@@ -774,7 +794,7 @@ impl AgentService {
                                         let output_summary: String =
                                             err_msg.chars().take(2000).collect();
                                         tool_outputs.push((false, output_summary.clone()));
-                                        if let Some(ref cb) = self.progress_callback {
+                                        if let Some(ref cb) = progress_callback {
                                             cb(
                                                 session_id,
                                                 ProgressEvent::ToolCompleted {
@@ -855,7 +875,7 @@ impl AgentService {
 
                         let output_summary: String = content.chars().take(2000).collect();
                         tool_outputs.push((success, output_summary.clone()));
-                        if let Some(ref cb) = self.progress_callback {
+                        if let Some(ref cb) = progress_callback {
                             cb(
                                 session_id,
                                 ProgressEvent::ToolCompleted {
@@ -878,7 +898,7 @@ impl AgentService {
                         tracing::error!("[TOOL_EXEC] 💥 Tool '{}' error: {}", tool_name, err_msg);
                         let output_summary: String = err_msg.chars().take(2000).collect();
                         tool_outputs.push((false, output_summary.clone()));
-                        if let Some(ref cb) = self.progress_callback {
+                        if let Some(ref cb) = progress_callback {
                             cb(
                                 session_id,
                                 ProgressEvent::ToolCompleted {
@@ -950,7 +970,7 @@ impl AgentService {
             context.add_message(tool_result_msg);
 
             // Fire token count update after tool results are added — keeps TUI in sync
-            if let Some(ref cb) = self.progress_callback {
+            if let Some(ref cb) = progress_callback {
                 cb(session_id, ProgressEvent::TokenCount(context.token_count));
             }
 

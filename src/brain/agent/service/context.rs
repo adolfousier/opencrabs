@@ -263,7 +263,7 @@ impl AgentService {
         // Use streaming so the TUI shows the summary being written in real-time
         // instead of freezing silently for 2-5 minutes on large contexts
         let (response, _reasoning) = self
-            .stream_complete(session_id, request, None)
+            .stream_complete(session_id, request, None, None)
             .await
             .map_err(AgentError::Provider)?;
 

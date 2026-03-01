@@ -1,5 +1,5 @@
 use super::builder::AgentService;
-use super::types::ProgressEvent;
+use super::types::{ProgressCallback, ProgressEvent};
 use crate::brain::provider::{
     ContentBlock, ImageSource, LLMRequest, LLMResponse, Message, Role, StopReason,
 };
@@ -13,15 +13,23 @@ impl AgentService {
     /// Sends text deltas to the progress callback as `StreamingChunk` events
     /// so the TUI can display them in real-time. Returns the full response
     /// once the stream completes, ready for tool extraction.
+    ///
+    /// `override_cb` takes precedence over the service-level `self.progress_callback`
+    /// so per-call callbacks (e.g. Telegram) receive real-time streaming chunks.
     pub(super) async fn stream_complete(
         &self,
         session_id: Uuid,
         request: LLMRequest,
         cancel_token: Option<&CancellationToken>,
+        override_cb: Option<&ProgressCallback>,
     ) -> std::result::Result<(LLMResponse, Option<String>), crate::brain::provider::ProviderError>
     {
         use crate::brain::provider::{ContentDelta, StreamEvent, TokenUsage};
         use futures::StreamExt;
+
+        // Per-call override wins over service-level callback
+        let effective_cb: Option<&ProgressCallback> =
+            override_cb.or(self.progress_callback.as_ref());
 
         let request_model = request.model.clone();
         let provider = self
@@ -112,8 +120,8 @@ impl AgentService {
                     if index < block_states.len() {
                         match delta {
                             ContentDelta::TextDelta { text } => {
-                                // Forward to TUI for real-time display
-                                if let Some(ref cb) = self.progress_callback {
+                                // Forward to TUI / per-call callback for real-time display
+                                if let Some(cb) = effective_cb {
                                     cb(
                                         session_id,
                                         ProgressEvent::StreamingChunk { text: text.clone() },
@@ -130,8 +138,8 @@ impl AgentService {
                                 block_states[index].json_buf.push_str(&partial_json);
                             }
                             ContentDelta::ReasoningDelta { text } => {
-                                // Forward reasoning content to TUI for real-time display
-                                if let Some(ref cb) = self.progress_callback {
+                                // Forward reasoning content to TUI / per-call callback
+                                if let Some(cb) = effective_cb {
                                     cb(
                                         session_id,
                                         ProgressEvent::ReasoningChunk { text: text.clone() },

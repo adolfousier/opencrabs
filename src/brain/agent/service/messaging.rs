@@ -1,6 +1,7 @@
 use super::builder::AgentService;
 use super::types::*;
 use crate::brain::agent::error::{AgentError, Result};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 impl AgentService {
@@ -129,5 +130,43 @@ impl AgentService {
     ) -> Result<AgentResponse> {
         self.send_message_with_tools_and_mode(session_id, user_message, model, None)
             .await
+    }
+
+    /// Shim: send with tools + optional cancellation token.
+    /// Delegates to `run_tool_loop` with service-level callbacks.
+    pub async fn send_message_with_tools_and_mode(
+        &self,
+        session_id: Uuid,
+        user_message: String,
+        model: Option<String>,
+        cancel_token: Option<CancellationToken>,
+    ) -> Result<AgentResponse> {
+        self.run_tool_loop(session_id, user_message, model, cancel_token, None, None)
+            .await
+    }
+
+    /// Send a message with per-call callback overrides.
+    ///
+    /// `override_approval_callback` and `override_progress_callback` take
+    /// precedence over the service-level callbacks (used by Telegram, Discord, etc.).
+    /// Pass `None` to fall back to the service-level callback.
+    pub async fn send_message_with_tools_and_callback(
+        &self,
+        session_id: Uuid,
+        user_message: String,
+        model: Option<String>,
+        cancel_token: Option<CancellationToken>,
+        override_approval_callback: Option<ApprovalCallback>,
+        override_progress_callback: Option<ProgressCallback>,
+    ) -> Result<AgentResponse> {
+        self.run_tool_loop(
+            session_id,
+            user_message,
+            model,
+            cancel_token,
+            override_approval_callback,
+            override_progress_callback,
+        )
+        .await
     }
 }

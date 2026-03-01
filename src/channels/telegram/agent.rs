@@ -132,7 +132,8 @@ impl TelegramAgent {
             let allowed_channels: Arc<HashSet<String>> = Arc::new(self.allowed_channels);
             let idle_timeout_hours = self.idle_timeout_hours;
 
-            let handler = Update::filter_message().endpoint(move |bot: Bot, msg: Message| {
+            // ── Message handler ───────────────────────────────────────────────
+            let msg_handler = Update::filter_message().endpoint({
                 let agent = agent.clone();
                 let session_svc = session_svc.clone();
                 let allowed = allowed.clone();
@@ -144,28 +145,80 @@ impl TelegramAgent {
                 let telegram_state = telegram_state.clone();
                 let respond_to = respond_to.clone();
                 let allowed_channels = allowed_channels.clone();
-                async move {
-                    handle_message(
-                        bot,
-                        msg,
-                        agent,
-                        session_svc,
-                        allowed,
-                        extra_sessions,
-                        voice_config,
-                        openai_key,
-                        bot_token,
-                        shared_session,
-                        telegram_state,
-                        &respond_to,
-                        &allowed_channels,
-                        idle_timeout_hours,
-                    )
-                    .await
+                move |bot: Bot, msg: Message| {
+                    let agent = agent.clone();
+                    let session_svc = session_svc.clone();
+                    let allowed = allowed.clone();
+                    let extra_sessions = extra_sessions.clone();
+                    let voice_config = voice_config.clone();
+                    let openai_key = openai_key.clone();
+                    let bot_token = bot_token.clone();
+                    let shared_session = shared_session.clone();
+                    let telegram_state = telegram_state.clone();
+                    let respond_to = respond_to.clone();
+                    let allowed_channels = allowed_channels.clone();
+                    async move {
+                        handle_message(
+                            bot,
+                            msg,
+                            agent,
+                            session_svc,
+                            allowed,
+                            extra_sessions,
+                            voice_config,
+                            openai_key,
+                            bot_token,
+                            shared_session,
+                            telegram_state,
+                            &respond_to,
+                            &allowed_channels,
+                            idle_timeout_hours,
+                        )
+                        .await
+                    }
                 }
             });
 
-            Dispatcher::builder(bot, handler).build().dispatch().await;
+            // ── Callback query handler (for Approve / Deny inline buttons) ────
+            let cb_handler = Update::filter_callback_query().endpoint({
+                let telegram_state = telegram_state.clone();
+                move |bot: Bot, query: CallbackQuery| {
+                    let state = telegram_state.clone();
+                    async move {
+                        if let Some(data) = query.data.as_deref() {
+                            let (approved, id) = if let Some(id) = data.strip_prefix("approve:") {
+                                (true, id.to_string())
+                            } else if let Some(id) = data.strip_prefix("deny:") {
+                                (false, id.to_string())
+                            } else {
+                                // Unknown callback — ack and ignore
+                                let _ = bot.answer_callback_query(&query.id).await;
+                                return ResponseResult::Ok(());
+                            };
+
+                            state.resolve_pending_approval(&id, approved).await;
+                            let _ = bot.answer_callback_query(&query.id).await;
+
+                            // Edit the approval message to show the outcome
+                            if let Some(msg) = &query.message {
+                                let label = if approved {
+                                    "✅ Approved"
+                                } else {
+                                    "❌ Denied"
+                                };
+                                let _ = bot.edit_message_text(msg.chat().id, msg.id(), label).await;
+                            }
+                        } else {
+                            let _ = bot.answer_callback_query(&query.id).await;
+                        }
+                        ResponseResult::Ok(())
+                    }
+                }
+            });
+
+            let tree = dptree::entry().branch(msg_handler).branch(cb_handler);
+
+            Dispatcher::builder(bot, tree).build().dispatch().await;
         })
     }
 }

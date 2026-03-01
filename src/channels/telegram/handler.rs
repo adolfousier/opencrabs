@@ -1,17 +1,34 @@
 //! Telegram Message Handler
 //!
 //! Processes incoming messages: text, voice (STT/TTS), photos, image documents, allowlist enforcement.
+//! Supports live streaming (edit-based) and Telegram-native approval inline keyboards.
 
 use super::TelegramState;
-use crate::brain::agent::AgentService;
+use crate::brain::agent::{AgentService, ProgressCallback, ProgressEvent};
 use crate::config::{RespondTo, VoiceConfig};
 use crate::services::SessionService;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use teloxide::prelude::*;
-use teloxide::types::{ChatKind, InputFile};
+use teloxide::types::{ChatAction, ChatKind, InputFile, MessageId, ParseMode};
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
+
+/// Guard that cancels a CancellationToken on drop (used for typing loop).
+struct TypingGuard(CancellationToken);
+impl Drop for TypingGuard {
+    fn drop(&mut self) {
+        self.0.cancel();
+    }
+}
+
+/// Per-message streaming state shared between the progress callback and the edit loop.
+struct StreamingState {
+    msg_id: Option<MessageId>,
+    text: String,
+    dirty: bool,
+}
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_message(
@@ -345,6 +362,24 @@ pub(crate) async fn handle_message(
         &text[..text.len().min(50)]
     );
 
+    // Start typing indicator loop — cancelled via guard on all return paths
+    let typing_cancel = CancellationToken::new();
+    let _typing_guard = TypingGuard(typing_cancel.clone());
+    tokio::spawn({
+        let bot = bot.clone();
+        let chat = msg.chat.id;
+        let cancel = typing_cancel.clone();
+        async move {
+            loop {
+                let _ = bot.send_chat_action(chat, ChatAction::Typing).await;
+                tokio::select! {
+                    _ = cancel.cancelled() => break,
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(4)) => {}
+                }
+            }
+        }
+    });
+
     // Resolve session: owner shares the TUI session, other users get their own
     let is_owner = allowed.len() == 1 || allowed.iter().next() == Some(&user_id);
 
@@ -418,15 +453,178 @@ pub(crate) async fn handle_message(
         }
     };
 
-    // Send to agent (with tools so the agent can use file ops, search, etc.)
-    match agent.send_message_with_tools(session_id, text, None).await {
+    // Register session → chat for approval routing
+    telegram_state
+        .register_session_chat(session_id, msg.chat.id.0)
+        .await;
+
+    // ── Streaming setup ───────────────────────────────────────────────────────
+    let streaming = Arc::new(Mutex::new(StreamingState {
+        msg_id: None,
+        text: String::new(),
+        dirty: false,
+    }));
+
+    let edit_cancel = CancellationToken::new();
+
+    // Edit loop: posts/edits a message every 1.5 s while response streams in
+    tokio::spawn({
+        let bot = bot.clone();
+        let chat = msg.chat.id;
+        let st = streaming.clone();
+        let cancel = edit_cancel.clone();
+        async move {
+            loop {
+                tokio::select! {
+                    _ = cancel.cancelled() => break,
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(1500)) => {
+                        let mut s = st.lock().await;
+                        if !s.dirty { continue; }
+                        if s.msg_id.is_none()
+                            && let Ok(m) = bot.send_message(chat, "\u{258b}").await
+                        {
+                            s.msg_id = Some(m.id);
+                        }
+                        if let Some(mid) = s.msg_id {
+                            let html = markdown_to_telegram_html(&s.text);
+                            let display = format!("{}\u{258b}", html); // ▋ cursor
+                            let _ = bot
+                                .edit_message_text(chat, mid, display)
+                                .parse_mode(ParseMode::Html)
+                                .await;
+                        }
+                        s.dirty = false;
+                    }
+                }
+            }
+        }
+    });
+
+    // Progress callback: accumulates streaming chunks + tool status into shared state
+    let progress_cb: ProgressCallback = {
+        let st = streaming.clone();
+        Arc::new(move |_sid, event| {
+            match event {
+                ProgressEvent::StreamingChunk { text } => {
+                    if let Ok(mut s) = st.try_lock() {
+                        s.text.push_str(&text);
+                        s.dirty = true;
+                    }
+                }
+                ProgressEvent::ToolStarted { tool_name, .. } => {
+                    if let Ok(mut s) = st.try_lock() {
+                        s.text.push_str(&format!("\n\n⚙️ _{tool_name}_…"));
+                        s.dirty = true;
+                    }
+                }
+                ProgressEvent::IntermediateText { text, .. } => {
+                    // Text produced between tool-call batches — show it while waiting
+                    if let Ok(mut s) = st.try_lock() {
+                        // Only append if this text isn't already in the buffer
+                        // (avoids duplication when StreamingChunks already accumulated it)
+                        if !s.text.contains(&text) {
+                            s.text.push_str(&text);
+                            s.dirty = true;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        })
+    };
+
+    // Build Telegram-native approval callback for this session
+    let approval_cb = TelegramState::make_approval_callback(telegram_state.clone());
+
+    // ── Agent call ────────────────────────────────────────────────────────────
+    let result = agent
+        .send_message_with_tools_and_callback(
+            session_id,
+            text.clone(),
+            None,
+            None,
+            Some(approval_cb),
+            Some(progress_cb.clone()),
+        )
+        .await;
+
+    // If session lookup failed (DB contention on restart), create a fresh session and retry once
+    let result = if let Err(ref e) = result {
+        let es = e.to_string();
+        if es.contains("Failed to get session") || es.contains("SessionNotFound") {
+            tracing::warn!(
+                "Telegram: session {} lookup failed ({}), creating fresh session and retrying",
+                session_id,
+                es
+            );
+            match session_svc.create_session(Some("Chat".to_string())).await {
+                Ok(new_session) => {
+                    let new_id = new_session.id;
+                    if is_owner {
+                        *shared_session.lock().await = Some(new_id);
+                    }
+                    telegram_state
+                        .register_session_chat(new_id, msg.chat.id.0)
+                        .await;
+                    let approval_cb2 =
+                        TelegramState::make_approval_callback(telegram_state.clone());
+                    agent
+                        .send_message_with_tools_and_callback(
+                            new_id,
+                            text,
+                            None,
+                            None,
+                            Some(approval_cb2),
+                            Some(progress_cb),
+                        )
+                        .await
+                }
+                Err(e2) => {
+                    tracing::error!("Telegram: failed to create fallback session: {}", e2);
+                    result
+                }
+            }
+        } else {
+            result
+        }
+    } else {
+        result
+    };
+
+    // Stop edit loop — final content will be written below
+    edit_cancel.cancel();
+    // _typing_guard drop cancels typing loop
+
+    // Grab streaming message id (if any was created during streaming)
+    let streaming_msg_id = streaming.lock().await.msg_id;
+
+    // ── Final response ────────────────────────────────────────────────────────
+    match result {
         Ok(response) => {
-            // Always send text reply first (keeps chat searchable)
             let html = markdown_to_telegram_html(&response.content);
-            for chunk in split_message(&html, 4096) {
-                bot.send_message(msg.chat.id, chunk)
-                    .parse_mode(teloxide::types::ParseMode::Html)
-                    .await?;
+            if let Some(mid) = streaming_msg_id {
+                if html.len() <= 4096 {
+                    // Edit streaming placeholder to final content (no cursor)
+                    let _ = bot
+                        .edit_message_text(msg.chat.id, mid, &html)
+                        .parse_mode(ParseMode::Html)
+                        .await;
+                } else {
+                    // Too long: delete placeholder, send split chunks
+                    let _ = bot.delete_message(msg.chat.id, mid).await;
+                    for chunk in split_message(&html, 4096) {
+                        bot.send_message(msg.chat.id, chunk)
+                            .parse_mode(ParseMode::Html)
+                            .await?;
+                    }
+                }
+            } else if !html.is_empty() {
+                // No streaming started (e.g. tool-only response with no text output)
+                for chunk in split_message(&html, 4096) {
+                    bot.send_message(msg.chat.id, chunk)
+                        .parse_mode(ParseMode::Html)
+                        .await?;
+                }
             }
 
             // If input was voice AND TTS is enabled, also send voice note after text
@@ -454,8 +652,15 @@ pub(crate) async fn handle_message(
         }
         Err(e) => {
             tracing::error!("Telegram: agent error: {}", e);
-            bot.send_message(msg.chat.id, format!("Error: {}", e))
-                .await?;
+            // If a streaming message was started, edit it to show the error
+            if let Some(mid) = streaming_msg_id {
+                let _ = bot
+                    .edit_message_text(msg.chat.id, mid, format!("Error: {}", e))
+                    .await;
+            } else {
+                bot.send_message(msg.chat.id, format!("Error: {}", e))
+                    .await?;
+            }
         }
     }
 
@@ -464,7 +669,7 @@ pub(crate) async fn handle_message(
 
 /// Convert markdown to Telegram-safe HTML
 /// Handles: code blocks, inline code, bold, italic. Escapes HTML entities.
-fn markdown_to_telegram_html(text: &str) -> String {
+pub(crate) fn markdown_to_telegram_html(text: &str) -> String {
     let mut result = String::with_capacity(text.len() + 256);
     let mut in_code_block = false;
     let mut code_lang;
