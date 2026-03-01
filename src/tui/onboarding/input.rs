@@ -136,19 +136,19 @@ impl OnboardingWizard {
                     }
                 }
             }
-            OnboardingStep::WhatsAppSetup => {
-                if self.whatsapp_field == WhatsAppField::PhoneAllowlist {
-                    // Accept digits, +, - for phone number
-                    let phone: String = clean
-                        .chars()
-                        .filter(|c| c.is_ascii_digit() || *c == '+' || *c == '-')
-                        .collect();
-                    if !phone.is_empty() {
-                        if self.has_existing_whatsapp_phone() {
-                            self.whatsapp_phone_input.clear();
-                        }
-                        self.whatsapp_phone_input.push_str(&phone);
+            OnboardingStep::WhatsAppSetup
+                if self.whatsapp_field == WhatsAppField::PhoneAllowlist =>
+            {
+                // Accept digits, +, - for phone number
+                let phone: String = clean
+                    .chars()
+                    .filter(|c| c.is_ascii_digit() || *c == '+' || *c == '-')
+                    .collect();
+                if !phone.is_empty() {
+                    if self.has_existing_whatsapp_phone() {
+                        self.whatsapp_phone_input.clear();
                     }
+                    self.whatsapp_phone_input.push_str(&phone);
                 }
             }
             OnboardingStep::VoiceSetup => {
