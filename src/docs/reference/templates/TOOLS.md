@@ -43,6 +43,7 @@ Use these **exact parameter names** when calling tools:
 | `discord_connect` | `token`, `allowed_users` | `channel_id` |
 | `discord_send` | `action` | `message`, `channel_id`, `message_id`, `emoji`, `embed_title`, `embed_description`, `embed_color`, `thread_name`, `user_id`, `role_id`, `limit` |
 | `telegram_send` | `action` | `message`, `chat_id`, `message_id`, `from_chat_id`, `photo_url`, `document_url`, `latitude`, `longitude`, `poll_question`, `poll_options`, `buttons`, `user_id`, `emoji` |
+| `slack_send` | `action` | `message`, `channel_id`, `thread_ts`, `message_ts`, `emoji`, `user_id`, `topic`, `blocks`, `limit` |
 
 > **Note:** `grep` and `glob` use `pattern` (not `query`). `bash` uses `command` (not `cmd`). File tools use `path` (not `file` or `file_path`).
 > **Trello:** `trello_connect` `boards` is an array of board names or IDs. Always use `trello_send` instead of `http_request` for Trello — credentials are handled securely without exposing them in URLs.
@@ -52,6 +53,8 @@ Use these **exact parameter names** when calling tools:
 > **Guild-required actions:** `list_channels`, `add_role`, `remove_role`, `kick`, `ban` — these need the bot to have received at least one guild message first so the guild_id is available.
 > **Telegram:** Always use `telegram_send` instead of `http_request` for Telegram — credentials handled securely.
 > **`telegram_send` actions (16):** `send`, `reply`, `edit`, `delete`, `pin`, `unpin`, `forward`, `send_photo`, `send_document`, `send_location`, `send_poll`, `send_buttons`, `get_chat`, `ban_user`, `unban_user`, `set_reaction`
+> **Slack:** Always use `slack_send` instead of `http_request` for Slack — credentials handled securely. `thread_ts` and `message_ts` are Slack timestamps (e.g. `1503435956.000247`). Emoji names have no colons (e.g. `thumbsup`).
+> **`slack_send` actions (16):** `send`, `reply`, `react`, `unreact`, `edit`, `delete`, `pin`, `unpin`, `get_messages`, `get_channel`, `list_channels`, `get_user`, `list_members`, `kick_user`, `set_topic`, `send_blocks`
 
 ## What Goes Here
 
@@ -155,7 +158,7 @@ OpenCrabs can connect to messaging platforms. Configure in `~/.opencrabs/config.
 - **Telegram** — Create a bot via @BotFather, add token to config `[channels.telegram]`. Use `telegram_send` (16 actions) for full proactive control. **Always use `telegram_send` instead of `http_request`** — keeps credentials out of URLs.
 - **Discord** — Create a bot at discord.com/developers (enable MESSAGE CONTENT intent), add token to config `[channels.discord]`. Use `discord_connect` to set up at runtime, `discord_send` (16 actions) for full proactive control. **Always use `discord_send` instead of `http_request`** — keeps credentials out of URLs.
 - **WhatsApp** — Link via QR code pairing, configure `[channels.whatsapp]` with allowed phone numbers
-- **Slack** — Create an app at api.slack.com/apps (enable Socket Mode), add tokens to config `[channels.slack]`
+- **Slack** — Create an app at api.slack.com/apps (enable Socket Mode), add tokens to config `[channels.slack]`. Use `slack_send` (16 actions) for full proactive control. **Always use `slack_send` instead of `http_request`** — keeps credentials out of URLs.
 - **Trello** — Get API Key + Token at trello.com/power-ups/admin, configure `[channels.trello]`. Tool-only by default — the AI acts on Trello only when explicitly asked via `trello_send`. Opt-in polling via `poll_interval_secs` in config. Use `trello_connect` to set up at runtime, `trello_send` (21 actions) for full proactive card/board management. **Always use `trello_send` instead of `http_request`** — keeps credentials out of URLs.
 
 API keys go in `~/.opencrabs/keys.toml` (chmod 600). Channel settings go in `config.toml`.

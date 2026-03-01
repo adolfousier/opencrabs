@@ -274,10 +274,22 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         }
     };
 
+    // For non-owner users, prepend sender identity so the agent knows who
+    // it's talking to and doesn't assume it's the owner.
+    let agent_input = if !is_owner {
+        if is_dm {
+            format!("[Slack DM from {user_id}]\n{text}")
+        } else {
+            format!("[Slack message from {user_id} in channel {channel_id}]\n{text}")
+        }
+    } else {
+        text
+    };
+
     // Send to agent
     match state
         .agent
-        .send_message_with_tools(session_id, text, None)
+        .send_message_with_tools(session_id, agent_input, None)
         .await
     {
         Ok(response) => {
