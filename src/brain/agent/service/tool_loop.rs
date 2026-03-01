@@ -11,6 +11,84 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 impl AgentService {
+    /// Enforce the 80 % context budget rule.
+    ///
+    /// - ≥ 80 %: LLM compact (up to 3 retries on error).
+    /// - ≥ 90 %: hard-truncate to 80 % first, then LLM compact.
+    /// - All retries fail: warn the user to run /compact — no silent data loss.
+    ///
+    /// Returns the compaction summary if LLM compaction succeeded.
+    async fn enforce_context_budget(
+        &self,
+        session_id: Uuid,
+        context: &mut AgentContext,
+        model_name: &str,
+        progress_callback: &Option<ProgressCallback>,
+    ) -> Option<String> {
+        let tool_overhead = self.tool_registry.count() * 500;
+        let effective_max = context.max_tokens.saturating_sub(tool_overhead);
+        let usage_pct = if effective_max > 0 {
+            (context.token_count as f64 / effective_max as f64) * 100.0
+        } else {
+            100.0
+        };
+
+        if usage_pct <= 80.0 {
+            return None;
+        }
+
+        // ≥ 90 %: truncate to 80 % before LLM compact to give it room
+        if usage_pct >= 90.0 {
+            tracing::warn!(
+                "Context at {:.0}% (≥90%) — truncating to 80% before LLM compaction",
+                usage_pct
+            );
+            let target = (effective_max as f64 * 0.80) as usize;
+            context.trim_to_target(target);
+        } else {
+            tracing::warn!("Context at {:.0}% — triggering LLM compaction", usage_pct);
+        }
+
+        const MAX_ATTEMPTS: u32 = 3;
+        for attempt in 1..=MAX_ATTEMPTS {
+            match self.compact_context(session_id, context, model_name).await {
+                Ok(summary) => {
+                    if let Some(cb) = progress_callback {
+                        cb(
+                            session_id,
+                            ProgressEvent::CompactionSummary {
+                                summary: summary.clone(),
+                            },
+                        );
+                    }
+                    return Some(summary);
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "LLM compaction failed (attempt {}/{}): {}",
+                        attempt,
+                        MAX_ATTEMPTS,
+                        e
+                    );
+                    if attempt == MAX_ATTEMPTS {
+                        let msg = "⚠️ Context compaction failed after 3 attempts. Please run **/compact** to manually compact the context before continuing.".to_string();
+                        tracing::warn!("{}", msg);
+                        if let Some(cb) = progress_callback {
+                            cb(
+                                session_id,
+                                ProgressEvent::IntermediateText {
+                                    text: msg,
+                                    reasoning: None,
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
     /// Core tool-execution loop — called by all public shims.
     /// `override_approval_callback` and `override_progress_callback` take
     /// precedence over the service-level callbacks (used by Telegram, etc.)
@@ -85,75 +163,20 @@ impl AgentService {
             .await
             .map_err(|e| AgentError::Database(e.to_string()))?;
 
-        // Reserve tokens for tool definitions (not tracked in context.token_count).
-        // Each tool schema is roughly 300-800 tokens; reserve a flat budget.
-        let tool_overhead = self.tool_registry.count() * 500;
-        let effective_max = context.max_tokens.saturating_sub(tool_overhead);
-        let effective_usage = if effective_max > 0 {
-            (context.token_count as f64 / effective_max as f64) * 100.0
-        } else {
-            100.0
-        };
-
-        // Auto-compaction: if context usage exceeds 80% (accounting for tool overhead)
-        if effective_usage > 80.0 {
-            tracing::warn!(
-                "Context usage at {:.0}% (effective {:.0}% with {} tool overhead) — triggering auto-compaction",
-                context.usage_percentage(),
-                effective_usage,
-                tool_overhead,
-            );
-            match self
-                .compact_context(session_id, &mut context, &model_name)
-                .await
-            {
-                Ok(summary) => {
-                    // Stream the summary to chat so user can see it
-                    if let Some(ref cb) = progress_callback {
-                        cb(session_id, ProgressEvent::CompactionSummary { summary });
-                    }
-                    let mut cont_text =
-                        "[SYSTEM: Context was auto-compacted. The summary above has full context. \
-                         Continue the task immediately using tools. Do NOT repeat completed work. \
-                         Do NOT ask for instructions.]"
-                            .to_string();
-                    if !self.auto_approve_tools {
-                        cont_text.push_str("\n\nCRITICAL: Tool approval is REQUIRED. You MUST wait for user approval before EVERY tool execution. Do NOT batch tool calls without approval.");
-                    }
-                    context.add_message(Message::user(cont_text));
-                }
-                Err(e) => {
-                    tracing::error!("Pre-loop compaction failed: {}", e);
-                    if let Some(ref cb) = progress_callback {
-                        cb(
-                            session_id,
-                            ProgressEvent::IntermediateText {
-                                text: format!(
-                                    "Context compaction failed: {}. Continuing with current context.",
-                                    e
-                                ),
-                                reasoning: None,
-                            },
-                        );
-                    }
-                }
+        // Enforce 80% budget: LLM compact (≥90% truncates to 80% first, 3 retries, warn on failure)
+        if let Some(_) = self
+            .enforce_context_budget(session_id, &mut context, &model_name, &progress_callback)
+            .await
+        {
+            let mut cont_text =
+                "[SYSTEM: Context was auto-compacted. The summary above has full context. \
+                 Continue the task immediately using tools. Do NOT repeat completed work. \
+                 Do NOT ask for instructions.]"
+                    .to_string();
+            if !self.auto_approve_tools {
+                cont_text.push_str("\n\nCRITICAL: Tool approval is REQUIRED. You MUST wait for user approval before EVERY tool execution. Do NOT batch tool calls without approval.");
             }
-        }
-
-        // Hard safety net: if context is above 90%, force-truncate old messages
-        // regardless of compaction success. Never let it blow past the window.
-        let post_usage = if effective_max > 0 {
-            (context.token_count as f64 / effective_max as f64) * 100.0
-        } else {
-            100.0
-        };
-        if post_usage > 90.0 {
-            tracing::warn!(
-                "Context still at {:.0}% after compaction attempt — hard-truncating to fit",
-                post_usage
-            );
-            let target_tokens = (effective_max as f64 * 0.6) as usize; // truncate down to 60%
-            context.trim_to_target(target_tokens);
+            context.add_message(Message::user(cont_text));
         }
 
         // Create tool execution context
@@ -176,7 +199,7 @@ impl AgentService {
         let mut final_response: Option<LLMResponse> = None;
         let mut accumulated_text = String::new(); // Collect text from all iterations (not just final)
         let mut recent_tool_calls: Vec<String> = Vec::new(); // Track tool calls to detect loops
-        let mut loop_break_reason: Option<String> = None; // Why the loop broke (if not normal exit)
+        let loop_break_reason: Option<String> = None; // Why the loop broke (if not normal exit)
         let mut stream_retry_count = 0u32; // Track consecutive stream drop retries
         const MAX_STREAM_RETRIES: u32 = 2; // Retry up to 2 times on dropped streams
 
@@ -204,62 +227,20 @@ impl AgentService {
                 cb(session_id, ProgressEvent::Thinking);
             }
 
-            // --- HARD CONTEXT BUDGET CHECK (every iteration) ---
-            // Tool results accumulate inside the loop. Re-check context budget
-            // BEFORE every API call to prevent sending >200K tokens (which
-            // Anthropic will happily bill for without rejection).
-            let tool_overhead = self.tool_registry.count() * 500;
-            let effective_max = context.max_tokens.saturating_sub(tool_overhead);
-            let effective_usage = if effective_max > 0 {
-                (context.token_count as f64 / effective_max as f64) * 100.0
-            } else {
-                100.0
-            };
-            if effective_usage > 80.0 {
-                tracing::warn!(
-                    "Context at {:.0}% inside tool loop (iteration {}) — compacting before next API call",
-                    effective_usage,
-                    iteration,
-                );
-                match self
-                    .compact_context(session_id, &mut context, &model_name)
-                    .await
-                {
-                    Ok(summary) => {
-                        // Stream the summary to chat so user can see it
-                        if let Some(ref cb) = progress_callback {
-                            cb(session_id, ProgressEvent::CompactionSummary { summary });
-                        }
-                        // Inject continuation — no "acknowledge first", go straight to tools
-                        let mut cont_text = "[SYSTEM: Context was auto-compacted. The summary above has full context. \
-                             Continue the task immediately using tools. Do NOT repeat completed work. \
-                             Do NOT ask for instructions.]".to_string();
-                        if !self.auto_approve_tools {
-                            cont_text.push_str("\n\nCRITICAL: Tool approval is REQUIRED. You MUST wait for user approval before EVERY tool execution. Do NOT batch tool calls without approval.");
-                        }
-                        context.add_message(Message::user(cont_text));
-                    }
-                    Err(e) => {
-                        tracing::error!("Pre-API-call compaction failed: {}", e);
-                        loop_break_reason = Some(format!("Context compaction failed: {}", e));
-                        break;
-                    }
+            // Enforce 80% budget before every API call
+            if let Some(_) = self
+                .enforce_context_budget(session_id, &mut context, &model_name, &progress_callback)
+                .await
+            {
+                let mut cont_text =
+                    "[SYSTEM: Context was auto-compacted. The summary above has full context. \
+                     Continue the task immediately using tools. Do NOT repeat completed work. \
+                     Do NOT ask for instructions.]"
+                        .to_string();
+                if !self.auto_approve_tools {
+                    cont_text.push_str("\n\nCRITICAL: Tool approval is REQUIRED. You MUST wait for user approval before EVERY tool execution. Do NOT batch tool calls without approval.");
                 }
-            }
-
-            // Hard safety net: if context is above 90% even after compaction, force-truncate
-            let post_loop_usage = if effective_max > 0 {
-                (context.token_count as f64 / effective_max as f64) * 100.0
-            } else {
-                100.0
-            };
-            if post_loop_usage > 90.0 {
-                tracing::warn!(
-                    "Context at {:.0}% in tool loop after compaction — hard-truncating",
-                    post_loop_usage
-                );
-                let target = (effective_max as f64 * 0.6) as usize;
-                context.trim_to_target(target);
+                context.add_message(Message::user(cont_text));
             }
 
             // Build LLM request with tools if available
@@ -974,53 +955,22 @@ impl AgentService {
                 cb(session_id, ProgressEvent::TokenCount(context.token_count));
             }
 
-            // Budget re-check: ensure we haven't blown past the context window
-            // during the tool loop. Tool results can be massive (file contents, grep, etc.)
-            // and without this check we'd send 200K+ tokens and get billed for it.
-            let usage_pct = context.usage_percentage();
-            if usage_pct > 80.0 {
-                tracing::warn!(
-                    "Context at {:.0}% ({} tokens) inside tool loop — forcing compaction",
-                    usage_pct,
-                    context.token_count
-                );
-                match self
-                    .compact_context(session_id, &mut context, &model_name)
-                    .await
-                {
-                    Ok(summary) => {
-                        tracing::info!(
-                            "Mid-loop compaction complete: {} tokens, summary len={}",
-                            context.token_count,
-                            summary.len()
-                        );
-                        // Inject continuation prompt so the LLM resumes the task
-                        let mut cont_text = "[SYSTEM: Mid-loop context compaction complete. The summary above has \
-                             full context of everything done so far. Briefly acknowledge the \
-                             compaction to the user with a fun/cheeky remark (be creative, surprise \
-                             them — cursing allowed), then pick up where you left off. Do NOT re-do \
-                             completed work.]".to_string();
-                        if !self.auto_approve_tools {
-                            cont_text.push_str("\n\nCRITICAL: Tool approval is REQUIRED. You MUST wait for user approval before EVERY tool execution. Do NOT batch tool calls without approval.");
-                        }
-                        context.add_message(Message::user(cont_text));
-                    }
-                    Err(e) => {
-                        tracing::error!("Mid-loop compaction failed: {}", e);
-                        loop_break_reason = Some(format!("Mid-loop compaction failed: {}", e));
-                        break;
-                    }
-                }
-            }
-
-            // Hard safety net: force-truncate if still above 90% after compaction attempt
+            // Enforce 80% budget after tool results (results can be massive)
+            if let Some(_) = self
+                .enforce_context_budget(session_id, &mut context, &model_name, &progress_callback)
+                .await
             {
-                let pct = context.usage_percentage();
-                if pct > 90.0 {
-                    tracing::warn!("Context at {:.0}% post-tool-results — hard-truncating", pct);
-                    let target = (context.max_tokens as f64 * 0.6) as usize;
-                    context.trim_to_target(target);
+                let mut cont_text =
+                    "[SYSTEM: Mid-loop context compaction complete. The summary above has \
+                     full context of everything done so far. Briefly acknowledge the \
+                     compaction to the user with a fun/cheeky remark (be creative, surprise \
+                     them — cursing allowed), then pick up where you left off. Do NOT re-do \
+                     completed work.]"
+                        .to_string();
+                if !self.auto_approve_tools {
+                    cont_text.push_str("\n\nCRITICAL: Tool approval is REQUIRED. You MUST wait for user approval before EVERY tool execution. Do NOT batch tool calls without approval.");
                 }
+                context.add_message(Message::user(cont_text));
             }
 
             // Check for queued user messages to inject between tool iterations.
