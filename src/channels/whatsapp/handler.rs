@@ -11,6 +11,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+use tokio_util::sync::CancellationToken;
 use wacore::types::message::MessageInfo;
 use waproto::whatsapp::Message;
 use whatsapp_rust::client::Client;
@@ -371,11 +372,32 @@ pub(crate) async fn handle_message(
         content
     };
 
+    // Typing indicator — send composing every 5 s while the agent thinks
+    let typing_cancel = CancellationToken::new();
+    tokio::spawn({
+        let client = client.clone();
+        let chat_jid = info.source.chat.clone();
+        let cancel = typing_cancel.clone();
+        async move {
+            loop {
+                let _ = client.chatstate().send_composing(&chat_jid).await;
+                tokio::select! {
+                    _ = cancel.cancelled() => break,
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {}
+                }
+            }
+            let _ = client.chatstate().send_paused(&chat_jid).await;
+        }
+    });
+
     // Send to agent
-    match agent
+    let result = agent
         .send_message_with_tools(session_id, agent_input, None)
-        .await
-    {
+        .await;
+
+    typing_cancel.cancel();
+
+    match result {
         Ok(response) => {
             let reply_jid = info.source.sender.clone();
             let tagged = format!("{}\n\n{}", MSG_HEADER, response.content);
