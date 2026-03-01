@@ -536,7 +536,10 @@ pub(crate) async fn handle_message(
                         s.dirty = true;
                     }
                 }
-                ProgressEvent::ToolStarted { tool_name, tool_input } => {
+                ProgressEvent::ToolStarted {
+                    tool_name,
+                    tool_input,
+                } => {
                     if let Ok(mut s) = st.try_lock() {
                         let ctx = tool_context(&tool_name, &tool_input);
                         s.text.push_str(&format!("\n\n⚙️ _{tool_name}_{ctx}"));
