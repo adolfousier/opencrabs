@@ -413,6 +413,7 @@ impl Tool for WhatsAppConnectTool {
                                 voice_config,
                                 shared_session,
                                 idle_timeout_hours,
+                                wa_state.clone(),
                             )
                             .await;
                         }

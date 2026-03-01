@@ -3,7 +3,9 @@
 //! Processes incoming WhatsApp messages: text + images, allowlist enforcement,
 //! session routing (owner shares TUI session, others get per-phone sessions).
 
+use crate::brain::agent::ApprovalCallback;
 use crate::brain::agent::AgentService;
+use crate::channels::whatsapp::WhatsAppState;
 use crate::config::VoiceConfig;
 use crate::services::SessionService;
 use std::collections::{HashMap, HashSet};
@@ -192,6 +194,7 @@ pub(crate) async fn handle_message(
     voice_config: Arc<VoiceConfig>,
     shared_session: Arc<Mutex<Option<Uuid>>>,
     idle_timeout_hours: Option<f64>,
+    wa_state: Arc<WhatsAppState>,
 ) {
     let phone = sender_phone(&info);
     tracing::debug!(
@@ -236,6 +239,50 @@ pub(crate) async fn handle_message(
             phone
         );
         return;
+    }
+
+    // Pending approval check: if a tool approval is waiting for this phone,
+    // interpret this message as Yes / Always / No instead of routing to the agent.
+    // Handles both button taps (ButtonsResponseMessage) and plain text replies.
+    {
+        use crate::channels::whatsapp::WaApproval;
+
+        let btn_id = unwrap_message(&msg)
+            .buttons_response_message
+            .as_ref()
+            .and_then(|b| b.selected_button_id.as_deref());
+
+        let choice: Option<WaApproval> = if let Some(id) = btn_id {
+            match id {
+                "wa_approve_yes" => Some(WaApproval::Yes),
+                "wa_approve_always" => Some(WaApproval::Always),
+                "wa_approve_no" => Some(WaApproval::No),
+                _ => None,
+            }
+        } else if let Some(raw_text) = extract_text(&msg) {
+            let answer = raw_text.trim().to_lowercase();
+            if matches!(answer.as_str(), "yes" | "y" | "sim" | "s") {
+                Some(WaApproval::Yes)
+            } else if matches!(answer.as_str(), "always" | "sempre") {
+                Some(WaApproval::Always)
+            } else if matches!(answer.as_str(), "no" | "n" | "nao" | "não") {
+                Some(WaApproval::No)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some(c) = choice
+            && wa_state.resolve_pending_approval(&phone, c).await.is_some()
+        {
+            tracing::info!("WhatsApp: approval from {}: {:?}", phone, c);
+            if c == WaApproval::Always {
+                wa_state.set_auto_approve_session().await;
+            }
+            return;
+        }
     }
 
     let text_preview = text
@@ -390,9 +437,96 @@ pub(crate) async fn handle_message(
         }
     });
 
-    // Send to agent
+    // Build per-call approval callback.
+    // If the user previously chose "Always (session)", auto-approve without asking.
+    // Otherwise send a 3-button message (Yes / Always / No) and wait up to 5 min.
+    let approval_cb: ApprovalCallback = {
+        use crate::channels::whatsapp::WaApproval;
+        use waproto::whatsapp::message::{buttons_message, ButtonsMessage};
+
+        let client = client.clone();
+        let chat_jid = info.source.chat.clone();
+        let phone_key = phone.clone();
+        let wa_state = wa_state.clone();
+        Arc::new(move |tool_info| {
+            let client = client.clone();
+            let chat_jid = chat_jid.clone();
+            let phone_key = phone_key.clone();
+            let wa_state = wa_state.clone();
+            Box::pin(async move {
+                // Auto-approve if user already chose "Always" this session
+                if wa_state.is_auto_approve_session().await {
+                    return Ok(true);
+                }
+
+                let input_preview = serde_json::to_string_pretty(&tool_info.tool_input)
+                    .unwrap_or_default();
+                let body = format!(
+                    "🔐 *Tool Approval Required*\n\nTool: `{}`\n```\n{}\n```",
+                    tool_info.tool_name,
+                    &input_preview[..input_preview.len().min(600)],
+                );
+
+                // Try to send interactive buttons message
+                let btn = |id: &str, label: &str| buttons_message::Button {
+                    button_id: Some(id.to_string()),
+                    button_text: Some(buttons_message::button::ButtonText {
+                        display_text: Some(label.to_string()),
+                    }),
+                    r#type: Some(1), // Response
+                    ..Default::default()
+                };
+                let buttons_msg = waproto::whatsapp::Message {
+                    buttons_message: Some(Box::new(ButtonsMessage {
+                        content_text: Some(body.clone()),
+                        footer_text: Some("5 min timeout — no reply = deny".to_string()),
+                        buttons: vec![
+                            btn("wa_approve_yes", "✅ Yes"),
+                            btn("wa_approve_always", "🔁 Always (session)"),
+                            btn("wa_approve_no", "❌ No"),
+                        ],
+                        ..Default::default()
+                    })),
+                    ..Default::default()
+                };
+
+                if client.send_message(chat_jid.clone(), buttons_msg).await.is_err() {
+                    // Fallback to plain text if buttons fail
+                    let text_msg = waproto::whatsapp::Message {
+                        conversation: Some(format!(
+                            "{}\n\n{}\n\nReply *yes*, *always* (session), or *no* (5 min timeout).",
+                            MSG_HEADER, body
+                        )),
+                        ..Default::default()
+                    };
+                    if let Err(e) = client.send_message(chat_jid, text_msg).await {
+                        tracing::error!("WhatsApp: failed to send approval request: {}", e);
+                        return Ok(false);
+                    }
+                }
+
+                let (tx, rx) = tokio::sync::oneshot::channel::<WaApproval>();
+                wa_state.register_pending_approval(phone_key, tx).await;
+
+                match tokio::time::timeout(std::time::Duration::from_secs(300), rx).await {
+                    Ok(Ok(WaApproval::Yes)) => Ok(true),
+                    Ok(Ok(WaApproval::Always)) => {
+                        wa_state.set_auto_approve_session().await;
+                        Ok(true)
+                    }
+                    Ok(Ok(WaApproval::No)) => Ok(false),
+                    _ => {
+                        tracing::warn!("WhatsApp: approval timed out or channel dropped — denying");
+                        Ok(false)
+                    }
+                }
+            })
+        })
+    };
+
+    // Send to agent with WhatsApp approval callback
     let result = agent
-        .send_message_with_tools(session_id, agent_input, None)
+        .send_message_with_tools_and_callback(session_id, agent_input, None, None, Some(approval_cb), None)
         .await;
 
     typing_cancel.cancel();
