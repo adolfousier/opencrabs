@@ -61,6 +61,7 @@ Ask how they want to reach you:
 - **Telegram** — set up a bot via @BotFather
 - **Discord** — create a bot at discord.com/developers, enable MESSAGE CONTENT intent
 - **Slack** — create an app at api.slack.com/apps, enable Socket Mode
+- **Trello** — get API Key + Token at trello.com/power-ups/admin; polls boards every 30 s, replies to card comments (use `trello_connect` tool)
 - **A2A Gateway** — enable peer-to-peer agent communication (`[a2a] enabled = true` in config.toml)
 
 Guide them through whichever they pick. Multiple channels can be active simultaneously.

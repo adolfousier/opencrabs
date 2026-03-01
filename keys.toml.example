@@ -72,6 +72,12 @@ token = ""
 token = ""
 app_token = ""
 
+[channels.trello]
+# Get from: trello.com/power-ups/admin > API Key tab, then click Token link
+# app_token = Trello API Key, token = Trello API Token (confusingly named, but correct)
+app_token = ""  # API Key (alphanumeric, ~32 chars)
+token = ""      # API Token (long hex string, ~64 chars)
+
 [channels.whatsapp]
 # WhatsApp Business API (if using cloud API)
 token = ""

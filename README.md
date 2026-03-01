@@ -90,6 +90,7 @@
 | **WhatsApp** | Connect via QR code pairing at runtime or from onboarding wizard. Text + image, shared session with TUI, phone allowlist, session persists across restarts |
 | **Discord** | Full Discord bot — text + image + voice, allowed user IDs, allowed channel IDs, `respond_to` filter, shared session with TUI |
 | **Slack** | Full Slack bot via Socket Mode — allowed user IDs, allowed channel IDs, `respond_to` filter, shared session with TUI |
+| **Trello** | Polls boards for new card comments every 30 s — routes them to the AI, posts replies back as card comments. Full card management via `trello_send`: `add_comment`, `create_card`, `move_card`, `find_cards`, `list_boards`, `get_card`, `get_card_comments`, `update_card`, `archive_card`, `add_member_to_card`, `remove_member_from_card`, `add_label_to_card`, `remove_label_from_card`, `add_checklist`, `add_checklist_item`, `complete_checklist_item`, `list_lists`, `get_board_members`, `search`, `get_notifications`, `mark_notifications_read`. API Key + Token from `trello.com/power-ups/admin`, board IDs and member-ID allowlist configurable |
 
 ### Terminal UI
 | Feature | Description |
@@ -457,7 +458,7 @@ First-time users are guided through an 8-step setup wizard that appears automati
 | 2 | **Model & Auth** | Pick provider (Anthropic, OpenAI, Gemini, OpenRouter, Minimax, Custom) → enter token/key → model list fetched live from API → select model. Auto-detects existing keys from `keys.toml` |
 | 3 | **Workspace** | Set brain workspace path (default `~/.opencrabs/`) → seed template files (SOUL.md, IDENTITY.md, etc.) |
 | 4 | **Gateway** | Configure HTTP API gateway: port, bind address, auth mode |
-| 5 | **Channels** | Toggle messaging integrations (Telegram, Discord, WhatsApp, Slack) |
+| 5 | **Channels** | Toggle messaging integrations (Telegram, Discord, WhatsApp, Slack, Trello) |
 | 6 | **Daemon** | Install background service (systemd on Linux, LaunchAgent on macOS) |
 | 7 | **Health Check** | Verify API key, config, workspace — shows pass/fail summary |
 | 8 | **Brain Personalization** | Tell the agent about yourself and how you want it to behave → AI generates personalized brain files (SOUL.md, IDENTITY.md, USER.md, etc.) |
@@ -520,6 +521,10 @@ token = "your-discord-bot-token"
 token = "xoxb-your-bot-token"
 app_token = "xapp-your-app-token"   # Required for Socket Mode
 
+[channels.trello]
+app_token = "your-trello-api-key"   # API Key from trello.com/power-ups/admin
+token = "your-trello-api-token"     # Token from the authorization URL
+
 # Web Search
 [providers.web_search.exa]
 api_key = "your-exa-key"
@@ -536,6 +541,8 @@ api_key = "your-openai-key"
 ```
 
 OAuth tokens (`sk-ant-oat` prefix) are auto-detected — OpenCrabs uses `Authorization: Bearer` with the `anthropic-beta: oauth-2025-04-20` header automatically.
+
+> **Trello note:** `app_token` holds the Trello **API Key** and `token` holds the Trello **API Token** — this naming follows the shared `ChannelConfig` schema used by all channels, where `app_token` is the app-level credential and `token` is the user-level credential.
 
 > **Security:** Always `chmod 600 ~/.opencrabs/keys.toml` and add `keys.toml` to `.gitignore`.
 
@@ -1078,6 +1085,7 @@ opencrabs/
 │   │   ├── whatsapp/     # WhatsApp Web client (agent, handler, sqlx_store)
 │   │   ├── discord/      # Discord bot (agent, handler)
 │   │   ├── slack/        # Slack bot via Socket Mode (agent, handler)
+│   │   ├── trello/       # Trello board poller (agent, client, handler, models)
 │   │   └── voice/        # STT (Groq Whisper) + TTS (OpenAI)
 │   ├── cli/              # Command-line interface (Clap)
 │   ├── config/           # Configuration (config.toml + keys.toml)
@@ -1137,6 +1145,7 @@ cargo clippy -- -D warnings
 | `whatsapp` | WhatsApp Web integration (default: enabled) |
 | `discord` | Discord bot integration (default: enabled) |
 | `slack` | Slack bot integration (default: enabled) |
+| `trello` | Trello board polling + card management (default: enabled) |
 | `profiling` | Enable pprof flamegraph profiling (Unix only) |
 
 ### Performance

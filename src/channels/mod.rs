@@ -12,6 +12,8 @@ pub mod discord;
 pub mod slack;
 #[cfg(feature = "telegram")]
 pub mod telegram;
+#[cfg(feature = "trello")]
+pub mod trello;
 #[cfg(feature = "whatsapp")]
 pub mod whatsapp;
 

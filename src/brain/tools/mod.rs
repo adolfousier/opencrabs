@@ -48,6 +48,10 @@ pub mod slack_send;
 pub mod telegram_connect;
 #[cfg(feature = "telegram")]
 pub mod telegram_send;
+#[cfg(feature = "trello")]
+pub mod trello_connect;
+#[cfg(feature = "trello")]
+pub mod trello_send;
 #[cfg(feature = "whatsapp")]
 pub mod whatsapp_connect;
 #[cfg(feature = "whatsapp")]

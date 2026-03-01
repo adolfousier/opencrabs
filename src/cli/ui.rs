@@ -412,6 +412,25 @@ pub(crate) async fn cmd_chat(
         crate::brain::tools::slack_send::SlackSendTool::new(slack_state.clone()),
     ));
 
+    // Shared Trello state for proactive card operations
+    #[cfg(feature = "trello")]
+    let trello_state = Arc::new(crate::channels::trello::TrelloState::new());
+
+    // Register Trello connect tool (agent-callable board setup)
+    #[cfg(feature = "trello")]
+    tool_registry.register(Arc::new(
+        crate::brain::tools::trello_connect::TrelloConnectTool::new(
+            channel_factory.clone(),
+            trello_state.clone(),
+        ),
+    ));
+
+    // Register Trello send tool (proactive card operations)
+    #[cfg(feature = "trello")]
+    tool_registry.register(Arc::new(
+        crate::brain::tools::trello_send::TrelloSendTool::new(trello_state.clone()),
+    ));
+
     // Create sudo password callback that sends requests to TUI
     let sudo_sender = app.event_sender();
     let sudo_callback: crate::brain::agent::SudoCallback = Arc::new(move |command| {
@@ -665,6 +684,44 @@ pub(crate) async fn cmd_chat(
                 Some(sl_agent.start(bot_tok, app_tok))
             } else {
                 tracing::debug!("Slack enabled but missing valid tokens");
+                None
+            }
+        } else {
+            None
+        }
+    };
+
+    // Spawn Trello agent if configured (polling-based, needs API Key + API Token + board IDs)
+    #[cfg(feature = "trello")]
+    let _trello_handle = {
+        let tr = &config.channels.trello;
+        let tr_api_key = tr.app_token.clone(); // app_token = API Key
+        let tr_api_token = tr.token.clone(); // token = API Token
+        let has_valid_creds = tr_api_key.as_ref().map(|k| !k.is_empty()).unwrap_or(false)
+            && tr_api_token
+                .as_ref()
+                .map(|t| !t.is_empty())
+                .unwrap_or(false);
+        let board_ids = tr.allowed_channels.clone();
+        let has_boards = !board_ids.is_empty();
+        if tr.enabled && has_valid_creds && has_boards {
+            if let (Some(api_key), Some(api_token)) = (tr_api_key, tr_api_token) {
+                let tr_agent = crate::channels::trello::TrelloAgent::new(
+                    channel_factory.create_agent_service(),
+                    service_context.clone(),
+                    tr.allowed_users.clone(),
+                    app.shared_session_id(),
+                    trello_state.clone(),
+                    board_ids,
+                );
+                tracing::info!(
+                    "Spawning Trello polling agent ({} board(s), {} allowed user(s))",
+                    tr.allowed_channels.len(),
+                    tr.allowed_users.len(),
+                );
+                Some(tr_agent.start(api_key, api_token))
+            } else {
+                tracing::debug!("Trello enabled but missing credentials");
                 None
             }
         } else {

@@ -75,6 +75,11 @@ impl OnboardingWizard {
         if self.is_whatsapp_enabled() {
             checks.push(("WhatsApp Connected".to_string(), HealthStatus::Pending));
         }
+        if self.is_trello_enabled() {
+            checks.push(("Trello API Key".to_string(), HealthStatus::Pending));
+            checks.push(("Trello API Token".to_string(), HealthStatus::Pending));
+            checks.push(("Trello Board ID".to_string(), HealthStatus::Pending));
+        }
 
         self.health_results = checks;
         self.health_running = true;
@@ -174,6 +179,29 @@ impl OnboardingWizard {
                         HealthStatus::Pass
                     } else {
                         HealthStatus::Fail("Not paired — scan QR code to connect".to_string())
+                    }
+                }
+                "Trello API Key" => {
+                    if !self.trello_api_key_input.is_empty() {
+                        HealthStatus::Pass
+                    } else {
+                        HealthStatus::Fail("No API Key provided".to_string())
+                    }
+                }
+                "Trello API Token" => {
+                    if !self.trello_api_token_input.is_empty() {
+                        HealthStatus::Pass
+                    } else {
+                        HealthStatus::Fail("No API Token provided".to_string())
+                    }
+                }
+                "Trello Board ID" => {
+                    if !self.trello_board_id_input.is_empty() {
+                        HealthStatus::Pass
+                    } else {
+                        HealthStatus::Fail(
+                            "No Board ID — agent won't know which board to poll".to_string(),
+                        )
                     }
                 }
                 _ => continue, // Already set above
@@ -310,6 +338,11 @@ impl OnboardingWizard {
             "enabled",
             &self.is_slack_enabled().to_string(),
         );
+        let _ = Config::write_key(
+            "channels.trello",
+            "enabled",
+            &self.is_trello_enabled().to_string(),
+        );
 
         // Voice config
         let groq_key_exists = !self.groq_api_key_input.is_empty() || self.has_existing_groq_key();
@@ -396,6 +429,27 @@ impl OnboardingWizard {
         {
             tracing::warn!("Failed to save Slack app token to keys.toml: {}", e);
         }
+        // Trello API Key (saved as app_token) + API Token
+        if !self.trello_api_key_input.is_empty()
+            && !self.has_existing_trello_api_key()
+            && let Err(e) = crate::config::write_secret_key(
+                "channels.trello",
+                "app_token",
+                &self.trello_api_key_input,
+            )
+        {
+            tracing::warn!("Failed to save Trello API Key to keys.toml: {}", e);
+        }
+        if !self.trello_api_token_input.is_empty()
+            && !self.has_existing_trello_api_token()
+            && let Err(e) = crate::config::write_secret_key(
+                "channels.trello",
+                "token",
+                &self.trello_api_token_input,
+            )
+        {
+            tracing::warn!("Failed to save Trello API Token to keys.toml: {}", e);
+        }
 
         // Persist channel IDs/user IDs to config.toml (if new)
         if !self.telegram_user_id_input.is_empty() && !self.has_existing_telegram_user_id() {
@@ -440,6 +494,29 @@ impl OnboardingWizard {
                 "allowed_phones",
                 std::slice::from_ref(&self.whatsapp_phone_input),
             );
+        }
+        if !self.trello_board_id_input.is_empty() && !self.has_existing_trello_board_id() {
+            let boards: Vec<String> = self
+                .trello_board_id_input
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if !boards.is_empty() {
+                let _ = Config::write_array("channels.trello", "allowed_channels", &boards);
+            }
+        }
+        if !self.trello_allowed_users_input.is_empty() && !self.has_existing_trello_allowed_users()
+        {
+            let users: Vec<String> = self
+                .trello_allowed_users_input
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if !users.is_empty() {
+                let _ = Config::write_array("channels.trello", "allowed_users", &users);
+            }
         }
 
         // Seed workspace templates (use AI-generated content when available)

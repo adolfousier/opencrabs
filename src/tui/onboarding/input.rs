@@ -30,6 +30,7 @@ impl OnboardingWizard {
             OnboardingStep::DiscordSetup => self.handle_discord_setup_key(event),
             OnboardingStep::WhatsAppSetup => self.handle_whatsapp_setup_key(event),
             OnboardingStep::SlackSetup => self.handle_slack_setup_key(event),
+            OnboardingStep::TrelloSetup => self.handle_trello_setup_key(event),
             OnboardingStep::VoiceSetup => self.handle_voice_setup_key(event),
             OnboardingStep::Daemon => self.handle_daemon_key(event),
             OnboardingStep::HealthCheck => self.handle_health_check_key(event),
@@ -133,6 +134,39 @@ impl OnboardingWizard {
                             self.slack_allowed_list_input.clear();
                         }
                         self.slack_allowed_list_input.push_str(clean);
+                    }
+                }
+            }
+            OnboardingStep::TrelloSetup => {
+                tracing::debug!(
+                    "[paste] Trello pasted ({} chars) field={:?}",
+                    clean.len(),
+                    self.trello_field
+                );
+                match self.trello_field {
+                    TrelloField::ApiKey => {
+                        if self.has_existing_trello_api_key() {
+                            self.trello_api_key_input.clear();
+                        }
+                        self.trello_api_key_input.push_str(clean);
+                    }
+                    TrelloField::ApiToken => {
+                        if self.has_existing_trello_api_token() {
+                            self.trello_api_token_input.clear();
+                        }
+                        self.trello_api_token_input.push_str(clean);
+                    }
+                    TrelloField::BoardId => {
+                        if self.has_existing_trello_board_id() {
+                            self.trello_board_id_input.clear();
+                        }
+                        self.trello_board_id_input.push_str(clean);
+                    }
+                    TrelloField::AllowedUsers => {
+                        if self.has_existing_trello_allowed_users() {
+                            self.trello_allowed_users_input.clear();
+                        }
+                        self.trello_allowed_users_input.push_str(clean);
                     }
                 }
             }

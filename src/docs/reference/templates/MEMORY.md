@@ -32,6 +32,9 @@
 ### Messaging Channels
 - Example: Telegram ✅ (text + voice)
 - Example: Discord ✅ (#channel-name)
+- Example: Slack ✅ (#channel-name)
+- Example: WhatsApp ✅ (+1234567890)
+- Example: Trello ✅ (Board Name — polling card comments)
 
 ## Troubleshooting
 *(Document problems and fixes so future-you doesn't waste time)*

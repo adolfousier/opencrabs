@@ -61,6 +61,13 @@ pub struct OnboardingWizard {
     pub slack_channel_id_input: String,
     pub slack_allowed_list_input: String,
 
+    /// Trello Setup (shown when Trello is enabled)
+    pub trello_field: TrelloField,
+    pub trello_api_key_input: String,
+    pub trello_api_token_input: String,
+    pub trello_board_id_input: String,
+    pub trello_allowed_users_input: String,
+
     /// Channel test connection status
     pub channel_test_status: ChannelTestStatus,
 
@@ -251,6 +258,12 @@ impl OnboardingWizard {
             slack_channel_id_input: String::new(),
             slack_allowed_list_input: String::new(),
 
+            trello_field: TrelloField::ApiKey,
+            trello_api_key_input: String::new(),
+            trello_api_token_input: String::new(),
+            trello_board_id_input: String::new(),
+            trello_allowed_users_input: String::new(),
+
             channel_test_status: ChannelTestStatus::Idle,
 
             voice_field: VoiceField::GroqApiKey,
@@ -385,9 +398,10 @@ impl OnboardingWizard {
         wizard.channel_toggles[1].1 = config.channels.discord.enabled; // Discord
         wizard.channel_toggles[2].1 = config.channels.whatsapp.enabled; // WhatsApp
         wizard.channel_toggles[3].1 = config.channels.slack.enabled; // Slack
-        wizard.channel_toggles[4].1 = config.channels.signal.enabled; // Signal
-        wizard.channel_toggles[5].1 = config.channels.google_chat.enabled; // Google Chat
-        wizard.channel_toggles[6].1 = config.channels.imessage.enabled; // iMessage
+        wizard.channel_toggles[4].1 = config.channels.trello.enabled; // Trello
+        wizard.channel_toggles[5].1 = config.channels.signal.enabled; // Signal
+        wizard.channel_toggles[6].1 = config.channels.google_chat.enabled; // Google Chat
+        wizard.channel_toggles[7].1 = config.channels.imessage.enabled; // iMessage
 
         // Load voice settings
         wizard.tts_enabled = config.voice.tts_enabled;
@@ -414,6 +428,13 @@ impl OnboardingWizard {
         }
         if let Some(channel_id) = config.channels.slack.allowed_channels.first() {
             wizard.slack_channel_id_input = channel_id.clone();
+        }
+        // Trello: load API Key (app_token) + board ID (first allowed_channel)
+        if let Some(ref api_key) = config.channels.trello.app_token {
+            wizard.trello_api_key_input = api_key.clone();
+        }
+        if let Some(board_id) = config.channels.trello.allowed_channels.first() {
+            wizard.trello_board_id_input = board_id.clone();
         }
         // WhatsApp: check if session.db exists (means it's paired)
         let wa_session = crate::config::opencrabs_home()

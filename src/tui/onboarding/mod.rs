@@ -21,8 +21,8 @@ mod tests;
 // Re-export all public types
 pub use types::{
     AuthField, BrainField, CHANNEL_NAMES, ChannelTestStatus, DiscordField, HealthStatus,
-    OnboardingStep, PROVIDERS, ProviderInfo, SlackField, TelegramField, VoiceField, WhatsAppField,
-    WizardAction, WizardMode,
+    OnboardingStep, PROVIDERS, ProviderInfo, SlackField, TelegramField, TrelloField, VoiceField,
+    WhatsAppField, WizardAction, WizardMode,
 };
 
 pub use wizard::OnboardingWizard;
