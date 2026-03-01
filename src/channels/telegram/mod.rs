@@ -172,9 +172,10 @@ impl TelegramState {
                     InlineKeyboardButton::callback("❌ No", format!("deny:{}", approval_id)),
                 ]]);
 
-                // Format message
-                let input_pretty = serde_json::to_string_pretty(&info.tool_input)
-                    .unwrap_or_else(|_| info.tool_input.to_string());
+                // Format message — redact secrets before display
+                let safe_input = crate::utils::redact_tool_input(&info.tool_input);
+                let input_pretty = serde_json::to_string_pretty(&safe_input)
+                    .unwrap_or_else(|_| safe_input.to_string());
                 let text = format!(
                     "🔐 <b>Tool Approval Required</b>\n\nTool: <code>{}</code>\nInput:\n<pre>{}</pre>",
                     info.tool_name,

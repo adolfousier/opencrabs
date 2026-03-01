@@ -697,24 +697,27 @@ pub(crate) async fn handle_message(
 }
 
 /// Extract a short, meaningful context hint from a tool's input for display.
+/// Runs the input through the secret sanitizer first so no API keys or tokens
+/// can leak into the streaming indicator via command or url fields.
 fn tool_context(name: &str, input: &serde_json::Value) -> String {
-    let hint: Option<&str> = match name {
-        "bash" => input.get("command").and_then(|v| v.as_str()),
-        "read" | "write" | "edit" => input.get("path").and_then(|v| v.as_str()),
-        "glob" => input.get("pattern").and_then(|v| v.as_str()),
-        "grep" => input.get("pattern").and_then(|v| v.as_str()),
-        "ls" => input.get("path").and_then(|v| v.as_str()),
-        "http_request" | "web_fetch" => input.get("url").and_then(|v| v.as_str()),
+    let safe = crate::utils::redact_tool_input(input);
+    let hint: Option<String> = match name {
+        "bash" => safe.get("command").and_then(|v| v.as_str()).map(String::from),
+        "read" | "write" | "edit" => safe.get("path").and_then(|v| v.as_str()).map(String::from),
+        "glob" => safe.get("pattern").and_then(|v| v.as_str()).map(String::from),
+        "grep" => safe.get("pattern").and_then(|v| v.as_str()).map(String::from),
+        "ls" => safe.get("path").and_then(|v| v.as_str()).map(String::from),
+        "http_request" | "web_fetch" => safe.get("url").and_then(|v| v.as_str()).map(String::from),
         "brave_search" | "exa_search" | "web_search" | "memory_search" | "session_search" => {
-            input.get("query").and_then(|v| v.as_str())
+            safe.get("query").and_then(|v| v.as_str()).map(String::from)
         }
         "telegram_send" | "discord_send" | "slack_send" | "trello_send" => {
-            input.get("action").and_then(|v| v.as_str())
+            safe.get("action").and_then(|v| v.as_str()).map(String::from)
         }
         // Fallback: first string value in the object
-        _ => input
+        _ => safe
             .as_object()
-            .and_then(|m| m.values().find_map(|v| v.as_str())),
+            .and_then(|m| m.values().find_map(|v| v.as_str().map(String::from))),
     };
     match hint {
         Some(h) if !h.is_empty() => {
