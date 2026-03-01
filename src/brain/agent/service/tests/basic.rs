@@ -192,7 +192,7 @@ async fn test_stream_complete_text_only() {
     let request = LLMRequest::new("mock-model".to_string(), vec![Message::user("Hello")]);
 
     let (response, reasoning) = agent_service
-        .stream_complete(Uuid::nil(), request, None)
+        .stream_complete(Uuid::nil(), request, None, None)
         .await
         .unwrap();
     assert!(
@@ -222,7 +222,7 @@ async fn test_stream_complete_with_tool_use() {
     let request = LLMRequest::new("mock-model".to_string(), vec![Message::user("Use a tool")]);
 
     let (response, reasoning) = agent_service
-        .stream_complete(Uuid::nil(), request, None)
+        .stream_complete(Uuid::nil(), request, None, None)
         .await
         .unwrap();
     assert!(
@@ -275,7 +275,7 @@ async fn test_streaming_chunks_emitted() {
     let request = LLMRequest::new("mock-model".to_string(), vec![Message::user("Hello")]);
 
     let (response, reasoning) = agent_service
-        .stream_complete(Uuid::nil(), request, None)
+        .stream_complete(Uuid::nil(), request, None, None)
         .await
         .unwrap();
     assert!(
