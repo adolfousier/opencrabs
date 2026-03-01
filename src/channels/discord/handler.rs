@@ -243,9 +243,24 @@ pub(crate) async fn handle_message(
         }
     };
 
+    // For non-owner users, prepend sender identity so the agent knows who
+    // it's talking to and doesn't assume it's the owner.
+    let agent_input = if !is_owner {
+        let name = &msg.author.name;
+        let uid = msg.author.id.get();
+        if msg.guild_id.is_some() {
+            let channel = msg.channel_id.get();
+            format!("[Discord message from {name} (ID {uid}) in channel {channel}]\n{content}")
+        } else {
+            format!("[Discord DM from {name} (ID {uid})]\n{content}")
+        }
+    } else {
+        content
+    };
+
     // Send to agent
     match agent
-        .send_message_with_tools(session_id, content, None)
+        .send_message_with_tools(session_id, agent_input, None)
         .await
     {
         Ok(response) => {
