@@ -164,9 +164,10 @@ impl AgentService {
             .map_err(|e| AgentError::Database(e.to_string()))?;
 
         // Enforce 80% budget: LLM compact (≥90% truncates to 80% first, 3 retries, warn on failure)
-        if let Some(_) = self
+        if self
             .enforce_context_budget(session_id, &mut context, &model_name, &progress_callback)
             .await
+            .is_some()
         {
             let mut cont_text =
                 "[SYSTEM: Context was auto-compacted. The summary above has full context. \
@@ -199,7 +200,6 @@ impl AgentService {
         let mut final_response: Option<LLMResponse> = None;
         let mut accumulated_text = String::new(); // Collect text from all iterations (not just final)
         let mut recent_tool_calls: Vec<String> = Vec::new(); // Track tool calls to detect loops
-        let loop_break_reason: Option<String> = None; // Why the loop broke (if not normal exit)
         let mut stream_retry_count = 0u32; // Track consecutive stream drop retries
         const MAX_STREAM_RETRIES: u32 = 2; // Retry up to 2 times on dropped streams
 
@@ -228,9 +228,10 @@ impl AgentService {
             }
 
             // Enforce 80% budget before every API call
-            if let Some(_) = self
+            if self
                 .enforce_context_budget(session_id, &mut context, &model_name, &progress_callback)
                 .await
+                .is_some()
             {
                 let mut cont_text =
                     "[SYSTEM: Context was auto-compacted. The summary above has full context. \
@@ -956,9 +957,10 @@ impl AgentService {
             }
 
             // Enforce 80% budget after tool results (results can be massive)
-            if let Some(_) = self
+            if self
                 .enforce_context_budget(session_id, &mut context, &model_name, &progress_callback)
                 .await
+                .is_some()
             {
                 let mut cont_text =
                     "[SYSTEM: Mid-loop context compaction complete. The summary above has \
@@ -1013,9 +1015,7 @@ impl AgentService {
         }
 
         let response = final_response.ok_or_else(|| {
-            let reason = loop_break_reason
-                .unwrap_or_else(|| "Tool loop ended without final response".to_string());
-            AgentError::Internal(reason)
+            AgentError::Internal("Tool loop ended without final response".to_string())
         })?;
 
         // Extract text from the final response only (for TUI display).
