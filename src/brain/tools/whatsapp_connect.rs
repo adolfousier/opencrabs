@@ -52,11 +52,14 @@ pub fn render_qr_unicode(data: &str) -> Option<String> {
             } else {
                 qrcode::Color::Light
             };
+            // Inverted mapping: light modules = bright block, dark modules = space.
+            // This is the qrencode -t UTF8 convention — white blocks on dark terminal
+            // background — which phone cameras read reliably without needing a white bg.
             let ch = match (top, bot) {
-                (qrcode::Color::Light, qrcode::Color::Light) => ' ',
-                (qrcode::Color::Dark, qrcode::Color::Dark) => '\u{2588}',
-                (qrcode::Color::Dark, qrcode::Color::Light) => '\u{2580}',
-                (qrcode::Color::Light, qrcode::Color::Dark) => '\u{2584}',
+                (qrcode::Color::Light, qrcode::Color::Light) => '\u{2588}', // full bright
+                (qrcode::Color::Dark, qrcode::Color::Dark) => ' ',          // transparent dark
+                (qrcode::Color::Light, qrcode::Color::Dark) => '\u{2580}',  // upper bright
+                (qrcode::Color::Dark, qrcode::Color::Light) => '\u{2584}',  // lower bright
             };
             out.push(ch);
         }
@@ -72,6 +75,9 @@ pub struct WhatsAppConnectHandle {
     pub qr_rx: tokio::sync::mpsc::UnboundedReceiver<String>,
     /// Fires once when WhatsApp is successfully paired.
     pub connected_rx: tokio::sync::oneshot::Receiver<()>,
+    /// Shared client reference — populated after successful pairing.
+    /// Use to send a test message without restarting the bot.
+    pub shared_client: Arc<Mutex<Option<Arc<whatsapp_rust::client::Client>>>>,
 }
 
 /// Start WhatsApp pairing — spawns a lightweight bot, returns channels for QR codes
@@ -87,6 +93,10 @@ pub async fn start_whatsapp_pairing() -> Result<WhatsAppConnectHandle> {
         ))
     })?;
     let db_path = db_dir.join("session.db");
+
+    // Always wipe the existing session so pairing always shows a fresh QR code.
+    // The running WhatsApp agent (if any) will disconnect on its next operation.
+    let _ = std::fs::remove_file(&db_path);
 
     let backend = Arc::new(
         crate::channels::whatsapp::sqlx_store::SqlxStore::new(db_path.to_string_lossy().as_ref())
@@ -105,20 +115,28 @@ pub async fn start_whatsapp_pairing() -> Result<WhatsAppConnectHandle> {
     let conn_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>> =
         Arc::new(Mutex::new(Some(conn_tx)));
 
+    // Shared client slot — populated when pairing succeeds, used by onboarding test message
+    let shared_client: Arc<Mutex<Option<Arc<whatsapp_rust::client::Client>>>> =
+        Arc::new(Mutex::new(None));
+    let shared_client_handler = shared_client.clone();
+
     // 3. Build bot with minimal event handler (QR + Connected only)
     let mut bot = Bot::builder()
         .with_backend(backend)
         .with_transport_factory(TokioWebSocketTransportFactory::new())
         .with_http_client(UreqHttpClient::new())
-        .on_event(move |event, _client| {
+        .on_event(move |event, client| {
             let qr_tx = qr_tx.clone();
             let conn_tx = conn_tx.clone();
+            let shared_client = shared_client_handler.clone();
             async move {
                 match event {
                     Event::PairingQrCode { ref code, .. } => {
                         let _ = qr_tx.send(code.clone());
                     }
                     Event::Connected(_) | Event::PairSuccess(_) => {
+                        // Store client for test message
+                        *shared_client.lock().await = Some(client);
                         let mut tx = conn_tx.lock().await;
                         if let Some(sender) = tx.take() {
                             let _ = sender.send(());
@@ -152,6 +170,92 @@ pub async fn start_whatsapp_pairing() -> Result<WhatsAppConnectHandle> {
     Ok(WhatsAppConnectHandle {
         qr_rx,
         connected_rx: conn_rx,
+        shared_client,
+    })
+}
+
+/// Reconnect to WhatsApp using an existing session (no QR wipe).
+/// Used by the test flow when re-entering the onboarding with an existing session.db.
+pub async fn reconnect_whatsapp() -> Result<WhatsAppConnectHandle> {
+    let db_dir = opencrabs_home().join("whatsapp");
+    std::fs::create_dir_all(&db_dir).map_err(|e| {
+        super::error::ToolError::Internal(format!(
+            "Failed to create WhatsApp data directory: {}",
+            e
+        ))
+    })?;
+    let db_path = db_dir.join("session.db");
+    // NOTE: No remove_file — we reconnect using the existing session.
+
+    let backend = Arc::new(
+        crate::channels::whatsapp::sqlx_store::SqlxStore::new(db_path.to_string_lossy().as_ref())
+            .await
+            .map_err(|e| {
+                super::error::ToolError::Internal(format!(
+                    "Failed to open WhatsApp session store: {}",
+                    e
+                ))
+            })?,
+    );
+
+    let (qr_tx, qr_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let (conn_tx, conn_rx) = tokio::sync::oneshot::channel::<()>();
+    let conn_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>> =
+        Arc::new(Mutex::new(Some(conn_tx)));
+
+    let shared_client: Arc<Mutex<Option<Arc<whatsapp_rust::client::Client>>>> =
+        Arc::new(Mutex::new(None));
+    let shared_client_handler = shared_client.clone();
+
+    let mut bot = Bot::builder()
+        .with_backend(backend)
+        .with_transport_factory(TokioWebSocketTransportFactory::new())
+        .with_http_client(UreqHttpClient::new())
+        .on_event(move |event, client| {
+            let qr_tx = qr_tx.clone();
+            let conn_tx = conn_tx.clone();
+            let shared_client = shared_client_handler.clone();
+            async move {
+                match event {
+                    Event::PairingQrCode { ref code, .. } => {
+                        // Shouldn't happen on reconnect but forward anyway
+                        let _ = qr_tx.send(code.clone());
+                    }
+                    Event::Connected(_) | Event::PairSuccess(_) => {
+                        *shared_client.lock().await = Some(client);
+                        let mut tx = conn_tx.lock().await;
+                        if let Some(sender) = tx.take() {
+                            let _ = sender.send(());
+                        }
+                        tracing::info!("WhatsApp: reconnected via existing session");
+                    }
+                    _ => {}
+                }
+            }
+        })
+        .build()
+        .await
+        .map_err(|e| {
+            super::error::ToolError::Internal(format!("Failed to create WhatsApp client: {}", e))
+        })?;
+
+    tokio::spawn(async move {
+        match bot.run().await {
+            Ok(handle) => {
+                if let Err(e) = handle.await {
+                    tracing::error!("WhatsApp reconnect bot task error: {:?}", e);
+                }
+            }
+            Err(e) => {
+                tracing::error!("WhatsApp reconnect bot run error: {}", e);
+            }
+        }
+    });
+
+    Ok(WhatsAppConnectHandle {
+        qr_rx,
+        connected_rx: conn_rx,
+        shared_client,
     })
 }
 

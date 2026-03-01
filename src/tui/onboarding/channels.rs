@@ -50,9 +50,20 @@ impl OnboardingWizard {
                         }
                         2 => {
                             self.step = OnboardingStep::WhatsAppSetup;
-                            self.whatsapp_field = WhatsAppField::Connection;
                             self.reset_whatsapp_state();
                             self.detect_existing_whatsapp_phone();
+                            // If already paired, drop the user on the phone field so they
+                            // can confirm or change the number without re-scanning QR.
+                            // Do NOT mark whatsapp_connected=true — no live client this session.
+                            // They can always BackTab to Connection and re-scan if needed.
+                            let session_db = crate::config::opencrabs_home()
+                                .join("whatsapp")
+                                .join("session.db");
+                            if session_db.exists() {
+                                self.whatsapp_field = WhatsAppField::PhoneAllowlist;
+                            } else {
+                                self.whatsapp_field = WhatsAppField::Connection;
+                            }
                         }
                         3 => {
                             self.step = OnboardingStep::SlackSetup;
@@ -271,20 +282,55 @@ impl OnboardingWizard {
     }
 
     pub(super) fn handle_whatsapp_setup_key(&mut self, event: KeyEvent) -> WizardAction {
+        // Navigation keys always work regardless of test status — user must be able
+        // to go back, re-scan, or skip at any point.
+        let is_nav = matches!(
+            event.code,
+            KeyCode::BackTab | KeyCode::Tab | KeyCode::Char('s') | KeyCode::Char('S')
+        );
+        if is_nav {
+            // Clear any test status so navigation doesn't get intercepted below
+            self.channel_test_status = ChannelTestStatus::Idle;
+        }
+
+        // Handle test status for Enter/result display — only on PhoneAllowlist field
+        if self.whatsapp_field == WhatsAppField::PhoneAllowlist && !is_nav {
+            match &self.channel_test_status {
+                ChannelTestStatus::Success => {
+                    if event.code == KeyCode::Enter {
+                        self.channel_test_status = ChannelTestStatus::Idle;
+                        self.next_step();
+                        return WizardAction::None;
+                    }
+                }
+                ChannelTestStatus::Failed(_) => {
+                    if event.code == KeyCode::Enter {
+                        self.channel_test_status = ChannelTestStatus::Idle;
+                        return WizardAction::TestWhatsApp;
+                    }
+                }
+                ChannelTestStatus::Testing => {
+                    // Block only Enter while test is in-flight; navigation already handled above
+                    if event.code == KeyCode::Enter {
+                        return WizardAction::None;
+                    }
+                }
+                ChannelTestStatus::Idle => {}
+            }
+        }
+
         match self.whatsapp_field {
             WhatsAppField::Connection => match event.code {
                 KeyCode::Enter => {
                     if self.whatsapp_connected {
-                        // Connected — move to phone field
                         self.whatsapp_field = WhatsAppField::PhoneAllowlist;
                         WizardAction::None
                     } else if !self.whatsapp_connecting {
-                        // Start connection
                         self.whatsapp_connecting = true;
                         self.whatsapp_error = None;
                         WizardAction::WhatsAppConnect
                     } else {
-                        WizardAction::None // already connecting, wait
+                        WizardAction::None
                     }
                 }
                 KeyCode::Tab => {
@@ -292,7 +338,6 @@ impl OnboardingWizard {
                     WizardAction::None
                 }
                 KeyCode::Char('s') | KeyCode::Char('S') => {
-                    // Skip — advance without connecting
                     self.next_step();
                     WizardAction::None
                 }
@@ -316,9 +361,25 @@ impl OnboardingWizard {
                 }
                 KeyCode::BackTab => {
                     self.whatsapp_field = WhatsAppField::Connection;
+                    self.whatsapp_connected = false;
+                    self.whatsapp_connecting = false;
+                    WizardAction::None
+                }
+                KeyCode::Tab => {
+                    // Tab from phone field wraps back to Connection
+                    self.whatsapp_field = WhatsAppField::Connection;
+                    self.whatsapp_connected = false;
+                    self.whatsapp_connecting = false;
+                    WizardAction::None
+                }
+                KeyCode::Char('s') | KeyCode::Char('S') => {
+                    self.next_step();
                     WizardAction::None
                 }
                 KeyCode::Enter => {
+                    if !self.whatsapp_phone_input.is_empty() {
+                        return WizardAction::TestWhatsApp;
+                    }
                     self.next_step();
                     WizardAction::None
                 }
@@ -333,6 +394,7 @@ impl OnboardingWizard {
         self.whatsapp_connecting = false;
         self.whatsapp_connected = false;
         self.whatsapp_error = None;
+        self.channel_test_status = ChannelTestStatus::Idle; // never carry over blocking state
     }
 
     /// Called by app when a QR code is received from the pairing flow
@@ -345,6 +407,9 @@ impl OnboardingWizard {
     pub fn set_whatsapp_connected(&mut self) {
         self.whatsapp_connected = true;
         self.whatsapp_connecting = false;
+        self.whatsapp_qr_text = None; // dismiss QR popup
+        self.whatsapp_field = WhatsAppField::PhoneAllowlist; // advance to phone field
+        self.channel_test_status = ChannelTestStatus::Idle;
     }
 
     /// Called by app when WhatsApp connection fails

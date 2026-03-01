@@ -1033,6 +1033,16 @@ impl App {
                     });
                 }
                 WizardAction::WhatsAppConnect => {
+                    // Reset the shared client slot so TestWhatsApp gets the new connection
+                    #[cfg(feature = "whatsapp")]
+                    let client_slot = {
+                        let slot = self.whatsapp_test_client.clone();
+                        // Clear any previous client
+                        if let Ok(mut guard) = slot.try_lock() {
+                            *guard = None;
+                        }
+                        slot
+                    };
                     let sender = self.event_sender();
                     tokio::spawn(async move {
                         // Timeout the pairing setup itself (may hang if session DB is locked)
@@ -1060,6 +1070,14 @@ impl App {
                                 .await
                                 {
                                     Ok(Ok(())) => {
+                                        // Capture client for test message
+                                        #[cfg(feature = "whatsapp")]
+                                        {
+                                            let mut src = handle.shared_client.lock().await;
+                                            if let Some(c) = src.take() {
+                                                *client_slot.lock().await = Some(c);
+                                            }
+                                        }
                                         let _ = sender.send(TuiEvent::WhatsAppConnected);
                                     }
                                     Ok(Err(_)) => {
@@ -1083,6 +1101,32 @@ impl App {
                                 ));
                             }
                         }
+                    });
+                }
+                WizardAction::TestWhatsApp => {
+                    wizard.channel_test_status = super::onboarding::ChannelTestStatus::Testing;
+                    let phone = if wizard.has_existing_whatsapp_phone() {
+                        crate::config::Config::load()
+                            .ok()
+                            .and_then(|c| c.channels.whatsapp.allowed_phones.first().cloned())
+                            .unwrap_or_default()
+                    } else {
+                        wizard.whatsapp_phone_input.clone()
+                    };
+                    #[cfg(feature = "whatsapp")]
+                    let client_slot = self.whatsapp_test_client.clone();
+                    let sender = self.event_sender();
+                    tokio::spawn(async move {
+                        #[cfg(feature = "whatsapp")]
+                        let result = test_whatsapp_connection(client_slot, &phone).await;
+                        #[cfg(not(feature = "whatsapp"))]
+                        let result: Result<(), String> =
+                            Err("WhatsApp feature not enabled".to_string());
+                        let _ = sender.send(TuiEvent::ChannelTestResult {
+                            channel: "whatsapp".to_string(),
+                            success: result.is_ok(),
+                            error: result.err(),
+                        });
                     });
                 }
                 WizardAction::TestTelegram => {
@@ -1605,4 +1649,71 @@ async fn test_slack_connection(token: &str, channel_id: &str) -> Result<(), Stri
 #[cfg(not(feature = "slack"))]
 async fn test_slack_connection(_token: &str, _channel_id: &str) -> Result<(), String> {
     Err("Slack feature not enabled".to_string())
+}
+
+/// Test WhatsApp connection by sending a message using the paired bot's client.
+#[cfg(feature = "whatsapp")]
+async fn test_whatsapp_connection(
+    client_slot: std::sync::Arc<
+        tokio::sync::Mutex<Option<std::sync::Arc<whatsapp_rust::client::Client>>>,
+    >,
+    phone: &str,
+) -> Result<(), String> {
+    let client = client_slot.lock().await.clone();
+    let client = match client {
+        Some(c) => c,
+        None => {
+            // No live client from this session — try reconnecting using existing session.db
+            let db_path = crate::config::opencrabs_home()
+                .join("whatsapp")
+                .join("session.db");
+            if !db_path.exists() {
+                return Err("WhatsApp not connected. Please scan the QR code first.".to_string());
+            }
+            let handle = crate::brain::tools::whatsapp_connect::reconnect_whatsapp()
+                .await
+                .map_err(|e| format!("WhatsApp reconnect failed: {e}"))?;
+            match tokio::time::timeout(std::time::Duration::from_secs(15), handle.connected_rx)
+                .await
+            {
+                Ok(Ok(())) => {
+                    let c =
+                        handle.shared_client.lock().await.take().ok_or_else(|| {
+                            "WhatsApp connected but client unavailable.".to_string()
+                        })?;
+                    *client_slot.lock().await = Some(c.clone());
+                    c
+                }
+                _ => {
+                    return Err(
+                        "WhatsApp reconnect timed out. Try re-scanning the QR code.".to_string()
+                    );
+                }
+            }
+        }
+    };
+
+    if phone.is_empty() {
+        return Err("No phone number provided.".to_string());
+    }
+
+    let jid_str = format!("{}@s.whatsapp.net", phone.trim_start_matches('+'));
+    let jid: wacore_binary::jid::Jid = jid_str
+        .parse()
+        .map_err(|e| format!("Invalid phone number format: {}", e))?;
+
+    let wa_msg = waproto::whatsapp::Message {
+        conversation: Some(format!(
+            "{}\n\nOpenCrabs connected! I'm living in your WhatsApp now. 🦀",
+            crate::channels::whatsapp::handler::MSG_HEADER
+        )),
+        ..Default::default()
+    };
+
+    client
+        .send_message(jid, wa_msg)
+        .await
+        .map_err(|e| format!("WhatsApp send error: {}", e))?;
+
+    Ok(())
 }
