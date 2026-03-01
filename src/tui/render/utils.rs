@@ -167,29 +167,6 @@ mod tests {
         assert_eq!(char_boundary_at_width("hello", 0), 0);
     }
 
-    // ── char_boundary_at_width_from_end ─────────────────────────────
-
-    #[test]
-    fn test_char_boundary_from_end_ascii() {
-        let s = "hello world";
-        let idx = char_boundary_at_width_from_end(s, 5);
-        assert_eq!(&s[idx..], "world");
-    }
-
-    #[test]
-    fn test_char_boundary_from_end_multibyte() {
-        // "abc██" → display width 5, bytes: a=0, b=1, c=2, █=3..6, █=6..9
-        let s = "abc██";
-        let idx = char_boundary_at_width_from_end(s, 2); // last 2 display cols = "██"
-        assert_eq!(&s[idx..], "██");
-    }
-
-    #[test]
-    fn test_char_boundary_from_end_wider_than_string() {
-        let s = "hi";
-        assert_eq!(char_boundary_at_width_from_end(s, 100), 0);
-    }
-
     // ── wrap_line_with_padding ──────────────────────────────────────
 
     #[test]

@@ -21,6 +21,8 @@ pub struct DiscordState {
     owner_channel_id: Mutex<Option<u64>>,
     /// Bot's own user ID — set on ready, used for @mention detection
     bot_user_id: Mutex<Option<u64>>,
+    /// Guild ID of the last guild message — needed for guild-scoped actions
+    guild_id: Mutex<Option<u64>>,
 }
 
 impl Default for DiscordState {
@@ -35,6 +37,7 @@ impl DiscordState {
             http: Mutex::new(None),
             owner_channel_id: Mutex::new(None),
             bot_user_id: Mutex::new(None),
+            guild_id: Mutex::new(None),
         }
     }
 
@@ -69,6 +72,16 @@ impl DiscordState {
     /// Get the bot's user ID for @mention detection.
     pub async fn bot_user_id(&self) -> Option<u64> {
         *self.bot_user_id.lock().await
+    }
+
+    /// Store the guild ID from an incoming guild message.
+    pub async fn set_guild_id(&self, id: u64) {
+        *self.guild_id.lock().await = Some(id);
+    }
+
+    /// Get the last-seen guild ID for guild-scoped actions.
+    pub async fn guild_id(&self) -> Option<u64> {
+        *self.guild_id.lock().await
     }
 
     /// Check if Discord is currently connected.

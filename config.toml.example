@@ -113,24 +113,28 @@ model = "gpt-4o-mini-tts" # TTS model
 enabled = false
 # Phone numbers allowed to message the bot (E.164 format, leading + optional)
 allowed_phones = ["+15551234567"]
+# session_idle_hours = 24.0             # Archive inactive non-owner sessions after N hours (default: never)
 
 [channels.discord]
 enabled = false
 allowed_channels = ["channel_id"]       # Where the bot operates (empty = all channels)
 allowed_users = [123456789012345]        # Who the bot replies to (numeric user ID, empty = everyone)
 # respond_to = "all"                    # "all" | "dm_only" | "mention"
+# session_idle_hours = 24.0             # Archive inactive non-owner sessions after N hours (default: never)
 
 [channels.telegram]
 enabled = false
 allowed_users = [123456789]             # Who the bot replies to (numeric user ID, empty = everyone)
 # allowed_channels = ["-100123456789"]  # Chat/group IDs to restrict to (empty = all chats)
 # respond_to = "all"                    # "all" | "dm_only" | "mention"
+# session_idle_hours = 24.0             # Archive inactive non-owner sessions after N hours (default: never)
 
 [channels.slack]
 enabled = false
 allowed_channels = ["C12345678"]        # Where the bot operates (Slack channel ID, empty = all)
 allowed_ids = ["U12345678"]             # Who the bot replies to (Slack user ID, empty = everyone)
 # respond_to = "all"                    # "all" | "dm_only" | "mention"
+# session_idle_hours = 24.0             # Archive inactive non-owner sessions after N hours (default: never)
 
 # ========================================
 # Trello — board card management
@@ -147,6 +151,7 @@ enabled = false
 allowed_channels = ["your-board-name", "abc123def456abc123def456"]
 allowed_users = []                      # Trello member IDs allowed to @mention the bot (empty = all)
 # poll_interval_secs = 30              # Opt-in: poll boards every N seconds for @mentions. Default = disabled.
+# session_idle_hours = 24.0             # Archive inactive non-owner sessions after N hours (default: never)
 
 # ========================================
 # Agent-to-Agent (A2A) Protocol

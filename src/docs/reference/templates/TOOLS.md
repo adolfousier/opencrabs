@@ -40,10 +40,15 @@ Use these **exact parameter names** when calling tools:
 | `session_context` | `operation` | `key`, `value` |
 | `trello_connect` | `api_key`, `api_token`, `boards` | `allowed_users` |
 | `trello_send` | `action` | `board_id`, `list_name`, `card_id`, `title`, `description`, `text`, `position`, `pattern`, `member_id`, `label_id`, `due_date`, `due_complete`, `checklist_id`, `item_id`, `complete`, `query`, `read_filter`, `limit` |
+| `discord_connect` | `token`, `allowed_users` | `channel_id` |
+| `discord_send` | `action` | `message`, `channel_id`, `message_id`, `emoji`, `embed_title`, `embed_description`, `embed_color`, `thread_name`, `user_id`, `role_id`, `limit` |
 
 > **Note:** `grep` and `glob` use `pattern` (not `query`). `bash` uses `command` (not `cmd`). File tools use `path` (not `file` or `file_path`).
 > **Trello:** `trello_connect` `boards` is an array of board names or IDs. Always use `trello_send` instead of `http_request` for Trello — credentials are handled securely without exposing them in URLs.
 > **`trello_send` actions (21):** `add_comment`, `create_card`, `move_card`, `find_cards`, `list_boards`, `get_card`, `get_card_comments`, `update_card`, `archive_card`, `add_member_to_card`, `remove_member_from_card`, `add_label_to_card`, `remove_label_from_card`, `add_checklist`, `add_checklist_item`, `complete_checklist_item`, `list_lists`, `get_board_members`, `search`, `get_notifications`, `mark_notifications_read`
+> **Discord:** `discord_connect` `allowed_users` is an array of numeric Discord user IDs. Always use `discord_send` instead of `http_request` for Discord — credentials are handled securely.
+> **`discord_send` actions (16):** `send`, `reply`, `react`, `unreact`, `edit`, `delete`, `pin`, `unpin`, `create_thread`, `send_embed`, `get_messages`, `list_channels`, `add_role`, `remove_role`, `kick`, `ban`
+> **Guild-required actions:** `list_channels`, `add_role`, `remove_role`, `kick`, `ban` — these need the bot to have received at least one guild message first so the guild_id is available.
 
 ## What Goes Here
 
@@ -145,7 +150,7 @@ The first provider with `enabled = true` (in config file order) is used for new 
 OpenCrabs can connect to messaging platforms. Configure in `~/.opencrabs/config.toml`:
 
 - **Telegram** — Create a bot via @BotFather, add token to config `[channels.telegram]`
-- **Discord** — Create a bot at discord.com/developers (enable MESSAGE CONTENT intent), add token to config `[channels.discord]`
+- **Discord** — Create a bot at discord.com/developers (enable MESSAGE CONTENT intent), add token to config `[channels.discord]`. Use `discord_connect` to set up at runtime, `discord_send` (16 actions) for full proactive control. **Always use `discord_send` instead of `http_request`** — keeps credentials out of URLs.
 - **WhatsApp** — Link via QR code pairing, configure `[channels.whatsapp]` with allowed phone numbers
 - **Slack** — Create an app at api.slack.com/apps (enable Socket Mode), add tokens to config `[channels.slack]`
 - **Trello** — Get API Key + Token at trello.com/power-ups/admin, configure `[channels.trello]` with board names/IDs to monitor. Polls every 30 s for new card comments, replies back as card comments. Use `trello_connect` to set up at runtime, `trello_send` (21 actions) for full proactive card/board management. **Always use `trello_send` instead of `http_request`** — keeps credentials out of URLs.

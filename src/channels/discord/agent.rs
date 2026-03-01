@@ -28,6 +28,7 @@ pub struct DiscordAgent {
     discord_state: Arc<DiscordState>,
     respond_to: RespondTo,
     allowed_channels: Vec<String>,
+    idle_timeout_hours: Option<f64>,
 }
 
 impl DiscordAgent {
@@ -42,6 +43,7 @@ impl DiscordAgent {
         discord_state: Arc<DiscordState>,
         respond_to: RespondTo,
         allowed_channels: Vec<String>,
+        idle_timeout_hours: Option<f64>,
     ) -> Self {
         Self {
             agent_service,
@@ -53,6 +55,7 @@ impl DiscordAgent {
             discord_state,
             respond_to,
             allowed_channels,
+            idle_timeout_hours,
         }
     }
 
@@ -78,7 +81,7 @@ impl DiscordAgent {
                     .filter_map(|s| s.parse().ok())
                     .collect(),
             );
-            let extra_sessions: Arc<Mutex<HashMap<u64, Uuid>>> =
+            let extra_sessions: Arc<Mutex<HashMap<u64, (Uuid, std::time::Instant)>>> =
                 Arc::new(Mutex::new(HashMap::new()));
 
             let allowed_channels: HashSet<String> = self.allowed_channels.into_iter().collect();
@@ -97,6 +100,7 @@ impl DiscordAgent {
                 allowed_channels: Arc::new(allowed_channels),
                 voice_config,
                 openai_key,
+                idle_timeout_hours: self.idle_timeout_hours,
             };
 
             let intents = GatewayIntents::GUILD_MESSAGES
@@ -126,13 +130,14 @@ struct Handler {
     agent: Arc<AgentService>,
     session_svc: SessionService,
     allowed: Arc<HashSet<i64>>,
-    extra_sessions: Arc<Mutex<HashMap<u64, Uuid>>>,
+    extra_sessions: Arc<Mutex<HashMap<u64, (Uuid, std::time::Instant)>>>,
     shared_session: Arc<Mutex<Option<Uuid>>>,
     discord_state: Arc<DiscordState>,
     respond_to: RespondTo,
     allowed_channels: Arc<HashSet<String>>,
     voice_config: Arc<VoiceConfig>,
     openai_key: Arc<Option<String>>,
+    idle_timeout_hours: Option<f64>,
 }
 
 #[async_trait]
@@ -170,6 +175,7 @@ impl EventHandler for Handler {
             &self.allowed_channels,
             self.voice_config.clone(),
             self.openai_key.clone(),
+            self.idle_timeout_hours,
         )
         .await;
     }

@@ -20,7 +20,7 @@ pub(crate) async fn handle_message(
     agent: Arc<AgentService>,
     session_svc: SessionService,
     allowed: Arc<HashSet<i64>>,
-    extra_sessions: Arc<Mutex<HashMap<i64, Uuid>>>,
+    extra_sessions: Arc<Mutex<HashMap<i64, (Uuid, std::time::Instant)>>>,
     voice_config: Arc<VoiceConfig>,
     openai_key: Arc<Option<String>>,
     bot_token: Arc<String>,
@@ -28,6 +28,7 @@ pub(crate) async fn handle_message(
     telegram_state: Arc<TelegramState>,
     respond_to: &RespondTo,
     allowed_channels: &HashSet<String>,
+    idle_timeout_hours: Option<f64>,
 ) -> ResponseResult<()> {
     let user = match msg.from {
         Some(ref u) => u,
@@ -377,13 +378,16 @@ pub(crate) async fn handle_message(
     } else {
         // Non-owner users get their own separate sessions
         let mut map = extra_sessions.lock().await;
-        match map.get(&user_id) {
-            Some(id) => *id,
-            None => {
+        if let Some((old_id, last_activity)) = map.get(&user_id).copied() {
+            if idle_timeout_hours
+                .is_some_and(|h| last_activity.elapsed().as_secs() > (h * 3600.0) as u64)
+            {
+                let _ = session_svc.archive_session(old_id).await;
+                map.remove(&user_id);
                 let title = format!("Telegram: {}", user.first_name);
                 match session_svc.create_session(Some(title)).await {
                     Ok(session) => {
-                        map.insert(user_id, session.id);
+                        map.insert(user_id, (session.id, std::time::Instant::now()));
                         session.id
                     }
                     Err(e) => {
@@ -392,6 +396,23 @@ pub(crate) async fn handle_message(
                             .await?;
                         return Ok(());
                     }
+                }
+            } else {
+                map.insert(user_id, (old_id, std::time::Instant::now()));
+                old_id
+            }
+        } else {
+            let title = format!("Telegram: {}", user.first_name);
+            match session_svc.create_session(Some(title)).await {
+                Ok(session) => {
+                    map.insert(user_id, (session.id, std::time::Instant::now()));
+                    session.id
+                }
+                Err(e) => {
+                    tracing::error!("Telegram: failed to create session: {}", e);
+                    bot.send_message(msg.chat.id, "Internal error creating session.")
+                        .await?;
+                    return Ok(());
                 }
             }
         }

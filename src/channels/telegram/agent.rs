@@ -25,6 +25,7 @@ pub struct TelegramAgent {
     telegram_state: Arc<TelegramState>,
     respond_to: RespondTo,
     allowed_channels: HashSet<String>,
+    idle_timeout_hours: Option<f64>,
 }
 
 impl TelegramAgent {
@@ -39,6 +40,7 @@ impl TelegramAgent {
         telegram_state: Arc<TelegramState>,
         respond_to: RespondTo,
         allowed_channels: Vec<String>,
+        idle_timeout_hours: Option<f64>,
     ) -> Self {
         Self {
             agent_service,
@@ -53,6 +55,7 @@ impl TelegramAgent {
             telegram_state,
             respond_to,
             allowed_channels: allowed_channels.into_iter().collect(),
+            idle_timeout_hours,
         }
     }
 
@@ -115,7 +118,7 @@ impl TelegramAgent {
             }
 
             // Per-user session tracking for non-owner users (owner shares TUI session)
-            let extra_sessions: Arc<Mutex<HashMap<i64, Uuid>>> =
+            let extra_sessions: Arc<Mutex<HashMap<i64, (Uuid, std::time::Instant)>>> =
                 Arc::new(Mutex::new(HashMap::new()));
             let agent = self.agent_service.clone();
             let session_svc = self.session_service.clone();
@@ -127,6 +130,7 @@ impl TelegramAgent {
             let telegram_state = self.telegram_state.clone();
             let respond_to = Arc::new(self.respond_to);
             let allowed_channels: Arc<HashSet<String>> = Arc::new(self.allowed_channels);
+            let idle_timeout_hours = self.idle_timeout_hours;
 
             let handler = Update::filter_message().endpoint(move |bot: Bot, msg: Message| {
                 let agent = agent.clone();
@@ -155,6 +159,7 @@ impl TelegramAgent {
                         telegram_state,
                         &respond_to,
                         &allowed_channels,
+                        idle_timeout_hours,
                     )
                     .await
                 }

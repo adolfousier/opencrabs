@@ -26,6 +26,7 @@ pub struct WhatsAppAgent {
     voice_config: VoiceConfig,
     shared_session_id: Arc<Mutex<Option<Uuid>>>,
     whatsapp_state: Arc<WhatsAppState>,
+    idle_timeout_hours: Option<f64>,
 }
 
 impl WhatsAppAgent {
@@ -36,6 +37,7 @@ impl WhatsAppAgent {
         voice_config: VoiceConfig,
         shared_session_id: Arc<Mutex<Option<Uuid>>>,
         whatsapp_state: Arc<WhatsAppState>,
+        idle_timeout_hours: Option<f64>,
     ) -> Self {
         Self {
             agent_service,
@@ -44,6 +46,7 @@ impl WhatsAppAgent {
             voice_config,
             shared_session_id,
             whatsapp_state,
+            idle_timeout_hours,
         }
     }
 
@@ -104,7 +107,8 @@ impl WhatsAppAgent {
             let shared_session = self.shared_session_id.clone();
             let wa_state = self.whatsapp_state.clone();
             let owner_jid_clone = owner_jid.clone();
-            let extra_sessions: Arc<Mutex<HashMap<String, Uuid>>> =
+            let idle_timeout_hours = self.idle_timeout_hours;
+            let extra_sessions: Arc<Mutex<HashMap<String, (Uuid, std::time::Instant)>>> =
                 Arc::new(Mutex::new(HashMap::new()));
 
             let bot_result = Bot::builder()
@@ -150,6 +154,7 @@ impl WhatsAppAgent {
                                     extra_sessions,
                                     voice_config,
                                     shared_session,
+                                    idle_timeout_hours,
                                 )
                                 .await;
                             }

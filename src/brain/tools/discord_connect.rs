@@ -124,6 +124,10 @@ impl Tool for DiscordConnectTool {
             .map(|c| c.channels.discord.allowed_channels.clone())
             .unwrap_or_default();
 
+        let idle_timeout_hours = cfg
+            .as_ref()
+            .and_then(|c| c.channels.discord.session_idle_hours);
+
         let dc_agent = crate::channels::discord::DiscordAgent::new(
             agent,
             service_context,
@@ -134,6 +138,7 @@ impl Tool for DiscordConnectTool {
             discord_state.clone(),
             respond_to,
             allowed_channels,
+            idle_timeout_hours,
         );
 
         let _handle = dc_agent.start(token);

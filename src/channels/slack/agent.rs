@@ -23,9 +23,11 @@ pub struct SlackAgent {
     slack_state: Arc<SlackState>,
     respond_to: RespondTo,
     allowed_channels: Vec<String>,
+    idle_timeout_hours: Option<f64>,
 }
 
 impl SlackAgent {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         agent_service: Arc<AgentService>,
         service_context: ServiceContext,
@@ -34,6 +36,7 @@ impl SlackAgent {
         slack_state: Arc<SlackState>,
         respond_to: RespondTo,
         allowed_channels: Vec<String>,
+        idle_timeout_hours: Option<f64>,
     ) -> Self {
         Self {
             agent_service,
@@ -43,6 +46,7 @@ impl SlackAgent {
             slack_state,
             respond_to,
             allowed_channels,
+            idle_timeout_hours,
         }
     }
 
@@ -109,6 +113,7 @@ impl SlackAgent {
                 respond_to: self.respond_to,
                 allowed_channels: Arc::new(self.allowed_channels.into_iter().collect()),
                 bot_user_id,
+                idle_timeout_hours: self.idle_timeout_hours,
             };
             handler::HANDLER_STATE
                 .set(Arc::new(handler_state))

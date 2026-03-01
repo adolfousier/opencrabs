@@ -354,7 +354,10 @@ impl Tool for WhatsAppConnectTool {
         let allowed: Arc<HashSet<String>> = Arc::new(allowed_phones.iter().cloned().collect());
         let voice_config = Arc::new(factory.voice_config().clone());
         let shared_session = factory.shared_session_id();
-        let extra_sessions: Arc<Mutex<HashMap<String, uuid::Uuid>>> =
+        let idle_timeout_hours = crate::config::Config::load()
+            .ok()
+            .and_then(|c| c.channels.whatsapp.session_idle_hours);
+        let extra_sessions: Arc<Mutex<HashMap<String, (uuid::Uuid, std::time::Instant)>>> =
             Arc::new(Mutex::new(HashMap::new()));
 
         // 4. Build bot with combined event handler (QR + Connected + Messages)
@@ -377,6 +380,7 @@ impl Tool for WhatsAppConnectTool {
                 let allowed = allowed.clone();
                 let extra_sessions = extra_sessions.clone();
                 let voice_config = voice_config.clone();
+                let idle_timeout_hours = idle_timeout_hours;
                 let shared_session = shared_session.clone();
                 let wa_state = wa_state.clone();
                 let owner_jid = owner_jid.clone();
@@ -408,6 +412,7 @@ impl Tool for WhatsAppConnectTool {
                                 extra_sessions,
                                 voice_config,
                                 shared_session,
+                                idle_timeout_hours,
                             )
                             .await;
                         }

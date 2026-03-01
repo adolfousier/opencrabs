@@ -13,7 +13,6 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-
 /// Background agent that polls Trello boards for new card comments.
 pub struct TrelloAgent {
     agent_service: Arc<AgentService>,
@@ -24,6 +23,7 @@ pub struct TrelloAgent {
     board_ids: Vec<String>,
     /// Polling interval in seconds. None or 0 = no polling (tool-only mode).
     poll_interval_secs: Option<u64>,
+    idle_timeout_hours: Option<f64>,
 }
 
 impl TrelloAgent {
@@ -36,6 +36,7 @@ impl TrelloAgent {
         trello_state: Arc<TrelloState>,
         board_ids: Vec<String>,
         poll_interval_secs: Option<u64>,
+        idle_timeout_hours: Option<f64>,
     ) -> Self {
         Self {
             agent_service,
@@ -45,6 +46,7 @@ impl TrelloAgent {
             trello_state,
             board_ids,
             poll_interval_secs,
+            idle_timeout_hours,
         }
     }
 
@@ -96,7 +98,8 @@ impl TrelloAgent {
             );
 
             let session_svc = SessionService::new(self.service_context.clone());
-            let extra_sessions: Arc<Mutex<HashMap<String, Uuid>>> =
+            let idle_timeout_hours = self.idle_timeout_hours;
+            let extra_sessions: Arc<Mutex<HashMap<String, (Uuid, std::time::Instant)>>> =
                 Arc::new(Mutex::new(HashMap::new()));
 
             // Owner = first allowed_user (shares TUI session)
@@ -143,9 +146,7 @@ impl TrelloAgent {
                         // Only respond when the bot is explicitly @mentioned
                         let mention = format!("@{}", bot_member.username);
                         if !action.data.text.contains(&mention) {
-                            tracing::debug!(
-                                "Trello: skipping comment — bot not @mentioned"
-                            );
+                            tracing::debug!("Trello: skipping comment — bot not @mentioned");
                             continue;
                         }
 
@@ -168,6 +169,7 @@ impl TrelloAgent {
                             self.shared_session_id.clone(),
                             extra_sessions.clone(),
                             owner_member_id.as_deref(),
+                            idle_timeout_hours,
                         )
                         .await;
                     }

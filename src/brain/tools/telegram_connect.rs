@@ -117,6 +117,10 @@ impl Tool for TelegramConnectTool {
             .map(|c| c.channels.telegram.allowed_channels.clone())
             .unwrap_or_default();
 
+        let idle_timeout_hours = cfg
+            .as_ref()
+            .and_then(|c| c.channels.telegram.session_idle_hours);
+
         let tg_agent = crate::channels::telegram::TelegramAgent::new(
             agent,
             service_context,
@@ -127,6 +131,7 @@ impl Tool for TelegramConnectTool {
             telegram_state.clone(),
             respond_to,
             allowed_channels,
+            idle_timeout_hours,
         );
 
         let _handle = tg_agent.start(token);

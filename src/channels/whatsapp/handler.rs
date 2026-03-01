@@ -180,9 +180,10 @@ pub(crate) async fn handle_message(
     agent: Arc<AgentService>,
     session_svc: SessionService,
     allowed: Arc<HashSet<String>>,
-    extra_sessions: Arc<Mutex<HashMap<String, Uuid>>>,
+    extra_sessions: Arc<Mutex<HashMap<String, (Uuid, std::time::Instant)>>>,
     voice_config: Arc<VoiceConfig>,
     shared_session: Arc<Mutex<Option<Uuid>>>,
+    idle_timeout_hours: Option<f64>,
 ) {
     let phone = sender_phone(&info);
     tracing::debug!(
@@ -304,19 +305,37 @@ pub(crate) async fn handle_message(
         }
     } else {
         let mut map = extra_sessions.lock().await;
-        match map.get(&phone) {
-            Some(id) => *id,
-            None => {
+        if let Some((old_id, last_activity)) = map.get(&phone).copied() {
+            if idle_timeout_hours
+                .is_some_and(|h| last_activity.elapsed().as_secs() > (h * 3600.0) as u64)
+            {
+                let _ = session_svc.archive_session(old_id).await;
+                map.remove(&phone);
                 let title = format!("WhatsApp: {}", phone);
                 match session_svc.create_session(Some(title)).await {
                     Ok(session) => {
-                        map.insert(phone.clone(), session.id);
+                        map.insert(phone.clone(), (session.id, std::time::Instant::now()));
                         session.id
                     }
                     Err(e) => {
                         tracing::error!("WhatsApp: failed to create session: {}", e);
                         return;
                     }
+                }
+            } else {
+                map.insert(phone.clone(), (old_id, std::time::Instant::now()));
+                old_id
+            }
+        } else {
+            let title = format!("WhatsApp: {}", phone);
+            match session_svc.create_session(Some(title)).await {
+                Ok(session) => {
+                    map.insert(phone.clone(), (session.id, std::time::Instant::now()));
+                    session.id
+                }
+                Err(e) => {
+                    tracing::error!("WhatsApp: failed to create session: {}", e);
+                    return;
                 }
             }
         }

@@ -570,6 +570,7 @@ pub(crate) async fn cmd_chat(
                     telegram_state.clone(),
                     tg.respond_to.clone(),
                     tg.allowed_channels.clone(),
+                    tg.session_idle_hours,
                 );
                 tracing::info!(
                     "Spawning Telegram bot ({} allowed users)",
@@ -597,6 +598,7 @@ pub(crate) async fn cmd_chat(
                 channel_factory.voice_config().clone(),
                 app.shared_session_id(),
                 whatsapp_state.clone(),
+                wa.session_idle_hours,
             );
             tracing::info!(
                 "Spawning WhatsApp agent ({} allowed phones)",
@@ -637,6 +639,7 @@ pub(crate) async fn cmd_chat(
                     discord_state.clone(),
                     dc.respond_to.clone(),
                     dc.allowed_channels.clone(),
+                    dc.session_idle_hours,
                 );
                 tracing::info!(
                     "Spawning Discord bot ({} allowed users)",
@@ -676,6 +679,7 @@ pub(crate) async fn cmd_chat(
                     slack_state.clone(),
                     sl.respond_to.clone(),
                     sl.allowed_channels.clone(),
+                    sl.session_idle_hours,
                 );
                 tracing::info!(
                     "Spawning Slack bot ({} allowed user(s))",
@@ -714,6 +718,7 @@ pub(crate) async fn cmd_chat(
                     trello_state.clone(),
                     board_ids,
                     tr.poll_interval_secs,
+                    tr.session_idle_hours,
                 );
                 tracing::info!(
                     "Spawning Trello agent ({} board(s), {} allowed user(s), poll={}s)",

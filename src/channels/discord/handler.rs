@@ -47,13 +47,14 @@ pub(crate) async fn handle_message(
     agent: Arc<AgentService>,
     session_svc: SessionService,
     allowed: Arc<HashSet<i64>>,
-    extra_sessions: Arc<Mutex<HashMap<u64, Uuid>>>,
+    extra_sessions: Arc<Mutex<HashMap<u64, (Uuid, std::time::Instant)>>>,
     shared_session: Arc<Mutex<Option<Uuid>>>,
     discord_state: Arc<DiscordState>,
     respond_to: &RespondTo,
     allowed_channels: &HashSet<String>,
     voice_config: Arc<VoiceConfig>,
     openai_key: Arc<Option<String>>,
+    idle_timeout_hours: Option<f64>,
 ) {
     let user_id = msg.author.id.get() as i64;
 
@@ -178,6 +179,11 @@ pub(crate) async fn handle_message(
         discord_state.set_owner_channel(msg.channel_id.get()).await;
     }
 
+    // Track guild ID for guild-scoped actions (kick, ban, roles, list_channels)
+    if let Some(guild_id) = msg.guild_id {
+        discord_state.set_guild_id(guild_id.get()).await;
+    }
+
     // Resolve session: owner shares TUI session, others get per-user sessions
     let session_id = if is_owner {
         let shared = shared_session.lock().await;
@@ -201,19 +207,37 @@ pub(crate) async fn handle_message(
     } else {
         let mut map = extra_sessions.lock().await;
         let disc_user_id = msg.author.id.get();
-        match map.get(&disc_user_id) {
-            Some(id) => *id,
-            None => {
+        if let Some((old_id, last_activity)) = map.get(&disc_user_id).copied() {
+            if idle_timeout_hours
+                .is_some_and(|h| last_activity.elapsed().as_secs() > (h * 3600.0) as u64)
+            {
+                let _ = session_svc.archive_session(old_id).await;
+                map.remove(&disc_user_id);
                 let title = format!("Discord: {}", msg.author.name);
                 match session_svc.create_session(Some(title)).await {
                     Ok(session) => {
-                        map.insert(disc_user_id, session.id);
+                        map.insert(disc_user_id, (session.id, std::time::Instant::now()));
                         session.id
                     }
                     Err(e) => {
                         tracing::error!("Discord: failed to create session: {}", e);
                         return;
                     }
+                }
+            } else {
+                map.insert(disc_user_id, (old_id, std::time::Instant::now()));
+                old_id
+            }
+        } else {
+            let title = format!("Discord: {}", msg.author.name);
+            match session_svc.create_session(Some(title)).await {
+                Ok(session) => {
+                    map.insert(disc_user_id, (session.id, std::time::Instant::now()));
+                    session.id
+                }
+                Err(e) => {
+                    tracing::error!("Discord: failed to create session: {}", e);
+                    return;
                 }
             }
         }

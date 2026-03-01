@@ -186,6 +186,10 @@ impl Tool for TrelloConnectTool {
         let shared_session = factory.shared_session_id();
         let trello_state = self.trello_state.clone();
 
+        let idle_timeout_hours = crate::config::Config::load()
+            .ok()
+            .and_then(|c| c.channels.trello.session_idle_hours);
+
         let trello_agent = crate::channels::trello::TrelloAgent::new(
             agent_svc,
             service_ctx,
@@ -194,6 +198,7 @@ impl Tool for TrelloConnectTool {
             trello_state.clone(),
             board_ids,
             None, // no polling by default — tool-only mode
+            idle_timeout_hours,
         );
 
         let _handle = trello_agent.start(api_key, api_token);

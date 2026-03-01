@@ -224,6 +224,11 @@ pub struct ChannelConfig {
     /// When set, the agent polls for @mentions on monitored boards at this interval.
     #[serde(default)]
     pub poll_interval_secs: Option<u64>,
+    /// Idle session timeout in hours for non-owner channel sessions.
+    /// When inactive for this long, the session is archived and a fresh one is created
+    /// on the next message. None = never expire (default).
+    #[serde(default)]
+    pub session_idle_hours: Option<f64>,
 }
 
 /// Voice processing configuration (STT + TTS)

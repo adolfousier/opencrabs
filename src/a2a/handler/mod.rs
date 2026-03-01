@@ -76,25 +76,10 @@ pub async fn dispatch(
 mod tests {
     use super::*;
 
-    fn make_send_request() -> JsonRpcRequest {
-        JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
-            method: "message/send".to_string(),
-            params: serde_json::json!({
-                "message": {
-                    "role": "user",
-                    "parts": [{"text": "Hello, agent!"}]
-                }
-            }),
-            id: serde_json::json!(1),
-        }
-    }
-
     // tasks/get and tasks/cancel tests don't need AgentService
     #[tokio::test]
     async fn test_get_task_not_found() {
         let store = new_task_store();
-        let cancel_store = new_cancel_store();
         let req = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             method: "tasks/get".to_string(),

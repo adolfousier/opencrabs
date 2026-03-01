@@ -12,14 +12,16 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 /// Process a single Trello card comment: route to AI and post the response back.
+#[allow(clippy::too_many_arguments)]
 pub async fn process_comment(
     comment: &Action,
     client: &TrelloClient,
     agent: Arc<AgentService>,
     session_svc: SessionService,
     shared_session: Arc<Mutex<Option<Uuid>>>,
-    extra_sessions: Arc<Mutex<HashMap<String, Uuid>>>,
+    extra_sessions: Arc<Mutex<HashMap<String, (Uuid, std::time::Instant)>>>,
     owner_member_id: Option<&str>,
+    idle_timeout_hours: Option<f64>,
 ) {
     let card_id = match &comment.data.card {
         Some(c) => c.id.clone(),
@@ -71,13 +73,17 @@ pub async fn process_comment(
         }
     } else {
         let mut map = extra_sessions.lock().await;
-        match map.get(commenter_id.as_str()) {
-            Some(id) => *id,
-            None => {
+        let key = commenter_id.as_str();
+        if let Some((old_id, last_activity)) = map.get(key).copied() {
+            if idle_timeout_hours
+                .is_some_and(|h| last_activity.elapsed().as_secs() > (h * 3600.0) as u64)
+            {
+                let _ = session_svc.archive_session(old_id).await;
+                map.remove(key);
                 let title = format!("Trello: {}", commenter_name);
                 match session_svc.create_session(Some(title)).await {
                     Ok(s) => {
-                        map.insert(commenter_id.clone(), s.id);
+                        map.insert(commenter_id.clone(), (s.id, std::time::Instant::now()));
                         s.id
                     }
                     Err(e) => {
@@ -88,6 +94,25 @@ pub async fn process_comment(
                         );
                         return;
                     }
+                }
+            } else {
+                map.insert(commenter_id.clone(), (old_id, std::time::Instant::now()));
+                old_id
+            }
+        } else {
+            let title = format!("Trello: {}", commenter_name);
+            match session_svc.create_session(Some(title)).await {
+                Ok(s) => {
+                    map.insert(commenter_id.clone(), (s.id, std::time::Instant::now()));
+                    s.id
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "Trello: failed to create session for {}: {}",
+                        commenter_name,
+                        e
+                    );
+                    return;
                 }
             }
         }

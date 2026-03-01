@@ -24,13 +24,14 @@ pub struct HandlerState {
     pub agent: Arc<AgentService>,
     pub session_svc: SessionService,
     pub allowed: Arc<HashSet<String>>,
-    pub extra_sessions: Arc<Mutex<HashMap<String, Uuid>>>,
+    pub extra_sessions: Arc<Mutex<HashMap<String, (Uuid, std::time::Instant)>>>,
     pub shared_session: Arc<Mutex<Option<Uuid>>>,
     pub slack_state: Arc<SlackState>,
     pub bot_token: String,
     pub respond_to: RespondTo,
     pub allowed_channels: Arc<HashSet<String>>,
     pub bot_user_id: Option<String>,
+    pub idle_timeout_hours: Option<f64>,
 }
 
 /// Split a message into chunks that fit Slack's limit (conservative 3000 chars).
@@ -236,19 +237,38 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         }
     } else {
         let mut map = state.extra_sessions.lock().await;
-        match map.get(&user_id) {
-            Some(id) => *id,
-            None => {
+        if let Some((old_id, last_activity)) = map.get(&user_id).copied() {
+            if state
+                .idle_timeout_hours
+                .is_some_and(|h| last_activity.elapsed().as_secs() > (h * 3600.0) as u64)
+            {
+                let _ = state.session_svc.archive_session(old_id).await;
+                map.remove(&user_id);
                 let title = format!("Slack: {}", user_id);
                 match state.session_svc.create_session(Some(title)).await {
                     Ok(session) => {
-                        map.insert(user_id.clone(), session.id);
+                        map.insert(user_id.clone(), (session.id, std::time::Instant::now()));
                         session.id
                     }
                     Err(e) => {
                         tracing::error!("Slack: failed to create session: {}", e);
                         return;
                     }
+                }
+            } else {
+                map.insert(user_id.clone(), (old_id, std::time::Instant::now()));
+                old_id
+            }
+        } else {
+            let title = format!("Slack: {}", user_id);
+            match state.session_svc.create_session(Some(title)).await {
+                Ok(session) => {
+                    map.insert(user_id.clone(), (session.id, std::time::Instant::now()));
+                    session.id
+                }
+                Err(e) => {
+                    tracing::error!("Slack: failed to create session: {}", e);
+                    return;
                 }
             }
         }

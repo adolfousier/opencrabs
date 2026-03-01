@@ -146,6 +146,10 @@ impl Tool for SlackConnectTool {
             .map(|c| c.channels.slack.allowed_channels.clone())
             .unwrap_or_default();
 
+        let idle_timeout_hours = cfg
+            .as_ref()
+            .and_then(|c| c.channels.slack.session_idle_hours);
+
         let sl_agent = crate::channels::slack::SlackAgent::new(
             agent,
             service_context,
@@ -154,6 +158,7 @@ impl Tool for SlackConnectTool {
             slack_state.clone(),
             respond_to,
             allowed_channels,
+            idle_timeout_hours,
         );
 
         let _handle = sl_agent.start(bot_token, app_token);
