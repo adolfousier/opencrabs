@@ -399,7 +399,7 @@ pub(crate) async fn handle_message(
 
     match result {
         Ok(response) => {
-            let reply_jid = info.source.sender.clone();
+            let reply_jid = info.source.chat.clone();
             let tagged = format!("{}\n\n{}", MSG_HEADER, response.content);
             for chunk in split_message(&tagged, 4000) {
                 let reply_msg = waproto::whatsapp::Message {
@@ -418,7 +418,7 @@ pub(crate) async fn handle_message(
                 ..Default::default()
             };
             let _ = client
-                .send_message(info.source.sender.clone(), error_msg)
+                .send_message(info.source.chat.clone(), error_msg)
                 .await;
         }
     }
