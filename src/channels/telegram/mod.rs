@@ -29,8 +29,10 @@ pub struct TelegramState {
     bot_username: Mutex<Option<String>>,
     /// Maps session_id → Telegram chat_id for approval routing
     session_chats: Mutex<HashMap<Uuid, i64>>,
-    /// Pending approval channels: approval_id → oneshot sender
-    pending_approvals: Mutex<HashMap<String, oneshot::Sender<bool>>>,
+    /// Pending approval channels: approval_id → oneshot sender of (approved, always).
+    pending_approvals: Mutex<HashMap<String, oneshot::Sender<(bool, bool)>>>,
+    /// When true, all tool calls are auto-approved for this session (user chose "Always").
+    auto_approve_session: Mutex<bool>,
 }
 
 impl Default for TelegramState {
@@ -47,6 +49,7 @@ impl TelegramState {
             bot_username: Mutex::new(None),
             session_chats: Mutex::new(HashMap::new()),
             pending_approvals: Mutex::new(HashMap::new()),
+            auto_approve_session: Mutex::new(false),
         }
     }
 
@@ -96,42 +99,56 @@ impl TelegramState {
     }
 
     /// Register a pending approval channel by id.
-    pub async fn register_pending_approval(&self, id: String, tx: oneshot::Sender<bool>) {
+    pub async fn register_pending_approval(&self, id: String, tx: oneshot::Sender<(bool, bool)>) {
         self.pending_approvals.lock().await.insert(id, tx);
     }
 
-    /// Resolve a pending approval — returns true if the channel existed and was resolved.
-    pub async fn resolve_pending_approval(&self, id: &str, approved: bool) -> bool {
+    /// Resolve a pending approval.
+    /// `approved` — whether tool is allowed; `always` — auto-approve all future tools.
+    /// Returns true if a pending approval existed.
+    pub async fn resolve_pending_approval(&self, id: &str, approved: bool, always: bool) -> bool {
         if let Some(tx) = self.pending_approvals.lock().await.remove(id) {
-            let _ = tx.send(approved);
+            let _ = tx.send((approved, always));
             true
         } else {
             false
         }
     }
 
+    /// Mark the session as auto-approve (user chose "Always").
+    pub async fn set_auto_approve_session(&self) {
+        *self.auto_approve_session.lock().await = true;
+    }
+
+    /// Whether all tool calls should be auto-approved this session.
+    pub async fn is_auto_approve_session(&self) -> bool {
+        *self.auto_approve_session.lock().await
+    }
+
     /// Build an `ApprovalCallback` that sends an inline-keyboard message to Telegram
-    /// and waits (up to 5 min) for the user to tap Approve or Deny.
+    /// and waits (up to 5 min) for the user to tap Yes, Always, or No.
     pub fn make_approval_callback(state: Arc<TelegramState>) -> ApprovalCallback {
         Arc::new(move |info: ToolApprovalInfo| {
             let state = state.clone();
             Box::pin(async move {
+                // Auto-approve if user already chose "Always" this session
+                if state.is_auto_approve_session().await {
+                    return Ok(true);
+                }
+
                 // Find the chat this session is active in
                 let chat_id = match state.session_chat(info.session_id).await {
                     Some(id) => id,
-                    None => {
-                        // Fall back to owner chat
-                        match state.owner_chat_id().await {
-                            Some(id) => id,
-                            None => {
-                                tracing::warn!(
-                                    "Telegram approval: no chat_id for session {}",
-                                    info.session_id
-                                );
-                                return Ok(false);
-                            }
+                    None => match state.owner_chat_id().await {
+                        Some(id) => id,
+                        None => {
+                            tracing::warn!(
+                                "Telegram approval: no chat_id for session {}",
+                                info.session_id
+                            );
+                            return Ok(false);
                         }
-                    }
+                    },
                 };
 
                 let bot = match state.bot().await {
@@ -145,13 +162,14 @@ impl TelegramState {
                 // Build unique approval id
                 let approval_id = Uuid::new_v4().to_string();
 
-                // Build inline keyboard
+                // Build inline keyboard — 3 buttons matching TUI: Yes / Always / No
                 let keyboard = InlineKeyboardMarkup::new(vec![vec![
+                    InlineKeyboardButton::callback("✅ Yes", format!("approve:{}", approval_id)),
                     InlineKeyboardButton::callback(
-                        "✅ Approve",
-                        format!("approve:{}", approval_id),
+                        "🔁 Always (session)",
+                        format!("always:{}", approval_id),
                     ),
-                    InlineKeyboardButton::callback("❌ Deny", format!("deny:{}", approval_id)),
+                    InlineKeyboardButton::callback("❌ No", format!("deny:{}", approval_id)),
                 ]]);
 
                 // Format message
@@ -186,7 +204,12 @@ impl TelegramState {
 
                 // Wait up to 5 minutes
                 match tokio::time::timeout(std::time::Duration::from_secs(300), rx).await {
-                    Ok(Ok(approved)) => Ok(approved),
+                    Ok(Ok((approved, always))) => {
+                        if always {
+                            state.set_auto_approve_session().await;
+                        }
+                        Ok(approved)
+                    }
                     Ok(Err(_)) => Ok(false), // channel closed
                     Err(_) => {
                         tracing::warn!("Telegram approval: 5-minute timeout — auto-denying");

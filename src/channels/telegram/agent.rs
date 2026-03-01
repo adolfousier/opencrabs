@@ -186,22 +186,27 @@ impl TelegramAgent {
                     let state = telegram_state.clone();
                     async move {
                         if let Some(data) = query.data.as_deref() {
-                            let (approved, id) = if let Some(id) = data.strip_prefix("approve:") {
-                                (true, id.to_string())
-                            } else if let Some(id) = data.strip_prefix("deny:") {
-                                (false, id.to_string())
-                            } else {
-                                // Unknown callback — ack and ignore
-                                let _ = bot.answer_callback_query(&query.id).await;
-                                return ResponseResult::Ok(());
-                            };
+                            let (approved, always, id) =
+                                if let Some(id) = data.strip_prefix("approve:") {
+                                    (true, false, id.to_string())
+                                } else if let Some(id) = data.strip_prefix("always:") {
+                                    (true, true, id.to_string())
+                                } else if let Some(id) = data.strip_prefix("deny:") {
+                                    (false, false, id.to_string())
+                                } else {
+                                    // Unknown callback — ack and ignore
+                                    let _ = bot.answer_callback_query(&query.id).await;
+                                    return ResponseResult::Ok(());
+                                };
 
-                            state.resolve_pending_approval(&id, approved).await;
+                            state.resolve_pending_approval(&id, approved, always).await;
                             let _ = bot.answer_callback_query(&query.id).await;
 
                             // Edit the approval message to show the outcome
                             if let Some(msg) = &query.message {
-                                let label = if approved {
+                                let label = if always {
+                                    "🔁 Always approved (session)"
+                                } else if approved {
                                     "✅ Approved"
                                 } else {
                                     "❌ Denied"

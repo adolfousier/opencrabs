@@ -3,8 +3,8 @@
 //! Processes incoming WhatsApp messages: text + images, allowlist enforcement,
 //! session routing (owner shares TUI session, others get per-phone sessions).
 
-use crate::brain::agent::ApprovalCallback;
 use crate::brain::agent::AgentService;
+use crate::brain::agent::ApprovalCallback;
 use crate::channels::whatsapp::WhatsAppState;
 use crate::config::VoiceConfig;
 use crate::services::SessionService;
@@ -442,7 +442,7 @@ pub(crate) async fn handle_message(
     // Otherwise send a 3-button message (Yes / Always / No) and wait up to 5 min.
     let approval_cb: ApprovalCallback = {
         use crate::channels::whatsapp::WaApproval;
-        use waproto::whatsapp::message::{buttons_message, ButtonsMessage};
+        use waproto::whatsapp::message::{ButtonsMessage, buttons_message};
 
         let client = client.clone();
         let chat_jid = info.source.chat.clone();
@@ -459,8 +459,8 @@ pub(crate) async fn handle_message(
                     return Ok(true);
                 }
 
-                let input_preview = serde_json::to_string_pretty(&tool_info.tool_input)
-                    .unwrap_or_default();
+                let input_preview =
+                    serde_json::to_string_pretty(&tool_info.tool_input).unwrap_or_default();
                 let body = format!(
                     "🔐 *Tool Approval Required*\n\nTool: `{}`\n```\n{}\n```",
                     tool_info.tool_name,
@@ -490,7 +490,11 @@ pub(crate) async fn handle_message(
                     ..Default::default()
                 };
 
-                if client.send_message(chat_jid.clone(), buttons_msg).await.is_err() {
+                if client
+                    .send_message(chat_jid.clone(), buttons_msg)
+                    .await
+                    .is_err()
+                {
                     // Fallback to plain text if buttons fail
                     let text_msg = waproto::whatsapp::Message {
                         conversation: Some(format!(
@@ -526,7 +530,14 @@ pub(crate) async fn handle_message(
 
     // Send to agent with WhatsApp approval callback
     let result = agent
-        .send_message_with_tools_and_callback(session_id, agent_input, None, None, Some(approval_cb), None)
+        .send_message_with_tools_and_callback(
+            session_id,
+            agent_input,
+            None,
+            None,
+            Some(approval_cb),
+            None,
+        )
         .await;
 
     typing_cancel.cancel();

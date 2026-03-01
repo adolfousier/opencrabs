@@ -69,7 +69,11 @@ impl WhatsAppState {
 
     /// Resolve a pending approval (called when user replies or taps a button).
     /// Returns `Some(choice)` if there was a pending approval, `None` otherwise.
-    pub async fn resolve_pending_approval(&self, phone: &str, choice: WaApproval) -> Option<WaApproval> {
+    pub async fn resolve_pending_approval(
+        &self,
+        phone: &str,
+        choice: WaApproval,
+    ) -> Option<WaApproval> {
         if let Some(tx) = self.pending_approvals.lock().await.remove(phone) {
             let _ = tx.send(choice);
             Some(choice)
