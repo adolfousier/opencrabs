@@ -13,7 +13,14 @@ pub struct Database {
 }
 
 impl Database {
-    /// Connect to a SQLite database file
+    /// Connect to a SQLite database file.
+    ///
+    /// Pool is tuned for concurrent access:
+    /// - WAL journal mode: readers never block on writers (eliminates the
+    ///   "slow statement" timeouts seen under heavy TUI load)
+    /// - 16 connections: enough headroom for TUI + all channel handlers
+    /// - 30 s busy_timeout: graceful queuing instead of fast-fail on contention
+    /// - synchronous = NORMAL: safe with WAL, ~3× faster writes than FULL
     pub async fn connect<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref();
 
@@ -30,12 +37,26 @@ impl Database {
         let url = format!("sqlite://{}?mode=rwc", path_str);
 
         let pool = SqlitePoolOptions::new()
-            .max_connections(5)
-            .acquire_timeout(std::time::Duration::from_secs(10))
+            .max_connections(16)
+            .acquire_timeout(std::time::Duration::from_secs(30))
             .after_connect(|conn, _meta| {
                 Box::pin(async move {
-                    // Set busy_timeout to 5 seconds to handle database locks
-                    sqlx::query("PRAGMA busy_timeout = 5000")
+                    // WAL mode: readers and writers don't block each other.
+                    // This is the primary fix for concurrent channel + TUI access.
+                    sqlx::query("PRAGMA journal_mode = WAL")
+                        .execute(&mut *conn)
+                        .await?;
+                    // 30 s busy timeout — graceful queuing when two writers
+                    // briefly contend, instead of immediate SQLITE_BUSY error.
+                    sqlx::query("PRAGMA busy_timeout = 30000")
+                        .execute(&mut *conn)
+                        .await?;
+                    // NORMAL is safe under WAL and ~3× faster than FULL.
+                    sqlx::query("PRAGMA synchronous = NORMAL")
+                        .execute(&mut *conn)
+                        .await?;
+                    // 64 MB page cache per connection.
+                    sqlx::query("PRAGMA cache_size = -65536")
                         .execute(&mut *conn)
                         .await?;
                     Ok(())
@@ -45,7 +66,10 @@ impl Database {
             .await
             .context("Failed to connect to database")?;
 
-        tracing::info!("Connected to database: {} (busy_timeout: 5s)", path_str);
+        tracing::info!(
+            "Connected to database: {} (WAL, pool=16, busy_timeout=30s)",
+            path_str
+        );
         Ok(Self { pool })
     }
 
