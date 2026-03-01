@@ -805,6 +805,7 @@ impl App {
                                 description: desc,
                                 success,
                                 details: output,
+                                tool_input: serde_json::Value::Null,
                             }
                         })
                         .collect()
@@ -816,6 +817,7 @@ impl App {
                             description: desc.to_string(),
                             success: true,
                             details: None,
+                            tool_input: serde_json::Value::Null,
                         })
                         .collect()
                 };

@@ -141,6 +141,8 @@ pub struct ToolCallEntry {
     pub description: String,
     pub success: bool,
     pub details: Option<String>,
+    /// Full raw tool input — shown untruncated in expanded view
+    pub tool_input: serde_json::Value,
 }
 
 /// A group of tool calls displayed as a collapsible bullet
@@ -962,6 +964,7 @@ impl App {
                     description: desc,
                     success: true,
                     details: None,
+                    tool_input: tool_input.clone(),
                 };
                 if let Some(ref mut group) = self.active_tool_group {
                     group.calls.push(entry);
@@ -1101,6 +1104,7 @@ impl App {
                         description: desc,
                         success,
                         details,
+                        tool_input: tool_input.clone(),
                     };
                     if let Some(ref mut group) = self.active_tool_group {
                         group.calls.push(entry);

@@ -50,65 +50,132 @@ pub(super) fn render_tool_group<'a>(
     lines.push(Line::from(header_spans));
 
     if group.expanded {
-        // Show all calls with tree lines + details
+        // Show all calls with tree lines + full input + details
         let is_last_call = |i: usize| i == group.calls.len() - 1;
         for (i, call) in group.calls.iter().enumerate() {
             let connector = if is_last_call(i) { "└─" } else { "├─" };
-            let style = if call.success {
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::ITALIC)
+            let continuation = if is_last_call(i) { "   " } else { "│  " };
+            let in_flight = call.details.is_none();
+
+            let header_style = if call.success || in_flight {
+                Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)
             } else {
-                Style::default()
-                    .fg(Color::Red)
-                    .add_modifier(Modifier::ITALIC)
+                Style::default().fg(Color::Red).add_modifier(Modifier::ITALIC)
             };
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("    {} ", connector),
                     Style::default().fg(Color::DarkGray),
                 ),
-                Span::styled(call.description.clone(), style),
+                Span::styled(call.description.clone(), header_style),
             ]));
 
-            // Show tool output details below the description
-            if let Some(ref details) = call.details {
-                let continuation = if is_last_call(i) { "   " } else { "│  " };
-                let default_detail_style = Style::default().fg(Color::Rgb(90, 90, 90));
-                for detail_line in details.lines().take(30) {
-                    // Diff-aware coloring: red for deletions, green for additions
-                    let line_style = if detail_line.starts_with("+ ") {
-                        Style::default().fg(Color::Rgb(60, 185, 185))
-                    } else if detail_line.starts_with("- ") {
-                        Style::default().fg(Color::Rgb(220, 80, 80))
-                    } else if detail_line.starts_with("@@ ") {
-                        Style::default().fg(Color::Cyan)
-                    } else {
-                        default_detail_style
-                    };
-                    lines.push(Line::from(vec![
-                        Span::styled(
-                            format!("    {}  ", continuation),
-                            Style::default().fg(Color::DarkGray),
-                        ),
-                        Span::styled(detail_line.to_string(), line_style),
-                    ]));
+            // Show full tool input parameters (untruncated) below the header
+            if !call.tool_input.is_null() {
+                if let Some(obj) = call.tool_input.as_object() {
+                    for (key, value) in obj.iter() {
+                        // Key label
+                        lines.push(Line::from(vec![
+                            Span::styled(
+                                format!("    {}  ", continuation),
+                                Style::default().fg(Color::DarkGray),
+                            ),
+                            Span::styled(
+                                format!("{}:", key),
+                                Style::default()
+                                    .fg(Color::Rgb(100, 100, 100))
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                        ]));
+                        // Value — expand strings line by line, cap at 80 lines
+                        let value_lines: Vec<String> = match value {
+                            serde_json::Value::String(s) => {
+                                s.lines().map(|l| l.to_string()).collect()
+                            }
+                            _ => vec![value.to_string()],
+                        };
+                        let total = value_lines.len();
+                        for vline in value_lines.iter().take(80) {
+                            lines.push(Line::from(vec![
+                                Span::styled(
+                                    format!("    {}    ", continuation),
+                                    Style::default().fg(Color::DarkGray),
+                                ),
+                                Span::styled(
+                                    vline.clone(),
+                                    Style::default().fg(Color::Rgb(170, 170, 170)),
+                                ),
+                            ]));
+                        }
+                        if total > 80 {
+                            lines.push(Line::from(vec![
+                                Span::styled(
+                                    format!("    {}    ", continuation),
+                                    Style::default().fg(Color::DarkGray),
+                                ),
+                                Span::styled(
+                                    format!("... ({} more lines)", total - 80),
+                                    Style::default()
+                                        .fg(Color::Rgb(120, 120, 120))
+                                        .add_modifier(Modifier::ITALIC),
+                                ),
+                            ]));
+                        }
+                    }
                 }
-                // Indicate truncation if output is long
-                let line_count = details.lines().count();
-                if line_count > 30 {
-                    lines.push(Line::from(vec![
-                        Span::styled(
-                            format!("    {}  ", continuation),
-                            Style::default().fg(Color::DarkGray),
-                        ),
-                        Span::styled(
-                            format!("... ({} more lines)", line_count - 30),
-                            Style::default()
-                                .fg(Color::Rgb(120, 120, 120))
-                                .add_modifier(Modifier::ITALIC),
-                        ),
-                    ]));
+            }
+
+            // If the call is still in-flight, show a running indicator
+            if in_flight {
+                let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+                let frame = spinner_frames[animation_frame % spinner_frames.len()];
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("    {}  {} ", continuation, frame),
+                        Style::default().fg(Color::Rgb(120, 120, 120)),
+                    ),
+                    Span::styled(
+                        "running...",
+                        Style::default().fg(Color::Rgb(215, 100, 20)),
+                    ),
+                ]));
+            } else {
+                // Show tool output details
+                if let Some(ref details) = call.details {
+                    let default_detail_style = Style::default().fg(Color::Rgb(90, 90, 90));
+                    for detail_line in details.lines().take(30) {
+                        let line_style = if detail_line.starts_with("+ ") {
+                            Style::default().fg(Color::Rgb(60, 185, 185))
+                        } else if detail_line.starts_with("- ") {
+                            Style::default().fg(Color::Rgb(220, 80, 80))
+                        } else if detail_line.starts_with("@@ ") {
+                            Style::default().fg(Color::Cyan)
+                        } else {
+                            default_detail_style
+                        };
+                        lines.push(Line::from(vec![
+                            Span::styled(
+                                format!("    {}  ", continuation),
+                                Style::default().fg(Color::DarkGray),
+                            ),
+                            Span::styled(detail_line.to_string(), line_style),
+                        ]));
+                    }
+                    let line_count = details.lines().count();
+                    if line_count > 30 {
+                        lines.push(Line::from(vec![
+                            Span::styled(
+                                format!("    {}  ", continuation),
+                                Style::default().fg(Color::DarkGray),
+                            ),
+                            Span::styled(
+                                format!("... ({} more lines)", line_count - 30),
+                                Style::default()
+                                    .fg(Color::Rgb(120, 120, 120))
+                                    .add_modifier(Modifier::ITALIC),
+                            ),
+                        ]));
+                    }
                 }
             }
         }
