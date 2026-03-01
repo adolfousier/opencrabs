@@ -5,6 +5,38 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.42] - 2026-03-01
+
+### Added
+- **Native Trello channel** (`80c7b05`) — TrelloAgent polls configured boards every 30 s for new card comments, routes them to the AI, and posts replies back as card comments. Board names resolved automatically — mix human-readable names and 24-char IDs freely. Owner shares TUI session; other commenters get per-member sessions
+  - `src/channels/trello/` (agent, client, handler, models, mod)
+- **`trello_connect` tool** (`80c7b05`) — Verify credentials, resolve boards by name, persist to config, spawn agent, confirm with open card count. Accepts comma-separated board names or IDs
+  - `src/brain/tools/trello_connect.rs`
+- **`trello_send` tool — 21 actions** (`80c7b05`) — Full Trello control without exposing credentials in URLs: `add_comment`, `create_card`, `move_card`, `find_cards`, `list_boards`, `get_card`, `get_card_comments`, `update_card`, `archive_card`, `add_member_to_card`, `remove_member_from_card`, `add_label_to_card`, `remove_label_from_card`, `add_checklist`, `add_checklist_item`, `complete_checklist_item`, `list_lists`, `get_board_members`, `search`, `get_notifications`, `mark_notifications_read`
+  - `src/brain/tools/trello_send.rs`
+- **`/onboard:<step>` deep-links** (`e4975e4`) — Jump directly to any onboarding step: `/onboard:provider`, `/onboard:channels`, `/onboard:voice`, `/onboard:health`, etc. `/doctor` alias for `/onboard:health`
+  - `src/tui/app/messaging.rs`, `src/tui/app/state.rs`, `src/tui/render/help.rs`
+
+### Fixed
+- **WhatsApp voice notes silently dropped** (`8e29655`) — Handler was skipping all non-text messages including voice notes (ptt). Now only skips if no text AND no audio AND no image
+  - `src/channels/whatsapp/handler.rs`
+- **STT key missing from channel factory** (`8e29655`, `d0a7651`) — `ChannelFactory` was built with `config.voice` which has `stt_provider=None`. All channel agents (WhatsApp, Discord, dynamic Telegram) now receive the fully resolved `VoiceConfig` with `stt_provider`/`tts_provider` populated
+  - `src/cli/ui.rs`
+- **Channel `allowed_users` unified** (`e4975e4`) — Removed `allowed_ids` from `ChannelConfig`, unified into `allowed_users: Vec<String>` with backward-compat deserializer accepting legacy TOML integer arrays. Fixed health check false failures: Discord and Slack channel IDs were read from wrong field
+  - `src/config/types.rs`, channel agents
+- **Channel config not passed to agents** (`406503b`) — `telegram_connect`, `discord_connect`, `slack_connect` now pass `respond_to` and `allowed_channels` from persisted config to agent constructors (previously hardcoded to defaults)
+  - `src/brain/tools/telegram_connect.rs`, `discord_connect.rs`, `slack_connect.rs`
+- **Tool expand (`Ctrl+O`) shows full params** (`0aba196`) — Expanded tool view now shows complete untruncated input params line by line. In-flight calls show a "running..." spinner. DB-reconstructed entries degrade gracefully
+  - `src/tui/render/tools.rs`, `src/tui/app/state.rs`
+- **Error/warning messages auto-dismiss after 2.5 s** (`4408a69`, `d0a7651`) — Timer resets correctly on user action; covers all clear-sites in input, messaging, and dialogs
+  - `src/tui/app/dialogs.rs`, `input.rs`, `messaging.rs`
+- **Thinking indicator sticky above input** (`406503b`) — Moved out of scrollable chat into a dedicated layout chunk — never scrolls away
+  - `src/tui/render/mod.rs`, `chat.rs`
+- **`/onboard` resets to first screen** (`d0a7651`) — Pre-loads existing config values while resetting to `ModeSelect` so health check shows correct state
+  - `src/tui/app/messaging.rs`, `src/tui/onboarding/wizard.rs`
+- **CI Windows build** (`001ed00`) — Replaced removed `aws-bedrock`/`openai` features with `telegram,discord,slack` in Windows CI workflow
+  - `.github/workflows/ci.yml`
+
 ## [0.2.41] - 2026-03-01
 
 ### Fixed
@@ -766,6 +798,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.42]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.42
 [0.2.41]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.41
 [0.2.40]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.40
 [0.2.39]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.39
