@@ -1788,6 +1788,10 @@ fn render_image_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard)
             "  gemini-3.1-flash-image-preview".to_string(),
             Style::default().fg(Color::DarkGray),
         ),
+        Span::styled(
+            "  🍌 Nano Banana".to_string(),
+            Style::default().fg(BRAND_GOLD),
+        ),
     ]));
     lines.push(Line::from(""));
 
