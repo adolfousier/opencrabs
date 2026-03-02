@@ -80,6 +80,9 @@ impl OnboardingWizard {
             checks.push(("Trello API Token".to_string(), HealthStatus::Pending));
             checks.push(("Trello Board ID".to_string(), HealthStatus::Pending));
         }
+        if self.image_vision_enabled || self.image_generation_enabled {
+            checks.push(("Google Image API Key".to_string(), HealthStatus::Pending));
+        }
 
         self.health_results = checks;
         self.health_running = true;
@@ -201,6 +204,16 @@ impl OnboardingWizard {
                     } else {
                         HealthStatus::Fail(
                             "No Board ID — agent won't know which board to poll".to_string(),
+                        )
+                    }
+                }
+                "Google Image API Key" => {
+                    if !self.image_api_key_input.is_empty() {
+                        HealthStatus::Pass
+                    } else {
+                        HealthStatus::Fail(
+                            "No API key — vision and image generation need a Google AI key"
+                                .to_string(),
                         )
                     }
                 }

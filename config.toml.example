@@ -63,6 +63,16 @@ base_url = "https://openrouter.ai/api/v1/chat/completions"
 default_model = "qwen/qwen3-coder-next"  # Many options at openrouter.ai/models
 
 # ========================================
+# Google Gemini Provider
+# ========================================
+# Models fetched live from the Gemini API during onboarding and /models
+# API key goes in keys.toml under [providers.gemini]
+# Get key from: aistudio.google.com
+[providers.gemini]
+enabled = false
+default_model = "gemini-2.5-flash"
+
+# ========================================
 # Minimax Provider (Chinese AI, OpenAI-compatible)
 # ========================================
 # Note: Minimax does NOT have a /models endpoint, so add models manually
@@ -89,6 +99,21 @@ enabled = false
 default_model = "gpt-4o-mini-tts"
 voice = "ash"             # TTS voice name
 model = "gpt-4o-mini-tts" # TTS model
+
+# ========================================
+# Image Generation & Vision (Google Gemini)
+# ========================================
+# API key goes in keys.toml under [image]
+# Get key from: aistudio.google.com
+# Use /onboard:image to configure via wizard
+
+[image.generation]
+enabled = false
+model = "gemini-3.1-flash-image-preview"   # Gemini image-gen model ("Nano Banana")
+
+[image.vision]
+enabled = false
+model = "gemini-3.1-flash-image-preview"   # Gemini vision model
 
 # ========================================
 # Tips for Using Local LLMs

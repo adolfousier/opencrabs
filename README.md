@@ -161,6 +161,27 @@ Access 400+ models from every major provider through a single API key — Anthro
 
 Model list is **fetched live** from the OpenRouter API during onboarding and via `/models` — no binary update needed when new models are added.
 
+### Google Gemini
+
+**Models:** `gemini-2.5-flash`, `gemini-2.0-flash`, `gemini-1.5-pro` — fetched live from the Gemini API
+
+**Setup** in `keys.toml` — get a key at [aistudio.google.com](https://aistudio.google.com):
+```toml
+[providers.gemini]
+api_key = "AIza..."
+```
+
+Enable and set default model in `config.toml`:
+```toml
+[providers.gemini]
+enabled = true
+default_model = "gemini-2.5-flash"
+```
+
+**Features:** Streaming, tool use, vision, 1M+ token context window, live model list from `/models` endpoint
+
+> **Image generation & vision:** Gemini also powers the separate `[image]` section for `generate_image` and `analyze_image` agent tools. See [Image Generation & Vision](#-image-generation--vision) below.
+
 ### MiniMax
 
 **Models:** `MiniMax-M2.5`, `MiniMax-M2.1`, `MiniMax-Text-01`
@@ -241,9 +262,54 @@ default_model = "moonshotai/kimi-k2.5"
 api_key = "nvapi-..."
 ```
 
-**Provider priority:** MiniMax > OpenRouter > Anthropic > OpenAI > Custom. The first provider with `enabled = true` is used on new sessions. Each provider has its own API key in `keys.toml` — no sharing or confusion.
+**Provider priority:** MiniMax > OpenRouter > Anthropic > OpenAI > Gemini > Custom. The first provider with `enabled = true` is used on new sessions. Each provider has its own API key in `keys.toml` — no sharing or confusion.
 
 **Per-session provider:** Each session remembers which provider and model it was using. Switch to Claude in one session, Kimi in another — when you `/sessions` switch between them, the provider restores automatically. No need to `/models` every time. New sessions inherit the current provider.
+
+---
+
+## 🖼️ Image Generation & Vision
+
+OpenCrabs supports image generation and vision analysis via Google Gemini. These features are independent of the main chat provider — you can use Claude for chat and Gemini for images.
+
+### Setup
+
+1. Get a free API key from [aistudio.google.com](https://aistudio.google.com)
+2. Run `/onboard:image` in chat (or go through onboarding Advanced mode) to configure
+3. Or add manually to `keys.toml`:
+
+```toml
+[image]
+api_key = "AIza..."
+```
+
+And `config.toml`:
+```toml
+[image.generation]
+enabled = true
+model = "gemini-3.1-flash-image-preview"
+
+[image.vision]
+enabled = true
+model = "gemini-3.1-flash-image-preview"
+```
+
+### Agent Tools
+
+When enabled, two tools become available to the agent automatically:
+
+| Tool | Description |
+|------|-------------|
+| `generate_image` | Generate an image from a text prompt — saves to `~/.opencrabs/images/` and returns the file path |
+| `analyze_image` | Analyze an image file or URL via Gemini vision — works even when your main model doesn't support vision |
+
+**Example prompts:**
+- _"Generate a pixel art crab logo"_ → agent calls `generate_image`, returns file path
+- _"What's in this image: /tmp/screenshot.png"_ → agent calls `analyze_image` via Gemini
+
+### Model
+
+Both tools use `gemini-3.1-flash-image-preview` ("Nano Banana") — Gemini's dedicated image-generation model that supports both vision input and image output in a single request.
 
 ---
 
@@ -441,7 +507,7 @@ Use `/cd` inside OpenCrabs to switch working directory at runtime without restar
 
 ## 🧙 Onboarding Wizard
 
-First-time users are guided through an 8-step setup wizard that appears automatically after the splash screen.
+First-time users are guided through a 9-step setup wizard that appears automatically after the splash screen.
 
 ### How It Triggers
 
@@ -450,7 +516,7 @@ First-time users are guided through an 8-step setup wizard that appears automati
 - **Chat flag:** `cargo run --bin opencrabs -- chat --onboard` to force the wizard before chat
 - **Slash command:** Type `/onboard` in the chat to re-run it anytime
 
-### The 8 Steps
+### The 9 Steps
 
 | Step | Title | What It Does |
 |------|-------|-------------|
@@ -459,13 +525,17 @@ First-time users are guided through an 8-step setup wizard that appears automati
 | 3 | **Workspace** | Set brain workspace path (default `~/.opencrabs/`) → seed template files (SOUL.md, IDENTITY.md, etc.) |
 | 4 | **Gateway** | Configure HTTP API gateway: port, bind address, auth mode |
 | 5 | **Channels** | Toggle messaging integrations (Telegram, Discord, WhatsApp, Slack, Trello) |
-| 6 | **Daemon** | Install background service (systemd on Linux, LaunchAgent on macOS) |
-| 7 | **Health Check** | Verify API key, config, workspace — shows pass/fail summary |
-| 8 | **Brain Personalization** | Tell the agent about yourself and how you want it to behave → AI generates personalized brain files (SOUL.md, IDENTITY.md, USER.md, etc.) |
+| 6 | **Voice** | Enable STT (Groq Whisper) for voice notes transcription from Telegram |
+| 7 | **Image Handling** | Enable Gemini image generation and/or vision analysis — uses a separate Google AI key |
+| 8 | **Daemon** | Install background service (systemd on Linux, LaunchAgent on macOS) |
+| 9 | **Health Check** | Verify API key, config, workspace — shows pass/fail summary |
+| 10 | **Brain Personalization** | Tell the agent about yourself and how you want it to behave → AI generates personalized brain files (SOUL.md, IDENTITY.md, USER.md, etc.) |
 
-**QuickStart mode** skips steps 4-6 with sensible defaults. **Advanced mode** lets you configure everything.
+**QuickStart mode** skips steps 4-8 with sensible defaults. **Advanced mode** lets you configure everything.
 
-#### Brain Personalization (Step 8)
+Type `/onboard:image` in chat to jump directly to the Image Handling step anytime.
+
+#### Brain Personalization (Step 10)
 
 Two input fields: **About You** (who you are) and **Your OpenCrabs** (how the agent should behave). The LLM uses these plus the 6 workspace template files to generate personalized brain files.
 
@@ -507,8 +577,15 @@ api_key = "sk-or-YOUR_KEY"
 [providers.minimax]
 api_key = "your-minimax-key"
 
+[providers.gemini]
+api_key = "AIza..."                  # Get from aistudio.google.com
+
 [providers.custom.your_name]
 api_key = "your-key"                 # not required for local LLMs
+
+# Image Generation & Vision (independent of main chat provider)
+[image]
+api_key = "AIza..."                  # Same Google AI key as providers.gemini (can reuse)
 
 # Messaging Channels — tokens/secrets only (config.toml holds allowed_users, allowed_channels, etc.)
 [channels.telegram]

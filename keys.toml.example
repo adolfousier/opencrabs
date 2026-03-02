@@ -27,6 +27,10 @@ api_key = ""
 # Get from: platform.minimax.io
 api_key = ""
 
+[providers.gemini]
+# Get from: aistudio.google.com
+api_key = ""
+
 # Custom providers use the same name as in config.toml:
 # For local LLMs (LM Studio, Ollama) — api_key not required, leave empty
 # For remote OpenAI-compatible APIs (Groq, Together, etc.) — set your key here
@@ -35,6 +39,15 @@ api_key = ""
 
 # [providers.custom.ollama]
 # api_key = ""
+
+# ========================================
+# Image Generation & Vision API Key
+# ========================================
+
+[image]
+# Same Google AI key used for both image generation and vision via Gemini
+# Get from: aistudio.google.com
+api_key = ""
 
 # ========================================
 # STT (Speech-to-Text) API Keys

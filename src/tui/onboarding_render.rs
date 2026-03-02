@@ -1791,6 +1791,19 @@ fn render_image_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard)
     ]));
     lines.push(Line::from(""));
 
+    // Contextual key hints
+    let hint_text = match wizard.image_field {
+        ImageField::VisionToggle | ImageField::GenerationToggle => {
+            "  Space / ↑↓ to toggle  ·  Tab / Enter to continue  ·  Esc to go back"
+        }
+        ImageField::ApiKey => "  Enter to continue  ·  BackTab to go back  ·  Esc to go back",
+    };
+    lines.push(Line::from(Span::styled(
+        hint_text,
+        Style::default().fg(Color::DarkGray),
+    )));
+    lines.push(Line::from(""));
+
     // Vision toggle
     let vision_focused = wizard.image_field == ImageField::VisionToggle;
     lines.push(Line::from(vec![
@@ -1926,12 +1939,6 @@ fn render_image_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard)
             )));
         }
     }
-
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "  Skip with Enter to set up later",
-        Style::default().fg(Color::DarkGray),
-    )));
 }
 
 fn render_voice_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
