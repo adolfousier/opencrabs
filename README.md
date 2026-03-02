@@ -7,9 +7,9 @@
 
 # 🦀 OpenCrabs
 
-**Rust-based open-claw inspired orchestration layer for software development.**
+**The autonomous AI agent. Single Rust binary. Every channel.**
 
-> A terminal-native AI orchestration agent written in Rust with Ratatui. Inspired by [Open Claw](https://github.com/openclaw/openclaw).
+> Autonomous multi-channel AI agent built in Rust. Inspired by [Open Claw](https://github.com/openclaw/openclaw).
 
 ```
     ___                    ___           _
@@ -18,7 +18,7 @@
    \___/| .__/\___|_||_|  \___|_| \__,_|_.__//__/
         |_|
 
- 🦀 Shell Yeah! AI Orchestration at Rust Speed.
+ 🦀 The autonomous AI agent. Single Rust binary. Every channel.
 
 ```
 

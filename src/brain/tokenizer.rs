@@ -51,7 +51,7 @@ mod tests {
         let count = count_tokens("Hello, world!");
         // cl100k_base: "Hello" "," " world" "!" = 4 tokens
         assert!(
-            count >= 3 && count <= 6,
+            (3..=6).contains(&count),
             "Got {count} tokens for 'Hello, world!'"
         );
     }

@@ -163,7 +163,7 @@ fn test_provider_auth_defaults() {
     assert_eq!(wizard.selected_model, 0);
     // First provider is Anthropic Claude
     assert_eq!(PROVIDERS[wizard.selected_provider].name, "Anthropic Claude");
-    assert!(PROVIDERS[wizard.selected_provider].help_lines.is_empty() == false);
+    assert!(!PROVIDERS[wizard.selected_provider].help_lines.is_empty());
 }
 
 #[test]
@@ -276,7 +276,7 @@ fn test_handle_key_provider_navigation() {
 
 #[test]
 fn test_handle_key_api_key_typing() {
-    let mut wizard = OnboardingWizard::new();
+    let mut wizard = clean_wizard();
     wizard.step = OnboardingStep::ProviderAuth;
     wizard.auth_field = AuthField::Provider;
 
@@ -296,7 +296,7 @@ fn test_handle_key_api_key_typing() {
 
 #[test]
 fn test_handle_key_provider_auth_field_flow() {
-    let mut wizard = OnboardingWizard::new();
+    let mut wizard = clean_wizard();
     wizard.step = OnboardingStep::ProviderAuth;
     wizard.auth_field = AuthField::Provider;
     assert_eq!(wizard.auth_field, AuthField::Provider);
@@ -355,7 +355,7 @@ fn test_provider_auth_validation_empty_key() {
         wizard
             .error_message
             .as_ref()
-            .map_or(false, |m| m.contains("required"))
+            .is_some_and(|m| m.contains("required"))
     );
 }
 
