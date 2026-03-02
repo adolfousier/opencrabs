@@ -310,7 +310,10 @@ impl Tool for WhatsAppConnectTool {
     }
 
     async fn execute(&self, input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
-        let allowed_phones: Vec<String> = input
+        // Use tool-provided phones if given, otherwise fall back to config.
+        // This prevents the security check from seeing an empty allowlist
+        // when the AI calls the tool without explicit allowed_phones.
+        let tool_phones: Vec<String> = input
             .get("allowed_phones")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
@@ -351,10 +354,20 @@ impl Tool for WhatsAppConnectTool {
         let factory = self.channel_factory.clone();
         let agent = factory.create_agent_service();
         let session_svc = crate::services::SessionService::new(factory.service_context());
+        // If the AI didn't pass allowed_phones, load from config so the security
+        // check always has a valid owner phone to compare against.
+        let wa_cfg = crate::config::Config::load().ok();
+        let allowed_phones: Vec<String> = if !tool_phones.is_empty() {
+            tool_phones
+        } else {
+            wa_cfg
+                .as_ref()
+                .map(|c| c.channels.whatsapp.allowed_phones.clone())
+                .unwrap_or_default()
+        };
         let allowed: Arc<HashSet<String>> = Arc::new(allowed_phones.iter().cloned().collect());
         let voice_config = Arc::new(factory.voice_config().clone());
         let shared_session = factory.shared_session_id();
-        let wa_cfg = crate::config::Config::load().ok();
         let idle_timeout_hours = wa_cfg
             .as_ref()
             .and_then(|c| c.channels.whatsapp.session_idle_hours);

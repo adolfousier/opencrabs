@@ -245,34 +245,27 @@ pub(crate) async fn handle_message(
         return;
     }
 
-    // SECURITY: Only respond to the owner (first phone in allowed_phones).
-    // Ignore ALL other messages - never auto-reply to contacts.
-    // This is a self-connected WhatsApp instance - only the owner should get responses.
-    // 
-    // CRITICAL: Also check the recipient. When user sends a message to a CONTACT,
-    // sender=owner, recipient=contact. We must NOT treat that as "owner messaging me".
-    // Only process when: recipient is owner (or empty/group), AND sender is owner.
-    let owner_phone_raw = allowed.iter().next().cloned().unwrap_or_default();
-    let owner_phone = owner_phone_raw.trim_start_matches('+');
-    let sender_normalized = phone.trim_start_matches('+');
-    let recipient = recipient_phone(&info);
-    let recipient_normalized = recipient.as_ref().map(|r| r.trim_start_matches('+'));
-    
-    // Check if this is a message TO the owner (incoming to the bot)
-    let is_to_owner = recipient_normalized.map(|r| r == owner_phone).unwrap_or(false);
-    // Check if this is from the owner
-    let is_from_owner = sender_normalized == owner_phone;
-    
-    // Only process if: sender is owner AND recipient is owner (or no recipient/group)
-    // This blocks: owner → contact messages being treated as owner → bot
-    if !is_from_owner || (recipient.is_some() && !is_to_owner) {
-        tracing::debug!(
-            "WhatsApp: ignoring message from={} to={:?} (owner={})",
-            phone,
-            recipient,
-            owner_phone
-        );
-        return;
+    // SECURITY: When allowed_phones is configured, only respond to the owner.
+    // Also check the recipient: when owner sends a message TO a contact,
+    // sender=owner but recipient=contact — must not treat that as "owner messaging bot".
+    // If allowed_phones is empty (unconfigured), fall through without filtering.
+    if !allowed.is_empty() {
+        let owner_phone_raw = allowed.iter().next().cloned().unwrap_or_default();
+        let owner_phone = owner_phone_raw.trim_start_matches('+');
+        let sender_normalized = phone.trim_start_matches('+');
+        let recipient = recipient_phone(&info);
+        let recipient_normalized = recipient.as_ref().map(|r| r.trim_start_matches('+'));
+        let is_to_owner = recipient_normalized.map(|r| r == owner_phone).unwrap_or(false);
+        let is_from_owner = sender_normalized == owner_phone;
+        if !is_from_owner || (recipient.is_some() && !is_to_owner) {
+            tracing::debug!(
+                "WhatsApp: ignoring message from={} to={:?} (owner={})",
+                phone,
+                recipient,
+                owner_phone
+            );
+            return;
+        }
     }
 
     // Pending approval check: if a tool approval is waiting for this phone,
