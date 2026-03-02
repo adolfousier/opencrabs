@@ -927,6 +927,12 @@ impl AgentService {
                     .append_content(assistant_db_msg.id, &tool_block)
                     .await;
 
+                // Notify TUI after each tool iteration so it refreshes in real-time,
+                // even during long-running channel sessions (Telegram, WhatsApp, etc.)
+                if let Some(ref tx) = self.session_updated_tx {
+                    let _ = tx.send(session_id);
+                }
+
                 tool_descriptions.clear();
                 tool_outputs.clear();
             }
