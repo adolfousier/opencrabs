@@ -1942,6 +1942,23 @@ fn render_image_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard)
                     .add_modifier(Modifier::ITALIC),
             )));
         }
+
+        // "get your key" hint — shown whenever key isn't set yet
+        if !wizard.has_existing_image_key() {
+            lines.push(Line::from(vec![
+                Span::styled("  Get a free key at ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    "aistudio.google.com",
+                    Style::default()
+                        .fg(BRAND_BLUE)
+                        .add_modifier(Modifier::UNDERLINED),
+                ),
+                Span::styled(
+                    "  →  Google AI Studio",
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]));
+        }
     }
 }
 
