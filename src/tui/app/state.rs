@@ -942,11 +942,13 @@ impl App {
                 session_id,
                 message,
             } => {
+                // Always clear session processing state — missing this for current sessions
+                // caused subsequent messages to be silently queued after errors.
+                self.processing_sessions.remove(&session_id);
+                self.session_cancel_tokens.remove(&session_id);
                 if self.is_current_session(session_id) {
                     self.show_error(message);
                 } else {
-                    self.processing_sessions.remove(&session_id);
-                    self.session_cancel_tokens.remove(&session_id);
                     tracing::warn!("Background session {} error: {}", session_id, message);
                 }
             }
