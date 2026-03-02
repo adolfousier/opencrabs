@@ -24,7 +24,8 @@ impl Tool for LoadBrainFileTool {
         "Load a specific brain context file from the OpenCrabs home directory (~/.opencrabs/). \
          Use this to retrieve USER.md, MEMORY.md, AGENTS.md, TOOLS.md, SECURITY.md, etc. \
          on demand — only when the current request actually needs that context. \
-         Pass name=\"all\" to load all available contextual files at once."
+         Pass name=\"all\" to load all available contextual files at once. \
+         To edit or update brain files, use the `write_opencrabs_file` tool."
     }
 
     fn input_schema(&self) -> Value {

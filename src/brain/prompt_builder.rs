@@ -228,7 +228,8 @@ impl BrainLoader {
             prompt.push_str(
                 "The following brain files contain detailed context. \
                  Load them on demand using the `load_brain_file` tool when relevant — \
-                 do NOT load them unless the request actually needs that context.\n\n",
+                 do NOT load them unless the request actually needs that context. \
+                 To update or edit a brain file, use the `write_opencrabs_file` tool.\n\n",
             );
             for (name, desc) in &available {
                 prompt.push_str(&format!("- **{}**: {}\n", name, desc));

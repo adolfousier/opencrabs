@@ -35,6 +35,7 @@ pub mod rebuild;
 pub mod session_search;
 pub mod slash_command;
 pub mod task;
+pub mod write_opencrabs_file;
 
 // Tool implementations - Phase 4: Channel Integrations
 #[cfg(feature = "discord")]

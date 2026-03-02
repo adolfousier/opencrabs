@@ -23,7 +23,7 @@ pub(crate) async fn cmd_chat(
                 memory_search::MemorySearchTool, notebook::NotebookEditTool, plan_tool::PlanTool,
                 read::ReadTool, registry::ToolRegistry, session_search::SessionSearchTool,
                 slash_command::SlashCommandTool, task::TaskTool, web_search::WebSearchTool,
-                write::WriteTool,
+                write::WriteTool, write_opencrabs_file::WriteOpenCrabsFileTool,
             },
         },
         db::Database,
@@ -95,6 +95,8 @@ pub(crate) async fn cmd_chat(
     tool_registry.register(Arc::new(MemorySearchTool));
     // On-demand brain file loader — agent fetches USER.md, MEMORY.md etc. only when needed
     tool_registry.register(Arc::new(LoadBrainFileTool));
+    // OpenCrabs file writer — agent can edit/append/overwrite any file in ~/.opencrabs/
+    tool_registry.register(Arc::new(WriteOpenCrabsFileTool));
     // Session search — hybrid QMD search across all session message history
     tool_registry.register(Arc::new(SessionSearchTool::new(db.pool().clone())));
     // Config management (read/write config.toml, commands.toml)
