@@ -475,6 +475,19 @@ pub(crate) async fn cmd_chat(
         })
     });
 
+    // Create session-updated notification channel — remote channels fire this so the TUI
+    // reloads in real-time when Telegram/WhatsApp/Discord/Slack messages are processed.
+    let (session_updated_tx, mut session_updated_rx) =
+        tokio::sync::mpsc::unbounded_channel::<uuid::Uuid>();
+    {
+        let event_sender = app.event_sender();
+        tokio::spawn(async move {
+            while let Some(session_id) = session_updated_rx.recv().await {
+                let _ = event_sender.send(crate::tui::events::TuiEvent::SessionUpdated(session_id));
+            }
+        });
+    }
+
     // Create agent service with approval callback, progress callback, and message queue
     tracing::debug!("Creating agent service with approval, progress, and message queue callbacks");
     let shared_tool_registry = Arc::new(tool_registry);
@@ -491,7 +504,8 @@ pub(crate) async fn cmd_chat(
             .with_message_queue_callback(Some(message_queue_callback))
             .with_sudo_callback(Some(sudo_callback))
             .with_working_directory(working_directory.clone())
-            .with_brain_path(brain_path),
+            .with_brain_path(brain_path)
+            .with_session_updated_tx(session_updated_tx),
     );
 
     // Update app with the configured agent service (preserve event channels!)

@@ -1043,6 +1043,12 @@ impl AgentService {
             .await
             .map_err(|e| AgentError::Database(e.to_string()))?;
 
+        // Notify the TUI that this session was updated (enables live refresh when
+        // a remote channel — Telegram, WhatsApp, Discord, Slack — processes a message).
+        if let Some(ref tx) = self.session_updated_tx {
+            let _ = tx.send(session_id);
+        }
+
         Ok(AgentResponse {
             message_id: assistant_db_msg.id,
             content: final_text,

@@ -131,6 +131,10 @@ pub enum TuiEvent {
 
     /// Reasoning/thinking content chunk from providers like MiniMax (display-only)
     ReasoningChunk { session_id: Uuid, text: String },
+
+    /// A remote channel (Telegram, WhatsApp, Discord, Slack) completed an agent
+    /// response — the TUI should refresh if it's the current session.
+    SessionUpdated(Uuid),
 }
 
 /// Sudo password request from the bash tool

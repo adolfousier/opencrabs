@@ -5,6 +5,44 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.43] - 2026-03-02
+
+### Added
+- **Telegram full control — 16 actions + live streaming + approval buttons** (`c1ba37c`) — `telegram_send` tool expanded from `send` to 16 actions: `send`, `reply`, `edit`, `delete`, `pin`, `unpin`, `forward`, `send_photo`, `send_document`, `send_location`, `send_poll`, `send_buttons`, `get_chat`, `ban_user`, `unban_user`, `set_reaction`. LLM response streams live into a Telegram message with `▋` cursor (edits every 1.5 s). Session resilience: re-fetches bot from DB if lost across restarts. Idle session timeout per-user
+  - `src/brain/tools/telegram_send.rs`, `src/channels/telegram/handler.rs`, `src/channels/telegram/mod.rs`
+- **Discord full control — 16 actions + session idle timeout** (`3459d0b`) — `discord_send` tool expanded to 16 actions mirroring Telegram: `send`, `reply`, `edit`, `delete`, `pin`, `unpin`, `forward`, `send_photo`, `send_document`, `send_location`, `send_poll`, `send_buttons`, `get_guild`, `kick_user`, `ban_user`, `set_reaction`. Idle session timeout for per-user sessions
+  - `src/brain/tools/discord_send.rs`, `src/channels/discord/`
+- **Slack full control — 16 actions + sender context injection** (`89c9e71`) — `slack_send` tool expanded to 16 actions: `send`, `reply`, `react`, `unreact`, `edit`, `delete`, `pin`, `unpin`, `get_messages`, `get_channel`, `list_channels`, `get_user`, `list_members`, `kick_user`, `set_topic`, `send_blocks`. Non-owner messages now prepend sender identity `[Slack message from {uid} in channel {ch}]`
+  - `src/brain/tools/slack_send.rs`, `src/channels/slack/handler.rs`
+- **WhatsApp typing indicator** (`9f3b1fa`) — Sends `composing` chat state on message receipt, `paused` on completion so the user sees a native typing indicator while the agent processes
+  - `src/channels/whatsapp/handler.rs`
+- **Tool approval — 3-button UI across all channels** (`f6b8523`, `586cccd`, `816147c`) — All four remote channels now show ✅ Yes / 🔁 Always (session) / ❌ No approval prompts matching the TUI, powered by channel-native interactive elements (WhatsApp `ButtonsMessage`, Telegram inline keyboard, Discord `CreateButton`, Slack `SlackBlockButtonElement`). "Always" sets session-level `auto_approve_session` flag — no further prompts for that session
+  - `src/channels/whatsapp/mod.rs`, `src/channels/telegram/mod.rs`, `src/channels/discord/mod.rs`, `src/channels/slack/mod.rs`
+- **Tool input context in Telegram streaming indicator** (`3da472a`, `af4b96b`) — Streaming status line now shows a brief hint of what the tool is doing (e.g. `⚙ bash: git status`) so the user has context while waiting
+  - `src/channels/telegram/handler.rs`
+- **TUI auto-refresh when remote channels process messages** (`7b95209`) — After every `run_tool_loop` completion, `AgentService` fires a `session_updated_tx` notification. The TUI listens, calling `load_session` if the updated session is the current one (and not already being processed by the TUI), or marking it as unread otherwise. Real-time TUI updates when Telegram/WhatsApp/Discord/Slack messages are processed — no manual session switch required
+  - `src/brain/agent/service/builder.rs`, `src/brain/agent/service/tool_loop.rs`, `src/tui/events.rs`, `src/tui/app/state.rs`, `src/cli/ui.rs`
+
+### Fixed
+- **SQLite WAL mode + larger pool** (`1ec5c3b`) — Enables write-ahead logging so concurrent reads (TUI) and writes (channel agents) don't block each other; pool size increased from 5 to 20 connections. Eliminates channel concurrency timeouts
+  - `src/services/` (DB setup)
+- **WhatsApp sender identity** (`00cc01b`) — Strips device suffix from JID (`:N@s.whatsapp.net` → `@s.whatsapp.net`) before phone-number comparison; injects `[WhatsApp message from {name} ({phone})]` for non-owner messages; fetches contact display name when available
+  - `src/channels/whatsapp/handler.rs`
+- **WhatsApp reply to chat JID instead of device JID** (`24c1e5d`) — Was replying to the device-scoped JID (`:0@s.whatsapp.net`) causing delivery failures in group chats and multi-device setups; now replies to the canonical chat JID
+  - `src/channels/whatsapp/handler.rs`
+- **Inject sender context for non-owner Discord and Telegram messages** (`e00374a`) — Non-owner messages now prepend `[Discord/Telegram message from {name} (ID {uid}) in channel {ch}]` so the agent knows who it's talking to instead of assuming the owner
+  - `src/channels/discord/handler.rs`, `src/channels/telegram/handler.rs`
+- **Secret sanitization — redact API keys from all display surfaces** (`436808e`, `d3a2380`) — New `utils::redact_tool_input()` function recursively walks tool input JSON, redacting values for sensitive keys (`authorization`, `api_key`, `token`, `secret`, `password`, `bearer`, etc.) and inline bash command patterns (`Bearer xxx`, `api_key=xxx`, URL passwords). Applied to TUI tool history, TUI approval dialogs, and all four remote channel approval messages
+  - `src/utils/sanitize.rs` (new), `src/tui/render/tools.rs`, `src/channels/*/mod.rs`
+- **WhatsApp upstream log noise suppressed** (`f6b8523`) — Added `whatsapp_rust::client=error` and `whatsapp_rust=warn` directives to filter upstream TODO stub log lines
+  - `src/logging/logger.rs`
+
+### Changed
+- **Context budget enforcement refactored** (`d8ab8f0`) — Extracted repeated 80%/90% compaction logic into `enforce_context_budget()` helper on `AgentService`. 80 %: triggers LLM compaction. 90 %: hard-truncates to 80 % first, then compacts. Up to 3 retries on LLM compaction failure, then warns user to run `/compact`
+  - `src/brain/agent/service/tool_loop.rs`
+- **`send_message_with_tools_and_callback`** — Per-call approval and progress callback overrides; remote channels pass their own callbacks without touching service-level defaults
+  - `src/brain/agent/service/messaging.rs`, `src/brain/agent/service/tool_loop.rs`
+
 ## [0.2.42] - 2026-03-01
 
 ### Added
@@ -800,6 +838,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.43]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.43
 [0.2.42]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.42
 [0.2.41]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.41
 [0.2.40]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.40

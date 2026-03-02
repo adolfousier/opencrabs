@@ -47,6 +47,11 @@ pub struct AgentService {
 
     /// Brain path (~/.opencrabs/) for loading brain files
     pub(super) brain_path: Option<std::path::PathBuf>,
+
+    /// Notification channel — fired after every `run_tool_loop` completion so
+    /// the TUI can refresh when a remote channel (Telegram/WhatsApp/…) updates
+    /// the shared session.
+    pub(super) session_updated_tx: Option<tokio::sync::mpsc::UnboundedSender<uuid::Uuid>>,
 }
 
 impl AgentService {
@@ -71,6 +76,7 @@ impl AgentService {
                 std::env::current_dir().unwrap_or_default(),
             )),
             brain_path: None,
+            session_updated_tx: None,
         }
     }
 
@@ -201,6 +207,24 @@ impl AgentService {
     pub fn with_brain_path(mut self, brain_path: std::path::PathBuf) -> Self {
         self.brain_path = Some(brain_path);
         self
+    }
+
+    /// Set the session-updated notification sender.
+    ///
+    /// When set, `run_tool_loop` fires this after every completed agent response
+    /// so the TUI can reload the session in real-time when a remote channel
+    /// (Telegram, WhatsApp, Discord, Slack) processes a message.
+    pub fn with_session_updated_tx(
+        mut self,
+        tx: tokio::sync::mpsc::UnboundedSender<uuid::Uuid>,
+    ) -> Self {
+        self.session_updated_tx = Some(tx);
+        self
+    }
+
+    /// Get the session-updated sender (for preserving across agent rebuilds).
+    pub fn session_updated_tx(&self) -> Option<tokio::sync::mpsc::UnboundedSender<uuid::Uuid>> {
+        self.session_updated_tx.clone()
     }
 
     /// Get the provider name
