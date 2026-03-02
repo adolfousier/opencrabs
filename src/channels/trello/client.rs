@@ -237,6 +237,35 @@ impl TrelloClient {
             .ok_or_else(|| anyhow::anyhow!("No board found matching '{}'", query))
     }
 
+    /// Get attachments for a card.
+    pub async fn get_card_attachments(&self, card_id: &str) -> Result<Vec<CardAttachment>> {
+        let path = format!("/cards/{}/attachments", card_id);
+        let url = self.url(&path);
+        let resp = self.http.get(&url).send().await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!("Failed to fetch attachments: {}: {}", status, body);
+        }
+        resp.json::<Vec<CardAttachment>>()
+            .await
+            .context("Failed to parse attachments")
+    }
+
+    /// Download a private Trello attachment (uploaded files require auth).
+    pub async fn download_attachment(&self, url: &str) -> Result<Vec<u8>> {
+        let auth_url = if url.contains('?') {
+            format!("{}&key={}&token={}", url, self.api_key, self.api_token)
+        } else {
+            format!("{}?key={}&token={}", url, self.api_key, self.api_token)
+        };
+        let resp = self.http.get(&auth_url).send().await?;
+        if !resp.status().is_success() {
+            bail!("Failed to download attachment: {}", resp.status());
+        }
+        Ok(resp.bytes().await?.to_vec())
+    }
+
     /// Get full card details including checklists, labels, and member IDs.
     pub async fn get_card(&self, card_id: &str) -> Result<CardDetail> {
         let path = format!(

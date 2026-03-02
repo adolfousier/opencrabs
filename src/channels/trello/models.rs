@@ -141,6 +141,21 @@ pub struct SearchResult {
     pub boards: Vec<Board>,
 }
 
+/// Card attachment (uploaded file or URL)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CardAttachment {
+    pub id: String,
+    pub name: String,
+    #[serde(rename = "mimeType", default)]
+    pub mime_type: String,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(rename = "isUpload", default)]
+    pub is_upload: bool,
+    #[serde(default)]
+    pub bytes: Option<i64>,
+}
+
 /// Trello Notification
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Notification {
