@@ -146,6 +146,7 @@ async fn download_image(msg: &Message, client: &Client) -> Option<String> {
 
 /// Extract the sender's phone number (digits only) from message info.
 /// JID format is "351933536442@s.whatsapp.net" or "351933536442:34@s.whatsapp.net"
+/// Extract sender phone from MessageInfo.
 /// (linked device suffix) — we return just "351933536442" in both cases.
 fn sender_phone(info: &MessageInfo) -> String {
     let full = info.source.sender.to_string();
@@ -156,6 +157,19 @@ fn sender_phone(info: &MessageInfo) -> String {
         .next()
         .unwrap_or(without_server)
         .to_string()
+}
+
+/// Extract recipient phone from MessageInfo (who the message is TO).
+fn recipient_phone(info: &MessageInfo) -> Option<String> {
+    info.source.recipient.as_ref().map(|r| {
+        let full = r.to_string();
+        let without_server = full.split('@').next().unwrap_or(&full);
+        without_server
+            .split(':')
+            .next()
+            .unwrap_or(without_server)
+            .to_string()
+    })
 }
 
 /// Split a message into chunks that fit WhatsApp's limit (~65536 chars, but we use 4000 for readability).
@@ -231,12 +245,32 @@ pub(crate) async fn handle_message(
         return;
     }
 
-    // Allowlist check — if allowed list is empty, accept all.
-    // Normalize: strip '+' from allowed entries to match JID digits.
-    if !allowed.is_empty() && !allowed.iter().any(|a| a.trim_start_matches('+') == phone) {
+    // SECURITY: Only respond to the owner (first phone in allowed_phones).
+    // Ignore ALL other messages - never auto-reply to contacts.
+    // This is a self-connected WhatsApp instance - only the owner should get responses.
+    // 
+    // CRITICAL: Also check the recipient. When user sends a message to a CONTACT,
+    // sender=owner, recipient=contact. We must NOT treat that as "owner messaging me".
+    // Only process when: recipient is owner (or empty/group), AND sender is owner.
+    let owner_phone_raw = allowed.iter().next().cloned().unwrap_or_default();
+    let owner_phone = owner_phone_raw.trim_start_matches('+');
+    let sender_normalized = phone.trim_start_matches('+');
+    let recipient = recipient_phone(&info);
+    let recipient_normalized = recipient.as_ref().map(|r| r.trim_start_matches('+'));
+    
+    // Check if this is a message TO the owner (incoming to the bot)
+    let is_to_owner = recipient_normalized.map(|r| r == owner_phone).unwrap_or(false);
+    // Check if this is from the owner
+    let is_from_owner = sender_normalized == owner_phone;
+    
+    // Only process if: sender is owner AND recipient is owner (or no recipient/group)
+    // This blocks: owner → contact messages being treated as owner → bot
+    if !is_from_owner || (recipient.is_some() && !is_to_owner) {
         tracing::debug!(
-            "WhatsApp: ignoring message from non-allowed phone {}",
-            phone
+            "WhatsApp: ignoring message from={} to={:?} (owner={})",
+            phone,
+            recipient,
+            owner_phone
         );
         return;
     }
