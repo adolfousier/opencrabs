@@ -742,12 +742,14 @@ impl App {
                     self.input_buffer.remove(prev);
                     self.cursor_position = prev;
                 }
-                KeyCode::Delete if event.modifiers.is_empty()
-                    && self.cursor_position < self.input_buffer.len() =>
+                KeyCode::Delete
+                    if event.modifiers.is_empty()
+                        && self.cursor_position < self.input_buffer.len() =>
                 {
                     self.input_buffer.remove(self.cursor_position);
                 }
-                KeyCode::Left if event.modifiers.is_empty()
+                KeyCode::Left
+                    if event.modifiers.is_empty()
                     // Move cursor left one character
                     && self.cursor_position > 0 =>
                 {
@@ -758,7 +760,8 @@ impl App {
                         .unwrap_or(0);
                     self.cursor_position = prev;
                 }
-                KeyCode::Right if event.modifiers.is_empty()
+                KeyCode::Right
+                    if event.modifiers.is_empty()
                     // Move cursor right one character
                     && self.cursor_position < self.input_buffer.len() =>
                 {

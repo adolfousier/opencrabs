@@ -144,21 +144,21 @@ impl Default for A2aConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ChannelsConfig {
     #[serde(default)]
-    pub telegram: ChannelConfig,
+    pub telegram: TelegramConfig,
     #[serde(default)]
-    pub discord: ChannelConfig,
+    pub discord: DiscordConfig,
     #[serde(default)]
-    pub whatsapp: ChannelConfig,
+    pub whatsapp: WhatsAppConfig,
     #[serde(default)]
-    pub slack: ChannelConfig,
+    pub slack: SlackConfig,
     #[serde(default)]
-    pub trello: ChannelConfig,
+    pub trello: TrelloConfig,
     #[serde(default)]
-    pub signal: ChannelConfig,
+    pub signal: SignalConfig,
     #[serde(default)]
-    pub google_chat: ChannelConfig,
+    pub google_chat: GoogleChatConfig,
     #[serde(default)]
-    pub imessage: ChannelConfig,
+    pub imessage: IMessageConfig,
 }
 
 /// When the bot should respond to messages in group channels.
@@ -197,36 +197,150 @@ where
     })
 }
 
-/// Individual channel configuration
+/// Telegram channel configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ChannelConfig {
+pub struct TelegramConfig {
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
     pub token: Option<String>,
-    /// Secondary token (Slack app-level token `xapp-...`)
-    #[serde(default)]
-    pub app_token: Option<String>,
-    /// Allowlisted user IDs — Telegram/Discord numeric IDs or Slack `U12345678` strings.
-    /// Accepts both integer and string arrays in TOML for backward compatibility.
+    /// Allowlisted Telegram user IDs (numeric). Accepts int or string arrays.
     #[serde(default, deserialize_with = "deser_users_compat")]
     pub allowed_users: Vec<String>,
-    /// Allowlisted phone numbers for WhatsApp (E.164 format: "+15551234567")
-    #[serde(default)]
-    pub allowed_phones: Vec<String>,
-    /// When the bot should respond: "all", "dm_only", or "mention" (default)
-    #[serde(default)]
-    pub respond_to: RespondTo,
     /// Restrict bot to specific channel IDs. Empty = all channels. DMs always pass.
     #[serde(default)]
     pub allowed_channels: Vec<String>,
-    /// Optional polling interval in seconds (Trello only). Absent or 0 = no polling.
-    /// When set, the agent polls for @mentions on monitored boards at this interval.
+    /// When the bot should respond: "all", "dm_only", or "mention" (default)
+    #[serde(default)]
+    pub respond_to: RespondTo,
+    /// Idle session timeout in hours for non-owner sessions.
+    #[serde(default)]
+    pub session_idle_hours: Option<f64>,
+}
+
+/// Discord channel configuration
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DiscordConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub token: Option<String>,
+    /// Allowlisted Discord user IDs (numeric). Accepts int or string arrays.
+    #[serde(default, deserialize_with = "deser_users_compat")]
+    pub allowed_users: Vec<String>,
+    /// Restrict bot to specific channel IDs. Empty = all channels.
+    #[serde(default)]
+    pub allowed_channels: Vec<String>,
+    /// When the bot should respond: "all", "dm_only", or "mention" (default)
+    #[serde(default)]
+    pub respond_to: RespondTo,
+    /// Idle session timeout in hours for non-owner sessions.
+    #[serde(default)]
+    pub session_idle_hours: Option<f64>,
+}
+
+/// Slack channel configuration
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SlackConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Bot token (xoxb-...)
+    #[serde(default)]
+    pub token: Option<String>,
+    /// App-level token for Socket Mode (xapp-...)
+    #[serde(default)]
+    pub app_token: Option<String>,
+    /// Allowlisted Slack user IDs (U12345678). Accepts int or string arrays.
+    #[serde(default, deserialize_with = "deser_users_compat")]
+    pub allowed_users: Vec<String>,
+    /// Restrict bot to specific channel IDs. Empty = all channels.
+    #[serde(default)]
+    pub allowed_channels: Vec<String>,
+    /// When the bot should respond: "all", "dm_only", or "mention" (default)
+    #[serde(default)]
+    pub respond_to: RespondTo,
+    /// Idle session timeout in hours for non-owner sessions.
+    #[serde(default)]
+    pub session_idle_hours: Option<f64>,
+}
+
+/// WhatsApp channel configuration
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct WhatsAppConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Allowlisted phone numbers (E.164 format: "+15551234567").
+    /// Empty = accept messages from everyone (not recommended for business numbers).
+    #[serde(default)]
+    pub allowed_phones: Vec<String>,
+    /// Idle session timeout in hours for non-owner sessions.
+    #[serde(default)]
+    pub session_idle_hours: Option<f64>,
+}
+
+/// Trello channel configuration
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TrelloConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Trello API Token
+    #[serde(default)]
+    pub token: Option<String>,
+    /// Trello API Key (stored as app_token for keys.toml symmetry)
+    #[serde(default)]
+    pub app_token: Option<String>,
+    /// Allowlisted Trello member IDs. Empty = respond to all members.
+    #[serde(default, deserialize_with = "deser_users_compat")]
+    pub allowed_users: Vec<String>,
+    /// Board IDs to monitor for @mentions.
+    /// Accepts the old `allowed_channels` key as an alias for migration compatibility.
+    #[serde(default, alias = "allowed_channels")]
+    pub board_ids: Vec<String>,
+    /// Optional polling interval in seconds. Absent or 0 = no polling (tool-only mode).
     #[serde(default)]
     pub poll_interval_secs: Option<u64>,
-    /// Idle session timeout in hours for non-owner channel sessions.
-    /// When inactive for this long, the session is archived and a fresh one is created
-    /// on the next message. None = never expire (default).
+    /// Idle session timeout in hours for non-owner sessions.
+    #[serde(default)]
+    pub session_idle_hours: Option<f64>,
+}
+
+/// Signal channel configuration (placeholder — not yet implemented)
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SignalConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Allowlisted phone numbers (E.164 format)
+    #[serde(default)]
+    pub allowed_phones: Vec<String>,
+    /// Idle session timeout in hours.
+    #[serde(default)]
+    pub session_idle_hours: Option<f64>,
+}
+
+/// Google Chat channel configuration (placeholder — not yet implemented)
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GoogleChatConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub token: Option<String>,
+    /// Allowlisted user IDs. Accepts int or string arrays.
+    #[serde(default, deserialize_with = "deser_users_compat")]
+    pub allowed_users: Vec<String>,
+    /// Idle session timeout in hours.
+    #[serde(default)]
+    pub session_idle_hours: Option<f64>,
+}
+
+/// iMessage channel configuration (placeholder — not yet implemented)
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct IMessageConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Allowlisted phone numbers (E.164 format)
+    #[serde(default)]
+    pub allowed_phones: Vec<String>,
+    /// Idle session timeout in hours.
     #[serde(default)]
     pub session_idle_hours: Option<f64>,
 }
@@ -842,12 +956,7 @@ fn merge_channel_keys(mut base: ChannelsConfig, keys: ChannelsConfig) -> Channel
         base.slack.app_token = Some(app_token.clone());
     }
 
-    // WhatsApp
-    if let Some(ref token) = keys.whatsapp.token
-        && !token.is_empty()
-    {
-        base.whatsapp.token = Some(token.clone());
-    }
+    // WhatsApp uses QR-code pairing stored in session.db — no token to merge.
 
     // Trello (app_token = API Key, token = API Token)
     if let Some(ref app_token) = keys.trello.app_token
@@ -939,6 +1048,11 @@ impl Config {
             config = Self::merge_from_file(config, &local_config_path)?;
         }
 
+        // 2.5 Migrate old config keys if needed (e.g. trello.allowed_channels → board_ids)
+        if let Some(ref path) = Self::system_config_path() {
+            Self::migrate_if_needed(path);
+        }
+
         // 3. Load API keys from keys.toml (overrides config.toml keys)
         if let Ok(keys) = load_keys_from_file() {
             config.providers = merge_provider_keys(config.providers, keys.providers);
@@ -990,6 +1104,52 @@ impl Config {
 
         tracing::debug!("Configuration loaded successfully from custom path");
         Ok(config)
+    }
+
+    /// Migrate old config keys in-place.
+    ///
+    /// Currently handles: `channels.trello.allowed_channels` → `board_ids`.
+    /// Called once after loading so old configs are silently upgraded on first run.
+    fn migrate_if_needed(path: &Path) {
+        let Ok(content) = fs::read_to_string(path) else {
+            return;
+        };
+
+        // Only rewrite if the trello section still uses the old key name.
+        // The struct alias keeps deserialization working, but we normalise the
+        // on-disk representation so future reads use the canonical key.
+        if !content.contains("allowed_channels") {
+            return;
+        }
+
+        // Simple line-by-line replacement scoped to the [channels.trello] section.
+        let mut in_trello = false;
+        let mut changed = false;
+        let mut lines: Vec<String> = content
+            .lines()
+            .map(|line| {
+                let trimmed = line.trim();
+                // Track which TOML section we are in.
+                if trimmed.starts_with('[') {
+                    in_trello = trimmed == "[channels.trello]";
+                }
+                if in_trello && trimmed.starts_with("allowed_channels") {
+                    changed = true;
+                    line.replacen("allowed_channels", "board_ids", 1)
+                } else {
+                    line.to_string()
+                }
+            })
+            .collect();
+
+        if !changed {
+            return;
+        }
+
+        lines.push(String::new()); // ensure trailing newline
+        if fs::write(path, lines.join("\n")).is_ok() {
+            tracing::info!("Config migrated: channels.trello.allowed_channels → board_ids");
+        }
     }
 
     /// Get the system config path: ~/.opencrabs/config.toml

@@ -433,7 +433,7 @@ impl OnboardingWizard {
         if let Some(ref api_key) = config.channels.trello.app_token {
             wizard.trello_api_key_input = api_key.clone();
         }
-        if let Some(board_id) = config.channels.trello.allowed_channels.first() {
+        if let Some(board_id) = config.channels.trello.board_ids.first() {
             wizard.trello_board_id_input = board_id.clone();
         }
         // WhatsApp: check if session.db exists (means it's paired)

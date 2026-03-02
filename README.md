@@ -87,7 +87,7 @@
 | Feature | Description |
 |---------|-------------|
 | **Telegram Bot** | Full-featured Telegram bot — shared session with TUI, photo/voice support, allowed user IDs, allowed chat/group IDs, `respond_to` filter (`all`/`dm_only`/`mention`) |
-| **WhatsApp** | Connect via QR code pairing at runtime or from onboarding wizard. Text + image, shared session with TUI, phone allowlist, session persists across restarts |
+| **WhatsApp** | Connect via QR code pairing at runtime or from onboarding wizard. Text + image, shared session with TUI, phone allowlist (`allowed_phones`), session persists across restarts |
 | **Discord** | Full Discord bot — text + image + voice, allowed user IDs, allowed channel IDs, `respond_to` filter, shared session with TUI |
 | **Slack** | Full Slack bot via Socket Mode — allowed user IDs, allowed channel IDs, `respond_to` filter, shared session with TUI. Full proactive control via `slack_send` (16 actions): `send`, `reply`, `react`, `unreact`, `edit`, `delete`, `pin`, `unpin`, `get_messages`, `get_channel`, `list_channels`, `get_user`, `list_members`, `kick_user`, `set_topic`, `send_blocks`. Bot token + app token from `api.slack.com/apps` (Socket Mode required) |
 | **Trello** | Tool-only by default — the AI acts on Trello only when explicitly asked via `trello_send`. Opt-in polling via `poll_interval_secs` in config; when enabled, only `@bot_username` mentions from allowed users trigger a response. Full card management via `trello_send`: `add_comment`, `create_card`, `move_card`, `find_cards`, `list_boards`, `get_card`, `get_card_comments`, `update_card`, `archive_card`, `add_member_to_card`, `remove_member_from_card`, `add_label_to_card`, `remove_label_from_card`, `add_checklist`, `add_checklist_item`, `complete_checklist_item`, `list_lists`, `get_board_members`, `search`, `get_notifications`, `mark_notifications_read`. API Key + Token from `trello.com/power-ups/admin`, board IDs and member-ID allowlist configurable |
@@ -542,7 +542,7 @@ api_key = "your-openai-key"
 
 OAuth tokens (`sk-ant-oat` prefix) are auto-detected — OpenCrabs uses `Authorization: Bearer` with the `anthropic-beta: oauth-2025-04-20` header automatically.
 
-> **Trello note:** `app_token` holds the Trello **API Key** and `token` holds the Trello **API Token** — this naming follows the shared `ChannelConfig` schema used by all channels, where `app_token` is the app-level credential and `token` is the user-level credential.
+> **Trello note:** `app_token` holds the Trello **API Key** and `token` holds the Trello **API Token** — `app_token` is the app-level credential and `token` is the user-level credential. Board IDs are configured via `board_ids` in `config.toml`.
 
 > **Security:** Always `chmod 600 ~/.opencrabs/keys.toml` and add `keys.toml` to `.gitignore`.
 

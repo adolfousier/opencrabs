@@ -354,8 +354,9 @@ impl Tool for WhatsAppConnectTool {
         let allowed: Arc<HashSet<String>> = Arc::new(allowed_phones.iter().cloned().collect());
         let voice_config = Arc::new(factory.voice_config().clone());
         let shared_session = factory.shared_session_id();
-        let idle_timeout_hours = crate::config::Config::load()
-            .ok()
+        let wa_cfg = crate::config::Config::load().ok();
+        let idle_timeout_hours = wa_cfg
+            .as_ref()
             .and_then(|c| c.channels.whatsapp.session_idle_hours);
         let extra_sessions: Arc<Mutex<HashMap<String, (uuid::Uuid, std::time::Instant)>>> =
             Arc::new(Mutex::new(HashMap::new()));

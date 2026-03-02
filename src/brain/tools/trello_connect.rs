@@ -169,8 +169,7 @@ impl Tool for TrelloConnectTool {
         let _ = crate::config::write_secret_key("channels.trello", "app_token", &api_key);
         let _ = crate::config::write_secret_key("channels.trello", "token", &api_token);
         let _ = crate::config::Config::write_key("channels.trello", "enabled", "true");
-        let _ =
-            crate::config::Config::write_array("channels.trello", "allowed_channels", &board_ids);
+        let _ = crate::config::Config::write_array("channels.trello", "board_ids", &board_ids);
         if !allowed_users.is_empty() {
             let _ = crate::config::Config::write_array(
                 "channels.trello",

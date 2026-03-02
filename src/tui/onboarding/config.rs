@@ -503,7 +503,7 @@ impl OnboardingWizard {
                 .filter(|s| !s.is_empty())
                 .collect();
             if !boards.is_empty() {
-                let _ = Config::write_array("channels.trello", "allowed_channels", &boards);
+                let _ = Config::write_array("channels.trello", "board_ids", &boards);
             }
         }
         if !self.trello_allowed_users_input.is_empty() && !self.has_existing_trello_allowed_users()

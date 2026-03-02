@@ -723,7 +723,7 @@ pub(crate) async fn cmd_chat(
                 .as_ref()
                 .map(|t| !t.is_empty())
                 .unwrap_or(false);
-        let board_ids = tr.allowed_channels.clone();
+        let board_ids = tr.board_ids.clone();
         let has_boards = !board_ids.is_empty();
         if tr.enabled && has_valid_creds && has_boards {
             if let (Some(api_key), Some(api_token)) = (tr_api_key, tr_api_token) {
@@ -739,7 +739,7 @@ pub(crate) async fn cmd_chat(
                 );
                 tracing::info!(
                     "Spawning Trello agent ({} board(s), {} allowed user(s), poll={}s)",
-                    tr.allowed_channels.len(),
+                    tr.board_ids.len(),
                     tr.allowed_users.len(),
                     tr.poll_interval_secs.unwrap_or(0),
                 );

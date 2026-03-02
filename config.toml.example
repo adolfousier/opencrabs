@@ -112,6 +112,7 @@ model = "gpt-4o-mini-tts" # TTS model
 [channels.whatsapp]
 enabled = false
 # Phone numbers allowed to message the bot (E.164 format, leading + optional)
+# Access control is purely phone-based — add numbers here to restrict who can message the bot.
 allowed_phones = ["+15551234567"]
 # session_idle_hours = 24.0             # Archive inactive non-owner sessions after N hours (default: never)
 
@@ -132,7 +133,7 @@ allowed_users = [123456789]             # Who the bot replies to (numeric user I
 [channels.slack]
 enabled = false
 allowed_channels = ["C12345678"]        # Where the bot operates (Slack channel ID, empty = all)
-allowed_ids = ["U12345678"]             # Who the bot replies to (Slack user ID, empty = everyone)
+allowed_users = ["U12345678"]           # Who the bot replies to (Slack user ID, empty = everyone)
 # respond_to = "all"                    # "all" | "dm_only" | "mention"
 # session_idle_hours = 24.0             # Archive inactive non-owner sessions after N hours (default: never)
 
@@ -148,7 +149,7 @@ allowed_ids = ["U12345678"]             # Who the bot replies to (Slack user ID,
 enabled = false
 # Board IDs or names to monitor — you can mix 24-char hex IDs and human-readable board names.
 # The agent resolves names at startup. Comma-separated in the wizard; TOML array here.
-allowed_channels = ["your-board-name", "abc123def456abc123def456"]
+board_ids = ["your-board-name", "abc123def456abc123def456"]
 allowed_users = []                      # Trello member IDs allowed to @mention the bot (empty = all)
 # poll_interval_secs = 30              # Opt-in: poll boards every N seconds for @mentions. Default = disabled.
 # session_idle_hours = 24.0             # Archive inactive non-owner sessions after N hours (default: never)

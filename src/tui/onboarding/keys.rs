@@ -230,7 +230,7 @@ impl OnboardingWizard {
             {
                 self.trello_api_token_input = EXISTING_KEY_SENTINEL.to_string();
             }
-            if !config.channels.trello.allowed_channels.is_empty() {
+            if !config.channels.trello.board_ids.is_empty() {
                 self.trello_board_id_input = EXISTING_KEY_SENTINEL.to_string();
             }
             if !config.channels.trello.allowed_users.is_empty() {
