@@ -702,18 +702,28 @@ pub(crate) async fn handle_message(
 fn tool_context(name: &str, input: &serde_json::Value) -> String {
     let safe = crate::utils::redact_tool_input(input);
     let hint: Option<String> = match name {
-        "bash" => safe.get("command").and_then(|v| v.as_str()).map(String::from),
+        "bash" => safe
+            .get("command")
+            .and_then(|v| v.as_str())
+            .map(String::from),
         "read" | "write" | "edit" => safe.get("path").and_then(|v| v.as_str()).map(String::from),
-        "glob" => safe.get("pattern").and_then(|v| v.as_str()).map(String::from),
-        "grep" => safe.get("pattern").and_then(|v| v.as_str()).map(String::from),
+        "glob" => safe
+            .get("pattern")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        "grep" => safe
+            .get("pattern")
+            .and_then(|v| v.as_str())
+            .map(String::from),
         "ls" => safe.get("path").and_then(|v| v.as_str()).map(String::from),
         "http_request" | "web_fetch" => safe.get("url").and_then(|v| v.as_str()).map(String::from),
         "brave_search" | "exa_search" | "web_search" | "memory_search" | "session_search" => {
             safe.get("query").and_then(|v| v.as_str()).map(String::from)
         }
-        "telegram_send" | "discord_send" | "slack_send" | "trello_send" => {
-            safe.get("action").and_then(|v| v.as_str()).map(String::from)
-        }
+        "telegram_send" | "discord_send" | "slack_send" | "trello_send" => safe
+            .get("action")
+            .and_then(|v| v.as_str())
+            .map(String::from),
         // Fallback: first string value in the object
         _ => safe
             .as_object()

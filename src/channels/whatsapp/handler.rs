@@ -461,8 +461,7 @@ pub(crate) async fn handle_message(
 
                 // Redact secrets before display
                 let safe_input = crate::utils::redact_tool_input(&tool_info.tool_input);
-                let input_preview =
-                    serde_json::to_string_pretty(&safe_input).unwrap_or_default();
+                let input_preview = serde_json::to_string_pretty(&safe_input).unwrap_or_default();
                 let body = format!(
                     "🔐 *Tool Approval Required*\n\nTool: `{}`\n```\n{}\n```",
                     tool_info.tool_name,

@@ -13,6 +13,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use serenity::async_trait;
+use serenity::model::application::Interaction;
 use serenity::model::channel::Message;
 use serenity::model::gateway::Ready;
 use serenity::prelude::*;
@@ -178,5 +179,40 @@ impl EventHandler for Handler {
             self.idle_timeout_hours,
         )
         .await;
+    }
+
+    async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
+        if let Some(comp) = interaction.message_component() {
+            let custom_id = comp.data.custom_id.as_str();
+            let (approved, always, approval_id) =
+                if let Some(id) = custom_id.strip_prefix("approve:") {
+                    (true, false, id.to_string())
+                } else if let Some(id) = custom_id.strip_prefix("always:") {
+                    (true, true, id.to_string())
+                } else if let Some(id) = custom_id.strip_prefix("deny:") {
+                    (false, false, id.to_string())
+                } else {
+                    // Not our button — ack and ignore
+                    let _ = comp
+                        .create_response(
+                            &ctx.http,
+                            serenity::builder::CreateInteractionResponse::Acknowledge,
+                        )
+                        .await;
+                    return;
+                };
+
+            self.discord_state
+                .resolve_pending_approval(&approval_id, approved, always)
+                .await;
+
+            // Ack the interaction so Discord doesn't show "interaction failed"
+            let _ = comp
+                .create_response(
+                    &ctx.http,
+                    serenity::builder::CreateInteractionResponse::Acknowledge,
+                )
+                .await;
+        }
     }
 }

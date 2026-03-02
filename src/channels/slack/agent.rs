@@ -121,8 +121,9 @@ impl SlackAgent {
                     tracing::warn!("Slack: handler state already initialized");
                 });
 
-            let socket_mode_callbacks =
-                SlackSocketModeListenerCallbacks::new().with_push_events(handler::on_push_event);
+            let socket_mode_callbacks = SlackSocketModeListenerCallbacks::new()
+                .with_push_events(handler::on_push_event)
+                .with_interaction_events(handler::on_interaction);
 
             let listener_environment = Arc::new(
                 SlackClientEventsListenerEnvironment::new(client)

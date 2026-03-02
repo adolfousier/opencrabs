@@ -53,7 +53,9 @@ const COMMAND_SENSITIVE_PATTERNS: &[&str] = &[
 /// Returns true if a JSON object key looks like it holds a sensitive value.
 fn is_sensitive_key(key: &str) -> bool {
     let lower = key.to_lowercase();
-    SENSITIVE_KEYS.iter().any(|&pat| lower == pat || lower.contains(pat))
+    SENSITIVE_KEYS
+        .iter()
+        .any(|&pat| lower == pat || lower.contains(pat))
 }
 
 /// Redact sensitive values from a bash command string.
@@ -234,7 +236,10 @@ mod tests {
         let out = redact_tool_input(&input);
         let url = out["url"].as_str().unwrap();
         assert!(url.contains("[REDACTED]"), "expected REDACTED in: {url}");
-        assert!(!url.contains("mysecretpass"), "password still present: {url}");
+        assert!(
+            !url.contains("mysecretpass"),
+            "password still present: {url}"
+        );
     }
 
     #[test]
