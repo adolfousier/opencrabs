@@ -96,7 +96,8 @@ impl Tool for DiscordSendTool {
                     "enum": [
                         "send", "reply", "react", "unreact", "edit", "delete",
                         "pin", "unpin", "create_thread", "send_embed", "get_messages",
-                        "list_channels", "add_role", "remove_role", "kick", "ban"
+                        "list_channels", "add_role", "remove_role", "kick", "ban",
+                        "send_file"
                     ],
                     "description": "The Discord action to perform"
                 },
@@ -143,6 +144,14 @@ impl Tool for DiscordSendTool {
                 "limit": {
                     "type": "integer",
                     "description": "Number of messages to fetch for get_messages (1-100, default 10)"
+                },
+                "file_path": {
+                    "type": "string",
+                    "description": "Local file path to upload (required for send_file)"
+                },
+                "caption": {
+                    "type": "string",
+                    "description": "Optional caption text for send_file"
                 }
             },
             "required": ["action"]
@@ -513,10 +522,52 @@ impl Tool for DiscordSendTool {
                 }
             }
 
+            "send_file" => {
+                use serenity::builder::{CreateAttachment, CreateMessage};
+                use serenity::model::id::ChannelId;
+                let channel_id = pget!(channel_or_err(channel_id_opt));
+                let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
+                    Some(p) => p.to_string(),
+                    None => {
+                        return Ok(ToolResult::error(
+                            "send_file requires 'file_path'.".to_string(),
+                        ));
+                    }
+                };
+                let caption = input
+                    .get("caption")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let channel = ChannelId::new(channel_id);
+                match tokio::fs::read(&file_path).await {
+                    Ok(bytes) => {
+                        let fname = std::path::Path::new(&file_path)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("file.png")
+                            .to_string();
+                        let attachment = CreateAttachment::bytes(bytes.as_slice(), fname);
+                        let mut msg = CreateMessage::new().add_file(attachment);
+                        if !caption.is_empty() {
+                            msg = msg.content(caption);
+                        }
+                        match channel.send_message(&http, msg).await {
+                            Ok(_) => Ok(ToolResult::success("File sent.".to_string())),
+                            Err(e) => Ok(ToolResult::error(format!("Failed to send file: {e}"))),
+                        }
+                    }
+                    Err(e) => Ok(ToolResult::error(format!(
+                        "Failed to read file '{}': {e}",
+                        file_path
+                    ))),
+                }
+            }
+
             unknown => Ok(ToolResult::error(format!(
                 "Unknown action '{unknown}'. Valid: send, reply, react, unreact, edit, delete, \
                  pin, unpin, create_thread, send_embed, get_messages, list_channels, \
-                 add_role, remove_role, kick, ban"
+                 add_role, remove_role, kick, ban, send_file"
             ))),
         }
     }

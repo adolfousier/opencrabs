@@ -76,7 +76,8 @@ impl Tool for SlackSendTool {
                     "enum": [
                         "send", "reply", "react", "unreact", "edit", "delete",
                         "pin", "unpin", "get_messages", "get_channel", "list_channels",
-                        "get_user", "list_members", "kick_user", "set_topic", "send_blocks"
+                        "get_user", "list_members", "kick_user", "set_topic", "send_blocks",
+                        "send_file"
                     ],
                     "description": "The Slack action to perform"
                 },
@@ -115,6 +116,14 @@ impl Tool for SlackSendTool {
                 "limit": {
                     "type": "integer",
                     "description": "Number of items to fetch for get_messages/list_channels/list_members (default 10)"
+                },
+                "file_path": {
+                    "type": "string",
+                    "description": "Local file path to upload (required for send_file)"
+                },
+                "caption": {
+                    "type": "string",
+                    "description": "Optional comment/caption for send_file"
                 }
             },
             "required": ["action"]
@@ -544,10 +553,56 @@ impl Tool for SlackSendTool {
                 }
             }
 
+            "send_file" => {
+                let channel_id = pget!(channel_or_err(channel_id_opt));
+                let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
+                    Some(p) => p.to_string(),
+                    None => {
+                        return Ok(ToolResult::error(
+                            "send_file requires 'file_path'.".to_string(),
+                        ));
+                    }
+                };
+                let caption = input
+                    .get("caption")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                match tokio::fs::read(&file_path).await {
+                    Ok(bytes) => {
+                        let fname = std::path::Path::new(&file_path)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("file.png")
+                            .to_string();
+                        #[allow(deprecated)]
+                        let req = SlackApiFilesUploadRequest {
+                            channels: Some(vec![SlackChannelId::new(channel_id)]),
+                            binary_content: Some(bytes),
+                            filename: Some(fname),
+                            initial_comment: caption,
+                            filetype: None,
+                            content: None,
+                            thread_ts: None,
+                            title: None,
+                            file_content_type: Some("image/png".to_string()),
+                        };
+                        #[allow(deprecated)]
+                        match session.files_upload(&req).await {
+                            Ok(_) => Ok(ToolResult::success("File uploaded to Slack.".to_string())),
+                            Err(e) => Ok(ToolResult::error(format!("Failed to upload file: {e}"))),
+                        }
+                    }
+                    Err(e) => Ok(ToolResult::error(format!(
+                        "Failed to read file '{}': {e}",
+                        file_path
+                    ))),
+                }
+            }
+
             unknown => Ok(ToolResult::error(format!(
                 "Unknown action '{unknown}'. Valid: send, reply, react, unreact, edit, delete, \
                  pin, unpin, get_messages, get_channel, list_channels, get_user, list_members, \
-                 kick_user, set_topic, send_blocks"
+                 kick_user, set_topic, send_blocks, send_file"
             ))),
         }
     }
