@@ -107,6 +107,7 @@ pub enum OnboardingStep {
     TrelloSetup,
     Gateway,
     VoiceSetup,
+    ImageSetup,
     Daemon,
     HealthCheck,
     BrainSetup,
@@ -128,16 +129,17 @@ impl OnboardingStep {
             Self::TrelloSetup => 4,   // sub-step of Channels
             Self::Gateway => 5,
             Self::VoiceSetup => 6,
-            Self::Daemon => 7,
-            Self::HealthCheck => 8,
-            Self::BrainSetup => 9,
-            Self::Complete => 10,
+            Self::ImageSetup => 7,
+            Self::Daemon => 8,
+            Self::HealthCheck => 9,
+            Self::BrainSetup => 10,
+            Self::Complete => 11,
         }
     }
 
     /// Total number of steps (excluding Complete)
     pub fn total() -> usize {
-        9
+        10
     }
 
     /// Step title
@@ -154,6 +156,7 @@ impl OnboardingStep {
             Self::TrelloSetup => "Trello",
             Self::Gateway => "API Gateway",
             Self::VoiceSetup => "Voice Superpowers",
+            Self::ImageSetup => "Image Handling",
             Self::Daemon => "Always On",
             Self::HealthCheck => "Vibe Check",
             Self::BrainSetup => "Make It Yours",
@@ -175,6 +178,7 @@ impl OnboardingStep {
             Self::TrelloSetup => "Hook up your Trello API Key and Token",
             Self::Gateway => "Open up an HTTP API if you want one",
             Self::VoiceSetup => "Talk to me, literally",
+            Self::ImageSetup => "Vision and image generation via Google Gemini",
             Self::Daemon => "Keep me running in the background",
             Self::HealthCheck => "Making sure everything's wired up right",
             Self::BrainSetup => "Make me yours, drop some context so I actually get you",
@@ -268,6 +272,14 @@ pub enum ChannelTestStatus {
 pub enum VoiceField {
     GroqApiKey,
     TtsToggle,
+}
+
+/// Which field is focused in ImageSetup step
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageField {
+    VisionToggle,
+    GenerationToggle,
+    ApiKey,
 }
 
 /// Which text area is focused in BrainSetup step

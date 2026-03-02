@@ -16,9 +16,10 @@ pub(crate) async fn cmd_chat(
         brain::{
             agent::AgentService,
             tools::{
-                bash::BashTool, brave_search::BraveSearchTool, code_exec::CodeExecTool,
-                config_tool::ConfigTool, context::ContextTool, doc_parser::DocParserTool,
-                edit::EditTool, exa_search::ExaSearchTool, glob::GlobTool, grep::GrepTool,
+                analyze_image::AnalyzeImageTool, bash::BashTool, brave_search::BraveSearchTool,
+                code_exec::CodeExecTool, config_tool::ConfigTool, context::ContextTool,
+                doc_parser::DocParserTool, edit::EditTool, exa_search::ExaSearchTool,
+                generate_image::GenerateImageTool, glob::GlobTool, grep::GrepTool,
                 http::HttpClientTool, load_brain_file::LoadBrainFileTool, ls::LsTool,
                 memory_search::MemorySearchTool, notebook::NotebookEditTool, plan_tool::PlanTool,
                 read::ReadTool, registry::ToolRegistry, session_search::SessionSearchTool,
@@ -129,6 +130,27 @@ pub(crate) async fn cmd_chat(
     {
         tool_registry.register(Arc::new(BraveSearchTool::new(brave_key)));
         tracing::info!("Registered Brave search tool");
+    }
+
+    // Image generation tool (requires image.generation.enabled + api_key in config)
+    if config.image.generation.enabled
+        && let Some(ref key) = config.image.generation.api_key
+    {
+        tool_registry.register(Arc::new(GenerateImageTool::new(
+            key.clone(),
+            config.image.generation.model.clone(),
+        )));
+        tracing::info!("Registered generate_image tool");
+    }
+    // Image vision tool (requires image.vision.enabled + api_key in config)
+    if config.image.vision.enabled
+        && let Some(ref key) = config.image.vision.api_key
+    {
+        tool_registry.register(Arc::new(AnalyzeImageTool::new(
+            key.clone(),
+            config.image.vision.model.clone(),
+        )));
+        tracing::info!("Registered analyze_image tool");
     }
 
     // Index existing memory files and warm up embedding engine in the background

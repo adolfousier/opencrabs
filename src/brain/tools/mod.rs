@@ -25,8 +25,10 @@ pub mod notebook;
 pub mod web_search;
 
 // Tool implementations - Phase 3: Workflow & Integration
+pub mod analyze_image;
 pub mod config_tool;
 pub mod context;
+pub mod generate_image;
 pub mod http;
 pub mod load_brain_file;
 pub mod memory_search;

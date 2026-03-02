@@ -100,6 +100,61 @@ impl OnboardingWizard {
         WizardAction::None
     }
 
+    pub(super) fn handle_image_setup_key(&mut self, event: KeyEvent) -> WizardAction {
+        let either_enabled = self.image_vision_enabled || self.image_generation_enabled;
+
+        match self.image_field {
+            ImageField::VisionToggle => match event.code {
+                KeyCode::Char(' ') | KeyCode::Up | KeyCode::Down => {
+                    self.image_vision_enabled = !self.image_vision_enabled;
+                }
+                KeyCode::Tab | KeyCode::Enter => {
+                    self.image_field = ImageField::GenerationToggle;
+                }
+                _ => {}
+            },
+            ImageField::GenerationToggle => match event.code {
+                KeyCode::Char(' ') | KeyCode::Up | KeyCode::Down => {
+                    self.image_generation_enabled = !self.image_generation_enabled;
+                }
+                KeyCode::BackTab => {
+                    self.image_field = ImageField::VisionToggle;
+                }
+                KeyCode::Tab | KeyCode::Enter => {
+                    if either_enabled {
+                        self.image_field = ImageField::ApiKey;
+                    } else {
+                        self.next_step();
+                    }
+                }
+                _ => {}
+            },
+            ImageField::ApiKey => match event.code {
+                KeyCode::Char(c) => {
+                    if self.has_existing_image_key() {
+                        self.image_api_key_input.clear();
+                    }
+                    self.image_api_key_input.push(c);
+                }
+                KeyCode::Backspace => {
+                    if self.has_existing_image_key() {
+                        self.image_api_key_input.clear();
+                    } else {
+                        self.image_api_key_input.pop();
+                    }
+                }
+                KeyCode::BackTab => {
+                    self.image_field = ImageField::GenerationToggle;
+                }
+                KeyCode::Enter => {
+                    self.next_step();
+                }
+                _ => {}
+            },
+        }
+        WizardAction::None
+    }
+
     pub(super) fn handle_daemon_key(&mut self, event: KeyEvent) -> WizardAction {
         match event.code {
             KeyCode::Up | KeyCode::Down | KeyCode::Char(' ') => {

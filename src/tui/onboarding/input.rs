@@ -32,6 +32,7 @@ impl OnboardingWizard {
             OnboardingStep::SlackSetup => self.handle_slack_setup_key(event),
             OnboardingStep::TrelloSetup => self.handle_trello_setup_key(event),
             OnboardingStep::VoiceSetup => self.handle_voice_setup_key(event),
+            OnboardingStep::ImageSetup => self.handle_image_setup_key(event),
             OnboardingStep::Daemon => self.handle_daemon_key(event),
             OnboardingStep::HealthCheck => self.handle_health_check_key(event),
             OnboardingStep::BrainSetup => self.handle_brain_setup_key(event),
@@ -194,6 +195,13 @@ impl OnboardingWizard {
                     self.groq_api_key_input.clear();
                 }
                 self.groq_api_key_input.push_str(clean);
+            }
+            OnboardingStep::ImageSetup if self.image_field == ImageField::ApiKey => {
+                tracing::debug!("[paste] Google API key pasted ({} chars)", clean.len());
+                if self.has_existing_image_key() {
+                    self.image_api_key_input.clear();
+                }
+                self.image_api_key_input.push_str(clean);
             }
             OnboardingStep::ProviderAuth => match self.auth_field {
                 AuthField::ApiKey | AuthField::CustomApiKey => {

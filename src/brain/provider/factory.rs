@@ -2,7 +2,10 @@
 //!
 //! Creates providers based on config.toml settings.
 
-use super::{Provider, anthropic::AnthropicProvider, custom_openai_compatible::OpenAIProvider};
+use super::{
+    Provider, anthropic::AnthropicProvider, custom_openai_compatible::OpenAIProvider,
+    gemini::GeminiProvider,
+};
 use crate::config::{Config, ProviderConfig};
 use anyhow::Result;
 use std::sync::Arc;
@@ -60,7 +63,8 @@ pub fn create_provider(config: &Config) -> Result<Arc<dyn Provider>> {
     // Try Gemini
     if config.providers.gemini.as_ref().is_some_and(|p| p.enabled) {
         tracing::info!("Using enabled provider: Google Gemini");
-        return Err(anyhow::anyhow!("Gemini provider not yet implemented"));
+        return try_create_gemini(config)?
+            .ok_or_else(|| anyhow::anyhow!("Gemini enabled but API key missing"));
     }
 
     // Try fallback if primary fails
@@ -93,6 +97,8 @@ pub fn create_provider_by_name(config: &Config, name: &str) -> Result<Arc<dyn Pr
             .ok_or_else(|| anyhow::anyhow!("Minimax not configured (missing API key)")),
         "openrouter" => try_create_openrouter(config)?
             .ok_or_else(|| anyhow::anyhow!("OpenRouter not configured (missing API key)")),
+        "gemini" => try_create_gemini(config)?
+            .ok_or_else(|| anyhow::anyhow!("Gemini not configured (missing API key)")),
         n if n.starts_with("custom:") => {
             let custom_name = &n["custom:".len()..];
             try_create_custom_by_name(config, custom_name)?
@@ -297,6 +303,29 @@ fn try_create_openai(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     }
 
     Ok(None)
+}
+
+/// Try to create Gemini provider if configured
+fn try_create_gemini(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
+    let gemini_config = match &config.providers.gemini {
+        Some(cfg) => cfg,
+        None => return Ok(None),
+    };
+
+    let api_key = match &gemini_config.api_key {
+        Some(key) if !key.is_empty() => key.clone(),
+        _ => return Ok(None),
+    };
+
+    let model = gemini_config
+        .default_model
+        .clone()
+        .unwrap_or_else(|| "gemini-2.0-flash".to_string());
+
+    tracing::info!("Using Gemini provider with model: {}", model);
+    Ok(Some(Arc::new(
+        GeminiProvider::new(api_key).with_model(model),
+    )))
 }
 
 /// Try to create Anthropic provider if configured

@@ -317,6 +317,7 @@ impl App {
                     "channels" => OnboardingStep::Channels,
                     "gateway" => OnboardingStep::Gateway,
                     "voice" => OnboardingStep::VoiceSetup,
+                    "image" => OnboardingStep::ImageSetup,
                     "daemon" => OnboardingStep::Daemon,
                     "health" => OnboardingStep::HealthCheck,
                     "brain" => OnboardingStep::BrainSetup,
@@ -327,6 +328,9 @@ impl App {
                 wizard.step = step;
                 if step == OnboardingStep::HealthCheck {
                     wizard.start_health_check();
+                }
+                if step == OnboardingStep::ImageSetup {
+                    wizard.detect_existing_image_key();
                 }
                 self.onboarding = Some(wizard);
                 self.mode = AppMode::Onboarding;

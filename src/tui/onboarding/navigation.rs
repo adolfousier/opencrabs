@@ -70,6 +70,11 @@ impl OnboardingWizard {
                 }
             }
             OnboardingStep::VoiceSetup => {
+                self.step = OnboardingStep::ImageSetup;
+                self.image_field = ImageField::VisionToggle;
+                self.detect_existing_image_key();
+            }
+            OnboardingStep::ImageSetup => {
                 self.step = OnboardingStep::Daemon;
             }
             OnboardingStep::Daemon => {
@@ -132,13 +137,17 @@ impl OnboardingWizard {
             OnboardingStep::VoiceSetup => {
                 self.step = OnboardingStep::Gateway;
             }
+            OnboardingStep::ImageSetup => {
+                self.step = OnboardingStep::VoiceSetup;
+                self.voice_field = VoiceField::GroqApiKey;
+            }
             OnboardingStep::Daemon => {
-                // QuickStart: go back to Gateway, Advanced: go back to VoiceSetup
+                // QuickStart: go back to Gateway, Advanced: go back to ImageSetup
                 if self.mode == WizardMode::QuickStart {
                     self.step = OnboardingStep::Gateway;
                 } else {
-                    self.step = OnboardingStep::VoiceSetup;
-                    self.voice_field = VoiceField::GroqApiKey;
+                    self.step = OnboardingStep::ImageSetup;
+                    self.image_field = ImageField::VisionToggle;
                 }
             }
             OnboardingStep::HealthCheck => {

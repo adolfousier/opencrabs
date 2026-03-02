@@ -49,6 +49,10 @@ pub struct Config {
     /// A2A (Agent-to-Agent) protocol gateway configuration
     #[serde(default)]
     pub a2a: A2aConfig,
+
+    /// Image generation and vision configuration
+    #[serde(default)]
+    pub image: ImageConfig,
 }
 
 /// HTTP API gateway configuration
@@ -396,6 +400,63 @@ impl Default for VoiceConfig {
             tts_provider: None,
         }
     }
+}
+
+/// Image generation and vision configuration
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ImageConfig {
+    #[serde(default)]
+    pub generation: ImageGenerationConfig,
+    #[serde(default)]
+    pub vision: ImageVisionConfig,
+}
+
+/// Image generation configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageGenerationConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_image_model")]
+    pub model: String,
+    /// Loaded from keys.toml at runtime, never serialized to config.toml
+    #[serde(skip, default)]
+    pub api_key: Option<String>,
+}
+
+impl Default for ImageGenerationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            model: default_image_model(),
+            api_key: None,
+        }
+    }
+}
+
+/// Image vision configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageVisionConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_image_model")]
+    pub model: String,
+    /// Loaded from keys.toml at runtime, never serialized to config.toml
+    #[serde(skip, default)]
+    pub api_key: Option<String>,
+}
+
+impl Default for ImageVisionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            model: default_image_model(),
+            api_key: None,
+        }
+    }
+}
+
+fn default_image_model() -> String {
+    "gemini-3.1-flash-image-preview".to_string()
 }
 
 /// Agent behaviour configuration
@@ -813,6 +874,14 @@ pub struct KeysFile {
     pub channels: ChannelsConfig,
     #[serde(default)]
     pub a2a: Option<KeysA2a>,
+    #[serde(default)]
+    pub image: Option<ImageKeys>,
+}
+
+/// Image keys section in keys.toml
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ImageKeys {
+    pub api_key: Option<String>,
 }
 
 /// A2A keys section in keys.toml
@@ -1015,6 +1084,7 @@ impl Default for Config {
             voice: VoiceConfig::default(),
             agent: AgentConfig::default(),
             a2a: A2aConfig::default(),
+            image: ImageConfig::default(),
         }
     }
 }
@@ -1063,6 +1133,14 @@ impl Config {
                 && !key.is_empty()
             {
                 config.a2a.api_key = Some(key);
+            }
+            // Merge image API key from keys.toml
+            if let Some(img_keys) = keys.image
+                && let Some(key) = img_keys.api_key
+                && !key.is_empty()
+            {
+                config.image.generation.api_key = Some(key.clone());
+                config.image.vision.api_key = Some(key);
             }
         }
 
@@ -1188,6 +1266,7 @@ impl Config {
             voice: overlay.voice,
             agent: overlay.agent,
             a2a: overlay.a2a,
+            image: overlay.image,
         }
     }
 

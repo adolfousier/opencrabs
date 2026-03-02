@@ -4,8 +4,8 @@
 
 use super::onboarding::{
     AuthField, BrainField, CHANNEL_NAMES, ChannelTestStatus, DiscordField, HealthStatus,
-    OnboardingStep, OnboardingWizard, PROVIDERS, SlackField, TelegramField, TrelloField,
-    VoiceField, WizardMode,
+    ImageField, OnboardingStep, OnboardingWizard, PROVIDERS, SlackField, TelegramField,
+    TrelloField, VoiceField, WizardMode,
 };
 use ratatui::{
     Frame,
@@ -66,6 +66,7 @@ pub fn render_onboarding(f: &mut Frame, wizard: &OnboardingWizard) {
                 OnboardingStep::SlackSetup => render_slack_setup(&mut lines, wizard),
                 OnboardingStep::TrelloSetup => render_trello_setup(&mut lines, wizard),
                 OnboardingStep::VoiceSetup => render_voice_setup(&mut lines, wizard),
+                OnboardingStep::ImageSetup => render_image_setup(&mut lines, wizard),
                 OnboardingStep::Daemon => render_daemon(&mut lines, wizard),
                 OnboardingStep::HealthCheck => render_health_check(&mut lines, wizard),
                 OnboardingStep::BrainSetup => render_brain_setup(&mut lines, wizard),
@@ -1770,6 +1771,167 @@ fn render_channel_test_status(lines: &mut Vec<Line<'static>>, wizard: &Onboardin
             )));
         }
     }
+}
+
+fn render_image_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
+    // Provider row
+    lines.push(Line::from(vec![
+        Span::styled(
+            "  Provider: ".to_string(),
+            Style::default().fg(Color::DarkGray),
+        ),
+        Span::styled(
+            "[ Google ]".to_string(),
+            Style::default().fg(BRAND_GOLD).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            "  gemini-3.1-flash-image-preview".to_string(),
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]));
+    lines.push(Line::from(""));
+
+    // Vision toggle
+    let vision_focused = wizard.image_field == ImageField::VisionToggle;
+    lines.push(Line::from(vec![
+        Span::styled(
+            if vision_focused { " > " } else { "   " },
+            Style::default().fg(ACCENT_GOLD),
+        ),
+        Span::styled(
+            if wizard.image_vision_enabled {
+                "[x]".to_string()
+            } else {
+                "[ ]".to_string()
+            },
+            Style::default().fg(if wizard.image_vision_enabled {
+                BRAND_GOLD
+            } else {
+                Color::DarkGray
+            }),
+        ),
+        Span::styled(
+            " Vision Analysis",
+            Style::default()
+                .fg(if vision_focused {
+                    Color::White
+                } else {
+                    Color::DarkGray
+                })
+                .add_modifier(if vision_focused {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
+        ),
+        Span::styled(
+            "   — analyze images the agent receives",
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]));
+
+    // Generation toggle
+    let gen_focused = wizard.image_field == ImageField::GenerationToggle;
+    lines.push(Line::from(vec![
+        Span::styled(
+            if gen_focused { " > " } else { "   " },
+            Style::default().fg(ACCENT_GOLD),
+        ),
+        Span::styled(
+            if wizard.image_generation_enabled {
+                "[x]".to_string()
+            } else {
+                "[ ]".to_string()
+            },
+            Style::default().fg(if wizard.image_generation_enabled {
+                BRAND_GOLD
+            } else {
+                Color::DarkGray
+            }),
+        ),
+        Span::styled(
+            " Image Generation",
+            Style::default()
+                .fg(if gen_focused {
+                    Color::White
+                } else {
+                    Color::DarkGray
+                })
+                .add_modifier(if gen_focused {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
+        ),
+        Span::styled(
+            " — generate images from text prompts",
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]));
+
+    // API key field (only when either is enabled)
+    if wizard.image_vision_enabled || wizard.image_generation_enabled {
+        lines.push(Line::from(""));
+
+        let key_focused = wizard.image_field == ImageField::ApiKey;
+        let (masked_key, key_hint) = if wizard.has_existing_image_key() {
+            (
+                "**************************".to_string(),
+                " (key already set)".to_string(),
+            )
+        } else if wizard.image_api_key_input.is_empty() {
+            (
+                "paste key from aistudio.google.com".to_string(),
+                String::new(),
+            )
+        } else {
+            (
+                "*".repeat(wizard.image_api_key_input.len().min(30)),
+                String::new(),
+            )
+        };
+        let cursor = if key_focused && !wizard.has_existing_image_key() {
+            "█"
+        } else {
+            ""
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled(
+                "  Google API Key: ",
+                Style::default().fg(if key_focused {
+                    BRAND_BLUE
+                } else {
+                    Color::DarkGray
+                }),
+            ),
+            Span::styled(
+                format!("{}{}", masked_key, cursor),
+                Style::default().fg(if wizard.has_existing_image_key() {
+                    Color::Cyan
+                } else if key_focused {
+                    Color::White
+                } else {
+                    Color::DarkGray
+                }),
+            ),
+        ]));
+
+        if !key_hint.is_empty() && key_focused {
+            lines.push(Line::from(Span::styled(
+                format!("  {}", key_hint.trim()),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
+            )));
+        }
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  Skip with Enter to set up later",
+        Style::default().fg(Color::DarkGray),
+    )));
 }
 
 fn render_voice_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {

@@ -81,7 +81,13 @@ pub struct OnboardingWizard {
     pub groq_api_key_input: String,
     pub tts_enabled: bool,
 
-    /// Step 7: Daemon
+    /// Step 7: Image Setup
+    pub image_field: ImageField,
+    pub image_vision_enabled: bool,
+    pub image_generation_enabled: bool,
+    pub image_api_key_input: String,
+
+    /// Step 8: Daemon
     pub install_daemon: bool,
 
     /// Step 7: Health check
@@ -279,6 +285,11 @@ impl OnboardingWizard {
             groq_api_key_input: String::new(),
             tts_enabled: false,
 
+            image_field: ImageField::VisionToggle,
+            image_vision_enabled: false,
+            image_generation_enabled: false,
+            image_api_key_input: String::new(),
+
             install_daemon: false,
 
             health_results: Vec::new(),
@@ -433,6 +444,11 @@ impl OnboardingWizard {
         // Load voice settings
         wizard.tts_enabled = config.voice.tts_enabled;
         wizard.detect_existing_groq_key();
+
+        // Load image settings
+        wizard.image_vision_enabled = config.image.vision.enabled;
+        wizard.image_generation_enabled = config.image.generation.enabled;
+        wizard.detect_existing_image_key();
 
         // Load channel tokens/IDs from config (keys.toml is merged in at load time)
         if let Some(ref token) = config.channels.telegram.token {

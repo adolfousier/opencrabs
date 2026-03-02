@@ -383,6 +383,25 @@ impl OnboardingWizard {
             let _ = Config::write_key("providers.tts.openai", "default_model", "gpt-4o-mini-tts");
         }
 
+        // Image config
+        let image_model = "gemini-3.1-flash-image-preview";
+        if self.image_generation_enabled {
+            let _ = Config::write_key("image.generation", "enabled", "true");
+            let _ = Config::write_key("image.generation", "model", image_model);
+        }
+        if self.image_vision_enabled {
+            let _ = Config::write_key("image.vision", "enabled", "true");
+            let _ = Config::write_key("image.vision", "model", image_model);
+        }
+        // Save image API key to keys.toml (only if newly entered)
+        if !self.image_api_key_input.is_empty()
+            && !self.has_existing_image_key()
+            && let Err(e) =
+                crate::config::write_secret_key("image", "api_key", &self.image_api_key_input)
+        {
+            tracing::warn!("Failed to save image API key to keys.toml: {}", e);
+        }
+
         // Save API key to keys.toml via merge — never overwrite
         if !self.has_existing_key()
             && !self.api_key_input.is_empty()

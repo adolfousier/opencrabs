@@ -65,6 +65,10 @@ pub const SLASH_COMMANDS: &[SlashCommand] = &[
         description: "Jump to voice STT/TTS setup",
     },
     SlashCommand {
+        name: "/onboard:image",
+        description: "Jump to image handling setup (vision + generation)",
+    },
+    SlashCommand {
         name: "/onboard:gateway",
         description: "Jump to API gateway settings",
     },

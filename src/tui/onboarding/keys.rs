@@ -281,6 +281,31 @@ impl OnboardingWizard {
         }
     }
 
+    /// Detect existing image API key from keys.toml
+    pub fn detect_existing_image_key(&mut self) {
+        if let Ok(config) = crate::config::Config::load()
+            && (config
+                .image
+                .generation
+                .api_key
+                .as_ref()
+                .is_some_and(|k| !k.is_empty())
+                || config
+                    .image
+                    .vision
+                    .api_key
+                    .as_ref()
+                    .is_some_and(|k| !k.is_empty()))
+        {
+            self.image_api_key_input = EXISTING_KEY_SENTINEL.to_string();
+        }
+    }
+
+    /// Check if image api key holds a pre-existing value
+    pub fn has_existing_image_key(&self) -> bool {
+        self.image_api_key_input == EXISTING_KEY_SENTINEL
+    }
+
     /// Detect existing Groq API key from keys.toml
     pub fn detect_existing_groq_key(&mut self) {
         if let Ok(config) = crate::config::Config::load()
