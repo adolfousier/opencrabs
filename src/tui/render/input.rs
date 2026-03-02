@@ -160,7 +160,7 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
             .attachments
             .iter()
             .enumerate()
-            .map(|(i, att)| format!("IMG{}:{}", i + 1, att.name))
+            .map(|(i, _att)| format!("Image #{}", i + 1))
             .collect();
         Line::from(Span::styled(
             format!(" [{}] ", names.join(" | ")),
