@@ -38,6 +38,8 @@ Use these **exact parameter names** when calling tools:
 | `task_manager` | `operation` | `title`, `description`, `task_id`, `status` |
 | `plan` | `operation` | `title`, `description`, `task` |
 | `session_context` | `operation` | `key`, `value` |
+| `generate_image` | `prompt` | `filename` |
+| `analyze_image` | `image` | `question` |
 | `trello_connect` | `api_key`, `api_token`, `boards` | `allowed_users` |
 | `trello_send` | `action` | `board_id`, `list_name`, `card_id`, `title`, `description`, `text`, `position`, `pattern`, `member_id`, `label_id`, `due_date`, `due_complete`, `checklist_id`, `item_id`, `complete`, `query`, `read_filter`, `limit`, `file_path` |
 | `discord_connect` | `token`, `allowed_users` | `channel_id` |
@@ -46,6 +48,8 @@ Use these **exact parameter names** when calling tools:
 | `slack_send` | `action` | `message`, `channel_id`, `thread_ts`, `message_ts`, `emoji`, `user_id`, `topic`, `blocks`, `limit`, `file_path`, `caption` |
 
 > **Note:** `grep` and `glob` use `pattern` (not `query`). `bash` uses `command` (not `cmd`). File tools use `path` (not `file` or `file_path`).
+> **`generate_image`:** Generate an image from a text prompt using Google Gemini. Returns the saved file path. Automatically sends as a native image on all channels — just include `<<IMG:path>>` in your reply or the channel handler sends it for you. Requires `[image.generation] enabled = true` in config. Run `/onboard:image` to set up.
+> **`analyze_image`:** Analyze an image file (local path) or URL using Google Gemini vision. Use when the current model doesn't support vision, the image is a saved file, or the user explicitly wants Google vision analysis. Returns a text description. Requires `[image.vision] enabled = true` in config. Run `/onboard:image` to set up.
 > **Trello:** `trello_connect` `boards` is an array of board names or IDs. Use `trello_send` for all Trello operations — fall back to `http_request` only if `trello_send` is unavailable. Credentials are handled securely without exposing them in URLs.
 > **`trello_send` actions (22):** `add_comment`, `create_card`, `move_card`, `find_cards`, `list_boards`, `get_card`, `get_card_comments`, `update_card`, `archive_card`, `add_member_to_card`, `remove_member_from_card`, `add_label_to_card`, `remove_label_from_card`, `add_checklist`, `add_checklist_item`, `complete_checklist_item`, `list_lists`, `get_board_members`, `search`, `get_notifications`, `mark_notifications_read`, `add_attachment`
 > **`add_attachment`:** Upload a local file to a Trello card. Returns the attachment URL — use `![image](url)` in a follow-up `add_comment` to display it inline.
