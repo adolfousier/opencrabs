@@ -50,7 +50,8 @@ impl Tool for TrelloSendTool {
                         "add_label_to_card", "remove_label_from_card",
                         "add_checklist", "add_checklist_item", "complete_checklist_item",
                         "list_boards", "list_lists", "get_board_members",
-                        "search", "get_notifications", "mark_notifications_read"
+                        "search", "get_notifications", "mark_notifications_read",
+                        "add_attachment"
                     ],
                     "description": "Operation to perform"
                 },
@@ -127,6 +128,10 @@ impl Tool for TrelloSendTool {
                 "limit": {
                     "type": "integer",
                     "description": "Max results to return (get_notifications: default 50 max 1000; search: default 20; get_card_comments: default 50)"
+                },
+                "file_path": {
+                    "type": "string",
+                    "description": "Local file path to upload (required for add_attachment). Returns the Trello attachment URL — embed in a comment as ![image](url) to show it inline."
                 }
             },
             "required": ["action"]
@@ -888,8 +893,58 @@ impl Tool for TrelloSendTool {
                 ))),
             },
 
+            "add_attachment" => {
+                let card_id = match input.get("card_id").and_then(|v| v.as_str()) {
+                    Some(id) => id,
+                    None => {
+                        return Ok(ToolResult::error(
+                            "add_attachment requires 'card_id'.".to_string(),
+                        ));
+                    }
+                };
+                let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
+                    Some(p) => p,
+                    None => {
+                        return Ok(ToolResult::error(
+                            "add_attachment requires 'file_path'.".to_string(),
+                        ));
+                    }
+                };
+                let bytes = match tokio::fs::read(file_path).await {
+                    Ok(b) => b,
+                    Err(e) => {
+                        return Ok(ToolResult::error(format!(
+                            "Failed to read file '{}': {}",
+                            file_path, e
+                        )));
+                    }
+                };
+                let filename = std::path::Path::new(file_path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("attachment.png");
+                let mime = if file_path.ends_with(".png") {
+                    "image/png"
+                } else {
+                    "image/jpeg"
+                };
+                match client
+                    .add_attachment_to_card(card_id, bytes, filename, mime)
+                    .await
+                {
+                    Ok(url) => Ok(ToolResult::success(format!(
+                        "Attachment uploaded. URL: {}\n\nTo show inline in a comment use: ![image]({})",
+                        url, url
+                    ))),
+                    Err(e) => Ok(ToolResult::error(format!(
+                        "Failed to upload attachment: {}",
+                        e
+                    ))),
+                }
+            }
+
             other => Ok(ToolResult::error(format!(
-                "Unknown action '{}'. Valid actions: add_comment, create_card, move_card, find_cards, list_boards, get_notifications, mark_notifications_read",
+                "Unknown action '{}'. Valid actions: add_comment, create_card, move_card, find_cards, list_boards, get_notifications, mark_notifications_read, add_attachment",
                 other
             ))),
         }

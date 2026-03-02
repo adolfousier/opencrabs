@@ -145,6 +145,34 @@ impl TrelloClient {
         Ok(())
     }
 
+    /// Upload a file as a card attachment. Returns the attachment URL.
+    pub async fn add_attachment_to_card(
+        &self,
+        card_id: &str,
+        bytes: Vec<u8>,
+        filename: &str,
+        mime_type: &str,
+    ) -> Result<String> {
+        let path = format!("/cards/{}/attachments", card_id);
+        let url = self.url(&path);
+        let part = reqwest::multipart::Part::bytes(bytes)
+            .file_name(filename.to_string())
+            .mime_str(mime_type)
+            .context("invalid mime type")?;
+        let form = reqwest::multipart::Form::new().part("file", part);
+        let resp = self.http.post(&url).multipart(form).send().await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!("Failed to add attachment: {}: {}", status, body);
+        }
+        let json: serde_json::Value = resp.json().await?;
+        json.get("url")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| anyhow::anyhow!("Trello attachment response missing 'url' field"))
+    }
+
     /// Create a card in the given list.
     pub async fn create_card(
         &self,
