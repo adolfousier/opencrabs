@@ -258,9 +258,21 @@ pub(crate) async fn handle_message(
         content
     };
 
-    // Send to agent
+    // Register channel for approval routing, then send with approval callback
+    discord_state
+        .register_session_channel(session_id, msg.channel_id.get())
+        .await;
+    let approval_cb = DiscordState::make_approval_callback(discord_state.clone());
+
     match agent
-        .send_message_with_tools(session_id, agent_input, None)
+        .send_message_with_tools_and_callback(
+            session_id,
+            agent_input,
+            None,
+            None,
+            Some(approval_cb),
+            None,
+        )
         .await
     {
         Ok(response) => {

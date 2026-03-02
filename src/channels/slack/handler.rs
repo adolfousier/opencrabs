@@ -16,6 +16,40 @@ use std::sync::{Arc, OnceLock};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+/// Socket Mode interaction callback — handles button clicks for tool approvals.
+pub async fn on_interaction(
+    event: SlackInteractionEvent,
+    _client: Arc<SlackHyperClient>,
+    _states: SlackClientEventsUserState,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if let SlackInteractionEvent::BlockActions(block_actions) = event {
+        let state = match HANDLER_STATE.get() {
+            Some(s) => s.clone(),
+            None => return Ok(()),
+        };
+
+        if let Some(actions) = block_actions.actions {
+            for action in actions {
+                let action_id = action.action_id.0.as_str();
+                let (approved, always, id) = if let Some(id) = action_id.strip_prefix("approve:") {
+                    (true, false, id.to_string())
+                } else if let Some(id) = action_id.strip_prefix("always:") {
+                    (true, true, id.to_string())
+                } else if let Some(id) = action_id.strip_prefix("deny:") {
+                    (false, false, id.to_string())
+                } else {
+                    continue;
+                };
+                state
+                    .slack_state
+                    .resolve_pending_approval(&id, approved, always)
+                    .await;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Global handler state — set once by the agent before starting the listener.
 pub static HANDLER_STATE: OnceLock<Arc<HandlerState>> = OnceLock::new();
 
@@ -286,10 +320,23 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         text
     };
 
-    // Send to agent
+    // Register channel for approval routing, then send with approval callback
+    state
+        .slack_state
+        .register_session_channel(session_id, channel_id.clone())
+        .await;
+    let approval_cb = SlackState::make_approval_callback(state.slack_state.clone());
+
     match state
         .agent
-        .send_message_with_tools(session_id, agent_input, None)
+        .send_message_with_tools_and_callback(
+            session_id,
+            agent_input,
+            None,
+            None,
+            Some(approval_cb),
+            None,
+        )
         .await
     {
         Ok(response) => {
