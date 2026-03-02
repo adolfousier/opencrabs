@@ -30,6 +30,7 @@ pub struct ChannelFactory {
     shared_session_id: Arc<Mutex<Option<Uuid>>>,
     voice_config: VoiceConfig,
     openai_tts_key: Option<String>,
+    session_updated_tx: OnceLock<tokio::sync::mpsc::UnboundedSender<Uuid>>,
 }
 
 impl ChannelFactory {
@@ -54,7 +55,13 @@ impl ChannelFactory {
             shared_session_id,
             voice_config,
             openai_tts_key,
+            session_updated_tx: OnceLock::new(),
         }
+    }
+
+    /// Wire in the TUI session-updated sender so channel agents trigger live TUI refresh.
+    pub fn set_session_updated_tx(&self, tx: tokio::sync::mpsc::UnboundedSender<Uuid>) {
+        let _ = self.session_updated_tx.set(tx);
     }
 
     /// Set the tool registry (call once, after Arc<ToolRegistry> is created).
@@ -62,16 +69,24 @@ impl ChannelFactory {
         let _ = self.tool_registry.set(registry);
     }
 
-    /// Create a new AgentService configured for channel use (auto-approve, no TUI callbacks).
+    /// Create a new AgentService configured for channel use.
+    ///
+    /// Channels that implement their own approval flow (WhatsApp, Telegram, Discord, Slack)
+    /// pass an `override_approval_callback` per call — they must NOT have `auto_approve_tools`
+    /// set, otherwise the override is ignored. A2A and headless tools that have no interactive
+    /// user can set their own auto-approval via session context.
     pub fn create_agent_service(&self) -> Arc<AgentService> {
         let mut builder = AgentService::new(self.provider.clone(), self.service_context.clone())
             .with_system_brain(self.shared_brain.clone())
-            .with_auto_approve_tools(true)
             .with_working_directory(self.working_directory.clone())
             .with_brain_path(self.brain_path.clone());
 
         if let Some(registry) = self.tool_registry.get() {
             builder = builder.with_tool_registry(registry.clone());
+        }
+
+        if let Some(tx) = self.session_updated_tx.get() {
+            builder = builder.with_session_updated_tx(tx.clone());
         }
 
         Arc::new(builder)
