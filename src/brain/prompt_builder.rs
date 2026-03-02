@@ -5,7 +5,23 @@
 
 use std::path::PathBuf;
 
-/// Files loaded from the brain workspace, in assembly order.
+/// Core brain files — always injected (personality + identity only).
+const CORE_BRAIN_FILES: &[(&str, &str)] =
+    &[("SOUL.md", "personality"), ("IDENTITY.md", "identity")];
+
+/// Contextual brain files — loaded on demand via the `load_brain_file` tool.
+pub(crate) const CONTEXTUAL_BRAIN_FILES: &[(&str, &str)] = &[
+    ("USER.md", "user profile"),
+    ("AGENTS.md", "workspace rules"),
+    ("TOOLS.md", "tool notes"),
+    ("SECURITY.md", "security policies"),
+    ("MEMORY.md", "long-term memory"),
+    ("BOOT.md", "startup config"),
+    ("BOOTSTRAP.md", "bootstrap config"),
+    ("HEARTBEAT.md", "heartbeat config"),
+];
+
+/// All brain files in assembly order — kept for `build_system_brain` (full mode).
 const BRAIN_FILES: &[(&str, &str)] = &[
     ("SOUL.md", "personality"),
     ("IDENTITY.md", "identity"),
@@ -167,6 +183,116 @@ impl BrainLoader {
 
         prompt
     }
+
+    /// Build a lean "core" system brain: only SOUL.md + IDENTITY.md are injected.
+    ///
+    /// All other brain files (USER.md, MEMORY.md, AGENTS.md, etc.) are listed in a
+    /// "Available Context Files" index section so the agent knows they exist and can
+    /// load them on demand via the `load_brain_file` tool — only when actually needed.
+    ///
+    /// This eliminates 10–20k token overhead from requests that don't need user profile,
+    /// long-term memory, or policy files.
+    pub fn build_core_brain(
+        &self,
+        runtime_info: Option<&RuntimeInfo>,
+        slash_commands_section: Option<&str>,
+    ) -> String {
+        let mut prompt = String::with_capacity(4096);
+
+        // 1. Brain preamble — always present
+        prompt.push_str(BRAIN_PREAMBLE);
+        prompt.push_str("\n\n");
+
+        // 2. Core files only (SOUL.md + IDENTITY.md)
+        for (filename, label) in CORE_BRAIN_FILES {
+            if let Some(content) = self.load_file(filename) {
+                let trimmed = content.trim();
+                if !trimmed.is_empty() {
+                    prompt.push_str(&format!(
+                        "--- {} ({}) ---\n{}\n\n",
+                        filename, label, trimmed
+                    ));
+                }
+            }
+        }
+
+        // 3. Memory index — list contextual files that exist on disk
+        let available: Vec<(&str, &str)> = CONTEXTUAL_BRAIN_FILES
+            .iter()
+            .filter(|(name, _)| self.workspace_path.join(name).exists())
+            .copied()
+            .collect();
+
+        if !available.is_empty() {
+            prompt.push_str("--- Available Context Files ---\n");
+            prompt.push_str(
+                "The following brain files contain detailed context. \
+                 Load them on demand using the `load_brain_file` tool when relevant — \
+                 do NOT load them unless the request actually needs that context.\n\n",
+            );
+            for (name, desc) in &available {
+                prompt.push_str(&format!("- **{}**: {}\n", name, desc));
+            }
+            // Guidance text: only mention files that actually exist on disk
+            let has = |name: &str| available.iter().any(|(n, _)| *n == name);
+            prompt.push_str("\nLoad proactively when:\n");
+            if has("USER.md") {
+                prompt.push_str("- User asks personal questions or preferences → load USER.md\n");
+            }
+            if has("MEMORY.md") {
+                prompt.push_str(
+                    "- Starting a project session or recalling past work → load MEMORY.md\n",
+                );
+            }
+            if has("AGENTS.md") || has("SECURITY.md") {
+                let files: Vec<&str> = ["AGENTS.md", "SECURITY.md"]
+                    .iter()
+                    .copied()
+                    .filter(|n| has(n))
+                    .collect();
+                prompt.push_str(&format!(
+                    "- Policy / rule / safety check needed → load {}\n",
+                    files.join(" or ")
+                ));
+            }
+            if has("TOOLS.md") {
+                prompt
+                    .push_str("- Working with environment-specific tool configs → load TOOLS.md\n");
+            }
+            prompt.push('\n');
+        }
+
+        // 4. Runtime info
+        if let Some(info) = runtime_info {
+            prompt.push_str("--- Runtime Info ---\n");
+            if let Some(ref model) = info.model {
+                prompt.push_str(&format!("Model: {}\n", model));
+            }
+            if let Some(ref provider) = info.provider {
+                prompt.push_str(&format!("Provider: {}\n", provider));
+            }
+            if let Some(ref wd) = info.working_directory {
+                prompt.push_str(&format!("Working directory: {}\n", wd));
+            }
+            prompt.push_str(&format!("OS: {}\n", std::env::consts::OS));
+            prompt.push_str(&format!(
+                "Timestamp: {}\n",
+                chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+            ));
+            prompt.push('\n');
+        }
+
+        // 5. Slash commands list
+        if let Some(commands_section) = slash_commands_section
+            && !commands_section.is_empty()
+        {
+            prompt.push_str("--- Available Slash Commands ---\n");
+            prompt.push_str(commands_section);
+            prompt.push_str("\n\n");
+        }
+
+        prompt
+    }
 }
 
 /// Runtime information injected into the system brain.
@@ -176,6 +302,10 @@ pub struct RuntimeInfo {
     pub provider: Option<String>,
     pub working_directory: Option<String>,
 }
+
+#[cfg(test)]
+#[path = "prompt_builder_tests.rs"]
+mod prompt_builder_tests;
 
 #[cfg(test)]
 mod tests {

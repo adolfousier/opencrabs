@@ -19,9 +19,9 @@ pub(crate) async fn cmd_chat(
                 bash::BashTool, brave_search::BraveSearchTool, code_exec::CodeExecTool,
                 config_tool::ConfigTool, context::ContextTool, doc_parser::DocParserTool,
                 edit::EditTool, exa_search::ExaSearchTool, glob::GlobTool, grep::GrepTool,
-                http::HttpClientTool, ls::LsTool, memory_search::MemorySearchTool,
-                notebook::NotebookEditTool, plan_tool::PlanTool, read::ReadTool,
-                registry::ToolRegistry, session_search::SessionSearchTool,
+                http::HttpClientTool, load_brain_file::LoadBrainFileTool, ls::LsTool,
+                memory_search::MemorySearchTool, notebook::NotebookEditTool, plan_tool::PlanTool,
+                read::ReadTool, registry::ToolRegistry, session_search::SessionSearchTool,
                 slash_command::SlashCommandTool, task::TaskTool, web_search::WebSearchTool,
                 write::WriteTool,
             },
@@ -93,6 +93,8 @@ pub(crate) async fn cmd_chat(
     tool_registry.register(Arc::new(PlanTool));
     // Memory search (built-in FTS5, always available)
     tool_registry.register(Arc::new(MemorySearchTool));
+    // On-demand brain file loader — agent fetches USER.md, MEMORY.md etc. only when needed
+    tool_registry.register(Arc::new(LoadBrainFileTool));
     // Session search — hybrid QMD search across all session message history
     tool_registry.register(Arc::new(SessionSearchTool::new(db.pool().clone())));
     // Config management (read/write config.toml, commands.toml)
@@ -170,8 +172,7 @@ pub(crate) async fn cmd_chat(
         .collect();
     let commands_section = CommandLoader::commands_section(&builtin_commands, &user_commands);
 
-    let system_brain =
-        brain_loader.build_system_brain(Some(&runtime_info), Some(&commands_section));
+    let system_brain = brain_loader.build_core_brain(Some(&runtime_info), Some(&commands_section));
 
     // Create agent service with dynamic system brain
     let agent_service = Arc::new(

@@ -28,6 +28,7 @@ pub mod web_search;
 pub mod config_tool;
 pub mod context;
 pub mod http;
+pub mod load_brain_file;
 pub mod memory_search;
 pub mod plan_tool;
 pub mod rebuild;
