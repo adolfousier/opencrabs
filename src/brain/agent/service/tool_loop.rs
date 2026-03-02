@@ -60,6 +60,8 @@ impl AgentService {
                                 summary: summary.clone(),
                             },
                         );
+                        // Immediately reset ctx display — don't wait for next API response
+                        cb(session_id, ProgressEvent::TokenCount(context.token_count));
                     }
                     return Some(summary);
                 }
