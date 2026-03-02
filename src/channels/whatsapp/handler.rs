@@ -622,7 +622,7 @@ mod tests {
         assert!(!has_image(&text_msg));
 
         let img_msg = Message {
-            image_message: Some(Box::new(Default::default())),
+            image_message: Some(Box::default()),
             ..Default::default()
         };
         assert!(has_image(&img_msg));

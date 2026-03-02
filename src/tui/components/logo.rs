@@ -19,7 +19,7 @@ pub const LOGO: &str = r#"
    ║  (      ,'                             `-,    \               ║
    ║   `-_, '                                  `-,_/               ║
    ║                                                               ║
-   ║      Shell Yeah! AI Orchestration at Rust Speed.               ║
+   ║   The autonomous AI agent. Single Rust binary. Every channel.  ║
    ║                                                               ║
    ╚═══════════════════════════════════════════════════════════════╝
 "#;

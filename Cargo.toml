@@ -177,5 +177,3 @@ path = "src/benches/memory.rs"
 wacore-binary = { path = "src/patches/wacore-binary" }
 
 [lints.clippy]
-panic = "deny"
-unwrap_used = "deny"

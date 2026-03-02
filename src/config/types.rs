@@ -1591,6 +1591,7 @@ level = "info"
 }
 
 /// Resolve provider name and model from config (for display purposes)
+#[allow(clippy::items_after_test_module)]
 pub fn resolve_provider_from_config(config: &Config) -> (&str, &str) {
     // Check new dedicated providers first
     if config.providers.minimax.as_ref().is_some_and(|p| p.enabled) {

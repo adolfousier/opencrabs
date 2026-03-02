@@ -68,7 +68,7 @@ fn render_splash_content(f: &mut Frame, area: Rect, provider_name: &str, model_n
     splash_text.extend(vec![
         Line::from(""),
         Line::from(Span::styled(
-            "Shell Yeah! AI Orchestration at Rust Speed.",
+            "The autonomous AI agent. Single Rust binary. Every channel.",
             Style::default()
                 .fg(Color::Rgb(215, 100, 20))
                 .add_modifier(Modifier::BOLD | Modifier::ITALIC),
@@ -108,7 +108,7 @@ fn render_splash_content(f: &mut Frame, area: Rect, provider_name: &str, model_n
         ]),
         Line::from(""),
         Line::from(Span::styled(
-            "AI Orchestration Agent for Software Development",
+            "autonomous · multi-channel · Rust-native",
             Style::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::ITALIC),
