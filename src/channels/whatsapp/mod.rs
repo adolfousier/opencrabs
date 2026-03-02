@@ -33,6 +33,10 @@ pub struct WhatsAppState {
     client: Mutex<Option<Arc<Client>>>,
     /// Owner's JID (phone@s.whatsapp.net) — first in allowed_phones list
     owner_jid: Mutex<Option<String>>,
+    /// Allowlisted phone numbers (from config `allowed_users`).
+    /// Enforced for BOTH incoming and outgoing messages — the agent may only
+    /// send to numbers on this list.  Empty = no restriction (not recommended).
+    allowed_phones: Mutex<Vec<String>>,
     /// Pending tool approvals: phone → oneshot sender of WaApproval.
     /// When a tool approval is in flight, the next message from that phone
     /// (text or button tap) is interpreted as Yes/Always/No instead of
@@ -53,9 +57,26 @@ impl WhatsAppState {
         Self {
             client: Mutex::new(None),
             owner_jid: Mutex::new(None),
+            allowed_phones: Mutex::new(Vec::new()),
             pending_approvals: Mutex::new(HashMap::new()),
             auto_approve_session: Mutex::new(false),
         }
+    }
+
+    /// Store the allowed phone numbers from config for outgoing message enforcement.
+    pub async fn set_allowed_phones(&self, phones: Vec<String>) {
+        *self.allowed_phones.lock().await = phones;
+    }
+
+    /// Returns true if `phone` is in the allowed list, or if the list is empty.
+    /// Normalises by stripping any leading `+` before comparing.
+    pub async fn is_phone_allowed(&self, phone: &str) -> bool {
+        let list = self.allowed_phones.lock().await;
+        if list.is_empty() {
+            return true;
+        }
+        let normalized = phone.trim_start_matches('+');
+        list.iter().any(|p| p.trim_start_matches('+') == normalized)
     }
 
     /// Register a pending approval for a phone number.

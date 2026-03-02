@@ -77,6 +77,14 @@ impl Tool for WhatsAppSendTool {
 
         // Resolve target JID: explicit phone or owner
         let jid_str = if let Some(phone) = input.get("phone").and_then(|v| v.as_str()) {
+            // Hard policy: only allowlisted contacts may receive outgoing messages.
+            if !self.whatsapp_state.is_phone_allowed(phone).await {
+                return Ok(ToolResult::error(format!(
+                    "Sending to {} is not permitted — this number is not in the \
+                     allowed_users config. Only allowlisted contacts may receive messages.",
+                    phone
+                )));
+            }
             let digits = phone.trim_start_matches('+');
             format!("{}@s.whatsapp.net", digits)
         } else {

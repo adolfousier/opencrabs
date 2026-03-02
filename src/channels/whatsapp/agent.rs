@@ -102,10 +102,17 @@ impl WhatsAppAgent {
 
             let agent = self.agent_service.clone();
             let session_svc = self.session_service.clone();
-            let allowed: Arc<HashSet<String>> = Arc::new(self.allowed_phones.into_iter().collect());
+            let allowed: Arc<HashSet<String>> =
+                Arc::new(self.allowed_phones.iter().cloned().collect());
             let voice_config = Arc::new(self.voice_config);
             let shared_session = self.shared_session_id.clone();
             let wa_state = self.whatsapp_state.clone();
+
+            // Store allowed phones in state so the whatsapp_send tool can
+            // enforce the outgoing allowlist (mirrors incoming filter).
+            wa_state
+                .set_allowed_phones(self.allowed_phones.clone())
+                .await;
             let owner_jid_clone = owner_jid.clone();
             let idle_timeout_hours = self.idle_timeout_hours;
             let extra_sessions: Arc<Mutex<HashMap<String, (Uuid, std::time::Instant)>>> =
