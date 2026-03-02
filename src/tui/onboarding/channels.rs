@@ -15,13 +15,11 @@ impl OnboardingWizard {
             KeyCode::Down | KeyCode::Char('j') => {
                 self.focused_field = (self.focused_field + 1).min(total.saturating_sub(1));
             }
-            KeyCode::Char(' ') => {
-                if self.focused_field < count {
-                    let name = &self.channel_toggles[self.focused_field].0;
-                    let new_val = !self.channel_toggles[self.focused_field].1;
-                    tracing::debug!("[channels] toggled '{}' → {}", name, new_val);
-                    self.channel_toggles[self.focused_field].1 = new_val;
-                }
+            KeyCode::Char(' ') if self.focused_field < count => {
+                let name = &self.channel_toggles[self.focused_field].0;
+                let new_val = !self.channel_toggles[self.focused_field].1;
+                tracing::debug!("[channels] toggled '{}' → {}", name, new_val);
+                self.channel_toggles[self.focused_field].1 = new_val;
             }
             KeyCode::Enter => {
                 if self.focused_field >= count {

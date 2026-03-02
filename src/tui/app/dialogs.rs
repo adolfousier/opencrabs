@@ -792,14 +792,12 @@ impl App {
                     "https://api.minimax.io/v1",
                 );
             }
-            5 => {
-                if !self.model_selector_base_url.is_empty() {
-                    let _ = crate::config::Config::write_key(
-                        section,
-                        "base_url",
-                        &self.model_selector_base_url,
-                    );
-                }
+            5 if !self.model_selector_base_url.is_empty() => {
+                let _ = crate::config::Config::write_key(
+                    section,
+                    "base_url",
+                    &self.model_selector_base_url,
+                );
             }
             _ => {}
         }

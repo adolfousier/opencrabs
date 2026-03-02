@@ -732,44 +732,42 @@ impl App {
                     self.input_buffer.insert(self.cursor_position, c);
                     self.cursor_position += c.len_utf8();
                 }
-                KeyCode::Backspace if event.modifiers.is_empty() => {
-                    if self.cursor_position > 0 {
-                        // Find the previous char boundary
-                        let prev = self.input_buffer[..self.cursor_position]
-                            .char_indices()
-                            .last()
-                            .map(|(i, _)| i)
-                            .unwrap_or(0);
-                        self.input_buffer.remove(prev);
-                        self.cursor_position = prev;
-                    }
+                KeyCode::Backspace if event.modifiers.is_empty() && self.cursor_position > 0 => {
+                    // Find the previous char boundary
+                    let prev = self.input_buffer[..self.cursor_position]
+                        .char_indices()
+                        .last()
+                        .map(|(i, _)| i)
+                        .unwrap_or(0);
+                    self.input_buffer.remove(prev);
+                    self.cursor_position = prev;
                 }
-                KeyCode::Delete if event.modifiers.is_empty() => {
-                    if self.cursor_position < self.input_buffer.len() {
-                        self.input_buffer.remove(self.cursor_position);
-                    }
+                KeyCode::Delete if event.modifiers.is_empty()
+                    && self.cursor_position < self.input_buffer.len() =>
+                {
+                    self.input_buffer.remove(self.cursor_position);
                 }
-                KeyCode::Left if event.modifiers.is_empty() => {
+                KeyCode::Left if event.modifiers.is_empty()
                     // Move cursor left one character
-                    if self.cursor_position > 0 {
-                        let prev = self.input_buffer[..self.cursor_position]
-                            .char_indices()
-                            .last()
-                            .map(|(i, _)| i)
-                            .unwrap_or(0);
-                        self.cursor_position = prev;
-                    }
+                    && self.cursor_position > 0 =>
+                {
+                    let prev = self.input_buffer[..self.cursor_position]
+                        .char_indices()
+                        .last()
+                        .map(|(i, _)| i)
+                        .unwrap_or(0);
+                    self.cursor_position = prev;
                 }
-                KeyCode::Right if event.modifiers.is_empty() => {
+                KeyCode::Right if event.modifiers.is_empty()
                     // Move cursor right one character
-                    if self.cursor_position < self.input_buffer.len() {
-                        let next = self.input_buffer[self.cursor_position..]
-                            .char_indices()
-                            .nth(1)
-                            .map(|(i, _)| self.cursor_position + i)
-                            .unwrap_or(self.input_buffer.len());
-                        self.cursor_position = next;
-                    }
+                    && self.cursor_position < self.input_buffer.len() =>
+                {
+                    let next = self.input_buffer[self.cursor_position..]
+                        .char_indices()
+                        .nth(1)
+                        .map(|(i, _)| self.cursor_position + i)
+                        .unwrap_or(self.input_buffer.len());
+                    self.cursor_position = next;
                 }
                 KeyCode::Home => {
                     self.cursor_position = 0;
