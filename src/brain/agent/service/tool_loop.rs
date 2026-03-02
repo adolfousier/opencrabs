@@ -103,7 +103,10 @@ impl AgentService {
         override_approval_callback: Option<ApprovalCallback>,
         override_progress_callback: Option<ProgressCallback>,
     ) -> Result<AgentResponse> {
-        // Per-call effective callbacks (override wins over service-level)
+        // Per-call effective callbacks (override wins over service-level).
+        // Track whether an explicit per-call override was provided so we can honour
+        // channel approval callbacks even when the factory set auto_approve_tools=true.
+        let has_override_approval = override_approval_callback.is_some();
         let approval_callback: Option<ApprovalCallback> =
             override_approval_callback.or_else(|| self.approval_callback.clone());
         let progress_callback: Option<ProgressCallback> =
@@ -647,10 +650,13 @@ impl AgentService {
                     );
                 }
 
-                // Check if approval is needed
+                // Check if approval is needed.
+                // auto_approve_tools is bypassed when the caller provided an explicit
+                // per-call approval callback (e.g. WhatsApp, Telegram, Discord, Slack)
+                // so channel approval flows are always respected.
                 let needs_approval = if let Some(tool) = self.tool_registry.get(&tool_name) {
                     tool.requires_approval_for_input(&tool_input)
-                        && !self.auto_approve_tools
+                        && (!self.auto_approve_tools || has_override_approval)
                         && !tool_context.auto_approve
                 } else {
                     false

@@ -520,6 +520,10 @@ pub(crate) async fn cmd_chat(
     // Now that the registry is Arc'd, give it to the channel factory
     channel_factory.set_tool_registry(shared_tool_registry.clone());
 
+    // Share session_updated_tx with the factory so channel agents (WhatsApp, Telegram, etc.)
+    // trigger real-time TUI refresh when they complete a response.
+    channel_factory.set_session_updated_tx(session_updated_tx.clone());
+
     let agent_service = Arc::new(
         AgentService::new(provider.clone(), service_context.clone())
             .with_system_brain(system_brain)
