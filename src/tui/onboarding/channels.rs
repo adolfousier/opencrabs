@@ -37,6 +37,7 @@ impl OnboardingWizard {
                             self.channel_test_status = ChannelTestStatus::Idle;
                             self.detect_existing_telegram_token();
                             self.detect_existing_telegram_user_id();
+                            self.detect_existing_respond_to();
                         }
                         1 => {
                             self.step = OnboardingStep::DiscordSetup;
@@ -45,6 +46,7 @@ impl OnboardingWizard {
                             self.detect_existing_discord_token();
                             self.detect_existing_discord_channel_id();
                             self.detect_existing_discord_allowed_list();
+                            self.detect_existing_respond_to();
                         }
                         2 => {
                             self.step = OnboardingStep::WhatsAppSetup;
@@ -70,6 +72,7 @@ impl OnboardingWizard {
                             self.detect_existing_slack_tokens();
                             self.detect_existing_slack_channel_id();
                             self.detect_existing_slack_allowed_list();
+                            self.detect_existing_respond_to();
                         }
                         4 => {
                             self.step = OnboardingStep::TrelloSetup;
@@ -177,8 +180,22 @@ impl OnboardingWizard {
                 KeyCode::BackTab => {
                     self.telegram_field = TelegramField::BotToken;
                 }
+                KeyCode::Tab | KeyCode::Enter => {
+                    self.telegram_field = TelegramField::RespondTo;
+                }
+                _ => {}
+            },
+            TelegramField::RespondTo => match event.code {
+                KeyCode::Left | KeyCode::Char('h') => {
+                    self.telegram_respond_to = self.telegram_respond_to.saturating_sub(1).max(0);
+                }
+                KeyCode::Right | KeyCode::Char('l') | KeyCode::Char(' ') => {
+                    self.telegram_respond_to = (self.telegram_respond_to + 1).min(2);
+                }
+                KeyCode::BackTab => {
+                    self.telegram_field = TelegramField::UserID;
+                }
                 KeyCode::Enter => {
-                    // If both token and user ID are provided, test the connection
                     let has_token = !self.telegram_token_input.is_empty();
                     let has_user_id = !self.telegram_user_id_input.is_empty();
                     if has_token && has_user_id {
@@ -275,6 +292,21 @@ impl OnboardingWizard {
                 }
                 KeyCode::BackTab => {
                     self.discord_field = DiscordField::ChannelID;
+                }
+                KeyCode::Tab | KeyCode::Enter => {
+                    self.discord_field = DiscordField::RespondTo;
+                }
+                _ => {}
+            },
+            DiscordField::RespondTo => match event.code {
+                KeyCode::Left | KeyCode::Char('h') => {
+                    self.discord_respond_to = self.discord_respond_to.saturating_sub(1).max(0);
+                }
+                KeyCode::Right | KeyCode::Char('l') | KeyCode::Char(' ') => {
+                    self.discord_respond_to = (self.discord_respond_to + 1).min(2);
+                }
+                KeyCode::BackTab => {
+                    self.discord_field = DiscordField::AllowedList;
                 }
                 KeyCode::Enter => {
                     let has_token = !self.discord_token_input.is_empty();
@@ -653,6 +685,21 @@ impl OnboardingWizard {
                 }
                 KeyCode::BackTab => {
                     self.slack_field = SlackField::ChannelID;
+                }
+                KeyCode::Tab | KeyCode::Enter => {
+                    self.slack_field = SlackField::RespondTo;
+                }
+                _ => {}
+            },
+            SlackField::RespondTo => match event.code {
+                KeyCode::Left | KeyCode::Char('h') => {
+                    self.slack_respond_to = self.slack_respond_to.saturating_sub(1).max(0);
+                }
+                KeyCode::Right | KeyCode::Char('l') | KeyCode::Char(' ') => {
+                    self.slack_respond_to = (self.slack_respond_to + 1).min(2);
+                }
+                KeyCode::BackTab => {
+                    self.slack_field = SlackField::AllowedList;
                 }
                 KeyCode::Enter => {
                     let has_token = !self.slack_bot_token_input.is_empty();

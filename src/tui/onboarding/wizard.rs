@@ -46,6 +46,11 @@ pub struct OnboardingWizard {
     pub discord_channel_id_input: String,
     pub discord_allowed_list_input: String,
 
+    /// respond_to selection per channel (0=all, 1=dm_only, 2=mention)
+    pub telegram_respond_to: usize,
+    pub discord_respond_to: usize,
+    pub slack_respond_to: usize,
+
     /// WhatsApp Setup (shown when WhatsApp is enabled)
     pub whatsapp_field: WhatsAppField,
     pub whatsapp_qr_text: Option<String>,
@@ -245,6 +250,10 @@ impl OnboardingWizard {
             discord_channel_id_input: String::new(),
             discord_allowed_list_input: String::new(),
 
+            telegram_respond_to: 0, // all
+            discord_respond_to: 2,  // mention
+            slack_respond_to: 2,    // mention
+
             whatsapp_field: WhatsAppField::Connection,
             whatsapp_qr_text: None,
             whatsapp_connecting: false,
@@ -402,6 +411,24 @@ impl OnboardingWizard {
         wizard.channel_toggles[5].1 = config.channels.signal.enabled; // Signal
         wizard.channel_toggles[6].1 = config.channels.google_chat.enabled; // Google Chat
         wizard.channel_toggles[7].1 = config.channels.imessage.enabled; // iMessage
+
+        // Load respond_to per channel
+        use crate::config::RespondTo;
+        wizard.telegram_respond_to = match config.channels.telegram.respond_to {
+            RespondTo::All => 0,
+            RespondTo::DmOnly => 1,
+            RespondTo::Mention => 2,
+        };
+        wizard.discord_respond_to = match config.channels.discord.respond_to {
+            RespondTo::All => 0,
+            RespondTo::DmOnly => 1,
+            RespondTo::Mention => 2,
+        };
+        wizard.slack_respond_to = match config.channels.slack.respond_to {
+            RespondTo::All => 0,
+            RespondTo::DmOnly => 1,
+            RespondTo::Mention => 2,
+        };
 
         // Load voice settings
         wizard.tts_enabled = config.voice.tts_enabled;

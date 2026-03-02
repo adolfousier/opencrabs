@@ -344,6 +344,24 @@ impl OnboardingWizard {
             &self.is_trello_enabled().to_string(),
         );
 
+        // respond_to per channel
+        let respond_to_values = ["all", "dm_only", "mention"];
+        let _ = Config::write_key(
+            "channels.telegram",
+            "respond_to",
+            respond_to_values[self.telegram_respond_to.min(2)],
+        );
+        let _ = Config::write_key(
+            "channels.discord",
+            "respond_to",
+            respond_to_values[self.discord_respond_to.min(2)],
+        );
+        let _ = Config::write_key(
+            "channels.slack",
+            "respond_to",
+            respond_to_values[self.slack_respond_to.min(2)],
+        );
+
         // Voice config
         let groq_key_exists = !self.groq_api_key_input.is_empty() || self.has_existing_groq_key();
         let _ = Config::write_key("voice", "stt_enabled", &groq_key_exists.to_string());

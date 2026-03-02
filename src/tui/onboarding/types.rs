@@ -217,6 +217,7 @@ pub enum DiscordField {
     BotToken,
     ChannelID,
     AllowedList,
+    RespondTo,
 }
 
 /// Which field is focused in SlackSetup step
@@ -226,6 +227,7 @@ pub enum SlackField {
     AppToken,
     ChannelID,
     AllowedList,
+    RespondTo,
 }
 
 /// Which field is focused in TelegramSetup step
@@ -233,6 +235,7 @@ pub enum SlackField {
 pub enum TelegramField {
     BotToken,
     UserID,
+    RespondTo,
 }
 
 /// Which field is focused in WhatsAppSetup step

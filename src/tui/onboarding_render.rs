@@ -1135,6 +1135,13 @@ fn render_telegram_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWiza
             .add_modifier(Modifier::ITALIC),
     )));
 
+    lines.push(Line::from(""));
+    render_respond_to_selector(
+        lines,
+        wizard.telegram_respond_to,
+        wizard.telegram_field == TelegramField::RespondTo,
+    );
+
     // Test status
     render_channel_test_status(lines, wizard);
 
@@ -1319,6 +1326,13 @@ fn render_discord_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
                 .add_modifier(Modifier::ITALIC),
         )));
     }
+
+    lines.push(Line::from(""));
+    render_respond_to_selector(
+        lines,
+        wizard.discord_respond_to,
+        wizard.discord_field == DiscordField::RespondTo,
+    );
 
     // Test status
     render_channel_test_status(lines, wizard);
@@ -1675,6 +1689,13 @@ fn render_slack_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard)
         )));
     }
 
+    lines.push(Line::from(""));
+    render_respond_to_selector(
+        lines,
+        wizard.slack_respond_to,
+        wizard.slack_field == SlackField::RespondTo,
+    );
+
     // Test status
     render_channel_test_status(lines, wizard);
 
@@ -1683,6 +1704,38 @@ fn render_slack_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard)
         "  Tab: next field | Enter: test/continue | Esc: back",
         Style::default().fg(Color::DarkGray),
     )));
+}
+
+/// Render respond_to selector: `  Respond to: [ all ]  dm_only  mention`
+/// `selected` = 0..2, `focused` = whether this field has keyboard focus.
+fn render_respond_to_selector(lines: &mut Vec<Line<'static>>, selected: usize, focused: bool) {
+    const OPTIONS: [&str; 3] = ["all", "dm_only", "mention"];
+    let label_style = Style::default().fg(if focused { BRAND_BLUE } else { Color::DarkGray });
+    let mut spans: Vec<Span<'static>> = vec![Span::styled("  Respond to: ", label_style)];
+    for (i, opt) in OPTIONS.iter().enumerate() {
+        let is_sel = i == selected;
+        let (prefix, suffix) = if is_sel { ("[", "]") } else { (" ", " ") };
+        let style = if is_sel && focused {
+            Style::default().fg(BRAND_GOLD).add_modifier(Modifier::BOLD)
+        } else if is_sel {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        spans.push(Span::styled(format!("{}{}{}", prefix, opt, suffix), style));
+        if i < OPTIONS.len() - 1 {
+            spans.push(Span::styled("  ", Style::default()));
+        }
+    }
+    lines.push(Line::from(spans));
+    if focused {
+        lines.push(Line::from(Span::styled(
+            "  ← → to change",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
+        )));
+    }
 }
 
 /// Render the channel test connection status line (shared by Telegram/Discord/Slack)

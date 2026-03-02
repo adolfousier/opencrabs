@@ -72,6 +72,7 @@ impl OnboardingWizard {
                             self.telegram_user_id_input.push_str(&digits);
                         }
                     }
+                    TelegramField::RespondTo => {} // selector, paste is no-op
                 }
             }
             OnboardingStep::DiscordSetup => {
@@ -102,6 +103,7 @@ impl OnboardingWizard {
                             self.discord_allowed_list_input.push_str(&digits);
                         }
                     }
+                    DiscordField::RespondTo => {} // selector, paste is no-op
                 }
             }
             OnboardingStep::SlackSetup => {
@@ -135,6 +137,7 @@ impl OnboardingWizard {
                         }
                         self.slack_allowed_list_input.push_str(clean);
                     }
+                    SlackField::RespondTo => {} // selector, paste is no-op
                 }
             }
             OnboardingStep::TrelloSetup => {

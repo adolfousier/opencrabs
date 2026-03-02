@@ -259,6 +259,28 @@ impl OnboardingWizard {
         self.trello_allowed_users_input == EXISTING_KEY_SENTINEL
     }
 
+    /// Detect existing respond_to values from config for all channels
+    pub(super) fn detect_existing_respond_to(&mut self) {
+        use crate::config::RespondTo;
+        if let Ok(config) = crate::config::Config::load() {
+            self.telegram_respond_to = match config.channels.telegram.respond_to {
+                RespondTo::All => 0,
+                RespondTo::DmOnly => 1,
+                RespondTo::Mention => 2,
+            };
+            self.discord_respond_to = match config.channels.discord.respond_to {
+                RespondTo::All => 0,
+                RespondTo::DmOnly => 1,
+                RespondTo::Mention => 2,
+            };
+            self.slack_respond_to = match config.channels.slack.respond_to {
+                RespondTo::All => 0,
+                RespondTo::DmOnly => 1,
+                RespondTo::Mention => 2,
+            };
+        }
+    }
+
     /// Detect existing Groq API key from keys.toml
     pub fn detect_existing_groq_key(&mut self) {
         if let Ok(config) = crate::config::Config::load()
