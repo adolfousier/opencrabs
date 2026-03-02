@@ -255,7 +255,9 @@ pub(crate) async fn handle_message(
         let sender_normalized = phone.trim_start_matches('+');
         let recipient = recipient_phone(&info);
         let recipient_normalized = recipient.as_ref().map(|r| r.trim_start_matches('+'));
-        let is_to_owner = recipient_normalized.map(|r| r == owner_phone).unwrap_or(false);
+        let is_to_owner = recipient_normalized
+            .map(|r| r == owner_phone)
+            .unwrap_or(false);
         let is_from_owner = sender_normalized == owner_phone;
         if !is_from_owner || (recipient.is_some() && !is_to_owner) {
             tracing::debug!(
@@ -581,6 +583,58 @@ pub(crate) async fn handle_message(
                 };
                 if let Err(e) = client.send_message(reply_jid.clone(), reply_msg).await {
                     tracing::error!("WhatsApp: failed to send reply: {}", e);
+                }
+            }
+
+            // If input was voice AND TTS is enabled, also send voice note after text
+            if has_aud
+                && voice_config.tts_enabled
+                && let Some(ref tts_provider) = voice_config.tts_provider
+                && let Some(ref tts_key) = tts_provider.api_key
+            {
+                match crate::channels::voice::synthesize_speech(
+                    &response.content,
+                    tts_key,
+                    &voice_config.tts_voice,
+                    &voice_config.tts_model,
+                )
+                .await
+                {
+                    Ok(audio_bytes) => {
+                        // WhatsApp requires uploading media to its servers first,
+                        // then sending the message with the returned URL + crypto keys.
+                        use wacore::download::MediaType;
+                        use waproto::whatsapp::message::AudioMessage;
+                        match client.upload(audio_bytes, MediaType::Audio).await {
+                            Ok(upload) => {
+                                let audio_msg = waproto::whatsapp::Message {
+                                    audio_message: Some(Box::new(AudioMessage {
+                                        url: Some(upload.url),
+                                        direct_path: Some(upload.direct_path),
+                                        media_key: Some(upload.media_key),
+                                        file_enc_sha256: Some(upload.file_enc_sha256),
+                                        file_sha256: Some(upload.file_sha256),
+                                        file_length: Some(upload.file_length),
+                                        mimetype: Some("audio/ogg; codecs=opus".to_string()),
+                                        ptt: Some(true),
+                                        ..Default::default()
+                                    })),
+                                    ..Default::default()
+                                };
+                                if let Err(e) =
+                                    client.send_message(reply_jid.clone(), audio_msg).await
+                                {
+                                    tracing::error!("WhatsApp: failed to send TTS voice: {}", e);
+                                }
+                            }
+                            Err(e) => {
+                                tracing::error!("WhatsApp: TTS audio upload failed: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("WhatsApp: TTS synthesis error: {}", e);
+                    }
                 }
             }
         }
