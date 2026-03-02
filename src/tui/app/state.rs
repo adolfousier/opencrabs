@@ -745,6 +745,7 @@ impl App {
         let progress_callback = self.agent_service.progress_callback().clone();
         let message_queue_callback = self.agent_service.message_queue_callback().clone();
         let sudo_callback = self.agent_service.sudo_callback().clone();
+        let session_updated_tx = self.agent_service.session_updated_tx();
         let working_dir = self
             .agent_service
             .working_directory()
@@ -761,6 +762,10 @@ impl App {
             .with_message_queue_callback(message_queue_callback)
             .with_sudo_callback(sudo_callback)
             .with_working_directory(working_dir);
+
+        if let Some(tx) = session_updated_tx {
+            new_agent_service = new_agent_service.with_session_updated_tx(tx);
+        }
 
         if let Some(bp) = brain_path {
             new_agent_service = new_agent_service.with_brain_path(bp);
@@ -1250,6 +1255,19 @@ impl App {
             | TuiEvent::IntermediateText { .. }
             | TuiEvent::CompactionSummary { .. }
             | TuiEvent::TokenCountUpdated { .. } => {}
+
+            TuiEvent::SessionUpdated(session_id) => {
+                // A remote channel completed an agent response. Only react when the TUI
+                // itself is NOT processing this session (to avoid conflicting with the
+                // TUI's own ResponseComplete flow).
+                if !self.processing_sessions.contains(&session_id) {
+                    if self.is_current_session(session_id) {
+                        self.load_session(session_id).await?;
+                    } else {
+                        self.sessions_with_unread.insert(session_id);
+                    }
+                }
+            }
 
             TuiEvent::OnboardingModelsFetched(models) => {
                 if let Some(ref mut wizard) = self.onboarding {
