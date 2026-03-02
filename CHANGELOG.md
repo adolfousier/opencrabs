@@ -5,6 +5,50 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.44] - 2026-03-02
+
+### Added
+- **Google Gemini provider** (`e715536`) — Full `Provider` trait implementation against the Gemini REST API (`generativelanguage.googleapis.com/v1beta`). Streaming via SSE, tool use with `functionDeclarations`/`functionCall`/`functionResponse`, vision (multimodal `inlineData`), 1M–2M token context window. Live model list fetched from the Gemini API during onboarding and `/models`. Auth via `?key=` query param
+  - `src/brain/provider/gemini.rs` (new), `src/brain/provider/factory.rs`, `src/brain/provider/mod.rs`
+- **Image generation & vision tools** (`e715536`) — Two new agent tools powered by `gemini-3.1-flash-image-preview` ("Nano Banana"), independent of the main chat provider:
+  - `generate_image` — Generate an image from a text prompt; saves PNG to `~/.opencrabs/images/`; returns file path for channel delivery
+  - `analyze_image` — Analyze an image file path or URL via Gemini vision; works even when the main model doesn't support vision
+  - `src/brain/tools/generate_image.rs` (new), `src/brain/tools/analyze_image.rs` (new), `src/brain/tools/mod.rs`
+- **ImageSetup onboarding step** (`e715536`) — Step 7 in Advanced mode (after VoiceSetup, before Daemon). Toggle Vision Analysis and Image Generation independently; API key input with mask/replace mode; existing key detection. Navigation: Space/↑↓ to toggle, Tab/Enter to continue, BackTab to go back, Esc to go back
+  - `src/tui/onboarding/types.rs`, `src/tui/onboarding/wizard.rs`, `src/tui/onboarding/navigation.rs`, `src/tui/onboarding/fetch.rs`, `src/tui/onboarding/config.rs`, `src/tui/onboarding_render.rs`
+- **`/onboard:image` deep-link** (`e715536`) — Jump directly to the ImageSetup step from chat at any time
+  - `src/tui/app/messaging.rs`
+- **On-demand brain file loading** (`3224048`) — `build_core_brain()` replaces `build_system_brain()` at startup — injects only SOUL.md + IDENTITY.md (~1-2k tokens). All other brain files listed in a memory index; loaded by the agent via `load_brain_file(name)` tool on demand. `name="all"` loads everything. Dramatically reduces baseline token overhead for every message
+  - `src/brain/prompt_builder.rs`, `src/brain/tools/load_brain_file.rs` (new), `src/cli/ui.rs`
+- **`write_opencrabs_file` tool** (`8f3d648`) — Writes any file inside `~/.opencrabs/` (brain files, config, keys). Replaces the broken agent pattern of using `edit_file`/`write_file` which are locked to the working directory by `validate_path_safety()`
+  - `src/brain/tools/write_opencrabs_file.rs` (new), `src/brain/tools/mod.rs`
+- **`respond_to` selector in Telegram/Discord/Slack onboarding** (`9ecc8f0`) — New field in each channel's setup step; choose `all` / `dm_only` / `mention` mode during onboarding instead of editing config.toml manually
+  - `src/tui/onboarding/types.rs`, `src/tui/onboarding/fetch.rs`, `src/tui/onboarding_render.rs`, `src/tui/onboarding/config.rs`
+- **Google Image API Key in health check** (`6923174`) — When image features are enabled, the health check step verifies the Google AI key is present
+  - `src/tui/onboarding/config.rs`
+
+### Fixed
+- **TUI silent message queue after errors** (`dc815ce`) — After any agent error, `processing_sessions` was never cleared for the current session, causing all subsequent `send_message` calls to be silently queued with no agent running. Fixed by unconditionally removing the session from `processing_sessions` and `session_cancel_tokens` in the `TuiEvent::Error` handler before branching on current vs background session
+  - `src/tui/app/state.rs`
+- **TUI real-time updates during channel tool loops** (`b44f1ff`) — Remote channel tool loops (Telegram, WhatsApp, etc.) were not firing `session_updated_tx` on each chunk, causing the TUI to only refresh at the end of a long tool sequence. Now fires after every tool call completion
+  - `src/brain/agent/service/tool_loop.rs`
+- **Attachment input shows "Image #N" instead of full path** (`2609583`) — Attachment display in the TUI input bar was showing the full file path; now shows `Image #N`, `Document #N` placeholders matching the `<<IMG:...>>` / `<<DOC:...>>` injection format
+  - `src/tui/render/input.rs`
+- **WhatsApp TTS — upload media before sending audio message** (`135b4d6`) — TTS audio was being sent via `send_audio` before uploading to WhatsApp media servers, causing delivery failures. Now uploads first, then sends with the returned media ID
+  - `src/channels/whatsapp/handler.rs`
+- **WhatsApp handler regression — empty `allowed_phones` + connect tool** (`5a32d49`) — Empty `allowed_phones` in config was incorrectly blocking all messages including the owner. `whatsapp_connect` tool now correctly writes the config entry. Owner bypass re-validated
+  - `src/channels/whatsapp/handler.rs`, `src/brain/tools/whatsapp_connect.rs`
+- **WhatsApp security — block owner→contact processing** (`0fc8b2e`) — Messages sent by the owner *to* a contact were being processed as if the contact sent them, exposing the agent to arbitrary tool execution from outgoing messages
+  - `src/channels/whatsapp/handler.rs`
+- **WhatsApp outgoing `allowed_users` enforcement** (`1707e0f`) — Outgoing messages to contacts not in `allowed_users` were being processed; now strictly gated
+  - `src/channels/whatsapp/handler.rs`
+- **Context display reset immediately after compaction** (`2c4ca8e`) — After `/compact`, the context percentage in the TUI header was not resetting to the new value until the next message; now resets immediately
+  - `src/tui/app/state.rs`
+
+### Changed
+- **Per-channel config structs** (`f28e229`) — Replaced the single flat `ChannelConfig` with 8 dedicated structs (`TelegramConfig`, `DiscordConfig`, `SlackConfig`, `WhatsAppConfig`, `TrelloConfig`, etc.) for cleaner config parsing, better type safety, and simpler channel-specific fields. Trello `board_ids` replaces the previous `allowed_channels` field
+  - `src/config/types.rs`, all channel modules, `src/tui/onboarding/`
+
 ## [0.2.43] - 2026-03-02
 
 ### Added
@@ -838,6 +882,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.44]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.44
 [0.2.43]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.43
 [0.2.42]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.42
 [0.2.41]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.41
