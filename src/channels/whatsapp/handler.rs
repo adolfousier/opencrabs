@@ -575,14 +575,71 @@ pub(crate) async fn handle_message(
     match result {
         Ok(response) => {
             let reply_jid = info.source.chat.clone();
-            let tagged = format!("{}\n\n{}", MSG_HEADER, response.content);
-            for chunk in split_message(&tagged, 4000) {
-                let reply_msg = waproto::whatsapp::Message {
-                    conversation: Some(chunk.to_string()),
-                    ..Default::default()
-                };
-                if let Err(e) = client.send_message(reply_jid.clone(), reply_msg).await {
-                    tracing::error!("WhatsApp: failed to send reply: {}", e);
+
+            // Extract <<IMG:path>> markers — send each as a real WhatsApp image message.
+            let (text_content, img_paths) = crate::utils::extract_img_markers(&response.content);
+
+            // Send images before text
+            for img_path in img_paths {
+                match tokio::fs::read(&img_path).await {
+                    Ok(bytes) => {
+                        use wacore::download::MediaType;
+                        use waproto::whatsapp::message::ImageMessage;
+                        match client.upload(bytes, MediaType::Image).await {
+                            Ok(upload) => {
+                                let mime = if img_path.ends_with(".png") {
+                                    "image/png"
+                                } else {
+                                    "image/jpeg"
+                                };
+                                let img_msg = waproto::whatsapp::Message {
+                                    image_message: Some(Box::new(ImageMessage {
+                                        url: Some(upload.url),
+                                        direct_path: Some(upload.direct_path),
+                                        media_key: Some(upload.media_key),
+                                        file_enc_sha256: Some(upload.file_enc_sha256),
+                                        file_sha256: Some(upload.file_sha256),
+                                        file_length: Some(upload.file_length),
+                                        mimetype: Some(mime.to_string()),
+                                        ..Default::default()
+                                    })),
+                                    ..Default::default()
+                                };
+                                if let Err(e) =
+                                    client.send_message(reply_jid.clone(), img_msg).await
+                                {
+                                    tracing::error!(
+                                        "WhatsApp: failed to send generated image: {}",
+                                        e
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    "WhatsApp: image upload failed for {}: {}",
+                                    img_path,
+                                    e
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("WhatsApp: failed to read image {}: {}", img_path, e);
+                    }
+                }
+            }
+
+            // Send text response (markers stripped)
+            if !text_content.is_empty() {
+                let tagged = format!("{}\n\n{}", MSG_HEADER, text_content);
+                for chunk in split_message(&tagged, 4000) {
+                    let reply_msg = waproto::whatsapp::Message {
+                        conversation: Some(chunk.to_string()),
+                        ..Default::default()
+                    };
+                    if let Err(e) = client.send_message(reply_jid.clone(), reply_msg).await {
+                        tracing::error!("WhatsApp: failed to send reply: {}", e);
+                    }
                 }
             }
 

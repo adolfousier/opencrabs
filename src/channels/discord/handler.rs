@@ -276,8 +276,33 @@ pub(crate) async fn handle_message(
         .await
     {
         Ok(response) => {
-            let tagged = response.content.clone();
-            for chunk in split_message(&tagged, 2000) {
+            // Extract <<IMG:path>> markers — send each as a Discord file attachment.
+            let (text_only, img_paths) = crate::utils::extract_img_markers(&response.content);
+
+            for img_path in img_paths {
+                match tokio::fs::read(&img_path).await {
+                    Ok(bytes) => {
+                        let fname = std::path::Path::new(&img_path)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("image.png")
+                            .to_string();
+                        let file = CreateAttachment::bytes(bytes.as_slice(), fname);
+                        if let Err(e) = msg
+                            .channel_id
+                            .send_message(&ctx.http, CreateMessage::new().add_file(file))
+                            .await
+                        {
+                            tracing::error!("Discord: failed to send generated image: {}", e);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("Discord: failed to read image {}: {}", img_path, e);
+                    }
+                }
+            }
+
+            for chunk in split_message(&text_only, 2000) {
                 if let Err(e) = msg.channel_id.say(&ctx.http, chunk).await {
                     tracing::error!("Discord: failed to send reply: {}", e);
                 }

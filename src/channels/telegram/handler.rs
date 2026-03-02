@@ -630,9 +630,29 @@ pub(crate) async fn handle_message(
     // ── Final response ────────────────────────────────────────────────────────
     match result {
         Ok(response) => {
-            let html = markdown_to_telegram_html(&response.content);
+            // Extract <<IMG:path>> markers — send each as a Telegram photo.
+            let (text_only, img_paths) = crate::utils::extract_img_markers(&response.content);
+
+            for img_path in img_paths {
+                match tokio::fs::read(&img_path).await {
+                    Ok(bytes) => {
+                        if let Err(e) = bot.send_photo(msg.chat.id, InputFile::memory(bytes)).await
+                        {
+                            tracing::error!("Telegram: failed to send generated image: {}", e);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("Telegram: failed to read image {}: {}", img_path, e);
+                    }
+                }
+            }
+
+            let html = markdown_to_telegram_html(&text_only);
             if let Some(mid) = streaming_msg_id {
-                if html.len() <= 4096 {
+                if html.is_empty() {
+                    // Images only — delete the streaming placeholder
+                    let _ = bot.delete_message(msg.chat.id, mid).await;
+                } else if html.len() <= 4096 {
                     // Edit streaming placeholder to final content (no cursor)
                     let _ = bot
                         .edit_message_text(msg.chat.id, mid, &html)

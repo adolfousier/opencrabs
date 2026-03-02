@@ -340,11 +340,47 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         .await
     {
         Ok(response) => {
-            let tagged = response.content.clone();
+            // Extract <<IMG:path>> markers — upload each as a Slack file.
+            let (text_only, img_paths) = crate::utils::extract_img_markers(&response.content);
+
             let token = SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
             let session = client.open_session(&token);
 
-            for chunk in split_message(&tagged, 3000) {
+            for img_path in img_paths {
+                match tokio::fs::read(&img_path).await {
+                    Ok(bytes) => {
+                        let fname = std::path::Path::new(&img_path)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("image.png")
+                            .to_string();
+                        #[allow(deprecated)]
+                        let req = SlackApiFilesUploadRequest {
+                            channels: Some(vec![SlackChannelId::new(channel_id.clone())]),
+                            binary_content: Some(bytes),
+                            filename: Some(fname),
+                            filetype: None,
+                            content: None,
+                            initial_comment: None,
+                            thread_ts: None,
+                            title: None,
+                            file_content_type: Some("image/png".to_string()),
+                        };
+                        #[allow(deprecated)]
+                        if let Err(e) = session.files_upload(&req).await {
+                            tracing::error!("Slack: failed to upload generated image: {}", e);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("Slack: failed to read image {}: {}", img_path, e);
+                    }
+                }
+            }
+
+            for chunk in split_message(&text_only, 3000) {
+                if chunk.is_empty() {
+                    continue;
+                }
                 let request = SlackApiChatPostMessageRequest::new(
                     SlackChannelId::new(channel_id.clone()),
                     SlackMessageContent::new().with_text(chunk.to_string()),
