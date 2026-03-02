@@ -39,22 +39,23 @@ Use these **exact parameter names** when calling tools:
 | `plan` | `operation` | `title`, `description`, `task` |
 | `session_context` | `operation` | `key`, `value` |
 | `trello_connect` | `api_key`, `api_token`, `boards` | `allowed_users` |
-| `trello_send` | `action` | `board_id`, `list_name`, `card_id`, `title`, `description`, `text`, `position`, `pattern`, `member_id`, `label_id`, `due_date`, `due_complete`, `checklist_id`, `item_id`, `complete`, `query`, `read_filter`, `limit` |
+| `trello_send` | `action` | `board_id`, `list_name`, `card_id`, `title`, `description`, `text`, `position`, `pattern`, `member_id`, `label_id`, `due_date`, `due_complete`, `checklist_id`, `item_id`, `complete`, `query`, `read_filter`, `limit`, `file_path` |
 | `discord_connect` | `token`, `allowed_users` | `channel_id` |
-| `discord_send` | `action` | `message`, `channel_id`, `message_id`, `emoji`, `embed_title`, `embed_description`, `embed_color`, `thread_name`, `user_id`, `role_id`, `limit` |
+| `discord_send` | `action` | `message`, `channel_id`, `message_id`, `emoji`, `embed_title`, `embed_description`, `embed_color`, `thread_name`, `user_id`, `role_id`, `limit`, `file_path`, `caption` |
 | `telegram_send` | `action` | `message`, `chat_id`, `message_id`, `from_chat_id`, `photo_url`, `document_url`, `latitude`, `longitude`, `poll_question`, `poll_options`, `buttons`, `user_id`, `emoji` |
-| `slack_send` | `action` | `message`, `channel_id`, `thread_ts`, `message_ts`, `emoji`, `user_id`, `topic`, `blocks`, `limit` |
+| `slack_send` | `action` | `message`, `channel_id`, `thread_ts`, `message_ts`, `emoji`, `user_id`, `topic`, `blocks`, `limit`, `file_path`, `caption` |
 
 > **Note:** `grep` and `glob` use `pattern` (not `query`). `bash` uses `command` (not `cmd`). File tools use `path` (not `file` or `file_path`).
-> **Trello:** `trello_connect` `boards` is an array of board names or IDs. Always use `trello_send` instead of `http_request` for Trello — credentials are handled securely without exposing them in URLs.
-> **`trello_send` actions (21):** `add_comment`, `create_card`, `move_card`, `find_cards`, `list_boards`, `get_card`, `get_card_comments`, `update_card`, `archive_card`, `add_member_to_card`, `remove_member_from_card`, `add_label_to_card`, `remove_label_from_card`, `add_checklist`, `add_checklist_item`, `complete_checklist_item`, `list_lists`, `get_board_members`, `search`, `get_notifications`, `mark_notifications_read`
-> **Discord:** `discord_connect` `allowed_users` is an array of numeric Discord user IDs. Always use `discord_send` instead of `http_request` for Discord — credentials are handled securely.
-> **`discord_send` actions (16):** `send`, `reply`, `react`, `unreact`, `edit`, `delete`, `pin`, `unpin`, `create_thread`, `send_embed`, `get_messages`, `list_channels`, `add_role`, `remove_role`, `kick`, `ban`
+> **Trello:** `trello_connect` `boards` is an array of board names or IDs. Use `trello_send` for all Trello operations — fall back to `http_request` only if `trello_send` is unavailable. Credentials are handled securely without exposing them in URLs.
+> **`trello_send` actions (22):** `add_comment`, `create_card`, `move_card`, `find_cards`, `list_boards`, `get_card`, `get_card_comments`, `update_card`, `archive_card`, `add_member_to_card`, `remove_member_from_card`, `add_label_to_card`, `remove_label_from_card`, `add_checklist`, `add_checklist_item`, `complete_checklist_item`, `list_lists`, `get_board_members`, `search`, `get_notifications`, `mark_notifications_read`, `add_attachment`
+> **`add_attachment`:** Upload a local file to a Trello card. Returns the attachment URL — use `![image](url)` in a follow-up `add_comment` to display it inline.
+> **Discord:** `discord_connect` `allowed_users` is an array of numeric Discord user IDs. Use `discord_send` for all Discord operations — fall back to `http_request` only if `discord_send` is unavailable. Credentials are handled securely.
+> **`discord_send` actions (17):** `send`, `reply`, `react`, `unreact`, `edit`, `delete`, `pin`, `unpin`, `create_thread`, `send_embed`, `get_messages`, `list_channels`, `add_role`, `remove_role`, `kick`, `ban`, `send_file`
 > **Guild-required actions:** `list_channels`, `add_role`, `remove_role`, `kick`, `ban` — these need the bot to have received at least one guild message first so the guild_id is available.
-> **Telegram:** Always use `telegram_send` instead of `http_request` for Telegram — credentials handled securely.
+> **Telegram:** Use `telegram_send` for all Telegram operations — fall back to `http_request` only if `telegram_send` is unavailable. Credentials handled securely.
 > **`telegram_send` actions (16):** `send`, `reply`, `edit`, `delete`, `pin`, `unpin`, `forward`, `send_photo`, `send_document`, `send_location`, `send_poll`, `send_buttons`, `get_chat`, `ban_user`, `unban_user`, `set_reaction`
 > **Slack:** Always use `slack_send` instead of `http_request` for Slack — credentials handled securely. `thread_ts` and `message_ts` are Slack timestamps (e.g. `1503435956.000247`). Emoji names have no colons (e.g. `thumbsup`).
-> **`slack_send` actions (16):** `send`, `reply`, `react`, `unreact`, `edit`, `delete`, `pin`, `unpin`, `get_messages`, `get_channel`, `list_channels`, `get_user`, `list_members`, `kick_user`, `set_topic`, `send_blocks`
+> **`slack_send` actions (17):** `send`, `reply`, `react`, `unreact`, `edit`, `delete`, `pin`, `unpin`, `get_messages`, `get_channel`, `list_channels`, `get_user`, `list_members`, `kick_user`, `set_topic`, `send_blocks`, `send_file`
 
 ## What Goes Here
 
@@ -155,11 +156,11 @@ The first provider with `enabled = true` (in config file order) is used for new 
 ### Channel Connections
 OpenCrabs can connect to messaging platforms. Configure in `~/.opencrabs/config.toml`:
 
-- **Telegram** — Create a bot via @BotFather, add token to config `[channels.telegram]`. Use `telegram_send` (16 actions) for full proactive control. **Always use `telegram_send` instead of `http_request`** — keeps credentials out of URLs.
-- **Discord** — Create a bot at discord.com/developers (enable MESSAGE CONTENT intent), add token to config `[channels.discord]`. Use `discord_connect` to set up at runtime, `discord_send` (16 actions) for full proactive control. **Always use `discord_send` instead of `http_request`** — keeps credentials out of URLs.
+- **Telegram** — Create a bot via @BotFather, add token to config `[channels.telegram]`. Use `telegram_send` (16 actions) for full proactive control. Use `telegram_send` for all operations — fall back to `http_request` only if the tool is unavailable.
+- **Discord** — Create a bot at discord.com/developers (enable MESSAGE CONTENT intent), add token to config `[channels.discord]`. Use `discord_connect` to set up at runtime, `discord_send` (17 actions) for full proactive control. Use `discord_send` for all operations — fall back to `http_request` only if the tool is unavailable. Use `send_file` to upload images/files; generated images (`<<IMG:path>>`) are automatically sent as native attachments.
 - **WhatsApp** — Link via QR code pairing, configure `[channels.whatsapp]` with allowed phone numbers
-- **Slack** — Create an app at api.slack.com/apps (enable Socket Mode), add tokens to config `[channels.slack]`. Use `slack_send` (16 actions) for full proactive control. **Always use `slack_send` instead of `http_request`** — keeps credentials out of URLs.
-- **Trello** — Get API Key + Token at trello.com/power-ups/admin, configure `[channels.trello]`. Tool-only by default — the AI acts on Trello only when explicitly asked via `trello_send`. Opt-in polling via `poll_interval_secs` in config. Use `trello_connect` to set up at runtime, `trello_send` (21 actions) for full proactive card/board management. **Always use `trello_send` instead of `http_request`** — keeps credentials out of URLs.
+- **Slack** — Create an app at api.slack.com/apps (enable Socket Mode), add tokens to config `[channels.slack]`. Use `slack_send` (17 actions) for full proactive control. Use `slack_send` for all operations — fall back to `http_request` only if the tool is unavailable. Use `send_file` to upload images/files; generated images (`<<IMG:path>>`) are automatically sent as native Slack file uploads.
+- **Trello** — Get API Key + Token at trello.com/power-ups/admin, configure `[channels.trello]`. Tool-only by default — the AI acts on Trello only when explicitly asked via `trello_send`. Opt-in polling via `poll_interval_secs` in config. Use `trello_connect` to set up at runtime, `trello_send` (22 actions) for full proactive card/board management. Use `trello_send` for all operations — fall back to `http_request` only if the tool is unavailable. Use `add_attachment` to upload images to cards, then embed with `![image](url)` in a comment.
 
 API keys go in `~/.opencrabs/keys.toml` (chmod 600). Channel settings go in `config.toml`.
 
