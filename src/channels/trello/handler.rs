@@ -197,9 +197,45 @@ pub async fn process_comment(
         return;
     }
 
+    // Extract <<IMG:path>> markers — upload each as a card attachment and embed inline.
+    let (text_only, img_paths) = crate::utils::extract_img_markers(&reply);
+    let mut image_embeds: Vec<String> = Vec::new();
+    for img_path in img_paths {
+        match tokio::fs::read(&img_path).await {
+            Ok(bytes) => {
+                let filename = std::path::Path::new(&img_path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "image.png".to_string());
+                let mime = crate::utils::file_extract::mime_from_ext(&filename);
+                match client
+                    .add_attachment_to_card(&card_id, bytes, &filename, mime)
+                    .await
+                {
+                    Ok(att_url) => {
+                        image_embeds.push(format!("![{}]({})", filename, att_url));
+                    }
+                    Err(e) => {
+                        tracing::warn!("Trello: failed to upload image '{}': {}", filename, e);
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Trello: failed to read image file '{}': {}", img_path, e);
+            }
+        }
+    }
+
+    let final_reply = match (text_only.trim().is_empty(), image_embeds.is_empty()) {
+        (true, true) => return,
+        (true, false) => image_embeds.join("\n"),
+        (false, true) => text_only.trim().to_string(),
+        (false, false) => format!("{}\n\n{}", text_only.trim(), image_embeds.join("\n")),
+    };
+
     // Split at ~4000 chars on newlines (Trello limit is ~16 384 chars per comment,
     // but we keep chunks short so they read well in the card activity feed).
-    let chunks = split_comment(&reply, 4000);
+    let chunks = split_comment(&final_reply, 4000);
     for chunk in chunks {
         if let Err(e) = client.add_comment_to_card(&card_id, &chunk).await {
             tracing::error!(

@@ -939,6 +939,9 @@ impl App {
     /// Extract image file paths from text and return (remaining_text, attachments).
     /// Handles paths with spaces (e.g. `/home/user/My Screenshots/photo.png`)
     /// and image URLs.
+    ///
+    /// Text file paths (`.txt`, `.md`, `.json`, source code, etc.) are read from
+    /// disk and inlined into the returned text — no attachment needed.
     pub(crate) fn extract_image_paths(text: &str) -> (String, Vec<ImageAttachment>) {
         let trimmed = text.trim();
         let lower = trimmed.to_lowercase();
@@ -973,10 +976,31 @@ impl App {
             }
         }
 
+        // Case 1b: Entire pasted text is a single text file path (handles spaces in path)
+        if TEXT_EXTENSIONS.iter().any(|ext| lower.ends_with(ext)) {
+            let path = std::path::Path::new(trimmed);
+            if path.exists() {
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| trimmed.to_string());
+                if let Ok(content) = std::fs::read_to_string(path) {
+                    const LIMIT: usize = 8_000;
+                    let truncated = if content.len() > LIMIT {
+                        format!("{}…[truncated]", &content[..LIMIT])
+                    } else {
+                        content
+                    };
+                    return (format!("[File: {}]\n```\n{}\n```", name, truncated), vec![]);
+                }
+            }
+        }
+
         // Case 2: Mixed text — scan for image URLs (split by whitespace is fine for URLs)
         // and absolute paths without spaces
         let mut attachments = Vec::new();
         let mut remaining_parts = Vec::new();
+        let mut inlined_files: Vec<String> = Vec::new();
 
         for word in text.split_whitespace() {
             let word_lower = word.to_lowercase();
@@ -1004,10 +1028,40 @@ impl App {
                     continue;
                 }
             }
+
+            // Check for text file paths (space-free paths only in mixed-text mode)
+            let is_text = TEXT_EXTENSIONS.iter().any(|ext| word_lower.ends_with(ext));
+            if is_text {
+                let path = std::path::Path::new(word);
+                if path.exists() {
+                    if let Ok(content) = std::fs::read_to_string(path) {
+                        let name = path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_else(|| word.to_string());
+                        const LIMIT: usize = 8_000;
+                        let truncated = if content.len() > LIMIT {
+                            format!("{}…[truncated]", &content[..LIMIT])
+                        } else {
+                            content
+                        };
+                        inlined_files.push(format!("[File: {}]\n```\n{}\n```", name, truncated));
+                        continue;
+                    }
+                }
+            }
+
             remaining_parts.push(word);
         }
 
-        (remaining_parts.join(" "), attachments)
+        let mut result = remaining_parts.join(" ");
+        for file_content in inlined_files {
+            if !result.is_empty() {
+                result.push_str("\n\n");
+            }
+            result.push_str(&file_content);
+        }
+        (result, attachments)
     }
 
     /// Replace `<<IMG:/path/to/file.png>>` markers with readable `[IMG: file.png]` for display.

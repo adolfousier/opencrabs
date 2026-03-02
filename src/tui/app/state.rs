@@ -171,6 +171,13 @@ pub struct ImageAttachment {
 pub(crate) const IMAGE_EXTENSIONS: &[&str] =
     &[".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"];
 
+/// Text file extensions for auto-detection (paste a path → inline content)
+pub(crate) const TEXT_EXTENSIONS: &[&str] = &[
+    ".txt", ".md", ".rst", ".log", ".json", ".yaml", ".yml", ".toml", ".xml", ".csv", ".tsv",
+    ".js", ".mjs", ".ts", ".py", ".rb", ".sh", ".rs", ".go", ".java", ".c", ".cpp", ".h", ".html",
+    ".htm", ".css", ".sql",
+];
+
 /// A single tool call entry within a grouped display
 #[derive(Debug, Clone)]
 pub struct ToolCallEntry {
