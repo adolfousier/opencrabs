@@ -723,6 +723,7 @@ pub(crate) async fn cmd_chat(
                     sl.respond_to.clone(),
                     sl.allowed_channels.clone(),
                     sl.session_idle_hours,
+                    channel_factory.voice_config().clone(),
                 );
                 tracing::info!(
                     "Spawning Slack bot ({} allowed user(s))",

@@ -88,6 +88,34 @@ fn has_audio(msg: &Message) -> bool {
     msg.audio_message.is_some()
 }
 
+/// Check if the message has a document attachment.
+fn has_document(msg: &Message) -> bool {
+    let msg = unwrap_message(msg);
+    msg.document_message.is_some()
+}
+
+/// Download a document from WhatsApp. Returns (bytes, mime, filename) on success.
+async fn download_document(msg: &Message, client: &Client) -> Option<(Vec<u8>, String, String)> {
+    let msg = unwrap_message(msg);
+    let doc = msg.document_message.as_ref()?;
+    let mime = doc.mimetype.clone().unwrap_or_default();
+    let fname = doc.file_name.clone().unwrap_or_else(|| "file".to_string());
+    match client.download(doc.as_ref()).await {
+        Ok(bytes) => {
+            tracing::debug!(
+                "WhatsApp: downloaded document {} ({} bytes)",
+                fname,
+                bytes.len()
+            );
+            Some((bytes, mime, fname))
+        }
+        Err(e) => {
+            tracing::error!("WhatsApp: failed to download document: {e}");
+            None
+        }
+    }
+}
+
 /// Download audio from WhatsApp. Returns raw bytes on success.
 async fn download_audio(msg: &Message, client: &Client) -> Option<Vec<u8>> {
     let msg = unwrap_message(msg);
@@ -235,13 +263,14 @@ pub(crate) async fn handle_message(
         }
     }
 
-    // Build message content: text, image, or audio
+    // Build message content: text, image, audio, or document
     let has_img = has_image(&msg);
     let has_aud = has_audio(&msg);
+    let has_doc = has_document(&msg);
     let text = extract_text(&msg);
 
-    // Require at least text, image, or audio
-    if text.is_none() && !has_img && !has_aud {
+    // Require at least text, image, audio, or document
+    if text.is_none() && !has_img && !has_aud && !has_doc {
         return;
     }
 
@@ -354,6 +383,43 @@ pub(crate) async fn handle_message(
             content = "Describe this image.".to_string();
         }
         content.push_str(&format!(" <<IMG:{}>>", img_path));
+    }
+
+    // Handle document attachment
+    if has_doc && !has_aud && !has_img {
+        if let Some((bytes, mime, fname)) = download_document(&msg, &client).await {
+            use crate::utils::{FileContent, classify_file};
+            match classify_file(&bytes, &mime, &fname) {
+                FileContent::Image => {
+                    let ext = fname.rsplit('.').next().unwrap_or("jpg");
+                    let tmp = std::env::temp_dir().join(format!(
+                        "wa_doc_{}.{}",
+                        uuid::Uuid::new_v4(),
+                        ext
+                    ));
+                    if std::fs::write(&tmp, &bytes).is_ok() {
+                        if content.is_empty() {
+                            content = "Describe this image.".to_string();
+                        }
+                        content.push_str(&format!(" <<IMG:{}>>", tmp.display()));
+                    }
+                }
+                FileContent::Text(extracted) => {
+                    if content.is_empty() {
+                        content = extracted;
+                    } else {
+                        content.push_str(&format!("\n\n{extracted}"));
+                    }
+                }
+                FileContent::Unsupported(note) => {
+                    if content.is_empty() {
+                        content = note;
+                    } else {
+                        content.push_str(&format!("\n\n{note}"));
+                    }
+                }
+            }
+        }
     }
 
     if content.is_empty() {

@@ -6,7 +6,7 @@
 use super::SlackState;
 use super::handler;
 use crate::brain::agent::AgentService;
-use crate::config::RespondTo;
+use crate::config::{RespondTo, VoiceConfig};
 use crate::services::{ServiceContext, SessionService};
 use slack_morphism::prelude::*;
 use std::collections::HashMap;
@@ -24,6 +24,7 @@ pub struct SlackAgent {
     respond_to: RespondTo,
     allowed_channels: Vec<String>,
     idle_timeout_hours: Option<f64>,
+    voice_config: VoiceConfig,
 }
 
 impl SlackAgent {
@@ -37,6 +38,7 @@ impl SlackAgent {
         respond_to: RespondTo,
         allowed_channels: Vec<String>,
         idle_timeout_hours: Option<f64>,
+        voice_config: VoiceConfig,
     ) -> Self {
         Self {
             agent_service,
@@ -47,6 +49,7 @@ impl SlackAgent {
             respond_to,
             allowed_channels,
             idle_timeout_hours,
+            voice_config,
         }
     }
 
@@ -114,6 +117,7 @@ impl SlackAgent {
                 allowed_channels: Arc::new(self.allowed_channels.into_iter().collect()),
                 bot_user_id,
                 idle_timeout_hours: self.idle_timeout_hours,
+                voice_config: Arc::new(self.voice_config),
             };
             handler::HANDLER_STATE
                 .set(Arc::new(handler_state))

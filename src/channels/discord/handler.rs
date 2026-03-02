@@ -141,16 +141,39 @@ pub(crate) async fn handle_message(
         return;
     }
 
-    // Handle image attachments — append <<IMG:url>> markers
+    // Handle attachments — images as <<IMG:url>>, text files extracted inline
     if !is_voice {
+        use crate::utils::{FileContent, classify_file};
         for attachment in &msg.attachments {
-            if let Some(ref content_type) = attachment.content_type
-                && content_type.starts_with("image/")
-            {
+            let mime = attachment.content_type.as_deref().unwrap_or("");
+            let fname = &attachment.filename;
+
+            if mime.starts_with("image/") {
                 if content.is_empty() {
                     content = "Describe this image.".to_string();
                 }
                 content.push_str(&format!(" <<IMG:{}>>", attachment.url));
+            } else if !mime.starts_with("audio/") {
+                // Try to download and classify non-audio, non-image attachments
+                if let Ok(resp) = reqwest::get(attachment.url.as_str()).await
+                    && let Ok(bytes) = resp.bytes().await
+                {
+                    match classify_file(&bytes, mime, fname) {
+                        FileContent::Text(extracted) => {
+                            content.push_str(&format!("\n\n{extracted}"));
+                        }
+                        FileContent::Image => {
+                            // Rare: image MIME not caught above — use URL
+                            if content.is_empty() {
+                                content = "Describe this image.".to_string();
+                            }
+                            content.push_str(&format!(" <<IMG:{}>>", attachment.url));
+                        }
+                        FileContent::Unsupported(note) => {
+                            content.push_str(&format!("\n\n{note}"));
+                        }
+                    }
+                }
             }
         }
     }

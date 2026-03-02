@@ -8,7 +8,7 @@
 
 use super::SlackState;
 use crate::brain::agent::AgentService;
-use crate::config::RespondTo;
+use crate::config::{RespondTo, VoiceConfig};
 use crate::services::SessionService;
 use slack_morphism::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -66,6 +66,7 @@ pub struct HandlerState {
     pub allowed_channels: Arc<HashSet<String>>,
     pub bot_user_id: Option<String>,
     pub idle_timeout_hours: Option<f64>,
+    pub voice_config: Arc<VoiceConfig>,
 }
 
 /// Split a message into chunks that fit Slack's limit (conservative 3000 chars).
@@ -163,20 +164,27 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         }
     };
 
-    // Extract text
-    let text = match &msg.content {
-        Some(content) => match &content.text {
-            Some(t) if !t.is_empty() => t.clone(),
-            _ => {
-                tracing::debug!("Slack: message has empty text, ignoring");
-                return;
-            }
-        },
-        None => {
-            tracing::debug!("Slack: message has no content, ignoring");
-            return;
-        }
-    };
+    // Extract text (may be empty if user sent files only)
+    let text = msg
+        .content
+        .as_ref()
+        .and_then(|c| c.text.clone())
+        .unwrap_or_default();
+
+    // Check for files
+    let files: Vec<_> = msg
+        .content
+        .as_ref()
+        .and_then(|c| c.files.as_ref())
+        .map(|v| v.as_slice())
+        .unwrap_or(&[])
+        .to_vec();
+
+    // Require at least text or files
+    if text.is_empty() && files.is_empty() {
+        tracing::debug!("Slack: message has no text and no files, ignoring");
+        return;
+    }
 
     // Allowlist check — if allowed list is empty, accept all
     if !state.allowed.is_empty() && !state.allowed.contains(&user_id) {
@@ -308,16 +316,116 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         }
     };
 
+    // Process attached files — images as <<IMG:tmp_path>>, text files extracted inline
+    let mut content = text.clone();
+    if !files.is_empty() {
+        use crate::utils::{FileContent, classify_file};
+        let http = reqwest::Client::new();
+        for file in &files {
+            let mime = file.mimetype.as_ref().map(|m| m.0.as_str()).unwrap_or("");
+            let fname = file.name.as_deref().unwrap_or("file");
+
+            // Download file using bot token (Slack private URLs require auth)
+            let dl_url = match file
+                .url_private_download
+                .as_ref()
+                .or(file.url_private.as_ref())
+            {
+                Some(u) => u.to_string(),
+                None => continue,
+            };
+            let dl_bytes = match http
+                .get(&dl_url)
+                .header("Authorization", format!("Bearer {}", state.bot_token))
+                .send()
+                .await
+            {
+                Ok(resp) => match resp.bytes().await {
+                    Ok(b) => b.to_vec(),
+                    Err(e) => {
+                        tracing::error!("Slack: failed to read file bytes: {e}");
+                        continue;
+                    }
+                },
+                Err(e) => {
+                    tracing::error!("Slack: failed to download file {}: {e}", fname);
+                    continue;
+                }
+            };
+
+            // Audio → STT
+            if mime.starts_with("audio/") {
+                if state.voice_config.stt_enabled
+                    && let Some(ref stt_provider) = state.voice_config.stt_provider
+                    && let Some(ref stt_key) = stt_provider.api_key
+                {
+                    match crate::channels::voice::transcribe_audio(dl_bytes, stt_key).await {
+                        Ok(transcript) => {
+                            tracing::info!(
+                                "Slack: transcribed audio: {}",
+                                &transcript[..transcript.len().min(80)]
+                            );
+                            if content.is_empty() {
+                                content = transcript;
+                            } else {
+                                content.push_str(&format!("\n\n[Transcription]: {transcript}"));
+                            }
+                        }
+                        Err(e) => tracing::error!("Slack: STT error: {e}"),
+                    }
+                }
+                continue;
+            }
+
+            match classify_file(&dl_bytes, mime, fname) {
+                FileContent::Image => {
+                    let ext = fname.rsplit('.').next().unwrap_or("png");
+                    let tmp = std::env::temp_dir().join(format!(
+                        "slack_img_{}.{}",
+                        uuid::Uuid::new_v4(),
+                        ext
+                    ));
+                    if tokio::fs::write(&tmp, &dl_bytes).await.is_ok() {
+                        if content.is_empty() {
+                            content = "Describe this image.".to_string();
+                        }
+                        content.push_str(&format!(" <<IMG:{}>>", tmp.display()));
+                        let cleanup = tmp.clone();
+                        tokio::spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                            let _ = tokio::fs::remove_file(cleanup).await;
+                        });
+                    }
+                }
+                FileContent::Text(extracted) => {
+                    if content.is_empty() {
+                        content = extracted;
+                    } else {
+                        content.push_str(&format!("\n\n{extracted}"));
+                    }
+                }
+                FileContent::Unsupported(note) => {
+                    content.push_str(&format!("\n\n{note}"));
+                }
+            }
+        }
+    }
+
+    if content.is_empty() {
+        tracing::debug!("Slack: no processable content after file handling, ignoring");
+        return;
+    }
+
     // For non-owner users, prepend sender identity so the agent knows who
     // it's talking to and doesn't assume it's the owner.
     let agent_input = if !is_owner {
         if is_dm {
-            format!("[Slack DM from {user_id}]\n{text}")
+            format!("[Slack DM from {user_id}]\n{content}")
         } else {
-            format!("[Slack message from {user_id} in channel {channel_id}]\n{text}")
+            format!("[Slack message from {user_id} in channel {channel_id}]\n{content}")
         }
     } else {
-        text
+        content
     };
 
     // Register channel for approval routing, then send with approval callback

@@ -150,6 +150,8 @@ impl Tool for SlackConnectTool {
             .as_ref()
             .and_then(|c| c.channels.slack.session_idle_hours);
 
+        let voice_config = cfg.as_ref().map(|c| c.voice.clone()).unwrap_or_default();
+
         let sl_agent = crate::channels::slack::SlackAgent::new(
             agent,
             service_context,
@@ -159,6 +161,7 @@ impl Tool for SlackConnectTool {
             respond_to,
             allowed_channels,
             idle_timeout_hours,
+            voice_config,
         );
 
         let _handle = sl_agent.start(bot_token, app_token);

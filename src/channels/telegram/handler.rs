@@ -270,22 +270,16 @@ pub(crate) async fn handle_message(
 
         (text_with_img, false)
     } else if let Some(doc) = msg.document() {
-        // Document -- check if it's an image by MIME type
-        let is_image = doc
-            .mime_type
-            .as_ref()
-            .is_some_and(|m| m.as_ref().starts_with("image/"));
-
-        if !is_image {
-            bot.send_message(msg.chat.id, "Only image files are supported for now.")
-                .await?;
-            return Ok(());
-        }
+        let fname = doc.file_name.as_deref().unwrap_or("file");
+        let mime = doc.mime_type.as_ref().map(|m| m.as_ref()).unwrap_or("");
+        let ext = fname.rsplit('.').next().unwrap_or("bin");
+        let caption = msg.caption().unwrap_or("");
 
         tracing::info!(
-            "Telegram: image document from user {} ({})",
+            "Telegram: document from user {} — name={} mime={}",
             user_id,
-            user.first_name,
+            fname,
+            mime
         );
 
         let file = bot.get_file(&doc.file.id).await?;
@@ -295,7 +289,7 @@ pub(crate) async fn handle_message(
             file.path
         );
 
-        let img_bytes = match reqwest::get(&download_url).await {
+        let bytes = match reqwest::get(&download_url).await {
             Ok(resp) => match resp.bytes().await {
                 Ok(b) => b.to_vec(),
                 Err(e) => {
@@ -313,31 +307,40 @@ pub(crate) async fn handle_message(
             }
         };
 
-        // Determine extension from filename or default to jpg
-        let ext = doc
-            .file_name
-            .as_ref()
-            .and_then(|n| n.rsplit('.').next())
-            .unwrap_or("jpg");
-
-        let tmp_path = std::env::temp_dir().join(format!("tg_doc_{}.{}", Uuid::new_v4(), ext));
-        if let Err(e) = tokio::fs::write(&tmp_path, &img_bytes).await {
-            tracing::error!("Telegram: failed to write temp doc: {}", e);
-            bot.send_message(msg.chat.id, "Failed to process file.")
-                .await?;
-            return Ok(());
+        use crate::utils::{FileContent, classify_file};
+        match classify_file(&bytes, mime, fname) {
+            FileContent::Image => {
+                let tmp_path =
+                    std::env::temp_dir().join(format!("tg_doc_{}.{}", Uuid::new_v4(), ext));
+                if let Err(e) = tokio::fs::write(&tmp_path, &bytes).await {
+                    tracing::error!("Telegram: failed to write temp image: {}", e);
+                    bot.send_message(msg.chat.id, "Failed to process file.")
+                        .await?;
+                    return Ok(());
+                }
+                let prompt = if caption.is_empty() {
+                    "Analyze this image."
+                } else {
+                    caption
+                };
+                let result = format!("<<IMG:{}>> {}", tmp_path.display(), prompt);
+                let cleanup = tmp_path.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    let _ = tokio::fs::remove_file(cleanup).await;
+                });
+                (result, false)
+            }
+            FileContent::Text(extracted) => {
+                let result = if caption.is_empty() {
+                    extracted
+                } else {
+                    format!("{caption}\n\n{extracted}")
+                };
+                (result, false)
+            }
+            FileContent::Unsupported(note) => (note, false),
         }
-
-        let caption = msg.caption().unwrap_or("Analyze this image");
-        let text_with_img = format!("<<IMG:{}>> {}", tmp_path.display(), caption);
-
-        let cleanup_path = tmp_path.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-            let _ = tokio::fs::remove_file(cleanup_path).await;
-        });
-
-        (text_with_img, false)
     } else {
         // Non-text, non-voice, non-photo message -- ignore
         return Ok(());
