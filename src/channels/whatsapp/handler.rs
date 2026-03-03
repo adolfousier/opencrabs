@@ -4,7 +4,7 @@
 //! session routing (owner shares TUI session, others get per-phone sessions).
 
 use crate::brain::agent::AgentService;
-use crate::brain::agent::ApprovalCallback;
+use crate::brain::agent::{ApprovalCallback, ProgressCallback, ProgressEvent};
 use crate::channels::whatsapp::WhatsAppState;
 use crate::config::VoiceConfig;
 use crate::services::SessionService;
@@ -531,6 +531,42 @@ pub(crate) async fn handle_message(
         }
     });
 
+    // Progress callback: forward intermediate texts (between tool-call iterations)
+    // to WhatsApp in real time. WhatsApp doesn't support message editing, so we
+    // send each chunk as a new message. Images (<<IMG:...>>) are stripped here —
+    // the main handler delivers them as actual WhatsApp image messages.
+    let was_streamed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let progress_cb: ProgressCallback = {
+        let client_cb = client.clone();
+        let jid_cb = info.source.chat.clone();
+        let was_streamed_cb = was_streamed.clone();
+        Arc::new(move |_session_id, event| {
+            if let ProgressEvent::IntermediateText { text, .. } = event {
+                let (clean, _) = crate::utils::extract_img_markers(&text);
+                if !clean.trim().is_empty() {
+                    was_streamed_cb.store(true, std::sync::atomic::Ordering::Relaxed);
+                    let client = client_cb.clone();
+                    let jid = jid_cb.clone();
+                    let tagged = format!("{}\n\n{}", MSG_HEADER, clean.trim());
+                    tokio::spawn(async move {
+                        for chunk in split_message(&tagged, 4000) {
+                            let msg = waproto::whatsapp::Message {
+                                conversation: Some(chunk.to_string()),
+                                ..Default::default()
+                            };
+                            if let Err(e) = client.send_message(jid.clone(), msg).await {
+                                tracing::error!(
+                                    "WhatsApp: intermediate text send failed: {}",
+                                    e
+                                );
+                            }
+                        }
+                    });
+                }
+            }
+        })
+    };
+
     // Build per-call approval callback.
     // If the user previously chose "Always (session)", auto-approve without asking.
     // Otherwise send a 3-button message (Yes / Always / No) and wait up to 5 min.
@@ -602,7 +638,7 @@ pub(crate) async fn handle_message(
         })
     };
 
-    // Send to agent with WhatsApp approval callback
+    // Send to agent with WhatsApp approval + progress callbacks
     let result = agent
         .send_message_with_tools_and_callback(
             session_id,
@@ -610,7 +646,7 @@ pub(crate) async fn handle_message(
             None,
             None,
             Some(approval_cb),
-            None,
+            Some(progress_cb),
         )
         .await;
 
@@ -673,8 +709,12 @@ pub(crate) async fn handle_message(
                 }
             }
 
-            // Send text response (markers stripped)
-            if !text_content.is_empty() {
+            // Send text response (markers stripped).
+            // Skip if already delivered progressively via the intermediate-text callback
+            // (happens when the agent used tool calls — text was sent between iterations).
+            if !text_content.is_empty()
+                && !was_streamed.load(std::sync::atomic::Ordering::Relaxed)
+            {
                 let tagged = format!("{}\n\n{}", MSG_HEADER, text_content);
                 for chunk in split_message(&tagged, 4000) {
                     let reply_msg = waproto::whatsapp::Message {
