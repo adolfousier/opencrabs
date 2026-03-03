@@ -65,7 +65,7 @@ pub(super) fn render_file_picker(f: &mut Frame, app: &App, area: Rect) {
         } else if is_dir {
             Style::default().fg(Color::Rgb(120, 120, 120))
         } else {
-            Style::default().fg(Color::White)
+            Style::default().fg(Color::Reset)
         };
 
         let prefix = if is_selected { "▶ " } else { "  " };
@@ -99,19 +99,19 @@ pub(super) fn render_file_picker(f: &mut Frame, app: &App, area: Rect) {
                 .fg(Color::Rgb(120, 120, 120))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" Navigate  ", Style::default().fg(Color::White)),
+        Span::styled(" Navigate  ", Style::default().fg(Color::Reset)),
         Span::styled(
             "[Enter]",
             Style::default()
                 .fg(Color::Gray)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" Select  ", Style::default().fg(Color::White)),
+        Span::styled(" Select  ", Style::default().fg(Color::Reset)),
         Span::styled(
             "[Esc]",
             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" Cancel", Style::default().fg(Color::White)),
+        Span::styled(" Cancel", Style::default().fg(Color::Reset)),
     ]));
 
     let widget = Paragraph::new(lines)
@@ -221,26 +221,26 @@ pub(super) fn render_directory_picker(f: &mut Frame, app: &App, area: Rect) {
                 .fg(Color::Rgb(120, 120, 120))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" Navigate  ", Style::default().fg(Color::White)),
+        Span::styled(" Navigate  ", Style::default().fg(Color::Reset)),
         Span::styled(
             "[Enter]",
             Style::default()
                 .fg(Color::Gray)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" Open  ", Style::default().fg(Color::White)),
+        Span::styled(" Open  ", Style::default().fg(Color::Reset)),
         Span::styled(
             "[Space/Tab]",
             Style::default()
                 .fg(Color::Rgb(60, 190, 190))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" Select here  ", Style::default().fg(Color::White)),
+        Span::styled(" Select here  ", Style::default().fg(Color::Reset)),
         Span::styled(
             "[Esc]",
             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" Cancel", Style::default().fg(Color::White)),
+        Span::styled(" Cancel", Style::default().fg(Color::Reset)),
     ]));
 
     let widget = Paragraph::new(lines)
@@ -344,7 +344,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
                 format!(" {}", label),
                 Style::default()
                     .fg(if selected {
-                        Color::White
+                        Color::Reset
                     } else {
                         Color::DarkGray
                     })
@@ -384,7 +384,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(
                 format!("{}{}", base_display, cursor),
                 Style::default().fg(if base_focused {
-                    Color::White
+                    Color::Reset
                 } else {
                     Color::Cyan
                 }),
@@ -430,7 +430,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(
             format!("{}{}", masked_key, cursor),
             Style::default().fg(if key_focused {
-                Color::White
+                Color::Reset
             } else {
                 Color::Cyan
             }),
@@ -472,7 +472,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(
                 model_display,
                 Style::default().fg(if model_focused {
-                    Color::White
+                    Color::Reset
                 } else if app.model_selector_custom_model.is_empty() {
                     Color::DarkGray
                 } else {
@@ -540,7 +540,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
                     .fg(Color::Gray)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::White)
+                Style::default().fg(Color::Reset)
             };
 
             let suffix = if active { " (active)" } else { "" };
@@ -575,7 +575,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(
                 name_display,
                 Style::default().fg(if name_focused {
-                    Color::White
+                    Color::Reset
                 } else if app.model_selector_custom_name.is_empty() {
                     Color::DarkGray
                 } else {
@@ -627,7 +627,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         ));
         help_spans.push(Span::styled(
             format!("{}  ", action),
-            Style::default().fg(Color::White),
+            Style::default().fg(Color::Reset),
         ));
     }
     lines.push(Line::from(help_spans));
@@ -753,7 +753,7 @@ pub(super) fn render_usage_dialog(f: &mut Frame, app: &App, area: Rect) {
     // ── Build lines ────────────────────────────────────────────────────────
     let label_style = Style::default().fg(Color::DarkGray);
     let value_style = Style::default()
-        .fg(Color::White)
+        .fg(Color::Reset)
         .add_modifier(Modifier::BOLD);
     let dim_style = Style::default().fg(Color::DarkGray);
     let header_style = Style::default()

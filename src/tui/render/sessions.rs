@@ -23,38 +23,38 @@ pub(super) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
                 .fg(Color::Rgb(120, 120, 120))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Navigate  ", Style::default().fg(Color::White)),
+        Span::styled("Navigate  ", Style::default().fg(Color::Reset)),
         Span::styled(
             "[Enter] ",
             Style::default()
                 .fg(Color::Rgb(120, 120, 120))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Select  ", Style::default().fg(Color::White)),
+        Span::styled("Select  ", Style::default().fg(Color::Reset)),
         Span::styled(
             "[N] ",
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("New  ", Style::default().fg(Color::White)),
+        Span::styled("New  ", Style::default().fg(Color::Reset)),
         Span::styled(
             "[R] ",
             Style::default()
                 .fg(Color::Rgb(215, 100, 20))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Rename  ", Style::default().fg(Color::White)),
+        Span::styled("Rename  ", Style::default().fg(Color::Reset)),
         Span::styled(
             "[D] ",
             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Delete  ", Style::default().fg(Color::White)),
+        Span::styled("Delete  ", Style::default().fg(Color::Reset)),
         Span::styled(
             "[Esc] ",
             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Back", Style::default().fg(Color::White)),
+        Span::styled("Back", Style::default().fg(Color::Reset)),
     ]));
     lines.push(Line::from(""));
 
@@ -99,7 +99,7 @@ pub(super) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
                 Span::styled(
                     format!("{}█", app.session_rename_buffer),
                     Style::default()
-                        .fg(Color::White)
+                        .fg(Color::Reset)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
@@ -115,7 +115,7 @@ pub(super) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
             } else if is_current {
                 Style::default().fg(Color::Gray)
             } else {
-                Style::default().fg(Color::White)
+                Style::default().fg(Color::Reset)
             };
 
             let mut spans = vec![

@@ -21,7 +21,7 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
                 Style::default().fg(key_color).add_modifier(Modifier::BOLD),
             ),
             Span::styled(" ", Style::default().fg(Color::DarkGray)),
-            Span::styled(desc, Style::default().fg(Color::White)),
+            Span::styled(desc, Style::default().fg(Color::Reset)),
         ])
     }
 
@@ -122,32 +122,32 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(" ✓ ", Style::default().fg(Color::Rgb(90, 110, 150))),
             Span::styled(
                 "Markdown & Syntax Highlighting",
-                Style::default().fg(Color::White),
+                Style::default().fg(Color::Reset),
             ),
         ]),
         Line::from(vec![
             Span::styled(" ✓ ", Style::default().fg(Color::Rgb(90, 110, 150))),
             Span::styled(
                 "Multi-line Input & Streaming",
-                Style::default().fg(Color::White),
+                Style::default().fg(Color::Reset),
             ),
         ]),
         Line::from(vec![
             Span::styled(" ✓ ", Style::default().fg(Color::Rgb(90, 110, 150))),
             Span::styled(
                 "Session Management & History",
-                Style::default().fg(Color::White),
+                Style::default().fg(Color::Reset),
             ),
         ]),
         Line::from(vec![
             Span::styled(" ✓ ", Style::default().fg(Color::Rgb(90, 110, 150))),
-            Span::styled("Token & Cost Tracking", Style::default().fg(Color::White)),
+            Span::styled("Token & Cost Tracking", Style::default().fg(Color::Reset)),
         ]),
         Line::from(vec![
             Span::styled(" ✓ ", Style::default().fg(Color::Rgb(90, 110, 150))),
             Span::styled(
                 "Inline Tool Approval (3 policies)",
-                Style::default().fg(Color::White),
+                Style::default().fg(Color::Reset),
             ),
         ]),
         Line::from(""),
@@ -201,7 +201,7 @@ pub(super) fn render_settings(f: &mut Frame, app: &App, area: Rect) {
                 format!("   {:<20}", key),
                 Style::default().fg(Color::Rgb(215, 100, 20)),
             ),
-            Span::styled(val, Style::default().fg(Color::White)),
+            Span::styled(val, Style::default().fg(Color::Reset)),
         ])
     }
 

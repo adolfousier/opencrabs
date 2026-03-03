@@ -183,7 +183,7 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
     }
 
     let input = Paragraph::new(input_lines)
-        .style(Style::default().fg(Color::White))
+        .style(Style::default().fg(Color::Reset))
         .block(block);
 
     f.render_widget(input, area);
@@ -233,16 +233,16 @@ pub(super) fn render_slash_autocomplete(f: &mut Frame, app: &App, input_area: Re
             let style = if is_selected {
                 Style::default()
                     .fg(Color::Black)
-                    .bg(Color::Rgb(120, 120, 120))
+                    .bg(Color::Gray)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::White)
+                Style::default().fg(Color::Reset)
             };
 
             let desc_style = if is_selected {
                 Style::default()
                     .fg(Color::Black)
-                    .bg(Color::Rgb(120, 120, 120))
+                    .bg(Color::Gray)
             } else {
                 Style::default().fg(Color::DarkGray)
             };

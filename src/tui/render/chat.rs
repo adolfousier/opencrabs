@@ -96,23 +96,17 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                     let (style, line_text): (Style, &str) =
                         if let Some(stripped) = detail_line.strip_prefix("+ ") {
                             (
-                                Style::default()
-                                    .fg(Color::Rgb(60, 185, 185)) // Cyan for additions
-                                    .bg(Color::Rgb(20, 30, 20)), // Dim green bg
+                                Style::default().fg(Color::Green),
                                 stripped,
                             )
                         } else if let Some(stripped) = detail_line.strip_prefix("- ") {
                             (
-                                Style::default()
-                                    .fg(Color::Rgb(255, 100, 100)) // Red for deletions
-                                    .bg(Color::Rgb(30, 20, 20)), // Dim red bg
+                                Style::default().fg(Color::Red),
                                 stripped,
                             )
                         } else {
                             (
-                                Style::default()
-                                    .fg(Color::Rgb(180, 180, 180)) // Light gray text
-                                    .bg(Color::Rgb(35, 35, 45)), // Gray background for context
+                                Style::default().fg(Color::DarkGray),
                                 detail_line,
                             )
                         };
@@ -129,12 +123,8 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
         // Dot/arrow message differentiation (no role labels needed)
         let is_user = app.messages[msg_idx].role == "user";
-        // User messages: subtle lighter background across full line width
-        let msg_bg = if is_user {
-            Some(Color::Rgb(30, 30, 38))
-        } else {
-            None
-        };
+        // User messages: no explicit background so it adapts to light/dark terminals
+        let msg_bg: Option<Color> = None;
 
         // Parse and render message content as markdown (cached per message + width)
         let msg_id = app.messages[msg_idx].id;
@@ -197,7 +187,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             lines.push(Line::from(vec![Span::styled(
                 hint_text.to_string(),
                 Style::default()
-                    .fg(Color::Rgb(90, 90, 90))
+                    .fg(Color::DarkGray)
                     .add_modifier(Modifier::ITALIC),
             )]));
             if app.messages[msg_idx].expanded
@@ -206,7 +196,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                 lines.push(Line::from(""));
                 let reasoning_lines = parse_markdown(details);
                 let reasoning_style = Style::default()
-                    .fg(Color::Rgb(80, 80, 80))
+                    .fg(Color::DarkGray)
                     .add_modifier(Modifier::ITALIC);
                 for line in reasoning_lines {
                     let mut padded_spans = vec![Span::styled("  ", Style::default())];
@@ -439,14 +429,14 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         };
         lines.push(Line::from(vec![
             Span::styled("  Command: ", Style::default().fg(Color::DarkGray)),
-            Span::styled(cmd_display, Style::default().fg(Color::White)),
+            Span::styled(cmd_display, Style::default().fg(Color::Reset)),
         ]));
         // Password input (masked with dots)
         lines.push(Line::from(vec![
             Span::styled("  Password: ", Style::default().fg(Color::DarkGray)),
             Span::styled(
                 "\u{2022}".repeat(app.sudo_input.len()),
-                Style::default().fg(Color::White),
+                Style::default().fg(Color::Reset),
             ),
             Span::styled("\u{2588}", Style::default().fg(Color::Rgb(120, 120, 120))),
         ]));

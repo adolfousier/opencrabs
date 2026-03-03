@@ -219,7 +219,7 @@ pub(super) fn render_inline_approval<'a>(
                 Span::styled(
                     desc,
                     Style::default()
-                        .fg(Color::White)
+                        .fg(Color::Reset)
                         .add_modifier(Modifier::BOLD),
                 ),
             ]));
@@ -393,7 +393,7 @@ pub(super) fn render_approve_menu<'a>(
                         .fg(Color::Cyan)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(Color::White)
+                    Style::default().fg(Color::Reset)
                 };
 
                 lines.push(Line::from(vec![
