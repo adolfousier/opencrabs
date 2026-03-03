@@ -456,76 +456,6 @@ pub(crate) async fn cmd_chat(
         crate::brain::tools::trello_send::TrelloSendTool::new(trello_state.clone()),
     ));
 
-    // Spawn config hot-reload watcher — updates all channel allowlists when
-    // config.toml or keys.toml change on disk without requiring a restart.
-    {
-        use crate::utils::config_watcher::{self, ReloadCallback};
-
-        let mut callbacks: Vec<ReloadCallback> = Vec::new();
-
-        #[cfg(feature = "telegram")]
-        {
-            let state = telegram_state.clone();
-            callbacks.push(Arc::new(move |cfg: crate::config::Config| {
-                let state = state.clone();
-                let users: Vec<i64> = cfg
-                    .channels
-                    .telegram
-                    .allowed_users
-                    .iter()
-                    .filter_map(|s| s.parse().ok())
-                    .collect();
-                tokio::spawn(async move {
-                    state.update_allowed_users(users).await;
-                });
-            }));
-        }
-
-        #[cfg(feature = "whatsapp")]
-        {
-            let state = whatsapp_state.clone();
-            callbacks.push(Arc::new(move |cfg: crate::config::Config| {
-                let state = state.clone();
-                let phones = cfg.channels.whatsapp.allowed_phones.clone();
-                tokio::spawn(async move {
-                    state.set_allowed_phones(phones).await;
-                });
-            }));
-        }
-
-        #[cfg(feature = "discord")]
-        {
-            let state = discord_state.clone();
-            callbacks.push(Arc::new(move |cfg: crate::config::Config| {
-                let state = state.clone();
-                let users: Vec<u64> = cfg
-                    .channels
-                    .discord
-                    .allowed_users
-                    .iter()
-                    .filter_map(|s| s.parse().ok())
-                    .collect();
-                tokio::spawn(async move {
-                    state.update_allowed_users(users).await;
-                });
-            }));
-        }
-
-        #[cfg(feature = "slack")]
-        {
-            let state = slack_state.clone();
-            callbacks.push(Arc::new(move |cfg: crate::config::Config| {
-                let state = state.clone();
-                let users = cfg.channels.slack.allowed_users.clone();
-                tokio::spawn(async move {
-                    state.update_allowed_users(users).await;
-                });
-            }));
-        }
-
-        let _config_watcher = config_watcher::spawn(callbacks);
-    }
-
     // Create sudo password callback that sends requests to TUI
     let sudo_sender = app.event_sender();
     let sudo_callback: crate::brain::agent::SudoCallback = Arc::new(move |command| {
@@ -609,6 +539,108 @@ pub(crate) async fn cmd_chat(
 
     // Update app with the configured agent service (preserve event channels!)
     app.set_agent_service(agent_service);
+
+    // Spawn config hot-reload watcher — fires on any change to config.toml, keys.toml,
+    // or commands.toml without requiring a restart.
+    {
+        use crate::tui::events::TuiEvent;
+        use crate::utils::config_watcher::{self, ReloadCallback};
+
+        let mut callbacks: Vec<ReloadCallback> = Vec::new();
+
+        // Channel allowlists
+        #[cfg(feature = "telegram")]
+        {
+            let state = telegram_state.clone();
+            callbacks.push(Arc::new(move |cfg: crate::config::Config| {
+                let state = state.clone();
+                let users: Vec<i64> = cfg
+                    .channels
+                    .telegram
+                    .allowed_users
+                    .iter()
+                    .filter_map(|s| s.parse().ok())
+                    .collect();
+                tokio::spawn(async move {
+                    state.update_allowed_users(users).await;
+                });
+            }));
+        }
+
+        #[cfg(feature = "whatsapp")]
+        {
+            let state = whatsapp_state.clone();
+            callbacks.push(Arc::new(move |cfg: crate::config::Config| {
+                let state = state.clone();
+                let phones = cfg.channels.whatsapp.allowed_phones.clone();
+                tokio::spawn(async move {
+                    state.set_allowed_phones(phones).await;
+                });
+            }));
+        }
+
+        #[cfg(feature = "discord")]
+        {
+            let state = discord_state.clone();
+            callbacks.push(Arc::new(move |cfg: crate::config::Config| {
+                let state = state.clone();
+                let users: Vec<u64> = cfg
+                    .channels
+                    .discord
+                    .allowed_users
+                    .iter()
+                    .filter_map(|s| s.parse().ok())
+                    .collect();
+                tokio::spawn(async move {
+                    state.update_allowed_users(users).await;
+                });
+            }));
+        }
+
+        #[cfg(feature = "slack")]
+        {
+            let state = slack_state.clone();
+            callbacks.push(Arc::new(move |cfg: crate::config::Config| {
+                let state = state.clone();
+                let users = cfg.channels.slack.allowed_users.clone();
+                tokio::spawn(async move {
+                    state.update_allowed_users(users).await;
+                });
+            }));
+        }
+
+        // Provider hot-reload — swap active LLM provider when keys.toml changes
+        {
+            let agent = app.agent_service().clone();
+            callbacks.push(Arc::new(move |cfg: crate::config::Config| {
+                let agent = agent.clone();
+                tokio::spawn(async move {
+                    match crate::brain::provider::create_provider(&cfg) {
+                        Ok(new_provider) => {
+                            agent.swap_provider(new_provider);
+                            tracing::info!("ConfigWatcher: LLM provider reloaded from new keys");
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "ConfigWatcher: provider rebuild failed, keeping current: {}",
+                                e
+                            );
+                        }
+                    }
+                });
+            }));
+        }
+
+        // TUI refresh — commands autocomplete + approval policy + any other cached config
+        {
+            let sender = app.event_sender();
+            callbacks.push(Arc::new(move |_cfg: crate::config::Config| {
+                let _ = sender.send(TuiEvent::ConfigReloaded);
+            }));
+        }
+
+        let _config_watcher = config_watcher::spawn(callbacks);
+    }
 
     // Set force onboard flag if requested
     if force_onboard {

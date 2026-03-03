@@ -1251,9 +1251,18 @@ impl App {
                 }
             }
             TuiEvent::ConfigReloaded => {
-                // Refresh cached config values and commands
+                // Refresh commands autocomplete
                 self.reload_user_commands();
-                tracing::info!("Config reloaded — refreshed commands and settings");
+                // Refresh approval policy
+                if let Ok(cfg) = crate::config::Config::load() {
+                    (self.approval_auto_session, self.approval_auto_always) =
+                        match cfg.agent.approval_policy.as_str() {
+                            "auto-session" => (true, false),
+                            "auto-always" => (false, true),
+                            _ => (false, false),
+                        };
+                }
+                tracing::info!("Config reloaded — refreshed commands, approval policy");
             }
             TuiEvent::TokenCountUpdated { session_id, count }
                 if self.is_current_session(session_id) =>

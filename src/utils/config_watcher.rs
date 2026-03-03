@@ -34,6 +34,7 @@ pub fn spawn(callbacks: Vec<ReloadCallback>) -> tokio::task::JoinHandle<()> {
         let base = opencrabs_home();
         let config_path = base.join("config.toml");
         let keys_path = base.join("keys.toml");
+        let commands_path = base.join("commands.toml");
 
         let (tx, rx) = std::sync::mpsc::channel();
 
@@ -49,7 +50,7 @@ pub fn spawn(callbacks: Vec<ReloadCallback>) -> tokio::task::JoinHandle<()> {
             }
         };
 
-        for path in [&config_path, &keys_path] {
+        for path in [&config_path, &keys_path, &commands_path] {
             if path.exists()
                 && let Err(e) = watcher.watch(path, RecursiveMode::NonRecursive)
             {
@@ -58,7 +59,7 @@ pub fn spawn(callbacks: Vec<ReloadCallback>) -> tokio::task::JoinHandle<()> {
         }
 
         tracing::info!(
-            "ConfigWatcher: watching config.toml and keys.toml in {:?}",
+            "ConfigWatcher: watching config.toml, keys.toml and commands.toml in {:?}",
             base
         );
 
