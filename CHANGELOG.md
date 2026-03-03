@@ -5,6 +5,42 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.45] - 2026-03-03
+
+### Added
+- **Real-time token count during streaming** (`65a0278`) — The context usage display in the input box now increments live as the model responds: each streaming chunk is counted via tiktoken (cl100k_base) and fires a `TokenCountUpdated` event, so the counter ticks up token by token (e.g. `45K → 45.1K → 45.3K`) instead of jumping at the end of each API round-trip. The API-reported real count resets the baseline after each response, keeping the display accurate across multi-tool loops
+  - `src/cli/ui.rs`
+- **Elapsed time + ctx in thinking indicator** (`65a0278`) — The "OpenCrabs is thinking..." spinner now shows elapsed seconds and current context size: `⠙ OpenCrabs is thinking... 3s · 45K ctx`
+  - `src/tui/render/mod.rs`
+- **Running token count below active tool groups** (`65a0278`) — While tool calls execute, a subtle `45K ctx · 3s` line is rendered below the live tool group so you can see context growth during multi-tool sequences
+  - `src/tui/render/chat.rs`
+- **`opencrabs daemon` command** (`be61993`) — New headless subcommand: same full channel setup (Telegram, Discord, Slack, WhatsApp) as the TUI, but no terminal UI. Blocks on Ctrl-C. Designed for use by the systemd/LaunchAgent service installed during onboarding. Fixes the daemon not working after `opencrabs init` (issue #12)
+  - `src/cli/mod.rs`, `src/cli/ui.rs`
+- **28 CLI parsing unit tests** (`be61993`) — Full test coverage for all CLI subcommands including the new `daemon` command. Wired into `lib.rs` under `#[cfg(test)]`
+  - `src/tests/cli_test.rs`, `src/tests/mod.rs`, `src/lib.rs`
+- **Hot-reload for all three config files** (`1675fd2`) — `config_watcher` now watches `config.toml`, `keys.toml`, and `commands.toml`. Changing any of them is picked up within ~300ms without restart. Provider is swapped live when keys change (via `AgentService::swap_provider`). TUI refreshes approval policy and slash commands on reload
+  - `src/utils/config_watcher.rs`, `src/cli/ui.rs`, `src/tui/app/state.rs`
+- **`config.toml` and `commands.toml` annotated examples** (`4fdc1a6`) — Full annotated `config.toml` example added to the README Configuration section. New `commands.toml` section with complete syntax and action types reference. New `commands.toml.example` file in the project root matching the style of `keys.toml.example`. Two new Table of Contents entries added
+  - `README.md`, `commands.toml.example` (new)
+
+### Fixed
+- **Daemon service not starting after install** (`be61993`) — systemd `ExecStart` was missing the `daemon` subcommand arg and `systemctl --user start` was never called after enable. macOS LaunchAgent plist was also missing the `daemon` arg in `ProgramArguments`. Both fixed. Closes #12
+  - `src/tui/onboarding/config.rs`
+- **config_watcher test hanging the test runner** (`be61993`) — Blocking `rx.recv()` loop inside `spawn_blocking` kept the tokio runtime from shutting down after tests. Fixed with a 200ms-poll loop and hard 3s deadline so the blocking thread exits cleanly
+  - `src/utils/config_watcher.rs`
+- **Nightly rustfmt CI failures** (`3208ac7`) — `telegram/mod.rs` and `whatsapp/handler.rs` had formatting differences between local stable `rustfmt` and the nightly toolchain used by CI. Fixed by running `cargo fmt` through the pinned nightly toolchain from `rust-toolchain.toml`
+  - `src/channels/telegram/mod.rs`, `src/channels/whatsapp/handler.rs`
+- **Redundant `.max(0)` on usize after `saturating_sub`** (`00fc64d`) — Clippy `unnecessary_min_or_max` lint: `usize::saturating_sub(1)` already clamps at 0, `.max(0)` was always a no-op. Removed from three fields in onboarding channels
+  - `src/tui/onboarding/channels.rs`
+- **llama-cpp-2 Metal segfault on macOS 26 arm64** (`118ea65`) — Bumped `llama-cpp-2` from `0.1.134` to `0.1.137` which includes the upstream Metal fix. Thanks @Pibomeister (PR #13)
+  - `Cargo.toml`, `Cargo.lock`
+
+### Changed
+- **Default approval policy changed to `auto-always` for new users** (`3ed02ef`) — New installations no longer prompt before every tool call. The agent works autonomously out of the box. Existing users with `approval_policy` set in `config.toml` are unaffected (serde `default` only applies when the field is absent). To opt back into per-call prompts: run `/approve` → "Approve-only (always ask)"
+  - `src/config/types.rs`, `README.md`
+- **Telegram allowlist hot-reload extended to Discord and Slack** (`2b9b8c6`, `bd95b52`) — `allowed_users` lists for all three text channels now update at runtime when `config.toml` changes, without restart. Builds on the allowlist hot-reload foundation contributed by @Pibomeister (PR #14)
+  - `src/channels/telegram/mod.rs`, `src/channels/discord/handler.rs`, `src/channels/slack/handler.rs`, `src/utils/config_watcher.rs`
+
 ## [0.2.44] - 2026-03-02
 
 ### Added
@@ -898,6 +934,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.45]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.45
 [0.2.44]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.44
 [0.2.43]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.43
 [0.2.42]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.42
