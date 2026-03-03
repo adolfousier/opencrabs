@@ -322,15 +322,14 @@ async fn cmd_chat_inner(
                     })
                 }
                 ProgressEvent::StreamingChunk { text } => {
-                    // Count tokens in this chunk via tiktoken and update the live display.
+                    // Count output tokens in this chunk via tiktoken for per-response display.
                     let chunk_tokens = crate::brain::tokenizer::count_tokens(&text) as u32;
                     let out = streaming_out
                         .fetch_add(chunk_tokens, std::sync::atomic::Ordering::Relaxed)
                         + chunk_tokens;
-                    let ctx = last_ctx_tokens.load(std::sync::atomic::Ordering::Relaxed);
-                    let _ = progress_sender.send(TuiEvent::TokenCountUpdated {
+                    let _ = progress_sender.send(TuiEvent::StreamingOutputTokens {
                         session_id,
-                        count: (ctx + out) as usize,
+                        tokens: out,
                     });
                     progress_sender.send(TuiEvent::ResponseChunk { session_id, text })
                 }

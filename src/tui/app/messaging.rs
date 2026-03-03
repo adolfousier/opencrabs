@@ -1186,6 +1186,7 @@ impl App {
             self.processing_sessions.insert(session.id);
             self.is_processing = true;
             self.processing_started_at = Some(std::time::Instant::now());
+            self.streaming_output_tokens = 0;
             self.error_message = None;
             self.error_message_shown_at = None;
             self.intermediate_text_received = false;
@@ -1328,6 +1329,7 @@ impl App {
             self.intermediate_text_received
         );
         self.streaming_response = None;
+        self.streaming_output_tokens = 0;
         let reasoning_details = self.streaming_reasoning.take();
         self.cancel_token = None;
         self.escape_pending_at = None; // Reset so abort hint doesn't leak to input clear
