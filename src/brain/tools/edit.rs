@@ -53,7 +53,6 @@ struct EditInput {
     operation: EditOperation,
 }
 
-
 #[async_trait]
 impl Tool for EditTool {
     fn name(&self) -> &str {

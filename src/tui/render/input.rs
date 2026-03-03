@@ -240,9 +240,7 @@ pub(super) fn render_slash_autocomplete(f: &mut Frame, app: &App, input_area: Re
             };
 
             let desc_style = if is_selected {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Gray)
+                Style::default().fg(Color::Black).bg(Color::Gray)
             } else {
                 Style::default().fg(Color::DarkGray)
             };

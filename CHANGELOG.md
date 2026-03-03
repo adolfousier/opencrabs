@@ -5,6 +5,23 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.46] - 2026-03-03
+
+### Fixed
+- **Telegram tool approval stuck after clicking Yes/Always** (`3716bf9`) — Three root causes fixed: (1) `ApprovalCallback` now returns `(bool, bool)` where the second bool propagates "Always" back into `tool_context.auto_approve`, so it persists across the entire tool loop instead of resetting after a few steps. (2) Race condition: pending approval is registered BEFORE sending the message, not after. (3) Tool input truncated to 3500 chars to prevent silent Telegram API rejection on long inputs. Closes #17
+  - `src/brain/agent/service/types.rs`, `src/brain/agent/service/tool_loop.rs`, `src/channels/telegram/mod.rs`, `src/channels/discord/mod.rs`, `src/channels/slack/mod.rs`, `src/channels/whatsapp/handler.rs`, `src/tui/app/state.rs`, `src/cli/ui.rs`
+- **Telegram missing tool call context and formatting** (`3716bf9`) — `ToolCompleted` events were being dropped by the progress callback; tool indicators used unsupported markdown. Now shows tool start/completion with proper labels. Improved `markdown_to_telegram_html` with headers, links, lists, underscore italic, and strikethrough. Closes #16
+  - `src/channels/telegram/handler.rs`
+- **Multiline Up/Down arrow keys never navigated lines** (`e27f59b`) — The multiline branch consumed all Up/Down events when the buffer contained newlines, even at boundaries (cursor at position 0 or end), blocking fall-through to history navigation. Now yields at boundaries: Up at position 0 falls through to history, Down at end of buffer does nothing
+  - `src/tui/app/input.rs`
+- **Light mode unreadable — user messages and UI text invisible on light terminals** (`009e8e3`) — Removed hardcoded dark user message background `Rgb(30,30,38)`. Replaced `Color::White` (invisible on light backgrounds) with `Color::Reset` (terminal's default foreground) across all render files. Diff backgrounds changed from dark RGB to ANSI named colors (Green/Red/DarkGray) that adapt to both themes
+  - `src/tui/render/chat.rs`, `src/tui/render/input.rs`, `src/tui/render/help.rs`, `src/tui/render/dialogs.rs`, `src/tui/render/sessions.rs`, `src/tui/render/tools.rs`
+- **Streaming token count duplicated ctx counter in input bar** (`2f8bc09`) — The per-chunk tiktoken counter was adding `ctx + output` together and feeding it back into `last_input_tokens`, making the tool group display show the same "28K ctx" already in the input bar, plus a duplicate timer. Now output tokens are tracked separately and displayed as a per-response count next to the timer: `(7s · 42 tok)`. The duplicate ctx+timer block below tool groups is removed
+  - `src/tui/events.rs`, `src/tui/app/state.rs`, `src/tui/app/messaging.rs`, `src/tui/render/chat.rs`, `src/cli/ui.rs`
+
+### Changed
+- **Removed auto-backup logic** (`e142698`) — Git handles versioning; the custom backup mechanism was redundant
+
 ## [0.2.45] - 2026-03-03
 
 ### Added
@@ -934,6 +951,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.46]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.46
 [0.2.45]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.45
 [0.2.44]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.44
 [0.2.43]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.43

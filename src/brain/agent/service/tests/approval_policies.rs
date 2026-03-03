@@ -103,7 +103,8 @@ async fn test_approval_denied_sends_error_result() {
     registry.register(Arc::new(MockToolRequiresApproval));
 
     // Always deny
-    let approval_cb: ApprovalCallback = Arc::new(move |_info| Box::pin(async move { Ok((false, false)) }));
+    let approval_cb: ApprovalCallback =
+        Arc::new(move |_info| Box::pin(async move { Ok((false, false)) }));
 
     let agent_service = AgentService::new(provider, context.clone())
         .with_tool_registry(Arc::new(registry))

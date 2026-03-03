@@ -221,9 +221,7 @@ impl TelegramState {
                 // Register oneshot channel BEFORE sending the message to prevent
                 // race condition where user clicks before registration completes
                 let (tx, rx) = oneshot::channel();
-                state
-                    .register_pending_approval(approval_id, tx)
-                    .await;
+                state.register_pending_approval(approval_id, tx).await;
 
                 match bot
                     .send_message(ChatId(chat_id), &text)

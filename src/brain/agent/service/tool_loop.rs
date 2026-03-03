@@ -709,7 +709,9 @@ impl AgentService {
                                 // Propagate "always approve" to skip callbacks for remaining tools
                                 if always_approve {
                                     tool_context.auto_approve = true;
-                                    tracing::info!("User selected 'Always' — auto-approving remaining tools in this loop");
+                                    tracing::info!(
+                                        "User selected 'Always' — auto-approving remaining tools in this loop"
+                                    );
                                 }
                                 tracing::info!("User approved tool '{}'", tool_name);
                                 // Create approved context for this tool execution

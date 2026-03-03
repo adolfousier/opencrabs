@@ -95,20 +95,11 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                     // Check for diff lines (+/-) and color accordingly
                     let (style, line_text): (Style, &str) =
                         if let Some(stripped) = detail_line.strip_prefix("+ ") {
-                            (
-                                Style::default().fg(Color::Green),
-                                stripped,
-                            )
+                            (Style::default().fg(Color::Green), stripped)
                         } else if let Some(stripped) = detail_line.strip_prefix("- ") {
-                            (
-                                Style::default().fg(Color::Red),
-                                stripped,
-                            )
+                            (Style::default().fg(Color::Red), stripped)
                         } else {
-                            (
-                                Style::default().fg(Color::DarkGray),
-                                detail_line,
-                            )
+                            (Style::default().fg(Color::DarkGray), detail_line)
                         };
 
                     lines.push(Line::from(vec![

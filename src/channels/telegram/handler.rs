@@ -815,9 +815,7 @@ pub(crate) fn markdown_to_telegram_html(text: &str) -> String {
         }
 
         // List items: - or * at start of line → bullet
-        if (trimmed.starts_with("- ") || trimmed.starts_with("* "))
-            && trimmed.len() > 2
-        {
+        if (trimmed.starts_with("- ") || trimmed.starts_with("* ")) && trimmed.len() > 2 {
             let content = &trimmed[2..];
             let escaped = escape_html(content);
             // Preserve leading indent
@@ -904,11 +902,9 @@ fn format_inline(text: &str) -> String {
         } else if chars[i] == '_' {
             // _italic_ — only match if not part of a word (e.g. my_var should stay)
             let prev_alnum = i > 0 && chars[i - 1].is_alphanumeric();
-            if !prev_alnum
-                && let Some(end) = chars[i + 1..].iter().position(|&c| c == '_')
-            {
-                let next_alnum = i + 1 + end + 1 < chars.len()
-                    && chars[i + 1 + end + 1].is_alphanumeric();
+            if !prev_alnum && let Some(end) = chars[i + 1..].iter().position(|&c| c == '_') {
+                let next_alnum =
+                    i + 1 + end + 1 < chars.len() && chars[i + 1 + end + 1].is_alphanumeric();
                 if !next_alnum && end > 0 {
                     let inner: String = chars[i + 1..i + 1 + end].iter().collect();
                     result.push_str(&format!("<i>{}</i>", inner));
