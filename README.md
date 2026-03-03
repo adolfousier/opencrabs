@@ -1020,13 +1020,14 @@ When the AI requests a tool that needs permission, an inline approval prompt app
 | `D` / `Esc` | Deny the tool request |
 | `V` | Toggle parameter details |
 
-**Approval options:**
+**Approval options (TUI and all channels):**
 
 | Option | Effect |
 |--------|--------|
-| **Allow once** | Approve this single tool call |
-| **Allow all for this task** | Auto-approve all tools this session (resets on session switch) |
-| **Allow all moving forward** | Auto-approve all tools permanently (app lifetime) |
+| **Yes** | Approve this single tool call |
+| **Always (session)** | Auto-approve all tools for this session (resets on restart) |
+| **YOLO (permanent)** | Auto-approve all tools permanently, persists to `config.toml` |
+| **No** | Deny this tool call |
 
 Use `/approve` to change your approval policy at any time (persisted to `config.toml`):
 

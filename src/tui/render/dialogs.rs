@@ -271,11 +271,12 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     let provider_idx = app.model_selector_provider_selected;
     let selected_provider = &PROVIDERS[provider_idx];
 
-    // Get models from fetched list ONLY - never use static fallback
-    // If no fetched models, show message to re-select provider to fetch
+    // Get models from fetched list, filtered by search text
+    let filter = app.model_selector_filter.to_lowercase();
     let display_models: Vec<&str> = app
         .model_selector_models
         .iter()
+        .filter(|m| filter.is_empty() || m.to_lowercase().contains(&filter))
         .map(|s| s.as_ref())
         .collect();
 

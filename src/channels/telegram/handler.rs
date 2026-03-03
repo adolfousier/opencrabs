@@ -1090,15 +1090,23 @@ pub(crate) fn make_approval_callback(
             // Build unique approval id
             let approval_id = uuid::Uuid::new_v4().to_string();
 
-            // Build inline keyboard — 3 buttons matching TUI: Yes / Always / No
-            let keyboard = InlineKeyboardMarkup::new(vec![vec![
-                InlineKeyboardButton::callback("✅ Yes", format!("approve:{}", approval_id)),
-                InlineKeyboardButton::callback(
-                    "🔁 Always (session)",
-                    format!("always:{}", approval_id),
-                ),
-                InlineKeyboardButton::callback("❌ No", format!("deny:{}", approval_id)),
-            ]]);
+            // Build inline keyboard — Yes / Always (session) / YOLO (permanent) / No
+            let keyboard = InlineKeyboardMarkup::new(vec![
+                vec![
+                    InlineKeyboardButton::callback("✅ Yes", format!("approve:{}", approval_id)),
+                    InlineKeyboardButton::callback(
+                        "🔁 Always (session)",
+                        format!("always:{}", approval_id),
+                    ),
+                ],
+                vec![
+                    InlineKeyboardButton::callback(
+                        "🔥 YOLO (permanent)",
+                        format!("yolo:{}", approval_id),
+                    ),
+                    InlineKeyboardButton::callback("❌ No", format!("deny:{}", approval_id)),
+                ],
+            ]);
 
             // Format message — redact secrets before display, truncate to fit Telegram limit
             let safe_input = crate::utils::redact_tool_input(&info.tool_input);

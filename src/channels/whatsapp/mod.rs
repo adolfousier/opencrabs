@@ -14,13 +14,15 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use whatsapp_rust::client::Client;
 
-/// The three approval choices mirroring the TUI's Yes / Always (session) / No.
+/// Approval choices mirroring the TUI's Yes / Always (session) / YOLO (permanent) / No.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WaApproval {
     /// Approve this tool call once.
     Yes,
     /// Approve this and all future tool calls for the rest of the session.
     Always,
+    /// Approve permanently (survives restarts).
+    Yolo,
     /// Deny this tool call.
     No,
 }

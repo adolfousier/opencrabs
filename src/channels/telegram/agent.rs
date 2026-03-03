@@ -198,18 +198,25 @@ impl TelegramAgent {
                     async move {
                         if let Some(data) = query.data.as_deref() {
                             tracing::info!("Telegram callback query received: data={}", data);
-                            let (approved, always, id) =
+                            let (approved, always, yolo, id) =
                                 if let Some(id) = data.strip_prefix("approve:") {
-                                    (true, false, id.to_string())
+                                    (true, false, false, id.to_string())
                                 } else if let Some(id) = data.strip_prefix("always:") {
-                                    (true, true, id.to_string())
+                                    (true, true, false, id.to_string())
+                                } else if let Some(id) = data.strip_prefix("yolo:") {
+                                    (true, true, true, id.to_string())
                                 } else if let Some(id) = data.strip_prefix("deny:") {
-                                    (false, false, id.to_string())
+                                    (false, false, false, id.to_string())
                                 } else {
                                     tracing::warn!("Telegram: unknown callback data: {}", data);
                                     let _ = bot.answer_callback_query(&query.id).await;
                                     return ResponseResult::Ok(());
                                 };
+
+                            // Persist YOLO (permanent) directly from callback
+                            if yolo {
+                                crate::utils::persist_auto_always_policy();
+                            }
 
                             let resolved = state.resolve_pending_approval(&id, approved, always).await;
                             tracing::info!(
@@ -226,7 +233,9 @@ impl TelegramAgent {
 
                             // Edit the approval message: keep original context, append outcome, remove buttons
                             if let Some(msg) = &query.message {
-                                let label = if always {
+                                let label = if yolo {
+                                    "\n\n🔥 YOLO — always approved"
+                                } else if always {
                                     "\n\n🔁 Always approved (session)"
                                 } else if approved {
                                     "\n\n✅ Approved"

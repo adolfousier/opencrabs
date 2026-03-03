@@ -35,16 +35,22 @@ pub async fn on_interaction(
             for action in actions {
                 let action_id = action.action_id.0.as_str();
                 tracing::info!("Slack callback received: action_id={}", action_id);
-                let (approved, always, id) = if let Some(id) = action_id.strip_prefix("approve:") {
-                    (true, false, id.to_string())
-                } else if let Some(id) = action_id.strip_prefix("always:") {
-                    (true, true, id.to_string())
-                } else if let Some(id) = action_id.strip_prefix("deny:") {
-                    (false, false, id.to_string())
-                } else {
-                    tracing::warn!("Slack: unknown action_id: {}", action_id);
-                    continue;
-                };
+                let (approved, always, yolo, id) =
+                    if let Some(id) = action_id.strip_prefix("approve:") {
+                        (true, false, false, id.to_string())
+                    } else if let Some(id) = action_id.strip_prefix("always:") {
+                        (true, true, false, id.to_string())
+                    } else if let Some(id) = action_id.strip_prefix("yolo:") {
+                        (true, true, true, id.to_string())
+                    } else if let Some(id) = action_id.strip_prefix("deny:") {
+                        (false, false, false, id.to_string())
+                    } else {
+                        tracing::warn!("Slack: unknown action_id: {}", action_id);
+                        continue;
+                    };
+                if yolo {
+                    crate::utils::persist_auto_always_policy();
+                }
                 let resolved = state
                     .slack_state
                     .resolve_pending_approval(&id, approved, always)
@@ -600,6 +606,12 @@ pub(crate) fn make_approval_callback(
                     "🔁 Always (session)".to_string(),
                 )),
             );
+            let yolo_btn = SlackBlockButtonElement::new(
+                SlackActionId::new(format!("yolo:{}", approval_id)),
+                SlackBlockPlainTextOnly::from(SlackBlockPlainText::new(
+                    "🔥 YOLO".to_string(),
+                )),
+            );
             let deny_btn = SlackBlockButtonElement::new(
                 SlackActionId::new(format!("deny:{}", approval_id)),
                 SlackBlockPlainTextOnly::from(SlackBlockPlainText::new("❌ No".to_string())),
@@ -608,6 +620,7 @@ pub(crate) fn make_approval_callback(
             let actions = SlackBlock::Actions(SlackActionsBlock::new(vec![
                 SlackActionBlockElement::Button(approve_btn),
                 SlackActionBlockElement::Button(always_btn),
+                SlackActionBlockElement::Button(yolo_btn),
                 SlackActionBlockElement::Button(deny_btn),
             ]));
 

@@ -314,6 +314,7 @@ pub(crate) async fn handle_message(
             match id {
                 "wa_approve_yes" => Some(WaApproval::Yes),
                 "wa_approve_always" => Some(WaApproval::Always),
+                "wa_approve_yolo" => Some(WaApproval::Yolo),
                 "wa_approve_no" => Some(WaApproval::No),
                 _ => None,
             }
@@ -323,6 +324,8 @@ pub(crate) async fn handle_message(
                 Some(WaApproval::Yes)
             } else if matches!(answer.as_str(), "always" | "sempre") {
                 Some(WaApproval::Always)
+            } else if matches!(answer.as_str(), "yolo") {
+                Some(WaApproval::Yolo)
             } else if matches!(answer.as_str(), "no" | "n" | "nao" | "não") {
                 Some(WaApproval::No)
             } else {
@@ -337,8 +340,9 @@ pub(crate) async fn handle_message(
         {
             tracing::info!("WhatsApp: approval from {}: {:?}", phone, c);
             if c == WaApproval::Always {
-                let _ =
-                    crate::config::Config::write_key("agent", "approval_policy", "auto-session");
+                crate::utils::persist_auto_session_policy();
+            } else if c == WaApproval::Yolo {
+                crate::utils::persist_auto_always_policy();
             }
             return;
         }
@@ -600,7 +604,7 @@ pub(crate) async fn handle_message(
                 // by WhatsApp and silently never renders — use text only)
                 let text_msg = waproto::whatsapp::Message {
                     conversation: Some(format!(
-                        "{}\n\n{}\n\nReply *yes*, *always* (session), or *no* (5 min timeout).",
+                        "{}\n\n{}\n\nReply *yes*, *always* (session), *yolo* (permanent), or *no* (5 min timeout).",
                         MSG_HEADER, body
                     )),
                     ..Default::default()
@@ -635,6 +639,14 @@ pub(crate) async fn handle_message(
                             phone_key
                         );
                         persist_auto_session_policy();
+                        Ok((true, true))
+                    }
+                    Ok(Ok(WaApproval::Yolo)) => {
+                        tracing::info!(
+                            "WhatsApp approval: user chose YOLO (phone={})",
+                            phone_key
+                        );
+                        crate::utils::persist_auto_always_policy();
                         Ok((true, true))
                     }
                     Ok(Ok(WaApproval::No)) => {

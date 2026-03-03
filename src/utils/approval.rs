@@ -31,3 +31,11 @@ pub fn persist_auto_session_policy() {
         Err(e) => tracing::error!("Failed to persist approval_policy to config.toml: {}", e),
     }
 }
+
+/// Persist "auto-always" (YOLO) approval policy to config.toml — permanent, survives restarts.
+pub fn persist_auto_always_policy() {
+    match crate::config::Config::write_key("agent", "approval_policy", "auto-always") {
+        Ok(_) => tracing::info!("Persisted approval_policy = auto-always to config.toml"),
+        Err(e) => tracing::error!("Failed to persist approval_policy to config.toml: {}", e),
+    }
+}

@@ -5,6 +5,33 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.48] - 2026-03-04
+
+### Added
+- **Telegram thinking/reasoning stream** — Live `💭` reasoning content streams during inference, vanishes on tool calls and response chunks, keeping the conversation clean
+  - `src/channels/telegram/handler.rs`
+- **`quick_jump` mode for `/onboard:<step>` deep-links** — Any `/onboard:step` (except ModeSelect) opens locked to that single step: no progress dots, centered title, Enter confirms, Esc exits to chat. Step-change detection reverts navigation attempts
+  - `src/tui/onboarding/wizard.rs`, `src/tui/onboarding/input.rs`, `src/tui/app/messaging.rs`, `src/tui/onboarding_render.rs`
+- **Deferred health re-check on Enter** — In `/doctor` quick_jump mode, Enter resets all checks to Pending (visible flash), tick resolves them next frame. Reloads config from disk so external changes are picked up
+  - `src/tui/onboarding/config.rs`, `src/tui/onboarding/fetch.rs`, `src/tui/app/state.rs`
+- **YOLO (permanent) approval button on all channels** — Telegram, Discord, Slack, and WhatsApp now offer a 🔥 YOLO button alongside Always (session), persisting `auto-always` to config.toml so approval survives restarts
+  - `src/channels/telegram/handler.rs`, `src/channels/telegram/agent.rs`, `src/channels/discord/handler.rs`, `src/channels/discord/agent.rs`, `src/channels/slack/handler.rs`, `src/channels/whatsapp/handler.rs`, `src/channels/whatsapp/mod.rs`, `src/utils/approval.rs`, `src/utils/mod.rs`
+
+### Fixed
+- **Redundant `check_approval_policy()` in tool loop** — Removed config-level short-circuit that was bypassing per-tool approval logic, fixing 3 approval policy test failures on CI
+  - `src/brain/agent/service/tool_loop.rs`
+- **CI and Release workflows running redundantly on tag push** — Added `tags-ignore: v*` to CI, added test gate (`needs: test`) to Release workflow
+  - `.github/workflows/ci.yml`, `.github/workflows/release.yml`
+- **`/doctor` standalone mode (closes #21)** — No onboarding chrome, Enter/Esc exit, removed redundant `/onboard:health` command
+  - `src/tui/onboarding_render.rs`, `src/tui/app/state.rs`, `src/tui/render/help.rs`
+- **Trello API Token not loaded in `from_config()`** — Health check falsely reported "No API Token provided" even when configured
+  - `src/tui/onboarding/wizard.rs`
+- **Model selector filter not working (closes #20)** — Filter text was typed but never applied to the displayed model list
+  - `src/tui/render/dialogs.rs`
+- **Approval policy not persisting from channels** — Channels only offered "Always (session)" which wrote `auto-session`, downgrading the default YOLO policy. Now properly offers both session and permanent options
+- **Updated README and commands.toml.example** with all `/onboard:*` sub-commands, `/doctor`, `/whisper`
+  - `README.md`, `commands.toml.example`
+
 ## [0.2.47] - 2026-03-03
 
 ### Changed
@@ -971,6 +998,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.48]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.48
 [0.2.47]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.47
 [0.2.46]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.46
 [0.2.45]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.45

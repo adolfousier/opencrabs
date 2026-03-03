@@ -185,13 +185,15 @@ impl EventHandler for Handler {
         if let Some(comp) = interaction.message_component() {
             let custom_id = comp.data.custom_id.as_str();
             tracing::info!("Discord callback received: custom_id={}", custom_id);
-            let (approved, always, approval_id) =
+            let (approved, always, yolo, approval_id) =
                 if let Some(id) = custom_id.strip_prefix("approve:") {
-                    (true, false, id.to_string())
+                    (true, false, false, id.to_string())
                 } else if let Some(id) = custom_id.strip_prefix("always:") {
-                    (true, true, id.to_string())
+                    (true, true, false, id.to_string())
+                } else if let Some(id) = custom_id.strip_prefix("yolo:") {
+                    (true, true, true, id.to_string())
                 } else if let Some(id) = custom_id.strip_prefix("deny:") {
-                    (false, false, id.to_string())
+                    (false, false, false, id.to_string())
                 } else {
                     tracing::warn!("Discord: unknown interaction custom_id: {}", custom_id);
                     let _ = comp
@@ -202,6 +204,10 @@ impl EventHandler for Handler {
                         .await;
                     return;
                 };
+
+            if yolo {
+                crate::utils::persist_auto_always_policy();
+            }
 
             let resolved = self
                 .discord_state

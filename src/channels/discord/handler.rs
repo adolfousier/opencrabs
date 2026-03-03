@@ -424,6 +424,9 @@ pub(crate) fn make_approval_callback(
                 CreateButton::new(format!("always:{}", approval_id))
                     .label("🔁 Always (session)")
                     .style(ButtonStyle::Primary),
+                CreateButton::new(format!("yolo:{}", approval_id))
+                    .label("🔥 YOLO")
+                    .style(ButtonStyle::Secondary),
                 CreateButton::new(format!("deny:{}", approval_id))
                     .label("❌ No")
                     .style(ButtonStyle::Danger),
