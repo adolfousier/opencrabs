@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `generate_image` — Generate an image from a text prompt; saves PNG to `~/.opencrabs/images/`; returns file path for channel delivery
   - `analyze_image` — Analyze an image file path or URL via Gemini vision; works even when the main model doesn't support vision
   - `src/brain/tools/generate_image.rs` (new), `src/brain/tools/analyze_image.rs` (new), `src/brain/tools/mod.rs`
-- **ImageSetup onboarding step** (`e715536`) — Step 7 in Advanced mode (after VoiceSetup, before Daemon). Toggle Vision Analysis and Image Generation independently; API key input with mask/replace mode; existing key detection. Navigation: Space/↑↓ to toggle, Tab/Enter to continue, BackTab to go back, Esc to go back
+- **ImageSetup onboarding step** (`e715536`, `1336b89`, `f534b24`) — Step 7 in Advanced mode (after VoiceSetup, before Daemon). Toggle Vision Analysis and Image Generation independently; API key input with mask/replace mode; existing key detection. Model labeled as `gemini-3.1-flash-image-preview (🍌 Nano Banana)`. Persistent "get a free key at aistudio.google.com" hint shown when no key is set. Navigation: Space/↑↓ to toggle, Tab/Enter to continue, BackTab/Esc to go back
   - `src/tui/onboarding/types.rs`, `src/tui/onboarding/wizard.rs`, `src/tui/onboarding/navigation.rs`, `src/tui/onboarding/fetch.rs`, `src/tui/onboarding/config.rs`, `src/tui/onboarding_render.rs`
 - **`/onboard:image` deep-link** (`e715536`) — Jump directly to the ImageSetup step from chat at any time
   - `src/tui/app/messaging.rs`
@@ -26,8 +26,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `src/tui/onboarding/types.rs`, `src/tui/onboarding/fetch.rs`, `src/tui/onboarding_render.rs`, `src/tui/onboarding/config.rs`
 - **Google Image API Key in health check** (`6923174`) — When image features are enabled, the health check step verifies the Google AI key is present
   - `src/tui/onboarding/config.rs`
+- **`send_file` action — discord_send and slack_send** (`905e9ef`) — New action uploads a local file as a native attachment. Discord: file attachment in channel. Slack: file upload via API. Both tools now at 17 actions
+  - `src/brain/tools/discord_send.rs`, `src/brain/tools/slack_send.rs`
+- **`add_attachment` action — trello_send** (`ac44fc3`) — New action uploads a local image or file as a Trello card attachment via multipart upload; returns the hosted Trello URL. Tool now at 22 actions
+  - `src/brain/tools/trello_send.rs`, `src/channels/trello/client.rs`
+- **Full file/image/audio input pipeline across all channels** (`9aed2ea`, `5bc33f5`) — Unified `classify_file(bytes, mime, filename) → FileContent` utility routes incoming files across every channel: images → vision pipeline (`<<IMG:path>>`), text/code/data files → extracted inline (up to 8 000 chars), audio → STT, PDFs → note to paste or use `analyze_image`. Trello: card attachments are fetched and processed on every incoming comment. Slack: voice/STT support added (was missing). All channels now handle images, text files, documents, and audio with consistent behavior
+  - `src/utils/file_extract.rs` (new), `src/utils/mod.rs`, `src/channels/telegram/handler.rs`, `src/channels/discord/handler.rs`, `src/channels/whatsapp/handler.rs`, `src/channels/slack/handler.rs`, `src/channels/slack/agent.rs`, `src/brain/tools/slack_connect.rs`, `src/channels/trello/client.rs`, `src/channels/trello/handler.rs`, `src/channels/trello/models.rs`
+- **TUI text file input** (`3e4460e`) — Paste or type any text file path in the TUI input field — the file is read and inlined automatically as `[File: name]\n```\ncontent\n``` `. Works at paste time and submit time. Supports `.txt`, `.md`, `.json`, `.yaml`, `.toml`, `.rs`, `.py`, `.go`, `.sql`, and 20+ other formats
+  - `src/tui/app/state.rs`, `src/tui/app/messaging.rs`
 
 ### Fixed
+- **Generated images delivered as native media across all channels** (`60584ff`) — `<<IMG:path>>` markers in agent replies are now unwrapped and delivered natively on every channel: Telegram `send_photo`, WhatsApp image message, Discord file attachment, Slack file upload, Trello card attachment + `![filename](url)` embed in comment. Previously the raw marker string was sent as plain text
+  - `src/channels/telegram/handler.rs`, `src/channels/discord/handler.rs`, `src/channels/whatsapp/handler.rs`, `src/channels/slack/handler.rs`, `src/channels/trello/handler.rs`
+- **Trello outgoing images — upload attachment + embed inline** (`3e4460e`) — Agent replies containing `<<IMG:path>>` on Trello are now uploaded as card attachments via `add_attachment_to_card` and embedded in the comment as `![filename](url)`. Previously the marker was silently dropped
+  - `src/channels/trello/handler.rs`
+- **Channel tool approval + TUI real-time updates follow-up** (`248b719`) — Follow-up fixes to tool approval flows and TUI live-update reliability across all remote channels after the v0.2.43 multi-channel expansion
+  - `src/channels/*/mod.rs`, `src/brain/agent/service/tool_loop.rs`, `src/tui/app/state.rs`
 - **TUI silent message queue after errors** (`dc815ce`) — After any agent error, `processing_sessions` was never cleared for the current session, causing all subsequent `send_message` calls to be silently queued with no agent running. Fixed by unconditionally removing the session from `processing_sessions` and `session_cancel_tokens` in the `TuiEvent::Error` handler before branching on current vs background session
   - `src/tui/app/state.rs`
 - **TUI real-time updates during channel tool loops** (`b44f1ff`) — Remote channel tool loops (Telegram, WhatsApp, etc.) were not firing `session_updated_tx` on each chunk, causing the TUI to only refresh at the end of a long tool sequence. Now fires after every tool call completion
