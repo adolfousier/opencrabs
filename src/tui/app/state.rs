@@ -748,7 +748,9 @@ impl App {
                     crate::brain::agent::AgentError::Internal("Approval channel closed".to_string())
                 })?;
 
-                Ok(response.approved)
+                // TUI handles "always" internally via approval_auto_session;
+                // return false for always_approve so tool_loop doesn't duplicate it
+                Ok((response.approved, false))
             })
         });
 

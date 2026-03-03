@@ -160,7 +160,7 @@ impl TelegramState {
             Box::pin(async move {
                 // Auto-approve if user already chose "Always" this session
                 if state.is_auto_approve_session().await {
-                    return Ok(true);
+                    return Ok((true, true));
                 }
 
                 // Find the chat this session is active in
@@ -173,7 +173,7 @@ impl TelegramState {
                                 "Telegram approval: no chat_id for session {}",
                                 info.session_id
                             );
-                            return Ok(false);
+                            return Ok((false, false));
                         }
                     },
                 };
@@ -182,7 +182,7 @@ impl TelegramState {
                     Some(b) => b,
                     None => {
                         tracing::warn!("Telegram approval: bot not connected");
-                        return Ok(false);
+                        return Ok((false, false));
                     }
                 };
 
@@ -199,10 +199,15 @@ impl TelegramState {
                     InlineKeyboardButton::callback("❌ No", format!("deny:{}", approval_id)),
                 ]]);
 
-                // Format message — redact secrets before display
+                // Format message — redact secrets before display, truncate to fit Telegram limit
                 let safe_input = crate::utils::redact_tool_input(&info.tool_input);
-                let input_pretty = serde_json::to_string_pretty(&safe_input)
+                let mut input_pretty = serde_json::to_string_pretty(&safe_input)
                     .unwrap_or_else(|_| safe_input.to_string());
+                // Telegram messages are limited to 4096 chars; cap input to leave room for markup
+                if input_pretty.len() > 3500 {
+                    input_pretty.truncate(3500);
+                    input_pretty.push_str("\n... [truncated]");
+                }
                 let text = format!(
                     "🔐 <b>Tool Approval Required</b>\n\nTool: <code>{}</code>\nInput:\n<pre>{}</pre>",
                     info.tool_name,
@@ -213,6 +218,13 @@ impl TelegramState {
                 use teloxide::prelude::Requester;
                 use teloxide::types::ParseMode;
 
+                // Register oneshot channel BEFORE sending the message to prevent
+                // race condition where user clicks before registration completes
+                let (tx, rx) = oneshot::channel();
+                state
+                    .register_pending_approval(approval_id, tx)
+                    .await;
+
                 match bot
                     .send_message(ChatId(chat_id), &text)
                     .parse_mode(ParseMode::Html)
@@ -222,13 +234,9 @@ impl TelegramState {
                     Ok(_) => {}
                     Err(e) => {
                         tracing::error!("Telegram approval: failed to send message: {}", e);
-                        return Ok(false);
+                        return Ok((false, false));
                     }
                 }
-
-                // Register oneshot channel
-                let (tx, rx) = oneshot::channel();
-                state.register_pending_approval(approval_id, tx).await;
 
                 // Wait up to 5 minutes
                 match tokio::time::timeout(std::time::Duration::from_secs(300), rx).await {
@@ -236,12 +244,12 @@ impl TelegramState {
                         if always {
                             state.set_auto_approve_session().await;
                         }
-                        Ok(approved)
+                        Ok((approved, always))
                     }
-                    Ok(Err(_)) => Ok(false), // channel closed
+                    Ok(Err(_)) => Ok((false, false)), // channel closed
                     Err(_) => {
                         tracing::warn!("Telegram approval: 5-minute timeout — auto-denying");
-                        Ok(false)
+                        Ok((false, false))
                     }
                 }
             })

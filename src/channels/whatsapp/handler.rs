@@ -582,7 +582,7 @@ pub(crate) async fn handle_message(
             Box::pin(async move {
                 // Auto-approve if user already chose "Always" this session
                 if wa_state.is_auto_approve_session().await {
-                    return Ok(true);
+                    return Ok((true, true));
                 }
 
                 // Redact secrets before display
@@ -605,19 +605,19 @@ pub(crate) async fn handle_message(
                 };
                 if let Err(e) = client.send_message(chat_jid.clone(), text_msg).await {
                     tracing::error!("WhatsApp: failed to send approval request: {}", e);
-                    return Ok(false);
+                    return Ok((false, false));
                 }
 
                 let (tx, rx) = tokio::sync::oneshot::channel::<WaApproval>();
                 wa_state.register_pending_approval(phone_key, tx).await;
 
                 match tokio::time::timeout(std::time::Duration::from_secs(300), rx).await {
-                    Ok(Ok(WaApproval::Yes)) => Ok(true),
+                    Ok(Ok(WaApproval::Yes)) => Ok((true, false)),
                     Ok(Ok(WaApproval::Always)) => {
                         wa_state.set_auto_approve_session().await;
-                        Ok(true)
+                        Ok((true, true))
                     }
-                    Ok(Ok(WaApproval::No)) => Ok(false),
+                    Ok(Ok(WaApproval::No)) => Ok((false, false)),
                     _ => {
                         tracing::warn!("WhatsApp: approval timed out or channel dropped — denying");
                         let timeout_msg = waproto::whatsapp::Message {
@@ -628,7 +628,7 @@ pub(crate) async fn handle_message(
                             ..Default::default()
                         };
                         let _ = client.send_message(chat_jid, timeout_msg).await;
-                        Ok(false)
+                        Ok((false, false))
                     }
                 }
             })

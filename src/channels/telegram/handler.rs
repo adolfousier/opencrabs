@@ -545,7 +545,17 @@ pub(crate) async fn handle_message(
                 } => {
                     if let Ok(mut s) = st.try_lock() {
                         let ctx = tool_context(&tool_name, &tool_input);
-                        s.text.push_str(&format!("\n\n⚙️ _{tool_name}_{ctx}"));
+                        // Single newline to avoid huge gaps; bold tool name for visibility
+                        s.text.push_str(&format!("\n⚙️ **{tool_name}**{ctx}"));
+                        s.dirty = true;
+                    }
+                }
+                ProgressEvent::ToolCompleted {
+                    tool_name, success, ..
+                } => {
+                    if let Ok(mut s) = st.try_lock() {
+                        let icon = if success { "✅" } else { "❌" };
+                        s.text.push_str(&format!("\n{icon} {tool_name}"));
                         s.dirty = true;
                     }
                 }
@@ -761,8 +771,9 @@ fn tool_context(name: &str, input: &serde_json::Value) -> String {
     }
 }
 
-/// Convert markdown to Telegram-safe HTML
-/// Handles: code blocks, inline code, bold, italic. Escapes HTML entities.
+/// Convert markdown to Telegram-safe HTML.
+/// Handles: code blocks, inline code, bold, italic, underscore italic,
+/// strikethrough, headers, links, and list items. Escapes HTML entities.
 pub(crate) fn markdown_to_telegram_html(text: &str) -> String {
     let mut result = String::with_capacity(text.len() + 256);
     let mut in_code_block = false;
@@ -794,6 +805,32 @@ pub(crate) fn markdown_to_telegram_html(text: &str) -> String {
             continue;
         }
 
+        // Headers: # → bold
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('#') {
+            let content = trimmed.trim_start_matches('#').trim();
+            let escaped = escape_html(content);
+            result.push_str(&format!("<b>{}</b>\n", format_inline(&escaped)));
+            continue;
+        }
+
+        // List items: - or * at start of line → bullet
+        if (trimmed.starts_with("- ") || trimmed.starts_with("* "))
+            && trimmed.len() > 2
+        {
+            let content = &trimmed[2..];
+            let escaped = escape_html(content);
+            // Preserve leading indent
+            let indent = line.len() - trimmed.len();
+            let spaces = &line[..indent];
+            result.push_str(&format!(
+                "{}• {}\n",
+                escape_html(spaces),
+                format_inline(&escaped)
+            ));
+            continue;
+        }
+
         let escaped = escape_html(line);
         let formatted = format_inline(&escaped);
         result.push_str(&formatted);
@@ -814,8 +851,12 @@ fn escape_html(text: &str) -> String {
         .replace('>', "&gt;")
 }
 
-/// Apply inline formatting: `code`, **bold**, *italic*
+/// Apply inline formatting: `code`, **bold**, *italic*, _italic_, ~~strikethrough~~, [text](url)
 fn format_inline(text: &str) -> String {
+    // First pass: convert markdown links [text](url) → <a href="url">text</a>
+    // Links are processed first because their syntax contains special chars
+    let text = convert_links(text);
+
     let mut result = String::new();
     let chars: Vec<char> = text.chars().collect();
     let mut i = 0;
@@ -828,24 +869,88 @@ fn format_inline(text: &str) -> String {
                 i += end + 2;
                 continue;
             }
+        } else if chars[i] == '~' && i + 1 < chars.len() && chars[i + 1] == '~' {
+            // ~~strikethrough~~
+            if let Some(end) = find_closing_marker(&chars[i + 2..], &['~', '~']) {
+                let inner: String = chars[i + 2..i + 2 + end].iter().collect();
+                result.push_str(&format!("<s>{}</s>", inner));
+                i += end + 4;
+                continue;
+            }
         } else if chars[i] == '*' && i + 1 < chars.len() && chars[i + 1] == '*' {
+            // **bold**
             if let Some(end) = find_closing_marker(&chars[i + 2..], &['*', '*']) {
                 let inner: String = chars[i + 2..i + 2 + end].iter().collect();
                 result.push_str(&format!("<b>{}</b>", inner));
                 i += end + 4;
                 continue;
             }
-        } else if chars[i] == '*'
-            && let Some(end) = chars[i + 1..].iter().position(|&c| c == '*')
-        {
-            let inner: String = chars[i + 1..i + 1 + end].iter().collect();
-            result.push_str(&format!("<i>{}</i>", inner));
-            i += end + 2;
-            continue;
+        } else if chars[i] == '_' && i + 1 < chars.len() && chars[i + 1] == '_' {
+            // __bold__ (underscore bold)
+            if let Some(end) = find_closing_marker(&chars[i + 2..], &['_', '_']) {
+                let inner: String = chars[i + 2..i + 2 + end].iter().collect();
+                result.push_str(&format!("<b>{}</b>", inner));
+                i += end + 4;
+                continue;
+            }
+        } else if chars[i] == '*' {
+            // *italic*
+            if let Some(end) = chars[i + 1..].iter().position(|&c| c == '*') {
+                let inner: String = chars[i + 1..i + 1 + end].iter().collect();
+                result.push_str(&format!("<i>{}</i>", inner));
+                i += end + 2;
+                continue;
+            }
+        } else if chars[i] == '_' {
+            // _italic_ — only match if not part of a word (e.g. my_var should stay)
+            let prev_alnum = i > 0 && chars[i - 1].is_alphanumeric();
+            if !prev_alnum
+                && let Some(end) = chars[i + 1..].iter().position(|&c| c == '_')
+            {
+                let next_alnum = i + 1 + end + 1 < chars.len()
+                    && chars[i + 1 + end + 1].is_alphanumeric();
+                if !next_alnum && end > 0 {
+                    let inner: String = chars[i + 1..i + 1 + end].iter().collect();
+                    result.push_str(&format!("<i>{}</i>", inner));
+                    i += end + 2;
+                    continue;
+                }
+            }
         }
         result.push(chars[i]);
         i += 1;
     }
+    result
+}
+
+/// Convert markdown links [text](url) to Telegram HTML <a> tags.
+/// Operates on already-HTML-escaped text, so we must unescape the URL.
+fn convert_links(text: &str) -> String {
+    let mut result = String::new();
+    let mut rest = text;
+    while let Some(open) = rest.find('[') {
+        result.push_str(&rest[..open]);
+        let after_open = &rest[open + 1..];
+        if let Some(close) = after_open.find("](") {
+            let link_text = &after_open[..close];
+            let after_paren = &after_open[close + 2..];
+            if let Some(end_paren) = after_paren.find(')') {
+                let url = &after_paren[..end_paren];
+                // Unescape HTML entities in URL (escape_html ran before format_inline)
+                let clean_url = url
+                    .replace("&amp;", "&")
+                    .replace("&lt;", "<")
+                    .replace("&gt;", ">");
+                result.push_str(&format!("<a href=\"{}\">{}</a>", clean_url, link_text));
+                rest = &after_paren[end_paren + 1..];
+                continue;
+            }
+        }
+        // Not a valid link, emit the '[' and continue
+        result.push('[');
+        rest = after_open;
+    }
+    result.push_str(rest);
     result
 }
 

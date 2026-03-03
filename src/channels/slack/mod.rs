@@ -148,14 +148,14 @@ impl SlackState {
             let state = state.clone();
             Box::pin(async move {
                 if state.is_auto_approve_session().await {
-                    return Ok(true);
+                    return Ok((true, true));
                 }
 
                 let client = match state.client().await {
                     Some(c) => c,
                     None => {
                         tracing::warn!("Slack approval: bot not connected");
-                        return Ok(false);
+                        return Ok((false, false));
                     }
                 };
 
@@ -163,7 +163,7 @@ impl SlackState {
                     Some(t) => t,
                     None => {
                         tracing::warn!("Slack approval: no bot token");
-                        return Ok(false);
+                        return Ok((false, false));
                     }
                 };
 
@@ -176,7 +176,7 @@ impl SlackState {
                                 "Slack approval: no channel_id for session {}",
                                 info.session_id
                             );
-                            return Ok(false);
+                            return Ok((false, false));
                         }
                     },
                 };
@@ -231,7 +231,7 @@ impl SlackState {
                     Ok(r) => r,
                     Err(e) => {
                         tracing::error!("Slack approval: failed to send message: {}", e);
-                        return Ok(false);
+                        return Ok((false, false));
                     }
                 };
 
@@ -258,9 +258,9 @@ impl SlackState {
                             msg_ts,
                         );
                         let _ = session.chat_update(&update).await;
-                        Ok(approved)
+                        Ok((approved, always))
                     }
-                    Ok(Err(_)) => Ok(false),
+                    Ok(Err(_)) => Ok((false, false)),
                     Err(_) => {
                         tracing::warn!("Slack approval: 5-minute timeout — auto-denying");
                         let update = SlackApiChatUpdateRequest::new(
@@ -270,7 +270,7 @@ impl SlackState {
                             msg_ts,
                         );
                         let _ = session.chat_update(&update).await;
-                        Ok(false)
+                        Ok((false, false))
                     }
                 }
             })
