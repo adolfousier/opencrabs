@@ -632,6 +632,7 @@ impl App {
             && !self.slash_suggestions_active
             && self.input_buffer.contains('\n')
             && self.input_history_index.is_none()
+            && self.cursor_position > 0
         {
             // Arrow Up in multiline — move to previous line or start of input
             let (line_start, col) = self.cursor_line_position();
@@ -652,6 +653,7 @@ impl App {
             && !self.slash_suggestions_active
             && self.input_buffer.contains('\n')
             && self.input_history_index.is_none()
+            && self.cursor_position < self.input_buffer.len()
         {
             // Arrow Down in multiline — move to next line or end of input
             let (line_start, col) = self.cursor_line_position();
