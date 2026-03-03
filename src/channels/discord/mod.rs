@@ -163,14 +163,14 @@ impl DiscordState {
             let state = state.clone();
             Box::pin(async move {
                 if state.is_auto_approve_session().await {
-                    return Ok(true);
+                    return Ok((true, true));
                 }
 
                 let http = match state.http().await {
                     Some(h) => h,
                     None => {
                         tracing::warn!("Discord approval: bot not connected");
-                        return Ok(false);
+                        return Ok((false, false));
                     }
                 };
 
@@ -183,7 +183,7 @@ impl DiscordState {
                                 "Discord approval: no channel_id for session {}",
                                 info.session_id
                             );
-                            return Ok(false);
+                            return Ok((false, false));
                         }
                     },
                 };
@@ -220,7 +220,7 @@ impl DiscordState {
                     Ok(m) => m,
                     Err(e) => {
                         tracing::error!("Discord approval: failed to send message: {}", e);
-                        return Ok(false);
+                        return Ok((false, false));
                     }
                 };
 
@@ -243,9 +243,9 @@ impl DiscordState {
                         let _ = sent_msg
                             .edit(&http, EditMessage::new().content(label).components(vec![]))
                             .await;
-                        Ok(approved)
+                        Ok((approved, always))
                     }
-                    Ok(Err(_)) => Ok(false),
+                    Ok(Err(_)) => Ok((false, false)),
                     Err(_) => {
                         tracing::warn!("Discord approval: 5-minute timeout — auto-denying");
                         let _ = sent_msg
@@ -256,7 +256,7 @@ impl DiscordState {
                                     .components(vec![]),
                             )
                             .await;
-                        Ok(false)
+                        Ok((false, false))
                     }
                 }
             })

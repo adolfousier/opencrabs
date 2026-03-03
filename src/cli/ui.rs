@@ -274,7 +274,7 @@ async fn cmd_chat_inner(
                         )
                     })?;
 
-            Ok(response.approved)
+            Ok((response.approved, false))
         })
     });
 

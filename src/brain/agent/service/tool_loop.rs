@@ -693,7 +693,7 @@ impl AgentService {
                         // Call approval callback
                         tracing::info!("Requesting user approval for tool '{}'", tool_name);
                         match approval_cb(tool_info).await {
-                            Ok(approved) => {
+                            Ok((approved, always_approve)) => {
                                 if !approved {
                                     tracing::warn!("User denied approval for tool '{}'", tool_name);
                                     tool_outputs
@@ -705,6 +705,11 @@ impl AgentService {
                                         is_error: Some(true),
                                     });
                                     continue;
+                                }
+                                // Propagate "always approve" to skip callbacks for remaining tools
+                                if always_approve {
+                                    tool_context.auto_approve = true;
+                                    tracing::info!("User selected 'Always' — auto-approving remaining tools in this loop");
                                 }
                                 tracing::info!("User approved tool '{}'", tool_name);
                                 // Create approved context for this tool execution

@@ -25,10 +25,14 @@ pub struct ToolApprovalInfo {
     pub capabilities: Vec<String>,
 }
 
-/// Type alias for approval callback function
-/// Returns true if approved, false if denied
+/// Type alias for approval callback function.
+/// Returns `(approved, always_approve)`:
+/// - `approved`: whether this tool call is allowed
+/// - `always_approve`: if true, skip approval for all subsequent tools in this loop
 pub type ApprovalCallback = Arc<
-    dyn Fn(ToolApprovalInfo) -> Pin<Box<dyn Future<Output = Result<bool>> + Send>> + Send + Sync,
+    dyn Fn(ToolApprovalInfo) -> Pin<Box<dyn Future<Output = Result<(bool, bool)>> + Send>>
+        + Send
+        + Sync,
 >;
 
 /// Progress event emitted during tool execution

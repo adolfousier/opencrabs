@@ -18,7 +18,7 @@ async fn test_auto_approve_skips_callback() {
 
     let approval_cb: ApprovalCallback = Arc::new(move |_info| {
         callback_called_clone.store(true, Ordering::SeqCst);
-        Box::pin(async move { Ok(true) })
+        Box::pin(async move { Ok((true, false)) })
     });
 
     let agent_service = AgentService::new(provider, context.clone())
@@ -64,7 +64,7 @@ async fn test_approval_required_calls_callback() {
 
     let approval_cb: ApprovalCallback = Arc::new(move |_info| {
         callback_called_clone.store(true, Ordering::SeqCst);
-        Box::pin(async move { Ok(true) }) // approve
+        Box::pin(async move { Ok((true, false)) }) // approve
     });
 
     let agent_service = AgentService::new(provider, context.clone())
@@ -103,7 +103,7 @@ async fn test_approval_denied_sends_error_result() {
     registry.register(Arc::new(MockToolRequiresApproval));
 
     // Always deny
-    let approval_cb: ApprovalCallback = Arc::new(move |_info| Box::pin(async move { Ok(false) }));
+    let approval_cb: ApprovalCallback = Arc::new(move |_info| Box::pin(async move { Ok((false, false)) }));
 
     let agent_service = AgentService::new(provider, context.clone())
         .with_tool_registry(Arc::new(registry))
@@ -155,7 +155,7 @@ async fn test_approval_callback_receives_session_id() {
         let captured = Arc::clone(&captured_clone);
         Box::pin(async move {
             *captured.lock().await = Some(info.session_id);
-            Ok(true)
+            Ok((true, false))
         })
     });
 
@@ -228,7 +228,7 @@ async fn test_non_approval_tool_executes_directly() {
 
     let approval_cb: ApprovalCallback = Arc::new(move |_info| {
         callback_called_clone.store(true, Ordering::SeqCst);
-        Box::pin(async move { Ok(true) })
+        Box::pin(async move { Ok((true, false)) })
     });
 
     let agent_service = AgentService::new(provider, context.clone())
@@ -280,7 +280,7 @@ async fn test_mixed_tools_approval_and_auto() {
 
     let approval_cb: ApprovalCallback = Arc::new(move |_info| {
         approval_count_clone.fetch_add(1, Ordering::SeqCst);
-        Box::pin(async move { Ok(true) }) // approve
+        Box::pin(async move { Ok((true, false)) }) // approve
     });
 
     let agent_service = AgentService::new(provider, context.clone())
