@@ -202,7 +202,13 @@ pub fn render(f: &mut Frame, app: &mut App) {
 fn render_thinking_indicator(f: &mut Frame, app: &App, area: Rect) {
     let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     let frame = spinner_frames[app.animation_frame % spinner_frames.len()];
-    let line = Line::from(vec![
+
+    let elapsed = app
+        .processing_started_at
+        .map(|t| t.elapsed().as_secs())
+        .unwrap_or(0);
+
+    let mut spans = vec![
         Span::styled(
             format!("  {} ", frame),
             Style::default()
@@ -213,8 +219,24 @@ fn render_thinking_indicator(f: &mut Frame, app: &App, area: Rect) {
             "OpenCrabs is thinking...",
             Style::default().fg(Color::Rgb(215, 100, 20)),
         ),
-    ]);
-    f.render_widget(Paragraph::new(line), area);
+    ];
+
+    if elapsed > 0 {
+        spans.push(Span::styled(
+            format!(" {}s", elapsed),
+            Style::default().fg(Color::Rgb(100, 100, 100)),
+        ));
+    }
+
+    if let Some(tok) = app.last_input_tokens {
+        let label = utils::format_token_count_raw(tok as i32);
+        spans.push(Span::styled(
+            format!(" · {} ctx", label),
+            Style::default().fg(Color::Rgb(80, 80, 80)),
+        ));
+    }
+
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 /// Split 1 row off the top of an area for the app title bar.
