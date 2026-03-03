@@ -9,7 +9,7 @@ pub(crate) mod handler;
 pub use agent::TelegramAgent;
 
 use crate::brain::agent::{ApprovalCallback, ToolApprovalInfo};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use teloxide::prelude::Bot;
 use teloxide::types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup};
@@ -33,6 +33,8 @@ pub struct TelegramState {
     pending_approvals: Mutex<HashMap<String, oneshot::Sender<(bool, bool)>>>,
     /// When true, all tool calls are auto-approved for this session (user chose "Always").
     auto_approve_session: Mutex<bool>,
+    /// Allowed user IDs — hot-reloadable at runtime when config changes
+    allowed_users: Mutex<HashSet<i64>>,
 }
 
 impl Default for TelegramState {
@@ -50,6 +52,7 @@ impl TelegramState {
             session_chats: Mutex::new(HashMap::new()),
             pending_approvals: Mutex::new(HashMap::new()),
             auto_approve_session: Mutex::new(false),
+            allowed_users: Mutex::new(HashSet::new()),
         }
     }
 
@@ -123,6 +126,29 @@ impl TelegramState {
     /// Whether all tool calls should be auto-approved this session.
     pub async fn is_auto_approve_session(&self) -> bool {
         *self.auto_approve_session.lock().await
+    }
+
+    /// Replace the allowed users set (called on config reload).
+    pub async fn update_allowed_users(&self, users: Vec<i64>) {
+        let new_set: HashSet<i64> = users.into_iter().collect();
+        let mut allowed = self.allowed_users.lock().await;
+        if *allowed != new_set {
+            tracing::info!(
+                "Telegram: allowed users updated: {:?} -> {:?}",
+                *allowed, new_set
+            );
+            *allowed = new_set;
+        }
+    }
+
+    /// Check if a user ID is in the allowed set.
+    pub async fn is_user_allowed(&self, user_id: i64) -> bool {
+        self.allowed_users.lock().await.contains(&user_id)
+    }
+
+    /// Get the number of allowed users.
+    pub async fn allowed_user_count(&self) -> usize {
+        self.allowed_users.lock().await.len()
     }
 
     /// Build an `ApprovalCallback` that sends an inline-keyboard message to Telegram
