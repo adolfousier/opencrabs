@@ -29,7 +29,7 @@ pub fn render_onboarding(f: &mut Frame, wizard: &OnboardingWizard) {
 
     // Header
     let step = wizard.step;
-    if step != OnboardingStep::Complete {
+    if step != OnboardingStep::Complete && !wizard.doctor_mode {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             render_progress_dots(&step),
@@ -89,34 +89,57 @@ pub fn render_onboarding(f: &mut Frame, wizard: &OnboardingWizard) {
     // Navigation footer
     if step != OnboardingStep::Complete {
         lines.push(Line::from(""));
-        let mut footer: Vec<Span<'static>> = vec![
-            Span::styled(
-                " [Esc] ",
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("Back  ", Style::default().fg(Color::White)),
-        ];
+        if wizard.doctor_mode {
+            let footer: Vec<Span<'static>> = vec![
+                Span::styled(
+                    " [Esc] ",
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("Exit  ", Style::default().fg(Color::White)),
+                Span::styled(
+                    "[R] ",
+                    Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("Re-run  ", Style::default().fg(Color::White)),
+                Span::styled(
+                    "[Enter] ",
+                    Style::default()
+                        .fg(ACCENT_GOLD)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("Exit", Style::default().fg(Color::White)),
+            ];
+            lines.push(Line::from(footer));
+        } else {
+            let mut footer: Vec<Span<'static>> = vec![
+                Span::styled(
+                    " [Esc] ",
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("Back  ", Style::default().fg(Color::White)),
+            ];
 
-        if step != OnboardingStep::ModeSelect {
+            if step != OnboardingStep::ModeSelect {
+                footer.push(Span::styled(
+                    "[Tab] ",
+                    Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
+                ));
+                footer.push(Span::styled(
+                    "Next Field  ",
+                    Style::default().fg(Color::White),
+                ));
+            }
+
             footer.push(Span::styled(
-                "[Tab] ",
-                Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
+                "[Enter] ",
+                Style::default()
+                    .fg(ACCENT_GOLD)
+                    .add_modifier(Modifier::BOLD),
             ));
-            footer.push(Span::styled(
-                "Next Field  ",
-                Style::default().fg(Color::White),
-            ));
+            footer.push(Span::styled("Confirm", Style::default().fg(Color::White)));
+
+            lines.push(Line::from(footer));
         }
-
-        footer.push(Span::styled(
-            "[Enter] ",
-            Style::default()
-                .fg(ACCENT_GOLD)
-                .add_modifier(Modifier::BOLD),
-        ));
-        footer.push(Span::styled("Confirm", Style::default().fg(Color::White)));
-
-        lines.push(Line::from(footer));
     }
 
     // Bottom padding

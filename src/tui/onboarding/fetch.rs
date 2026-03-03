@@ -170,12 +170,14 @@ impl OnboardingWizard {
 
     pub(super) fn handle_health_check_key(&mut self, event: KeyEvent) -> WizardAction {
         match event.code {
+            KeyCode::Enter if self.health_complete && self.doctor_mode => {
+                return WizardAction::Cancel;
+            }
             KeyCode::Enter if self.health_complete => {
                 self.next_step();
                 return WizardAction::None;
             }
             KeyCode::Char('r') | KeyCode::Char('R') => {
-                // Re-run health checks
                 self.start_health_check();
             }
             _ => {}
