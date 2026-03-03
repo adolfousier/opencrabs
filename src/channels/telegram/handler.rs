@@ -71,8 +71,8 @@ pub(crate) async fn handle_message(
         return Ok(());
     }
 
-    // Allowlist check -- reject non-allowed users
-    if !allowed.contains(&user_id) {
+    // Allowlist check — use TelegramState so the list is hot-reloadable at runtime
+    if !telegram_state.is_user_allowed(user_id).await {
         tracing::debug!(
             "Telegram: ignoring message from non-allowed user {}",
             user_id

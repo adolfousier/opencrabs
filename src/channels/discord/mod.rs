@@ -12,7 +12,7 @@ use crate::brain::agent::{ApprovalCallback, ToolApprovalInfo};
 use serenity::builder::{CreateActionRow, CreateButton, CreateMessage, EditMessage};
 use serenity::model::application::ButtonStyle;
 use serenity::model::id::ChannelId;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::{Mutex, oneshot};
 use uuid::Uuid;
@@ -35,6 +35,8 @@ pub struct DiscordState {
     pending_approvals: Mutex<HashMap<String, oneshot::Sender<(bool, bool)>>>,
     /// When true, all tool calls are auto-approved for this session (user chose "Always")
     auto_approve_session: Mutex<bool>,
+    /// Allowed user IDs — hot-reloadable at runtime when config changes
+    allowed_users: Mutex<HashSet<u64>>,
 }
 
 impl Default for DiscordState {
@@ -53,7 +55,19 @@ impl DiscordState {
             session_channels: Mutex::new(HashMap::new()),
             pending_approvals: Mutex::new(HashMap::new()),
             auto_approve_session: Mutex::new(false),
+            allowed_users: Mutex::new(HashSet::new()),
         }
+    }
+
+    /// Replace the allowed users set (called on config reload).
+    pub async fn update_allowed_users(&self, users: Vec<u64>) {
+        *self.allowed_users.lock().await = users.into_iter().collect();
+    }
+
+    /// Check if a user ID is in the allowed set.
+    pub async fn is_user_allowed(&self, user_id: u64) -> bool {
+        let set = self.allowed_users.lock().await;
+        set.is_empty() || set.contains(&user_id)
     }
 
     /// Store the connected HTTP client and optionally set the owner channel.
