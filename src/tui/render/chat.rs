@@ -5,7 +5,7 @@
 use super::super::app::App;
 use super::super::markdown::parse_markdown;
 use super::tools::{render_approve_menu, render_inline_approval, render_tool_group};
-use super::utils::wrap_line_with_padding;
+use super::utils::{format_token_count_raw, wrap_line_with_padding};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -372,6 +372,35 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     // so it's always visible at the bottom with auto-scroll
     if let Some(ref group) = app.active_tool_group {
         render_tool_group(&mut lines, group, true, app.animation_frame);
+
+        // Show running token count + elapsed time alongside the active tool group
+        let elapsed = app
+            .processing_started_at
+            .map(|t| t.elapsed().as_secs())
+            .unwrap_or(0);
+        let mut meta_spans = vec![Span::styled("     ", Style::default())];
+        if let Some(tok) = app.last_input_tokens {
+            let label = format_token_count_raw(tok as i32);
+            meta_spans.push(Span::styled(
+                format!("{} ctx", label),
+                Style::default().fg(Color::Rgb(80, 80, 80)),
+            ));
+        }
+        if elapsed > 0 {
+            if app.last_input_tokens.is_some() {
+                meta_spans.push(Span::styled(
+                    " · ".to_string(),
+                    Style::default().fg(Color::Rgb(60, 60, 60)),
+                ));
+            }
+            meta_spans.push(Span::styled(
+                format!("{}s", elapsed),
+                Style::default().fg(Color::Rgb(80, 80, 80)),
+            ));
+        }
+        if app.last_input_tokens.is_some() || elapsed > 0 {
+            lines.push(Line::from(meta_spans));
+        }
     }
 
     // Show error message if present
