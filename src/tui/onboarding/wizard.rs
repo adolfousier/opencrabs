@@ -477,9 +477,12 @@ impl OnboardingWizard {
         if let Some(channel_id) = config.channels.slack.allowed_channels.first() {
             wizard.slack_channel_id_input = channel_id.clone();
         }
-        // Trello: load API Key (app_token) + board ID (first allowed_channel)
+        // Trello: load API Key (app_token), API Token (token), board ID
         if let Some(ref api_key) = config.channels.trello.app_token {
             wizard.trello_api_key_input = api_key.clone();
+        }
+        if let Some(ref token) = config.channels.trello.token {
+            wizard.trello_api_token_input = token.clone();
         }
         if let Some(board_id) = config.channels.trello.board_ids.first() {
             wizard.trello_board_id_input = board_id.clone();

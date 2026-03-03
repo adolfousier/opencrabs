@@ -52,6 +52,31 @@ impl OnboardingWizard {
 
     /// Initialize health check results
     pub fn start_health_check(&mut self) {
+        // Reload config from disk so re-check picks up external changes
+        if self.quick_jump
+            && let Ok(config) = crate::config::Config::load()
+        {
+            let fresh = Self::from_config(&config);
+            self.api_key_input = fresh.api_key_input;
+            self.selected_provider = fresh.selected_provider;
+            self.workspace_path = fresh.workspace_path;
+            self.channel_toggles = fresh.channel_toggles;
+            self.telegram_token_input = fresh.telegram_token_input;
+            self.telegram_user_id_input = fresh.telegram_user_id_input;
+            self.discord_token_input = fresh.discord_token_input;
+            self.discord_channel_id_input = fresh.discord_channel_id_input;
+            self.slack_bot_token_input = fresh.slack_bot_token_input;
+            self.slack_app_token_input = fresh.slack_app_token_input;
+            self.slack_channel_id_input = fresh.slack_channel_id_input;
+            self.trello_api_key_input = fresh.trello_api_key_input;
+            self.trello_api_token_input = fresh.trello_api_token_input;
+            self.trello_board_id_input = fresh.trello_board_id_input;
+            self.whatsapp_connected = fresh.whatsapp_connected;
+            self.image_vision_enabled = fresh.image_vision_enabled;
+            self.image_generation_enabled = fresh.image_generation_enabled;
+            self.image_api_key_input = fresh.image_api_key_input;
+        }
+
         let mut checks = vec![
             ("API Key Present".to_string(), HealthStatus::Pending),
             ("Config File".to_string(), HealthStatus::Pending),
