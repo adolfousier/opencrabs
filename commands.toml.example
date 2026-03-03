@@ -1,0 +1,54 @@
+# OpenCrabs User-Defined Slash Commands
+# Copy this to ~/.opencrabs/commands.toml
+#
+# Commands appear instantly in the / autocomplete dropdown.
+# Changes are hot-reloaded — no restart needed.
+#
+# The agent can also create, edit, and remove commands autonomously
+# using the config_manager tool (e.g. "create a /deploy command that...").
+#
+# action types:
+#   "prompt"  — sends the prompt to the agent for execution
+#   "system"  — displays the text inline as a system message (no LLM call)
+
+# ========================================
+# Example: DevOps Commands
+# ========================================
+
+[[commands]]
+name = "/deploy"
+description = "Deploy to staging server"
+action = "prompt"
+prompt = "Run ./deploy.sh staging and report the result."
+
+[[commands]]
+name = "/rebuild"
+description = "Build and restart OpenCrabs from source"
+action = "prompt"
+prompt = 'Run `RUSTFLAGS="-C target-cpu=native" cargo build --release` in /srv/rs/opencrabs. If it succeeds, ask if I want to restart now.'
+
+# ========================================
+# Example: Productivity Commands
+# ========================================
+
+[[commands]]
+name = "/standup"
+description = "Generate a daily standup summary"
+action = "prompt"
+prompt = "Summarize my recent git commits and open tasks for a concise standup report."
+
+[[commands]]
+name = "/todo"
+description = "Show open tasks in current project"
+action = "prompt"
+prompt = "List all TODO/FIXME comments in the current project and any open tasks files."
+
+# ========================================
+# Example: System Messages (no LLM call)
+# ========================================
+
+[[commands]]
+name = "/howto"
+description = "Show quick reference for common commands"
+action = "system"
+prompt = "Common commands: /models (switch model), /sessions (browse history), /usage (cost report), /rebuild (rebuild from source)."
