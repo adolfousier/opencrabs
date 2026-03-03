@@ -337,7 +337,8 @@ pub(crate) async fn handle_message(
         {
             tracing::info!("WhatsApp: approval from {}: {:?}", phone, c);
             if c == WaApproval::Always {
-                wa_state.set_auto_approve_session().await;
+                let _ =
+                    crate::config::Config::write_key("agent", "approval_policy", "auto-session");
             }
             return;
         }
@@ -569,6 +570,7 @@ pub(crate) async fn handle_message(
     // Otherwise send a 3-button message (Yes / Always / No) and wait up to 5 min.
     let approval_cb: ApprovalCallback = {
         use crate::channels::whatsapp::WaApproval;
+        use crate::utils::{check_approval_policy, persist_auto_session_policy};
 
         let client = client.clone();
         let chat_jid = info.source.chat.clone();
@@ -580,9 +582,9 @@ pub(crate) async fn handle_message(
             let phone_key = phone_key.clone();
             let wa_state = wa_state.clone();
             Box::pin(async move {
-                // Auto-approve if user already chose "Always" this session
-                if wa_state.is_auto_approve_session().await {
-                    return Ok((true, true));
+                // Respect config-level approval policy (single source of truth)
+                if let Some(result) = check_approval_policy() {
+                    return Ok(result);
                 }
 
                 // Redact secrets before display
@@ -603,23 +605,47 @@ pub(crate) async fn handle_message(
                     )),
                     ..Default::default()
                 };
+                tracing::info!(
+                    "WhatsApp approval: sending request for tool '{}' to {}",
+                    tool_info.tool_name,
+                    phone_key
+                );
                 if let Err(e) = client.send_message(chat_jid.clone(), text_msg).await {
                     tracing::error!("WhatsApp: failed to send approval request: {}", e);
                     return Ok((false, false));
                 }
 
                 let (tx, rx) = tokio::sync::oneshot::channel::<WaApproval>();
-                wa_state.register_pending_approval(phone_key, tx).await;
+                wa_state
+                    .register_pending_approval(phone_key.clone(), tx)
+                    .await;
+                tracing::info!(
+                    "WhatsApp approval: registered pending for phone={}, waiting for response",
+                    phone_key
+                );
 
                 match tokio::time::timeout(std::time::Duration::from_secs(300), rx).await {
-                    Ok(Ok(WaApproval::Yes)) => Ok((true, false)),
+                    Ok(Ok(WaApproval::Yes)) => {
+                        tracing::info!("WhatsApp approval: user approved (phone={})", phone_key);
+                        Ok((true, false))
+                    }
                     Ok(Ok(WaApproval::Always)) => {
-                        wa_state.set_auto_approve_session().await;
+                        tracing::info!(
+                            "WhatsApp approval: user chose Always (phone={})",
+                            phone_key
+                        );
+                        persist_auto_session_policy();
                         Ok((true, true))
                     }
-                    Ok(Ok(WaApproval::No)) => Ok((false, false)),
+                    Ok(Ok(WaApproval::No)) => {
+                        tracing::info!("WhatsApp approval: user denied (phone={})", phone_key);
+                        Ok((false, false))
+                    }
                     _ => {
-                        tracing::warn!("WhatsApp: approval timed out or channel dropped — denying");
+                        tracing::warn!(
+                            "WhatsApp: approval timed out or channel dropped — denying (phone={})",
+                            phone_key
+                        );
                         let timeout_msg = waproto::whatsapp::Message {
                             conversation: Some(format!(
                                 "{}\n\n⏰ No response in 5 minutes — *{}* was denied.\n\nSend your message again and reply *yes*, *always*, or *no* when prompted.",

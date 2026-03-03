@@ -8,10 +8,6 @@ pub(crate) mod handler;
 
 pub use agent::DiscordAgent;
 
-use crate::brain::agent::{ApprovalCallback, ToolApprovalInfo};
-use serenity::builder::{CreateActionRow, CreateButton, CreateMessage, EditMessage};
-use serenity::model::application::ButtonStyle;
-use serenity::model::id::ChannelId;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::{Mutex, oneshot};
@@ -33,8 +29,6 @@ pub struct DiscordState {
     session_channels: Mutex<HashMap<Uuid, u64>>,
     /// Pending approval channels: approval_id → oneshot sender of (approved, always)
     pending_approvals: Mutex<HashMap<String, oneshot::Sender<(bool, bool)>>>,
-    /// When true, all tool calls are auto-approved for this session (user chose "Always")
-    auto_approve_session: Mutex<bool>,
     /// Allowed user IDs — hot-reloadable at runtime when config changes
     allowed_users: Mutex<HashSet<u64>>,
 }
@@ -54,7 +48,6 @@ impl DiscordState {
             guild_id: Mutex::new(None),
             session_channels: Mutex::new(HashMap::new()),
             pending_approvals: Mutex::new(HashMap::new()),
-            auto_approve_session: Mutex::new(false),
             allowed_users: Mutex::new(HashSet::new()),
         }
     }
@@ -144,122 +137,5 @@ impl DiscordState {
         } else {
             false
         }
-    }
-
-    /// Mark the session as auto-approve (user chose "Always").
-    pub async fn set_auto_approve_session(&self) {
-        *self.auto_approve_session.lock().await = true;
-    }
-
-    /// Whether all tool calls should be auto-approved this session.
-    pub async fn is_auto_approve_session(&self) -> bool {
-        *self.auto_approve_session.lock().await
-    }
-
-    /// Build an `ApprovalCallback` that sends a Discord message with 3 buttons
-    /// (✅ Yes / 🔁 Always (session) / ❌ No) and waits up to 5 min for a click.
-    pub fn make_approval_callback(state: Arc<DiscordState>) -> ApprovalCallback {
-        Arc::new(move |info: ToolApprovalInfo| {
-            let state = state.clone();
-            Box::pin(async move {
-                if state.is_auto_approve_session().await {
-                    return Ok((true, true));
-                }
-
-                let http = match state.http().await {
-                    Some(h) => h,
-                    None => {
-                        tracing::warn!("Discord approval: bot not connected");
-                        return Ok((false, false));
-                    }
-                };
-
-                let channel_id = match state.session_channel(info.session_id).await {
-                    Some(id) => id,
-                    None => match state.owner_channel_id().await {
-                        Some(id) => id,
-                        None => {
-                            tracing::warn!(
-                                "Discord approval: no channel_id for session {}",
-                                info.session_id
-                            );
-                            return Ok((false, false));
-                        }
-                    },
-                };
-
-                let approval_id = Uuid::new_v4().to_string();
-                let safe_input = crate::utils::redact_tool_input(&info.tool_input);
-                let input_pretty = serde_json::to_string_pretty(&safe_input)
-                    .unwrap_or_else(|_| safe_input.to_string());
-                let text = format!(
-                    "🔐 **Tool Approval Required**\n\nTool: `{}`\nInput:\n```json\n{}\n```",
-                    info.tool_name,
-                    &input_pretty[..input_pretty.len().min(1800)],
-                );
-
-                let row = CreateActionRow::Buttons(vec![
-                    CreateButton::new(format!("approve:{}", approval_id))
-                        .label("✅ Yes")
-                        .style(ButtonStyle::Success),
-                    CreateButton::new(format!("always:{}", approval_id))
-                        .label("🔁 Always (session)")
-                        .style(ButtonStyle::Primary),
-                    CreateButton::new(format!("deny:{}", approval_id))
-                        .label("❌ No")
-                        .style(ButtonStyle::Danger),
-                ]);
-
-                let mut sent_msg = match ChannelId::new(channel_id)
-                    .send_message(
-                        &http,
-                        CreateMessage::new().content(&text).components(vec![row]),
-                    )
-                    .await
-                {
-                    Ok(m) => m,
-                    Err(e) => {
-                        tracing::error!("Discord approval: failed to send message: {}", e);
-                        return Ok((false, false));
-                    }
-                };
-
-                let (tx, rx) = oneshot::channel();
-                state.register_pending_approval(approval_id, tx).await;
-
-                match tokio::time::timeout(std::time::Duration::from_secs(300), rx).await {
-                    Ok(Ok((approved, always))) => {
-                        if always {
-                            state.set_auto_approve_session().await;
-                        }
-                        // Remove buttons from the message
-                        let label = if always {
-                            "🔁 Always approved (session)"
-                        } else if approved {
-                            "✅ Approved"
-                        } else {
-                            "❌ Denied"
-                        };
-                        let _ = sent_msg
-                            .edit(&http, EditMessage::new().content(label).components(vec![]))
-                            .await;
-                        Ok((approved, always))
-                    }
-                    Ok(Err(_)) => Ok((false, false)),
-                    Err(_) => {
-                        tracing::warn!("Discord approval: 5-minute timeout — auto-denying");
-                        let _ = sent_msg
-                            .edit(
-                                &http,
-                                EditMessage::new()
-                                    .content("⏱️ Approval timed out — denied")
-                                    .components(vec![]),
-                            )
-                            .await;
-                        Ok((false, false))
-                    }
-                }
-            })
-        })
     }
 }

@@ -8,11 +8,8 @@ pub(crate) mod handler;
 
 pub use agent::TelegramAgent;
 
-use crate::brain::agent::{ApprovalCallback, ToolApprovalInfo};
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 use teloxide::prelude::Bot;
-use teloxide::types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup};
 use tokio::sync::{Mutex, oneshot};
 use uuid::Uuid;
 
@@ -31,8 +28,6 @@ pub struct TelegramState {
     session_chats: Mutex<HashMap<Uuid, i64>>,
     /// Pending approval channels: approval_id → oneshot sender of (approved, always).
     pending_approvals: Mutex<HashMap<String, oneshot::Sender<(bool, bool)>>>,
-    /// When true, all tool calls are auto-approved for this session (user chose "Always").
-    auto_approve_session: Mutex<bool>,
     /// Allowed user IDs — hot-reloadable at runtime when config changes
     allowed_users: Mutex<HashSet<i64>>,
 }
@@ -51,7 +46,6 @@ impl TelegramState {
             bot_username: Mutex::new(None),
             session_chats: Mutex::new(HashMap::new()),
             pending_approvals: Mutex::new(HashMap::new()),
-            auto_approve_session: Mutex::new(false),
             allowed_users: Mutex::new(HashSet::new()),
         }
     }
@@ -118,16 +112,6 @@ impl TelegramState {
         }
     }
 
-    /// Mark the session as auto-approve (user chose "Always").
-    pub async fn set_auto_approve_session(&self) {
-        *self.auto_approve_session.lock().await = true;
-    }
-
-    /// Whether all tool calls should be auto-approved this session.
-    pub async fn is_auto_approve_session(&self) -> bool {
-        *self.auto_approve_session.lock().await
-    }
-
     /// Replace the allowed users set (called on config reload).
     pub async fn update_allowed_users(&self, users: Vec<i64>) {
         let new_set: HashSet<i64> = users.into_iter().collect();
@@ -151,113 +135,4 @@ impl TelegramState {
     pub async fn allowed_user_count(&self) -> usize {
         self.allowed_users.lock().await.len()
     }
-
-    /// Build an `ApprovalCallback` that sends an inline-keyboard message to Telegram
-    /// and waits (up to 5 min) for the user to tap Yes, Always, or No.
-    pub fn make_approval_callback(state: Arc<TelegramState>) -> ApprovalCallback {
-        Arc::new(move |info: ToolApprovalInfo| {
-            let state = state.clone();
-            Box::pin(async move {
-                // Auto-approve if user already chose "Always" this session
-                if state.is_auto_approve_session().await {
-                    return Ok((true, true));
-                }
-
-                // Find the chat this session is active in
-                let chat_id = match state.session_chat(info.session_id).await {
-                    Some(id) => id,
-                    None => match state.owner_chat_id().await {
-                        Some(id) => id,
-                        None => {
-                            tracing::warn!(
-                                "Telegram approval: no chat_id for session {}",
-                                info.session_id
-                            );
-                            return Ok((false, false));
-                        }
-                    },
-                };
-
-                let bot = match state.bot().await {
-                    Some(b) => b,
-                    None => {
-                        tracing::warn!("Telegram approval: bot not connected");
-                        return Ok((false, false));
-                    }
-                };
-
-                // Build unique approval id
-                let approval_id = Uuid::new_v4().to_string();
-
-                // Build inline keyboard — 3 buttons matching TUI: Yes / Always / No
-                let keyboard = InlineKeyboardMarkup::new(vec![vec![
-                    InlineKeyboardButton::callback("✅ Yes", format!("approve:{}", approval_id)),
-                    InlineKeyboardButton::callback(
-                        "🔁 Always (session)",
-                        format!("always:{}", approval_id),
-                    ),
-                    InlineKeyboardButton::callback("❌ No", format!("deny:{}", approval_id)),
-                ]]);
-
-                // Format message — redact secrets before display, truncate to fit Telegram limit
-                let safe_input = crate::utils::redact_tool_input(&info.tool_input);
-                let mut input_pretty = serde_json::to_string_pretty(&safe_input)
-                    .unwrap_or_else(|_| safe_input.to_string());
-                // Telegram messages are limited to 4096 chars; cap input to leave room for markup
-                if input_pretty.len() > 3500 {
-                    input_pretty.truncate(3500);
-                    input_pretty.push_str("\n... [truncated]");
-                }
-                let text = format!(
-                    "🔐 <b>Tool Approval Required</b>\n\nTool: <code>{}</code>\nInput:\n<pre>{}</pre>",
-                    info.tool_name,
-                    html_escape_pre(&input_pretty),
-                );
-
-                use teloxide::payloads::SendMessageSetters;
-                use teloxide::prelude::Requester;
-                use teloxide::types::ParseMode;
-
-                // Register oneshot channel BEFORE sending the message to prevent
-                // race condition where user clicks before registration completes
-                let (tx, rx) = oneshot::channel();
-                state.register_pending_approval(approval_id, tx).await;
-
-                match bot
-                    .send_message(ChatId(chat_id), &text)
-                    .parse_mode(ParseMode::Html)
-                    .reply_markup(keyboard)
-                    .await
-                {
-                    Ok(_) => {}
-                    Err(e) => {
-                        tracing::error!("Telegram approval: failed to send message: {}", e);
-                        return Ok((false, false));
-                    }
-                }
-
-                // Wait up to 5 minutes
-                match tokio::time::timeout(std::time::Duration::from_secs(300), rx).await {
-                    Ok(Ok((approved, always))) => {
-                        if always {
-                            state.set_auto_approve_session().await;
-                        }
-                        Ok((approved, always))
-                    }
-                    Ok(Err(_)) => Ok((false, false)), // channel closed
-                    Err(_) => {
-                        tracing::warn!("Telegram approval: 5-minute timeout — auto-denying");
-                        Ok((false, false))
-                    }
-                }
-            })
-        })
-    }
-}
-
-/// Escape HTML for use inside <pre> blocks (only & < > needed)
-fn html_escape_pre(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
 }

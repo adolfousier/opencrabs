@@ -42,8 +42,6 @@ pub struct WhatsAppState {
     /// (text or button tap) is interpreted as Yes/Always/No instead of
     /// being routed to the agent.
     pub pending_approvals: Mutex<HashMap<String, tokio::sync::oneshot::Sender<WaApproval>>>,
-    /// When true, all tool calls are auto-approved for this session (user chose "Always").
-    auto_approve_session: Mutex<bool>,
 }
 
 impl Default for WhatsAppState {
@@ -59,7 +57,6 @@ impl WhatsAppState {
             owner_jid: Mutex::new(None),
             allowed_phones: Mutex::new(Vec::new()),
             pending_approvals: Mutex::new(HashMap::new()),
-            auto_approve_session: Mutex::new(false),
         }
     }
 
@@ -101,16 +98,6 @@ impl WhatsAppState {
         } else {
             None
         }
-    }
-
-    /// Mark the session as auto-approve (user chose "Always").
-    pub async fn set_auto_approve_session(&self) {
-        *self.auto_approve_session.lock().await = true;
-    }
-
-    /// Whether all tool calls should be auto-approved this session.
-    pub async fn is_auto_approve_session(&self) -> bool {
-        *self.auto_approve_session.lock().await
     }
 
     /// Store the connected client and owner JID.

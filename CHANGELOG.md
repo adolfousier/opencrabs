@@ -5,6 +5,26 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.47] - 2026-03-03
+
+### Changed
+- **Centralized tool approval into shared `utils::approval` module** — Replaced per-channel `auto_approve_session: Mutex<bool>` fields in Discord, Slack, Telegram, and WhatsApp with a single config-driven source of truth. Two new functions (`check_approval_policy`, `persist_auto_session_policy`) read/write `config.toml` directly, and the core `tool_loop.rs` checks policy first before delegating to any channel callback. Approval callbacks moved from `mod.rs` to `handler.rs` as free functions across all channels
+  - `src/utils/approval.rs` (new), `src/utils/mod.rs`, `src/brain/agent/service/tool_loop.rs`, `src/channels/discord/mod.rs`, `src/channels/discord/handler.rs`, `src/channels/slack/mod.rs`, `src/channels/slack/handler.rs`, `src/channels/telegram/mod.rs`, `src/channels/telegram/handler.rs`, `src/channels/whatsapp/mod.rs`, `src/channels/whatsapp/handler.rs`, `src/channels/trello/handler.rs`
+
+### Fixed
+- **Telegram streaming message stuck at top between tool calls** — Streaming now uses separate `tools` and `response` fields with a `recreate` flag that deletes the old message and creates a fresh one below the approval buttons after each tool completion, so the conversation flows naturally downward instead of getting stuck above approval messages. Thanks @opryshok for reporting #17 and #16 — your bug reports directly drove this fix and the v0.2.46 improvements
+  - `src/channels/telegram/handler.rs`, `src/channels/telegram/agent.rs`
+- **Race condition in approval registration across all channels** — Pending approval is now registered BEFORE sending the approval message (not after), preventing a window where the user could click before the handler was ready
+  - `src/channels/discord/handler.rs`, `src/channels/slack/handler.rs`, `src/channels/telegram/handler.rs`
+- **TUI "Always" approval choice not persisting** — Clicking "AllowAlways" in the TUI now writes `approval_policy = "auto-session"` to `config.toml` so the choice survives restarts and is respected by all channels
+  - `src/tui/app/input.rs`, `src/tui/app/messaging.rs`, `src/tui/app/state.rs`
+
+### Added
+- **Tracing/logging across all channel approval flows** — Every approval request, response, and edge case now logs via `tracing::info!` / `tracing::warn!` for easier debugging
+  - `src/channels/discord/agent.rs`, `src/channels/discord/handler.rs`, `src/channels/slack/handler.rs`, `src/channels/telegram/agent.rs`, `src/channels/telegram/handler.rs`, `src/channels/whatsapp/handler.rs`
+- **Cross-channel approval awareness** — TUI reads approval policy from `config.toml` on session create/load, so a policy set via Telegram or any other channel is picked up everywhere
+  - `src/tui/app/messaging.rs`, `src/tui/app/state.rs`
+
 ## [0.2.46] - 2026-03-03
 
 ### Fixed
@@ -951,6 +971,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.47]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.47
 [0.2.46]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.46
 [0.2.45]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.45
 [0.2.44]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.44

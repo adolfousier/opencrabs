@@ -184,6 +184,7 @@ impl EventHandler for Handler {
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
         if let Some(comp) = interaction.message_component() {
             let custom_id = comp.data.custom_id.as_str();
+            tracing::info!("Discord callback received: custom_id={}", custom_id);
             let (approved, always, approval_id) =
                 if let Some(id) = custom_id.strip_prefix("approve:") {
                     (true, false, id.to_string())
@@ -192,7 +193,7 @@ impl EventHandler for Handler {
                 } else if let Some(id) = custom_id.strip_prefix("deny:") {
                     (false, false, id.to_string())
                 } else {
-                    // Not our button — ack and ignore
+                    tracing::warn!("Discord: unknown interaction custom_id: {}", custom_id);
                     let _ = comp
                         .create_response(
                             &ctx.http,
@@ -202,9 +203,23 @@ impl EventHandler for Handler {
                     return;
                 };
 
-            self.discord_state
+            let resolved = self
+                .discord_state
                 .resolve_pending_approval(&approval_id, approved, always)
                 .await;
+            tracing::info!(
+                "Discord approval resolved: id={}, approved={}, always={}, found_pending={}",
+                approval_id,
+                approved,
+                always,
+                resolved
+            );
+            if !resolved {
+                tracing::warn!(
+                    "Discord: no pending approval for id={} — may have timed out or already resolved",
+                    approval_id
+                );
+            }
 
             // Ack the interaction so Discord doesn't show "interaction failed"
             let _ = comp

@@ -24,10 +24,28 @@ impl Drop for TypingGuard {
 }
 
 /// Per-message streaming state shared between the progress callback and the edit loop.
+/// Tools are rendered at the top, response text streams at the bottom — matching TUI layout.
 struct StreamingState {
     msg_id: Option<MessageId>,
-    text: String,
+    /// Tool execution log (⚙️ started, ✅/❌ completed) — always rendered at top
+    tools: String,
+    /// Response text from streaming chunks — always rendered at bottom
+    response: String,
     dirty: bool,
+    /// When true, the edit loop deletes the old message and creates a fresh one
+    /// at the bottom of the chat (so it appears below approval messages).
+    recreate: bool,
+}
+
+impl StreamingState {
+    /// Render the combined display text: tools at top, response at bottom.
+    fn render(&self) -> String {
+        match (self.tools.is_empty(), self.response.is_empty()) {
+            (true, _) => self.response.clone(),
+            (false, true) => self.tools.clone(),
+            (false, false) => format!("{}\n\n{}", self.tools.trim_end(), self.response),
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -489,8 +507,10 @@ pub(crate) async fn handle_message(
     // ── Streaming setup ───────────────────────────────────────────────────────
     let streaming = Arc::new(Mutex::new(StreamingState {
         msg_id: None,
-        text: String::new(),
+        tools: String::new(),
+        response: String::new(),
         dirty: false,
+        recreate: false,
     }));
 
     let edit_cancel = CancellationToken::new();
@@ -507,14 +527,21 @@ pub(crate) async fn handle_message(
                     _ = cancel.cancelled() => break,
                     _ = tokio::time::sleep(std::time::Duration::from_millis(1500)) => {
                         let mut s = st.lock().await;
-                        if !s.dirty { continue; }
+                        if !s.dirty && !s.recreate { continue; }
+                        // Delete old message and create fresh at bottom when flagged
+                        if s.recreate {
+                            if let Some(old_mid) = s.msg_id.take() {
+                                let _ = bot.delete_message(chat, old_mid).await;
+                            }
+                            s.recreate = false;
+                        }
                         if s.msg_id.is_none()
                             && let Ok(m) = bot.send_message(chat, "\u{258b}").await
                         {
                             s.msg_id = Some(m.id);
                         }
                         if let Some(mid) = s.msg_id {
-                            let html = markdown_to_telegram_html(&s.text);
+                            let html = markdown_to_telegram_html(&s.render());
                             let display = format!("{}\u{258b}", html); // ▋ cursor
                             let _ = bot
                                 .edit_message_text(chat, mid, display)
@@ -535,7 +562,7 @@ pub(crate) async fn handle_message(
             match event {
                 ProgressEvent::StreamingChunk { text } => {
                     if let Ok(mut s) = st.try_lock() {
-                        s.text.push_str(&text);
+                        s.response.push_str(&text);
                         s.dirty = true;
                     }
                 }
@@ -545,8 +572,7 @@ pub(crate) async fn handle_message(
                 } => {
                     if let Ok(mut s) = st.try_lock() {
                         let ctx = tool_context(&tool_name, &tool_input);
-                        // Single newline to avoid huge gaps; bold tool name for visibility
-                        s.text.push_str(&format!("\n⚙️ **{tool_name}**{ctx}"));
+                        s.tools.push_str(&format!("\n⚙️ **{tool_name}**{ctx}"));
                         s.dirty = true;
                     }
                 }
@@ -555,19 +581,18 @@ pub(crate) async fn handle_message(
                 } => {
                     if let Ok(mut s) = st.try_lock() {
                         let icon = if success { "✅" } else { "❌" };
-                        s.text.push_str(&format!("\n{icon} {tool_name}"));
+                        s.tools.push_str(&format!("\n{icon} {tool_name}"));
                         s.dirty = true;
+                        // Recreate message at bottom so it appears below approval messages
+                        s.recreate = true;
                     }
                 }
                 ProgressEvent::IntermediateText { text, .. } => {
-                    // Text produced between tool-call batches — show it while waiting
-                    if let Ok(mut s) = st.try_lock() {
-                        // Only append if this text isn't already in the buffer
-                        // (avoids duplication when StreamingChunks already accumulated it)
-                        if !s.text.contains(&text) {
-                            s.text.push_str(&text);
-                            s.dirty = true;
-                        }
+                    if let Ok(mut s) = st.try_lock()
+                        && !s.response.contains(&text)
+                    {
+                        s.response.push_str(&text);
+                        s.dirty = true;
                     }
                 }
                 _ => {}
@@ -576,7 +601,7 @@ pub(crate) async fn handle_message(
     };
 
     // Build Telegram-native approval callback for this session
-    let approval_cb = TelegramState::make_approval_callback(telegram_state.clone());
+    let approval_cb = make_approval_callback(telegram_state.clone());
 
     // ── Agent call ────────────────────────────────────────────────────────────
     let result = agent
@@ -608,8 +633,7 @@ pub(crate) async fn handle_message(
                     telegram_state
                         .register_session_chat(new_id, msg.chat.id.0)
                         .await;
-                    let approval_cb2 =
-                        TelegramState::make_approval_callback(telegram_state.clone());
+                    let approval_cb2 = make_approval_callback(telegram_state.clone());
                     agent
                         .send_message_with_tools_and_callback(
                             new_id,
@@ -660,7 +684,14 @@ pub(crate) async fn handle_message(
                 }
             }
 
-            let html = markdown_to_telegram_html(&text_only);
+            // Combine tools log (top) + response (bottom) for final message
+            let tools_log = streaming.lock().await.tools.clone();
+            let final_text = if tools_log.is_empty() {
+                text_only
+            } else {
+                format!("{}\n\n{}", tools_log.trim(), text_only.trim())
+            };
+            let html = markdown_to_telegram_html(&final_text);
             if let Some(mid) = streaming_msg_id {
                 if html.is_empty() {
                     // Images only — delete the streaming placeholder
@@ -980,6 +1011,139 @@ pub(crate) fn split_message(text: &str, max_len: usize) -> Vec<&str> {
         start = break_at;
     }
     chunks
+}
+
+/// Build an `ApprovalCallback` that sends an inline-keyboard message to Telegram
+/// and waits (up to 5 min) for the user to tap Yes, Always, or No.
+pub(crate) fn make_approval_callback(
+    state: Arc<super::TelegramState>,
+) -> crate::brain::agent::ApprovalCallback {
+    use crate::brain::agent::ToolApprovalInfo;
+    use crate::utils::{check_approval_policy, persist_auto_session_policy};
+    use teloxide::payloads::SendMessageSetters;
+    use teloxide::prelude::Requester;
+    use teloxide::types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode};
+    use tokio::sync::oneshot;
+
+    Arc::new(move |info: ToolApprovalInfo| {
+        let state = state.clone();
+        Box::pin(async move {
+            // Respect config-level approval policy (single source of truth)
+            if let Some(result) = check_approval_policy() {
+                return Ok(result);
+            }
+
+            // Find the chat this session is active in
+            let chat_id = match state.session_chat(info.session_id).await {
+                Some(id) => id,
+                None => match state.owner_chat_id().await {
+                    Some(id) => id,
+                    None => {
+                        tracing::warn!(
+                            "Telegram approval: no chat_id for session {}",
+                            info.session_id
+                        );
+                        return Ok((false, false));
+                    }
+                },
+            };
+
+            let bot = match state.bot().await {
+                Some(b) => b,
+                None => {
+                    tracing::warn!("Telegram approval: bot not connected");
+                    return Ok((false, false));
+                }
+            };
+
+            // Build unique approval id
+            let approval_id = uuid::Uuid::new_v4().to_string();
+
+            // Build inline keyboard — 3 buttons matching TUI: Yes / Always / No
+            let keyboard = InlineKeyboardMarkup::new(vec![vec![
+                InlineKeyboardButton::callback("✅ Yes", format!("approve:{}", approval_id)),
+                InlineKeyboardButton::callback(
+                    "🔁 Always (session)",
+                    format!("always:{}", approval_id),
+                ),
+                InlineKeyboardButton::callback("❌ No", format!("deny:{}", approval_id)),
+            ]]);
+
+            // Format message — redact secrets before display, truncate to fit Telegram limit
+            let safe_input = crate::utils::redact_tool_input(&info.tool_input);
+            let mut input_pretty = serde_json::to_string_pretty(&safe_input)
+                .unwrap_or_else(|_| safe_input.to_string());
+            if input_pretty.len() > 3500 {
+                input_pretty.truncate(3500);
+                input_pretty.push_str("\n... [truncated]");
+            }
+            let text = format!(
+                "🔐 <b>Tool Approval Required</b>\n\nTool: <code>{}</code>\nInput:\n<pre>{}</pre>",
+                info.tool_name,
+                escape_html(&input_pretty),
+            );
+
+            // Register oneshot channel BEFORE sending the message to prevent
+            // race condition where user clicks before registration completes
+            let (tx, rx) = oneshot::channel();
+            state
+                .register_pending_approval(approval_id.clone(), tx)
+                .await;
+            tracing::info!(
+                "Telegram approval: registered pending id={}, sending to chat={}",
+                approval_id,
+                chat_id
+            );
+
+            match bot
+                .send_message(ChatId(chat_id), &text)
+                .parse_mode(ParseMode::Html)
+                .reply_markup(keyboard)
+                .await
+            {
+                Ok(_) => {
+                    tracing::info!(
+                        "Telegram approval: message sent, waiting for response (id={})",
+                        approval_id
+                    );
+                }
+                Err(e) => {
+                    tracing::error!("Telegram approval: failed to send message: {}", e);
+                    return Ok((false, false));
+                }
+            }
+
+            // Wait up to 5 minutes
+            match tokio::time::timeout(std::time::Duration::from_secs(300), rx).await {
+                Ok(Ok((approved, always))) => {
+                    tracing::info!(
+                        "Telegram approval: user responded id={}, approved={}, always={}",
+                        approval_id,
+                        approved,
+                        always
+                    );
+                    if always {
+                        persist_auto_session_policy();
+                    }
+                    Ok((approved, always))
+                }
+                Ok(Err(_)) => {
+                    tracing::warn!(
+                        "Telegram approval: oneshot channel closed (id={})",
+                        approval_id
+                    );
+                    Ok((false, false))
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        "Telegram approval: 5-minute timeout — auto-denying (id={})",
+                        approval_id
+                    );
+                    Ok((false, false))
+                }
+            }
+        })
+    })
 }
 
 #[cfg(test)]

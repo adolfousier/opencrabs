@@ -163,23 +163,29 @@ impl TelegramAgent {
                     let respond_to = respond_to.clone();
                     let allowed_channels = allowed_channels.clone();
                     async move {
-                        handle_message(
-                            bot,
-                            msg,
-                            agent,
-                            session_svc,
-                            allowed,
-                            extra_sessions,
-                            voice_config,
-                            openai_key,
-                            bot_token,
-                            shared_session,
-                            telegram_state,
-                            &respond_to,
-                            &allowed_channels,
-                            idle_timeout_hours,
-                        )
-                        .await
+                        // Spawn in background so the dispatcher is free to
+                        // process callback queries (approval button clicks)
+                        // while the agent is running.
+                        tokio::spawn(async move {
+                            let _ = handle_message(
+                                bot,
+                                msg,
+                                agent,
+                                session_svc,
+                                allowed,
+                                extra_sessions,
+                                voice_config,
+                                openai_key,
+                                bot_token,
+                                shared_session,
+                                telegram_state,
+                                &respond_to,
+                                &allowed_channels,
+                                idle_timeout_hours,
+                            )
+                            .await;
+                        });
+                        ResponseResult::Ok(())
                     }
                 }
             });
@@ -191,6 +197,7 @@ impl TelegramAgent {
                     let state = telegram_state.clone();
                     async move {
                         if let Some(data) = query.data.as_deref() {
+                            tracing::info!("Telegram callback query received: data={}", data);
                             let (approved, always, id) =
                                 if let Some(id) = data.strip_prefix("approve:") {
                                     (true, false, id.to_string())
@@ -199,26 +206,54 @@ impl TelegramAgent {
                                 } else if let Some(id) = data.strip_prefix("deny:") {
                                     (false, false, id.to_string())
                                 } else {
-                                    // Unknown callback — ack and ignore
+                                    tracing::warn!("Telegram: unknown callback data: {}", data);
                                     let _ = bot.answer_callback_query(&query.id).await;
                                     return ResponseResult::Ok(());
                                 };
 
-                            state.resolve_pending_approval(&id, approved, always).await;
+                            let resolved = state.resolve_pending_approval(&id, approved, always).await;
+                            tracing::info!(
+                                "Telegram approval resolved: id={}, approved={}, always={}, found_pending={}",
+                                id, approved, always, resolved
+                            );
+                            if !resolved {
+                                tracing::warn!(
+                                    "Telegram: no pending approval found for id={} — may have timed out or already resolved",
+                                    id
+                                );
+                            }
                             let _ = bot.answer_callback_query(&query.id).await;
 
-                            // Edit the approval message to show the outcome
+                            // Edit the approval message: keep original context, append outcome, remove buttons
                             if let Some(msg) = &query.message {
                                 let label = if always {
-                                    "🔁 Always approved (session)"
+                                    "\n\n🔁 Always approved (session)"
                                 } else if approved {
-                                    "✅ Approved"
+                                    "\n\n✅ Approved"
                                 } else {
-                                    "❌ Denied"
+                                    "\n\n❌ Denied"
                                 };
-                                let _ = bot.edit_message_text(msg.chat().id, msg.id(), label).await;
+                                let original_text = match msg {
+                                    teloxide::types::MaybeInaccessibleMessage::Regular(m) => {
+                                        m.text().unwrap_or("").to_string()
+                                    }
+                                    _ => String::new(),
+                                };
+                                let updated = format!("{}{}", original_text, label);
+                                use teloxide::payloads::EditMessageTextSetters;
+                                use teloxide::prelude::Requester;
+                                if let Err(e) = bot
+                                    .edit_message_text(msg.chat().id, msg.id(), &updated)
+                                    .reply_markup(teloxide::types::InlineKeyboardMarkup::default())
+                                    .await
+                                {
+                                    tracing::error!("Telegram: failed to edit approval message: {}", e);
+                                }
+                            } else {
+                                tracing::warn!("Telegram: callback query has no message — cannot edit");
                             }
                         } else {
+                            tracing::warn!("Telegram: callback query with no data");
                             let _ = bot.answer_callback_query(&query.id).await;
                         }
                         ResponseResult::Ok(())

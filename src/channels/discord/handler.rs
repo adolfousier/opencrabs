@@ -285,7 +285,7 @@ pub(crate) async fn handle_message(
     discord_state
         .register_session_channel(session_id, msg.channel_id.get())
         .await;
-    let approval_cb = DiscordState::make_approval_callback(discord_state.clone());
+    let approval_cb = make_approval_callback(discord_state.clone());
 
     match agent
         .send_message_with_tools_and_callback(
@@ -364,6 +364,149 @@ pub(crate) async fn handle_message(
             let _ = msg.channel_id.say(&ctx.http, error_msg).await;
         }
     }
+}
+
+/// Build an `ApprovalCallback` that sends a Discord message with 3 buttons
+/// (Yes / Always / No) and waits up to 5 min for a click.
+pub(crate) fn make_approval_callback(
+    state: Arc<super::DiscordState>,
+) -> crate::brain::agent::ApprovalCallback {
+    use crate::brain::agent::ToolApprovalInfo;
+    use crate::utils::{check_approval_policy, persist_auto_session_policy};
+    use serenity::builder::{CreateActionRow, CreateButton, CreateMessage, EditMessage};
+    use serenity::model::application::ButtonStyle;
+    use serenity::model::id::ChannelId;
+    use tokio::sync::oneshot;
+
+    Arc::new(move |info: ToolApprovalInfo| {
+        let state = state.clone();
+        Box::pin(async move {
+            if let Some(result) = check_approval_policy() {
+                return Ok(result);
+            }
+
+            let http = match state.http().await {
+                Some(h) => h,
+                None => {
+                    tracing::warn!("Discord approval: bot not connected");
+                    return Ok((false, false));
+                }
+            };
+
+            let channel_id = match state.session_channel(info.session_id).await {
+                Some(id) => id,
+                None => match state.owner_channel_id().await {
+                    Some(id) => id,
+                    None => {
+                        tracing::warn!(
+                            "Discord approval: no channel_id for session {}",
+                            info.session_id
+                        );
+                        return Ok((false, false));
+                    }
+                },
+            };
+
+            let approval_id = uuid::Uuid::new_v4().to_string();
+            let safe_input = crate::utils::redact_tool_input(&info.tool_input);
+            let input_pretty = serde_json::to_string_pretty(&safe_input)
+                .unwrap_or_else(|_| safe_input.to_string());
+            let text = format!(
+                "🔐 **Tool Approval Required**\n\nTool: `{}`\nInput:\n```json\n{}\n```",
+                info.tool_name,
+                &input_pretty[..input_pretty.len().min(1800)],
+            );
+
+            let row = CreateActionRow::Buttons(vec![
+                CreateButton::new(format!("approve:{}", approval_id))
+                    .label("✅ Yes")
+                    .style(ButtonStyle::Success),
+                CreateButton::new(format!("always:{}", approval_id))
+                    .label("🔁 Always (session)")
+                    .style(ButtonStyle::Primary),
+                CreateButton::new(format!("deny:{}", approval_id))
+                    .label("❌ No")
+                    .style(ButtonStyle::Danger),
+            ]);
+
+            // Register BEFORE sending to prevent race condition
+            let (tx, rx) = oneshot::channel();
+            state
+                .register_pending_approval(approval_id.clone(), tx)
+                .await;
+            tracing::info!(
+                "Discord approval: registered pending id={}, sending to channel={}",
+                approval_id,
+                channel_id
+            );
+
+            let mut sent_msg = match ChannelId::new(channel_id)
+                .send_message(
+                    &http,
+                    CreateMessage::new().content(&text).components(vec![row]),
+                )
+                .await
+            {
+                Ok(m) => m,
+                Err(e) => {
+                    tracing::error!("Discord approval: failed to send message: {}", e);
+                    return Ok((false, false));
+                }
+            };
+
+            tracing::info!(
+                "Discord approval: message sent, waiting for response (id={})",
+                approval_id
+            );
+
+            match tokio::time::timeout(std::time::Duration::from_secs(300), rx).await {
+                Ok(Ok((approved, always))) => {
+                    tracing::info!(
+                        "Discord approval: user responded id={}, approved={}, always={}",
+                        approval_id,
+                        approved,
+                        always
+                    );
+                    if always {
+                        persist_auto_session_policy();
+                    }
+                    let label = if always {
+                        "🔁 Always approved (session)"
+                    } else if approved {
+                        "✅ Approved"
+                    } else {
+                        "❌ Denied"
+                    };
+                    let _ = sent_msg
+                        .edit(&http, EditMessage::new().content(label).components(vec![]))
+                        .await;
+                    Ok((approved, always))
+                }
+                Ok(Err(_)) => {
+                    tracing::warn!(
+                        "Discord approval: oneshot channel closed (id={})",
+                        approval_id
+                    );
+                    Ok((false, false))
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        "Discord approval: 5-minute timeout — auto-denying (id={})",
+                        approval_id
+                    );
+                    let _ = sent_msg
+                        .edit(
+                            &http,
+                            EditMessage::new()
+                                .content("⏱️ Approval timed out — denied")
+                                .components(vec![]),
+                        )
+                        .await;
+                    Ok((false, false))
+                }
+            }
+        })
+    })
 }
 
 #[cfg(test)]

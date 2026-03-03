@@ -425,14 +425,8 @@ impl App {
         let user_commands = command_loader.load();
 
         // Load persisted approval policy from config.toml
-        let (approval_auto_session, approval_auto_always) = match crate::config::Config::load() {
-            Ok(cfg) => match cfg.agent.approval_policy.as_str() {
-                "auto-session" => (true, false),
-                "auto-always" => (false, true),
-                _ => (false, false),
-            },
-            Err(_) => (false, false),
-        };
+        let (approval_auto_session, approval_auto_always) =
+            Self::read_approval_policy_from_config();
 
         Self {
             current_session: None,
@@ -1259,14 +1253,8 @@ impl App {
                 // Refresh commands autocomplete
                 self.reload_user_commands();
                 // Refresh approval policy
-                if let Ok(cfg) = crate::config::Config::load() {
-                    (self.approval_auto_session, self.approval_auto_always) =
-                        match cfg.agent.approval_policy.as_str() {
-                            "auto-session" => (true, false),
-                            "auto-always" => (false, true),
-                            _ => (false, false),
-                        };
-                }
+                (self.approval_auto_session, self.approval_auto_always) =
+                    Self::read_approval_policy_from_config();
                 tracing::info!("Config reloaded — refreshed commands, approval policy");
             }
             TuiEvent::TokenCountUpdated { session_id, count }

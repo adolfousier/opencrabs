@@ -11,6 +11,19 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 impl App {
+    /// Read the persisted approval policy from config.toml.
+    /// Returns `(auto_session, auto_always)` flags.
+    pub(crate) fn read_approval_policy_from_config() -> (bool, bool) {
+        match crate::config::Config::load() {
+            Ok(cfg) => match cfg.agent.approval_policy.as_str() {
+                "auto-session" => (true, false),
+                "auto-always" => (false, true),
+                _ => (false, false),
+            },
+            Err(_) => (false, false),
+        }
+    }
+
     /// Create a new session
     pub(crate) async fn create_new_session(&mut self) -> Result<()> {
         // Inherit provider and model from the current agent service
@@ -28,8 +41,9 @@ impl App {
         self.auto_scroll = true;
         self.scroll_offset = 0;
         self.mode = AppMode::Chat;
-        self.approval_auto_session = false;
-        self.approval_auto_always = false;
+        // Re-read approval policy from config (persisted by /approve)
+        (self.approval_auto_session, self.approval_auto_always) =
+            Self::read_approval_policy_from_config();
         // Show the system prompt + tools baseline immediately — new sessions are never 0
         self.last_input_tokens = Some(self.agent_service.base_context_tokens());
 
@@ -74,8 +88,9 @@ impl App {
         self.messages = expanded;
         self.auto_scroll = true;
         self.scroll_offset = 0;
-        self.approval_auto_session = false;
-        self.approval_auto_always = false;
+        // Re-read approval policy from config (persisted by /approve)
+        (self.approval_auto_session, self.approval_auto_always) =
+            Self::read_approval_policy_from_config();
 
         // Sync shared session ID for channels (Telegram, WhatsApp)
         *self.shared_session_id.lock().await = Some(session.id);

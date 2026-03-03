@@ -281,6 +281,7 @@ impl App {
                         };
                         if matches!(option, ApprovalOption::AllowAlways) {
                             self.approval_auto_session = true;
+                            crate::utils::persist_auto_session_policy();
                             self.push_system_message(
                                 "Auto-approve enabled for this session. Use /approve to reset."
                                     .to_string(),

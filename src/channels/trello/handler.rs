@@ -181,8 +181,19 @@ pub async fn process_comment(
         session_id
     );
 
+    // Trello is poll-based with no interactive approval UI — auto-approve all tools.
+    let approval_cb: crate::brain::agent::ApprovalCallback =
+        Arc::new(|_info| Box::pin(async { Ok((true, false)) }));
+
     let response = match agent
-        .send_message_with_tools(session_id, message, None)
+        .send_message_with_tools_and_callback(
+            session_id,
+            message,
+            None,
+            None,
+            Some(approval_cb),
+            None,
+        )
         .await
     {
         Ok(r) => r,

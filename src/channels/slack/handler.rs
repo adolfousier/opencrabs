@@ -25,12 +25,16 @@ pub async fn on_interaction(
     if let SlackInteractionEvent::BlockActions(block_actions) = event {
         let state = match HANDLER_STATE.get() {
             Some(s) => s.clone(),
-            None => return Ok(()),
+            None => {
+                tracing::warn!("Slack: interaction received but HANDLER_STATE not initialized");
+                return Ok(());
+            }
         };
 
         if let Some(actions) = block_actions.actions {
             for action in actions {
                 let action_id = action.action_id.0.as_str();
+                tracing::info!("Slack callback received: action_id={}", action_id);
                 let (approved, always, id) = if let Some(id) = action_id.strip_prefix("approve:") {
                     (true, false, id.to_string())
                 } else if let Some(id) = action_id.strip_prefix("always:") {
@@ -38,12 +42,26 @@ pub async fn on_interaction(
                 } else if let Some(id) = action_id.strip_prefix("deny:") {
                     (false, false, id.to_string())
                 } else {
+                    tracing::warn!("Slack: unknown action_id: {}", action_id);
                     continue;
                 };
-                state
+                let resolved = state
                     .slack_state
                     .resolve_pending_approval(&id, approved, always)
                     .await;
+                tracing::info!(
+                    "Slack approval resolved: id={}, approved={}, always={}, found_pending={}",
+                    id,
+                    approved,
+                    always,
+                    resolved
+                );
+                if !resolved {
+                    tracing::warn!(
+                        "Slack: no pending approval for id={} — may have timed out or already resolved",
+                        id
+                    );
+                }
             }
         }
     }
@@ -433,7 +451,7 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         .slack_state
         .register_session_channel(session_id, channel_id.clone())
         .await;
-    let approval_cb = SlackState::make_approval_callback(state.slack_state.clone());
+    let approval_cb = make_approval_callback(state.slack_state.clone());
 
     match state
         .agent
@@ -510,6 +528,174 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
             let _ = session.chat_post_message(&request).await;
         }
     }
+}
+
+/// Build an `ApprovalCallback` that sends a Slack Block Kit message with 3 buttons
+/// (Yes / Always / No) and waits up to 5 min for a click.
+pub(crate) fn make_approval_callback(
+    state: Arc<super::SlackState>,
+) -> crate::brain::agent::ApprovalCallback {
+    use crate::brain::agent::ToolApprovalInfo;
+    use crate::utils::{check_approval_policy, persist_auto_session_policy};
+    use tokio::sync::oneshot;
+
+    Arc::new(move |info: ToolApprovalInfo| {
+        let state = state.clone();
+        Box::pin(async move {
+            if let Some(result) = check_approval_policy() {
+                return Ok(result);
+            }
+
+            let client = match state.client().await {
+                Some(c) => c,
+                None => {
+                    tracing::warn!("Slack approval: bot not connected");
+                    return Ok((false, false));
+                }
+            };
+
+            let bot_token = match state.bot_token().await {
+                Some(t) => t,
+                None => {
+                    tracing::warn!("Slack approval: no bot token");
+                    return Ok((false, false));
+                }
+            };
+
+            let channel_id = match state.session_channel(info.session_id).await {
+                Some(id) => id,
+                None => match state.owner_channel_id().await {
+                    Some(id) => id,
+                    None => {
+                        tracing::warn!(
+                            "Slack approval: no channel_id for session {}",
+                            info.session_id
+                        );
+                        return Ok((false, false));
+                    }
+                },
+            };
+
+            let approval_id = uuid::Uuid::new_v4().to_string();
+            let safe_input = crate::utils::redact_tool_input(&info.tool_input);
+            let input_pretty = serde_json::to_string_pretty(&safe_input)
+                .unwrap_or_else(|_| safe_input.to_string());
+            let text = format!(
+                "🔐 *Tool Approval Required*\n\nTool: `{}`\nInput:\n```\n{}\n```",
+                info.tool_name,
+                &input_pretty[..input_pretty.len().min(1800)],
+            );
+
+            let section = SlackBlock::Section(SlackSectionBlock::new().with_text(
+                SlackBlockText::MarkDown(SlackBlockMarkDownText::new(text.clone())),
+            ));
+            let approve_btn = SlackBlockButtonElement::new(
+                SlackActionId::new(format!("approve:{}", approval_id)),
+                SlackBlockPlainTextOnly::from(SlackBlockPlainText::new("✅ Yes".to_string())),
+            )
+            .with_style("primary".to_string());
+            let always_btn = SlackBlockButtonElement::new(
+                SlackActionId::new(format!("always:{}", approval_id)),
+                SlackBlockPlainTextOnly::from(SlackBlockPlainText::new(
+                    "🔁 Always (session)".to_string(),
+                )),
+            );
+            let deny_btn = SlackBlockButtonElement::new(
+                SlackActionId::new(format!("deny:{}", approval_id)),
+                SlackBlockPlainTextOnly::from(SlackBlockPlainText::new("❌ No".to_string())),
+            )
+            .with_style("danger".to_string());
+            let actions = SlackBlock::Actions(SlackActionsBlock::new(vec![
+                SlackActionBlockElement::Button(approve_btn),
+                SlackActionBlockElement::Button(always_btn),
+                SlackActionBlockElement::Button(deny_btn),
+            ]));
+
+            let content = SlackMessageContent::new()
+                .with_text(text)
+                .with_blocks(vec![section, actions]);
+            let request = SlackApiChatPostMessageRequest::new(
+                SlackChannelId::new(channel_id.clone()),
+                content,
+            );
+            let token = SlackApiToken::new(SlackApiTokenValue::from(bot_token.clone()));
+            let session = client.open_session(&token);
+
+            // Register BEFORE sending to prevent race condition
+            let (tx, rx) = oneshot::channel();
+            state
+                .register_pending_approval(approval_id.clone(), tx)
+                .await;
+            tracing::info!(
+                "Slack approval: registered pending id={}, sending to channel={}",
+                approval_id,
+                channel_id
+            );
+
+            let sent = match session.chat_post_message(&request).await {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::error!("Slack approval: failed to send message: {}", e);
+                    return Ok((false, false));
+                }
+            };
+
+            let msg_ts = sent.ts.clone();
+            tracing::info!(
+                "Slack approval: message sent, waiting for response (id={})",
+                approval_id
+            );
+
+            match tokio::time::timeout(std::time::Duration::from_secs(300), rx).await {
+                Ok(Ok((approved, always))) => {
+                    tracing::info!(
+                        "Slack approval: user responded id={}, approved={}, always={}",
+                        approval_id,
+                        approved,
+                        always
+                    );
+                    if always {
+                        persist_auto_session_policy();
+                    }
+                    let label = if always {
+                        "🔁 Always approved (session)"
+                    } else if approved {
+                        "✅ Approved"
+                    } else {
+                        "❌ Denied"
+                    };
+                    let update = SlackApiChatUpdateRequest::new(
+                        SlackChannelId::new(channel_id),
+                        SlackMessageContent::new().with_text(label.to_string()),
+                        msg_ts,
+                    );
+                    let _ = session.chat_update(&update).await;
+                    Ok((approved, always))
+                }
+                Ok(Err(_)) => {
+                    tracing::warn!(
+                        "Slack approval: oneshot channel closed (id={})",
+                        approval_id
+                    );
+                    Ok((false, false))
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        "Slack approval: 5-minute timeout — auto-denying (id={})",
+                        approval_id
+                    );
+                    let update = SlackApiChatUpdateRequest::new(
+                        SlackChannelId::new(channel_id),
+                        SlackMessageContent::new()
+                            .with_text("⏱️ Approval timed out — denied".to_string()),
+                        msg_ts,
+                    );
+                    let _ = session.chat_update(&update).await;
+                    Ok((false, false))
+                }
+            }
+        })
+    })
 }
 
 #[cfg(test)]
