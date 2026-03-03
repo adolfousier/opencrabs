@@ -3,6 +3,8 @@ name: CI
 on:
   push:
     branches: [ main ]
+    tags-ignore:
+      - 'v*'
   pull_request:
     branches: [ main ]
 
@@ -85,39 +87,6 @@ jobs:
 
       - name: Check formatting
         run: cargo fmt --all -- --check
-
-  build:
-    name: Build
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust (from rust-toolchain.toml)
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly
-
-      - name: Install CMake (Windows)
-        if: runner.os == 'Windows'
-        run: choco install cmake -y
-
-      - name: Build (Windows)
-        if: matrix.os == 'windows-latest'
-        run: cargo build --release --features telegram,discord,slack
-
-      - name: Build (Unix)
-        if: matrix.os != 'windows-latest'
-        run: cargo build --release --all-features
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: opencrabs-${{ matrix.os }}
-          path: |
-            target/release/opencrabs${{ matrix.os == 'windows-latest' && '.exe' || '' }}
 
   coverage:
     name: Code Coverage

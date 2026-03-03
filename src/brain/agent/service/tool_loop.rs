@@ -651,12 +651,10 @@ impl AgentService {
                 }
 
                 // Check if approval is needed.
-                // Config-level approval policy is the single source of truth —
-                // checked here so ALL callers (TUI, Telegram, Trello, etc.) respect it.
-                let config_auto_approve = crate::utils::check_approval_policy().is_some();
-                let needs_approval = if config_auto_approve {
-                    false
-                } else if let Some(tool) = self.tool_registry.get(&tool_name) {
+                // Each channel's make_approval_callback() already checks
+                // check_approval_policy() from config — the tool loop only
+                // respects the auto_approve_tools flag and tool-level policy.
+                let needs_approval = if let Some(tool) = self.tool_registry.get(&tool_name) {
                     tool.requires_approval_for_input(&tool_input)
                         && (!self.auto_approve_tools || has_override_approval)
                         && !tool_context.auto_approve
