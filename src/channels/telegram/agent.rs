@@ -92,6 +92,11 @@ impl TelegramAgent {
                 return;
             }
 
+            // Seed the allowlist into shared state so it can be hot-reloaded later
+            self.telegram_state
+                .update_allowed_users(self.allowed_users.iter().copied().collect())
+                .await;
+
             tracing::info!(
                 "Starting Telegram bot with {} allowed user(s), STT={}, TTS={}",
                 self.allowed_users.len(),
