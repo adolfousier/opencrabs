@@ -555,10 +555,7 @@ pub(crate) async fn handle_message(
                                 ..Default::default()
                             };
                             if let Err(e) = client.send_message(jid.clone(), msg).await {
-                                tracing::error!(
-                                    "WhatsApp: intermediate text send failed: {}",
-                                    e
-                                );
+                                tracing::error!("WhatsApp: intermediate text send failed: {}", e);
                             }
                         }
                     });
@@ -712,8 +709,7 @@ pub(crate) async fn handle_message(
             // Send text response (markers stripped).
             // Skip if already delivered progressively via the intermediate-text callback
             // (happens when the agent used tool calls — text was sent between iterations).
-            if !text_content.is_empty()
-                && !was_streamed.load(std::sync::atomic::Ordering::Relaxed)
+            if !text_content.is_empty() && !was_streamed.load(std::sync::atomic::Ordering::Relaxed)
             {
                 let tagged = format!("{}\n\n{}", MSG_HEADER, text_content);
                 for chunk in split_message(&tagged, 4000) {

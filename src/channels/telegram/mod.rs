@@ -135,7 +135,8 @@ impl TelegramState {
         if *allowed != new_set {
             tracing::info!(
                 "Telegram: allowed users updated: {:?} -> {:?}",
-                *allowed, new_set
+                *allowed,
+                new_set
             );
             *allowed = new_set;
         }
