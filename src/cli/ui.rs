@@ -7,10 +7,23 @@ use crate::brain::prompt_builder::RuntimeInfo;
 use crate::brain::{BrainLoader, CommandLoader};
 
 /// Start interactive chat session
+pub(crate) async fn cmd_daemon(config: &crate::config::Config) -> Result<()> {
+    cmd_chat_inner(config, None, false, true).await
+}
+
 pub(crate) async fn cmd_chat(
     config: &crate::config::Config,
     session_id: Option<String>,
     force_onboard: bool,
+) -> Result<()> {
+    cmd_chat_inner(config, session_id, force_onboard, false).await
+}
+
+async fn cmd_chat_inner(
+    config: &crate::config::Config,
+    session_id: Option<String>,
+    force_onboard: bool,
+    headless: bool,
 ) -> Result<()> {
     use crate::{
         brain::{
@@ -882,7 +895,16 @@ pub(crate) async fn cmd_chat(
         }
     };
 
-    // Run TUI
+    // Run TUI or block in headless daemon mode
+    if headless {
+        tracing::info!("OpenCrabs daemon started — press Ctrl+C to stop");
+        println!("🦀 OpenCrabs daemon running. Press Ctrl+C to stop.");
+        tokio::signal::ctrl_c()
+            .await
+            .context("Failed to listen for ctrl_c")?;
+        tracing::info!("OpenCrabs daemon shutting down");
+        return Ok(());
+    }
     tracing::debug!("Launching TUI");
     tui::run(app).await.context("TUI error")?;
 

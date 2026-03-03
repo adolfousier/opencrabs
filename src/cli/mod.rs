@@ -81,6 +81,10 @@ pub enum Commands {
         #[command(subcommand)]
         operation: LogCommands,
     },
+
+    /// Run in headless daemon mode — no TUI, channel bots only (Telegram, Discord, Slack, WhatsApp)
+    /// Used by the systemd/LaunchAgent service installed during onboarding
+    Daemon,
 }
 
 #[derive(Subcommand, Debug)]
@@ -177,6 +181,7 @@ pub async fn run() -> Result<()> {
             auto_approve,
             format,
         }) => commands::cmd_run(&config, prompt, auto_approve, format).await,
+        Some(Commands::Daemon) => ui::cmd_daemon(&config).await,
     }
 }
 
