@@ -42,6 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `src/channels/trello/handler.rs`
 - **Channel tool approval + TUI real-time updates follow-up** (`248b719`) — Follow-up fixes to tool approval flows and TUI live-update reliability across all remote channels after the v0.2.43 multi-channel expansion
   - `src/channels/*/mod.rs`, `src/brain/agent/service/tool_loop.rs`, `src/tui/app/state.rs`
+- **Clippy: collapse nested if blocks** (`2595550`) — Fixed two `collapsible_if` lint errors in `messaging.rs` (TUI text file detection) and `whatsapp/handler.rs` (document attachment handling)
+  - `src/tui/app/messaging.rs`, `src/channels/whatsapp/handler.rs`
 - **TUI silent message queue after errors** (`dc815ce`) — After any agent error, `processing_sessions` was never cleared for the current session, causing all subsequent `send_message` calls to be silently queued with no agent running. Fixed by unconditionally removing the session from `processing_sessions` and `session_cancel_tokens` in the `TuiEvent::Error` handler before branching on current vs background session
   - `src/tui/app/state.rs`
 - **TUI real-time updates during channel tool loops** (`b44f1ff`) — Remote channel tool loops (Telegram, WhatsApp, etc.) were not firing `session_updated_tx` on each chunk, causing the TUI to only refresh at the end of a long tool sequence. Now fires after every tool call completion

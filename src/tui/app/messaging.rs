@@ -1033,21 +1033,21 @@ impl App {
             let is_text = TEXT_EXTENSIONS.iter().any(|ext| word_lower.ends_with(ext));
             if is_text {
                 let path = std::path::Path::new(word);
-                if path.exists() {
-                    if let Ok(content) = std::fs::read_to_string(path) {
-                        let name = path
-                            .file_name()
-                            .map(|n| n.to_string_lossy().to_string())
-                            .unwrap_or_else(|| word.to_string());
-                        const LIMIT: usize = 8_000;
-                        let truncated = if content.len() > LIMIT {
-                            format!("{}…[truncated]", &content[..LIMIT])
-                        } else {
-                            content
-                        };
-                        inlined_files.push(format!("[File: {}]\n```\n{}\n```", name, truncated));
-                        continue;
-                    }
+                if path.exists()
+                    && let Ok(content) = std::fs::read_to_string(path)
+                {
+                    let name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| word.to_string());
+                    const LIMIT: usize = 8_000;
+                    let truncated = if content.len() > LIMIT {
+                        format!("{}…[truncated]", &content[..LIMIT])
+                    } else {
+                        content
+                    };
+                    inlined_files.push(format!("[File: {}]\n```\n{}\n```", name, truncated));
+                    continue;
                 }
             }
 

@@ -35,7 +35,9 @@ fn test_advanced_mode_all_steps() {
     assert_eq!(wizard.step, OnboardingStep::Gateway);
     wizard.next_step(); // Gateway -> VoiceSetup (Advanced)
     assert_eq!(wizard.step, OnboardingStep::VoiceSetup);
-    wizard.next_step(); // VoiceSetup -> Daemon
+    wizard.next_step(); // VoiceSetup -> ImageSetup (Advanced)
+    assert_eq!(wizard.step, OnboardingStep::ImageSetup);
+    wizard.next_step(); // ImageSetup -> Daemon
     assert_eq!(wizard.step, OnboardingStep::Daemon);
     wizard.next_step(); // Daemon -> HealthCheck
     assert_eq!(wizard.step, OnboardingStep::HealthCheck);
@@ -142,9 +144,10 @@ fn test_step_numbers() {
     assert_eq!(OnboardingStep::TelegramSetup.number(), 4); // sub-step of Channels
     assert_eq!(OnboardingStep::Gateway.number(), 5);
     assert_eq!(OnboardingStep::VoiceSetup.number(), 6);
-    assert_eq!(OnboardingStep::HealthCheck.number(), 8);
-    assert_eq!(OnboardingStep::BrainSetup.number(), 9);
-    assert_eq!(OnboardingStep::total(), 9);
+    assert_eq!(OnboardingStep::ImageSetup.number(), 7);
+    assert_eq!(OnboardingStep::HealthCheck.number(), 9);
+    assert_eq!(OnboardingStep::BrainSetup.number(), 10);
+    assert_eq!(OnboardingStep::total(), 10);
 }
 
 #[test]

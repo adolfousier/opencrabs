@@ -386,37 +386,36 @@ pub(crate) async fn handle_message(
     }
 
     // Handle document attachment
-    if has_doc && !has_aud && !has_img {
-        if let Some((bytes, mime, fname)) = download_document(&msg, &client).await {
-            use crate::utils::{FileContent, classify_file};
-            match classify_file(&bytes, &mime, &fname) {
-                FileContent::Image => {
-                    let ext = fname.rsplit('.').next().unwrap_or("jpg");
-                    let tmp = std::env::temp_dir().join(format!(
-                        "wa_doc_{}.{}",
-                        uuid::Uuid::new_v4(),
-                        ext
-                    ));
-                    if std::fs::write(&tmp, &bytes).is_ok() {
-                        if content.is_empty() {
-                            content = "Describe this image.".to_string();
-                        }
-                        content.push_str(&format!(" <<IMG:{}>>", tmp.display()));
-                    }
-                }
-                FileContent::Text(extracted) => {
+    if has_doc
+        && !has_aud
+        && !has_img
+        && let Some((bytes, mime, fname)) = download_document(&msg, &client).await
+    {
+        use crate::utils::{FileContent, classify_file};
+        match classify_file(&bytes, &mime, &fname) {
+            FileContent::Image => {
+                let ext = fname.rsplit('.').next().unwrap_or("jpg");
+                let tmp =
+                    std::env::temp_dir().join(format!("wa_doc_{}.{}", uuid::Uuid::new_v4(), ext));
+                if std::fs::write(&tmp, &bytes).is_ok() {
                     if content.is_empty() {
-                        content = extracted;
-                    } else {
-                        content.push_str(&format!("\n\n{extracted}"));
+                        content = "Describe this image.".to_string();
                     }
+                    content.push_str(&format!(" <<IMG:{}>>", tmp.display()));
                 }
-                FileContent::Unsupported(note) => {
-                    if content.is_empty() {
-                        content = note;
-                    } else {
-                        content.push_str(&format!("\n\n{note}"));
-                    }
+            }
+            FileContent::Text(extracted) => {
+                if content.is_empty() {
+                    content = extracted;
+                } else {
+                    content.push_str(&format!("\n\n{extracted}"));
+                }
+            }
+            FileContent::Unsupported(note) => {
+                if content.is_empty() {
+                    content = note;
+                } else {
+                    content.push_str(&format!("\n\n{note}"));
                 }
             }
         }
