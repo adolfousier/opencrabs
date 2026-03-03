@@ -10,7 +10,7 @@ pub use agent::SlackAgent;
 
 use crate::brain::agent::{ApprovalCallback, ToolApprovalInfo};
 use slack_morphism::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::{Mutex, oneshot};
 use uuid::Uuid;
@@ -30,6 +30,8 @@ pub struct SlackState {
     pending_approvals: Mutex<HashMap<String, oneshot::Sender<(bool, bool)>>>,
     /// When true, all tool calls are auto-approved for this session (user chose "Always")
     auto_approve_session: Mutex<bool>,
+    /// Allowed user IDs — hot-reloadable at runtime when config changes
+    allowed_users: Mutex<HashSet<String>>,
 }
 
 impl Default for SlackState {
@@ -47,7 +49,19 @@ impl SlackState {
             session_channels: Mutex::new(HashMap::new()),
             pending_approvals: Mutex::new(HashMap::new()),
             auto_approve_session: Mutex::new(false),
+            allowed_users: Mutex::new(HashSet::new()),
         }
+    }
+
+    /// Replace the allowed users set (called on config reload).
+    pub async fn update_allowed_users(&self, users: Vec<String>) {
+        *self.allowed_users.lock().await = users.into_iter().collect();
+    }
+
+    /// Check if a user ID is in the allowed set.
+    pub async fn is_user_allowed(&self, user_id: &str) -> bool {
+        let set = self.allowed_users.lock().await;
+        set.is_empty() || set.contains(user_id)
     }
 
     /// Store the connected client, bot token, and optionally the owner's channel.
