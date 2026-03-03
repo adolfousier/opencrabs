@@ -9,6 +9,9 @@ impl OnboardingWizard {
     pub fn handle_key(&mut self, event: KeyEvent) -> WizardAction {
         // Global: Escape goes back (but if model filter is active, clear it first)
         if event.code == KeyCode::Esc {
+            if self.doctor_mode {
+                return WizardAction::Cancel;
+            }
             if !self.model_filter.is_empty() {
                 self.model_filter.clear();
                 self.selected_model = 0;

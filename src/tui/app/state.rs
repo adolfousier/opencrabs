@@ -73,10 +73,6 @@ pub const SLASH_COMMANDS: &[SlashCommand] = &[
         description: "Jump to API gateway settings",
     },
     SlashCommand {
-        name: "/onboard:health",
-        description: "Run connection health check",
-    },
-    SlashCommand {
         name: "/onboard:brain",
         description: "Jump to brain/persona setup",
     },

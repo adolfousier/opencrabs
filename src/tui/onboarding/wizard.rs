@@ -118,6 +118,10 @@ pub struct OnboardingWizard {
     /// Navigation
     pub focused_field: usize,
     pub error_message: Option<String>,
+
+    /// When true, the wizard is in standalone /doctor mode:
+    /// hides progress dots, Enter/Esc exit to chat instead of navigating.
+    pub doctor_mode: bool,
 }
 
 impl Default for OnboardingWizard {
@@ -314,6 +318,7 @@ impl OnboardingWizard {
             model_filter: String::new(),
             focused_field: 0,
             error_message: None,
+            doctor_mode: false,
         };
 
         // Load existing brain files from workspace if available

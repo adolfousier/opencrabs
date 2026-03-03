@@ -343,6 +343,9 @@ impl App {
                 wizard.step = step;
                 if step == OnboardingStep::HealthCheck {
                     wizard.start_health_check();
+                    if s == "/doctor" {
+                        wizard.doctor_mode = true;
+                    }
                 }
                 if step == OnboardingStep::ImageSetup {
                     wizard.detect_existing_image_key();
