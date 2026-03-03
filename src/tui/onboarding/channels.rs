@@ -187,7 +187,7 @@ impl OnboardingWizard {
             },
             TelegramField::RespondTo => match event.code {
                 KeyCode::Left | KeyCode::Char('h') => {
-                    self.telegram_respond_to = self.telegram_respond_to.saturating_sub(1).max(0);
+                    self.telegram_respond_to = self.telegram_respond_to.saturating_sub(1);
                 }
                 KeyCode::Right | KeyCode::Char('l') | KeyCode::Char(' ') => {
                     self.telegram_respond_to = (self.telegram_respond_to + 1).min(2);
@@ -300,7 +300,7 @@ impl OnboardingWizard {
             },
             DiscordField::RespondTo => match event.code {
                 KeyCode::Left | KeyCode::Char('h') => {
-                    self.discord_respond_to = self.discord_respond_to.saturating_sub(1).max(0);
+                    self.discord_respond_to = self.discord_respond_to.saturating_sub(1);
                 }
                 KeyCode::Right | KeyCode::Char('l') | KeyCode::Char(' ') => {
                     self.discord_respond_to = (self.discord_respond_to + 1).min(2);
@@ -693,7 +693,7 @@ impl OnboardingWizard {
             },
             SlackField::RespondTo => match event.code {
                 KeyCode::Left | KeyCode::Char('h') => {
-                    self.slack_respond_to = self.slack_respond_to.saturating_sub(1).max(0);
+                    self.slack_respond_to = self.slack_respond_to.saturating_sub(1);
                 }
                 KeyCode::Right | KeyCode::Char('l') | KeyCode::Char(' ') => {
                     self.slack_respond_to = (self.slack_respond_to + 1).min(2);
