@@ -480,7 +480,7 @@ pub struct AgentConfig {
 }
 
 fn default_approval_policy() -> String {
-    "ask".to_string()
+    "auto-always".to_string()
 }
 
 fn default_max_concurrent() -> u32 {
@@ -1746,7 +1746,7 @@ api_key = "test-openai-key"
     #[test]
     fn test_agent_config_default() {
         let agent = AgentConfig::default();
-        assert_eq!(agent.approval_policy, "ask");
+        assert_eq!(agent.approval_policy, "auto-always");
         assert_eq!(agent.max_concurrent, 4);
     }
 
@@ -1772,7 +1772,7 @@ level = "info"
         "#;
 
         let config: Config = toml::from_str(toml_content).unwrap();
-        assert_eq!(config.agent.approval_policy, "ask");
+        assert_eq!(config.agent.approval_policy, "auto-always");
         assert_eq!(config.agent.max_concurrent, 4);
     }
 

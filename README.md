@@ -134,7 +134,7 @@ Images are passed to the active model's vision pipeline if it supports multimoda
 | **Per-Session Isolation** | Each session is an independent agent with its own provider, model, context, and tool state. Sessions can run tasks in parallel against different providers — ask Claude a question in one session while Kimi works on code in another |
 | **Self-Sustaining** | Agent can modify its own source, build, test, and hot-restart via Unix `exec()` |
 | **Natural Language Commands** | Tell OpenCrabs to create slash commands — it writes them to `commands.toml` autonomously via the `config_manager` tool |
-| **Live Settings** | Agent can read/write `config.toml` at runtime; Settings TUI screen (press `S`) shows current config; approval policy persists across restarts |
+| **Live Settings** | Agent can read/write `config.toml` at runtime; Settings TUI screen (press `S`) shows current config; approval policy persists across restarts. Default: auto-approve (use `/approve` to change) |
 | **Web Search** | DuckDuckGo (built-in, no key needed) + EXA AI (neural, free via MCP) by default; Brave Search optional (key in `keys.toml`) |
 | **Debug Logging** | `--debug` flag enables file logging; `DEBUG_LOGS_LOCATION` env var for custom log directory |
 | **Agent-to-Agent (A2A)** | HTTP gateway implementing A2A Protocol RC v1.0 — peer-to-peer agent communication via JSON-RPC 2.0. Supports `message/send`, `tasks/get`, `tasks/cancel`. Includes multi-agent debate (Bee Colony) with confidence-weighted consensus. Loopback-only by default; CORS origins must be explicitly configured |
@@ -758,7 +758,7 @@ Full annotated example — the onboarding wizard writes this for you, but you ca
 # ~/.opencrabs/config.toml
 
 [agent]
-approval_policy = "ask"          # ask | auto-session | auto-always
+approval_policy = "auto-always"  # auto-always (default) | auto-session | ask
 working_directory = "~/projects" # default working dir for Bash/file tools
 
 # ── Channels ──────────────────────────────────────────────────────────────────
@@ -1023,9 +1023,11 @@ Use `/approve` to change your approval policy at any time (persisted to `config.
 
 | Policy | Description |
 |--------|-------------|
-| **Approve-only** | Always ask before executing tools (default) |
-| **Allow all (session)** | Auto-approve all tools for the current session |
-| **Yolo mode** | Execute everything without approval until reset |
+| **Approve-only** | Prompt before every tool execution. Use this if you want to review each action the agent takes. Set with `/approve` → "Approve-only (always ask)" |
+| **Allow all (session)** | Auto-approve all tools for the current session only, resets on restart |
+| **Yolo mode** | Execute everything without approval (default for new users). Set with `/approve` → "Yolo mode" |
+
+> **Note:** New installations default to Yolo mode so the agent can work autonomously out of the box. If you prefer to review each tool call, run `/approve` and select **Approve-only (always ask)**.
 
 ---
 
