@@ -367,6 +367,8 @@ pub struct App {
     /// Context window tracking
     pub context_max_tokens: u32,
     pub last_input_tokens: Option<u32>,
+    /// Per-response output token count (streaming, counted via tiktoken)
+    pub streaming_output_tokens: u32,
     /// Per-session cache of last known input token count — survives session switches
     pub(crate) session_context_cache: HashMap<Uuid, u32>,
 
@@ -499,6 +501,7 @@ impl App {
             context_max_tokens: agent_service
                 .context_window_for_model(&agent_service.provider_model()),
             last_input_tokens: None,
+            streaming_output_tokens: 0,
             session_context_cache: HashMap::new(),
             active_tool_group: None,
             rebuild_status: None,
@@ -1270,15 +1273,21 @@ impl App {
                 if self.is_current_session(session_id) =>
             {
                 self.display_token_count = count;
-                // Keep last_input_tokens in sync so the ctx display updates live during tool loops
+                // Update ctx display with API-confirmed context size
                 self.last_input_tokens = Some(count as u32);
+            }
+            TuiEvent::StreamingOutputTokens { session_id, tokens }
+                if self.is_current_session(session_id) =>
+            {
+                self.streaming_output_tokens = tokens;
             }
             // Silently ignore events for background sessions (already handled above for ResponseComplete/Error)
             TuiEvent::ToolCallStarted { .. }
             | TuiEvent::ToolCallCompleted { .. }
             | TuiEvent::IntermediateText { .. }
             | TuiEvent::CompactionSummary { .. }
-            | TuiEvent::TokenCountUpdated { .. } => {}
+            | TuiEvent::TokenCountUpdated { .. }
+            | TuiEvent::StreamingOutputTokens { .. } => {}
 
             TuiEvent::SessionUpdated(session_id) => {
                 // A remote channel completed an agent response. Only react when the TUI

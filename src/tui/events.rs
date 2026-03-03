@@ -103,6 +103,9 @@ pub enum TuiEvent {
     /// Real-time token count update from the agent loop
     TokenCountUpdated { session_id: Uuid, count: usize },
 
+    /// Streaming output token count (per-response, counted via tiktoken)
+    StreamingOutputTokens { session_id: Uuid, tokens: u32 },
+
     /// Onboarding wizard received fetched model list from provider API
     OnboardingModelsFetched(Vec<String>),
 
