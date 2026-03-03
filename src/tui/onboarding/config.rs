@@ -87,9 +87,13 @@ impl OnboardingWizard {
         self.health_results = checks;
         self.health_running = true;
         self.health_complete = false;
+    }
 
-        // Run health checks synchronously (they're fast local checks)
-        self.run_health_checks();
+    /// Resolve pending health checks (call from tick to show Pending state for one frame).
+    pub fn tick_health_check(&mut self) {
+        if self.health_running && !self.health_complete {
+            self.run_health_checks();
+        }
     }
 
     /// Execute all health checks

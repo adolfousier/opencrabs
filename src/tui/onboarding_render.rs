@@ -29,7 +29,7 @@ pub fn render_onboarding(f: &mut Frame, wizard: &OnboardingWizard) {
 
     // Header
     let step = wizard.step;
-    if step != OnboardingStep::Complete && !wizard.doctor_mode {
+    if step != OnboardingStep::Complete && !wizard.quick_jump {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             render_progress_dots(&step),
@@ -46,6 +46,9 @@ pub fn render_onboarding(f: &mut Frame, wizard: &OnboardingWizard) {
             lines.push(Line::from(Span::styled(chunk, subtitle_style)));
         }
         lines.push(Line::from(""));
+        lines.push(Line::from(""));
+    } else if wizard.quick_jump {
+        // Top padding for doctor/deep-link mode (no header, just spacing)
         lines.push(Line::from(""));
     }
 
@@ -89,26 +92,45 @@ pub fn render_onboarding(f: &mut Frame, wizard: &OnboardingWizard) {
     // Navigation footer
     if step != OnboardingStep::Complete {
         lines.push(Line::from(""));
-        if wizard.doctor_mode {
-            let footer: Vec<Span<'static>> = vec![
+        if wizard.quick_jump {
+            let mut footer: Vec<Span<'static>> = vec![
                 Span::styled(
                     " [Esc] ",
                     Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled("Exit  ", Style::default().fg(Color::White)),
-                Span::styled(
-                    "[R] ",
-                    Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("Re-run  ", Style::default().fg(Color::White)),
-                Span::styled(
+            ];
+            if step == OnboardingStep::HealthCheck {
+                footer.push(Span::styled(
                     "[Enter] ",
                     Style::default()
                         .fg(ACCENT_GOLD)
                         .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("Exit", Style::default().fg(Color::White)),
-            ];
+                ));
+                if wizard.health_complete {
+                    footer.push(Span::styled("Re-check", Style::default().fg(Color::White)));
+                } else {
+                    footer.push(Span::styled("Check", Style::default().fg(Color::White)));
+                }
+            } else {
+                if step != OnboardingStep::ModeSelect {
+                    footer.push(Span::styled(
+                        "[Tab] ",
+                        Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
+                    ));
+                    footer.push(Span::styled(
+                        "Next Field  ",
+                        Style::default().fg(Color::White),
+                    ));
+                }
+                footer.push(Span::styled(
+                    "[Enter] ",
+                    Style::default()
+                        .fg(ACCENT_GOLD)
+                        .add_modifier(Modifier::BOLD),
+                ));
+                footer.push(Span::styled("Confirm", Style::default().fg(Color::White)));
+            }
             lines.push(Line::from(footer));
         } else {
             let mut footer: Vec<Span<'static>> = vec![
@@ -263,12 +285,20 @@ pub fn render_onboarding(f: &mut Frame, wizard: &OnboardingWizard) {
 
     let title_string = if step == OnboardingStep::Complete {
         " OpenCrabs Setup Complete ".to_string()
+    } else if wizard.quick_jump {
+        format!(" {} ", step.title())
     } else {
         format!(
             " OpenCrabs Setup ({}/{}) ",
             step.number(),
             OnboardingStep::total()
         )
+    };
+
+    let title_alignment = if wizard.quick_jump {
+        Alignment::Center
+    } else {
+        Alignment::Left
     };
 
     let paragraph = Paragraph::new(centered_lines)
@@ -279,7 +309,8 @@ pub fn render_onboarding(f: &mut Frame, wizard: &OnboardingWizard) {
                 .title(Span::styled(
                     title_string,
                     Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
-                )),
+                ))
+                .title_alignment(title_alignment),
         )
         .alignment(Alignment::Left)
         .wrap(Wrap { trim: false });
@@ -2203,27 +2234,31 @@ fn render_health_check(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             )));
-            lines.push(Line::from(Span::styled(
-                "  Press Enter to finish setup".to_string(),
-                Style::default().fg(Color::DarkGray),
-            )));
+            if !wizard.quick_jump {
+                lines.push(Line::from(Span::styled(
+                    "  Press Enter to finish setup".to_string(),
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
         } else {
             lines.push(Line::from(Span::styled(
                 "  Some checks failed.".to_string(),
                 Style::default().fg(Color::Red),
             )));
-            lines.push(Line::from(vec![
-                Span::styled(
-                    "  [R] ",
-                    Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("Re-run  ", Style::default().fg(Color::White)),
-                Span::styled(
-                    "[Esc] ",
-                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("Go back and fix", Style::default().fg(Color::White)),
-            ]));
+            if !wizard.quick_jump {
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        "  [R] ",
+                        Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("Re-run  ", Style::default().fg(Color::White)),
+                    Span::styled(
+                        "[Esc] ",
+                        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("Go back and fix", Style::default().fg(Color::White)),
+                ]));
+            }
         }
     }
 }

@@ -980,11 +980,20 @@ OpenCrabs includes a built-in tool execution system. The AI can use these tools 
 | `/model` | Show current model |
 | `/models` | Switch model (fetches live from provider API) |
 | `/usage` | Token/cost stats — shows current session + all-time breakdown grouped by model with estimated costs for historical sessions |
-| `/onboard` | Run setup wizard |
+| `/onboard` | Run setup wizard (full flow) |
+| `/onboard:provider` | Jump to provider/API key setup |
+| `/onboard:workspace` | Jump to workspace settings |
+| `/onboard:channels` | Jump to channel config |
+| `/onboard:voice` | Jump to voice STT/TTS setup |
+| `/onboard:image` | Jump to image handling setup |
+| `/onboard:gateway` | Jump to API gateway settings |
+| `/onboard:brain` | Jump to brain/persona setup |
+| `/doctor` | Run connection health check |
 | `/sessions` | Open session manager |
 | `/approve` | Tool approval policy selector (approve-only / session / yolo) |
 | `/compact` | Compact context (summarize + trim for long sessions) |
 | `/rebuild` | Build from source & hot-restart — streams live compiler output to chat, auto exec() restarts on success (no prompt), auto-clones repo if no source tree found |
+| `/whisper` | Voice-to-text — speak anywhere, pastes to clipboard |
 | `/cd` | Change working directory (directory picker) |
 | `/settings` or `S` | Open Settings screen (provider, approval, commands, paths) |
 

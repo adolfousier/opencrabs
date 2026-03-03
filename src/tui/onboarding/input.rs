@@ -9,7 +9,7 @@ impl OnboardingWizard {
     pub fn handle_key(&mut self, event: KeyEvent) -> WizardAction {
         // Global: Escape goes back (but if model filter is active, clear it first)
         if event.code == KeyCode::Esc {
-            if self.doctor_mode {
+            if self.quick_jump {
                 return WizardAction::Cancel;
             }
             if !self.model_filter.is_empty() {
@@ -23,7 +23,8 @@ impl OnboardingWizard {
             return WizardAction::None;
         }
 
-        match self.step {
+        let step_before = self.step;
+        let action = match self.step {
             OnboardingStep::ModeSelect => self.handle_mode_select_key(event),
             OnboardingStep::ProviderAuth => self.handle_provider_auth_key(event),
             OnboardingStep::Workspace => self.handle_workspace_key(event),
@@ -40,7 +41,14 @@ impl OnboardingWizard {
             OnboardingStep::HealthCheck => self.handle_health_check_key(event),
             OnboardingStep::BrainSetup => self.handle_brain_setup_key(event),
             OnboardingStep::Complete => WizardAction::Complete,
+        };
+        // In doctor mode (deep-link to a single step), if the step advanced
+        // via next_step(), exit back to chat instead of navigating further.
+        if self.quick_jump && self.step != step_before {
+            self.step = step_before; // revert navigation
+            return WizardAction::Cancel;
         }
+        action
     }
 
     /// Handle paste event - inserts text at current cursor position

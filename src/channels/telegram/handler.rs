@@ -27,6 +27,8 @@ impl Drop for TypingGuard {
 /// Tools are rendered at the top, response text streams at the bottom — matching TUI layout.
 struct StreamingState {
     msg_id: Option<MessageId>,
+    /// Reasoning/thinking text — streamed live, cleared before tool calls or response
+    thinking: String,
     /// Tool execution log (⚙️ started, ✅/❌ completed) — always rendered at top
     tools: String,
     /// Response text from streaming chunks — always rendered at bottom
@@ -38,12 +40,29 @@ struct StreamingState {
 }
 
 impl StreamingState {
-    /// Render the combined display text: tools at top, response at bottom.
+    /// Render the combined display text: thinking → tools → response.
+    /// Thinking is ephemeral — shown only while streaming, cleared on transitions.
     fn render(&self) -> String {
-        match (self.tools.is_empty(), self.response.is_empty()) {
-            (true, _) => self.response.clone(),
-            (false, true) => self.tools.clone(),
-            (false, false) => format!("{}\n\n{}", self.tools.trim_end(), self.response),
+        let mut parts = Vec::new();
+        if !self.thinking.is_empty() {
+            // Show last ~800 chars to stay within Telegram message limits
+            let t = if self.thinking.len() > 800 {
+                &self.thinking[self.thinking.len() - 800..]
+            } else {
+                &self.thinking
+            };
+            parts.push(format!("💭 _{}_", t.trim()));
+        }
+        if !self.tools.is_empty() {
+            parts.push(self.tools.trim().to_string());
+        }
+        if !self.response.is_empty() {
+            parts.push(self.response.clone());
+        }
+        if parts.is_empty() {
+            String::new()
+        } else {
+            parts.join("\n\n")
         }
     }
 }
@@ -507,6 +526,7 @@ pub(crate) async fn handle_message(
     // ── Streaming setup ───────────────────────────────────────────────────────
     let streaming = Arc::new(Mutex::new(StreamingState {
         msg_id: None,
+        thinking: String::new(),
         tools: String::new(),
         response: String::new(),
         dirty: false,
@@ -560,8 +580,17 @@ pub(crate) async fn handle_message(
         let st = streaming.clone();
         Arc::new(move |_sid, event| {
             match event {
+                ProgressEvent::ReasoningChunk { text } => {
+                    if let Ok(mut s) = st.try_lock() {
+                        s.thinking.push_str(&text);
+                        s.dirty = true;
+                    }
+                }
                 ProgressEvent::StreamingChunk { text } => {
                     if let Ok(mut s) = st.try_lock() {
+                        if !s.thinking.is_empty() {
+                            s.thinking.clear();
+                        }
                         s.response.push_str(&text);
                         s.dirty = true;
                     }
@@ -571,6 +600,7 @@ pub(crate) async fn handle_message(
                     tool_input,
                 } => {
                     if let Ok(mut s) = st.try_lock() {
+                        s.thinking.clear();
                         let ctx = tool_context(&tool_name, &tool_input);
                         s.tools.push_str(&format!("\n⚙️ **{tool_name}**{ctx}"));
                         s.dirty = true;
@@ -591,6 +621,7 @@ pub(crate) async fn handle_message(
                     if let Ok(mut s) = st.try_lock()
                         && !s.response.contains(&text)
                     {
+                        s.thinking.clear();
                         s.response.push_str(&text);
                         s.dirty = true;
                     }

@@ -341,11 +341,14 @@ impl App {
                 let config = crate::config::Config::load().unwrap_or_default();
                 let mut wizard = OnboardingWizard::from_config(&config);
                 wizard.step = step;
+                // Deep-link to a specific step: lock to that step only
+                // (no progress dots, no navigation, Enter/Esc exit to chat)
+                // Only bare /onboard runs the full wizard flow
+                if step != OnboardingStep::ModeSelect {
+                    wizard.quick_jump = true;
+                }
                 if step == OnboardingStep::HealthCheck {
                     wizard.start_health_check();
-                    if s == "/doctor" {
-                        wizard.doctor_mode = true;
-                    }
                 }
                 if step == OnboardingStep::ImageSetup {
                     wizard.detect_existing_image_key();
@@ -1390,7 +1393,7 @@ impl App {
             tracing::info!("[TUI] Added queued message at response complete");
         }
 
-        // Finalize active tool group as a standalone message BEFORE the response.
+        // Finalize active tool group as a quick_jump message BEFORE the response.
         // Matches DB reload order from expand_message.
         if let Some(group) = self.active_tool_group.take() {
             let count = group.calls.len();

@@ -970,6 +970,14 @@ impl App {
                 // Update animation frame for spinner
                 self.animation_frame = self.animation_frame.wrapping_add(1);
 
+                // Resolve deferred health checks (shows Pending for one frame first)
+                if let Some(ref mut wizard) = self.onboarding
+                    && wizard.health_running
+                    && !wizard.health_complete
+                {
+                    wizard.tick_health_check();
+                }
+
                 // Auto-dismiss error/warning messages after 2.5 seconds
                 if let Some(shown_at) = self.error_message_shown_at
                     && shown_at.elapsed() >= std::time::Duration::from_millis(2500)
