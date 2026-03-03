@@ -51,15 +51,8 @@ struct EditInput {
     /// Edit operation to perform
     #[serde(flatten)]
     operation: EditOperation,
-
-    /// Create backup before editing
-    #[serde(default = "default_true")]
-    create_backup: bool,
 }
 
-fn default_true() -> bool {
-    true
-}
 
 #[async_trait]
 impl Tool for EditTool {
@@ -119,11 +112,6 @@ impl Tool for EditTool {
                     "type": "string",
                     "description": "Replacement text (for 'regex_replace')"
                 },
-                "create_backup": {
-                    "type": "boolean",
-                    "description": "Create backup file before editing (default: true)",
-                    "default": true
-                }
             },
             "required": ["path", "operation"]
         })
@@ -158,17 +146,6 @@ impl Tool for EditTool {
 
         // Read file content
         let content = fs::read_to_string(&path).await.map_err(ToolError::Io)?;
-
-        // Create backup if requested
-        if input.create_backup {
-            let backup_path = path.with_extension(format!(
-                "{}.backup",
-                path.extension().and_then(|s| s.to_str()).unwrap_or("txt")
-            ));
-            fs::write(&backup_path, &content)
-                .await
-                .map_err(ToolError::Io)?;
-        }
 
         // Perform edit operation
         let new_content = match input.operation {
