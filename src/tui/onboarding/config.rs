@@ -659,7 +659,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart={}
+ExecStart={} daemon
 Restart=on-failure
 RestartSec=5
 
@@ -673,11 +673,16 @@ WantedBy=default.target
     std::fs::write(&service_path, service_content)
         .map_err(|e| format!("Failed to write service file: {}", e))?;
 
-    // Enable the service
+    // Enable and start the service
     std::process::Command::new("systemctl")
         .args(["--user", "enable", "opencrabs"])
         .output()
         .map_err(|e| format!("Failed to enable service: {}", e))?;
+
+    std::process::Command::new("systemctl")
+        .args(["--user", "start", "opencrabs"])
+        .output()
+        .map_err(|e| format!("Failed to start service: {}", e))?;
 
     Ok(())
 }
@@ -704,6 +709,7 @@ fn install_launchagent() -> Result<(), String> {
     <key>ProgramArguments</key>
     <array>
         <string>{}</string>
+        <string>daemon</string>
     </array>
     <key>RunAtLoad</key>
     <true/>

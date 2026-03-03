@@ -147,7 +147,20 @@ mod tests {
                 let _ = watcher.watch(&config_path, notify::RecursiveMode::NonRecursive);
                 let _ = watcher.watch(&keys_path, notify::RecursiveMode::NonRecursive);
                 let debounce = std::time::Duration::from_millis(100);
-                while rx.recv().is_ok() {
+                // Hard deadline so the blocking thread exits and doesn't hang the
+                // tokio runtime shutdown (default shutdown_timeout is 10s).
+                let end = std::time::Instant::now() + std::time::Duration::from_secs(3);
+                loop {
+                    let remaining = end.saturating_duration_since(std::time::Instant::now());
+                    if remaining.is_zero() {
+                        break;
+                    }
+                    let poll = remaining.min(std::time::Duration::from_millis(200));
+                    match rx.recv_timeout(poll) {
+                        Ok(_) => {}
+                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                    }
                     let deadline = std::time::Instant::now() + debounce;
                     loop {
                         let remaining =

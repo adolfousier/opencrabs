@@ -2,8 +2,8 @@
 //!
 //! Tests for command-line argument parsing using Clap.
 
+use crate::cli::{Cli, Commands, DbCommands, OutputFormat};
 use clap::Parser;
-use opencrabs::cli::{Cli, Commands, DbCommands, OutputFormat};
 
 #[test]
 fn test_cli_parse_no_command() {
@@ -18,7 +18,7 @@ fn test_cli_parse_no_command() {
 fn test_cli_parse_chat_command() {
     let cli = Cli::try_parse_from(["opencrabs", "chat"]).unwrap();
     match cli.command {
-        Some(Commands::Chat { session }) => {
+        Some(Commands::Chat { session, .. }) => {
             assert!(session.is_none());
         }
         _ => panic!("Expected Chat command"),
@@ -29,7 +29,7 @@ fn test_cli_parse_chat_command() {
 fn test_cli_parse_chat_with_session() {
     let cli = Cli::try_parse_from(["opencrabs", "chat", "--session", "test-session-id"]).unwrap();
     match cli.command {
-        Some(Commands::Chat { session }) => {
+        Some(Commands::Chat { session, .. }) => {
             assert_eq!(session, Some("test-session-id".to_string()));
         }
         _ => panic!("Expected Chat command with session"),
@@ -269,5 +269,40 @@ fn test_cli_db_missing_operation() {
 #[test]
 fn test_cli_db_invalid_operation() {
     let result = Cli::try_parse_from(["opencrabs", "db", "invalid"]);
+    assert!(result.is_err());
+}
+
+// --- Daemon command tests ---
+
+#[test]
+fn test_cli_parse_daemon_command() {
+    let cli = Cli::try_parse_from(["opencrabs", "daemon"]).unwrap();
+    assert!(matches!(cli.command, Some(Commands::Daemon)));
+}
+
+#[test]
+fn test_cli_parse_daemon_with_debug_flag() {
+    let cli = Cli::try_parse_from(["opencrabs", "--debug", "daemon"]).unwrap();
+    assert!(cli.debug);
+    assert!(matches!(cli.command, Some(Commands::Daemon)));
+}
+
+#[test]
+fn test_cli_parse_daemon_with_config_path() {
+    let cli = Cli::try_parse_from([
+        "opencrabs",
+        "--config",
+        "/etc/opencrabs/config.toml",
+        "daemon",
+    ])
+    .unwrap();
+    assert_eq!(cli.config, Some("/etc/opencrabs/config.toml".to_string()));
+    assert!(matches!(cli.command, Some(Commands::Daemon)));
+}
+
+#[test]
+fn test_cli_daemon_takes_no_args() {
+    // daemon subcommand accepts no positional args or flags
+    let result = Cli::try_parse_from(["opencrabs", "daemon", "--session", "foo"]);
     assert!(result.is_err());
 }
