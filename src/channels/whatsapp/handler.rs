@@ -536,7 +536,6 @@ pub(crate) async fn handle_message(
     // Otherwise send a 3-button message (Yes / Always / No) and wait up to 5 min.
     let approval_cb: ApprovalCallback = {
         use crate::channels::whatsapp::WaApproval;
-        use waproto::whatsapp::message::{ButtonsMessage, buttons_message};
 
         let client = client.clone();
         let chat_jid = info.source.chat.clone();
@@ -562,46 +561,18 @@ pub(crate) async fn handle_message(
                     &input_preview[..input_preview.len().min(600)],
                 );
 
-                // Try to send interactive buttons message
-                let btn = |id: &str, label: &str| buttons_message::Button {
-                    button_id: Some(id.to_string()),
-                    button_text: Some(buttons_message::button::ButtonText {
-                        display_text: Some(label.to_string()),
-                    }),
-                    r#type: Some(1), // Response
+                // Send plain text approval request (ButtonsMessage is deprecated
+                // by WhatsApp and silently never renders — use text only)
+                let text_msg = waproto::whatsapp::Message {
+                    conversation: Some(format!(
+                        "{}\n\n{}\n\nReply *yes*, *always* (session), or *no* (5 min timeout).",
+                        MSG_HEADER, body
+                    )),
                     ..Default::default()
                 };
-                let buttons_msg = waproto::whatsapp::Message {
-                    buttons_message: Some(Box::new(ButtonsMessage {
-                        content_text: Some(body.clone()),
-                        footer_text: Some("5 min timeout — no reply = deny".to_string()),
-                        buttons: vec![
-                            btn("wa_approve_yes", "✅ Yes"),
-                            btn("wa_approve_always", "🔁 Always (session)"),
-                            btn("wa_approve_no", "❌ No"),
-                        ],
-                        ..Default::default()
-                    })),
-                    ..Default::default()
-                };
-
-                if client
-                    .send_message(chat_jid.clone(), buttons_msg)
-                    .await
-                    .is_err()
-                {
-                    // Fallback to plain text if buttons fail
-                    let text_msg = waproto::whatsapp::Message {
-                        conversation: Some(format!(
-                            "{}\n\n{}\n\nReply *yes*, *always* (session), or *no* (5 min timeout).",
-                            MSG_HEADER, body
-                        )),
-                        ..Default::default()
-                    };
-                    if let Err(e) = client.send_message(chat_jid, text_msg).await {
-                        tracing::error!("WhatsApp: failed to send approval request: {}", e);
-                        return Ok(false);
-                    }
+                if let Err(e) = client.send_message(chat_jid.clone(), text_msg).await {
+                    tracing::error!("WhatsApp: failed to send approval request: {}", e);
+                    return Ok(false);
                 }
 
                 let (tx, rx) = tokio::sync::oneshot::channel::<WaApproval>();
@@ -616,6 +587,14 @@ pub(crate) async fn handle_message(
                     Ok(Ok(WaApproval::No)) => Ok(false),
                     _ => {
                         tracing::warn!("WhatsApp: approval timed out or channel dropped — denying");
+                        let timeout_msg = waproto::whatsapp::Message {
+                            conversation: Some(format!(
+                                "{}\n\n⏰ No response in 5 minutes — *{}* was denied.\n\nSend your message again and reply *yes*, *always*, or *no* when prompted.",
+                                MSG_HEADER, tool_info.tool_name,
+                            )),
+                            ..Default::default()
+                        };
+                        let _ = client.send_message(chat_jid, timeout_msg).await;
                         Ok(false)
                     }
                 }
