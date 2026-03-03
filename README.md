@@ -37,6 +37,8 @@
 - [Quick Start](#-quick-start)
 - [Onboarding Wizard](#-onboarding-wizard)
 - [API Keys (keys.toml)](#-api-keys-keystoml)
+- [Configuration (config.toml)](#-configuration-configtoml)
+- [Commands (commands.toml)](#-commands-commandstoml)
 - [Using Local LLMs](#-using-local-llms)
 - [Configuration](#-configuration)
 - [Tool System](#-tool-system)
@@ -731,24 +733,118 @@ See [LM_STUDIO_GUIDE.md](src/docs/guides/LM_STUDIO_GUIDE.md) for detailed setup 
 
 ### Configuration Files
 
-OpenCrabs uses two config files:
-1. `~/.opencrabs/config.toml` — Provider settings, models, channels (safe to commit)
-2. `~/.opencrabs/keys.toml` — API keys (chmod 600, NEVER commit!)
+OpenCrabs uses three config files — all **hot-reloaded at runtime** (no restart needed):
 
-Search order for config.toml:
+| File | Purpose | Secret? |
+|------|---------|---------|
+| `~/.opencrabs/config.toml` | Provider settings, models, channels, allowed users | No — safe to commit |
+| `~/.opencrabs/keys.toml` | API keys, bot tokens | **Yes** — `chmod 600`, never commit |
+| `~/.opencrabs/commands.toml` | User-defined slash commands | No |
+
+Changes to any of these files are picked up automatically within ~300ms while OpenCrabs is running. The active LLM provider, channel allowlists, approval policy, and slash command autocomplete all update without restart.
+
+Search order for `config.toml`:
 1. `~/.opencrabs/config.toml` (primary)
 2. `~/.config/opencrabs/config.toml` (legacy fallback)
 3. `./opencrabs.toml` (current directory override)
 
-```bash
-# Initialize config
-cargo run -- init
+---
 
-# Copy the examples
-cp config.toml.example ~/.opencrabs/config.toml
-cp keys.toml.example ~/.opencrabs/keys.toml
-chmod 600 ~/.opencrabs/keys.toml  # IMPORTANT: Secure the keys file!
+## 🛠️ Configuration (config.toml)
+
+Full annotated example — the onboarding wizard writes this for you, but you can edit it directly:
+
+```toml
+# ~/.opencrabs/config.toml
+
+[agent]
+approval_policy = "ask"          # ask | auto-session | auto-always
+working_directory = "~/projects" # default working dir for Bash/file tools
+
+# ── Channels ──────────────────────────────────────────────────────────────────
+
+[channels.telegram]
+enabled = true
+allowed_users = ["123456789"]    # Telegram user IDs (get yours via /start)
+respond_to = "all"               # all | mention | dm_only
+
+[channels.discord]
+enabled = true
+allowed_users = ["637291214508654633"]  # Discord user IDs
+allowed_channels = ["1473207147025137778"]
+respond_to = "mention"           # all | mention | dm_only
+
+[channels.slack]
+enabled = true
+allowed_users = ["U066SGWQZFG"]  # Slack user IDs
+allowed_channels = ["C0AEY3C2P9V"]
+respond_to = "mention"           # all | mention | dm_only
+
+[channels.whatsapp]
+enabled = true
+allowed_phones = ["+1234567890"] # E.164 format
+
+[channels.trello]
+enabled = true
+board_ids = ["your-board-id"]    # From the board URL
+
+# ── Providers ─────────────────────────────────────────────────────────────────
+
+[providers.anthropic]
+enabled = true
+default_model = "claude-sonnet-4-6"
+
+[providers.gemini]
+enabled = false
+
+[providers.openai]
+enabled = false
+default_model = "gpt-4o"
+
+# ── Image ─────────────────────────────────────────────────────────────────────
+
+[image.generation]
+enabled = true
+model = "gemini-3.1-flash-image-preview"
+
+[image.vision]
+enabled = true
+model = "gemini-3.1-flash-image-preview"
 ```
+
+> API keys go in `keys.toml`, not here. See [API Keys (keys.toml)](#-api-keys-keystoml).
+
+---
+
+## 📋 Commands (commands.toml)
+
+User-defined slash commands — the agent writes these autonomously via the `config_manager` tool, or you can edit directly:
+
+```toml
+# ~/.opencrabs/commands.toml
+
+[[commands]]
+name = "/deploy"
+description = "Deploy to staging server"
+action = "prompt"
+prompt = "Run ./deploy.sh staging and report the result."
+
+[[commands]]
+name = "/standup"
+description = "Generate a daily standup summary"
+action = "prompt"
+prompt = "Summarize my recent git commits and open tasks for a standup. Be concise."
+
+[[commands]]
+name = "/rebuild"
+description = "Build and restart OpenCrabs from source"
+action = "prompt"
+prompt = 'Run `RUSTFLAGS="-C target-cpu=native" cargo build --release` in /srv/rs/opencrabs. If it succeeds, ask if I want to restart now.'
+```
+
+Commands appear instantly in autocomplete (type `/`) after saving — no restart needed. The `action` field supports:
+- `"prompt"` — sends the prompt text to the agent for execution
+- `"system"` — displays the text inline as a system message
 
 ### Example: Hybrid Setup (Local + Cloud)
 
