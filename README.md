@@ -1439,7 +1439,19 @@ Pre-built `*-compat` binaries are also available on the [releases page](https://
 
 ### macOS
 
-No additional dependencies required.
+Requires **macOS 15 (Sequoia)** or later.
+
+#### Metal GPU crash on macOS 14 (Sonoma) or older
+
+If you see this error when running OpenCrabs:
+
+```
+dyld: Symbol not found: _OBJC_CLASS_$_MTLResidencySetDescriptor
+```
+
+This happens because `llama.cpp` (used for local embeddings) compiles with Metal GPU support and unconditionally links Metal frameworks that require macOS 15+. There is currently no way to disable Metal at build time through the Rust `llama-cpp-sys-2` crate.
+
+**Fix:** Update to macOS 15 (Sequoia) or later.
 
 ### Windows
 

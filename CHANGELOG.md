@@ -22,6 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Image API key stored under wrong path** — Onboarding wrote to flat `[image]` section in keys.toml instead of `[providers.image.gemini]`, inconsistent with all other provider keys. Added `ImageProviders` struct, merge logic, and legacy fallback
   - `src/config/types.rs`, `src/tui/onboarding/config.rs`
 - **Channel commands section in README** — Documented `/help`, `/usage`, `/models`, `/stop` for all channels including WhatsApp
+- **`keys.toml` parse errors now surface visibly** — Invalid TOML (e.g. unquoted emails) previously caused silent key merge failure, breaking provider startup with no error. Now prints warning to stderr and logs error. `/doctor` validates keys.toml syntax
+  - `src/config/types.rs`, `src/brain/provider/factory.rs`, `src/brain/tools/slash_command.rs`
+
+### Improved
+- **Telegram tool calls as individual messages** — Each tool call now gets its own message (context + result) instead of all tools stacked in the response. Response streams cleanly at the bottom
+  - `src/channels/telegram/handler.rs`
+- **Intermediate agent texts visible on Telegram** — Agent commentary between tool rounds (e.g. "Found one! Let me reply to this:") now appears as individual messages, matching TUI behavior
+  - `src/channels/telegram/handler.rs`
 
 ## [0.2.48] - 2026-03-04
 
