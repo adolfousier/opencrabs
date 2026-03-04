@@ -5,6 +5,24 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.50] - 2026-03-04
+
+### Changed
+- **Config hot-reload via `watch` channel** — Replaced per-channel `Mutex` copies of config (allowlists, voice, respond_to, idle_timeout) with a single `tokio::sync::watch<Config>` channel. All channels now read the latest config per-message from the watch receiver. Removed `allowed_users`/`allowed_phones` HashSet fields from all channel states and 4 separate allowlist callbacks in `ui.rs`
+  - `src/channels/factory.rs`, `src/channels/{telegram,discord,slack,whatsapp}/{mod,agent,handler}.rs`, `src/cli/ui.rs`, `src/brain/tools/{telegram,discord,slack,whatsapp}_connect.rs`, `src/brain/tools/whatsapp_send.rs`
+- **TTS voice/model read from `[providers.tts]`** — Added `voice` and `model` fields to `TtsProviders` so `voice = "echo"` under `[providers.tts]` is actually picked up. Previously serde silently ignored the field
+  - `src/config/types.rs`, `src/channels/factory.rs`, `src/channels/{telegram,discord,slack,whatsapp}/handler.rs`
+- **Default TTS voice changed from "ash" to "echo"**; both `stt_enabled` and `tts_enabled` now default to `false` (user must opt in)
+  - `src/config/types.rs`
+
+### Fixed
+- **Telegram "Session not found" after TUI quit** — The retry logic checked for `"SessionNotFound"` (camelCase) but the error Display produces `"Session not found"` (lowercase), so recovery never triggered. Now correctly matches and creates a fresh session (closes #24)
+  - `src/channels/telegram/handler.rs`
+- **Duplicate data delivery on Telegram** — LLM sent data both as streaming text response AND via `telegram_send`, resulting in the same content appearing twice. Added channel context prefix to all handlers telling the LLM its text response is auto-delivered (closes #23)
+  - `src/channels/{telegram,discord,slack,whatsapp}/handler.rs`
+- **Groq API key in test fixture** — Replaced real-format Groq key in `redact_secrets` test with obviously fake placeholder (closes #25)
+  - `src/utils/sanitize.rs`
+
 ## [0.2.49] - 2026-03-04
 
 ### Added
