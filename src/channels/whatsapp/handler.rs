@@ -642,10 +642,7 @@ pub(crate) async fn handle_message(
                         Ok((true, true))
                     }
                     Ok(Ok(WaApproval::Yolo)) => {
-                        tracing::info!(
-                            "WhatsApp approval: user chose YOLO (phone={})",
-                            phone_key
-                        );
+                        tracing::info!("WhatsApp approval: user chose YOLO (phone={})", phone_key);
                         crate::utils::persist_auto_always_policy();
                         Ok((true, true))
                     }
