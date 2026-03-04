@@ -1508,8 +1508,12 @@ node dist/cli.js linkedin like <post-url>
 node dist/cli.js linkedin comment <post-url> "your comment"
 ```
 
-#### Method 2: Playwright Browser Automation
-Uses Playwright to control a real browser — useful when GraphQL APIs are rate-limited or unavailable.
+#### Method 2: Playwright Browser Automation (⚠️ Currently Broken)
+Uses Playwright to control a real browser — **currently not working** due to Twitter/X UI changes.
+
+**Status:** Twitter changed their UI and the selectors are outdated. All write operations (`tweet`, `reply`, `like` via browser) fail with "Tweet input not found" / "Reply input not found".
+
+**Use CLI + GraphQL instead** — it covers all operations (read + write).
 
 **Setup:**
 ```bash
