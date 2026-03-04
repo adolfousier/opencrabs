@@ -8,6 +8,7 @@ use crate::brain::agent::{ApprovalCallback, ProgressCallback, ProgressEvent};
 use crate::channels::whatsapp::WhatsAppState;
 use crate::config::VoiceConfig;
 use crate::services::SessionService;
+use crate::utils::sanitize::redact_secrets;
 use crate::utils::truncate_str;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -588,6 +589,7 @@ pub(crate) async fn handle_message(
         Arc::new(move |_session_id, event| {
             if let ProgressEvent::IntermediateText { text, .. } = event {
                 let (clean, _) = crate::utils::extract_img_markers(&text);
+                let clean = redact_secrets(&clean);
                 if !clean.trim().is_empty() {
                     was_streamed_cb.store(true, std::sync::atomic::Ordering::Relaxed);
                     let client = client_cb.clone();
@@ -736,6 +738,7 @@ pub(crate) async fn handle_message(
 
             // Extract <<IMG:path>> markers — send each as a real WhatsApp image message.
             let (text_content, img_paths) = crate::utils::extract_img_markers(&response.content);
+            let text_content = redact_secrets(&text_content);
 
             // Send images before text
             for img_path in img_paths {

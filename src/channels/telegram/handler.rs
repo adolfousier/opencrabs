@@ -7,6 +7,7 @@ use super::TelegramState;
 use crate::brain::agent::{AgentService, ProgressCallback, ProgressEvent};
 use crate::config::{RespondTo, VoiceConfig};
 use crate::services::SessionService;
+use crate::utils::sanitize::redact_secrets;
 use crate::utils::truncate_str;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -55,13 +56,13 @@ impl StreamingState {
             } else {
                 &self.thinking
             };
-            parts.push(format!("💭 _{}_", t.trim()));
+            parts.push(format!("💭 _{}_", redact_secrets(t.trim())));
         }
         if !self.tools.is_empty() {
             parts.push(self.tools.trim().to_string());
         }
         if !self.response.is_empty() {
-            parts.push(self.response.clone());
+            parts.push(redact_secrets(&self.response));
         }
         if parts.is_empty() {
             String::new()
@@ -765,6 +766,7 @@ pub(crate) async fn handle_message(
         Ok(response) => {
             // Extract <<IMG:path>> markers — send each as a Telegram photo.
             let (text_only, img_paths) = crate::utils::extract_img_markers(&response.content);
+            let text_only = redact_secrets(&text_only);
 
             for img_path in img_paths {
                 match tokio::fs::read(&img_path).await {

@@ -5,6 +5,24 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.49] - 2026-03-04
+
+### Added
+- **Channel commands (`/help`, `/usage`, `/models`, `/stop`)** — All four commands now work on Telegram, Discord, Slack, and WhatsApp. Shared `commands.rs` module handles parsing; each channel renders platform-native responses (inline keyboards, action rows, Block Kit buttons)
+  - `src/channels/commands.rs` (new), `src/channels/mod.rs`, `src/channels/telegram/handler.rs`, `src/channels/discord/handler.rs`, `src/channels/slack/handler.rs`, `src/channels/whatsapp/handler.rs`
+- **`/stop` cancels running agent on channels** — `CancellationToken` per session, equivalent to double-Escape in TUI. Immediately aborts streaming/tool loop mid-run
+  - `src/channels/telegram/mod.rs`, `src/channels/discord/mod.rs`, `src/channels/slack/mod.rs`, `src/channels/whatsapp/mod.rs`, all handler files
+- **`/models` interactive model switching on channels** — Platform-native buttons (Telegram `InlineKeyboardMarkup`, Discord `ActionRow`, Slack Block Kit) with `model:` callback handlers
+  - `src/channels/telegram/agent.rs`, `src/channels/discord/agent.rs`, `src/channels/slack/handler.rs`
+- **Agent `slash_command` tool returns real data** — `/models`, `/usage`, `/help`, `/doctor`, `/sessions` now execute and return actual context instead of "TUI-only" errors, enabling the agent to read config, check health, and switch models via `config_manager`
+  - `src/brain/tools/slash_command.rs`, `src/brain/tools/trait.rs`, `src/brain/agent/service/tool_loop.rs`
+- **`service_context` on `ToolExecutionContext`** — Tools can now access `ServiceContext` for DB queries (used by `/usage` and `/sessions`)
+
+### Fixed
+- **Image API key stored under wrong path** — Onboarding wrote to flat `[image]` section in keys.toml instead of `[providers.image.gemini]`, inconsistent with all other provider keys. Added `ImageProviders` struct, merge logic, and legacy fallback
+  - `src/config/types.rs`, `src/tui/onboarding/config.rs`
+- **Channel commands section in README** — Documented `/help`, `/usage`, `/models`, `/stop` for all channels including WhatsApp
+
 ## [0.2.48] - 2026-03-04
 
 ### Added
@@ -1002,6 +1020,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.49]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.49
 [0.2.48]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.48
 [0.2.47]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.47
 [0.2.46]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.46

@@ -7,6 +7,7 @@ use super::DiscordState;
 use crate::brain::agent::AgentService;
 use crate::config::{RespondTo, VoiceConfig};
 use crate::services::SessionService;
+use crate::utils::sanitize::redact_secrets;
 use crate::utils::truncate_str;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -368,6 +369,7 @@ pub(crate) async fn handle_message(
         Ok(response) => {
             // Extract <<IMG:path>> markers — send each as a Discord file attachment.
             let (text_only, img_paths) = crate::utils::extract_img_markers(&response.content);
+            let text_only = redact_secrets(&text_only);
 
             for img_path in img_paths {
                 match tokio::fs::read(&img_path).await {

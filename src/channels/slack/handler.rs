@@ -10,6 +10,7 @@ use super::SlackState;
 use crate::brain::agent::AgentService;
 use crate::config::{RespondTo, VoiceConfig};
 use crate::services::SessionService;
+use crate::utils::sanitize::redact_secrets;
 use crate::utils::truncate_str;
 use slack_morphism::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -571,6 +572,7 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         Ok(response) => {
             // Extract <<IMG:path>> markers — upload each as a Slack file.
             let (text_only, img_paths) = crate::utils::extract_img_markers(&response.content);
+            let text_only = redact_secrets(&text_only);
 
             let token = SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
             let session = client.open_session(&token);
