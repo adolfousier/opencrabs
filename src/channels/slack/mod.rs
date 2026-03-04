@@ -12,6 +12,7 @@ use slack_morphism::prelude::SlackHyperClient;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::{Mutex, oneshot};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 /// Shared Slack state for proactive messaging.
@@ -29,6 +30,8 @@ pub struct SlackState {
     pending_approvals: Mutex<HashMap<String, oneshot::Sender<(bool, bool)>>>,
     /// Allowed user IDs — hot-reloadable at runtime when config changes
     allowed_users: Mutex<HashSet<String>>,
+    /// Per-session cancel tokens for aborting in-flight agent tasks via /stop
+    cancel_tokens: Mutex<HashMap<Uuid, CancellationToken>>,
 }
 
 impl Default for SlackState {
@@ -46,6 +49,7 @@ impl SlackState {
             session_channels: Mutex::new(HashMap::new()),
             pending_approvals: Mutex::new(HashMap::new()),
             allowed_users: Mutex::new(HashSet::new()),
+            cancel_tokens: Mutex::new(HashMap::new()),
         }
     }
 
@@ -125,5 +129,25 @@ impl SlackState {
         } else {
             false
         }
+    }
+
+    /// Store a cancel token for a session (before starting agent call).
+    pub async fn store_cancel_token(&self, session_id: Uuid, token: CancellationToken) {
+        self.cancel_tokens.lock().await.insert(session_id, token);
+    }
+
+    /// Cancel and remove the token for a session. Returns true if a token existed.
+    pub async fn cancel_session(&self, session_id: Uuid) -> bool {
+        if let Some(token) = self.cancel_tokens.lock().await.remove(&session_id) {
+            token.cancel();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Remove the cancel token after the agent call completes (cleanup).
+    pub async fn remove_cancel_token(&self, session_id: Uuid) {
+        self.cancel_tokens.lock().await.remove(&session_id);
     }
 }

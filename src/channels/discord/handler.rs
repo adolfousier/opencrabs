@@ -311,6 +311,16 @@ pub(crate) async fn handle_message(
                 let _ = msg.channel_id.send_message(&ctx.http, builder).await;
                 return;
             }
+            ChannelCommand::Stop => {
+                let cancelled = discord_state.cancel_session(session_id).await;
+                let reply = if cancelled {
+                    "Operation cancelled."
+                } else {
+                    "No operation in progress."
+                };
+                let _ = msg.channel_id.say(&ctx.http, reply).await;
+                return;
+            }
             ChannelCommand::NotACommand => {}
         }
     }
@@ -336,17 +346,25 @@ pub(crate) async fn handle_message(
         .await;
     let approval_cb = make_approval_callback(discord_state.clone());
 
-    match agent
+    let cancel_token = tokio_util::sync::CancellationToken::new();
+    discord_state
+        .store_cancel_token(session_id, cancel_token.clone())
+        .await;
+
+    let result = agent
         .send_message_with_tools_and_callback(
             session_id,
             agent_input,
             None,
-            None,
+            Some(cancel_token),
             Some(approval_cb),
             None,
         )
-        .await
-    {
+        .await;
+
+    discord_state.remove_cancel_token(session_id).await;
+
+    match result {
         Ok(response) => {
             // Extract <<IMG:path>> markers — send each as a Discord file attachment.
             let (text_only, img_paths) = crate::utils::extract_img_markers(&response.content);

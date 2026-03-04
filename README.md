@@ -996,6 +996,22 @@ OpenCrabs includes a built-in tool execution system. The AI can use these tools 
 | `/whisper` | Voice-to-text — speak anywhere, pastes to clipboard |
 | `/cd` | Change working directory (directory picker) |
 | `/settings` or `S` | Open Settings screen (provider, approval, commands, paths) |
+| `/stop` | Abort in-progress agent operation (channels only — TUI uses `Escape` x2) |
+
+### Channel Commands (Telegram, Discord, Slack)
+
+When connected via messaging channels, the following slash commands are available directly in chat. These are the channel equivalents of TUI commands — type them as regular messages.
+
+| Command | Action |
+|---------|--------|
+| `/help` | List available channel commands |
+| `/usage` | Session token & cost stats (current session + all-time breakdown by model) |
+| `/models` | Switch AI model — shows platform-native buttons (Telegram inline keyboard, Discord buttons, Slack Block Kit) |
+| `/stop` | Abort the current agent operation immediately — cancels streaming, tool execution, and any pending approvals. Equivalent to double-Escape in the TUI |
+
+Model switching via `/models` changes the model within the current provider and takes effect immediately (no restart needed). The selection persists to `config.toml`.
+
+Any message that isn't a recognized command is forwarded to the AI agent as normal.
 
 ### Sessions Mode
 

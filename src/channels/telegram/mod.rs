@@ -11,6 +11,7 @@ pub use agent::TelegramAgent;
 use std::collections::{HashMap, HashSet};
 use teloxide::prelude::Bot;
 use tokio::sync::{Mutex, oneshot};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 /// Shared Telegram state for proactive messaging.
@@ -30,6 +31,8 @@ pub struct TelegramState {
     pending_approvals: Mutex<HashMap<String, oneshot::Sender<(bool, bool)>>>,
     /// Allowed user IDs — hot-reloadable at runtime when config changes
     allowed_users: Mutex<HashSet<i64>>,
+    /// Per-session cancel tokens for aborting in-flight agent tasks via /stop
+    cancel_tokens: Mutex<HashMap<Uuid, CancellationToken>>,
 }
 
 impl Default for TelegramState {
@@ -47,6 +50,7 @@ impl TelegramState {
             session_chats: Mutex::new(HashMap::new()),
             pending_approvals: Mutex::new(HashMap::new()),
             allowed_users: Mutex::new(HashSet::new()),
+            cancel_tokens: Mutex::new(HashMap::new()),
         }
     }
 
@@ -134,5 +138,25 @@ impl TelegramState {
     /// Get the number of allowed users.
     pub async fn allowed_user_count(&self) -> usize {
         self.allowed_users.lock().await.len()
+    }
+
+    /// Store a cancel token for a session (before starting agent call).
+    pub async fn store_cancel_token(&self, session_id: Uuid, token: CancellationToken) {
+        self.cancel_tokens.lock().await.insert(session_id, token);
+    }
+
+    /// Cancel and remove the token for a session. Returns true if a token existed.
+    pub async fn cancel_session(&self, session_id: Uuid) -> bool {
+        if let Some(token) = self.cancel_tokens.lock().await.remove(&session_id) {
+            token.cancel();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Remove the cancel token after the agent call completes (cleanup).
+    pub async fn remove_cancel_token(&self, session_id: Uuid) {
+        self.cancel_tokens.lock().await.remove(&session_id);
     }
 }

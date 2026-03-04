@@ -19,6 +19,8 @@ pub enum ChannelCommand {
     Usage(String),
     /// `/models` — model list for interactive switching
     Models(ModelsResponse),
+    /// `/stop` — cancel the running agent task
+    Stop,
     /// Not a recognised command — pass through to agent
     NotACommand,
 }
@@ -43,6 +45,7 @@ pub async fn handle_command(
         "/help" => ChannelCommand::Help(format_help()),
         "/usage" => ChannelCommand::Usage(format_usage(session_id, agent, session_svc).await),
         "/models" => ChannelCommand::Models(format_models(agent).await),
+        "/stop" => ChannelCommand::Stop,
         _ => ChannelCommand::NotACommand,
     }
 }
@@ -53,9 +56,10 @@ fn format_help() -> String {
     [
         "📖 *Available Commands*",
         "",
-        "`/help`  — Show this message",
-        "`/usage` — Session token & cost stats",
+        "`/help`   — Show this message",
+        "`/usage`  — Session token & cost stats",
         "`/models` — Switch AI model",
+        "`/stop`   — Abort current operation",
         "",
         "Any other message is sent to the AI agent.",
     ]

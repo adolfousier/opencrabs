@@ -508,6 +508,22 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                 let _ = session.chat_post_message(&request).await;
                 return;
             }
+            ChannelCommand::Stop => {
+                let cancelled = state.slack_state.cancel_session(session_id).await;
+                let reply = if cancelled {
+                    "Operation cancelled."
+                } else {
+                    "No operation in progress."
+                };
+                let token = SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
+                let session = client.open_session(&token);
+                let request = SlackApiChatPostMessageRequest::new(
+                    SlackChannelId::new(channel_id),
+                    SlackMessageContent::new().with_text(reply.to_string()),
+                );
+                let _ = session.chat_post_message(&request).await;
+                return;
+            }
             ChannelCommand::NotACommand => {}
         }
     }
@@ -531,18 +547,27 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         .await;
     let approval_cb = make_approval_callback(state.slack_state.clone());
 
-    match state
+    let cancel_token = tokio_util::sync::CancellationToken::new();
+    state
+        .slack_state
+        .store_cancel_token(session_id, cancel_token.clone())
+        .await;
+
+    let result = state
         .agent
         .send_message_with_tools_and_callback(
             session_id,
             agent_input,
             None,
-            None,
+            Some(cancel_token),
             Some(approval_cb),
             None,
         )
-        .await
-    {
+        .await;
+
+    state.slack_state.remove_cancel_token(session_id).await;
+
+    match result {
         Ok(response) => {
             // Extract <<IMG:path>> markers — upload each as a Slack file.
             let (text_only, img_paths) = crate::utils::extract_img_markers(&response.content);

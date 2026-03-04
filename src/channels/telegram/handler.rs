@@ -535,6 +535,16 @@ pub(crate) async fn handle_message(
                     .await?;
                 return Ok(());
             }
+            ChannelCommand::Stop => {
+                let cancelled = telegram_state.cancel_session(session_id).await;
+                let reply = if cancelled {
+                    "Operation cancelled."
+                } else {
+                    "No operation in progress."
+                };
+                bot.send_message(msg.chat.id, reply).await?;
+                return Ok(());
+            }
             ChannelCommand::NotACommand => {} // fall through to agent
         }
     }
@@ -676,12 +686,17 @@ pub(crate) async fn handle_message(
     let approval_cb = make_approval_callback(telegram_state.clone());
 
     // ── Agent call ────────────────────────────────────────────────────────────
+    let cancel_token = tokio_util::sync::CancellationToken::new();
+    telegram_state
+        .store_cancel_token(session_id, cancel_token.clone())
+        .await;
+
     let result = agent
         .send_message_with_tools_and_callback(
             session_id,
             agent_input.clone(),
             None,
-            None,
+            Some(cancel_token.clone()),
             Some(approval_cb),
             Some(progress_cb.clone()),
         )
@@ -706,16 +721,22 @@ pub(crate) async fn handle_message(
                         .register_session_chat(new_id, msg.chat.id.0)
                         .await;
                     let approval_cb2 = make_approval_callback(telegram_state.clone());
-                    agent
+                    let cancel_token2 = tokio_util::sync::CancellationToken::new();
+                    telegram_state
+                        .store_cancel_token(new_id, cancel_token2.clone())
+                        .await;
+                    let retry_result = agent
                         .send_message_with_tools_and_callback(
                             new_id,
                             agent_input,
                             None,
-                            None,
+                            Some(cancel_token2),
                             Some(approval_cb2),
                             Some(progress_cb),
                         )
-                        .await
+                        .await;
+                    telegram_state.remove_cancel_token(new_id).await;
+                    retry_result
                 }
                 Err(e2) => {
                     tracing::error!("Telegram: failed to create fallback session: {}", e2);
@@ -728,6 +749,9 @@ pub(crate) async fn handle_message(
     } else {
         result
     };
+
+    // Clean up cancel token
+    telegram_state.remove_cancel_token(session_id).await;
 
     // Stop edit loop — final content will be written below
     edit_cancel.cancel();
