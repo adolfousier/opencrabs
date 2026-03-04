@@ -1461,7 +1461,7 @@ This reliably resolves the issue. A fix is coming in a future release.
 
 ### SocialCrabs (Twitter/X, Instagram, LinkedIn)
 
-SocialCrabs is the social media automation template for OpenCrabs. It provides two methods to interact with social platforms:
+SocialCrabs is the social media automation template for OpenCrabs. It uses **CLI + GraphQL** to interact with social platforms — fast, reliable, no browser needed.
 
 #### Authentication
 
@@ -1474,16 +1474,9 @@ SocialCrabs uses cookie-based authentication. Get your cookies from the browser:
 
 Or run: `node dist/cli.js session login twitter` for interactive login.
 
-#### Method 1: CLI + GraphQL (Recommended)
-The built-in CLI uses Twitter's GraphQL API directly — fast, reliable, no browser needed.
+#### CLI Commands
 
-**What works:**
-- `whoami` - check logged in account
-- `search` - search tweets
-- `home` - timeline
-- `mentions` - your mentions
-- `like`, `reply`, `follow` (via GraphQL)
-- `tweet` (via GraphQL)
+All engagement goes through the CLI using Twitter's GraphQL API:
 
 ```bash
 cd /path/to/socialcrabs
@@ -1496,6 +1489,7 @@ node dist/cli.js x mentions -n 10
 node dist/cli.js x like <tweet-url>
 node dist/cli.js x reply <tweet-url> "your reply"
 node dist/cli.js x tweet "your post"
+node dist/cli.js x follow <username>
 
 # Instagram
 node dist/cli.js ig posts <username> -n 3
@@ -1508,36 +1502,13 @@ node dist/cli.js linkedin like <post-url>
 node dist/cli.js linkedin comment <post-url> "your comment"
 ```
 
-#### Method 2: Playwright Browser Automation
-Uses Playwright to control a real browser — useful when GraphQL APIs are rate-limited or unavailable.
+#### Troubleshooting
 
-**Setup:**
-```bash
-cd /path/to/socialcrabs
-npm install
-playwright install chromium
-```
-
-**Run the HTTP server:**
-```bash
-node dist/server.js
-# API available at http://localhost:3847
-```
-
-**Common Playwright Issues:**
-
-| Error | Cause | Fix |
-|-------|-------|-----|
-| `Target page, context or browser has been closed` | Stale browser process or missing Chromium | `pkill -f chromium; pkill -f pw; rm -rf ~/.cache/ms-playwright/` then `playwright install chromium` |
-| `Tweet input not found` | Twitter UI changed, selectors outdated | Use CLI + GraphQL method instead (recommended) |
-| `Session expired` | Cookies invalid | Run `node dist/cli.js session login twitter` to get fresh cookies |
-
-**Quick Test:**
-```bash
-npx playwright screenshot --browser chromium https://x.com /tmp/test.png
-```
-
-If this works but SocialCrabs doesn't, the issue is likely selector changes in Twitter's UI.
+| Issue | Fix |
+|-------|-----|
+| Session expired | Run `node dist/cli.js session login twitter` |
+| Auth errors | Verify `auth_token` and `ct0` in `sessions/twitter.json` are current |
+| Rate limited | Wait a few minutes, GraphQL has strict limits |
 
 ---
 
