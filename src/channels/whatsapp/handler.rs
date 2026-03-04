@@ -8,6 +8,7 @@ use crate::brain::agent::{ApprovalCallback, ProgressCallback, ProgressEvent};
 use crate::channels::whatsapp::WhatsAppState;
 use crate::config::VoiceConfig;
 use crate::services::SessionService;
+use crate::utils::truncate_str;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -350,7 +351,7 @@ pub(crate) async fn handle_message(
 
     let text_preview = text
         .as_deref()
-        .map(|t| &t[..t.len().min(50)])
+        .map(|t| truncate_str(t, 50))
         .unwrap_or("[image]");
     tracing::info!("WhatsApp: message from {}: {}", phone, text_preview);
 
@@ -366,7 +367,7 @@ pub(crate) async fn handle_message(
             Ok(transcript) => {
                 tracing::info!(
                     "WhatsApp: transcribed voice: {}",
-                    &transcript[..transcript.len().min(80)]
+                    truncate_str(&transcript, 80)
                 );
                 content = transcript;
             }
@@ -597,7 +598,7 @@ pub(crate) async fn handle_message(
                 let body = format!(
                     "🔐 *Tool Approval Required*\n\nTool: `{}`\n```\n{}\n```",
                     tool_info.tool_name,
-                    &input_preview[..input_preview.len().min(600)],
+                    truncate_str(&input_preview, 600),
                 );
 
                 // Send plain text approval request (ButtonsMessage is deprecated

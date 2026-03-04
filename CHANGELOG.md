@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `src/tui/onboarding/wizard.rs`
 - **Model selector filter not working (closes #20)** — Filter text was typed but never applied to the displayed model list
   - `src/tui/render/dialogs.rs`
+- **UTF-8 crash on multi-byte text in all channels** — 12 unsafe byte-index string slices replaced with `truncate_str()`, fixing panic on accented/emoji characters (e.g. Portuguese `õ`)
+  - `src/channels/telegram/handler.rs`, `src/channels/discord/handler.rs`, `src/channels/slack/handler.rs`, `src/channels/whatsapp/handler.rs`
+- **`quick_jump` blocking all step navigation** — Guard was catching internal step changes (field switching, channel sub-steps), not just step completion. Moved guard into `next_step()` so only step completion exits in deep-link mode
+  - `src/tui/onboarding/input.rs`, `src/tui/onboarding/navigation.rs`, `src/tui/onboarding/wizard.rs`
 - **Approval policy not persisting from channels** — Channels only offered "Always (session)" which wrote `auto-session`, downgrading the default YOLO policy. Now properly offers both session and permanent options
 - **Updated README and commands.toml.example** with all `/onboard:*` sub-commands, `/doctor`, `/whisper`
   - `README.md`, `commands.toml.example`

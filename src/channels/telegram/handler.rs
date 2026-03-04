@@ -7,6 +7,7 @@ use super::TelegramState;
 use crate::brain::agent::{AgentService, ProgressCallback, ProgressEvent};
 use crate::config::{RespondTo, VoiceConfig};
 use crate::services::SessionService;
+use crate::utils::truncate_str;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use teloxide::prelude::*;
@@ -236,7 +237,7 @@ pub(crate) async fn handle_message(
             Ok(transcript) => {
                 tracing::info!(
                     "Telegram: transcribed voice: {}",
-                    &transcript[..transcript.len().min(80)]
+                    truncate_str(&transcript, 80)
                 );
                 (transcript, true)
             }
@@ -399,7 +400,7 @@ pub(crate) async fn handle_message(
         if is_voice { "voice" } else { "text" },
         user_id,
         user.first_name,
-        &text[..text.len().min(50)]
+        truncate_str(&text, 50)
     );
 
     // Start typing indicator loop — cancelled via guard on all return paths
@@ -826,7 +827,7 @@ fn tool_context(name: &str, input: &serde_json::Value) -> String {
     };
     match hint {
         Some(h) if !h.is_empty() => {
-            let truncated = &h[..h.len().min(60)];
+            let truncated = truncate_str(&h, 60);
             format!("(`{truncated}`)")
         }
         _ => String::new(),

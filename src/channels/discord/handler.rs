@@ -7,6 +7,7 @@ use super::DiscordState;
 use crate::brain::agent::AgentService;
 use crate::config::{RespondTo, VoiceConfig};
 use crate::services::SessionService;
+use crate::utils::truncate_str;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -120,7 +121,7 @@ pub(crate) async fn handle_message(
             Ok(transcript) => {
                 tracing::info!(
                     "Discord: transcribed voice: {}",
-                    &transcript[..transcript.len().min(80)]
+                    truncate_str(&transcript, 80)
                 );
                 content = transcript;
                 is_voice = true;
@@ -182,7 +183,7 @@ pub(crate) async fn handle_message(
         return;
     }
 
-    let text_preview = &content[..content.len().min(50)];
+    let text_preview = truncate_str(&content, 50);
     tracing::info!(
         "Discord: message from {} ({}): {}",
         msg.author.name,
@@ -414,7 +415,7 @@ pub(crate) fn make_approval_callback(
             let text = format!(
                 "🔐 **Tool Approval Required**\n\nTool: `{}`\nInput:\n```json\n{}\n```",
                 info.tool_name,
-                &input_pretty[..input_pretty.len().min(1800)],
+                truncate_str(&input_pretty, 1800),
             );
 
             let row = CreateActionRow::Buttons(vec![

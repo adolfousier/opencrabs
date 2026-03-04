@@ -122,6 +122,9 @@ pub struct OnboardingWizard {
     /// Opened from chat via slash command (e.g. /doctor, /onboard:provider).
     /// Shows only the target step: no progress dots, no navigation, Enter/Esc exit.
     pub quick_jump: bool,
+    /// Set by `next_step()` when `quick_jump` is true — signals the step is done
+    /// and `handle_key` should return `WizardAction::Cancel`.
+    pub quick_jump_done: bool,
 }
 
 impl Default for OnboardingWizard {
@@ -319,6 +322,7 @@ impl OnboardingWizard {
             focused_field: 0,
             error_message: None,
             quick_jump: false,
+            quick_jump_done: false,
         };
 
         // Load existing brain files from workspace if available

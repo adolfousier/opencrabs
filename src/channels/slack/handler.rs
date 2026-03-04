@@ -10,6 +10,7 @@ use super::SlackState;
 use crate::brain::agent::AgentService;
 use crate::config::{RespondTo, VoiceConfig};
 use crate::services::SessionService;
+use crate::utils::truncate_str;
 use slack_morphism::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock};
@@ -258,7 +259,7 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         text
     };
 
-    let text_preview = &text[..text.len().min(50)];
+    let text_preview = truncate_str(&text, 50);
     tracing::info!("Slack: message from {}: {}", user_id, text_preview);
 
     // Track owner's channel for proactive messaging
@@ -387,7 +388,7 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                         Ok(transcript) => {
                             tracing::info!(
                                 "Slack: transcribed audio: {}",
-                                &transcript[..transcript.len().min(80)]
+                                truncate_str(&transcript, 80)
                             );
                             if content.is_empty() {
                                 content = transcript;
@@ -589,7 +590,7 @@ pub(crate) fn make_approval_callback(
             let text = format!(
                 "🔐 *Tool Approval Required*\n\nTool: `{}`\nInput:\n```\n{}\n```",
                 info.tool_name,
-                &input_pretty[..input_pretty.len().min(1800)],
+                truncate_str(&input_pretty, 1800),
             );
 
             let section = SlackBlock::Section(SlackSectionBlock::new().with_text(

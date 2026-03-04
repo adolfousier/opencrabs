@@ -7,6 +7,13 @@ impl OnboardingWizard {
         self.error_message = None;
         self.focused_field = 0;
 
+        // In quick_jump mode, completing a step exits back to chat
+        // instead of advancing through the wizard flow.
+        if self.quick_jump {
+            self.quick_jump_done = true;
+            return;
+        }
+
         match self.step {
             OnboardingStep::ModeSelect => {
                 self.step = OnboardingStep::Workspace;

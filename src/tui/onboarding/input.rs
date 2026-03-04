@@ -23,7 +23,6 @@ impl OnboardingWizard {
             return WizardAction::None;
         }
 
-        let step_before = self.step;
         let action = match self.step {
             OnboardingStep::ModeSelect => self.handle_mode_select_key(event),
             OnboardingStep::ProviderAuth => self.handle_provider_auth_key(event),
@@ -42,10 +41,8 @@ impl OnboardingWizard {
             OnboardingStep::BrainSetup => self.handle_brain_setup_key(event),
             OnboardingStep::Complete => WizardAction::Complete,
         };
-        // In doctor mode (deep-link to a single step), if the step advanced
-        // via next_step(), exit back to chat instead of navigating further.
-        if self.quick_jump && self.step != step_before {
-            self.step = step_before; // revert navigation
+        if self.quick_jump_done {
+            self.quick_jump_done = false;
             return WizardAction::Cancel;
         }
         action
