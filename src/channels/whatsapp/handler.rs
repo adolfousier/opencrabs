@@ -573,6 +573,12 @@ pub(crate) async fn handle_message(
         content
     };
 
+    // Tell the LLM its text response is automatically delivered to the chat.
+    let agent_input = format!(
+        "[Channel: WhatsApp — your text response is automatically sent to this chat. \
+         There is no whatsapp_send tool. Just reply with text.]\n{agent_input}"
+    );
+
     // Typing indicator — send composing every 5 s while the agent thinks
     let typing_cancel = CancellationToken::new();
     tokio::spawn({

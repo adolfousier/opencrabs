@@ -553,6 +553,14 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         content
     };
 
+    // Tell the LLM its text response is automatically delivered to the chat,
+    // so it should NOT use slack_send for simple text replies.
+    let agent_input = format!(
+        "[Channel: Slack — your text response is automatically sent to this channel. \
+         Do NOT call slack_send to deliver your answer. Only use slack_send for: \
+         sending to a different channel, threads, blocks, reactions, files, or moderation.]\n{agent_input}"
+    );
+
     // Register channel for approval routing, then send with approval callback
     state
         .slack_state
