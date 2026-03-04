@@ -185,6 +185,23 @@ impl EventHandler for Handler {
         if let Some(comp) = interaction.message_component() {
             let custom_id = comp.data.custom_id.as_str();
             tracing::info!("Discord callback received: custom_id={}", custom_id);
+
+            // Model switch callback
+            if let Some(model_name) = custom_id.strip_prefix("model:") {
+                crate::channels::commands::switch_model(&self.agent, model_name);
+                let _ = comp
+                    .create_response(
+                        &ctx.http,
+                        serenity::builder::CreateInteractionResponse::Message(
+                            serenity::builder::CreateInteractionResponseMessage::new()
+                                .content(format!("✅ Model switched to `{}`", model_name))
+                                .ephemeral(true),
+                        ),
+                    )
+                    .await;
+                return;
+            }
+
             let (approved, always, yolo, approval_id) =
                 if let Some(id) = custom_id.strip_prefix("approve:") {
                     (true, false, false, id.to_string())

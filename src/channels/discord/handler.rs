@@ -267,6 +267,54 @@ pub(crate) async fn handle_message(
         }
     };
 
+    // ── Channel commands (/help, /usage, /models) ──────────────────────────
+    {
+        use crate::channels::commands::{self, ChannelCommand};
+        match commands::handle_command(&content, session_id, &agent, &session_svc).await {
+            ChannelCommand::Help(body) | ChannelCommand::Usage(body) => {
+                let _ = msg.channel_id.say(&ctx.http, &body).await;
+                return;
+            }
+            ChannelCommand::Models(resp) => {
+                use serenity::builder::{CreateActionRow, CreateButton, CreateMessage};
+                use serenity::model::application::ButtonStyle;
+                // Max 5 buttons per row, max 5 rows
+                let rows: Vec<CreateActionRow> = resp
+                    .models
+                    .chunks(5)
+                    .take(5)
+                    .map(|chunk| {
+                        CreateActionRow::Buttons(
+                            chunk
+                                .iter()
+                                .map(|m| {
+                                    let label = if *m == resp.current_model {
+                                        format!("✓ {}", m)
+                                    } else {
+                                        m.clone()
+                                    };
+                                    // Discord button labels max 80 chars
+                                    let label = if label.len() > 80 {
+                                        format!("{}…", &label[..79])
+                                    } else {
+                                        label
+                                    };
+                                    CreateButton::new(format!("model:{}", m))
+                                        .label(label)
+                                        .style(ButtonStyle::Secondary)
+                                })
+                                .collect(),
+                        )
+                    })
+                    .collect();
+                let builder = CreateMessage::new().content(&resp.text).components(rows);
+                let _ = msg.channel_id.send_message(&ctx.http, builder).await;
+                return;
+            }
+            ChannelCommand::NotACommand => {}
+        }
+    }
+
     // For non-owner users, prepend sender identity so the agent knows who
     // it's talking to and doesn't assume it's the owner.
     let agent_input = if !is_owner {

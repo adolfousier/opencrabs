@@ -3,6 +3,7 @@
 //! Messaging channel integrations (Telegram, WhatsApp, Discord, Slack) and the
 //! shared factory for creating channel-specific agent services.
 
+pub mod commands;
 mod factory;
 pub mod voice;
 

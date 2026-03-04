@@ -20,7 +20,7 @@ use uuid::Uuid;
 /// Socket Mode interaction callback — handles button clicks for tool approvals.
 pub async fn on_interaction(
     event: SlackInteractionEvent,
-    _client: Arc<SlackHyperClient>,
+    client: Arc<SlackHyperClient>,
     _states: SlackClientEventsUserState,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if let SlackInteractionEvent::BlockActions(block_actions) = event {
@@ -36,6 +36,25 @@ pub async fn on_interaction(
             for action in actions {
                 let action_id = action.action_id.0.as_str();
                 tracing::info!("Slack callback received: action_id={}", action_id);
+
+                // Model switch callback
+                if let Some(model_name) = action_id.strip_prefix("model:") {
+                    crate::channels::commands::switch_model(&state.agent, model_name);
+                    tracing::info!("Slack: model switched to {}", model_name);
+                    if let Some(ref channel) = block_actions.channel {
+                        let token =
+                            SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
+                        let session = client.open_session(&token);
+                        let request = SlackApiChatPostMessageRequest::new(
+                            channel.id.clone(),
+                            SlackMessageContent::new()
+                                .with_text(format!("✅ Model switched to `{}`", model_name)),
+                        );
+                        let _ = session.chat_post_message(&request).await;
+                    }
+                    continue;
+                }
+
                 let (approved, always, yolo, id) =
                     if let Some(id) = action_id.strip_prefix("approve:") {
                         (true, false, false, id.to_string())
@@ -439,6 +458,58 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
     if content.is_empty() {
         tracing::debug!("Slack: no processable content after file handling, ignoring");
         return;
+    }
+
+    // ── Channel commands (/help, /usage, /models) ──────────────────────────
+    {
+        use crate::channels::commands::{self, ChannelCommand};
+        match commands::handle_command(&content, session_id, &state.agent, &state.session_svc).await
+        {
+            ChannelCommand::Help(body) | ChannelCommand::Usage(body) => {
+                let token = SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
+                let session = client.open_session(&token);
+                let request = SlackApiChatPostMessageRequest::new(
+                    SlackChannelId::new(channel_id),
+                    SlackMessageContent::new().with_text(body),
+                );
+                let _ = session.chat_post_message(&request).await;
+                return;
+            }
+            ChannelCommand::Models(resp) => {
+                let token = SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
+                let session = client.open_session(&token);
+                let header = SlackBlock::Section(SlackSectionBlock::new().with_text(
+                    SlackBlockText::MarkDown(SlackBlockMarkDownText::new(resp.text.clone())),
+                ));
+                let buttons: Vec<SlackActionBlockElement> = resp
+                    .models
+                    .iter()
+                    .take(25)
+                    .map(|m| {
+                        let label = if *m == resp.current_model {
+                            format!("✓ {}", m)
+                        } else {
+                            m.clone()
+                        };
+                        SlackActionBlockElement::Button(SlackBlockButtonElement::new(
+                            SlackActionId::new(format!("model:{}", m)),
+                            SlackBlockPlainTextOnly::from(SlackBlockPlainText::new(label)),
+                        ))
+                    })
+                    .collect();
+                let mut blocks = vec![header];
+                for chunk in buttons.chunks(5) {
+                    blocks.push(SlackBlock::Actions(SlackActionsBlock::new(chunk.to_vec())));
+                }
+                let request = SlackApiChatPostMessageRequest::new(
+                    SlackChannelId::new(channel_id),
+                    SlackMessageContent::new().with_blocks(blocks),
+                );
+                let _ = session.chat_post_message(&request).await;
+                return;
+            }
+            ChannelCommand::NotACommand => {}
+        }
     }
 
     // For non-owner users, prepend sender identity so the agent knows who

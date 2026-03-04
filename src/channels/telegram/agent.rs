@@ -193,11 +193,38 @@ impl TelegramAgent {
             // ── Callback query handler (for Approve / Deny inline buttons) ────
             let cb_handler = Update::filter_callback_query().endpoint({
                 let telegram_state = telegram_state.clone();
+                let agent = agent.clone();
                 move |bot: Bot, query: CallbackQuery| {
                     let state = telegram_state.clone();
+                    let agent = agent.clone();
                     async move {
                         if let Some(data) = query.data.as_deref() {
                             tracing::info!("Telegram callback query received: data={}", data);
+
+                            // Model switch callback
+                            if let Some(model_name) = data.strip_prefix("model:") {
+                                crate::channels::commands::switch_model(&agent, model_name);
+                                let _ = bot
+                                    .answer_callback_query(&query.id)
+                                    .text(format!("Switched to {}", model_name))
+                                    .await;
+                                // Update the message to reflect the new selection
+                                if let Some(msg) = &query.message {
+                                    let text =
+                                        format!("✅ Model switched to <code>{}</code>", model_name);
+                                    use teloxide::payloads::EditMessageTextSetters;
+                                    use teloxide::prelude::Requester;
+                                    let _ = bot
+                                        .edit_message_text(msg.chat().id, msg.id(), &text)
+                                        .parse_mode(teloxide::types::ParseMode::Html)
+                                        .reply_markup(
+                                            teloxide::types::InlineKeyboardMarkup::default(),
+                                        )
+                                        .await;
+                                }
+                                return ResponseResult::Ok(());
+                            }
+
                             let (approved, always, yolo, id) =
                                 if let Some(id) = data.strip_prefix("approve:") {
                                     (true, false, false, id.to_string())

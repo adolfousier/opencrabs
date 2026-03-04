@@ -11,7 +11,10 @@ use crate::utils::truncate_str;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use teloxide::prelude::*;
-use teloxide::types::{ChatAction, ChatKind, InputFile, MessageId, ParseMode};
+use teloxide::types::{
+    ChatAction, ChatKind, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, MessageId,
+    ParseMode,
+};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -499,6 +502,43 @@ pub(crate) async fn handle_message(
         .register_session_chat(session_id, msg.chat.id.0)
         .await;
 
+    // ── Channel commands (/help, /usage, /models) ──────────────────────────
+    if !is_voice {
+        use crate::channels::commands::{self, ChannelCommand};
+        match commands::handle_command(&text, session_id, &agent, &session_svc).await {
+            ChannelCommand::Help(body) | ChannelCommand::Usage(body) => {
+                bot.send_message(msg.chat.id, md_to_html(&body))
+                    .parse_mode(ParseMode::Html)
+                    .await?;
+                return Ok(());
+            }
+            ChannelCommand::Models(resp) => {
+                let rows: Vec<Vec<InlineKeyboardButton>> = resp
+                    .models
+                    .iter()
+                    .map(|m| {
+                        let label = if *m == resp.current_model {
+                            format!("✓ {}", m)
+                        } else {
+                            m.clone()
+                        };
+                        vec![InlineKeyboardButton::callback(
+                            label,
+                            format!("model:{}", m),
+                        )]
+                    })
+                    .collect();
+                let keyboard = InlineKeyboardMarkup::new(rows);
+                bot.send_message(msg.chat.id, md_to_html(&resp.text))
+                    .parse_mode(ParseMode::Html)
+                    .reply_markup(keyboard)
+                    .await?;
+                return Ok(());
+            }
+            ChannelCommand::NotACommand => {} // fall through to agent
+        }
+    }
+
     // For non-owner users, prepend sender identity so the agent knows who
     // it's talking to and doesn't assume it's the owner.
     let agent_input = if !is_owner {
@@ -790,6 +830,29 @@ pub(crate) async fn handle_message(
     }
 
     Ok(())
+}
+
+/// Convert simple markdown (`*bold*`, `` `code` ``) to Telegram HTML.
+fn md_to_html(s: &str) -> String {
+    // Replace `code` with <code>code</code>, then *bold* with <b>bold</b>
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '`' {
+            let code: String = chars.by_ref().take_while(|&ch| ch != '`').collect();
+            out.push_str("<code>");
+            out.push_str(&code);
+            out.push_str("</code>");
+        } else if c == '*' {
+            let bold: String = chars.by_ref().take_while(|&ch| ch != '*').collect();
+            out.push_str("<b>");
+            out.push_str(&bold);
+            out.push_str("</b>");
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// Extract a short, meaningful context hint from a tool's input for display.
