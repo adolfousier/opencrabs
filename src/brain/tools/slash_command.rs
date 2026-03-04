@@ -18,10 +18,11 @@ impl Tool for SlashCommandTool {
     }
 
     fn description(&self) -> &str {
-        "Execute any OpenCrabs slash command. Works for built-in commands (/cd, /compact, \
-         /rebuild, /approve, etc.) and user-defined commands from commands.toml. \
-         Use this when the user asks you to run a command or when you need to trigger \
-         a slash command internally. New user-defined commands are available immediately."
+        "Execute any OpenCrabs slash command. Built-in: /help, /models (view/switch), \
+         /usage (session stats), /doctor (health check), /sessions (list), \
+         /approve (get/set policy), /cd (change dir), /compact, /rebuild. \
+         Also executes user-defined commands from commands.toml. \
+         /models with args='model-name' switches the active model."
     }
 
     fn input_schema(&self) -> Value {
@@ -69,14 +70,27 @@ impl Tool for SlashCommandTool {
             )),
             "/rebuild" => self.handle_rebuild(),
             "/approve" => self.handle_approve(args),
-            // TUI-only commands — agent can't open UI dialogs
-            "/models" | "/sessions" | "/help" | "/settings" | "/onboard" | "/usage" => {
-                Ok(ToolResult::success(format!(
-                    "{} is a TUI-only command (opens an interactive dialog). \
-                     Tell the user to type {} in the input box.",
-                    command, command
-                )))
-            }
+            "/help" => self.handle_help(),
+            "/models" => self.handle_models(args),
+            "/usage" => self.handle_usage(context).await,
+            "/doctor" => self.handle_doctor().await,
+            "/sessions" => self.handle_sessions(context).await,
+            "/settings" => Ok(ToolResult::success(
+                "Settings is a TUI screen (press S). Use config_manager read_config \
+                 to view settings programmatically."
+                    .into(),
+            )),
+            "/stop" => Ok(ToolResult::success(
+                "Use the cancel mechanism to stop the current operation. \
+                 On channels, users type /stop. On TUI, press Escape twice."
+                    .into(),
+            )),
+            "/onboard" => Ok(ToolResult::success(
+                "Onboarding wizard is a TUI-only interactive screen. \
+                 However, you can read and modify all settings via config_manager \
+                 (read_config, write_config) and manage API keys directly."
+                    .into(),
+            )),
             "/whisper" => Ok(ToolResult::success(
                 "WhisperCrabs is a TUI-triggered command. Tell the user to type /whisper \
                  in the input box to launch the floating voice-to-text tool."
@@ -184,6 +198,344 @@ impl SlashCommandTool {
         }
     }
 
+    fn handle_help(&self) -> Result<ToolResult> {
+        Ok(ToolResult::success(
+            "Available commands:\n\
+             /help     — Show this list\n\
+             /models   — Show current provider/model + available models (args: model name to switch)\n\
+             /usage    — Session token & cost stats\n\
+             /stop     — Abort current operation (channels: /stop, TUI: Esc×2)\n\
+             /doctor   — Run connection health check on all providers/channels\n\
+             /sessions — List all sessions with stats\n\
+             /approve  — Get or set approval policy (args: approve-only|auto-session|auto-always)\n\
+             /cd       — Change working directory (args: path)\n\
+             /compact  — Compact context (summarize + trim)\n\
+             /rebuild  — Build from source & hot-restart\n\
+             /whisper  — Voice-to-text (TUI only)\n\
+             /onboard  — Setup wizard (TUI only, use config_manager for programmatic changes)\n\n\
+             You can also use config_manager to read/write any config setting directly."
+                .into(),
+        ))
+    }
+
+    fn handle_models(&self, args: &str) -> Result<ToolResult> {
+        let config = match crate::config::Config::load() {
+            Ok(c) => c,
+            Err(e) => return Ok(ToolResult::error(format!("Failed to load config: {}", e))),
+        };
+
+        let model_arg = args.trim();
+
+        // If a model name was provided, switch to it
+        if !model_arg.is_empty() {
+            // Detect active provider section
+            let provider = &config.providers;
+            let section = if provider.anthropic.as_ref().is_some_and(|p| p.enabled) {
+                "providers.anthropic"
+            } else if provider.openai.as_ref().is_some_and(|p| p.enabled) {
+                "providers.openai"
+            } else if provider.gemini.as_ref().is_some_and(|p| p.enabled) {
+                "providers.gemini"
+            } else if provider.openrouter.as_ref().is_some_and(|p| p.enabled) {
+                "providers.openrouter"
+            } else if provider.minimax.as_ref().is_some_and(|p| p.enabled) {
+                "providers.minimax"
+            } else {
+                // Check custom providers
+                let custom = provider
+                    .custom
+                    .as_ref()
+                    .and_then(|m| m.iter().find(|(_, p)| p.enabled))
+                    .map(|(name, _)| name.clone());
+                if let Some(ref name) = custom {
+                    return match crate::config::Config::write_key(
+                        &format!("providers.custom.{}", name),
+                        "default_model",
+                        model_arg,
+                    ) {
+                        Ok(()) => Ok(ToolResult::success(format!(
+                            "Model switched to '{}' on custom provider '{}'.",
+                            model_arg, name
+                        ))),
+                        Err(e) => Ok(ToolResult::error(format!("Failed to write config: {}", e))),
+                    };
+                }
+                return Ok(ToolResult::error(
+                    "No active provider found. Configure one via config_manager or /onboard."
+                        .into(),
+                ));
+            };
+
+            return match crate::config::Config::write_key(section, "default_model", model_arg) {
+                Ok(()) => Ok(ToolResult::success(format!(
+                    "Model switched to '{}'. Config updated at [{section}].default_model. \
+                     The change takes effect on the next request.",
+                    model_arg
+                ))),
+                Err(e) => Ok(ToolResult::error(format!("Failed to write config: {}", e))),
+            };
+        }
+
+        // No args — return current provider/model info
+        let mut lines = Vec::new();
+
+        let providers_info = [
+            ("anthropic", &config.providers.anthropic),
+            ("openai", &config.providers.openai),
+            ("gemini", &config.providers.gemini),
+            ("openrouter", &config.providers.openrouter),
+            ("minimax", &config.providers.minimax),
+        ];
+
+        for (name, provider_opt) in &providers_info {
+            if let Some(provider) = provider_opt {
+                let status = if provider.enabled {
+                    "active"
+                } else {
+                    "disabled"
+                };
+                let model = provider.default_model.as_deref().unwrap_or("(not set)");
+                let models_list = if provider.models.is_empty() {
+                    String::new()
+                } else {
+                    format!("\n    Available: {}", provider.models.join(", "))
+                };
+                lines.push(format!(
+                    "  {} [{}]: model={}{}",
+                    name, status, model, models_list
+                ));
+            }
+        }
+
+        // Custom providers
+        if let Some(ref custom) = config.providers.custom {
+            for (name, provider) in custom {
+                let status = if provider.enabled {
+                    "active"
+                } else {
+                    "disabled"
+                };
+                let model = provider.default_model.as_deref().unwrap_or("(not set)");
+                let models_list = if provider.models.is_empty() {
+                    String::new()
+                } else {
+                    format!("\n    Available: {}", provider.models.join(", "))
+                };
+                lines.push(format!(
+                    "  custom/{} [{}]: model={}{}",
+                    name, status, model, models_list
+                ));
+            }
+        }
+
+        if lines.is_empty() {
+            lines.push("  No providers configured.".to_string());
+        }
+
+        Ok(ToolResult::success(format!(
+            "Providers:\n{}\n\n\
+             To switch model: use slash_command /models with args='<model-name>'\n\
+             To change provider: use config_manager write_config on the provider section.",
+            lines.join("\n")
+        )))
+    }
+
+    async fn handle_usage(&self, context: &ToolExecutionContext) -> Result<ToolResult> {
+        let svc_ctx = match &context.service_context {
+            Some(ctx) => ctx.clone(),
+            None => {
+                return Ok(ToolResult::error(
+                    "Service context not available — cannot query session data.".into(),
+                ));
+            }
+        };
+
+        let session_svc = crate::services::SessionService::new(svc_ctx);
+        let session_id = context.session_id;
+
+        let mut lines = vec!["Usage Stats".to_string(), String::new()];
+
+        // Current session
+        match session_svc.get_session(session_id).await {
+            Ok(Some(session)) => {
+                let name = session.title.as_deref().unwrap_or("Current Session");
+                let model = session.model.as_deref().unwrap_or("(unknown)");
+                lines.push(format!("Current Session: {}", name));
+                lines.push(format!("  Model: {}", model));
+                lines.push(format!("  Tokens: {}", session.token_count));
+                lines.push(format!("  Cost: ${:.4}", session.total_cost));
+            }
+            _ => {
+                lines.push("Current Session: (not found)".to_string());
+            }
+        }
+
+        // All-time stats
+        lines.push(String::new());
+        if let Ok(sessions) = session_svc
+            .list_sessions(crate::db::repository::SessionListOptions::default())
+            .await
+        {
+            let total = sessions.len();
+            let total_tokens: i64 = sessions.iter().map(|s| s.token_count as i64).sum();
+            let total_cost: f64 = sessions.iter().map(|s| s.total_cost).sum();
+            lines.push(format!(
+                "All-Time: {} sessions, {} tokens, ${:.4}",
+                total, total_tokens, total_cost
+            ));
+
+            // Group by model
+            let mut by_model: std::collections::HashMap<String, (usize, i64, f64)> =
+                std::collections::HashMap::new();
+            for s in &sessions {
+                if s.token_count == 0 && s.total_cost == 0.0 {
+                    continue;
+                }
+                let model_key = s
+                    .model
+                    .clone()
+                    .filter(|m| !m.is_empty())
+                    .unwrap_or_else(|| "(unknown)".to_string());
+                let entry = by_model.entry(model_key).or_insert((0, 0, 0.0));
+                entry.0 += 1;
+                entry.1 += s.token_count as i64;
+                entry.2 += s.total_cost;
+            }
+
+            let mut entries: Vec<_> = by_model.iter().collect();
+            entries.sort_by(|a, b| {
+                b.1.2
+                    .partial_cmp(&a.1.2)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            for (model, (count, tokens, cost)) in entries.iter().take(10) {
+                lines.push(format!(
+                    "  {} — {} sessions, {} tokens, ${:.4}",
+                    model, count, tokens, cost
+                ));
+            }
+        }
+
+        Ok(ToolResult::success(lines.join("\n")))
+    }
+
+    async fn handle_doctor(&self) -> Result<ToolResult> {
+        let config = match crate::config::Config::load() {
+            Ok(c) => c,
+            Err(e) => return Ok(ToolResult::error(format!("Failed to load config: {}", e))),
+        };
+
+        let mut lines = vec!["Health Check".to_string(), String::new()];
+
+        // Check providers
+        let providers = [
+            ("anthropic", &config.providers.anthropic),
+            ("openai", &config.providers.openai),
+            ("gemini", &config.providers.gemini),
+            ("openrouter", &config.providers.openrouter),
+            ("minimax", &config.providers.minimax),
+        ];
+
+        lines.push("Providers:".to_string());
+        for (name, provider_opt) in &providers {
+            if let Some(provider) = provider_opt
+                && provider.enabled
+            {
+                let has_key = provider.api_key.as_ref().is_some_and(|k| !k.is_empty());
+                let model = provider.default_model.as_deref().unwrap_or("(not set)");
+                let status = if has_key { "OK" } else { "MISSING API KEY" };
+                lines.push(format!("  {} — {} (model: {})", name, status, model));
+            }
+        }
+
+        if let Some(ref custom) = config.providers.custom {
+            for (name, provider) in custom {
+                if provider.enabled {
+                    let has_key = provider.api_key.as_ref().is_some_and(|k| !k.is_empty());
+                    let model = provider.default_model.as_deref().unwrap_or("(not set)");
+                    let status = if has_key { "OK" } else { "MISSING API KEY" };
+                    lines.push(format!("  custom/{} — {} (model: {})", name, status, model));
+                }
+            }
+        }
+
+        // Check channels
+        lines.push(String::new());
+        lines.push("Channels:".to_string());
+        let ch = &config.channels;
+        if ch.telegram.enabled {
+            lines.push("  telegram — enabled".to_string());
+        }
+        if ch.discord.enabled {
+            lines.push("  discord — enabled".to_string());
+        }
+        if ch.slack.enabled {
+            lines.push("  slack — enabled".to_string());
+        }
+        if ch.whatsapp.enabled {
+            lines.push("  whatsapp — enabled".to_string());
+        }
+        if ch.trello.enabled {
+            lines.push("  trello — enabled".to_string());
+        }
+
+        // Voice config
+        lines.push(String::new());
+        lines.push(format!(
+            "Voice: STT={}, TTS={}",
+            config.voice.stt_enabled, config.voice.tts_enabled
+        ));
+
+        // Approval policy
+        lines.push(format!("Approval: {}", config.agent.approval_policy));
+
+        Ok(ToolResult::success(lines.join("\n")))
+    }
+
+    async fn handle_sessions(&self, context: &ToolExecutionContext) -> Result<ToolResult> {
+        let svc_ctx = match &context.service_context {
+            Some(ctx) => ctx.clone(),
+            None => {
+                return Ok(ToolResult::error(
+                    "Service context not available — cannot query sessions.".into(),
+                ));
+            }
+        };
+
+        let session_svc = crate::services::SessionService::new(svc_ctx);
+        match session_svc
+            .list_sessions(crate::db::repository::SessionListOptions::default())
+            .await
+        {
+            Ok(sessions) => {
+                if sessions.is_empty() {
+                    return Ok(ToolResult::success("No sessions found.".into()));
+                }
+
+                let current_id = context.session_id;
+                let mut lines = vec![format!("{} session(s):\n", sessions.len())];
+                for s in sessions.iter().take(20) {
+                    let title = s.title.as_deref().unwrap_or("(untitled)");
+                    let model = s.model.as_deref().unwrap_or("?");
+                    let marker = if s.id == current_id {
+                        " ← current"
+                    } else {
+                        ""
+                    };
+                    lines.push(format!(
+                        "  {} [{}] — {} tokens, ${:.4}{}",
+                        title, model, s.token_count, s.total_cost, marker
+                    ));
+                }
+                if sessions.len() > 20 {
+                    lines.push(format!("  ... and {} more", sessions.len() - 20));
+                }
+                Ok(ToolResult::success(lines.join("\n")))
+            }
+            Err(e) => Ok(ToolResult::error(format!("Failed to list sessions: {}", e))),
+        }
+    }
+
     fn handle_user_command(&self, command: &str, _args: &str) -> Result<ToolResult> {
         let brain_path = crate::brain::BrainLoader::resolve_path();
         let loader = crate::brain::CommandLoader::from_brain_path(&brain_path);
@@ -214,10 +566,12 @@ impl SlashCommandTool {
                 "/models",
                 "/sessions",
                 "/help",
-                "/onboard",
                 "/usage",
-                "/whisper",
+                "/doctor",
+                "/stop",
                 "/settings",
+                "/onboard",
+                "/whisper",
             ];
             Ok(ToolResult::error(format!(
                 "Unknown command: '{}'. Built-in: {}. User-defined: {}",
@@ -257,7 +611,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_tui_only_command() {
+    async fn test_models_returns_provider_info() {
         let tool = SlashCommandTool;
         let ctx = ToolExecutionContext::new(uuid::Uuid::new_v4());
         let result = tool
@@ -265,7 +619,20 @@ mod tests {
             .await
             .unwrap();
         assert!(result.success);
-        assert!(result.output.contains("TUI-only"));
+        assert!(result.output.contains("Providers"));
+    }
+
+    #[tokio::test]
+    async fn test_help_returns_commands() {
+        let tool = SlashCommandTool;
+        let ctx = ToolExecutionContext::new(uuid::Uuid::new_v4());
+        let result = tool
+            .execute(serde_json::json!({"command": "/help"}), &ctx)
+            .await
+            .unwrap();
+        assert!(result.success);
+        assert!(result.output.contains("/models"));
+        assert!(result.output.contains("/usage"));
     }
 
     #[tokio::test]
