@@ -28,38 +28,44 @@ impl Drop for TypingGuard {
     }
 }
 
+/// Individual tool call — each gets its own Telegram message.
+struct ToolMsg {
+    msg_id: Option<MessageId>,
+    name: String,
+    context: String,
+    /// None = running, Some(true) = success, Some(false) = failed
+    completed: Option<bool>,
+    dirty: bool,
+}
+
 /// Per-message streaming state shared between the progress callback and the edit loop.
-/// Tools are rendered at the top, response text streams at the bottom — matching TUI layout.
+/// Each tool call gets its own message above; response streams in a separate message below.
 struct StreamingState {
+    /// Response/thinking message (always at bottom)
     msg_id: Option<MessageId>,
     /// Reasoning/thinking text — streamed live, cleared before tool calls or response
     thinking: String,
-    /// Tool execution log (⚙️ started, ✅/❌ completed) — always rendered at top
-    tools: String,
-    /// Response text from streaming chunks — always rendered at bottom
+    /// Each tool call = its own individual message
+    tool_msgs: Vec<ToolMsg>,
+    /// Response text from streaming chunks — own message at bottom
     response: String,
     dirty: bool,
-    /// When true, the edit loop deletes the old message and creates a fresh one
-    /// at the bottom of the chat (so it appears below approval messages).
+    /// When true, the edit loop deletes the response message and creates a fresh one
+    /// at the bottom of the chat (so it appears below tool/approval messages).
     recreate: bool,
 }
 
 impl StreamingState {
-    /// Render the combined display text: thinking → tools → response.
-    /// Thinking is ephemeral — shown only while streaming, cleared on transitions.
+    /// Render response message: thinking + response only (tools are separate messages).
     fn render(&self) -> String {
         let mut parts = Vec::new();
         if !self.thinking.is_empty() {
-            // Show last ~800 chars to stay within Telegram message limits
             let t = if self.thinking.len() > 800 {
                 &self.thinking[self.thinking.len() - 800..]
             } else {
                 &self.thinking
             };
             parts.push(format!("💭 _{}_", redact_secrets(t.trim())));
-        }
-        if !self.tools.is_empty() {
-            parts.push(self.tools.trim().to_string());
         }
         if !self.response.is_empty() {
             parts.push(redact_secrets(&self.response));
@@ -579,7 +585,7 @@ pub(crate) async fn handle_message(
     let streaming = Arc::new(Mutex::new(StreamingState {
         msg_id: None,
         thinking: String::new(),
-        tools: String::new(),
+        tool_msgs: Vec::new(),
         response: String::new(),
         dirty: false,
         recreate: false,
@@ -587,7 +593,7 @@ pub(crate) async fn handle_message(
 
     let edit_cancel = CancellationToken::new();
 
-    // Edit loop: posts/edits a message every 1.5 s while response streams in
+    // Edit loop: sends individual tool messages + streams response at bottom
     tokio::spawn({
         let bot = bot.clone();
         let chat = msg.chat.id;
@@ -599,28 +605,59 @@ pub(crate) async fn handle_message(
                     _ = cancel.cancelled() => break,
                     _ = tokio::time::sleep(std::time::Duration::from_millis(1500)) => {
                         let mut s = st.lock().await;
-                        if !s.dirty && !s.recreate { continue; }
-                        // Delete old message and create fresh at bottom when flagged
-                        if s.recreate {
-                            if let Some(old_mid) = s.msg_id.take() {
-                                let _ = bot.delete_message(chat, old_mid).await;
-                            }
-                            s.recreate = false;
-                        }
-                        if s.msg_id.is_none()
-                            && let Ok(m) = bot.send_message(chat, "\u{258b}").await
-                        {
-                            s.msg_id = Some(m.id);
-                        }
-                        if let Some(mid) = s.msg_id {
-                            let html = markdown_to_telegram_html(&s.render());
-                            let display = format!("{}\u{258b}", html); // ▋ cursor
-                            let _ = bot
-                                .edit_message_text(chat, mid, display)
+                        let any_tools_dirty = s.tool_msgs.iter().any(|t| t.dirty);
+                        if !s.dirty && !s.recreate && !any_tools_dirty { continue; }
+
+                        // ── Individual tool messages (each tool = its own message) ──
+                        for tool in s.tool_msgs.iter_mut().filter(|t| t.dirty) {
+                            let line1 = format!("⚙️ **{}**{}", tool.name, tool.context);
+                            let text = match tool.completed {
+                                None => line1,
+                                Some(true) => format!("{}\n✅ **{}**", line1, tool.name),
+                                Some(false) => format!("{}\n❌ **{}**", line1, tool.name),
+                            };
+                            let html = markdown_to_telegram_html(&text);
+                            if let Some(mid) = tool.msg_id {
+                                let _ = bot
+                                    .edit_message_text(chat, mid, &html)
+                                    .parse_mode(ParseMode::Html)
+                                    .await;
+                            } else if let Ok(m) = bot
+                                .send_message(chat, &html)
                                 .parse_mode(ParseMode::Html)
-                                .await;
+                                .await
+                            {
+                                tool.msg_id = Some(m.id);
+                            }
+                            tool.dirty = false;
                         }
-                        s.dirty = false;
+
+                        // ── Response message (thinking + response, always at bottom) ──
+                        if s.dirty || s.recreate {
+                            if s.recreate {
+                                if let Some(old_mid) = s.msg_id.take() {
+                                    let _ = bot.delete_message(chat, old_mid).await;
+                                }
+                                s.recreate = false;
+                            }
+                            let text = s.render();
+                            if !text.is_empty() {
+                                if s.msg_id.is_none()
+                                    && let Ok(m) = bot.send_message(chat, "\u{258b}").await
+                                {
+                                    s.msg_id = Some(m.id);
+                                }
+                                if let Some(mid) = s.msg_id {
+                                    let html = markdown_to_telegram_html(&text);
+                                    let display = format!("{}\u{258b}", html); // ▋ cursor
+                                    let _ = bot
+                                        .edit_message_text(chat, mid, display)
+                                        .parse_mode(ParseMode::Html)
+                                        .await;
+                                }
+                            }
+                            s.dirty = false;
+                        }
                     }
                 }
             }
@@ -654,19 +691,32 @@ pub(crate) async fn handle_message(
                     if let Ok(mut s) = st.try_lock() {
                         s.thinking.clear();
                         let ctx = tool_context(&tool_name, &tool_input);
-                        s.tools.push_str(&format!("\n⚙️ **{tool_name}**{ctx}"));
-                        s.dirty = true;
+                        s.tool_msgs.push(ToolMsg {
+                            msg_id: None,
+                            name: tool_name,
+                            context: ctx,
+                            completed: None,
+                            dirty: true,
+                        });
                     }
                 }
                 ProgressEvent::ToolCompleted {
                     tool_name, success, ..
                 } => {
                     if let Ok(mut s) = st.try_lock() {
-                        let icon = if success { "✅" } else { "❌" };
-                        s.tools.push_str(&format!("\n{icon} {tool_name}"));
-                        s.dirty = true;
-                        // Recreate message at bottom so it appears below approval messages
-                        s.recreate = true;
+                        if let Some(tool) = s
+                            .tool_msgs
+                            .iter_mut()
+                            .rev()
+                            .find(|t| t.name == tool_name && t.completed.is_none())
+                        {
+                            tool.completed = Some(success);
+                            tool.dirty = true;
+                        }
+                        // Push response to bottom so it stays below tool/approval messages
+                        if s.msg_id.is_some() {
+                            s.recreate = true;
+                        }
                     }
                 }
                 ProgressEvent::IntermediateText { text, .. } => {
@@ -782,35 +832,14 @@ pub(crate) async fn handle_message(
                 }
             }
 
-            // Combine tools log (top) + response (bottom) for final message
-            let tools_log = streaming.lock().await.tools.clone();
-            let final_text = if tools_log.is_empty() {
-                text_only
-            } else {
-                format!("{}\n\n{}", tools_log.trim(), text_only.trim())
-            };
-            let html = markdown_to_telegram_html(&final_text);
+            // Tool messages already sent individually — delete streaming placeholder
             if let Some(mid) = streaming_msg_id {
-                if html.is_empty() {
-                    // Images only — delete the streaming placeholder
-                    let _ = bot.delete_message(msg.chat.id, mid).await;
-                } else if html.len() <= 4096 {
-                    // Edit streaming placeholder to final content (no cursor)
-                    let _ = bot
-                        .edit_message_text(msg.chat.id, mid, &html)
-                        .parse_mode(ParseMode::Html)
-                        .await;
-                } else {
-                    // Too long: delete placeholder, send split chunks
-                    let _ = bot.delete_message(msg.chat.id, mid).await;
-                    for chunk in split_message(&html, 4096) {
-                        bot.send_message(msg.chat.id, chunk)
-                            .parse_mode(ParseMode::Html)
-                            .await?;
-                    }
-                }
-            } else if !html.is_empty() {
-                // No streaming started (e.g. tool-only response with no text output)
+                let _ = bot.delete_message(msg.chat.id, mid).await;
+            }
+
+            // Send final response as a clean separate message
+            let html = markdown_to_telegram_html(&text_only);
+            if !html.is_empty() {
                 for chunk in split_message(&html, 4096) {
                     bot.send_message(msg.chat.id, chunk)
                         .parse_mode(ParseMode::Html)
