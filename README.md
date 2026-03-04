@@ -1463,8 +1463,27 @@ This reliably resolves the issue. A fix is coming in a future release.
 
 SocialCrabs is the social media automation template for OpenCrabs. It provides two methods to interact with social platforms:
 
+#### Authentication
+
+SocialCrabs uses cookie-based authentication. Get your cookies from the browser:
+
+1. Open x.com in Chrome/Edge
+2. Open DevTools (F12) → Application → Cookies → x.com
+3. Copy `auth_token` and `ct0` values
+4. Save to `sessions/twitter.json` or use `sync-bird-cookies.ts`
+
+Or run: `node dist/cli.js session login twitter` for interactive login.
+
 #### Method 1: CLI + GraphQL (Recommended)
 The built-in CLI uses Twitter's GraphQL API directly — fast, reliable, no browser needed.
+
+**What works:**
+- `whoami` - check logged in account
+- `search` - search tweets
+- `home` - timeline
+- `mentions` - your mentions
+- `like`, `reply`, `follow` (via GraphQL)
+- `tweet` (via GraphQL)
 
 ```bash
 cd /path/to/socialcrabs
