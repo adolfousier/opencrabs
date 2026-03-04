@@ -414,7 +414,7 @@ mod tests {
 
     #[test]
     fn redact_secrets_multiple_keys() {
-        let text = "OpenAI: sk-proj-AAAAAAAAAAAAAAAAAAAAAA, Groq: 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";
+        let text = "OpenAI: sk-proj-AAAAAAAAAAAAAAAAAAAAAA, Groq: gsk_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
         let out = redact_secrets(text);
         assert!(out.contains("sk-proj-[REDACTED]"), "got: {out}");
         assert!(out.contains("gsk_[REDACTED]"), "got: {out}");
