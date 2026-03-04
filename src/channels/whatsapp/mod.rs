@@ -12,6 +12,8 @@ pub use agent::WhatsAppAgent;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 use whatsapp_rust::client::Client;
 
 /// Approval choices mirroring the TUI's Yes / Always (session) / YOLO (permanent) / No.
@@ -44,6 +46,8 @@ pub struct WhatsAppState {
     /// (text or button tap) is interpreted as Yes/Always/No instead of
     /// being routed to the agent.
     pub pending_approvals: Mutex<HashMap<String, tokio::sync::oneshot::Sender<WaApproval>>>,
+    /// Per-session cancel tokens for aborting in-flight agent tasks via /stop
+    cancel_tokens: Mutex<HashMap<Uuid, CancellationToken>>,
 }
 
 impl Default for WhatsAppState {
@@ -59,6 +63,7 @@ impl WhatsAppState {
             owner_jid: Mutex::new(None),
             allowed_phones: Mutex::new(Vec::new()),
             pending_approvals: Mutex::new(HashMap::new()),
+            cancel_tokens: Mutex::new(HashMap::new()),
         }
     }
 
@@ -123,5 +128,25 @@ impl WhatsAppState {
     /// Check if WhatsApp is currently connected.
     pub async fn is_connected(&self) -> bool {
         self.client.lock().await.is_some()
+    }
+
+    /// Store a cancel token for a session (before starting agent call).
+    pub async fn store_cancel_token(&self, session_id: Uuid, token: CancellationToken) {
+        self.cancel_tokens.lock().await.insert(session_id, token);
+    }
+
+    /// Cancel and remove the token for a session. Returns true if a token existed.
+    pub async fn cancel_session(&self, session_id: Uuid) -> bool {
+        if let Some(token) = self.cancel_tokens.lock().await.remove(&session_id) {
+            token.cancel();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Remove the cancel token after the agent call completes (cleanup).
+    pub async fn remove_cancel_token(&self, session_id: Uuid) {
+        self.cancel_tokens.lock().await.remove(&session_id);
     }
 }

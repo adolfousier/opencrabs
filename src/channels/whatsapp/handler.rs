@@ -496,6 +496,45 @@ pub(crate) async fn handle_message(
         }
     };
 
+    // ── Channel commands (/help, /usage, /models, /stop) ────────────────────
+    {
+        use crate::channels::commands::{self, ChannelCommand};
+        match commands::handle_command(&content, session_id, &agent, &session_svc).await {
+            ChannelCommand::Help(body) | ChannelCommand::Usage(body) => {
+                let reply = waproto::whatsapp::Message {
+                    conversation: Some(body),
+                    ..Default::default()
+                };
+                let _ = client.send_message(info.source.chat.clone(), reply).await;
+                return;
+            }
+            ChannelCommand::Models(resp) => {
+                // WhatsApp has no inline buttons — send plain text list
+                let reply = waproto::whatsapp::Message {
+                    conversation: Some(resp.text),
+                    ..Default::default()
+                };
+                let _ = client.send_message(info.source.chat.clone(), reply).await;
+                return;
+            }
+            ChannelCommand::Stop => {
+                let cancelled = wa_state.cancel_session(session_id).await;
+                let text = if cancelled {
+                    "Operation cancelled."
+                } else {
+                    "No operation in progress."
+                };
+                let reply = waproto::whatsapp::Message {
+                    conversation: Some(text.to_string()),
+                    ..Default::default()
+                };
+                let _ = client.send_message(info.source.chat.clone(), reply).await;
+                return;
+            }
+            ChannelCommand::NotACommand => {}
+        }
+    }
+
     // For non-owner contacts, prepend sender identity so the agent knows who
     // it's talking to and doesn't assume it's the owner messaging themselves.
     let agent_input = if !is_owner {
@@ -672,17 +711,23 @@ pub(crate) async fn handle_message(
     };
 
     // Send to agent with WhatsApp approval + progress callbacks
+    let cancel_token = CancellationToken::new();
+    wa_state
+        .store_cancel_token(session_id, cancel_token.clone())
+        .await;
+
     let result = agent
         .send_message_with_tools_and_callback(
             session_id,
             agent_input,
             None,
-            None,
+            Some(cancel_token),
             Some(approval_cb),
             Some(progress_cb),
         )
         .await;
 
+    wa_state.remove_cancel_token(session_id).await;
     typing_cancel.cancel();
 
     match result {
