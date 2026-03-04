@@ -364,6 +364,14 @@ pub(crate) async fn handle_message(
         content
     };
 
+    // Tell the LLM its text response is automatically delivered to the chat,
+    // so it should NOT use discord_send for simple text replies.
+    let agent_input = format!(
+        "[Channel: Discord — your text response is automatically sent to this channel. \
+         Do NOT call discord_send to deliver your answer. Only use discord_send for: \
+         sending to a different channel, embeds, reactions, threads, files, or moderation.]\n{agent_input}"
+    );
+
     // Register channel for approval routing, then send with approval callback
     discord_state
         .register_session_channel(session_id, msg.channel_id.get())

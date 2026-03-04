@@ -607,6 +607,14 @@ pub(crate) async fn handle_message(
         text
     };
 
+    // Tell the LLM its text response is automatically delivered to the chat,
+    // so it should NOT use telegram_send for simple text replies.
+    let agent_input = format!(
+        "[Channel: Telegram — your text response is automatically sent to this chat. \
+         Do NOT call telegram_send to deliver your answer. Only use telegram_send for: \
+         sending to a different chat_id, media, polls, buttons, reactions, or moderation.]\n{agent_input}"
+    );
+
     // ── Streaming setup ───────────────────────────────────────────────────────
     let streaming = Arc::new(Mutex::new(StreamingState {
         msg_id: None,
@@ -792,7 +800,7 @@ pub(crate) async fn handle_message(
     // If session lookup failed (DB contention on restart), create a fresh session and retry once
     let result = if let Err(ref e) = result {
         let es = e.to_string();
-        if es.contains("Failed to get session") || es.contains("SessionNotFound") {
+        if es.contains("Failed to get session") || es.contains("Session not found") {
             tracing::warn!(
                 "Telegram: session {} lookup failed ({}), creating fresh session and retrying",
                 session_id,
