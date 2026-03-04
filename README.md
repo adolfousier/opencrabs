@@ -1459,6 +1459,69 @@ This reliably resolves the issue. A fix is coming in a future release.
 
 ---
 
+### SocialCrabs (Twitter/X, Instagram, LinkedIn)
+
+SocialCrabs is the social media automation template for OpenCrabs. It provides two methods to interact with social platforms:
+
+#### Method 1: CLI + GraphQL (Recommended)
+The built-in CLI uses Twitter's GraphQL API directly — fast, reliable, no browser needed.
+
+```bash
+cd /path/to/socialcrabs
+
+# Twitter/X
+node dist/cli.js x whoami
+node dist/cli.js x search "query" -n 10
+node dist/cli.js x home -n 20
+node dist/cli.js x mentions -n 10
+node dist/cli.js x like <tweet-url>
+node dist/cli.js x reply <tweet-url> "your reply"
+node dist/cli.js x tweet "your post"
+
+# Instagram
+node dist/cli.js ig posts <username> -n 3
+node dist/cli.js ig like <post-url>
+node dist/cli.js ig comment <post-url> "your comment"
+
+# LinkedIn
+node dist/cli.js linkedin search "AI founder" -n 10
+node dist/cli.js linkedin like <post-url>
+node dist/cli.js linkedin comment <post-url> "your comment"
+```
+
+#### Method 2: Playwright Browser Automation
+Uses Playwright to control a real browser — useful when GraphQL APIs are rate-limited or unavailable.
+
+**Setup:**
+```bash
+cd /path/to/socialcrabs
+npm install
+playwright install chromium
+```
+
+**Run the HTTP server:**
+```bash
+node dist/server.js
+# API available at http://localhost:3847
+```
+
+**Common Playwright Issues:**
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `Target page, context or browser has been closed` | Stale browser process or missing Chromium | `pkill -f chromium; pkill -f pw; rm -rf ~/.cache/ms-playwright/` then `playwright install chromium` |
+| `Tweet input not found` | Twitter UI changed, selectors outdated | Use CLI + GraphQL method instead (recommended) |
+| `Session expired` | Cookies invalid | Run `node dist/cli.js session login twitter` to get fresh cookies |
+
+**Quick Test:**
+```bash
+npx playwright screenshot --browser chromium https://x.com /tmp/test.png
+```
+
+If this works but SocialCrabs doesn't, the issue is likely selector changes in Twitter's UI.
+
+---
+
 ## ⚠️ Disclaimers
 
 ### Development Status
