@@ -317,22 +317,34 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         match *shared {
             Some(id) => id,
             None => {
-                tracing::warn!("Slack: no active TUI session, creating one for owner");
                 drop(shared);
-                match state
-                    .session_svc
-                    .create_session(Some("Chat".to_string()))
-                    .await
-                {
-                    Ok(session) => {
-                        *state.shared_session.lock().await = Some(session.id);
-                        session.id
+                // Resume most recent session from DB (survives daemon restarts)
+                let restored = match state.session_svc.get_most_recent_session().await {
+                    Ok(Some(s)) => {
+                        tracing::info!("Slack: restored most recent session {}", s.id);
+                        Some(s.id)
                     }
-                    Err(e) => {
-                        tracing::error!("Slack: failed to create session: {}", e);
-                        return;
+                    _ => None,
+                };
+                let id = match restored {
+                    Some(id) => id,
+                    None => {
+                        tracing::info!("Slack: no existing session, creating one for owner");
+                        match state
+                            .session_svc
+                            .create_session(Some("Chat".to_string()))
+                            .await
+                        {
+                            Ok(session) => session.id,
+                            Err(e) => {
+                                tracing::error!("Slack: failed to create session: {}", e);
+                                return;
+                            }
+                        }
                     }
-                }
+                };
+                *state.shared_session.lock().await = Some(id);
+                id
             }
         }
     } else {

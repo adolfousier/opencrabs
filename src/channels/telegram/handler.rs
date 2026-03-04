@@ -466,25 +466,40 @@ pub(crate) async fn handle_message(
     }
 
     let session_id = if is_owner {
-        // Owner shares the TUI's current session
+        // Owner shares the TUI's current session (or daemon's persisted session)
         let shared = shared_session.lock().await;
         match *shared {
             Some(id) => id,
             None => {
-                tracing::warn!("Telegram: no active TUI session, creating one for owner");
-                drop(shared); // release lock before async create
-                match session_svc.create_session(Some("Chat".to_string())).await {
-                    Ok(session) => {
-                        *shared_session.lock().await = Some(session.id);
-                        session.id
+                drop(shared); // release lock before async calls
+                // Try to resume the most recent active session from DB (survives daemon restarts)
+                let restored = match session_svc.get_most_recent_session().await {
+                    Ok(Some(session)) => {
+                        tracing::info!(
+                            "Telegram: restored most recent session {} for owner",
+                            session.id
+                        );
+                        Some(session.id)
                     }
-                    Err(e) => {
-                        tracing::error!("Telegram: failed to create session: {}", e);
-                        bot.send_message(msg.chat.id, "Internal error creating session.")
-                            .await?;
-                        return Ok(());
+                    _ => None,
+                };
+                let id = match restored {
+                    Some(id) => id,
+                    None => {
+                        tracing::info!("Telegram: no existing session, creating one for owner");
+                        match session_svc.create_session(Some("Chat".to_string())).await {
+                            Ok(session) => session.id,
+                            Err(e) => {
+                                tracing::error!("Telegram: failed to create session: {}", e);
+                                bot.send_message(msg.chat.id, "Internal error creating session.")
+                                    .await?;
+                                return Ok(());
+                            }
+                        }
                     }
-                }
+                };
+                *shared_session.lock().await = Some(id);
+                id
             }
         }
     } else {
