@@ -196,6 +196,7 @@ impl AgentService {
             );
         tool_context.sudo_callback = self.sudo_callback.clone();
         tool_context.shared_working_directory = Some(Arc::clone(&self.working_directory));
+        tool_context.service_context = Some(self.context.clone());
 
         // Tool execution loop
         let mut iteration = 0;
@@ -725,6 +726,7 @@ impl AgentService {
                                     shared_working_directory: tool_context
                                         .shared_working_directory
                                         .clone(),
+                                    service_context: tool_context.service_context.clone(),
                                 };
 
                                 // Execute the tool with approved context

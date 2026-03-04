@@ -31,6 +31,9 @@ pub struct ToolExecutionContext {
     /// Shared working directory handle — tools can mutate this to change the
     /// working directory at runtime (e.g. config_manager set_working_directory).
     pub shared_working_directory: Option<Arc<std::sync::RwLock<std::path::PathBuf>>>,
+
+    /// Service context — tools use this to create SessionService for /usage stats.
+    pub service_context: Option<crate::services::ServiceContext>,
 }
 
 impl std::fmt::Debug for ToolExecutionContext {
@@ -56,6 +59,7 @@ impl ToolExecutionContext {
             timeout_secs: 120,
             sudo_callback: None,
             shared_working_directory: None,
+            service_context: None,
         }
     }
 
