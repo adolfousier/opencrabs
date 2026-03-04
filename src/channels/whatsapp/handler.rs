@@ -6,7 +6,7 @@
 use crate::brain::agent::AgentService;
 use crate::brain::agent::{ApprovalCallback, ProgressCallback, ProgressEvent};
 use crate::channels::whatsapp::WhatsAppState;
-use crate::config::VoiceConfig;
+use crate::config::Config;
 use crate::services::SessionService;
 use crate::utils::sanitize::redact_secrets;
 use crate::utils::truncate_str;
@@ -233,12 +233,10 @@ pub(crate) async fn handle_message(
     client: Arc<Client>,
     agent: Arc<AgentService>,
     session_svc: SessionService,
-    allowed: Arc<HashSet<String>>,
     extra_sessions: Arc<Mutex<HashMap<String, (Uuid, std::time::Instant)>>>,
-    voice_config: Arc<VoiceConfig>,
     shared_session: Arc<Mutex<Option<Uuid>>>,
-    idle_timeout_hours: Option<f64>,
     wa_state: Arc<WhatsAppState>,
+    config_rx: tokio::sync::watch::Receiver<Config>,
 ) {
     let phone = sender_phone(&info);
     tracing::debug!(
@@ -274,6 +272,22 @@ pub(crate) async fn handle_message(
     // Require at least text, image, audio, or document
     if text.is_none() && !has_img && !has_aud && !has_doc {
         return;
+    }
+
+    // Read latest config from watch channel — single source of truth
+    let cfg = config_rx.borrow().clone();
+    let wa_cfg = &cfg.channels.whatsapp;
+    let allowed: HashSet<String> = wa_cfg.allowed_phones.iter().cloned().collect();
+    let idle_timeout_hours = wa_cfg.session_idle_hours;
+    let mut voice_config = cfg.voice.clone();
+    voice_config.stt_provider = cfg.providers.stt.as_ref().and_then(|s| s.groq.clone());
+    let tts_providers = cfg.providers.tts.as_ref();
+    voice_config.tts_provider = tts_providers.and_then(|t| t.openai.clone());
+    if let Some(ref v) = tts_providers.and_then(|t| t.voice.as_ref()) {
+        voice_config.tts_voice = v.to_string();
+    }
+    if let Some(ref m) = tts_providers.and_then(|t| t.model.as_ref()) {
+        voice_config.tts_model = m.to_string();
     }
 
     // SECURITY: When allowed_phones is configured, only respond to the owner.

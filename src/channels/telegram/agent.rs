@@ -5,9 +5,9 @@
 use super::TelegramState;
 use super::handler::handle_message;
 use crate::brain::agent::AgentService;
-use crate::config::{RespondTo, VoiceConfig};
+use crate::config::Config;
 use crate::services::{ServiceContext, SessionService};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use teloxide::prelude::*;
 use tokio::sync::Mutex;
@@ -17,45 +17,26 @@ use uuid::Uuid;
 pub struct TelegramAgent {
     agent_service: Arc<AgentService>,
     session_service: SessionService,
-    allowed_users: HashSet<i64>,
-    voice_config: VoiceConfig,
-    openai_api_key: Option<String>,
     /// Shared session ID from the TUI — owner user shares the terminal session
     shared_session_id: Arc<Mutex<Option<Uuid>>>,
     telegram_state: Arc<TelegramState>,
-    respond_to: RespondTo,
-    allowed_channels: HashSet<String>,
-    idle_timeout_hours: Option<f64>,
+    config_rx: tokio::sync::watch::Receiver<Config>,
 }
 
 impl TelegramAgent {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         agent_service: Arc<AgentService>,
         service_context: ServiceContext,
-        allowed_users: Vec<String>,
-        voice_config: VoiceConfig,
-        openai_api_key: Option<String>,
         shared_session_id: Arc<Mutex<Option<Uuid>>>,
         telegram_state: Arc<TelegramState>,
-        respond_to: RespondTo,
-        allowed_channels: Vec<String>,
-        idle_timeout_hours: Option<f64>,
+        config_rx: tokio::sync::watch::Receiver<Config>,
     ) -> Self {
         Self {
             agent_service,
             session_service: SessionService::new(service_context),
-            allowed_users: allowed_users
-                .into_iter()
-                .filter_map(|s| s.parse().ok())
-                .collect(),
-            voice_config,
-            openai_api_key,
             shared_session_id,
             telegram_state,
-            respond_to,
-            allowed_channels: allowed_channels.into_iter().collect(),
-            idle_timeout_hours,
+            config_rx,
         }
     }
 
@@ -92,16 +73,13 @@ impl TelegramAgent {
                 return;
             }
 
-            // Seed the allowlist into shared state so it can be hot-reloaded later
-            self.telegram_state
-                .update_allowed_users(self.allowed_users.iter().copied().collect())
-                .await;
-
+            // Read initial config for logging
+            let cfg = self.config_rx.borrow().clone();
             tracing::info!(
                 "Starting Telegram bot with {} allowed user(s), STT={}, TTS={}",
-                self.allowed_users.len(),
-                self.voice_config.stt_enabled,
-                self.voice_config.tts_enabled,
+                cfg.channels.telegram.allowed_users.len(),
+                cfg.voice.stt_enabled,
+                cfg.voice.tts_enabled,
             );
 
             let bot = Bot::new(token.clone());
@@ -127,41 +105,28 @@ impl TelegramAgent {
                 Arc::new(Mutex::new(HashMap::new()));
             let agent = self.agent_service.clone();
             let session_svc = self.session_service.clone();
-            let allowed = Arc::new(self.allowed_users);
-            let voice_config = Arc::new(self.voice_config);
-            let openai_key = Arc::new(self.openai_api_key);
             let bot_token = Arc::new(token);
             let shared_session = self.shared_session_id.clone();
             let telegram_state = self.telegram_state.clone();
-            let respond_to = Arc::new(self.respond_to);
-            let allowed_channels: Arc<HashSet<String>> = Arc::new(self.allowed_channels);
-            let idle_timeout_hours = self.idle_timeout_hours;
+            let config_rx = self.config_rx.clone();
 
             // ── Message handler ───────────────────────────────────────────────
             let msg_handler = Update::filter_message().endpoint({
                 let agent = agent.clone();
                 let session_svc = session_svc.clone();
-                let allowed = allowed.clone();
                 let extra_sessions = extra_sessions.clone();
-                let voice_config = voice_config.clone();
-                let openai_key = openai_key.clone();
                 let bot_token = bot_token.clone();
                 let shared_session = shared_session.clone();
                 let telegram_state = telegram_state.clone();
-                let respond_to = respond_to.clone();
-                let allowed_channels = allowed_channels.clone();
+                let config_rx = config_rx.clone();
                 move |bot: Bot, msg: Message| {
                     let agent = agent.clone();
                     let session_svc = session_svc.clone();
-                    let allowed = allowed.clone();
                     let extra_sessions = extra_sessions.clone();
-                    let voice_config = voice_config.clone();
-                    let openai_key = openai_key.clone();
                     let bot_token = bot_token.clone();
                     let shared_session = shared_session.clone();
                     let telegram_state = telegram_state.clone();
-                    let respond_to = respond_to.clone();
-                    let allowed_channels = allowed_channels.clone();
+                    let config_rx = config_rx.clone();
                     async move {
                         // Spawn in background so the dispatcher is free to
                         // process callback queries (approval button clicks)
@@ -172,16 +137,11 @@ impl TelegramAgent {
                                 msg,
                                 agent,
                                 session_svc,
-                                allowed,
                                 extra_sessions,
-                                voice_config,
-                                openai_key,
                                 bot_token,
                                 shared_session,
                                 telegram_state,
-                                &respond_to,
-                                &allowed_channels,
-                                idle_timeout_hours,
+                                config_rx,
                             )
                             .await;
                         });

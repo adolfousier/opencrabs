@@ -353,14 +353,14 @@ pub struct IMessageConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceConfig {
     /// Enable speech-to-text transcription
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub stt_enabled: bool,
 
     /// Enable text-to-speech replies
     #[serde(default)]
     pub tts_enabled: bool,
 
-    /// TTS voice name (default: "ash")
+    /// TTS voice name (default: "echo")
     #[serde(default = "default_tts_voice")]
     pub tts_voice: String,
 
@@ -379,11 +379,8 @@ pub struct VoiceConfig {
     pub tts_provider: Option<ProviderConfig>,
 }
 
-fn default_true() -> bool {
-    true
-}
 fn default_tts_voice() -> String {
-    "ash".to_string()
+    "echo".to_string()
 }
 fn default_tts_model() -> String {
     "gpt-4o-mini-tts".to_string()
@@ -392,7 +389,7 @@ fn default_tts_model() -> String {
 impl Default for VoiceConfig {
     fn default() -> Self {
         Self {
-            stt_enabled: true,
+            stt_enabled: false,
             tts_enabled: false,
             tts_voice: default_tts_voice(),
             tts_model: default_tts_model(),
@@ -683,6 +680,14 @@ pub struct TtsProviders {
     /// OpenAI TTS configuration
     #[serde(default)]
     pub openai: Option<ProviderConfig>,
+
+    /// TTS voice name — set under [providers.tts] (e.g. voice = "echo")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub voice: Option<String>,
+
+    /// TTS model — set under [providers.tts] (e.g. model = "gpt-4o-mini-tts")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 /// Web Search provider configurations

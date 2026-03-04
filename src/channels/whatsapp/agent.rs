@@ -5,9 +5,8 @@
 use super::WhatsAppState;
 use super::handler;
 use crate::brain::agent::AgentService;
-use crate::config::VoiceConfig;
+use crate::config::Config;
 use crate::services::{ServiceContext, SessionService};
-use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -22,31 +21,25 @@ use whatsapp_rust_ureq_http_client::UreqHttpClient;
 pub struct WhatsAppAgent {
     agent_service: Arc<AgentService>,
     session_service: SessionService,
-    allowed_phones: Vec<String>,
-    voice_config: VoiceConfig,
     shared_session_id: Arc<Mutex<Option<Uuid>>>,
     whatsapp_state: Arc<WhatsAppState>,
-    idle_timeout_hours: Option<f64>,
+    config_rx: tokio::sync::watch::Receiver<Config>,
 }
 
 impl WhatsAppAgent {
     pub fn new(
         agent_service: Arc<AgentService>,
         service_context: ServiceContext,
-        allowed_phones: Vec<String>,
-        voice_config: VoiceConfig,
         shared_session_id: Arc<Mutex<Option<Uuid>>>,
         whatsapp_state: Arc<WhatsAppState>,
-        idle_timeout_hours: Option<f64>,
+        config_rx: tokio::sync::watch::Receiver<Config>,
     ) -> Self {
         Self {
             agent_service,
             session_service: SessionService::new(service_context),
-            allowed_phones,
-            voice_config,
             shared_session_id,
             whatsapp_state,
-            idle_timeout_hours,
+            config_rx,
         }
     }
 
@@ -88,35 +81,31 @@ impl WhatsAppAgent {
                 }
             }
 
+            let cfg = self.config_rx.borrow().clone();
             tracing::info!(
                 "WhatsApp agent running (STT={}, TTS={})",
-                self.voice_config.stt_enabled,
-                self.voice_config.tts_enabled,
+                cfg.voice.stt_enabled,
+                cfg.voice.tts_enabled,
             );
 
             // Derive owner JID from first allowed phone (for proactive messaging)
-            let owner_jid = self
+            let owner_jid = cfg
+                .channels
+                .whatsapp
                 .allowed_phones
                 .first()
                 .map(|p| format!("{}@s.whatsapp.net", p.trim_start_matches('+')));
 
             let agent = self.agent_service.clone();
             let session_svc = self.session_service.clone();
-            let allowed: Arc<HashSet<String>> =
-                Arc::new(self.allowed_phones.iter().cloned().collect());
-            let voice_config = Arc::new(self.voice_config);
             let shared_session = self.shared_session_id.clone();
             let wa_state = self.whatsapp_state.clone();
+            let config_rx = self.config_rx.clone();
+            let extra_sessions: Arc<
+                Mutex<std::collections::HashMap<String, (Uuid, std::time::Instant)>>,
+            > = Arc::new(Mutex::new(std::collections::HashMap::new()));
 
-            // Store allowed phones in state so the whatsapp_send tool can
-            // enforce the outgoing allowlist (mirrors incoming filter).
-            wa_state
-                .set_allowed_phones(self.allowed_phones.clone())
-                .await;
             let owner_jid_clone = owner_jid.clone();
-            let idle_timeout_hours = self.idle_timeout_hours;
-            let extra_sessions: Arc<Mutex<HashMap<String, (Uuid, std::time::Instant)>>> =
-                Arc::new(Mutex::new(HashMap::new()));
 
             let bot_result = Bot::builder()
                 .with_backend(backend)
@@ -125,12 +114,11 @@ impl WhatsAppAgent {
                 .on_event(move |event, client| {
                     let agent = agent.clone();
                     let session_svc = session_svc.clone();
-                    let allowed = allowed.clone();
                     let extra_sessions = extra_sessions.clone();
-                    let voice_config = voice_config.clone();
                     let shared_session = shared_session.clone();
                     let wa_state = wa_state.clone();
                     let owner_jid = owner_jid_clone.clone();
+                    let config_rx = config_rx.clone();
                     async move {
                         match event {
                             Event::PairingQrCode { ref code, .. } => {
@@ -157,12 +145,10 @@ impl WhatsAppAgent {
                                     client,
                                     agent,
                                     session_svc,
-                                    allowed,
                                     extra_sessions,
-                                    voice_config,
                                     shared_session,
-                                    idle_timeout_hours,
                                     wa_state.clone(),
+                                    config_rx,
                                 )
                                 .await;
                             }

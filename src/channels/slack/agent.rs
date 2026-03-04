@@ -6,10 +6,9 @@
 use super::SlackState;
 use super::handler;
 use crate::brain::agent::AgentService;
-use crate::config::{RespondTo, VoiceConfig};
+use crate::config::Config;
 use crate::services::{ServiceContext, SessionService};
 use slack_morphism::prelude::*;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -18,38 +17,25 @@ use uuid::Uuid;
 pub struct SlackAgent {
     agent_service: Arc<AgentService>,
     session_service: SessionService,
-    allowed_users: Vec<String>,
     shared_session_id: Arc<Mutex<Option<Uuid>>>,
     slack_state: Arc<SlackState>,
-    respond_to: RespondTo,
-    allowed_channels: Vec<String>,
-    idle_timeout_hours: Option<f64>,
-    voice_config: VoiceConfig,
+    config_rx: tokio::sync::watch::Receiver<Config>,
 }
 
 impl SlackAgent {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         agent_service: Arc<AgentService>,
         service_context: ServiceContext,
-        allowed_users: Vec<String>,
         shared_session_id: Arc<Mutex<Option<Uuid>>>,
         slack_state: Arc<SlackState>,
-        respond_to: RespondTo,
-        allowed_channels: Vec<String>,
-        idle_timeout_hours: Option<f64>,
-        voice_config: VoiceConfig,
+        config_rx: tokio::sync::watch::Receiver<Config>,
     ) -> Self {
         Self {
             agent_service,
             session_service: SessionService::new(service_context),
-            allowed_users,
             shared_session_id,
             slack_state,
-            respond_to,
-            allowed_channels,
-            idle_timeout_hours,
-            voice_config,
+            config_rx,
         }
     }
 
@@ -66,9 +52,10 @@ impl SlackAgent {
                 return;
             }
 
+            let cfg = self.config_rx.borrow().clone();
             tracing::info!(
                 "Starting Slack bot via Socket Mode with {} allowed user(s)",
-                self.allowed_users.len(),
+                cfg.channels.slack.allowed_users.len(),
             );
 
             let client = match SlackClientHyperConnector::new() {
@@ -108,16 +95,12 @@ impl SlackAgent {
             let handler_state = handler::HandlerState {
                 agent: self.agent_service,
                 session_svc: self.session_service,
-                allowed: Arc::new(self.allowed_users.into_iter().collect()),
-                extra_sessions: Arc::new(Mutex::new(HashMap::new())),
+                extra_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
                 shared_session: self.shared_session_id,
                 slack_state: self.slack_state.clone(),
                 bot_token: bot_token.clone(),
-                respond_to: self.respond_to,
-                allowed_channels: Arc::new(self.allowed_channels.into_iter().collect()),
                 bot_user_id,
-                idle_timeout_hours: self.idle_timeout_hours,
-                voice_config: Arc::new(self.voice_config),
+                config_rx: self.config_rx,
             };
             handler::HANDLER_STATE
                 .set(Arc::new(handler_state))

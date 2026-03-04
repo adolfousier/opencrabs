@@ -9,7 +9,7 @@ pub(crate) mod handler;
 pub use agent::SlackAgent;
 
 use slack_morphism::prelude::SlackHyperClient;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, oneshot};
 use tokio_util::sync::CancellationToken;
@@ -28,8 +28,6 @@ pub struct SlackState {
     session_channels: Mutex<HashMap<Uuid, String>>,
     /// Pending approval channels: approval_id → oneshot sender of (approved, always)
     pending_approvals: Mutex<HashMap<String, oneshot::Sender<(bool, bool)>>>,
-    /// Allowed user IDs — hot-reloadable at runtime when config changes
-    allowed_users: Mutex<HashSet<String>>,
     /// Per-session cancel tokens for aborting in-flight agent tasks via /stop
     cancel_tokens: Mutex<HashMap<Uuid, CancellationToken>>,
 }
@@ -48,20 +46,8 @@ impl SlackState {
             owner_channel_id: Mutex::new(None),
             session_channels: Mutex::new(HashMap::new()),
             pending_approvals: Mutex::new(HashMap::new()),
-            allowed_users: Mutex::new(HashSet::new()),
             cancel_tokens: Mutex::new(HashMap::new()),
         }
-    }
-
-    /// Replace the allowed users set (called on config reload).
-    pub async fn update_allowed_users(&self, users: Vec<String>) {
-        *self.allowed_users.lock().await = users.into_iter().collect();
-    }
-
-    /// Check if a user ID is in the allowed set.
-    pub async fn is_user_allowed(&self, user_id: &str) -> bool {
-        let set = self.allowed_users.lock().await;
-        set.is_empty() || set.contains(user_id)
     }
 
     /// Store the connected client, bot token, and optionally the owner's channel.

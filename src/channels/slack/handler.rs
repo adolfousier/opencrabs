@@ -8,7 +8,7 @@
 
 use super::SlackState;
 use crate::brain::agent::AgentService;
-use crate::config::{RespondTo, VoiceConfig};
+use crate::config::{Config, RespondTo};
 use crate::services::SessionService;
 use crate::utils::sanitize::redact_secrets;
 use crate::utils::truncate_str;
@@ -102,16 +102,12 @@ pub static HANDLER_STATE: OnceLock<Arc<HandlerState>> = OnceLock::new();
 pub struct HandlerState {
     pub agent: Arc<AgentService>,
     pub session_svc: SessionService,
-    pub allowed: Arc<HashSet<String>>,
     pub extra_sessions: Arc<Mutex<HashMap<String, (Uuid, std::time::Instant)>>>,
     pub shared_session: Arc<Mutex<Option<Uuid>>>,
     pub slack_state: Arc<SlackState>,
     pub bot_token: String,
-    pub respond_to: RespondTo,
-    pub allowed_channels: Arc<HashSet<String>>,
     pub bot_user_id: Option<String>,
-    pub idle_timeout_hours: Option<f64>,
-    pub voice_config: Arc<VoiceConfig>,
+    pub config_rx: tokio::sync::watch::Receiver<Config>,
 }
 
 /// Split a message into chunks that fit Slack's limit (conservative 3000 chars).
@@ -231,8 +227,26 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         return;
     }
 
+    // Read latest config from watch channel — single source of truth
+    let cfg = state.config_rx.borrow().clone();
+    let sl_cfg = &cfg.channels.slack;
+    let allowed: HashSet<String> = sl_cfg.allowed_users.iter().cloned().collect();
+    let respond_to = &sl_cfg.respond_to;
+    let allowed_channels: HashSet<String> = sl_cfg.allowed_channels.iter().cloned().collect();
+    let idle_timeout_hours = sl_cfg.session_idle_hours;
+    let mut voice_config = cfg.voice.clone();
+    voice_config.stt_provider = cfg.providers.stt.as_ref().and_then(|s| s.groq.clone());
+    let tts_providers = cfg.providers.tts.as_ref();
+    voice_config.tts_provider = tts_providers.and_then(|t| t.openai.clone());
+    if let Some(ref v) = tts_providers.and_then(|t| t.voice.as_ref()) {
+        voice_config.tts_voice = v.to_string();
+    }
+    if let Some(ref m) = tts_providers.and_then(|t| t.model.as_ref()) {
+        voice_config.tts_model = m.to_string();
+    }
+
     // Allowlist check — if allowed list is empty, accept all
-    if !state.allowed.is_empty() && !state.allowed.contains(&user_id) {
+    if !allowed.is_empty() && !allowed.contains(&user_id) {
         tracing::debug!("Slack: ignoring message from non-allowed user {}", user_id);
         return;
     }
@@ -241,7 +255,7 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
     let is_dm = channel_id.starts_with('D');
     if !is_dm {
         // Check allowed_channels (empty = all channels allowed)
-        if !state.allowed_channels.is_empty() && !state.allowed_channels.contains(&channel_id) {
+        if !allowed_channels.is_empty() && !allowed_channels.contains(&channel_id) {
             tracing::debug!(
                 "Slack: ignoring message in non-allowed channel {}",
                 channel_id
@@ -249,7 +263,7 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
             return;
         }
 
-        match state.respond_to {
+        match respond_to {
             RespondTo::DmOnly => {
                 tracing::debug!("Slack: respond_to=dm_only, ignoring channel message");
                 return;
@@ -269,7 +283,7 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
     }
 
     // Strip <@BOT_ID> from text when responding to a mention
-    let text = if !is_dm && state.respond_to == RespondTo::Mention {
+    let text = if !is_dm && *respond_to == RespondTo::Mention {
         if let Some(ref bid) = state.bot_user_id {
             text.replace(&format!("<@{}>", bid), "").trim().to_string()
         } else {
@@ -283,9 +297,8 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
     tracing::info!("Slack: message from {}: {}", user_id, text_preview);
 
     // Track owner's channel for proactive messaging
-    let is_owner = state.allowed.is_empty()
-        || state
-            .allowed
+    let is_owner = allowed.is_empty()
+        || allowed
             .iter()
             .next()
             .map(|a| *a == user_id)
@@ -325,8 +338,7 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
     } else {
         let mut map = state.extra_sessions.lock().await;
         if let Some((old_id, last_activity)) = map.get(&user_id).copied() {
-            if state
-                .idle_timeout_hours
+            if idle_timeout_hours
                 .is_some_and(|h| last_activity.elapsed().as_secs() > (h * 3600.0) as u64)
             {
                 let _ = state.session_svc.archive_session(old_id).await;
@@ -400,8 +412,8 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
 
             // Audio → STT
             if mime.starts_with("audio/") {
-                if state.voice_config.stt_enabled
-                    && let Some(ref stt_provider) = state.voice_config.stt_provider
+                if voice_config.stt_enabled
+                    && let Some(ref stt_provider) = voice_config.stt_provider
                     && let Some(ref stt_key) = stt_provider.api_key
                 {
                     match crate::channels::voice::transcribe_audio(dl_bytes, stt_key).await {

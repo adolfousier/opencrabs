@@ -6,7 +6,7 @@
 use crate::brain::agent::AgentService;
 use crate::brain::provider::Provider;
 use crate::brain::tools::ToolRegistry;
-use crate::config::VoiceConfig;
+use crate::config::{Config, VoiceConfig};
 use crate::services::ServiceContext;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
@@ -28,8 +28,7 @@ pub struct ChannelFactory {
     working_directory: PathBuf,
     brain_path: PathBuf,
     shared_session_id: Arc<Mutex<Option<Uuid>>>,
-    voice_config: VoiceConfig,
-    openai_tts_key: Option<String>,
+    config_rx: tokio::sync::watch::Receiver<Config>,
     session_updated_tx: OnceLock<tokio::sync::mpsc::UnboundedSender<Uuid>>,
 }
 
@@ -42,8 +41,7 @@ impl ChannelFactory {
         working_directory: PathBuf,
         brain_path: PathBuf,
         shared_session_id: Arc<Mutex<Option<Uuid>>>,
-        voice_config: VoiceConfig,
-        openai_tts_key: Option<String>,
+        config_rx: tokio::sync::watch::Receiver<Config>,
     ) -> Self {
         Self {
             provider,
@@ -53,8 +51,7 @@ impl ChannelFactory {
             working_directory,
             brain_path,
             shared_session_id,
-            voice_config,
-            openai_tts_key,
+            config_rx,
             session_updated_tx: OnceLock::new(),
         }
     }
@@ -100,11 +97,35 @@ impl ChannelFactory {
         self.service_context.clone()
     }
 
-    pub fn voice_config(&self) -> &VoiceConfig {
-        &self.voice_config
+    /// Get a clone of the config watch receiver for channels to subscribe to.
+    pub fn config_rx(&self) -> tokio::sync::watch::Receiver<Config> {
+        self.config_rx.clone()
     }
 
+    /// Read the current voice config from the watch channel (always latest).
+    /// Provider-level `voice` and `model` fields override the [voice] section defaults.
+    pub fn voice_config(&self) -> VoiceConfig {
+        let cfg = self.config_rx.borrow();
+        let mut vc = cfg.voice.clone();
+        vc.stt_provider = cfg.providers.stt.as_ref().and_then(|s| s.groq.clone());
+        let tts_providers = cfg.providers.tts.as_ref();
+        vc.tts_provider = tts_providers.and_then(|t| t.openai.clone());
+        if let Some(ref v) = tts_providers.and_then(|t| t.voice.as_ref()) {
+            vc.tts_voice = v.to_string();
+        }
+        if let Some(ref m) = tts_providers.and_then(|t| t.model.as_ref()) {
+            vc.tts_model = m.to_string();
+        }
+        vc
+    }
+
+    /// Read the current OpenAI TTS key from the watch channel (always latest).
     pub fn openai_tts_key(&self) -> Option<String> {
-        self.openai_tts_key.clone()
+        let cfg = self.config_rx.borrow();
+        cfg.providers
+            .tts
+            .as_ref()
+            .and_then(|t| t.openai.as_ref())
+            .and_then(|p| p.api_key.clone())
     }
 }

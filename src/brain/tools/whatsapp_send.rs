@@ -6,6 +6,7 @@
 use super::error::Result;
 use super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
 use crate::channels::whatsapp::WhatsAppState;
+use crate::config::Config;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
@@ -13,11 +14,18 @@ use std::sync::Arc;
 /// Tool that sends a WhatsApp message to the owner or a specific phone number.
 pub struct WhatsAppSendTool {
     whatsapp_state: Arc<WhatsAppState>,
+    config_rx: tokio::sync::watch::Receiver<Config>,
 }
 
 impl WhatsAppSendTool {
-    pub fn new(whatsapp_state: Arc<WhatsAppState>) -> Self {
-        Self { whatsapp_state }
+    pub fn new(
+        whatsapp_state: Arc<WhatsAppState>,
+        config_rx: tokio::sync::watch::Receiver<Config>,
+    ) -> Self {
+        Self {
+            whatsapp_state,
+            config_rx,
+        }
     }
 }
 
@@ -78,7 +86,13 @@ impl Tool for WhatsAppSendTool {
         // Resolve target JID: explicit phone or owner
         let jid_str = if let Some(phone) = input.get("phone").and_then(|v| v.as_str()) {
             // Hard policy: only allowlisted contacts may receive outgoing messages.
-            if !self.whatsapp_state.is_phone_allowed(phone).await {
+            let allowed = &self.config_rx.borrow().channels.whatsapp.allowed_phones;
+            let normalized = phone.trim_start_matches('+');
+            let phone_allowed = allowed.is_empty()
+                || allowed
+                    .iter()
+                    .any(|p| p.trim_start_matches('+') == normalized);
+            if !phone_allowed {
                 return Ok(ToolResult::error(format!(
                     "Sending to {} is not permitted — this number is not in the \
                      allowed_users config. Only allowlisted contacts may receive messages.",

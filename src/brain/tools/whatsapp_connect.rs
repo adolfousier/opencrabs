@@ -12,7 +12,7 @@ use crate::channels::whatsapp::handler;
 use crate::config::opencrabs_home;
 use async_trait::async_trait;
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -354,8 +354,12 @@ impl Tool for WhatsAppConnectTool {
         let factory = self.channel_factory.clone();
         let agent = factory.create_agent_service();
         let session_svc = crate::services::SessionService::new(factory.service_context());
-        // If the AI didn't pass allowed_phones, load from config so the security
-        // check always has a valid owner phone to compare against.
+        let shared_session = factory.shared_session_id();
+        let config_rx = factory.config_rx();
+        let extra_sessions: Arc<Mutex<HashMap<String, (uuid::Uuid, std::time::Instant)>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+
+        // Derive owner JID from config or tool input
         let wa_cfg = crate::config::Config::load().ok();
         let allowed_phones: Vec<String> = if !tool_phones.is_empty() {
             tool_phones
@@ -365,14 +369,6 @@ impl Tool for WhatsAppConnectTool {
                 .map(|c| c.channels.whatsapp.allowed_phones.clone())
                 .unwrap_or_default()
         };
-        let allowed: Arc<HashSet<String>> = Arc::new(allowed_phones.iter().cloned().collect());
-        let voice_config = Arc::new(factory.voice_config().clone());
-        let shared_session = factory.shared_session_id();
-        let idle_timeout_hours = wa_cfg
-            .as_ref()
-            .and_then(|c| c.channels.whatsapp.session_idle_hours);
-        let extra_sessions: Arc<Mutex<HashMap<String, (uuid::Uuid, std::time::Instant)>>> =
-            Arc::new(Mutex::new(HashMap::new()));
 
         // 4. Build bot with combined event handler (QR + Connected + Messages)
         let qr_tx_clone = qr_tx.clone();
@@ -391,13 +387,11 @@ impl Tool for WhatsAppConnectTool {
                 let connected_tx = connected_tx_clone.clone();
                 let agent = agent.clone();
                 let session_svc = session_svc.clone();
-                let allowed = allowed.clone();
                 let extra_sessions = extra_sessions.clone();
-                let voice_config = voice_config.clone();
-                let idle_timeout_hours = idle_timeout_hours;
                 let shared_session = shared_session.clone();
                 let wa_state = wa_state.clone();
                 let owner_jid = owner_jid.clone();
+                let config_rx = config_rx.clone();
                 async move {
                     match event {
                         Event::PairingQrCode { ref code, .. } => {
@@ -422,12 +416,10 @@ impl Tool for WhatsAppConnectTool {
                                 client,
                                 agent,
                                 session_svc,
-                                allowed,
                                 extra_sessions,
-                                voice_config,
                                 shared_session,
-                                idle_timeout_hours,
                                 wa_state.clone(),
+                                config_rx,
                             )
                             .await;
                         }

@@ -101,44 +101,30 @@ impl Tool for DiscordConnectTool {
         // Save token to keys.toml for persistence
         let _ = crate::config::write_secret_key("channels.discord", "token", &token);
 
-        // Persist enabled state to config
+        // Persist enabled state + allowed_users to config (read by config_rx)
         let _ = crate::config::Config::write_key("channels.discord", "enabled", "true");
+        if !allowed_users.is_empty() {
+            let _ = crate::config::Config::write_array(
+                "channels.discord",
+                "allowed_users",
+                &allowed_users,
+            );
+        }
 
         // Create and spawn the Discord agent
         let factory = self.channel_factory.clone();
         let agent = factory.create_agent_service();
         let service_context = factory.service_context();
-        let voice_config = factory.voice_config().clone();
-        let openai_tts_key = factory.openai_tts_key();
         let shared_session = factory.shared_session_id();
         let discord_state = self.discord_state.clone();
-
-        // Load respond_to and allowed_channels from persisted config
-        let cfg = crate::config::Config::load().ok();
-        let respond_to = cfg
-            .as_ref()
-            .map(|c| c.channels.discord.respond_to.clone())
-            .unwrap_or_default();
-        let allowed_channels = cfg
-            .as_ref()
-            .map(|c| c.channels.discord.allowed_channels.clone())
-            .unwrap_or_default();
-
-        let idle_timeout_hours = cfg
-            .as_ref()
-            .and_then(|c| c.channels.discord.session_idle_hours);
+        let config_rx = factory.config_rx();
 
         let dc_agent = crate::channels::discord::DiscordAgent::new(
             agent,
             service_context,
-            allowed_users,
-            voice_config,
-            openai_tts_key,
             shared_session,
             discord_state.clone(),
-            respond_to,
-            allowed_channels,
-            idle_timeout_hours,
+            config_rx,
         );
 
         let _handle = dc_agent.start(token);

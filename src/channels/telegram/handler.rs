@@ -5,7 +5,7 @@
 
 use super::TelegramState;
 use crate::brain::agent::{AgentService, ProgressCallback, ProgressEvent};
-use crate::config::{RespondTo, VoiceConfig};
+use crate::config::{Config, RespondTo};
 use crate::services::SessionService;
 use crate::utils::sanitize::redact_secrets;
 use crate::utils::truncate_str;
@@ -86,16 +86,11 @@ pub(crate) async fn handle_message(
     msg: Message,
     agent: Arc<AgentService>,
     session_svc: SessionService,
-    allowed: Arc<HashSet<i64>>,
     extra_sessions: Arc<Mutex<HashMap<i64, (Uuid, std::time::Instant)>>>,
-    voice_config: Arc<VoiceConfig>,
-    openai_key: Arc<Option<String>>,
     bot_token: Arc<String>,
     shared_session: Arc<Mutex<Option<Uuid>>>,
     telegram_state: Arc<TelegramState>,
-    respond_to: &RespondTo,
-    allowed_channels: &HashSet<String>,
-    idle_timeout_hours: Option<f64>,
+    config_rx: tokio::sync::watch::Receiver<Config>,
 ) -> ResponseResult<()> {
     let user = match msg.from {
         Some(ref u) => u,
@@ -121,8 +116,36 @@ pub(crate) async fn handle_message(
         return Ok(());
     }
 
-    // Allowlist check — use TelegramState so the list is hot-reloadable at runtime
-    if !telegram_state.is_user_allowed(user_id).await {
+    // Read latest config from watch channel — single source of truth
+    let cfg = config_rx.borrow().clone();
+    let tg_cfg = &cfg.channels.telegram;
+    let allowed: HashSet<i64> = tg_cfg
+        .allowed_users
+        .iter()
+        .filter_map(|s| s.parse().ok())
+        .collect();
+    let respond_to = &tg_cfg.respond_to;
+    let allowed_channels: HashSet<String> = tg_cfg.allowed_channels.iter().cloned().collect();
+    let idle_timeout_hours = tg_cfg.session_idle_hours;
+    let mut voice_config = cfg.voice.clone();
+    voice_config.stt_provider = cfg.providers.stt.as_ref().and_then(|s| s.groq.clone());
+    let tts_providers = cfg.providers.tts.as_ref();
+    voice_config.tts_provider = tts_providers.and_then(|t| t.openai.clone());
+    if let Some(ref v) = tts_providers.and_then(|t| t.voice.as_ref()) {
+        voice_config.tts_voice = v.to_string();
+    }
+    if let Some(ref m) = tts_providers.and_then(|t| t.model.as_ref()) {
+        voice_config.tts_model = m.to_string();
+    }
+    let openai_tts_key = cfg
+        .providers
+        .tts
+        .as_ref()
+        .and_then(|t| t.openai.as_ref())
+        .and_then(|p| p.api_key.clone());
+
+    // Allowlist check — read from config (hot-reloaded via watch channel)
+    if !allowed.is_empty() && !allowed.contains(&user_id) {
         tracing::debug!(
             "Telegram: ignoring message from non-allowed user {}",
             user_id
@@ -397,7 +420,7 @@ pub(crate) async fn handle_message(
     };
 
     // Strip @bot_username from text when responding to a mention in groups
-    let text = if !is_dm && *respond_to == RespondTo::Mention {
+    let text = if !is_dm && respond_to == &RespondTo::Mention {
         if let Some(ref uname) = telegram_state.bot_username().await {
             text.replace(&format!("@{}", uname), "").trim().to_string()
         } else {
@@ -434,7 +457,8 @@ pub(crate) async fn handle_message(
     });
 
     // Resolve session: owner shares the TUI session, other users get their own
-    let is_owner = allowed.len() == 1 || allowed.iter().next() == Some(&user_id);
+    let is_owner =
+        allowed.is_empty() || allowed.len() == 1 || allowed.iter().next() == Some(&user_id);
 
     // Track owner's chat ID for proactive messaging
     if is_owner {
@@ -862,7 +886,7 @@ pub(crate) async fn handle_message(
             // If input was voice AND TTS is enabled, also send voice note after text
             if is_voice
                 && voice_config.tts_enabled
-                && let Some(ref oai_key) = *openai_key
+                && let Some(ref oai_key) = openai_tts_key
             {
                 match crate::channels::voice::synthesize_speech(
                     &response.content,

@@ -5,9 +5,9 @@
 use super::DiscordState;
 use super::handler;
 use crate::brain::agent::AgentService;
-use crate::config::{RespondTo, VoiceConfig};
+use crate::config::Config;
 use crate::services::{ServiceContext, SessionService};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -22,41 +22,25 @@ use serenity::prelude::*;
 pub struct DiscordAgent {
     agent_service: Arc<AgentService>,
     session_service: SessionService,
-    allowed_users: Vec<String>,
-    voice_config: VoiceConfig,
-    openai_api_key: Option<String>,
     shared_session_id: Arc<Mutex<Option<Uuid>>>,
     discord_state: Arc<DiscordState>,
-    respond_to: RespondTo,
-    allowed_channels: Vec<String>,
-    idle_timeout_hours: Option<f64>,
+    config_rx: tokio::sync::watch::Receiver<Config>,
 }
 
 impl DiscordAgent {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         agent_service: Arc<AgentService>,
         service_context: ServiceContext,
-        allowed_users: Vec<String>,
-        voice_config: VoiceConfig,
-        openai_api_key: Option<String>,
         shared_session_id: Arc<Mutex<Option<Uuid>>>,
         discord_state: Arc<DiscordState>,
-        respond_to: RespondTo,
-        allowed_channels: Vec<String>,
-        idle_timeout_hours: Option<f64>,
+        config_rx: tokio::sync::watch::Receiver<Config>,
     ) -> Self {
         Self {
             agent_service,
             session_service: SessionService::new(service_context),
-            allowed_users,
-            voice_config,
-            openai_api_key,
             shared_session_id,
             discord_state,
-            respond_to,
-            allowed_channels,
-            idle_timeout_hours,
+            config_rx,
         }
     }
 
@@ -69,39 +53,24 @@ impl DiscordAgent {
                 return;
             }
 
+            let cfg = self.config_rx.borrow().clone();
             tracing::info!(
                 "Starting Discord bot with {} allowed user(s), STT={}, TTS={}",
-                self.allowed_users.len(),
-                self.voice_config.stt_enabled,
-                self.voice_config.tts_enabled,
+                cfg.channels.discord.allowed_users.len(),
+                cfg.voice.stt_enabled,
+                cfg.voice.tts_enabled,
             );
 
-            let allowed: Arc<HashSet<i64>> = Arc::new(
-                self.allowed_users
-                    .into_iter()
-                    .filter_map(|s| s.parse().ok())
-                    .collect(),
-            );
             let extra_sessions: Arc<Mutex<HashMap<u64, (Uuid, std::time::Instant)>>> =
                 Arc::new(Mutex::new(HashMap::new()));
-
-            let allowed_channels: HashSet<String> = self.allowed_channels.into_iter().collect();
-
-            let voice_config = Arc::new(self.voice_config);
-            let openai_key = Arc::new(self.openai_api_key);
 
             let event_handler = Handler {
                 agent: self.agent_service,
                 session_svc: self.session_service,
-                allowed,
                 extra_sessions,
                 shared_session: self.shared_session_id,
                 discord_state: self.discord_state,
-                respond_to: self.respond_to,
-                allowed_channels: Arc::new(allowed_channels),
-                voice_config,
-                openai_key,
-                idle_timeout_hours: self.idle_timeout_hours,
+                config_rx: self.config_rx,
             };
 
             let intents = GatewayIntents::GUILD_MESSAGES
@@ -130,15 +99,10 @@ impl DiscordAgent {
 struct Handler {
     agent: Arc<AgentService>,
     session_svc: SessionService,
-    allowed: Arc<HashSet<i64>>,
     extra_sessions: Arc<Mutex<HashMap<u64, (Uuid, std::time::Instant)>>>,
     shared_session: Arc<Mutex<Option<Uuid>>>,
     discord_state: Arc<DiscordState>,
-    respond_to: RespondTo,
-    allowed_channels: Arc<HashSet<String>>,
-    voice_config: Arc<VoiceConfig>,
-    openai_key: Arc<Option<String>>,
-    idle_timeout_hours: Option<f64>,
+    config_rx: tokio::sync::watch::Receiver<Config>,
 }
 
 #[async_trait]
@@ -168,15 +132,10 @@ impl EventHandler for Handler {
             &msg,
             self.agent.clone(),
             self.session_svc.clone(),
-            self.allowed.clone(),
             self.extra_sessions.clone(),
             self.shared_session.clone(),
             self.discord_state.clone(),
-            &self.respond_to,
-            &self.allowed_channels,
-            self.voice_config.clone(),
-            self.openai_key.clone(),
-            self.idle_timeout_hours,
+            self.config_rx.clone(),
         )
         .await;
     }

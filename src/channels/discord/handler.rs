@@ -5,7 +5,7 @@
 
 use super::DiscordState;
 use crate::brain::agent::AgentService;
-use crate::config::{RespondTo, VoiceConfig};
+use crate::config::{Config, RespondTo};
 use crate::services::SessionService;
 use crate::utils::sanitize::redact_secrets;
 use crate::utils::truncate_str;
@@ -48,16 +48,39 @@ pub(crate) async fn handle_message(
     msg: &Message,
     agent: Arc<AgentService>,
     session_svc: SessionService,
-    allowed: Arc<HashSet<i64>>,
     extra_sessions: Arc<Mutex<HashMap<u64, (Uuid, std::time::Instant)>>>,
     shared_session: Arc<Mutex<Option<Uuid>>>,
     discord_state: Arc<DiscordState>,
-    respond_to: &RespondTo,
-    allowed_channels: &HashSet<String>,
-    voice_config: Arc<VoiceConfig>,
-    openai_key: Arc<Option<String>>,
-    idle_timeout_hours: Option<f64>,
+    config_rx: tokio::sync::watch::Receiver<Config>,
 ) {
+    // Read latest config from watch channel — single source of truth
+    let cfg = config_rx.borrow().clone();
+    let dc_cfg = &cfg.channels.discord;
+    let allowed: HashSet<i64> = dc_cfg
+        .allowed_users
+        .iter()
+        .filter_map(|s| s.parse().ok())
+        .collect();
+    let respond_to = &dc_cfg.respond_to;
+    let allowed_channels: HashSet<String> = dc_cfg.allowed_channels.iter().cloned().collect();
+    let idle_timeout_hours = dc_cfg.session_idle_hours;
+    let mut voice_config = cfg.voice.clone();
+    voice_config.stt_provider = cfg.providers.stt.as_ref().and_then(|s| s.groq.clone());
+    let tts_providers = cfg.providers.tts.as_ref();
+    voice_config.tts_provider = tts_providers.and_then(|t| t.openai.clone());
+    if let Some(ref v) = tts_providers.and_then(|t| t.voice.as_ref()) {
+        voice_config.tts_voice = v.to_string();
+    }
+    if let Some(ref m) = tts_providers.and_then(|t| t.model.as_ref()) {
+        voice_config.tts_model = m.to_string();
+    }
+    let openai_tts_key = cfg
+        .providers
+        .tts
+        .as_ref()
+        .and_then(|t| t.openai.as_ref())
+        .and_then(|p| p.api_key.clone());
+
     let user_id = msg.author.id.get() as i64;
 
     // Allowlist check — if allowed list is empty, accept all
@@ -133,7 +156,7 @@ pub(crate) async fn handle_message(
 
     // Strip bot @mention from content when responding to a mention
     if !is_dm
-        && *respond_to == RespondTo::Mention
+        && respond_to == &RespondTo::Mention
         && let Some(bot_id) = discord_state.bot_user_id().await
     {
         let mention_tag = format!("<@{}>", bot_id);
@@ -403,7 +426,7 @@ pub(crate) async fn handle_message(
             // TTS: send voice reply if input was audio and TTS is enabled
             if is_voice
                 && voice_config.tts_enabled
-                && let Some(ref oai_key) = *openai_key
+                && let Some(ref oai_key) = openai_tts_key
             {
                 match crate::channels::voice::synthesize_speech(
                     &response.content,

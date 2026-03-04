@@ -92,46 +92,30 @@ impl Tool for TelegramConnectTool {
         // Save token to keys.toml for persistence
         let _ = crate::config::write_secret_key("channels.telegram", "token", &token);
 
-        // Persist enabled state to config
+        // Persist enabled state + allowed_users to config (read by config_rx)
         let _ = crate::config::Config::write_key("channels.telegram", "enabled", "true");
+        if !allowed_users.is_empty() {
+            let _ = crate::config::Config::write_array(
+                "channels.telegram",
+                "allowed_users",
+                &allowed_users,
+            );
+        }
 
         // Create and spawn the Telegram agent
         let factory = self.channel_factory.clone();
         let agent = factory.create_agent_service();
         let service_context = factory.service_context();
-        let voice_config = factory.voice_config().clone();
         let shared_session = factory.shared_session_id();
         let telegram_state = self.telegram_state.clone();
-
-        // Get OpenAI TTS key from config (keys.toml)
-        let openai_key = factory.openai_tts_key();
-
-        // Load respond_to and allowed_channels from persisted config
-        let cfg = crate::config::Config::load().ok();
-        let respond_to = cfg
-            .as_ref()
-            .map(|c| c.channels.telegram.respond_to.clone())
-            .unwrap_or_default();
-        let allowed_channels = cfg
-            .as_ref()
-            .map(|c| c.channels.telegram.allowed_channels.clone())
-            .unwrap_or_default();
-
-        let idle_timeout_hours = cfg
-            .as_ref()
-            .and_then(|c| c.channels.telegram.session_idle_hours);
+        let config_rx = factory.config_rx();
 
         let tg_agent = crate::channels::telegram::TelegramAgent::new(
             agent,
             service_context,
-            allowed_users,
-            voice_config,
-            openai_key,
             shared_session,
             telegram_state.clone(),
-            respond_to,
-            allowed_channels,
-            idle_timeout_hours,
+            config_rx,
         );
 
         let _handle = tg_agent.start(token);

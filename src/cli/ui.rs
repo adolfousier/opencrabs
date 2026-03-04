@@ -371,17 +371,12 @@ async fn cmd_chat_inner(
         Some(progress_callback.clone()),
     )));
 
+    // Create config watch channel — single source of truth for all hot-reloadable config.
+    // All channel agents receive a Receiver and read the latest config per-message.
+    let (config_tx, config_rx) = tokio::sync::watch::channel(config.clone());
+
     // Create ChannelFactory (shared by static channel spawn + WhatsApp connect tool).
     // Tool registry is set lazily after Arc wrapping to break circular dependency.
-    let openai_tts_key = config
-        .providers
-        .tts
-        .as_ref()
-        .and_then(|t| t.openai.as_ref())
-        .and_then(|p| p.api_key.clone());
-    let mut factory_voice_cfg = config.voice.clone();
-    factory_voice_cfg.stt_provider = config.providers.stt.as_ref().and_then(|s| s.groq.clone());
-    factory_voice_cfg.tts_provider = config.providers.tts.as_ref().and_then(|t| t.openai.clone());
     let channel_factory = Arc::new(crate::channels::ChannelFactory::new(
         provider.clone(),
         service_context.clone(),
@@ -389,8 +384,7 @@ async fn cmd_chat_inner(
         working_directory.clone(),
         brain_path.clone(),
         app.shared_session_id(),
-        factory_voice_cfg,
-        openai_tts_key,
+        config_rx,
     ));
 
     // Shared Telegram state for proactive messaging
@@ -429,7 +423,10 @@ async fn cmd_chat_inner(
     // Register WhatsApp send tool (proactive messaging)
     #[cfg(feature = "whatsapp")]
     tool_registry.register(Arc::new(
-        crate::brain::tools::whatsapp_send::WhatsAppSendTool::new(whatsapp_state.clone()),
+        crate::brain::tools::whatsapp_send::WhatsAppSendTool::new(
+            whatsapp_state.clone(),
+            channel_factory.config_rx(),
+        ),
     ));
 
     // Shared Discord state for proactive messaging
@@ -581,71 +578,17 @@ async fn cmd_chat_inner(
 
         let mut callbacks: Vec<ReloadCallback> = Vec::new();
 
-        // Channel allowlists
-        #[cfg(feature = "telegram")]
-        {
-            let state = telegram_state.clone();
-            callbacks.push(Arc::new(move |cfg: crate::config::Config| {
-                let state = state.clone();
-                let users: Vec<i64> = cfg
-                    .channels
-                    .telegram
-                    .allowed_users
-                    .iter()
-                    .filter_map(|s| s.parse().ok())
-                    .collect();
-                tokio::spawn(async move {
-                    state.update_allowed_users(users).await;
-                });
-            }));
-        }
-
-        #[cfg(feature = "whatsapp")]
-        {
-            let state = whatsapp_state.clone();
-            callbacks.push(Arc::new(move |cfg: crate::config::Config| {
-                let state = state.clone();
-                let phones = cfg.channels.whatsapp.allowed_phones.clone();
-                tokio::spawn(async move {
-                    state.set_allowed_phones(phones).await;
-                });
-            }));
-        }
-
-        #[cfg(feature = "discord")]
-        {
-            let state = discord_state.clone();
-            callbacks.push(Arc::new(move |cfg: crate::config::Config| {
-                let state = state.clone();
-                let users: Vec<u64> = cfg
-                    .channels
-                    .discord
-                    .allowed_users
-                    .iter()
-                    .filter_map(|s| s.parse().ok())
-                    .collect();
-                tokio::spawn(async move {
-                    state.update_allowed_users(users).await;
-                });
-            }));
-        }
-
-        #[cfg(feature = "slack")]
-        {
-            let state = slack_state.clone();
-            callbacks.push(Arc::new(move |cfg: crate::config::Config| {
-                let state = state.clone();
-                let users = cfg.channels.slack.allowed_users.clone();
-                tokio::spawn(async move {
-                    state.update_allowed_users(users).await;
-                });
-            }));
-        }
-
-        // Provider hot-reload — swap active LLM provider when keys.toml changes
+        // Unified config broadcast — push new config to watch channel so ALL
+        // channel agents see the latest values on next message (allowlists,
+        // voice, respond_to, allowed_channels, idle_timeout, TTS keys, etc.)
         {
             let agent = app.agent_service().clone();
+            let sender = app.event_sender();
             callbacks.push(Arc::new(move |cfg: crate::config::Config| {
+                // Broadcast full config to all channels via watch channel
+                let _ = config_tx.send(cfg.clone());
+
+                // Provider swap still needs explicit call
                 let agent = agent.clone();
                 tokio::spawn(async move {
                     match crate::brain::provider::create_provider(&cfg) {
@@ -661,13 +604,8 @@ async fn cmd_chat_inner(
                         }
                     }
                 });
-            }));
-        }
 
-        // TUI refresh — commands autocomplete + approval policy + any other cached config
-        {
-            let sender = app.event_sender();
-            callbacks.push(Arc::new(move |_cfg: crate::config::Config| {
+                // TUI refresh — commands autocomplete + approval policy
                 let _ = sender.send(TuiEvent::ConfigReloaded);
             }));
         }
@@ -726,29 +664,12 @@ async fn cmd_chat_inner(
         if tg.enabled && has_valid_token {
             if let Some(ref token) = tg_token {
                 let tg_agent = channel_factory.create_agent_service();
-                // Extract OpenAI API key for TTS (from providers.tts.openai)
-                let openai_key = config
-                    .providers
-                    .tts
-                    .as_ref()
-                    .and_then(|t| t.openai.as_ref())
-                    .and_then(|p| p.api_key.clone());
-                // Extract STT provider config from providers.stt.*
-                let mut voice_cfg = config.voice.clone();
-                voice_cfg.stt_provider = config.providers.stt.as_ref().and_then(|s| s.groq.clone());
-                voice_cfg.tts_provider =
-                    config.providers.tts.as_ref().and_then(|t| t.openai.clone());
                 let bot = crate::channels::telegram::TelegramAgent::new(
                     tg_agent,
                     service_context.clone(),
-                    tg.allowed_users.clone(),
-                    voice_cfg,
-                    openai_key,
                     app.shared_session_id(),
                     telegram_state.clone(),
-                    tg.respond_to.clone(),
-                    tg.allowed_channels.clone(),
-                    tg.session_idle_hours,
+                    channel_factory.config_rx(),
                 );
                 tracing::info!(
                     "Spawning Telegram bot ({} allowed users)",
@@ -772,11 +693,9 @@ async fn cmd_chat_inner(
             let wa_agent = crate::channels::whatsapp::WhatsAppAgent::new(
                 channel_factory.create_agent_service(),
                 service_context.clone(),
-                wa.allowed_phones.clone(),
-                channel_factory.voice_config().clone(),
                 app.shared_session_id(),
                 whatsapp_state.clone(),
-                wa.session_idle_hours,
+                channel_factory.config_rx(),
             );
             tracing::info!(
                 "Spawning WhatsApp agent ({} allowed phones)",
@@ -800,24 +719,12 @@ async fn cmd_chat_inner(
             .unwrap_or(false);
         if dc.enabled && has_valid_token {
             if let Some(ref token) = dc_token {
-                // Extract OpenAI API key for TTS (from providers.tts.openai in keys.toml)
-                let openai_key = config
-                    .providers
-                    .tts
-                    .as_ref()
-                    .and_then(|t| t.openai.as_ref())
-                    .and_then(|p| p.api_key.clone());
                 let dc_agent = crate::channels::discord::DiscordAgent::new(
                     channel_factory.create_agent_service(),
                     service_context.clone(),
-                    dc.allowed_users.clone(),
-                    channel_factory.voice_config().clone(),
-                    openai_key,
                     app.shared_session_id(),
                     discord_state.clone(),
-                    dc.respond_to.clone(),
-                    dc.allowed_channels.clone(),
-                    dc.session_idle_hours,
+                    channel_factory.config_rx(),
                 );
                 tracing::info!(
                     "Spawning Discord bot ({} allowed users)",
@@ -852,13 +759,9 @@ async fn cmd_chat_inner(
                 let sl_agent = crate::channels::slack::SlackAgent::new(
                     channel_factory.create_agent_service(),
                     service_context.clone(),
-                    sl.allowed_users.clone(),
                     app.shared_session_id(),
                     slack_state.clone(),
-                    sl.respond_to.clone(),
-                    sl.allowed_channels.clone(),
-                    sl.session_idle_hours,
-                    channel_factory.voice_config().clone(),
+                    channel_factory.config_rx(),
                 );
                 tracing::info!(
                     "Spawning Slack bot ({} allowed user(s))",

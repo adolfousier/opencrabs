@@ -8,7 +8,7 @@ pub(crate) mod handler;
 
 pub use agent::TelegramAgent;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use teloxide::prelude::Bot;
 use tokio::sync::{Mutex, oneshot};
 use tokio_util::sync::CancellationToken;
@@ -29,8 +29,6 @@ pub struct TelegramState {
     session_chats: Mutex<HashMap<Uuid, i64>>,
     /// Pending approval channels: approval_id → oneshot sender of (approved, always).
     pending_approvals: Mutex<HashMap<String, oneshot::Sender<(bool, bool)>>>,
-    /// Allowed user IDs — hot-reloadable at runtime when config changes
-    allowed_users: Mutex<HashSet<i64>>,
     /// Per-session cancel tokens for aborting in-flight agent tasks via /stop
     cancel_tokens: Mutex<HashMap<Uuid, CancellationToken>>,
 }
@@ -49,7 +47,6 @@ impl TelegramState {
             bot_username: Mutex::new(None),
             session_chats: Mutex::new(HashMap::new()),
             pending_approvals: Mutex::new(HashMap::new()),
-            allowed_users: Mutex::new(HashSet::new()),
             cancel_tokens: Mutex::new(HashMap::new()),
         }
     }
@@ -114,30 +111,6 @@ impl TelegramState {
         } else {
             false
         }
-    }
-
-    /// Replace the allowed users set (called on config reload).
-    pub async fn update_allowed_users(&self, users: Vec<i64>) {
-        let new_set: HashSet<i64> = users.into_iter().collect();
-        let mut allowed = self.allowed_users.lock().await;
-        if *allowed != new_set {
-            tracing::info!(
-                "Telegram: allowed users updated: {:?} -> {:?}",
-                *allowed,
-                new_set
-            );
-            *allowed = new_set;
-        }
-    }
-
-    /// Check if a user ID is in the allowed set.
-    pub async fn is_user_allowed(&self, user_id: i64) -> bool {
-        self.allowed_users.lock().await.contains(&user_id)
-    }
-
-    /// Get the number of allowed users.
-    pub async fn allowed_user_count(&self) -> usize {
-        self.allowed_users.lock().await.len()
     }
 
     /// Store a cancel token for a session (before starting agent call).
