@@ -47,6 +47,8 @@ struct StreamingState {
     thinking: String,
     /// Each tool call = its own individual message
     tool_msgs: Vec<ToolMsg>,
+    /// Intermediate agent texts (between tool rounds) — each sent as its own message
+    pending_intermediate: Vec<String>,
     /// Response text from streaming chunks — own message at bottom
     response: String,
     dirty: bool,
@@ -586,6 +588,7 @@ pub(crate) async fn handle_message(
         msg_id: None,
         thinking: String::new(),
         tool_msgs: Vec::new(),
+        pending_intermediate: Vec::new(),
         response: String::new(),
         dirty: false,
         recreate: false,
@@ -606,7 +609,8 @@ pub(crate) async fn handle_message(
                     _ = tokio::time::sleep(std::time::Duration::from_millis(1500)) => {
                         let mut s = st.lock().await;
                         let any_tools_dirty = s.tool_msgs.iter().any(|t| t.dirty);
-                        if !s.dirty && !s.recreate && !any_tools_dirty { continue; }
+                        let has_intermediate = !s.pending_intermediate.is_empty();
+                        if !s.dirty && !s.recreate && !any_tools_dirty && !has_intermediate { continue; }
 
                         // ── Individual tool messages (each tool = its own message) ──
                         for tool in s.tool_msgs.iter_mut().filter(|t| t.dirty) {
@@ -630,6 +634,17 @@ pub(crate) async fn handle_message(
                                 tool.msg_id = Some(m.id);
                             }
                             tool.dirty = false;
+                        }
+
+                        // ── Intermediate texts (agent commentary between tool rounds) ──
+                        for text in s.pending_intermediate.drain(..) {
+                            let html = markdown_to_telegram_html(&text);
+                            if !html.is_empty() {
+                                let _ = bot
+                                    .send_message(chat, &html)
+                                    .parse_mode(ParseMode::Html)
+                                    .await;
+                            }
                         }
 
                         // ── Response message (thinking + response, always at bottom) ──
@@ -720,12 +735,9 @@ pub(crate) async fn handle_message(
                     }
                 }
                 ProgressEvent::IntermediateText { text, .. } => {
-                    if let Ok(mut s) = st.try_lock()
-                        && !s.response.contains(&text)
-                    {
+                    if let Ok(mut s) = st.try_lock() {
                         s.thinking.clear();
-                        s.response.push_str(&text);
-                        s.dirty = true;
+                        s.pending_intermediate.push(text);
                     }
                 }
                 _ => {}
