@@ -608,9 +608,7 @@ pub(crate) fn make_approval_callback(
             );
             let yolo_btn = SlackBlockButtonElement::new(
                 SlackActionId::new(format!("yolo:{}", approval_id)),
-                SlackBlockPlainTextOnly::from(SlackBlockPlainText::new(
-                    "🔥 YOLO".to_string(),
-                )),
+                SlackBlockPlainTextOnly::from(SlackBlockPlainText::new("🔥 YOLO".to_string())),
             );
             let deny_btn = SlackBlockButtonElement::new(
                 SlackActionId::new(format!("deny:{}", approval_id)),
