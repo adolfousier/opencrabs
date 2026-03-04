@@ -944,6 +944,11 @@ fn merge_provider_keys(mut base: ProviderConfigs, keys: ProviderConfigs) -> Prov
         let entry = base.openrouter.get_or_insert_with(ProviderConfig::default);
         entry.api_key = Some(key);
     }
+    tracing::debug!(
+        "merge_provider_keys: minimax keys present={}, base present={}",
+        keys.minimax.is_some(),
+        base.minimax.is_some()
+    );
     if let Some(k) = keys.minimax
         && let Some(key) = k.api_key
         && is_real_key(&key)
@@ -1147,35 +1152,41 @@ impl Config {
         }
 
         // 3. Load API keys from keys.toml (overrides config.toml keys)
-        if let Ok(keys) = load_keys_from_file() {
-            config.providers = merge_provider_keys(config.providers, keys.providers);
-            config.channels = merge_channel_keys(config.channels, keys.channels);
-            // Merge A2A API key from keys.toml
-            if let Some(a2a_keys) = keys.a2a
-                && let Some(key) = a2a_keys.api_key
-                && !key.is_empty()
-            {
-                config.a2a.api_key = Some(key);
+        match load_keys_from_file() {
+            Err(e) => {
+                tracing::error!("Failed to load keys.toml: {:#}", e);
+                eprintln!("⚠️  keys.toml parse error — API keys not loaded: {e}");
             }
-            // Merge image API key into config.image (generation + vision)
-            // New path: [providers.image.gemini] (already merged above)
-            // Legacy fallback: flat [image] section in keys.toml
-            let image_key = config
-                .providers
-                .image
-                .as_ref()
-                .and_then(|img| img.gemini.as_ref())
-                .and_then(|g| g.api_key.as_ref())
-                .filter(|k| !k.is_empty())
-                .cloned()
-                .or_else(|| {
-                    keys.image
-                        .and_then(|img| img.api_key)
-                        .filter(|k| !k.is_empty())
-                });
-            if let Some(key) = image_key {
-                config.image.generation.api_key = Some(key.clone());
-                config.image.vision.api_key = Some(key);
+            Ok(keys) => {
+                config.providers = merge_provider_keys(config.providers, keys.providers);
+                config.channels = merge_channel_keys(config.channels, keys.channels);
+                // Merge A2A API key from keys.toml
+                if let Some(a2a_keys) = keys.a2a
+                    && let Some(key) = a2a_keys.api_key
+                    && !key.is_empty()
+                {
+                    config.a2a.api_key = Some(key);
+                }
+                // Merge image API key into config.image (generation + vision)
+                // New path: [providers.image.gemini] (already merged above)
+                // Legacy fallback: flat [image] section in keys.toml
+                let image_key = config
+                    .providers
+                    .image
+                    .as_ref()
+                    .and_then(|img| img.gemini.as_ref())
+                    .and_then(|g| g.api_key.as_ref())
+                    .filter(|k| !k.is_empty())
+                    .cloned()
+                    .or_else(|| {
+                        keys.image
+                            .and_then(|img| img.api_key)
+                            .filter(|k| !k.is_empty())
+                    });
+                if let Some(key) = image_key {
+                    config.image.generation.api_key = Some(key.clone());
+                    config.image.vision.api_key = Some(key);
+                }
             }
         }
 

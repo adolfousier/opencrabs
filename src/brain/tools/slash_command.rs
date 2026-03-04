@@ -427,6 +427,21 @@ impl SlashCommandTool {
 
         let mut lines = vec!["Health Check".to_string(), String::new()];
 
+        // Check keys.toml validity
+        let keys_path = crate::config::keys_path();
+        if keys_path.exists() {
+            match std::fs::read_to_string(&keys_path) {
+                Ok(content) => match toml::from_str::<toml::Value>(&content) {
+                    Ok(_) => lines.push("keys.toml — OK".to_string()),
+                    Err(e) => lines.push(format!("keys.toml — PARSE ERROR: {e}")),
+                },
+                Err(e) => lines.push(format!("keys.toml — READ ERROR: {e}")),
+            }
+        } else {
+            lines.push("keys.toml — NOT FOUND".to_string());
+        }
+        lines.push(String::new());
+
         // Check providers
         let providers = [
             ("anthropic", &config.providers.anthropic),

@@ -202,11 +202,19 @@ fn try_create_openrouter(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
 /// Try to create Minimax provider if configured
 fn try_create_minimax(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     let minimax_config = match &config.providers.minimax {
-        Some(cfg) => cfg,
+        Some(cfg) => {
+            tracing::debug!(
+                "Minimax config: enabled={}, has_key={}",
+                cfg.enabled,
+                cfg.api_key.is_some()
+            );
+            cfg
+        }
         None => return Ok(None),
     };
 
     let Some(api_key) = &minimax_config.api_key else {
+        tracing::warn!("Minimax enabled but API key missing — check keys.toml");
         return Ok(None);
     };
 
