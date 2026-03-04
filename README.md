@@ -1508,6 +1508,7 @@ node dist/cli.js linkedin comment <post-url> "your comment"
 |-------|-----|
 | Session expired | Run `node dist/cli.js session login twitter` |
 | Auth errors | Verify `auth_token` and `ct0` in `sessions/twitter.json` are current |
+| Login modal / "Like a post to share the love" | Cookies expired. Get fresh `auth_token` + `ct0` from browser DevTools → Application → Cookies → x.com, then re-sync to `sessions/twitter.json` |
 | Rate limited | Wait a few minutes, GraphQL has strict limits |
 
 ---
