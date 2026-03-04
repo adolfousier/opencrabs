@@ -565,6 +565,10 @@ pub struct ProviderConfigs {
     #[serde(default)]
     pub web_search: Option<WebSearchProviders>,
 
+    /// Image provider configurations (e.g. [providers.image.gemini])
+    #[serde(default)]
+    pub image: Option<ImageProviders>,
+
     /// Fallback provider configuration (under [providers.fallback] in config)
     #[serde(default)]
     pub fallback: Option<FallbackProviderConfig>,
@@ -691,6 +695,14 @@ pub struct WebSearchProviders {
     /// Brave search configuration
     #[serde(default)]
     pub brave: Option<ProviderConfig>,
+}
+
+/// Image provider configurations (e.g. Gemini for generation/vision)
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ImageProviders {
+    /// Google Gemini image configuration
+    #[serde(default)]
+    pub gemini: Option<ProviderConfig>,
 }
 
 /// Individual provider configuration
@@ -993,6 +1005,17 @@ fn merge_provider_keys(mut base: ProviderConfigs, keys: ProviderConfigs) -> Prov
             entry.api_key = Some(key);
         }
     }
+    // Merge image provider keys (e.g. [providers.image.gemini])
+    if let Some(img) = keys.image {
+        let base_img = base.image.get_or_insert_with(ImageProviders::default);
+        if let Some(gemini) = img.gemini
+            && let Some(key) = gemini.api_key
+            && !key.is_empty()
+        {
+            let entry = base_img.gemini.get_or_insert_with(ProviderConfig::default);
+            entry.api_key = Some(key);
+        }
+    }
     base
 }
 
@@ -1134,11 +1157,23 @@ impl Config {
             {
                 config.a2a.api_key = Some(key);
             }
-            // Merge image API key from keys.toml
-            if let Some(img_keys) = keys.image
-                && let Some(key) = img_keys.api_key
-                && !key.is_empty()
-            {
+            // Merge image API key into config.image (generation + vision)
+            // New path: [providers.image.gemini] (already merged above)
+            // Legacy fallback: flat [image] section in keys.toml
+            let image_key = config
+                .providers
+                .image
+                .as_ref()
+                .and_then(|img| img.gemini.as_ref())
+                .and_then(|g| g.api_key.as_ref())
+                .filter(|k| !k.is_empty())
+                .cloned()
+                .or_else(|| {
+                    keys.image
+                        .and_then(|img| img.api_key)
+                        .filter(|k| !k.is_empty())
+                });
+            if let Some(key) = image_key {
                 config.image.generation.api_key = Some(key.clone());
                 config.image.vision.api_key = Some(key);
             }
