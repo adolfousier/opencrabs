@@ -438,8 +438,11 @@ impl OnboardingWizard {
         // Save image API key to keys.toml (only if newly entered)
         if !self.image_api_key_input.is_empty()
             && !self.has_existing_image_key()
-            && let Err(e) =
-                crate::config::write_secret_key("image", "api_key", &self.image_api_key_input)
+            && let Err(e) = crate::config::write_secret_key(
+                "providers.image.gemini",
+                "api_key",
+                &self.image_api_key_input,
+            )
         {
             tracing::warn!("Failed to save image API key to keys.toml: {}", e);
         }
