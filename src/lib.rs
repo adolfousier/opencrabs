@@ -39,6 +39,7 @@ pub mod utils;
 
 pub mod a2a;
 pub mod channels;
+pub mod cron;
 
 // Re-export commonly used types
 pub use error::{ErrorCode, OpenCrabsError};

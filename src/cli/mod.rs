@@ -3,6 +3,7 @@
 //! Command-line interface for OpenCrabs using Clap v4.
 
 mod commands;
+mod cron;
 mod ui;
 
 use anyhow::Result;
@@ -85,6 +86,12 @@ pub enum Commands {
     /// Run in headless daemon mode — no TUI, channel bots only (Telegram, Discord, Slack, WhatsApp)
     /// Used by the systemd/LaunchAgent service installed during onboarding
     Daemon,
+
+    /// Manage scheduled cron jobs
+    Cron {
+        #[command(subcommand)]
+        operation: CronCommands,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -118,6 +125,69 @@ pub enum DbCommands {
         /// Skip confirmation prompt (use with caution)
         #[arg(short, long)]
         force: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum CronCommands {
+    /// Add a new cron job
+    Add {
+        /// Job name
+        #[arg(long)]
+        name: String,
+
+        /// Cron expression (5-field: min hour dom mon dow)
+        #[arg(long)]
+        cron: String,
+
+        /// Timezone (default: UTC)
+        #[arg(long, default_value = "UTC")]
+        tz: String,
+
+        /// Prompt / instructions for the agent
+        #[arg(long, alias = "message")]
+        prompt: String,
+
+        /// Override provider (e.g. anthropic, openai)
+        #[arg(long)]
+        provider: Option<String>,
+
+        /// Override model (e.g. claude-sonnet-4-20250514)
+        #[arg(long)]
+        model: Option<String>,
+
+        /// Thinking mode: off, on, budget
+        #[arg(long, default_value = "off")]
+        thinking: String,
+
+        /// Auto-approve tool executions
+        #[arg(long, default_value = "true")]
+        auto_approve: bool,
+
+        /// Channel to deliver results (e.g. telegram:123456)
+        #[arg(long, alias = "deliver")]
+        deliver_to: Option<String>,
+    },
+
+    /// List all cron jobs
+    List,
+
+    /// Remove a cron job by ID or name
+    Remove {
+        /// Job ID or name
+        id: String,
+    },
+
+    /// Enable a cron job
+    Enable {
+        /// Job ID or name
+        id: String,
+    },
+
+    /// Disable a cron job (pause without deleting)
+    Disable {
+        /// Job ID or name
+        id: String,
     },
 }
 
@@ -182,6 +252,7 @@ pub async fn run() -> Result<()> {
             format,
         }) => commands::cmd_run(&config, prompt, auto_approve, format).await,
         Some(Commands::Daemon) => ui::cmd_daemon(&config).await,
+        Some(Commands::Cron { operation }) => cron::cmd_cron(&config, operation).await,
     }
 }
 
