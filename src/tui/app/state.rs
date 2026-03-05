@@ -1632,17 +1632,14 @@ impl App {
         self.messages.iter().filter_map(|m| m.token_count).sum()
     }
 
-    /// Get context usage as a percentage (0.0 - 100.0, capped)
-    /// Uses the latest response's input_tokens as the current context size
+    /// Get context usage as a percentage
+    /// Uses the calibrated message token count (excludes tool schema overhead)
     pub fn context_usage_percent(&self) -> f64 {
         if self.context_max_tokens == 0 {
             return 0.0;
         }
-        // Find the most recent assistant message's input token count
-        // input_tokens represents how much context was sent to the LLM
         let used = self.last_input_tokens.unwrap_or(0) as f64;
-        let pct = (used / self.context_max_tokens as f64) * 100.0;
-        pct.min(100.0) // Never show more than 100%
+        (used / self.context_max_tokens as f64) * 100.0
     }
 
     /// Get total cost for current session

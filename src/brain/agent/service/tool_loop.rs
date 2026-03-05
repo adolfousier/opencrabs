@@ -33,6 +33,14 @@ impl AgentService {
             100.0
         };
 
+        tracing::debug!(
+            "Context budget: {} msg tokens / {} effective max ({} tools × 500 overhead) = {:.1}%",
+            context.token_count,
+            effective_max,
+            self.tool_registry.count(),
+            usage_pct,
+        );
+
         if usage_pct <= 80.0 {
             return None;
         }
@@ -203,7 +211,6 @@ impl AgentService {
         let mut iteration = 0;
         let mut total_input_tokens = 0u32;
         let mut total_output_tokens = 0u32;
-        let mut last_input_tokens = 0u32;
         let mut final_response: Option<LLMResponse> = None;
         let mut accumulated_text = String::new(); // Collect text from all iterations (not just final)
         let mut recent_tool_calls: Vec<String> = Vec::new(); // Track tool calls to detect loops
@@ -336,7 +343,7 @@ impl AgentService {
 
             // Track token usage — fall back to tiktoken estimate when provider
             // doesn't report usage (e.g. MiniMax streaming ignores include_usage)
-            last_input_tokens = if response.usage.input_tokens > 0 {
+            let call_input_tokens = if response.usage.input_tokens > 0 {
                 response.usage.input_tokens
             } else {
                 // Serialize actual tool definitions to count their real token cost,
@@ -354,7 +361,7 @@ impl AgentService {
                 );
                 estimate
             };
-            total_input_tokens += last_input_tokens;
+            total_input_tokens += call_input_tokens;
             total_output_tokens += response.usage.output_tokens;
 
             // Calibrate context token count with the API's real input_tokens.
@@ -381,9 +388,7 @@ impl AgentService {
             }
             // When a channel override is active, also fire to the service-level callback
             // so the TUI ctx display stays in sync with channel interactions.
-            if has_progress_override
-                && let Some(ref cb) = self.progress_callback
-            {
+            if has_progress_override && let Some(ref cb) = self.progress_callback {
                 cb(session_id, ProgressEvent::TokenCount(context.token_count));
             }
 
@@ -984,9 +989,7 @@ impl AgentService {
             if let Some(ref cb) = progress_callback {
                 cb(session_id, ProgressEvent::TokenCount(context.token_count));
             }
-            if has_progress_override
-                && let Some(ref cb) = self.progress_callback
-            {
+            if has_progress_override && let Some(ref cb) = self.progress_callback {
                 cb(session_id, ProgressEvent::TokenCount(context.token_count));
             }
 
@@ -1093,7 +1096,7 @@ impl AgentService {
                 input_tokens: total_input_tokens,
                 output_tokens: total_output_tokens,
             },
-            context_tokens: last_input_tokens,
+            context_tokens: context.token_count as u32,
             cost,
             model: response.model,
         })
