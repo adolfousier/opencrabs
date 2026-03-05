@@ -5,6 +5,26 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.53] - 2026-03-05
+
+### Added
+- **Cron jobs — full production implementation** (`ae79eee`) (closes #28) — Background `CronScheduler` polls DB every 60s, executes due jobs in isolated agent sessions with configurable provider/model/thinking. CLI subcommands: `cron add/list/remove/enable/disable` with name/UUID resolution. `CronManageTool` agent tool (5 actions: create/list/delete/enable/disable) with approval gates on create/delete. Telegram delivery via Bot API HTTP POST, Discord/Slack logged only. 43 tests covering CLI parsing, repository CRUD, cron expression validation, scheduler logic, and agent tool operations
+  - `src/cron/mod.rs` (new), `src/cron/scheduler.rs` (new), `src/brain/tools/cron_manage.rs` (new), `src/cli/cron.rs` (new), `src/tests/cron_test.rs` (new), `src/brain/tools/mod.rs`, `src/cli/mod.rs`, `src/cli/ui.rs`, `src/lib.rs`
+- **Passive message capture for Discord, Slack, and WhatsApp** (`027377a`) — All non-directed group messages are now stored in `channel_messages` table for `channel_search` tool access. Previously only Telegram captured messages. Discord captures at allowed_channels/dm_only/mention drop points and directed messages. Slack captures at the same drop points. WhatsApp captures all text messages after content extraction. Connect tools updated to pass `ChannelMessageRepository`. 24 tests for channel_search repository and tool operations
+  - `src/channels/discord/handler.rs`, `src/channels/discord/agent.rs`, `src/channels/slack/handler.rs`, `src/channels/slack/agent.rs`, `src/channels/whatsapp/handler.rs`, `src/channels/whatsapp/agent.rs`, `src/brain/tools/discord_connect.rs`, `src/brain/tools/slack_connect.rs`, `src/brain/tools/whatsapp_connect.rs`, `src/cli/ui.rs`, `src/tests/channel_search_test.rs` (new)
+
+### Fixed
+- **Agent loses brain context after compaction** (`21c119e`) (closes #27) — After auto-compaction, the agent no longer reloads brain files (SOUL.md, AGENTS.md, USER.md, TOOLS.md) and answers without its identity, capabilities, or user preferences. Post-compaction instruction now mandates calling `load_brain_file` with `name="all"` as the first action before continuing the task
+  - `src/brain/agent/service/tool_loop.rs`
+
+### Upgrade Notes
+> **Existing users:** Your local brain files at `~/.opencrabs/` are not auto-updated. To get the latest `cron_manage` tool docs and `channel_search` guidance, update your brain files from the repo templates:
+> ```sh
+> cp src/docs/reference/templates/TOOLS.md ~/.opencrabs/TOOLS.md
+> cp src/docs/reference/templates/AGENTS.md ~/.opencrabs/AGENTS.md
+> ```
+> Or ask your agent: *"Update TOOLS.md and AGENTS.md from the repo templates"* — it can use `write_opencrabs_file` to do it for you.
+
 ## [0.2.52] - 2026-03-05
 
 ### Added
