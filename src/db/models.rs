@@ -180,6 +180,103 @@ impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for ChannelMessage {
     }
 }
 
+/// Cron job model — a scheduled isolated session
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CronJob {
+    pub id: Uuid,
+    pub name: String,
+    pub cron_expr: String,
+    pub timezone: String,
+    pub prompt: String,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub thinking: String,
+    pub auto_approve: bool,
+    pub deliver_to: Option<String>,
+    pub enabled: bool,
+    pub last_run_at: Option<DateTime<Utc>>,
+    pub next_run_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl CronJob {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        name: String,
+        cron_expr: String,
+        timezone: String,
+        prompt: String,
+        provider: Option<String>,
+        model: Option<String>,
+        thinking: String,
+        auto_approve: bool,
+        deliver_to: Option<String>,
+    ) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4(),
+            name,
+            cron_expr,
+            timezone,
+            prompt,
+            provider,
+            model,
+            thinking,
+            auto_approve,
+            deliver_to,
+            enabled: true,
+            last_run_at: None,
+            next_run_at: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+}
+
+impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for CronJob {
+    fn from_row(row: &'r sqlx::sqlite::SqliteRow) -> std::result::Result<Self, sqlx::Error> {
+        use sqlx::Row;
+
+        let parse_ts = |val: Option<String>| -> Option<DateTime<Utc>> {
+            val.and_then(|s| {
+                DateTime::parse_from_rfc3339(&s)
+                    .ok()
+                    .map(|d| d.with_timezone(&Utc))
+            })
+        };
+
+        Ok(CronJob {
+            id: Uuid::parse_str(row.try_get("id")?)
+                .map_err(|e| sqlx::Error::Decode(Box::new(e)))?,
+            name: row.try_get("name")?,
+            cron_expr: row.try_get("cron_expr")?,
+            timezone: row.try_get("timezone")?,
+            prompt: row.try_get("prompt")?,
+            provider: row.try_get("provider")?,
+            model: row.try_get("model")?,
+            thinking: row.try_get("thinking")?,
+            auto_approve: row.try_get::<i32, _>("auto_approve")? != 0,
+            deliver_to: row.try_get("deliver_to")?,
+            enabled: row.try_get::<i32, _>("enabled")? != 0,
+            last_run_at: parse_ts(row.try_get("last_run_at")?),
+            next_run_at: parse_ts(row.try_get("next_run_at")?),
+            created_at: {
+                let s: String = row.try_get("created_at")?;
+                DateTime::parse_from_rfc3339(&s)
+                    .map(|d| d.with_timezone(&Utc))
+                    .map_err(|e| sqlx::Error::Decode(Box::new(e)))?
+            },
+            updated_at: {
+                let s: String = row.try_get("updated_at")?;
+                DateTime::parse_from_rfc3339(&s)
+                    .map(|d| d.with_timezone(&Utc))
+                    .map_err(|e| sqlx::Error::Decode(Box::new(e)))?
+            },
+        })
+    }
+}
+
 impl Session {
     /// Create a new session
     pub fn new(

@@ -46,6 +46,7 @@ Use these **exact parameter names** when calling tools:
 | `discord_send` | `action` | `message`, `channel_id`, `message_id`, `emoji`, `embed_title`, `embed_description`, `embed_color`, `thread_name`, `user_id`, `role_id`, `limit`, `file_path`, `caption` |
 | `telegram_send` | `action` | `message`, `chat_id`, `message_id`, `from_chat_id`, `photo_url`, `document_url`, `latitude`, `longitude`, `poll_question`, `poll_options`, `buttons`, `user_id`, `emoji` |
 | `channel_search` | `operation` | `channel`, `chat_id`, `query`, `n` |
+| `cron_manage` | `action` | `name`, `cron`, `tz`, `prompt`, `provider`, `model`, `thinking`, `auto_approve`, `deliver_to`, `job_id`, `enabled` |
 | `slack_send` | `action` | `message`, `channel_id`, `thread_ts`, `message_ts`, `emoji`, `user_id`, `topic`, `blocks`, `limit`, `file_path`, `caption` |
 
 > **Note:** `grep` and `glob` use `pattern` (not `query`). `bash` uses `command` (not `cmd`). File tools use `path` (not `file` or `file_path`).
@@ -60,8 +61,80 @@ Use these **exact parameter names** when calling tools:
 > **Telegram:** Use `telegram_send` for all Telegram operations — fall back to `http_request` only if `telegram_send` is unavailable. Credentials handled securely.
 > **`telegram_send` actions (19):** `send`, `reply`, `edit`, `delete`, `pin`, `unpin`, `forward`, `send_photo`, `send_document`, `send_location`, `send_poll`, `send_buttons`, `get_chat`, `get_chat_administrators`, `get_chat_member_count`, `get_chat_member`, `ban_user`, `unban_user`, `set_reaction`
 > **`channel_search` operations (3):** `list_chats` (show known chats with message counts), `recent` (last N messages in a chat), `search` (find messages by keyword). Telegram Bot API cannot fetch message history due to privacy — OpenCrabs passively captures group messages as they arrive and stores them for later search. Works across all channels (Telegram, Discord, Slack, WhatsApp). If `list_chats` returns empty, it means no messages have been captured yet — ask the user to send a message in the group first, or ask for the chat_id directly and use `telegram_send get_chat` to fetch chat info.
+> **`cron_manage` actions (5):** `create` (schedule a new cron job), `list` (show all jobs), `delete` (remove a job by id), `enable` (activate a paused job), `disable` (pause a job without deleting). Jobs run in isolated sessions with configurable provider/model/thinking. Use `deliver_to` to send results to a channel (e.g. `telegram:chat_id`, `discord:channel_id`). Cron expressions follow standard 5-field format (min hour dom mon dow). See AGENTS.md for best practices on heartbeat vs cron.
 > **Slack:** Always use `slack_send` instead of `http_request` for Slack — credentials handled securely. `thread_ts` and `message_ts` are Slack timestamps (e.g. `1503435956.000247`). Emoji names have no colons (e.g. `thumbsup`).
 > **`slack_send` actions (17):** `send`, `reply`, `react`, `unreact`, `edit`, `delete`, `pin`, `unpin`, `get_messages`, `get_channel`, `list_channels`, `get_user`, `list_members`, `kick_user`, `set_topic`, `send_blocks`, `send_file`
+
+## System CLI Tools
+
+OpenCrabs can leverage any CLI tool installed on the host system via `bash`. Common ones worth knowing about:
+
+| Tool | Purpose | Check |
+|------|---------|-------|
+| `gh` | GitHub CLI — issues, PRs, repos, releases, actions | `gh --version` |
+| `gog` | Google CLI — Gmail, Calendar (OAuth) | `gog --version` |
+| `docker` | Container management | `docker --version` |
+| `ssh` | Remote server access | `ssh -V` |
+| `node` | Run JavaScript/TypeScript tools | `node --version` |
+| `python3` | Run Python scripts and tools | `python3 --version` |
+| `ffmpeg` | Audio/video processing | `ffmpeg -version` |
+| `curl` | HTTP requests (fallback when `http_request` insufficient) | `curl --version` |
+
+Before using any CLI tool, verify it's installed with the check command. Document tool-specific accounts, aliases, and usage notes below in this file.
+
+### GitHub CLI (gh)
+
+Authenticated GitHub CLI. Use `gh` commands instead of raw API calls:
+
+```bash
+# Issues
+gh issue list
+gh issue view <number>
+gh issue create --title "Title" --body "Body"
+gh issue close <number>
+gh issue comment <number> --body "Comment"
+
+# Pull Requests
+gh pr list
+gh pr view <number>
+gh pr create --title "Title" --body "Body"
+gh pr merge <number>
+gh pr checks <number>
+
+# Repos & Releases
+gh release list
+gh release create <tag> --title "Title" --notes "Notes"
+gh repo view
+
+# Actions / CI
+gh run list
+gh run view <run-id>
+gh run watch <run-id>
+```
+
+### Google CLI (gog)
+
+OAuth-authenticated Google Workspace CLI. Supports Gmail and Calendar.
+
+**Setup:** Requires `GOG_KEYRING_PASSWORD` and `GOG_ACCOUNT` env vars. OAuth tokens stored in local keyring.
+
+```bash
+export GOG_KEYRING_PASSWORD="<keyring-password>"
+export GOG_ACCOUNT="<google-account-email>"
+
+# Calendar
+gog calendar events --max 10
+gog calendar events --start 2026-01-30 --end 2026-02-01
+
+# Gmail — Read
+gog gmail search "newer_than:1d" --max 10
+gog gmail search "is:unread" --max 20
+gog gmail thread <thread-id>
+
+# Gmail — Send
+gog gmail send --to recipient@email.com --subject "Subject" --body "Body"
+gog gmail send --to recipient@email.com --subject "Subject" --body "Body" --cc other@email.com
+```
 
 ## What Goes Here
 
@@ -76,6 +149,7 @@ Things like:
 - Docker container inventories
 - Nginx site mappings
 - Custom skill/plugin notes and configuration
+- CLI tool accounts and configurations (gh, gog, etc.)
 - Anything environment-specific
 
 ## Path Tips
