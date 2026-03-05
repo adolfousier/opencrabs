@@ -44,6 +44,7 @@
 - [Tool System](#-tool-system)
 - [Keyboard Shortcuts](#-keyboard-shortcuts)
 - [Debug and Logging](#-debug-and-logging)
+- [Cron Jobs & Heartbeats](#-cron-jobs--heartbeats)
 - [Architecture](#-architecture)
 - [Project Structure](#-project-structure)
 - [Development](#-development)
@@ -1240,6 +1241,78 @@ rebuild tool      # Agent-triggered: build → ProgressEvent::RestartReady → r
 **Modules:**
 - `src/brain/self_update.rs` — `SelfUpdater` struct with `auto_detect()`, `build()`, `test()`, `restart()`
 - `src/brain/tools/rebuild.rs` — `RebuildTool` (agent-callable, emits `ProgressEvent::RestartReady`)
+
+---
+
+## ⏰ Cron Jobs & Heartbeats
+
+OpenCrabs runs as a daemon on your machine — a persistent terminal agent that's always on. This makes scheduled tasks and background jobs native and trivial.
+
+### Cron Jobs — Scheduled Isolated Sessions
+
+Cron jobs run as isolated sessions in the background. Each job gets its own session, provider, model, and context — completely independent from your main chat.
+
+```bash
+# Add a cron job via CLI
+opencrabs cron add \
+  --name "morning-briefing" \
+  --cron "0 9 * * *" \
+  --tz "America/New_York" \
+  --prompt "Check my email, calendar, and weather. Send a morning briefing." \
+  --deliver telegram:123456789
+
+# List all jobs
+opencrabs cron list
+
+# Enable/disable
+opencrabs cron enable morning-briefing
+opencrabs cron disable morning-briefing
+
+# Remove
+opencrabs cron remove morning-briefing
+```
+
+The agent can also create, list, and manage cron jobs autonomously via the `cron_manage` tool — from any channel:
+
+> "Set up a cron job that checks my Trello board every 2 hours and pings me on Telegram if any card is overdue"
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--cron` | required | Standard cron expression (e.g. `"0 9 * * *"`) |
+| `--tz` | `UTC` | Timezone for the schedule |
+| `--prompt` | required | The instruction to execute |
+| `--provider` | current | Override provider (e.g. `anthropic`, `gemini`) |
+| `--model` | current | Override model |
+| `--thinking` | `off` | Thinking mode: `off`, `on`, `budget` |
+| `--auto-approve` | `true` | Auto-approve tool calls (isolated sessions) |
+| `--deliver` | none | Channel to deliver results (e.g. `telegram:123456`, `discord:789`, `slack:C0123`) |
+
+### Heartbeats — Proactive Background Checks
+
+When running as a daemon, OpenCrabs can perform periodic heartbeat checks. Configure `HEARTBEAT.md` in your workspace (`~/.opencrabs/HEARTBEAT.md`) with a checklist of things to monitor:
+
+```markdown
+# Heartbeat Checklist
+- Check for urgent unread emails
+- Check calendar for events in the next 2 hours
+- If anything needs attention, message me on Telegram
+- Otherwise, reply HEARTBEAT_OK
+```
+
+The heartbeat prompt is loaded into the agent's brain every turn. When the heartbeat fires, the agent reads `HEARTBEAT.md` and acts on it — checking email, calendar, notifications, or whatever you've configured.
+
+### Heartbeat vs Cron
+
+| | Heartbeat | Cron Job |
+|---|-----------|----------|
+| **Timing** | Periodic (every N minutes) | Exact schedule (cron expression) |
+| **Session** | Main session (shared context) | Isolated session (independent) |
+| **Context** | Has conversation history | Fresh context each run |
+| **Use case** | Batch periodic checks | Standalone scheduled tasks |
+| **Model** | Current session model | Configurable per job |
+| **Cost** | Single turn per cycle | Full session per run |
+
+**Rule of thumb:** Use heartbeats for lightweight monitoring that benefits from conversation context. Use cron jobs for standalone tasks that need exact timing, different models, or isolation.
 
 ---
 
