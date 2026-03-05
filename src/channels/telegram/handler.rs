@@ -556,9 +556,13 @@ pub(crate) async fn handle_message(
         }
     });
 
-    // Resolve session: owner shares the TUI session, other users get their own
-    let is_owner =
-        allowed.is_empty() || allowed.len() == 1 || allowed.iter().next() == Some(&user_id);
+    // Resolve session: owner shares the TUI session, other users get their own.
+    // Owner = first user in the config's allowed_users list (Vec order, not HashSet).
+    let owner_id = tg_cfg
+        .allowed_users
+        .first()
+        .and_then(|s| s.parse::<i64>().ok());
+    let is_owner = allowed.is_empty() || owner_id == Some(user_id);
 
     tracing::info!(
         "Telegram: session resolve — is_owner={}, is_dm={}, chat=\"{}\" ({}), user={} ({})",
