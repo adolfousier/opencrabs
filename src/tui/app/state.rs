@@ -1434,25 +1434,39 @@ impl App {
         // Any non-Ctrl+C key resets the quit confirmation
         self.ctrl_c_pending_at = None;
 
-        // Ctrl+Backspace / Alt+Backspace — delete last word
-        // Terminals send Ctrl+Backspace as Ctrl+H or Ctrl+W; macOS Option+Delete
-        // may report as Alt+Backspace or just Backspace with ALT modifier.
-        if event.code == KeyCode::Backspace
-            && (event.modifiers.contains(KeyModifiers::CONTROL)
-                || event.modifiers.contains(KeyModifiers::ALT))
+        // Delete word — comprehensive handling across platforms.
+        // macOS Option+Delete, Ctrl+Backspace, Ctrl+W, Ctrl+H — all delete the
+        // previous word.  Terminals encode these in many ways:
+        //   - KeyCode::Backspace + ALT/CONTROL modifier (standard)
+        //   - KeyCode::Char('\x7f') + ALT (macOS Option+Delete with enhancement)
+        //   - KeyCode::Char('\x08') + CONTROL (Ctrl+Backspace as Ctrl+H)
+        //   - KeyCode::Char('h') + CONTROL (Ctrl+H without enhancement)
+        //   - KeyCode::Char('w') + CONTROL (Ctrl+W)
+        //   - KeyCode::Char('\x17') + CONTROL or NONE (Ctrl+W raw)
         {
-            self.delete_last_word();
-            return Ok(());
-        }
-        // Ctrl+H fallback (some terminals send Ctrl+Backspace as Ctrl+H)
-        if event.code == KeyCode::Char('h') && event.modifiers.contains(KeyModifiers::CONTROL) {
-            self.delete_last_word();
-            return Ok(());
-        }
-        // Ctrl+W — delete word (unix terminal standard)
-        if event.code == KeyCode::Char('w') && event.modifiers.contains(KeyModifiers::CONTROL) {
-            self.delete_last_word();
-            return Ok(());
+            let is_delete_word = match event.code {
+                KeyCode::Backspace => {
+                    event.modifiers.contains(KeyModifiers::CONTROL)
+                        || event.modifiers.contains(KeyModifiers::ALT)
+                        || event.modifiers.contains(KeyModifiers::SUPER)
+                }
+                KeyCode::Char('\x7f') => {
+                    // DEL char — macOS Option+Delete with keyboard enhancement
+                    event.modifiers.contains(KeyModifiers::ALT)
+                        || event.modifiers.contains(KeyModifiers::CONTROL)
+                        || event.modifiers.contains(KeyModifiers::SUPER)
+                        || event.modifiers.is_empty()
+                }
+                KeyCode::Char('\x08') => true, // raw Ctrl+H / Ctrl+Backspace
+                KeyCode::Char('\x17') => true, // raw Ctrl+W
+                KeyCode::Char('h') => event.modifiers.contains(KeyModifiers::CONTROL),
+                KeyCode::Char('w') => event.modifiers.contains(KeyModifiers::CONTROL),
+                _ => false,
+            };
+            if is_delete_word {
+                self.delete_last_word();
+                return Ok(());
+            }
         }
 
         // Ctrl+Left or Alt+Left — jump to previous word boundary

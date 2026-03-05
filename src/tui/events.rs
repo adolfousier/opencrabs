@@ -390,11 +390,15 @@ pub mod keys {
             && (event.modifiers.is_empty() || event.modifiers.contains(KeyModifiers::CONTROL))
     }
 
-    /// Alt+Enter or Shift+Enter - Insert newline
+    /// Insert newline — Alt+Enter, Shift+Enter, or Ctrl+J
+    /// macOS terminals don't send ALT modifier for Option key, so Ctrl+J
+    /// (Unix standard line feed) is the reliable cross-platform binding.
     pub fn is_newline(event: &KeyEvent) -> bool {
-        event.code == KeyCode::Enter
+        (event.code == KeyCode::Enter
             && (event.modifiers.contains(KeyModifiers::ALT)
-                || event.modifiers.contains(KeyModifiers::SHIFT))
+                || event.modifiers.contains(KeyModifiers::SHIFT)))
+            || (event.code == KeyCode::Char('j')
+                && event.modifiers.contains(KeyModifiers::CONTROL))
     }
 
     /// Escape - Cancel/Back
