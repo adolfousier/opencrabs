@@ -5,6 +5,36 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.51] - 2026-03-05
+
+### Added
+- **Telegram message history capture and search** (`20c6008`) — Passive capture of Telegram group messages into new `channel_messages` table. New `channel_search` tool with `list_chats`, `recent`, and `search` operations. Telegram Bot API cannot fetch history, so the handler stores all group messages (directed and non-directed) as they arrive for on-demand retrieval. New migration, `ChannelMessageRepository`, and `ChannelMessage` model. Discord/Slack already have API-based history fetching via existing tools
+  - `src/migrations/20260305000001_add_channel_messages.sql` (new), `src/db/repository/channel_message.rs` (new), `src/db/models.rs`, `src/db/mod.rs`, `src/brain/tools/channel_search.rs` (new), `src/brain/tools/mod.rs`, `src/channels/telegram/handler.rs`, `src/channels/telegram/agent.rs`, `src/brain/tools/telegram_connect.rs`, `src/cli/ui.rs`
+- **Telegram chat and member info** (`20c6008`) — `get_chat` (chat details), `get_chat_administrators` (admin list with roles), `get_chat_member_count`, `get_chat_member` (user status lookup). Agent previously had no way to query Telegram chats or members. 19 telegram_send actions total
+  - `src/brain/tools/telegram_send.rs`
+- **Click-to-select and right-click-to-copy messages** (`5498970`, `d7fe7d7`) — Left-click highlights a message with subtle background, right-click copies clean content to clipboard via `pbcopy`/`xclip`/`xsel` with 2s cyan notification. Separate notification system from error messages. Line-to-message mapping built during render for coordinate lookup
+  - `src/tui/app/state.rs`, `src/tui/app/input.rs`, `src/tui/events.rs`, `src/tui/render/chat.rs`, `src/tui/runner.rs`
+- **Vim-style cross-platform input bindings** (`fbb92ad`, `de05b5c`, `8309804`) — `Ctrl+J` (newline), `Ctrl+W` (delete word), `Ctrl+U` (delete to line start). macOS Option key doesn't send ALT modifier in terminals, so Alt+Enter/Alt+Backspace never worked — vim bindings are the reliable cross-platform alternative. Crossterm `DISAMBIGUATE_ESCAPE_CODES` keyboard enhancement. Comprehensive delete-word key matching across terminal encodings (Backspace+modifiers, DEL `0x7f`, raw Ctrl+H/W). Up/Down arrows jump to start/end of line before entering history on single-line input. Home/End and Ctrl+U are line-aware in multiline
+  - `src/tui/app/state.rs`, `src/tui/app/input.rs`, `src/tui/events.rs`, `src/tui/runner.rs`
+- **Detailed Telegram logging** (`255a293`) — Verbose tracing for group/channel interactions to diagnose message routing
+  - `src/channels/telegram/handler.rs`
+
+### Fixed
+- **Context display showed raw API tokens including tool schema overhead** (`2532b51`) — `AgentResponse.context_tokens` now uses calibrated `context.token_count` (message-only) instead of raw API `input_tokens` which included ~22k tool schema overhead for 44 tools. Display no longer shows inflated 210k/200k
+  - `src/brain/agent/service/tool_loop.rs`, `src/brain/agent/service/tests/basic.rs`
+- **Owner detection used HashSet random iteration order** (`89ae548`) — `HashSet::iter().next()` is non-deterministic, causing the wrong user to be identified as owner. Fixed to use `tg_cfg.allowed_users.first()` (Vec order from config = deterministic, first entry = owner)
+  - `src/channels/telegram/handler.rs`
+- **Forward TokenCount events to TUI during channel interactions** (`b98027a`) — TUI now receives real-time token count updates when messages arrive via Telegram/Discord/Slack/WhatsApp
+  - `src/channels/telegram/handler.rs`
+- **Restore most recent session from DB on daemon restart** (`c423410`) — Daemon no longer starts with a blank session after restart
+  - `src/cli/ui.rs`
+
+### Improved
+- **Help screen colors** (`eb10a96`) — Orange section titles, cyan command keys matching TUI theme. Added INPUT EDITING section documenting all keybindings
+  - `src/tui/render/help.rs`
+- **README keyboard shortcuts** — Updated with vim bindings, mouse actions, multiline navigation
+  - `README.md`
+
 ## [0.2.50] - 2026-03-04
 
 ### Changed
@@ -1046,6 +1076,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.51]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.51
+[0.2.50]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.50
 [0.2.49]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.49
 [0.2.48]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.48
 [0.2.47]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.47
