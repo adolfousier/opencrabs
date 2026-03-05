@@ -6,6 +6,7 @@ use super::DiscordState;
 use super::handler;
 use crate::brain::agent::AgentService;
 use crate::config::Config;
+use crate::db::ChannelMessageRepository;
 use crate::services::{ServiceContext, SessionService};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,6 +26,7 @@ pub struct DiscordAgent {
     shared_session_id: Arc<Mutex<Option<Uuid>>>,
     discord_state: Arc<DiscordState>,
     config_rx: tokio::sync::watch::Receiver<Config>,
+    channel_msg_repo: ChannelMessageRepository,
 }
 
 impl DiscordAgent {
@@ -34,6 +36,7 @@ impl DiscordAgent {
         shared_session_id: Arc<Mutex<Option<Uuid>>>,
         discord_state: Arc<DiscordState>,
         config_rx: tokio::sync::watch::Receiver<Config>,
+        channel_msg_repo: ChannelMessageRepository,
     ) -> Self {
         Self {
             agent_service,
@@ -41,6 +44,7 @@ impl DiscordAgent {
             shared_session_id,
             discord_state,
             config_rx,
+            channel_msg_repo,
         }
     }
 
@@ -71,6 +75,7 @@ impl DiscordAgent {
                 shared_session: self.shared_session_id,
                 discord_state: self.discord_state,
                 config_rx: self.config_rx,
+                channel_msg_repo: self.channel_msg_repo,
             };
 
             let intents = GatewayIntents::GUILD_MESSAGES
@@ -103,6 +108,7 @@ struct Handler {
     shared_session: Arc<Mutex<Option<Uuid>>>,
     discord_state: Arc<DiscordState>,
     config_rx: tokio::sync::watch::Receiver<Config>,
+    channel_msg_repo: ChannelMessageRepository,
 }
 
 #[async_trait]
@@ -136,6 +142,7 @@ impl EventHandler for Handler {
             self.shared_session.clone(),
             self.discord_state.clone(),
             self.config_rx.clone(),
+            self.channel_msg_repo.clone(),
         )
         .await;
     }

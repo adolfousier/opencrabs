@@ -7,6 +7,7 @@ use super::SlackState;
 use super::handler;
 use crate::brain::agent::AgentService;
 use crate::config::Config;
+use crate::db::ChannelMessageRepository;
 use crate::services::{ServiceContext, SessionService};
 use slack_morphism::prelude::*;
 use std::sync::Arc;
@@ -20,6 +21,7 @@ pub struct SlackAgent {
     shared_session_id: Arc<Mutex<Option<Uuid>>>,
     slack_state: Arc<SlackState>,
     config_rx: tokio::sync::watch::Receiver<Config>,
+    channel_msg_repo: ChannelMessageRepository,
 }
 
 impl SlackAgent {
@@ -29,6 +31,7 @@ impl SlackAgent {
         shared_session_id: Arc<Mutex<Option<Uuid>>>,
         slack_state: Arc<SlackState>,
         config_rx: tokio::sync::watch::Receiver<Config>,
+        channel_msg_repo: ChannelMessageRepository,
     ) -> Self {
         Self {
             agent_service,
@@ -36,6 +39,7 @@ impl SlackAgent {
             shared_session_id,
             slack_state,
             config_rx,
+            channel_msg_repo,
         }
     }
 
@@ -101,6 +105,7 @@ impl SlackAgent {
                 bot_token: bot_token.clone(),
                 bot_user_id,
                 config_rx: self.config_rx,
+                channel_msg_repo: self.channel_msg_repo,
             };
             handler::HANDLER_STATE
                 .set(Arc::new(handler_state))

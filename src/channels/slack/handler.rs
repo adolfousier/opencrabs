@@ -9,6 +9,8 @@
 use super::SlackState;
 use crate::brain::agent::AgentService;
 use crate::config::{Config, RespondTo};
+use crate::db::ChannelMessageRepository;
+use crate::db::models::ChannelMessage as DbChannelMessage;
 use crate::services::SessionService;
 use crate::utils::sanitize::redact_secrets;
 use crate::utils::truncate_str;
@@ -108,6 +110,7 @@ pub struct HandlerState {
     pub bot_token: String,
     pub bot_user_id: Option<String>,
     pub config_rx: tokio::sync::watch::Receiver<Config>,
+    pub channel_msg_repo: ChannelMessageRepository,
 }
 
 /// Split a message into chunks that fit Slack's limit (conservative 3000 chars).
@@ -227,6 +230,31 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         return;
     }
 
+    // Helper: passively capture a channel message for history
+    let store_channel_msg = |text: String| {
+        let repo = state.channel_msg_repo.clone();
+        let ch_id = channel_id.clone();
+        let uid = user_id.clone();
+        async move {
+            if text.is_empty() {
+                return;
+            }
+            let cm = DbChannelMessage::new(
+                "slack".into(),
+                ch_id,
+                None, // Slack channel names require an API call; omit for now
+                uid,
+                String::new(), // Slack user names require an API call
+                text,
+                "text".into(),
+                None,
+            );
+            if let Err(e) = repo.insert(&cm).await {
+                tracing::warn!("Failed to store Slack channel message: {e}");
+            }
+        }
+    };
+
     // Read latest config from watch channel — single source of truth
     let cfg = state.config_rx.borrow().clone();
     let sl_cfg = &cfg.channels.slack;
@@ -260,12 +288,14 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                 "Slack: ignoring message in non-allowed channel {}",
                 channel_id
             );
+            store_channel_msg(text.clone()).await;
             return;
         }
 
         match respond_to {
             RespondTo::DmOnly => {
                 tracing::debug!("Slack: respond_to=dm_only, ignoring channel message");
+                store_channel_msg(text.clone()).await;
                 return;
             }
             RespondTo::Mention => {
@@ -275,11 +305,17 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                     .is_some_and(|bid| text.contains(&format!("<@{}>", bid)));
                 if !mentioned {
                     tracing::debug!("Slack: respond_to=mention, bot not mentioned — ignoring");
+                    store_channel_msg(text.clone()).await;
                     return;
                 }
             }
             RespondTo::All => {} // pass through
         }
+    }
+
+    // Also store directed channel messages for complete history
+    if !is_dm {
+        store_channel_msg(text.clone()).await;
     }
 
     // Strip <@BOT_ID> from text when responding to a mention

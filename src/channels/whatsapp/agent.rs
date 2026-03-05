@@ -6,6 +6,7 @@ use super::WhatsAppState;
 use super::handler;
 use crate::brain::agent::AgentService;
 use crate::config::Config;
+use crate::db::ChannelMessageRepository;
 use crate::services::{ServiceContext, SessionService};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -24,6 +25,7 @@ pub struct WhatsAppAgent {
     shared_session_id: Arc<Mutex<Option<Uuid>>>,
     whatsapp_state: Arc<WhatsAppState>,
     config_rx: tokio::sync::watch::Receiver<Config>,
+    channel_msg_repo: ChannelMessageRepository,
 }
 
 impl WhatsAppAgent {
@@ -33,6 +35,7 @@ impl WhatsAppAgent {
         shared_session_id: Arc<Mutex<Option<Uuid>>>,
         whatsapp_state: Arc<WhatsAppState>,
         config_rx: tokio::sync::watch::Receiver<Config>,
+        channel_msg_repo: ChannelMessageRepository,
     ) -> Self {
         Self {
             agent_service,
@@ -40,6 +43,7 @@ impl WhatsAppAgent {
             shared_session_id,
             whatsapp_state,
             config_rx,
+            channel_msg_repo,
         }
     }
 
@@ -101,6 +105,7 @@ impl WhatsAppAgent {
             let shared_session = self.shared_session_id.clone();
             let wa_state = self.whatsapp_state.clone();
             let config_rx = self.config_rx.clone();
+            let channel_msg_repo = self.channel_msg_repo.clone();
             let extra_sessions: Arc<
                 Mutex<std::collections::HashMap<String, (Uuid, std::time::Instant)>>,
             > = Arc::new(Mutex::new(std::collections::HashMap::new()));
@@ -119,6 +124,7 @@ impl WhatsAppAgent {
                     let wa_state = wa_state.clone();
                     let owner_jid = owner_jid_clone.clone();
                     let config_rx = config_rx.clone();
+                    let channel_msg_repo = channel_msg_repo.clone();
                     async move {
                         match event {
                             Event::PairingQrCode { ref code, .. } => {
@@ -149,6 +155,7 @@ impl WhatsAppAgent {
                                     shared_session,
                                     wa_state.clone(),
                                     config_rx,
+                                    channel_msg_repo,
                                 )
                                 .await;
                             }

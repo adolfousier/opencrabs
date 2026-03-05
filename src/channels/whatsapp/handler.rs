@@ -7,6 +7,8 @@ use crate::brain::agent::AgentService;
 use crate::brain::agent::{ApprovalCallback, ProgressCallback, ProgressEvent};
 use crate::channels::whatsapp::WhatsAppState;
 use crate::config::Config;
+use crate::db::ChannelMessageRepository;
+use crate::db::models::ChannelMessage as DbChannelMessage;
 use crate::services::SessionService;
 use crate::utils::sanitize::redact_secrets;
 use crate::utils::truncate_str;
@@ -254,6 +256,7 @@ pub(crate) async fn handle_message(
     shared_session: Arc<Mutex<Option<Uuid>>>,
     wa_state: Arc<WhatsAppState>,
     config_rx: tokio::sync::watch::Receiver<Config>,
+    channel_msg_repo: ChannelMessageRepository,
 ) {
     let phone = sender_phone(&info);
     tracing::debug!(
@@ -289,6 +292,32 @@ pub(crate) async fn handle_message(
     // Require at least text, image, audio, or document
     if text.is_none() && !has_img && !has_aud && !has_doc {
         return;
+    }
+
+    // Passively capture message for channel history (groups and DMs)
+    if let Some(ref t) = text
+        && !t.is_empty()
+    {
+        let chat_id = format!("{}", info.source.chat);
+        let is_group = info.source.is_group;
+        let push_name = info.push_name.clone();
+        let cm = DbChannelMessage::new(
+            "whatsapp".into(),
+            chat_id,
+            if is_group {
+                Some(format!("{}", info.source.chat))
+            } else {
+                None
+            },
+            phone.clone(),
+            push_name,
+            t.clone(),
+            "text".into(),
+            None,
+        );
+        if let Err(e) = channel_msg_repo.insert(&cm).await {
+            tracing::warn!("Failed to store WhatsApp channel message: {e}");
+        }
     }
 
     // Read latest config from watch channel — single source of truth

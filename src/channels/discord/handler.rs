@@ -6,6 +6,8 @@
 use super::DiscordState;
 use crate::brain::agent::AgentService;
 use crate::config::{Config, RespondTo};
+use crate::db::ChannelMessageRepository;
+use crate::db::models::ChannelMessage as DbChannelMessage;
 use crate::services::SessionService;
 use crate::utils::sanitize::redact_secrets;
 use crate::utils::truncate_str;
@@ -52,6 +54,7 @@ pub(crate) async fn handle_message(
     shared_session: Arc<Mutex<Option<Uuid>>>,
     discord_state: Arc<DiscordState>,
     config_rx: tokio::sync::watch::Receiver<Config>,
+    channel_msg_repo: ChannelMessageRepository,
 ) {
     // Read latest config from watch channel — single source of truth
     let cfg = config_rx.borrow().clone();
@@ -83,6 +86,37 @@ pub(crate) async fn handle_message(
 
     let user_id = msg.author.id.get() as i64;
 
+    // Helper: passively capture a channel message for history
+    let store_channel_msg = |text: String| {
+        let repo = channel_msg_repo.clone();
+        let channel_chat_id = msg.channel_id.get().to_string();
+        let guild_name = msg
+            .guild_id
+            .map(|g| g.get().to_string())
+            .unwrap_or_else(|| "DM".to_string());
+        let sender_id = msg.author.id.get().to_string();
+        let sender_name = msg.author.name.clone();
+        let msg_id = msg.id.get().to_string();
+        async move {
+            if text.is_empty() {
+                return;
+            }
+            let cm = DbChannelMessage::new(
+                "discord".into(),
+                channel_chat_id,
+                Some(guild_name),
+                sender_id,
+                sender_name,
+                text,
+                "text".into(),
+                Some(msg_id),
+            );
+            if let Err(e) = repo.insert(&cm).await {
+                tracing::warn!("Failed to store Discord channel message: {e}");
+            }
+        }
+    };
+
     // Allowlist check — if allowed list is empty, accept all
     if !allowed.is_empty() && !allowed.contains(&user_id) {
         tracing::debug!(
@@ -103,12 +137,14 @@ pub(crate) async fn handle_message(
                 "Discord: ignoring message in non-allowed channel {}",
                 channel_str
             );
+            store_channel_msg(msg.content.clone()).await;
             return;
         }
 
         match respond_to {
             RespondTo::DmOnly => {
                 tracing::debug!("Discord: respond_to=dm_only, ignoring channel message");
+                store_channel_msg(msg.content.clone()).await;
                 return;
             }
             RespondTo::Mention => {
@@ -117,11 +153,17 @@ pub(crate) async fn handle_message(
                     bot_id.is_some_and(|bid| msg.mentions.iter().any(|u| u.id.get() == bid));
                 if !mentioned {
                     tracing::debug!("Discord: respond_to=mention, bot not mentioned — ignoring");
+                    store_channel_msg(msg.content.clone()).await;
                     return;
                 }
             }
             RespondTo::All => {} // pass through
         }
+    }
+
+    // Also store directed channel messages for complete history
+    if !is_dm {
+        store_channel_msg(msg.content.clone()).await;
     }
 
     // Check for audio attachments → STT

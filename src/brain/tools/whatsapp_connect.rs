@@ -356,6 +356,8 @@ impl Tool for WhatsAppConnectTool {
         let session_svc = crate::services::SessionService::new(factory.service_context());
         let shared_session = factory.shared_session_id();
         let config_rx = factory.config_rx();
+        let channel_msg_repo =
+            crate::db::ChannelMessageRepository::new(factory.service_context().pool());
         let extra_sessions: Arc<Mutex<HashMap<String, (uuid::Uuid, std::time::Instant)>>> =
             Arc::new(Mutex::new(HashMap::new()));
 
@@ -392,6 +394,7 @@ impl Tool for WhatsAppConnectTool {
                 let wa_state = wa_state.clone();
                 let owner_jid = owner_jid.clone();
                 let config_rx = config_rx.clone();
+                let channel_msg_repo = channel_msg_repo.clone();
                 async move {
                     match event {
                         Event::PairingQrCode { ref code, .. } => {
@@ -420,6 +423,7 @@ impl Tool for WhatsAppConnectTool {
                                 shared_session,
                                 wa_state.clone(),
                                 config_rx,
+                                channel_msg_repo,
                             )
                             .await;
                         }

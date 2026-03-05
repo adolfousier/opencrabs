@@ -119,12 +119,15 @@ impl Tool for DiscordConnectTool {
         let discord_state = self.discord_state.clone();
         let config_rx = factory.config_rx();
 
+        let channel_msg_repo =
+            crate::db::ChannelMessageRepository::new(factory.service_context().pool());
         let dc_agent = crate::channels::discord::DiscordAgent::new(
             agent,
             service_context,
             shared_session,
             discord_state.clone(),
             config_rx,
+            channel_msg_repo,
         );
 
         let _handle = dc_agent.start(token);

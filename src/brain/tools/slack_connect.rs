@@ -136,12 +136,15 @@ impl Tool for SlackConnectTool {
         let slack_state = self.slack_state.clone();
         let config_rx = factory.config_rx();
 
+        let channel_msg_repo =
+            crate::db::ChannelMessageRepository::new(factory.service_context().pool());
         let sl_agent = crate::channels::slack::SlackAgent::new(
             agent,
             service_context,
             shared_session,
             slack_state.clone(),
             config_rx,
+            channel_msg_repo,
         );
 
         let _handle = sl_agent.start(bot_token, app_token);

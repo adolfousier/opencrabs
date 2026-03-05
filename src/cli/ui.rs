@@ -719,6 +719,7 @@ async fn cmd_chat_inner(
                 app.shared_session_id(),
                 whatsapp_state.clone(),
                 channel_factory.config_rx(),
+                crate::db::ChannelMessageRepository::new(db.pool().clone()),
             );
             tracing::info!(
                 "Spawning WhatsApp agent ({} allowed phones)",
@@ -748,6 +749,7 @@ async fn cmd_chat_inner(
                     app.shared_session_id(),
                     discord_state.clone(),
                     channel_factory.config_rx(),
+                    crate::db::ChannelMessageRepository::new(db.pool().clone()),
                 );
                 tracing::info!(
                     "Spawning Discord bot ({} allowed users)",
@@ -785,6 +787,7 @@ async fn cmd_chat_inner(
                     app.shared_session_id(),
                     slack_state.clone(),
                     channel_factory.config_rx(),
+                    crate::db::ChannelMessageRepository::new(db.pool().clone()),
                 );
                 tracing::info!(
                     "Spawning Slack bot ({} allowed user(s))",
