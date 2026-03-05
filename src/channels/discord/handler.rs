@@ -361,6 +361,20 @@ pub(crate) async fn handle_message(
         }
     }
 
+    // Extract replied-to message context so the agent knows what the user is referencing.
+    let reply_context = msg.referenced_message.as_ref().and_then(|reply| {
+        let reply_text = reply.content.trim();
+        if reply_text.is_empty() {
+            return None;
+        }
+        let reply_sender = if reply.author.bot {
+            "assistant".to_string()
+        } else {
+            reply.author.name.clone()
+        };
+        Some(format!("[Replying to {reply_sender}: \"{reply_text}\"]"))
+    });
+
     // For non-owner users, prepend sender identity so the agent knows who
     // it's talking to and doesn't assume it's the owner.
     let agent_input = if !is_owner {
@@ -374,6 +388,13 @@ pub(crate) async fn handle_message(
         }
     } else {
         content
+    };
+
+    // Prepend reply context if the user is replying to a specific message.
+    let agent_input = if let Some(ref ctx) = reply_context {
+        format!("{ctx}\n{agent_input}")
+    } else {
+        agent_input
     };
 
     // Tell the LLM its text response is automatically delivered to the chat,
