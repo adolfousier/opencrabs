@@ -258,6 +258,11 @@ pub struct App {
     pub error_message: Option<String>,
     /// When error_message was set — used to auto-dismiss after 2.5s
     pub error_message_shown_at: Option<std::time::Instant>,
+    /// Transient notification (non-error, e.g. "Copied to clipboard")
+    pub notification: Option<String>,
+    pub notification_shown_at: Option<std::time::Instant>,
+    /// Currently selected message index (left-click to select, right-click to copy)
+    pub selected_message_idx: Option<usize>,
     /// Set to true when IntermediateText arrives during the current response cycle.
     /// Reset to false at the start of each new send_message call.
     /// Used in complete_response to avoid double-adding the assistant message.
@@ -381,6 +386,14 @@ pub struct App {
     /// Key: (message_id, content_width). Invalidated on terminal resize.
     pub render_cache: HashMap<(Uuid, u16), Vec<Line<'static>>>,
 
+    /// Mapping from rendered line index → message index (for click-to-copy).
+    /// Updated each frame by render_chat.
+    pub chat_line_to_msg: Vec<Option<usize>>,
+    /// The scroll offset used during the last render (for coordinate mapping)
+    pub chat_render_scroll: usize,
+    /// The top-left Y coordinate of the chat area in the terminal
+    pub chat_area_y: u16,
+
     /// History paging — how many DB messages are hidden above the current view
     pub hidden_older_messages: usize,
     pub oldest_displayed_sequence: i32,
@@ -442,6 +455,9 @@ impl App {
             streaming_reasoning: None,
             error_message: None,
             error_message_shown_at: None,
+            notification: None,
+            notification_shown_at: None,
+            selected_message_idx: None,
             intermediate_text_received: false,
             animation_frame: 0,
             splash_shown_at: Some(std::time::Instant::now()),
@@ -497,6 +513,9 @@ impl App {
             rebuild_status: None,
             resume_session_id: None,
             render_cache: HashMap::new(),
+            chat_line_to_msg: Vec::new(),
+            chat_render_scroll: 0,
+            chat_area_y: 0,
             hidden_older_messages: 0,
             oldest_displayed_sequence: 0,
             display_token_count: 0,
@@ -825,6 +844,16 @@ impl App {
                             self.auto_scroll = true;
                         }
                     }
+                }
+            }
+            TuiEvent::MouseClick(_col, row) => {
+                if self.mode == AppMode::Chat {
+                    self.handle_click_select(row);
+                }
+            }
+            TuiEvent::MouseRightClick(_col, row) => {
+                if self.mode == AppMode::Chat {
+                    self.handle_right_click_copy(row);
                 }
             }
             TuiEvent::Paste(text) => {

@@ -8,8 +8,9 @@ use super::render;
 use anyhow::Result;
 use crossterm::{
     event::{
-        DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange,
-        KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+        DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
+        EnableFocusChange, EnableMouseCapture, KeyboardEnhancementFlags,
+        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
@@ -18,7 +19,7 @@ use ratatui::{
     Terminal,
     backend::{Backend, CrosstermBackend},
 };
-use std::io::{self, Write};
+use std::io;
 
 /// Run the TUI application
 pub async fn run(mut app: App) -> Result<()> {
@@ -29,24 +30,15 @@ pub async fn run(mut app: App) -> Result<()> {
         stdout,
         EnterAlternateScreen,
         EnableBracketedPaste,
+        EnableMouseCapture,
         EnableFocusChange
     )?;
-    // Enable button-event mouse mode (\x1b[?1000h) + SGR encoding (\x1b[?1006h).
-    // This captures scroll wheel and clicks but NOT drag/motion, so terminal
-    // native text selection (click-drag to copy) keeps working.
-    // We intentionally avoid EnableMouseCapture which enables all-motion tracking
-    // (\x1b[?1003h) and blocks text selection.
-    write!(stdout, "\x1b[?1000h\x1b[?1006h")?;
-    stdout.flush()?;
-    // Enable keyboard enhancement for proper modifier key reporting (macOS).
-    // Silently ignore if the terminal doesn't support it — fallback keys in
-    // handle_key_event cover non-enhanced terminals.
+    // Enable keyboard enhancement for proper modifier key reporting.
+    // DISAMBIGUATE_ESCAPE_CODES gives accurate modifier info without
+    // changing how Backspace/Enter are encoded.
     let _ = execute!(
         io::stdout(),
-        PushKeyboardEnhancementFlags(
-            KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-                | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
-        )
+        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
     );
 
     let backend = CrosstermBackend::new(stdout);
@@ -68,13 +60,11 @@ pub async fn run(mut app: App) -> Result<()> {
     // Restore terminal
     let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
     disable_raw_mode()?;
-    // Disable button-event mouse mode + SGR encoding
-    write!(terminal.backend_mut(), "\x1b[?1000l\x1b[?1006l")?;
-    io::Write::flush(terminal.backend_mut())?;
     execute!(
         terminal.backend_mut(),
         LeaveAlternateScreen,
         DisableBracketedPaste,
+        DisableMouseCapture,
         DisableFocusChange
     )?;
     terminal.show_cursor()?;

@@ -17,6 +17,12 @@ pub enum TuiEvent {
     /// Mouse scroll event
     MouseScroll(i8), // positive = up, negative = down
 
+    /// Mouse left-click at (column, row) — select message
+    MouseClick(u16, u16),
+
+    /// Mouse right-click at (column, row) — copy message
+    MouseRightClick(u16, u16),
+
     /// Terminal gained focus
     FocusGained,
 
@@ -320,6 +326,12 @@ impl EventHandler {
                                 MouseEventKind::ScrollDown => {
                                     tx.send(TuiEvent::MouseScroll(-1)).is_err()
                                 }
+                                MouseEventKind::Down(crossterm::event::MouseButton::Left) => tx
+                                    .send(TuiEvent::MouseClick(mouse.column, mouse.row))
+                                    .is_err(),
+                                MouseEventKind::Down(crossterm::event::MouseButton::Right) => tx
+                                    .send(TuiEvent::MouseRightClick(mouse.column, mouse.row))
+                                    .is_err(),
                                 _ => false,
                             }
                         }
@@ -397,8 +409,7 @@ pub mod keys {
         (event.code == KeyCode::Enter
             && (event.modifiers.contains(KeyModifiers::ALT)
                 || event.modifiers.contains(KeyModifiers::SHIFT)))
-            || (event.code == KeyCode::Char('j')
-                && event.modifiers.contains(KeyModifiers::CONTROL))
+            || (event.code == KeyCode::Char('j') && event.modifiers.contains(KeyModifiers::CONTROL))
     }
 
     /// Escape - Cancel/Back

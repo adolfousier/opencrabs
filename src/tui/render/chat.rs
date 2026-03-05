@@ -18,15 +18,20 @@ use unicode_width::UnicodeWidthStr;
 /// Render the chat messages
 pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
+    // Track which message index each rendered line belongs to (for click-to-copy)
+    let mut line_to_msg: Vec<Option<usize>> = Vec::new();
 
     let content_width = area.width.saturating_sub(4) as usize; // borders + padding
 
     // Iterate by index to allow mutable access to render_cache while reading messages
     for msg_idx in 0..app.messages.len() {
+        let lines_before = lines.len();
+
         // Render inline approval messages
         if let Some(ref approval) = app.messages[msg_idx].approval {
             render_inline_approval(&mut lines, approval, content_width);
             lines.push(Line::from(""));
+            line_to_msg.resize(lines.len(), None);
             continue;
         }
 
@@ -34,6 +39,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         if let Some(ref menu) = app.messages[msg_idx].approve_menu {
             render_approve_menu(&mut lines, menu, content_width);
             lines.push(Line::from(""));
+            line_to_msg.resize(lines.len(), None);
             continue;
         }
 
@@ -46,6 +52,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                     .add_modifier(Modifier::ITALIC),
             )));
             lines.push(Line::from(""));
+            line_to_msg.resize(lines.len(), None);
             continue;
         }
 
@@ -53,6 +60,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         if let Some(ref group) = app.messages[msg_idx].tool_group {
             render_tool_group(&mut lines, group, false, app.animation_frame);
             lines.push(Line::from(""));
+            line_to_msg.resize(lines.len(), None);
             continue;
         }
 
@@ -109,13 +117,22 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                 }
             }
             lines.push(Line::from(""));
+            // System messages are mapped to their index for copy
+            for _ in lines_before..lines.len() {
+                line_to_msg.push(Some(msg_idx));
+            }
             continue;
         }
 
         // Dot/arrow message differentiation (no role labels needed)
         let is_user = app.messages[msg_idx].role == "user";
-        // User messages: no explicit background so it adapts to light/dark terminals
-        let msg_bg: Option<Color> = None;
+        // Highlight selected message with subtle background
+        let is_selected = app.selected_message_idx == Some(msg_idx);
+        let msg_bg: Option<Color> = if is_selected {
+            Some(Color::Rgb(40, 45, 55))
+        } else {
+            None
+        };
 
         // Parse and render message content as markdown (cached per message + width)
         let msg_id = app.messages[msg_idx].id;
@@ -202,8 +219,15 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             }
         }
 
+        // Map all lines from this message to its index
+        let msg_lines_end = lines.len();
+        for _ in lines_before..msg_lines_end {
+            line_to_msg.push(Some(msg_idx));
+        }
+
         // Spacing between messages
         lines.push(Line::from(""));
+        line_to_msg.push(None);
     }
 
     let has_pending_approval = app.has_pending_approval();
@@ -384,6 +408,29 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         lines.push(Line::from(""));
     }
 
+    // Show notification if present (auto-dismiss after 2s)
+    if let Some(ref note) = app.notification {
+        if app
+            .notification_shown_at
+            .is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(2))
+        {
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::styled("  ", Style::default()),
+                Span::styled(
+                    note.clone(),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]));
+            lines.push(Line::from(""));
+        } else {
+            app.notification = None;
+            app.notification_shown_at = None;
+        }
+    }
+
     // Show sudo password dialog inline (like approval dialogs)
     if let Some(ref sudo_req) = app.sudo_pending {
         lines.push(Line::from(""));
@@ -436,12 +483,20 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         lines.push(Line::from(""));
     }
 
+    // Pad line_to_msg for any remaining lines (streaming, errors, etc.)
+    line_to_msg.resize(lines.len(), None);
+    app.chat_line_to_msg = line_to_msg;
+
     // Calculate scroll offset — lines are pre-wrapped so count is accurate
     let total_lines = lines.len();
     // Only 1 row of top padding (Borders::NONE + Padding::new(1,1,1,0)); no border rows
     let visible_height = area.height.saturating_sub(1) as usize;
     let max_scroll = total_lines.saturating_sub(visible_height);
     let actual_scroll_offset = max_scroll.saturating_sub(app.scroll_offset);
+
+    // Store render info for click-to-copy coordinate mapping
+    app.chat_render_scroll = actual_scroll_offset;
+    app.chat_area_y = area.y;
 
     let chat = Paragraph::new(lines)
         .block(
