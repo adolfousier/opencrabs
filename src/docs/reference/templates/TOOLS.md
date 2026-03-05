@@ -45,6 +45,7 @@ Use these **exact parameter names** when calling tools:
 | `discord_connect` | `token`, `allowed_users` | `channel_id` |
 | `discord_send` | `action` | `message`, `channel_id`, `message_id`, `emoji`, `embed_title`, `embed_description`, `embed_color`, `thread_name`, `user_id`, `role_id`, `limit`, `file_path`, `caption` |
 | `telegram_send` | `action` | `message`, `chat_id`, `message_id`, `from_chat_id`, `photo_url`, `document_url`, `latitude`, `longitude`, `poll_question`, `poll_options`, `buttons`, `user_id`, `emoji` |
+| `channel_search` | `operation` | `channel`, `chat_id`, `query`, `n` |
 | `slack_send` | `action` | `message`, `channel_id`, `thread_ts`, `message_ts`, `emoji`, `user_id`, `topic`, `blocks`, `limit`, `file_path`, `caption` |
 
 > **Note:** `grep` and `glob` use `pattern` (not `query`). `bash` uses `command` (not `cmd`). File tools use `path` (not `file` or `file_path`).
@@ -57,7 +58,8 @@ Use these **exact parameter names** when calling tools:
 > **`discord_send` actions (17):** `send`, `reply`, `react`, `unreact`, `edit`, `delete`, `pin`, `unpin`, `create_thread`, `send_embed`, `get_messages`, `list_channels`, `add_role`, `remove_role`, `kick`, `ban`, `send_file`
 > **Guild-required actions:** `list_channels`, `add_role`, `remove_role`, `kick`, `ban` — these need the bot to have received at least one guild message first so the guild_id is available.
 > **Telegram:** Use `telegram_send` for all Telegram operations — fall back to `http_request` only if `telegram_send` is unavailable. Credentials handled securely.
-> **`telegram_send` actions (16):** `send`, `reply`, `edit`, `delete`, `pin`, `unpin`, `forward`, `send_photo`, `send_document`, `send_location`, `send_poll`, `send_buttons`, `get_chat`, `ban_user`, `unban_user`, `set_reaction`
+> **`telegram_send` actions (19):** `send`, `reply`, `edit`, `delete`, `pin`, `unpin`, `forward`, `send_photo`, `send_document`, `send_location`, `send_poll`, `send_buttons`, `get_chat`, `get_chat_administrators`, `get_chat_member_count`, `get_chat_member`, `ban_user`, `unban_user`, `set_reaction`
+> **`channel_search` operations (3):** `list_chats` (show known chats with message counts), `recent` (last N messages in a chat), `search` (find messages by keyword). Telegram Bot API cannot fetch message history — OpenCrabs passively captures group messages as they arrive and stores them for later search. Works across all channels (Telegram, Discord, Slack, WhatsApp).
 > **Slack:** Always use `slack_send` instead of `http_request` for Slack — credentials handled securely. `thread_ts` and `message_ts` are Slack timestamps (e.g. `1503435956.000247`). Emoji names have no colons (e.g. `thumbsup`).
 > **`slack_send` actions (17):** `send`, `reply`, `react`, `unreact`, `edit`, `delete`, `pin`, `unpin`, `get_messages`, `get_channel`, `list_channels`, `get_user`, `list_members`, `kick_user`, `set_topic`, `send_blocks`, `send_file`
 
@@ -160,7 +162,7 @@ The first provider with `enabled = true` (in config file order) is used for new 
 ### Channel Connections
 OpenCrabs can connect to messaging platforms. Configure in `~/.opencrabs/config.toml`:
 
-- **Telegram** — Create a bot via @BotFather, add token to config `[channels.telegram]`. Use `telegram_send` (16 actions) for full proactive control. Use `telegram_send` for all operations — fall back to `http_request` only if the tool is unavailable.
+- **Telegram** — Create a bot via @BotFather, add token to config `[channels.telegram]`. Use `telegram_send` (19 actions) for full proactive control including `get_chat`, `get_chat_administrators`, `get_chat_member_count`, and `get_chat_member`. Use `channel_search` to browse captured message history (Telegram Bot API cannot fetch history, so messages are passively stored as they arrive). Use `telegram_send` for all operations — fall back to `http_request` only if the tool is unavailable.
 - **Discord** — Create a bot at discord.com/developers (enable MESSAGE CONTENT intent), add token to config `[channels.discord]`. Use `discord_connect` to set up at runtime, `discord_send` (17 actions) for full proactive control. Use `discord_send` for all operations — fall back to `http_request` only if the tool is unavailable. Use `send_file` to upload images/files; generated images (`<<IMG:path>>`) are automatically sent as native attachments.
 - **WhatsApp** — Link via QR code pairing, configure `[channels.whatsapp]` with allowed phone numbers
 - **Slack** — Create an app at api.slack.com/apps (enable Socket Mode), add tokens to config `[channels.slack]`. Use `slack_send` (17 actions) for full proactive control. Use `slack_send` for all operations — fall back to `http_request` only if the tool is unavailable. Use `send_file` to upload images/files; generated images (`<<IMG:path>>`) are automatically sent as native Slack file uploads.
