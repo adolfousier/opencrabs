@@ -18,7 +18,7 @@ use teloxide::types::{
     ReplyParameters, UserId,
 };
 
-/// Tool for comprehensive Telegram bot control (16 actions).
+/// Tool for comprehensive Telegram bot control (19 actions).
 pub struct TelegramSendTool {
     telegram_state: Arc<TelegramState>,
 }
@@ -83,9 +83,10 @@ impl Tool for TelegramSendTool {
 
     fn description(&self) -> &str {
         "Full Telegram control: send messages, reply, edit, delete, pin/unpin, forward, \
-         send photos/documents/locations/polls, inline buttons, get chat info, ban/unban \
-         users, and set emoji reactions. Always use telegram_send instead of http_request \
-         — credentials handled securely. Requires Telegram to be connected first."
+         send photos/documents/locations/polls, inline buttons, get chat info, list admins, \
+         check member count/status, ban/unban users, and set emoji reactions. \
+         Always use telegram_send instead of http_request — credentials handled securely. \
+         Requires Telegram to be connected first."
     }
 
     fn input_schema(&self) -> Value {
@@ -98,6 +99,7 @@ impl Tool for TelegramSendTool {
                         "send", "reply", "edit", "delete", "pin", "unpin",
                         "forward", "send_photo", "send_document", "send_location",
                         "send_poll", "send_buttons", "get_chat",
+                        "get_chat_administrators", "get_chat_member_count", "get_chat_member",
                         "ban_user", "unban_user", "set_reaction"
                     ],
                     "description": "The Telegram action to perform"
@@ -449,6 +451,90 @@ impl Tool for TelegramSendTool {
                 }
             }
 
+            // ── get_chat_administrators ────────────────────────────────────
+            "get_chat_administrators" => {
+                let chat_id = pget!(chat_or_err(&input, &self.telegram_state).await);
+                match bot.get_chat_administrators(ChatId(chat_id)).await {
+                    Ok(admins) => {
+                        let lines: Vec<String> = admins
+                            .iter()
+                            .map(|m| {
+                                let u = &m.user;
+                                let role = match m.kind {
+                                    teloxide::types::ChatMemberKind::Owner { .. } => "owner",
+                                    teloxide::types::ChatMemberKind::Administrator { .. } => {
+                                        "admin"
+                                    }
+                                    _ => "member",
+                                };
+                                let handle = u
+                                    .username
+                                    .as_ref()
+                                    .map(|h| format!(" @{h}"))
+                                    .unwrap_or_default();
+                                format!("- {} (id={}){} [{}]", u.first_name, u.id, handle, role)
+                            })
+                            .collect();
+                        Ok(ToolResult::success(format!(
+                            "Chat {} administrators ({}):\n{}",
+                            chat_id,
+                            admins.len(),
+                            lines.join("\n")
+                        )))
+                    }
+                    Err(e) => Ok(ToolResult::error(format!(
+                        "Failed to get administrators: {e}"
+                    ))),
+                }
+            }
+
+            // ── get_chat_member_count ─────────────────────────────────────────
+            "get_chat_member_count" => {
+                let chat_id = pget!(chat_or_err(&input, &self.telegram_state).await);
+                match bot.get_chat_member_count(ChatId(chat_id)).await {
+                    Ok(count) => Ok(ToolResult::success(format!(
+                        "Chat {chat_id} has {count} members."
+                    ))),
+                    Err(e) => Ok(ToolResult::error(format!(
+                        "Failed to get member count: {e}"
+                    ))),
+                }
+            }
+
+            // ── get_chat_member ───────────────────────────────────────────────
+            "get_chat_member" => {
+                let chat_id = pget!(chat_or_err(&input, &self.telegram_state).await);
+                let uid = pget!(get_id(&input, "user_id"));
+                match bot
+                    .get_chat_member(ChatId(chat_id), UserId(uid as u64))
+                    .await
+                {
+                    Ok(member) => {
+                        let u = &member.user;
+                        let status = match member.kind {
+                            teloxide::types::ChatMemberKind::Owner { .. } => "owner",
+                            teloxide::types::ChatMemberKind::Administrator { .. } => {
+                                "administrator"
+                            }
+                            teloxide::types::ChatMemberKind::Member => "member",
+                            teloxide::types::ChatMemberKind::Restricted { .. } => "restricted",
+                            teloxide::types::ChatMemberKind::Left => "left",
+                            teloxide::types::ChatMemberKind::Banned { .. } => "banned",
+                        };
+                        let handle = u
+                            .username
+                            .as_ref()
+                            .map(|h| format!(" @{h}"))
+                            .unwrap_or_default();
+                        Ok(ToolResult::success(format!(
+                            "User {} (id={}){}: status={}",
+                            u.first_name, u.id, handle, status
+                        )))
+                    }
+                    Err(e) => Ok(ToolResult::error(format!("Failed to get chat member: {e}"))),
+                }
+            }
+
             // ── ban_user ─────────────────────────────────────────────────────
             "ban_user" => {
                 let chat_id = pget!(chat_or_err(&input, &self.telegram_state).await);
@@ -502,7 +588,8 @@ impl Tool for TelegramSendTool {
             unknown => Ok(ToolResult::error(format!(
                 "Unknown action '{unknown}'. Valid actions: send, reply, edit, delete, pin, \
                  unpin, forward, send_photo, send_document, send_location, send_poll, \
-                 send_buttons, get_chat, ban_user, unban_user, set_reaction"
+                 send_buttons, get_chat, get_chat_administrators, get_chat_member_count, \
+                 get_chat_member, ban_user, unban_user, set_reaction"
             ))),
         }
     }

@@ -113,6 +113,11 @@ async fn cmd_chat_inner(
     tool_registry.register(Arc::new(WriteOpenCrabsFileTool));
     // Session search — hybrid QMD search across all session message history
     tool_registry.register(Arc::new(SessionSearchTool::new(db.pool().clone())));
+    // Channel search — search passively captured channel messages (Telegram groups, etc.)
+    use crate::brain::tools::channel_search::ChannelSearchTool;
+    tool_registry.register(Arc::new(ChannelSearchTool::new(
+        crate::db::ChannelMessageRepository::new(db.pool().clone()),
+    )));
     // Config management (read/write config.toml, commands.toml)
     tool_registry.register(Arc::new(ConfigTool));
     // Slash command invocation (agent can call any slash command)
@@ -670,6 +675,7 @@ async fn cmd_chat_inner(
                     app.shared_session_id(),
                     telegram_state.clone(),
                     channel_factory.config_rx(),
+                    crate::db::ChannelMessageRepository::new(db.pool().clone()),
                 );
                 tracing::info!(
                     "Spawning Telegram bot ({} allowed users)",

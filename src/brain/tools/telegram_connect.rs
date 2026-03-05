@@ -110,12 +110,15 @@ impl Tool for TelegramConnectTool {
         let telegram_state = self.telegram_state.clone();
         let config_rx = factory.config_rx();
 
+        let channel_msg_repo =
+            crate::db::ChannelMessageRepository::new((*service_context.pool).clone());
         let tg_agent = crate::channels::telegram::TelegramAgent::new(
             agent,
             service_context,
             shared_session,
             telegram_state.clone(),
             config_rx,
+            channel_msg_repo,
         );
 
         let _handle = tg_agent.start(token);

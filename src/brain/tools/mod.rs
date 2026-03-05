@@ -26,6 +26,7 @@ pub mod web_search;
 
 // Tool implementations - Phase 3: Workflow & Integration
 pub mod analyze_image;
+pub mod channel_search;
 pub mod config_tool;
 pub mod context;
 pub mod generate_image;
