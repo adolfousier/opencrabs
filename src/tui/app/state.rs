@@ -1434,11 +1434,23 @@ impl App {
         // Any non-Ctrl+C key resets the quit confirmation
         self.ctrl_c_pending_at = None;
 
-        // Ctrl+Backspace — delete last word
-        // Terminals send Ctrl+Backspace as Ctrl+H (KeyCode::Char('h')) so match both
-        if (event.code == KeyCode::Backspace || event.code == KeyCode::Char('h'))
-            && event.modifiers.contains(KeyModifiers::CONTROL)
+        // Ctrl+Backspace / Alt+Backspace — delete last word
+        // Terminals send Ctrl+Backspace as Ctrl+H or Ctrl+W; macOS Option+Delete
+        // may report as Alt+Backspace or just Backspace with ALT modifier.
+        if event.code == KeyCode::Backspace
+            && (event.modifiers.contains(KeyModifiers::CONTROL)
+                || event.modifiers.contains(KeyModifiers::ALT))
         {
+            self.delete_last_word();
+            return Ok(());
+        }
+        // Ctrl+H fallback (some terminals send Ctrl+Backspace as Ctrl+H)
+        if event.code == KeyCode::Char('h') && event.modifiers.contains(KeyModifiers::CONTROL) {
+            self.delete_last_word();
+            return Ok(());
+        }
+        // Ctrl+W — delete word (unix terminal standard)
+        if event.code == KeyCode::Char('w') && event.modifiers.contains(KeyModifiers::CONTROL) {
             self.delete_last_word();
             return Ok(());
         }
@@ -1450,6 +1462,16 @@ impl App {
         {
             let before = &self.input_buffer[..self.cursor_position];
             // Skip whitespace, then find start of word
+            let trimmed = before.trim_end();
+            self.cursor_position = trimmed
+                .rfind(char::is_whitespace)
+                .map(|pos| pos + 1)
+                .unwrap_or(0);
+            return Ok(());
+        }
+        // macOS: Option+Left sends Char('b') with Alt modifier in some terminals
+        if event.code == KeyCode::Char('b') && event.modifiers.contains(KeyModifiers::ALT) {
+            let before = &self.input_buffer[..self.cursor_position];
             let trimmed = before.trim_end();
             self.cursor_position = trimmed
                 .rfind(char::is_whitespace)
@@ -1471,6 +1493,34 @@ impl App {
                 .find(|c: char| !c.is_whitespace())
                 .unwrap_or(rest.len());
             self.cursor_position += word_end + space_end;
+            return Ok(());
+        }
+        // macOS: Option+Right sends Char('f') with Alt modifier in some terminals
+        if event.code == KeyCode::Char('f') && event.modifiers.contains(KeyModifiers::ALT) {
+            let after = &self.input_buffer[self.cursor_position..];
+            let word_end = after.find(char::is_whitespace).unwrap_or(after.len());
+            let rest = &after[word_end..];
+            let space_end = rest
+                .find(|c: char| !c.is_whitespace())
+                .unwrap_or(rest.len());
+            self.cursor_position += word_end + space_end;
+            return Ok(());
+        }
+
+        // Ctrl+A — jump to start of line (unix standard)
+        if event.code == KeyCode::Char('a') && event.modifiers == KeyModifiers::CONTROL {
+            self.cursor_position = 0;
+            return Ok(());
+        }
+        // Ctrl+E — jump to end of line (unix standard)
+        if event.code == KeyCode::Char('e') && event.modifiers == KeyModifiers::CONTROL {
+            self.cursor_position = self.input_buffer.len();
+            return Ok(());
+        }
+        // Ctrl+U — delete to start of line
+        if event.code == KeyCode::Char('u') && event.modifiers == KeyModifiers::CONTROL {
+            self.input_buffer.drain(..self.cursor_position);
+            self.cursor_position = 0;
             return Ok(());
         }
 
