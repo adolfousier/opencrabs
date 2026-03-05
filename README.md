@@ -969,12 +969,16 @@ OpenCrabs includes a built-in tool execution system. The AI can use these tools 
 | Shortcut | Action |
 |----------|--------|
 | `Enter` | Send message |
-| `Alt+Enter` / `Shift+Enter` | New line in input |
+| `Ctrl+J` | New line (vim — also Alt+Enter / Shift+Enter on supported terminals) |
 | `←` / `→` | Move cursor one character |
+| `↑` / `↓` | Navigate lines (multiline), jump to start/end (single-line), then history |
 | `Ctrl+←` / `Ctrl+→` | Jump by word |
-| `Home` / `End` | Jump to start/end of input |
+| `Home` / `End` | Start / end of current line |
 | `Delete` | Delete character after cursor |
-| `Ctrl+Backspace` / `Alt+Backspace` | Delete word before cursor |
+| `Ctrl+W` | Delete word before cursor (vim) |
+| `Ctrl+U` | Delete to start of line (vim) |
+| `Left-click` | Select/highlight a message |
+| `Right-click` | Copy message to clipboard |
 | `Escape` ×2 | Abort in-progress request |
 | `/help` | Open help dialog |
 | `/model` | Show current model |

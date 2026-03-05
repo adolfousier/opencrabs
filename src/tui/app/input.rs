@@ -19,6 +19,91 @@ impl App {
         (line_start, col)
     }
 
+    /// Map terminal row to message index using the render-time line mapping
+    fn row_to_msg_idx(&self, row: u16) -> Option<usize> {
+        let row_in_chat = row.saturating_sub(self.chat_area_y + 1) as usize;
+        let line_idx = self.chat_render_scroll + row_in_chat;
+        self.chat_line_to_msg.get(line_idx).copied().flatten()
+    }
+
+    /// Left-click: select/highlight a message
+    pub(crate) fn handle_click_select(&mut self, row: u16) {
+        let msg_idx = self.row_to_msg_idx(row);
+        // Toggle: click same message deselects, click different selects
+        if self.selected_message_idx == msg_idx {
+            self.selected_message_idx = None;
+        } else {
+            self.selected_message_idx = msg_idx;
+        }
+    }
+
+    /// Right-click: copy the clicked (or selected) message to clipboard
+    pub(crate) fn handle_right_click_copy(&mut self, row: u16) {
+        // Use clicked message, or fall back to already-selected message
+        let msg_idx = self.row_to_msg_idx(row).or(self.selected_message_idx);
+
+        let Some(idx) = msg_idx else { return };
+        let content = match self.messages.get(idx) {
+            Some(msg) if !msg.content.trim().is_empty() => msg.content.clone(),
+            _ => return,
+        };
+
+        if Self::copy_to_clipboard(&content) {
+            self.notification = Some("Copied to clipboard".to_string());
+            self.notification_shown_at = Some(std::time::Instant::now());
+            self.selected_message_idx = None;
+        }
+    }
+
+    /// Copy text to system clipboard
+    fn copy_to_clipboard(text: &str) -> bool {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        // Try pbcopy (macOS)
+        if let Ok(mut child) = Command::new("pbcopy")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            if let Some(ref mut stdin) = child.stdin {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            return child.wait().is_ok_and(|s| s.success());
+        }
+
+        // Try xclip (Linux)
+        if let Ok(mut child) = Command::new("xclip")
+            .args(["-selection", "clipboard"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            if let Some(ref mut stdin) = child.stdin {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            return child.wait().is_ok_and(|s| s.success());
+        }
+
+        // Try xsel (Linux fallback)
+        if let Ok(mut child) = Command::new("xsel")
+            .args(["--clipboard", "--input"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            if let Some(ref mut stdin) = child.stdin {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            return child.wait().is_ok_and(|s| s.success());
+        }
+
+        false
+    }
+
     /// Delete the word before the cursor (for Ctrl+Backspace and Alt+Backspace)
     pub(crate) fn delete_last_word(&mut self) {
         if self.cursor_position == 0 {
