@@ -720,6 +720,26 @@ pub(crate) async fn handle_message(
         }
     }
 
+    // Extract replied-to message context so the agent knows what the user is referencing.
+    let reply_context = msg.reply_to_message().and_then(|reply| {
+        let reply_text = reply.text().or(reply.caption()).unwrap_or("").trim();
+        if reply_text.is_empty() {
+            return None;
+        }
+        let reply_sender = reply
+            .from
+            .as_ref()
+            .map(|u| {
+                if u.is_bot {
+                    "assistant".to_string()
+                } else {
+                    u.first_name.clone()
+                }
+            })
+            .unwrap_or_else(|| "unknown".to_string());
+        Some(format!("[Replying to {reply_sender}: \"{reply_text}\"]"))
+    });
+
     // Prepend sender identity and group context so the agent knows who and where.
     let agent_input = {
         let mut name = user.first_name.clone();
@@ -747,6 +767,13 @@ pub(crate) async fn handle_message(
                 if is_owner { "owner" } else { "user" },
             )
         }
+    };
+
+    // Prepend reply context if the user is replying to a specific message.
+    let agent_input = if let Some(ref ctx) = reply_context {
+        format!("{ctx}\n{agent_input}")
+    } else {
+        agent_input
     };
 
     // Tell the LLM its text response is automatically delivered to the chat,
