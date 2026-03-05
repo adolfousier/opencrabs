@@ -160,13 +160,47 @@ pub(crate) async fn handle_message(
 
     // respond_to / allowed_channels filtering — private chats always pass
     let is_dm = matches!(msg.chat.kind, ChatKind::Private { .. });
+    let chat_title = msg
+        .chat
+        .title()
+        .unwrap_or(if is_dm { "DM" } else { "unknown" });
+    let chat_kind = match &msg.chat.kind {
+        ChatKind::Private { .. } => "private",
+        ChatKind::Public(public) => match &public.kind {
+            teloxide::types::PublicChatKind::Group { .. } => "group",
+            teloxide::types::PublicChatKind::Supergroup { .. } => "supergroup",
+            teloxide::types::PublicChatKind::Channel { .. } => "channel",
+        },
+    };
+
+    tracing::info!(
+        "Telegram: incoming msg in {} \"{}\" (chat_id={}) from {} ({}) — kind={}, text={}",
+        chat_kind,
+        chat_title,
+        msg.chat.id.0,
+        user.first_name,
+        user_id,
+        if msg.text().is_some() {
+            "text"
+        } else if msg.voice().is_some() {
+            "voice"
+        } else if msg.photo().is_some() {
+            "photo"
+        } else if msg.document().is_some() {
+            "document"
+        } else {
+            "other"
+        },
+        truncate_str(msg.text().or(msg.caption()).unwrap_or(""), 60),
+    );
+
     if !is_dm {
         let chat_id_str = msg.chat.id.0.to_string();
 
         // Check allowed_channels (empty = all channels allowed)
         if !allowed_channels.is_empty() && !allowed_channels.contains(&chat_id_str) {
             tracing::debug!(
-                "Telegram: ignoring message in non-allowed chat {}",
+                "Telegram: dropping — chat {} not in allowed_channels",
                 chat_id_str
             );
             return Ok(());
@@ -174,7 +208,11 @@ pub(crate) async fn handle_message(
 
         match respond_to {
             RespondTo::DmOnly => {
-                tracing::debug!("Telegram: respond_to=dm_only, ignoring group message");
+                tracing::debug!(
+                    "Telegram: dropping — respond_to=dm_only, {} \"{}\"",
+                    chat_kind,
+                    chat_title
+                );
                 return Ok(());
             }
             RespondTo::Mention => {
@@ -190,12 +228,35 @@ pub(crate) async fn handle_message(
                     .reply_to_message()
                     .is_some_and(|reply| reply.from.as_ref().is_some_and(|u| u.is_bot));
 
+                tracing::info!(
+                    "Telegram: group mention check — mentioned={}, replied_to_bot={}, bot_username={:?}",
+                    mentioned_by_username,
+                    replied_to_bot,
+                    bot_username,
+                );
+
                 if !mentioned_by_username && !replied_to_bot {
-                    tracing::debug!("Telegram: respond_to=mention, bot not mentioned — ignoring");
+                    tracing::info!(
+                        "Telegram: group msg not directed at bot — {} in \"{}\" said: {}",
+                        user.first_name,
+                        chat_title,
+                        truncate_str(text_content, 80),
+                    );
                     return Ok(());
                 }
+                tracing::info!(
+                    "Telegram: bot mentioned/replied in \"{}\" by {} — processing",
+                    chat_title,
+                    user.first_name,
+                );
             }
-            RespondTo::All => {} // pass through
+            RespondTo::All => {
+                tracing::debug!(
+                    "Telegram: respond_to=all, processing {} \"{}\"",
+                    chat_kind,
+                    chat_title
+                );
+            }
         }
     }
 
@@ -460,6 +521,16 @@ pub(crate) async fn handle_message(
     let is_owner =
         allowed.is_empty() || allowed.len() == 1 || allowed.iter().next() == Some(&user_id);
 
+    tracing::info!(
+        "Telegram: session resolve — is_owner={}, is_dm={}, chat=\"{}\" ({}), user={} ({})",
+        is_owner,
+        is_dm,
+        chat_title,
+        msg.chat.id.0,
+        user.first_name,
+        user_id,
+    );
+
     // Track owner's chat ID for proactive messaging
     if is_owner {
         telegram_state.set_owner_chat_id(msg.chat.id.0).await;
@@ -545,6 +616,15 @@ pub(crate) async fn handle_message(
         }
     };
 
+    tracing::info!(
+        "Telegram: resolved session={} for {} in {} \"{}\" (chat_id={})",
+        session_id,
+        user.first_name,
+        chat_kind,
+        chat_title,
+        msg.chat.id.0,
+    );
+
     // Register session → chat for approval routing
     telegram_state
         .register_session_chat(session_id, msg.chat.id.0)
@@ -597,9 +677,8 @@ pub(crate) async fn handle_message(
         }
     }
 
-    // For non-owner users, prepend sender identity so the agent knows who
-    // it's talking to and doesn't assume it's the owner.
-    let agent_input = if !is_owner {
+    // Prepend sender identity and group context so the agent knows who and where.
+    let agent_input = {
         let mut name = user.first_name.clone();
         if let Some(ref last) = user.last_name {
             name.push(' ');
@@ -611,15 +690,19 @@ pub(crate) async fn handle_message(
             .map(|u| format!(" (@{})", u))
             .unwrap_or_default();
         if is_dm {
-            format!("[Telegram DM from {name}{handle}, ID {user_id}]\n{text}")
+            if is_owner {
+                text.clone()
+            } else {
+                format!("[Telegram DM from {name}{handle}, ID {user_id}]\n{text}")
+            }
         } else {
-            let chat_title = msg.chat.title().unwrap_or("group");
+            // Always include group context — even for the owner — so the agent
+            // knows it's in a group and who is speaking.
             format!(
-                "[Telegram message from {name}{handle}, ID {user_id} in group {chat_title}]\n{text}"
+                "[Telegram group \"{}\" — {} from {name}{handle}]\n{text}",
+                chat_title, if is_owner { "owner" } else { "user" },
             )
         }
-    } else {
-        text
     };
 
     // Tell the LLM its text response is automatically delivered to the chat,
