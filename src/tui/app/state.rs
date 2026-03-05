@@ -1507,20 +1507,14 @@ impl App {
             return Ok(());
         }
 
-        // Ctrl+A — jump to start of line (unix standard)
-        if event.code == KeyCode::Char('a') && event.modifiers == KeyModifiers::CONTROL {
-            self.cursor_position = 0;
-            return Ok(());
-        }
-        // Ctrl+E — jump to end of line (unix standard)
-        if event.code == KeyCode::Char('e') && event.modifiers == KeyModifiers::CONTROL {
-            self.cursor_position = self.input_buffer.len();
-            return Ok(());
-        }
-        // Ctrl+U — delete to start of line
+        // Ctrl+U — delete to start of current line
         if event.code == KeyCode::Char('u') && event.modifiers == KeyModifiers::CONTROL {
-            self.input_buffer.drain(..self.cursor_position);
-            self.cursor_position = 0;
+            let line_start = self.input_buffer[..self.cursor_position]
+                .rfind('\n')
+                .map(|i| i + 1)
+                .unwrap_or(0);
+            self.input_buffer.drain(line_start..self.cursor_position);
+            self.cursor_position = line_start;
             return Ok(());
         }
 

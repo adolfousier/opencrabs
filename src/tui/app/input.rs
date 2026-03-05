@@ -677,6 +677,14 @@ impl App {
             }
         } else if keys::is_up(&event)
             && !self.slash_suggestions_active
+            && !self.input_buffer.contains('\n')
+            && self.input_history_index.is_none()
+            && self.cursor_position > 0
+        {
+            // Arrow Up on single-line — jump to start first, history on next press
+            self.cursor_position = 0;
+        } else if keys::is_up(&event)
+            && !self.slash_suggestions_active
             && self.input_buffer.is_empty()
             && !self.input_history_stash.is_empty()
             && self.input_history_index.is_none()
@@ -706,6 +714,14 @@ impl App {
                 }
                 _ => {} // already at oldest
             }
+        } else if keys::is_down(&event)
+            && !self.slash_suggestions_active
+            && !self.input_buffer.contains('\n')
+            && self.input_history_index.is_none()
+            && self.cursor_position < self.input_buffer.len()
+        {
+            // Arrow Down on single-line — jump to end first
+            self.cursor_position = self.input_buffer.len();
         } else if keys::is_down(&event)
             && !self.slash_suggestions_active
             && self.input_history_index.is_some()
@@ -776,10 +792,20 @@ impl App {
                     self.cursor_position = next;
                 }
                 KeyCode::Home => {
-                    self.cursor_position = 0;
+                    // Jump to start of current line (not absolute start)
+                    let line_start = self.input_buffer[..self.cursor_position]
+                        .rfind('\n')
+                        .map(|i| i + 1)
+                        .unwrap_or(0);
+                    self.cursor_position = line_start;
                 }
                 KeyCode::End => {
-                    self.cursor_position = self.input_buffer.len();
+                    // Jump to end of current line (not absolute end)
+                    let line_end = self.input_buffer[self.cursor_position..]
+                        .find('\n')
+                        .map(|i| self.cursor_position + i)
+                        .unwrap_or(self.input_buffer.len());
+                    self.cursor_position = line_end;
                 }
                 KeyCode::Enter => {
                     // Fallback — if Enter didn't match is_submit (e.g., empty input)
