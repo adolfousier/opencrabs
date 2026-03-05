@@ -1,6 +1,6 @@
 [package]
 name = "opencrabs"
-version = "0.2.51"
+version = "0.2.52"
 edition = "2024"
 authors = ["Adolfo Usier <adolfo@meetneura.ai>"]
 license = "MIT"
@@ -26,6 +26,9 @@ crossterm = { version = "0.29", features = ["event-stream"] }
 
 # Database (git main: libsqlite3-sys >=0.30,<0.37 — compatible with qmd's rusqlite)
 sqlx = { git = "https://github.com/launchbadge/sqlx", branch = "main", features = ["runtime-tokio", "tls-native-tls", "sqlite", "chrono", "uuid"] }
+
+# Cron scheduling
+cron = "0.15"
 
 # Serialization
 serde = { version = "1.0", features = ["derive", "rc"] }

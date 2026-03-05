@@ -5,6 +5,25 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.52] - 2026-03-05
+
+### Added
+- **Reply-to-message context across all channels** (closes #26) — When a user replies to a specific message, the agent now receives the quoted message text and sender as context. Previously the agent had no way to know what message was being referenced
+  - **Telegram** (`c1f51be`) — Extracts `reply_to_message()` text and sender. Bot replies labeled "assistant", user replies show sender name
+  - **Discord** (`26dc53e`) — Extracts `referenced_message` content and author. Bot replies labeled "assistant"
+  - **Slack** (`b00c8bb`) — Detects thread replies via `thread_ts`. Slack events don't embed parent message text, so thread context is noted without parent content
+  - **WhatsApp** (`00d4e02`) — Extracts quoted message from `ExtendedTextMessage` context_info. Sender shown as phone number from participant JID
+- **Cron jobs DB layer** (`43e7448`) — New `cron_jobs` table migration, `CronJob` model with full scheduling fields (cron expression, timezone, provider, model, thinking, auto_approve, deliver_to), `CronJobRepository` with insert/list/find/delete/enable/disable/update_last_run. Foundation for scheduled isolated sessions via CLI or agent `cron_manage` tool
+  - `src/migrations/20260305000002_add_cron_jobs.sql` (new), `src/db/repository/cron_job.rs` (new), `src/db/models.rs`, `src/db/repository/mod.rs`, `Cargo.toml` (`cron = "0.15"`)
+
+### Fixed
+- **Native text selection restored** (`6962572`) — Disabled mouse capture that was blocking terminal text selection. Users can now select and copy text normally with left-click drag + keyboard copy
+- **API key look-alike in test fixture** (`eb0b3f2`) — Replaced realistic-looking Google API key pattern in sanitize test with clear fake placeholder to avoid false positive leak alerts
+
+### Improved
+- **Brain templates updated** (`3e5033b`, `a590fce`, `43e7448`) — TOOLS.md template: `telegram_send` 16→19 actions (`get_chat_administrators`, `get_chat_member_count`, `get_chat_member`), added `channel_search` tool with `list_chats`/`recent`/`search` operations, empty state guidance for agents, `cron_manage` tool (5 actions: create/list/delete/enable/disable), system CLI tools reference (gh, gog, docker, ssh, node, etc.) with full gh and gog command docs. Updated `commands.toml.example` with `/chats` and `/history` example commands
+- **README.md** (`43e7448`) — Added "Cron Jobs & Heartbeats" section with CLI examples, agent tool description, options table, HEARTBEAT.md usage, and heartbeat vs cron comparison
+
 ## [0.2.51] - 2026-03-05
 
 ### Added
@@ -1076,6 +1095,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.52]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.52
 [0.2.51]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.51
 [0.2.50]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.50
 [0.2.49]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.49
