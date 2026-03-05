@@ -70,6 +70,7 @@ tasks/
 ~/
 .opencrabs_*.json
 PLAN.md
+COST_ESTIMATE.md
 src/plans/
 *.swp
 *.swo

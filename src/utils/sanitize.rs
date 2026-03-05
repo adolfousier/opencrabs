@@ -392,7 +392,7 @@ mod tests {
 
     #[test]
     fn redact_secrets_google_key() {
-        let text = "key=AIzaSyB7_BkFn6E-mF5WevdqPPphnrE62ndhHQ0 for gemini";
+        let text = "key=AIzaSyFAKE_TEST_KEY_NOT_REAL_000000 for gemini";
         let out = redact_secrets(text);
         assert!(out.contains("AIzaSy[REDACTED]"), "got: {out}");
     }
