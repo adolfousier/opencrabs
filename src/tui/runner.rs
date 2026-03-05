@@ -9,7 +9,8 @@ use anyhow::Result;
 use crossterm::{
     event::{
         DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
-        EnableFocusChange, EnableMouseCapture,
+        EnableFocusChange, EnableMouseCapture, KeyboardEnhancementFlags,
+        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
@@ -32,6 +33,16 @@ pub async fn run(mut app: App) -> Result<()> {
         EnableMouseCapture,
         EnableFocusChange
     )?;
+    // Enable keyboard enhancement for proper modifier key reporting (macOS).
+    // Silently ignore if the terminal doesn't support it — fallback keys in
+    // handle_key_event cover non-enhanced terminals.
+    let _ = execute!(
+        io::stdout(),
+        PushKeyboardEnhancementFlags(
+            KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
+        )
+    );
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
@@ -50,6 +61,7 @@ pub async fn run(mut app: App) -> Result<()> {
     let result = run_loop(&mut terminal, &mut app).await;
 
     // Restore terminal
+    let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
