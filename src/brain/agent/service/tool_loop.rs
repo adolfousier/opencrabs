@@ -109,6 +109,7 @@ impl AgentService {
         let has_override_approval = override_approval_callback.is_some();
         let approval_callback: Option<ApprovalCallback> =
             override_approval_callback.or_else(|| self.approval_callback.clone());
+        let has_progress_override = override_progress_callback.is_some();
         let progress_callback: Option<ProgressCallback> =
             override_progress_callback.or_else(|| self.progress_callback.clone());
 
@@ -376,6 +377,13 @@ impl AgentService {
             }
             // Fire real-time token count update after every API response
             if let Some(ref cb) = progress_callback {
+                cb(session_id, ProgressEvent::TokenCount(context.token_count));
+            }
+            // When a channel override is active, also fire to the service-level callback
+            // so the TUI ctx display stays in sync with channel interactions.
+            if has_progress_override
+                && let Some(ref cb) = self.progress_callback
+            {
                 cb(session_id, ProgressEvent::TokenCount(context.token_count));
             }
 
@@ -974,6 +982,11 @@ impl AgentService {
 
             // Fire token count update after tool results are added — keeps TUI in sync
             if let Some(ref cb) = progress_callback {
+                cb(session_id, ProgressEvent::TokenCount(context.token_count));
+            }
+            if has_progress_override
+                && let Some(ref cb) = self.progress_callback
+            {
                 cb(session_id, ProgressEvent::TokenCount(context.token_count));
             }
 
