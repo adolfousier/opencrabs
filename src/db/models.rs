@@ -117,6 +117,69 @@ pub struct PlanTask {
     pub completed_at: Option<DateTime<Utc>>,
 }
 
+/// Channel message model — passive capture of messages from channel platforms
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelMessage {
+    pub id: Uuid,
+    pub channel: String,
+    pub channel_chat_id: String,
+    pub channel_chat_name: Option<String>,
+    pub sender_id: String,
+    pub sender_name: String,
+    pub content: String,
+    pub message_type: String,
+    pub platform_message_id: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+impl ChannelMessage {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        channel: String,
+        channel_chat_id: String,
+        channel_chat_name: Option<String>,
+        sender_id: String,
+        sender_name: String,
+        content: String,
+        message_type: String,
+        platform_message_id: Option<String>,
+    ) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            channel,
+            channel_chat_id,
+            channel_chat_name,
+            sender_id,
+            sender_name,
+            content,
+            message_type,
+            platform_message_id,
+            created_at: Utc::now(),
+        }
+    }
+}
+
+impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for ChannelMessage {
+    fn from_row(row: &'r sqlx::sqlite::SqliteRow) -> std::result::Result<Self, sqlx::Error> {
+        use sqlx::Row;
+
+        Ok(ChannelMessage {
+            id: Uuid::parse_str(row.try_get("id")?)
+                .map_err(|e| sqlx::Error::Decode(Box::new(e)))?,
+            channel: row.try_get("channel")?,
+            channel_chat_id: row.try_get("channel_chat_id")?,
+            channel_chat_name: row.try_get("channel_chat_name")?,
+            sender_id: row.try_get("sender_id")?,
+            sender_name: row.try_get("sender_name")?,
+            content: row.try_get("content")?,
+            message_type: row.try_get("message_type")?,
+            platform_message_id: row.try_get("platform_message_id")?,
+            created_at: DateTime::from_timestamp(row.try_get("created_at")?, 0)
+                .ok_or_else(|| sqlx::Error::Decode("Invalid timestamp for created_at".into()))?,
+        })
+    }
+}
+
 impl Session {
     /// Create a new session
     pub fn new(

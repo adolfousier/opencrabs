@@ -6,6 +6,7 @@ use super::TelegramState;
 use super::handler::handle_message;
 use crate::brain::agent::AgentService;
 use crate::config::Config;
+use crate::db::ChannelMessageRepository;
 use crate::services::{ServiceContext, SessionService};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -21,6 +22,7 @@ pub struct TelegramAgent {
     shared_session_id: Arc<Mutex<Option<Uuid>>>,
     telegram_state: Arc<TelegramState>,
     config_rx: tokio::sync::watch::Receiver<Config>,
+    channel_msg_repo: ChannelMessageRepository,
 }
 
 impl TelegramAgent {
@@ -30,6 +32,7 @@ impl TelegramAgent {
         shared_session_id: Arc<Mutex<Option<Uuid>>>,
         telegram_state: Arc<TelegramState>,
         config_rx: tokio::sync::watch::Receiver<Config>,
+        channel_msg_repo: ChannelMessageRepository,
     ) -> Self {
         Self {
             agent_service,
@@ -37,6 +40,7 @@ impl TelegramAgent {
             shared_session_id,
             telegram_state,
             config_rx,
+            channel_msg_repo,
         }
     }
 
@@ -109,6 +113,7 @@ impl TelegramAgent {
             let shared_session = self.shared_session_id.clone();
             let telegram_state = self.telegram_state.clone();
             let config_rx = self.config_rx.clone();
+            let channel_msg_repo = self.channel_msg_repo.clone();
 
             // ── Message handler ───────────────────────────────────────────────
             let msg_handler = Update::filter_message().endpoint({
@@ -119,6 +124,7 @@ impl TelegramAgent {
                 let shared_session = shared_session.clone();
                 let telegram_state = telegram_state.clone();
                 let config_rx = config_rx.clone();
+                let channel_msg_repo = channel_msg_repo.clone();
                 move |bot: Bot, msg: Message| {
                     let agent = agent.clone();
                     let session_svc = session_svc.clone();
@@ -127,6 +133,7 @@ impl TelegramAgent {
                     let shared_session = shared_session.clone();
                     let telegram_state = telegram_state.clone();
                     let config_rx = config_rx.clone();
+                    let channel_msg_repo = channel_msg_repo.clone();
                     async move {
                         // Spawn in background so the dispatcher is free to
                         // process callback queries (approval button clicks)
@@ -142,6 +149,7 @@ impl TelegramAgent {
                                 shared_session,
                                 telegram_state,
                                 config_rx,
+                                channel_msg_repo,
                             )
                             .await;
                         });

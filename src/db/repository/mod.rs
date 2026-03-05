@@ -2,11 +2,13 @@
 //!
 //! Repository pattern implementations for database access.
 
+pub mod channel_message;
 pub mod file;
 pub mod message;
 pub mod plan;
 pub mod session;
 
+pub use channel_message::ChannelMessageRepository;
 pub use file::FileRepository;
 pub use message::MessageRepository;
 pub use plan::PlanRepository;

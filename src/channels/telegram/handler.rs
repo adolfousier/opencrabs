@@ -6,6 +6,8 @@
 use super::TelegramState;
 use crate::brain::agent::{AgentService, ProgressCallback, ProgressEvent};
 use crate::config::{Config, RespondTo};
+use crate::db::ChannelMessageRepository;
+use crate::db::models::ChannelMessage as DbChannelMessage;
 use crate::services::SessionService;
 use crate::utils::sanitize::redact_secrets;
 use crate::utils::truncate_str;
@@ -91,6 +93,7 @@ pub(crate) async fn handle_message(
     shared_session: Arc<Mutex<Option<Uuid>>>,
     telegram_state: Arc<TelegramState>,
     config_rx: tokio::sync::watch::Receiver<Config>,
+    channel_msg_repo: ChannelMessageRepository,
 ) -> ResponseResult<()> {
     let user = match msg.from {
         Some(ref u) => u,
@@ -194,6 +197,34 @@ pub(crate) async fn handle_message(
         truncate_str(msg.text().or(msg.caption()).unwrap_or(""), 60),
     );
 
+    // Helper: passively capture a group message for channel history
+    let store_channel_msg = |text: String| {
+        let repo = channel_msg_repo.clone();
+        let channel_chat_id = msg.chat.id.0.to_string();
+        let chat_name = chat_title.to_string();
+        let sender_id = user.id.0.to_string();
+        let sender_name = user.first_name.clone();
+        let msg_id = msg.id.0.to_string();
+        async move {
+            if text.is_empty() {
+                return;
+            }
+            let cm = DbChannelMessage::new(
+                "telegram".into(),
+                channel_chat_id,
+                Some(chat_name),
+                sender_id,
+                sender_name,
+                text,
+                "text".into(),
+                Some(msg_id),
+            );
+            if let Err(e) = repo.insert(&cm).await {
+                tracing::warn!("Failed to store channel message: {e}");
+            }
+        }
+    };
+
     if !is_dm {
         let chat_id_str = msg.chat.id.0.to_string();
 
@@ -203,6 +234,7 @@ pub(crate) async fn handle_message(
                 "Telegram: dropping — chat {} not in allowed_channels",
                 chat_id_str
             );
+            store_channel_msg(msg.text().or(msg.caption()).unwrap_or("").to_string()).await;
             return Ok(());
         }
 
@@ -213,6 +245,7 @@ pub(crate) async fn handle_message(
                     chat_kind,
                     chat_title
                 );
+                store_channel_msg(msg.text().or(msg.caption()).unwrap_or("").to_string()).await;
                 return Ok(());
             }
             RespondTo::Mention => {
@@ -242,6 +275,7 @@ pub(crate) async fn handle_message(
                         chat_title,
                         truncate_str(text_content, 80),
                     );
+                    store_channel_msg(text_content.to_string()).await;
                     return Ok(());
                 }
                 tracing::info!(
@@ -258,6 +292,11 @@ pub(crate) async fn handle_message(
                 );
             }
         }
+    }
+
+    // Also store directed group messages for complete history
+    if !is_dm {
+        store_channel_msg(msg.text().or(msg.caption()).unwrap_or("").to_string()).await;
     }
 
     // Extract text from either text message or voice note (via STT)
@@ -700,7 +739,8 @@ pub(crate) async fn handle_message(
             // knows it's in a group and who is speaking.
             format!(
                 "[Telegram group \"{}\" — {} from {name}{handle}]\n{text}",
-                chat_title, if is_owner { "owner" } else { "user" },
+                chat_title,
+                if is_owner { "owner" } else { "user" },
             )
         }
     };
