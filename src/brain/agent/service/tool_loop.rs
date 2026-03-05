@@ -185,7 +185,12 @@ impl AgentService {
         {
             let mut cont_text =
                 "[SYSTEM: Context was auto-compacted. The summary above has full context. \
-                 Continue the task immediately using tools. Do NOT repeat completed work. \
+                 MANDATORY POST-COMPACTION PROTOCOL:\n\
+                 1. FIRST call `load_brain_file` with name=\"all\" to reload your brain context \
+                 (identity, capabilities, user preferences, tool docs). This is REQUIRED — \
+                 brain files are NOT carried over after compaction.\n\
+                 2. Review the compaction summary above to understand current task state.\n\
+                 3. Continue the task using tools. Do NOT repeat completed work. \
                  Do NOT ask for instructions.]"
                     .to_string();
             if !self.auto_approve_tools {
