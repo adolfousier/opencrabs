@@ -118,6 +118,11 @@ async fn cmd_chat_inner(
     tool_registry.register(Arc::new(ChannelSearchTool::new(
         crate::db::ChannelMessageRepository::new(db.pool().clone()),
     )));
+    // Cron job management — agent can create/list/delete/enable/disable scheduled jobs
+    use crate::brain::tools::cron_manage::CronManageTool;
+    tool_registry.register(Arc::new(CronManageTool::new(
+        crate::db::CronJobRepository::new(db.pool().clone()),
+    )));
     // Config management (read/write config.toml, commands.toml)
     tool_registry.register(Arc::new(ConfigTool));
     // Slash command invocation (agent can call any slash command)
@@ -628,6 +633,18 @@ async fn cmd_chat_inner(
         && let Ok(uuid) = uuid::Uuid::parse_str(sid)
     {
         app.resume_session_id = Some(uuid);
+    }
+
+    // Spawn cron scheduler — polls every 60s, executes due jobs in isolated sessions
+    {
+        let cron_repo = crate::db::CronJobRepository::new(db.pool().clone());
+        let cron_scheduler = crate::cron::CronScheduler::new(
+            cron_repo,
+            channel_factory.clone(),
+            service_context.clone(),
+        );
+        let _cron_handle = cron_scheduler.spawn();
+        tracing::info!("Cron scheduler spawned");
     }
 
     // Spawn A2A gateway if configured

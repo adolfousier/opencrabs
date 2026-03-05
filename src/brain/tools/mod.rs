@@ -29,6 +29,7 @@ pub mod analyze_image;
 pub mod channel_search;
 pub mod config_tool;
 pub mod context;
+pub mod cron_manage;
 pub mod generate_image;
 pub mod http;
 pub mod load_brain_file;
