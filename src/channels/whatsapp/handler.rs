@@ -53,6 +53,23 @@ fn unwrap_message(msg: &Message) -> &Message {
     msg
 }
 
+/// Extract quoted/replied-to message text from a WhatsApp message.
+fn extract_reply_context(msg: &Message) -> Option<String> {
+    let msg = unwrap_message(msg);
+    let ctx = msg.extended_text_message.as_ref()?.context_info.as_ref()?;
+    let quoted = ctx.quoted_message.as_ref()?;
+    let quoted_text = extract_text(quoted)?;
+    if quoted_text.is_empty() {
+        return None;
+    }
+    let sender = ctx
+        .participant
+        .as_ref()
+        .map(|p| p.split('@').next().unwrap_or(p).to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    Some(format!("[Replying to {sender}: \"{quoted_text}\"]"))
+}
+
 /// Extract plain text from a WhatsApp message.
 fn extract_text(msg: &Message) -> Option<String> {
     let msg = unwrap_message(msg);
@@ -562,6 +579,9 @@ pub(crate) async fn handle_message(
         }
     }
 
+    // Extract replied-to message context so the agent knows what the user is referencing.
+    let reply_context = extract_reply_context(&msg);
+
     // For non-owner contacts, prepend sender identity so the agent knows who
     // it's talking to and doesn't assume it's the owner messaging themselves.
     let agent_input = if !is_owner {
@@ -583,6 +603,13 @@ pub(crate) async fn handle_message(
         }
     } else {
         content
+    };
+
+    // Prepend reply context if the user is replying to a specific message.
+    let agent_input = if let Some(ref ctx) = reply_context {
+        format!("{ctx}\n{agent_input}")
+    } else {
+        agent_input
     };
 
     // Tell the LLM its text response is automatically delivered to the chat.
