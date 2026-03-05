@@ -553,6 +553,15 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         }
     }
 
+    // Detect thread replies so the agent knows the message is in a thread context.
+    // Slack doesn't embed the parent message in the event — fetching it would require
+    // an API call per message, so we note the thread context without the parent text.
+    let reply_context = msg
+        .origin
+        .thread_ts
+        .as_ref()
+        .map(|ts| format!("[Replying in thread (thread_ts: {ts})]"));
+
     // For non-owner users, prepend sender identity so the agent knows who
     // it's talking to and doesn't assume it's the owner.
     let agent_input = if !is_owner {
@@ -563,6 +572,13 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         }
     } else {
         content
+    };
+
+    // Prepend reply/thread context if the message is in a thread.
+    let agent_input = if let Some(ref ctx) = reply_context {
+        format!("{ctx}\n{agent_input}")
+    } else {
+        agent_input
     };
 
     // Tell the LLM its text response is automatically delivered to the chat,
