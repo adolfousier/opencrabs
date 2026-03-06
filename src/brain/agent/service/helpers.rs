@@ -8,6 +8,13 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 impl AgentService {
+    /// Actual token count for the serialized tool schemas (cached per call).
+    pub(super) fn actual_tool_schema_tokens(&self) -> usize {
+        crate::brain::tokenizer::count_tokens(
+            &serde_json::to_string(&self.tool_registry.get_tool_definitions()).unwrap_or_default(),
+        )
+    }
+
     /// Stream a request and accumulate into an LLMResponse.
     ///
     /// Sends text deltas to the progress callback as `StreamingChunk` events

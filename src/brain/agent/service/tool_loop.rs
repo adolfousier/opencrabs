@@ -25,7 +25,7 @@ impl AgentService {
         model_name: &str,
         progress_callback: &Option<ProgressCallback>,
     ) -> Option<String> {
-        let tool_overhead = self.tool_registry.count() * 500;
+        let tool_overhead = self.actual_tool_schema_tokens();
         let effective_max = context.max_tokens.saturating_sub(tool_overhead);
         let usage_pct = if effective_max > 0 {
             (context.token_count as f64 / effective_max as f64) * 100.0
@@ -34,10 +34,10 @@ impl AgentService {
         };
 
         tracing::debug!(
-            "Context budget: {} msg tokens / {} effective max ({} tools × 500 overhead) = {:.1}%",
+            "Context budget: {} msg tokens / {} effective max ({} tool-schema overhead) = {:.1}%",
             context.token_count,
             effective_max,
-            self.tool_registry.count(),
+            tool_overhead,
             usage_pct,
         );
 
@@ -457,7 +457,7 @@ impl AgentService {
             // Even with tiktoken, there's some drift since Anthropic's tokenizer differs slightly.
             // The API knows the exact count — use it to keep our tracking honest.
             let api_input = response.usage.input_tokens as usize;
-            let tool_overhead = self.tool_registry.count() * 500;
+            let tool_overhead = self.actual_tool_schema_tokens();
             let real_message_tokens = api_input.saturating_sub(tool_overhead);
             if real_message_tokens > 0 {
                 let drift = (context.token_count as f64 - real_message_tokens as f64).abs();
