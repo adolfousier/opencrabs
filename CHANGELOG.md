@@ -5,6 +5,22 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.56] - 2026-03-06
+
+### Added
+- **Daily release check notification** -- Background task checks GitHub for new releases on startup (after 10s delay) and every 24 hours. When an update is available, shows a temporary system message in chat prompting the user to `/evolve`. Reuses the existing `check_for_update()` extracted from the evolve tool
+  - `src/brain/tools/evolve.rs`, `src/tui/app/state.rs`
+
+### Fixed
+- **Context counter showing 243/200K when real usage was 19K** -- Two compounding bugs. First, MiniMax and OpenAI compatible providers send real usage in a final `choices: []` chunk after the `finish_reason` chunk. We emitted `MessageStop` on `finish_reason` and never captured the real token counts, falling back to tiktoken estimates. Second, the calibration formula subtracted `tool_count * 500` from input tokens to isolate message-only count. With ~38 tools that was 19,000 subtracted from 19,286 estimated input, leaving 286 tokens as the context count shown to the user
+  - `src/brain/provider/custom_openai_compatible.rs`, `src/brain/agent/service/helpers.rs`, `src/brain/agent/service/tool_loop.rs`
+- **Streaming stop_reason overwritten by deferred usage delta** -- When providers send a usage-only `MessageDelta` after the `finish_reason` chunk, `stop_reason` was overwritten with `None`. Now only updates `stop_reason` when the delta carries one
+  - `src/brain/agent/service/helpers.rs`
+
+### Tests
+- 5 new streaming usage unit tests covering deferred vs inline usage patterns, tool calls with deferred usage, content preservation, and zero-start override
+  - `src/brain/agent/service/tests/streaming_usage.rs` (new)
+
 ## [0.2.55] - 2026-03-06
 
 ### Added
@@ -1166,6 +1182,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.56]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.56
 [0.2.55]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.55
 [0.2.54]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.54
 [0.2.53]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.53
