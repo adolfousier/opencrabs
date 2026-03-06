@@ -688,68 +688,40 @@ pub(super) fn render_usage_dialog(f: &mut Frame, app: &App, area: Rect) {
         }
     };
 
-    // ── All-time stats grouped by model ───────────────────────────────────
-    // Group sessions by model, sum token_count and total_cost.
-    // For sessions with zero cost but non-zero tokens, estimate cost.
-    use std::collections::HashMap;
+    // ── All-time stats from usage ledger (survives session deletes) ──────
+    let total_sessions = app.sessions.len();
+    let all_tokens: i64 = app.usage_ledger_stats.iter().map(|s| s.total_tokens).sum();
+    let all_cost: f64 = app.usage_ledger_stats.iter().map(|s| s.total_cost).sum();
+
+    // For display: use ledger stats directly (already sorted by cost desc)
     struct ModelStats {
-        sessions: usize,
         tokens: i64,
         cost: f64,
-        estimated: bool, // true if any session used estimation
+        estimated: bool,
     }
-    let mut by_model: HashMap<String, ModelStats> = HashMap::new();
-
-    for s in &app.sessions {
-        // Skip empty sessions — no model set yet (new session, no messages sent)
-        if s.token_count == 0 && s.total_cost == 0.0 {
-            continue;
-        }
-        // Sessions created before model was persisted won't have a model field.
-        // Fall back to the current session's model so they don't bucket under "unknown".
-        let model_key = s
-            .model
-            .clone()
-            .filter(|m| !m.is_empty())
-            .unwrap_or_else(|| {
-                app.current_session
-                    .as_ref()
-                    .and_then(|cs| cs.model.clone())
-                    .filter(|m| !m.is_empty())
-                    .unwrap_or_else(|| app.provider_model().to_string())
-            });
-        let entry = by_model.entry(model_key.clone()).or_insert(ModelStats {
-            sessions: 0,
-            tokens: 0,
-            cost: 0.0,
-            estimated: false,
-        });
-        entry.sessions += 1;
-        entry.tokens += s.token_count as i64;
-
-        if s.total_cost > 0.0 {
-            entry.cost += s.total_cost;
-        } else if s.token_count > 0 {
-            // Cost not stored — estimate from token count
-            if let Some(est) = estimate_cost_from_tokens(&model_key, s.token_count as i64) {
-                entry.cost += est;
-                entry.estimated = true;
-            }
-        }
-    }
-
-    let total_sessions = app.sessions.len();
-    let all_tokens: i64 = by_model.values().map(|v| v.tokens).sum();
-    let all_cost: f64 = by_model.values().map(|v| v.cost).sum();
-    let any_estimated = by_model.values().any(|v| v.estimated);
-
-    // Sort models by cost descending
-    let mut model_entries: Vec<(&String, &ModelStats)> = by_model.iter().collect();
-    model_entries.sort_by(|a, b| {
-        b.1.cost
-            .partial_cmp(&a.1.cost)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    let model_entries: Vec<(&str, ModelStats)> = app
+        .usage_ledger_stats
+        .iter()
+        .map(|s| {
+            let cost = if s.total_cost > 0.0 {
+                s.total_cost
+            } else if s.total_tokens > 0 {
+                estimate_cost_from_tokens(&s.model, s.total_tokens).unwrap_or(0.0)
+            } else {
+                0.0
+            };
+            let estimated = s.total_cost == 0.0 && s.total_tokens > 0;
+            (
+                s.model.as_str(),
+                ModelStats {
+                    tokens: s.total_tokens,
+                    cost,
+                    estimated,
+                },
+            )
+        })
+        .collect();
+    let any_estimated = model_entries.iter().any(|(_, s)| s.estimated);
 
     // ── Build lines ────────────────────────────────────────────────────────
     let label_style = Style::default().fg(Color::DarkGray);

@@ -3,8 +3,6 @@
 //! Each channel handler calls [`handle_command`] before forwarding to the agent.
 //! If the message is a known command, the channel renders the response directly.
 
-use std::collections::HashMap;
-
 use uuid::Uuid;
 
 use crate::brain::agent::AgentService;
@@ -104,45 +102,21 @@ async fn format_usage(
         }
     }
 
-    // All-time stats
+    // All-time stats from usage ledger (survives session deletes)
     lines.push(String::new());
-    if let Ok(sessions) = session_svc
-        .list_sessions(SessionListOptions::default())
-        .await
     {
-        struct Stats {
-            sessions: usize,
-            tokens: i64,
-            cost: f64,
-        }
-        let mut by_model: HashMap<String, Stats> = HashMap::new();
+        use crate::db::repository::UsageLedgerRepository;
+        let ledger = UsageLedgerRepository::new(session_svc.pool());
+        let ledger_stats = ledger.stats_by_model().await.unwrap_or_default();
 
-        for s in &sessions {
-            if s.token_count == 0 && s.total_cost == 0.0 {
-                continue;
-            }
-            let model_key = s
-                .model
-                .clone()
-                .filter(|m| !m.is_empty())
-                .unwrap_or_else(|| current_model.clone());
-            let entry = by_model.entry(model_key.clone()).or_insert(Stats {
-                sessions: 0,
-                tokens: 0,
-                cost: 0.0,
-            });
-            entry.sessions += 1;
-            entry.tokens += s.token_count as i64;
-            if s.total_cost > 0.0 {
-                entry.cost += s.total_cost;
-            } else if s.token_count > 0 {
-                entry.cost += estimate_cost(&model_key, s.token_count as i64).unwrap_or(0.0);
-            }
-        }
+        let all_tokens: i64 = ledger_stats.iter().map(|s| s.total_tokens).sum();
+        let all_cost: f64 = ledger_stats.iter().map(|s| s.total_cost).sum();
 
-        let total_sessions = sessions.len();
-        let all_tokens: i64 = by_model.values().map(|v| v.tokens).sum();
-        let all_cost: f64 = by_model.values().map(|v| v.cost).sum();
+        let total_sessions = session_svc
+            .list_sessions(SessionListOptions::default())
+            .await
+            .map(|s| s.len())
+            .unwrap_or(0);
 
         lines.push(format!(
             "*All-Time:* {} sessions, {} tokens, ${:.4}",
@@ -151,20 +125,13 @@ async fn format_usage(
             all_cost
         ));
 
-        // Top models by cost
-        let mut entries: Vec<_> = by_model.iter().collect();
-        entries.sort_by(|a, b| {
-            b.1.cost
-                .partial_cmp(&a.1.cost)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        for (model, stats) in entries.iter().take(5) {
+        // Top models by cost (already sorted desc from ledger)
+        for stats in ledger_stats.iter().take(5) {
             lines.push(format!(
-                "  `{}` — {} sessions, {} tokens, ${:.4}",
-                model,
-                stats.sessions,
-                format_number(stats.tokens),
-                stats.cost
+                "  `{}` — {} tokens, ${:.4}",
+                stats.model,
+                format_number(stats.total_tokens),
+                stats.total_cost
             ));
         }
     }
