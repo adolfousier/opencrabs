@@ -33,7 +33,9 @@ async fn main() -> Result<()> {
     // Run CLI application
     let result = cli::run().await;
 
-    // Force exit — spawn_blocking tasks (embedding backfill) may still be running
-    // and would prevent the tokio runtime from shutting down cleanly
-    std::process::exit(if result.is_ok() { 0 } else { 1 });
+    // Use libc::_exit instead of std::process::exit — skips C atexit handlers
+    // which avoids llama.cpp Metal device destructor crash on macOS ARM.
+    // Still force-exits so background tokio tasks (embedding backfill) don't hang.
+    let code = if result.is_ok() { 0 } else { 1 };
+    unsafe { libc::_exit(code) }
 }

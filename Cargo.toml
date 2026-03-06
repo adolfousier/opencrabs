@@ -62,6 +62,7 @@ tracing-appender = "0.2"
 base64 = "0.22.1"
 
 # Utilities
+libc = "0.2.182"
 uuid = { version = "1.11", features = ["v4", "serde"] }
 notify = "6"
 chrono = { version = "0.4", features = ["serde"] }
