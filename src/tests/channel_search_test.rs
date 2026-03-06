@@ -329,7 +329,7 @@ mod tool {
         sender: &str,
         content: &str,
     ) -> ChannelMessage {
-        let m = ChannelMessage::new(
+        ChannelMessage::new(
             channel.into(),
             chat_id.into(),
             Some(chat_name.into()),
@@ -338,8 +338,7 @@ mod tool {
             content.into(),
             "text".into(),
             None,
-        );
-        m
+        )
     }
 
     #[test]

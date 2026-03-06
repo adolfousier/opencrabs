@@ -603,7 +603,7 @@ mod tool {
                 || result
                     .error
                     .as_ref()
-                    .map_or(false, |e| e.contains("Invalid"))
+                    .is_some_and(|e| e.contains("Invalid"))
         );
     }
 
@@ -624,7 +624,7 @@ mod tool {
                 || result
                     .error
                     .as_ref()
-                    .map_or(false, |e| e.contains("already exists"))
+                    .is_some_and(|e| e.contains("already exists"))
         );
     }
 
@@ -723,7 +723,7 @@ mod tool {
                 || result
                     .error
                     .as_ref()
-                    .map_or(false, |e| e.contains("Unknown"))
+                    .is_some_and(|e| e.contains("Unknown"))
         );
     }
 
