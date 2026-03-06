@@ -242,6 +242,59 @@ impl EventHandler for Handler {
                 return;
             }
 
+            // Session switch callback
+            if let Some(session_id_str) = custom_id.strip_prefix("session:") {
+                if let Ok(new_id) = session_id_str.parse::<Uuid>() {
+                    let cfg = self.config_rx.borrow().clone();
+                    let caller_id = comp.user.id.get();
+                    let owner_id = cfg
+                        .channels
+                        .discord
+                        .allowed_users
+                        .first()
+                        .and_then(|s| s.parse::<u64>().ok());
+                    let is_owner = cfg.channels.discord.allowed_users.is_empty()
+                        || owner_id == Some(caller_id);
+
+                    if is_owner {
+                        *self.shared_session.lock().await = Some(new_id);
+                    } else {
+                        self.extra_sessions.lock().await.insert(
+                            caller_id,
+                            (new_id, std::time::Instant::now()),
+                        );
+                    }
+                    self.discord_state
+                        .register_session_channel(new_id, comp.channel_id.get())
+                        .await;
+                    let _ = comp
+                        .create_response(
+                            &ctx.http,
+                            serenity::builder::CreateInteractionResponse::Message(
+                                serenity::builder::CreateInteractionResponseMessage::new()
+                                    .content(format!(
+                                        "✅ Switched to session `{}`",
+                                        &session_id_str[..8.min(session_id_str.len())]
+                                    ))
+                                    .ephemeral(true),
+                            ),
+                        )
+                        .await;
+                } else {
+                    let _ = comp
+                        .create_response(
+                            &ctx.http,
+                            serenity::builder::CreateInteractionResponse::Message(
+                                serenity::builder::CreateInteractionResponseMessage::new()
+                                    .content("Invalid session ID")
+                                    .ephemeral(true),
+                            ),
+                        )
+                        .await;
+                }
+                return;
+            }
+
             let (approved, always, yolo, approval_id) =
                 if let Some(id) = custom_id.strip_prefix("approve:") {
                     (true, false, false, id.to_string())

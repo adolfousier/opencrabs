@@ -388,6 +388,66 @@ pub(crate) async fn handle_message(
                 let _ = msg.channel_id.send_message(&ctx.http, builder).await;
                 return;
             }
+            ChannelCommand::NewSession => {
+                match session_svc.create_session(Some("Chat".to_string())).await {
+                    Ok(new_session) => {
+                        if is_owner {
+                            *shared_session.lock().await = Some(new_session.id);
+                        } else {
+                            extra_sessions.lock().await.insert(
+                                msg.author.id.get(),
+                                (new_session.id, std::time::Instant::now()),
+                            );
+                        }
+                        discord_state
+                            .register_session_channel(new_session.id, msg.channel_id.get())
+                            .await;
+                        let _ = msg.channel_id.say(&ctx.http, "✅ New session started.").await;
+                    }
+                    Err(e) => {
+                        tracing::error!("Discord: failed to create session: {}", e);
+                        let _ = msg
+                            .channel_id
+                            .say(&ctx.http, "Failed to create session.")
+                            .await;
+                    }
+                }
+                return;
+            }
+            ChannelCommand::Sessions(resp) => {
+                use serenity::builder::{CreateActionRow, CreateButton, CreateMessage};
+                use serenity::model::application::ButtonStyle;
+                let rows: Vec<CreateActionRow> = resp
+                    .sessions
+                    .chunks(5)
+                    .take(5)
+                    .map(|chunk| {
+                        CreateActionRow::Buttons(
+                            chunk
+                                .iter()
+                                .map(|(id, label)| {
+                                    let display = if *id == resp.current_session_id {
+                                        format!("✓ {}", label)
+                                    } else {
+                                        label.clone()
+                                    };
+                                    let display = if display.len() > 80 {
+                                        format!("{}…", &display[..79])
+                                    } else {
+                                        display
+                                    };
+                                    CreateButton::new(format!("session:{}", id))
+                                        .label(display)
+                                        .style(ButtonStyle::Secondary)
+                                })
+                                .collect(),
+                        )
+                    })
+                    .collect();
+                let builder = CreateMessage::new().content(&resp.text).components(rows);
+                let _ = msg.channel_id.send_message(&ctx.http, builder).await;
+                return;
+            }
             ChannelCommand::Stop => {
                 let cancelled = discord_state.cancel_session(session_id).await;
                 let reply = if cancelled {

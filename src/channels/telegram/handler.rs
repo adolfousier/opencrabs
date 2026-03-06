@@ -706,6 +706,57 @@ pub(crate) async fn handle_message(
                     .await?;
                 return Ok(());
             }
+            ChannelCommand::NewSession => {
+                match session_svc.create_session(Some("Chat".to_string())).await {
+                    Ok(new_session) => {
+                        if is_owner {
+                            *shared_session.lock().await = Some(new_session.id);
+                        } else {
+                            extra_sessions.lock().await.insert(
+                                user_id,
+                                (new_session.id, std::time::Instant::now()),
+                            );
+                        }
+                        telegram_state
+                            .register_session_chat(new_session.id, msg.chat.id.0)
+                            .await;
+                        bot.send_message(
+                            msg.chat.id,
+                            "✅ New session started.",
+                        )
+                        .await?;
+                    }
+                    Err(e) => {
+                        tracing::error!("Telegram: failed to create session: {}", e);
+                        bot.send_message(msg.chat.id, "Failed to create session.")
+                            .await?;
+                    }
+                }
+                return Ok(());
+            }
+            ChannelCommand::Sessions(resp) => {
+                let rows: Vec<Vec<InlineKeyboardButton>> = resp
+                    .sessions
+                    .iter()
+                    .map(|(id, label)| {
+                        let display = if *id == resp.current_session_id {
+                            format!("✓ {}", label)
+                        } else {
+                            label.clone()
+                        };
+                        vec![InlineKeyboardButton::callback(
+                            display,
+                            format!("session:{}", id),
+                        )]
+                    })
+                    .collect();
+                let keyboard = InlineKeyboardMarkup::new(rows);
+                bot.send_message(msg.chat.id, md_to_html(&resp.text))
+                    .parse_mode(ParseMode::Html)
+                    .reply_markup(keyboard)
+                    .await?;
+                return Ok(());
+            }
             ChannelCommand::Stop => {
                 let cancelled = telegram_state.cancel_session(session_id).await;
                 let reply = if cancelled {

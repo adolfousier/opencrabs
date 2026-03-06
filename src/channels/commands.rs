@@ -17,6 +17,10 @@ pub enum ChannelCommand {
     Usage(String),
     /// `/models` — provider picker (step 1: choose provider, step 2: choose model)
     Models(ProvidersResponse),
+    /// `/new` — create a new session and switch to it
+    NewSession,
+    /// `/sessions` — list recent sessions to switch between
+    Sessions(SessionsResponse),
     /// `/stop` — cancel the running agent task
     Stop,
     /// Not a recognised command — pass through to agent
@@ -29,6 +33,15 @@ pub struct ProvidersResponse {
     pub current_model: String,
     /// Available providers (name, display label) that have API keys configured.
     pub providers: Vec<(String, String)>,
+    /// Fallback text when platform buttons are unavailable.
+    pub text: String,
+}
+
+/// Data for rendering a session-picker on the channel platform.
+pub struct SessionsResponse {
+    pub current_session_id: Uuid,
+    /// (session_id, display_label)
+    pub sessions: Vec<(Uuid, String)>,
     /// Fallback text when platform buttons are unavailable.
     pub text: String,
 }
@@ -52,9 +65,13 @@ pub async fn handle_command(
     let trimmed = text.trim();
     match trimmed {
         "/help" => ChannelCommand::Help(format_help()),
-        "/usage" => ChannelCommand::Usage(format_usage(session_id, agent, session_svc).await),
         "/models" => ChannelCommand::Models(format_providers(agent)),
+        "/new" => ChannelCommand::NewSession,
+        "/sessions" => ChannelCommand::Sessions(
+            format_sessions(session_id, session_svc).await,
+        ),
         "/stop" => ChannelCommand::Stop,
+        "/usage" => ChannelCommand::Usage(format_usage(session_id, agent, session_svc).await),
         _ => ChannelCommand::NotACommand,
     }
 }
@@ -65,11 +82,13 @@ fn format_help() -> String {
     [
         "📖 *Available Commands*",
         "",
-        "`/evolve` — Download latest release & restart",
-        "`/help`   — Show this message",
-        "`/models` — Switch AI model",
-        "`/stop`   — Abort current operation",
-        "`/usage`  — Session token & cost stats",
+        "`/evolve`   — Download latest release & restart",
+        "`/help`     — Show this message",
+        "`/models`   — Switch AI model",
+        "`/new`      — Start a new session",
+        "`/sessions` — Switch between sessions",
+        "`/stop`     — Abort current operation",
+        "`/usage`    — Session token & cost stats",
         "",
         "🦀 Any other message is sent to OpenCrabs. 🦀",
     ]
@@ -161,6 +180,45 @@ fn format_number(n: i64) -> String {
         format!("{:.1}K", n as f64 / 1_000.0)
     } else {
         n.to_string()
+    }
+}
+
+// ── /sessions ──────────────────────────────────────────────────────────────
+
+async fn format_sessions(current_session_id: Uuid, session_svc: &SessionService) -> SessionsResponse {
+    let sessions = session_svc
+        .list_sessions(SessionListOptions {
+            include_archived: false,
+            limit: Some(10),
+            offset: 0,
+        })
+        .await
+        .unwrap_or_default();
+
+    let mut text_lines = vec!["📂 *Sessions*".to_string(), String::new()];
+    let mut items = Vec::new();
+
+    for s in &sessions {
+        let title = s.title.as_deref().unwrap_or("Untitled");
+        let marker = if s.id == current_session_id {
+            " ✓"
+        } else {
+            ""
+        };
+        let date = s.updated_at.format("%b %d %H:%M");
+        let label = format!("{} ({})", title, date);
+        text_lines.push(format!("• `{}`{}", label, marker));
+        items.push((s.id, label));
+    }
+
+    if sessions.is_empty() {
+        text_lines.push("No sessions found.".to_string());
+    }
+
+    SessionsResponse {
+        current_session_id,
+        sessions: items,
+        text: text_lines.join("\n"),
     }
 }
 
