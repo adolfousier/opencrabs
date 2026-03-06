@@ -5,6 +5,35 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.55] - 2026-03-06
+
+### Added
+- **Cumulative usage ledger** — New `usage_ledger` table tracks all token/cost usage permanently. Deleting or compacting sessions no longer resets usage stats. All-time totals in TUI, channel commands, and `/usage` tool now read from the ledger. Migration auto-backfills from existing sessions
+  - `src/db/repository/usage_ledger.rs` (new), `src/migrations/20260306000001_add_usage_ledger.sql` (new), `src/services/session.rs`, `src/tui/render/dialogs.rs`, `src/tui/app/state.rs`, `src/brain/tools/slash_command.rs`, `src/channels/commands.rs`
+
+### Fixed
+- **Compaction overhaul — zero-truncation, DB persistence, exhaustive summaries** (closes #29) — Complete rewrite of the compaction system. Context is NEVER truncated before summarization — the full conversation reaches the LLM. Compaction prompt expanded to 10-section exhaustive format (chronological analysis, code snippets, user preferences with exact quotes, recovery playbook with `gh` CLI, personalized continuation message). Manual `/compact` now calls the real compaction pipeline instead of faking it. Compaction markers persist to DB so restarts load only from the last compaction point forward. All 5 compaction paths (manual, pre-loop, mid-loop x2, emergency) now persist markers. 24 compaction tests
+  - `src/brain/agent/service/context.rs`, `src/brain/agent/service/tool_loop.rs`, `src/brain/agent/context.rs`, `src/tests/compaction_test.rs`, `src/tui/app/messaging.rs`, `src/docs/reference/templates/AGENTS.md`
+- **TUI context counter wrong after restart** — After compacting and restarting, the TUI showed 200K/200K because `load_session` counted ALL DB messages instead of only post-compaction ones. Now filters through `messages_from_last_compaction` to match what the agent actually sees
+  - `src/tui/app/messaging.rs`, `src/brain/agent/service/context.rs`
+- **`/compact` placeholder visible in chat** — The internal `[SYSTEM: Compact context now...]` trigger message no longer shows as a user message in chat. The TUI already displays a "Compacting context..." system message
+  - `src/tui/app/messaging.rs`
+- **Metal destructor crash on macOS exit** — Replaced `std::process::exit` with `libc::_exit` to skip C atexit handlers that trigger llama.cpp's Metal GPU device destructor assertion on Apple Silicon. Clean exit, no more backtrace spam
+  - `src/main.rs`, `Cargo.toml` (`libc = "0.2.182"`)
+- **Empty context sent to compaction summarizer** — Fixed `trim_to_target` gutting context before the summarizer saw it. Removed dead method entirely
+  - `src/brain/agent/context.rs`, `src/brain/agent/service/tool_loop.rs`, `src/tests/compaction_test.rs`
+
+### Upgrade Notes
+> **Existing users:** Update your brain files to get the new compaction behavior docs:
+> ```sh
+> cp src/docs/reference/templates/AGENTS.md ~/.opencrabs/AGENTS.md
+> ```
+> Or ask your agent: *"Update AGENTS.md from the repo template"*
+>
+> The `usage_ledger` migration runs automatically on first start — your existing session usage is backfilled so no data is lost.
+>
+> **Always check brain files for updates after upgrading** — templates evolve with each release and your local copies may be outdated.
+
 ## [0.2.54] - 2026-03-06
 
 ### Added
@@ -1137,6 +1166,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.55]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.55
 [0.2.54]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.54
 [0.2.53]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.53
 [0.2.52]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.52
