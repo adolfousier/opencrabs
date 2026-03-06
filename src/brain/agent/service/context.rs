@@ -47,8 +47,9 @@ impl AgentService {
         let mut context =
             AgentContext::from_db_messages(session_id, db_messages, context_window as usize);
 
-        // Add system brain if available
+        // Add system brain if available (count its tokens for accurate tracking)
         if let Some(brain) = &self.default_system_brain {
+            context.token_count += AgentContext::estimate_tokens(brain);
             context.system_brain = Some(brain.clone());
         }
 

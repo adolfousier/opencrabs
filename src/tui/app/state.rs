@@ -1257,6 +1257,8 @@ impl App {
                 self.streaming_response = None;
                 self.streaming_reasoning = None;
                 self.active_tool_group = None;
+                // Allow post-compaction TokenCountUpdated to set a lower value
+                self.last_input_tokens = None;
 
                 // Brief status notice
                 self.messages.push(DisplayMessage {
@@ -1321,8 +1323,20 @@ impl App {
                 if self.is_current_session(session_id) =>
             {
                 self.display_token_count = count;
-                // Update ctx display with API-confirmed context size
-                self.last_input_tokens = Some(count as u32);
+                // Only allow context counter to grow during processing.
+                // This prevents the visual drop when a new request rebuilds
+                // context from DB (losing ephemeral tool results from the
+                // previous tool loop). Authoritative decreases come from
+                // ResponseComplete (end of request) or CompactionSummary.
+                let new_val = count as u32;
+                match self.last_input_tokens {
+                    Some(current) if new_val < current => {
+                        // Keep current — don't let DB-rebuild cause a visual drop
+                    }
+                    _ => {
+                        self.last_input_tokens = Some(new_val);
+                    }
+                }
             }
             TuiEvent::StreamingOutputTokens { session_id, tokens }
                 if self.is_current_session(session_id) =>

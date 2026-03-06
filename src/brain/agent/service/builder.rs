@@ -251,8 +251,7 @@ impl AgentService {
             .as_deref()
             .map(count_tokens)
             .unwrap_or(0);
-        // Rough per-tool overhead: name + description ≈ 60 tokens each
-        let tool_tokens = self.tool_registry.list_tools().len() * 60;
+        let tool_tokens = self.actual_tool_schema_tokens();
         (system_tokens + tool_tokens) as u32
     }
 
