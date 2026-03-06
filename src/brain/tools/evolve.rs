@@ -24,6 +24,32 @@ fn platform_suffix() -> Option<&'static str> {
     }
 }
 
+/// Check GitHub for a newer release. Returns `Some(latest_version)` if an
+/// update is available, `None` if already on latest (or on error).
+pub async fn check_for_update() -> Option<String> {
+    let current_version = crate::VERSION;
+    let client = reqwest::Client::new();
+    let release: serde_json::Value = client
+        .get(GITHUB_API)
+        .header("User-Agent", format!("opencrabs/{}", current_version))
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+
+    let latest_tag = release["tag_name"].as_str()?;
+    let latest_version = latest_tag.strip_prefix('v').unwrap_or(latest_tag);
+
+    if latest_version != current_version {
+        Some(latest_version.to_string())
+    } else {
+        None
+    }
+}
+
 pub struct EvolveTool {
     progress: Option<ProgressCallback>,
 }
