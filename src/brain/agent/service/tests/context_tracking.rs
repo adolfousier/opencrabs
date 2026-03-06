@@ -87,8 +87,8 @@ async fn test_context_includes_brain_after_db_rebuild() {
     let context = ServiceContext::new(db.pool().clone());
 
     let brain_text = "You are a helpful assistant for software development.";
-    let agent_service = AgentService::new(provider, context.clone())
-        .with_system_brain(brain_text.to_string());
+    let agent_service =
+        AgentService::new(provider, context.clone()).with_system_brain(brain_text.to_string());
 
     let session_service = SessionService::new(context);
     let session = session_service

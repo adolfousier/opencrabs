@@ -41,6 +41,12 @@ impl App {
         self.auto_scroll = true;
         self.scroll_offset = 0;
         self.mode = AppMode::Chat;
+        // Clear streaming state from any previous session
+        self.streaming_response = None;
+        self.streaming_reasoning = None;
+        self.active_tool_group = None;
+        self.streaming_output_tokens = 0;
+        self.intermediate_text_received = false;
         // Re-read approval policy from config (persisted by /approve)
         (self.approval_auto_session, self.approval_auto_always) =
             Self::read_approval_policy_from_config();
@@ -73,6 +79,23 @@ impl App {
         // matches what the agent actually sees in its context window.
         let messages =
             crate::brain::agent::AgentService::messages_from_last_compaction(all_messages);
+
+        // Stash old session's cancel token before switching so background
+        // processing can still be cancelled from the sessions screen.
+        if let Some(old_token) = self.cancel_token.take()
+            && let Some(ref old_session) = self.current_session
+            && self.processing_sessions.contains(&old_session.id)
+        {
+            self.session_cancel_tokens.insert(old_session.id, old_token);
+        }
+
+        // Clear streaming state from previous session so it doesn't
+        // bleed into the newly loaded session's chat view.
+        self.streaming_response = None;
+        self.streaming_reasoning = None;
+        self.active_tool_group = None;
+        self.streaming_output_tokens = 0;
+        self.intermediate_text_received = false;
 
         self.current_session = Some(session.clone());
         self.set_plan_file_for_session(session.id);
