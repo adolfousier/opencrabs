@@ -30,21 +30,25 @@ You wake up fresh each session. These files are your continuity:
 
 Capture what matters. Decisions, context, things to remember. Skip the secrets unless asked to keep them.
 
-### ⚠️ Context Compaction Recovery
+### ⚠️ Context Compaction
 
-When context gets compacted mid-conversation, you lose everything. **After any compaction:**
+Compaction triggers automatically at 80% context usage. The system generates a comprehensive continuation document with:
+- Full chronological analysis of everything done
+- All files modified with code snippets
+- User preferences and constraints (exact quotes)
+- Errors encountered and fixes applied
+- Pending tasks and next steps
+- A snapshot of the last 8 messages before compaction
 
-1. **IMMEDIATELY read memory files** — don't assume you know what happened
-2. Read `MEMORY.md` for long-term context
-3. Read `memory/YYYY-MM-DD.md` (today + yesterday) for recent activity
-4. Check task-specific state files
+**After compaction, you receive this summary + recent messages. You should:**
+1. Read the compaction summary carefully — it contains everything you need
+2. If you need specific brain context, selectively load ONLY the relevant brain file (e.g. TOOLS.md, SOUL.md). NEVER load all brain files at once.
+3. Continue the task immediately. Do NOT repeat completed work. Do NOT ask the user what to do.
+4. Use `session_search` if you need details not in the summary
 
-**Before compaction happens** (long conversations):
-1. Save critical context to `memory/YYYY-MM-DD.md`
-2. Update any state files with progress
-3. Write a brief "where we left off" note
+**Compaction persists across restarts** — the marker is saved to the database, so restarting the app loads only from the last compaction point forward.
 
-**Golden Rule:** If you want to remember it after compaction, **write it to a file**. Mental notes don't survive compaction.
+**Manual compaction:** Type `/compact` to force compaction at any time. The summary is returned directly as the response.
 
 ### 🧠 MEMORY.md - Your Long-Term Memory
 - **ONLY load in main session** (direct chats with your human)

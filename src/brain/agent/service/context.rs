@@ -41,12 +41,8 @@ impl AgentService {
         });
         let context_window = self.context_limit;
 
-        let db_messages = Self::trim_messages_to_budget(
-            all_db_messages,
-            context_window as usize,
-            self.tool_registry.count(),
-            self.default_system_brain.as_deref(),
-        );
+        // Load from last compaction point — no arbitrary trimming
+        let db_messages = Self::messages_from_last_compaction(all_db_messages);
 
         let mut context =
             AgentContext::from_db_messages(session_id, db_messages, context_window as usize);
@@ -79,53 +75,31 @@ impl AgentService {
         Ok((model_name, request, message_service, session_service))
     }
 
-    /// Trim DB messages to fit within the context budget.
+    /// Load messages from the last compaction point forward.
     ///
-    /// Keeps only the most recent messages that fit within ~60% of the context window
-    /// after reserving space for tool definitions, brain, and response.
-    /// Uses tiktoken cl100k_base for accurate token counting — no more chars/N guessing.
-    pub(super) fn trim_messages_to_budget(
+    /// Finds the last message containing the `[CONTEXT COMPACTION` marker and
+    /// returns only messages from that point onward. If no compaction marker
+    /// exists, returns all messages. This ensures restarts pick up exactly
+    /// where compaction left off — no arbitrary trimming.
+    pub fn messages_from_last_compaction(
         all_messages: Vec<crate::db::models::Message>,
-        context_window: usize,
-        tool_count: usize,
-        brain: Option<&str>,
     ) -> Vec<crate::db::models::Message> {
-        use crate::brain::tokenizer;
+        const COMPACTION_MARKER: &str = "[CONTEXT COMPACTION";
 
-        let tool_budget = tool_count * 500;
-        let brain_budget = brain.map(tokenizer::count_tokens).unwrap_or(0);
-        let history_budget = context_window
-            .saturating_sub(tool_budget)
-            .saturating_sub(brain_budget)
-            .saturating_sub(16384) // reserve for response
-            * 60
-            / 100; // Target 60% to leave headroom for tool results and overhead
+        // Walk backward to find the last compaction marker
+        let compaction_idx = all_messages
+            .iter()
+            .rposition(|msg| msg.content.contains(COMPACTION_MARKER));
 
-        let mut token_acc = 0usize;
-        let mut keep_from = 0usize;
-        for (i, msg) in all_messages.iter().enumerate().rev() {
-            if msg.content.is_empty() {
-                continue;
-            }
-            let msg_tokens = tokenizer::count_message_tokens(&msg.content);
-            if token_acc + msg_tokens > history_budget {
-                keep_from = i + 1;
-                break;
-            }
-            token_acc += msg_tokens;
-        }
-
-        if keep_from > 0 {
-            let kept = all_messages.len() - keep_from;
+        if let Some(idx) = compaction_idx {
+            let kept = all_messages.len() - idx;
             tracing::info!(
-                "Context budget: keeping last {} of {} messages ({} tokens via tiktoken, budget {}, window {})",
-                kept,
+                "Found compaction marker at message {}/{} — loading {} messages from compaction point",
+                idx,
                 all_messages.len(),
-                token_acc,
-                history_budget,
-                context_window
+                kept,
             );
-            all_messages[keep_from..].to_vec()
+            all_messages[idx..].to_vec()
         } else {
             all_messages
         }
@@ -218,28 +192,83 @@ impl AgentService {
 
         // Add the compaction instruction as a user message
         let compaction_prompt = format!(
-            "IMPORTANT: The context window is at {:.0}% capacity ({} / {} tokens, {} tokens remaining). \
-             The conversation must be compacted to continue.\n\n\
-             Please provide a STRUCTURED BREAKDOWN of this entire conversation so far. \
-             This will be used as the sole context when the agent wakes up after compaction. \
-             Include ALL of the following sections:\n\n\
-             ## Current Task\n\
-             What is the user currently working on? What was the last request?\n\n\
-             ## Key Decisions Made\n\
-             List all important decisions, choices, and conclusions reached.\n\n\
-             ## Files Modified\n\
-             List every file that was created, edited, or discussed, with a brief note on what changed.\n\n\
-             ## Current State\n\
-             Where did we leave off? What is the next step? Any pending work?\n\n\
-             ## Important Context\n\
-             Any critical details, constraints, preferences, or gotchas the agent must remember.\n\n\
-             ## Errors & Solutions\n\
-             Any errors encountered and how they were resolved.\n\n\
-             ## Tool Approval Policy\n\
-             State whether tool approval is required (auto-approve OFF) or tools run freely (auto-approve ON). \
-             This is CRITICAL for the agent to know post-compaction.\n\n\
-             Be concise but complete — this summary is the ONLY context the agent will have after compaction.\n\n\
-             Tool approval status for this session: {}",
+            "CRITICAL: The context window is at {:.0}% capacity ({} / {} tokens, {} tokens remaining). \
+             The conversation must be compacted NOW.\n\n\
+             You are creating a COMPREHENSIVE CONTINUATION DOCUMENT. After compaction, a fresh agent \
+             instance will wake up with ONLY this summary as context. It must be able to continue \
+             working immediately without asking the user what to do.\n\n\
+             Analyze the ENTIRE conversation chronologically and produce the following:\n\n\
+             ## 1. Chronological Analysis\n\
+             Walk through every task the user requested, in order. For each task include:\n\
+             - What was requested\n\
+             - What was done (with exact file paths and line numbers where relevant)\n\
+             - Exact code snippets for any changes made (show before/after when applicable)\n\
+             - Whether it was completed, committed, pushed, or still pending\n\n\
+             ## 2. Files Modified\n\
+             List EVERY file that was created, edited, read, or discussed. For each file include:\n\
+             - Full file path\n\
+             - What was changed and why\n\
+             - Key code snippets showing the current state of changes\n\
+             - Whether the change is committed or uncommitted\n\n\
+             ## 3. User Preferences & Constraints\n\
+             List EVERY preference, constraint, or strong reaction from the user. Include:\n\
+             - Things the user explicitly said to NEVER do (with their exact words if they were emphatic)\n\
+             - Workflow preferences (commit style, release process, tool choices)\n\
+             - Technical constraints or architectural decisions\n\
+             - Any corrections the user made to your work\n\n\
+             ## 4. Errors & Corrections\n\
+             Every error encountered, every mistake made, and how each was resolved. Include:\n\
+             - Exact error messages when available\n\
+             - What caused the error\n\
+             - The fix applied\n\
+             - User reactions to mistakes (so the agent avoids repeating them)\n\n\
+             ## 5. All User Messages\n\
+             Summarize every user message in order, capturing their intent and exact wording \
+             for important instructions. This is critical for understanding the user's communication \
+             style and expectations.\n\n\
+             ## 6. Pending Tasks\n\
+             List everything that is NOT yet done:\n\
+             - Uncommitted changes\n\
+             - Tasks mentioned but not started\n\
+             - Investigations in progress\n\
+             - Next steps the user expects\n\n\
+             ## 7. Current Work\n\
+             What was the agent doing RIGHT BEFORE this compaction? What is the immediate next action? \
+             The fresh agent must pick up exactly where this left off.\n\n\
+             ## 8. Recovery Playbook\n\
+             The fresh agent has these tools available to recover any missing context:\n\
+             - `session_search` — search past conversation messages in this session by keyword\n\
+             - `memory_search` — search daily memory logs and indexed knowledge\n\
+             - `load_brain_file` — reload brain files (SOUL.md, TOOLS.md, USER.md, etc.) for identity/preferences\n\
+             - `read_file` / `glob` / `grep` — read any file, search by pattern, search file contents\n\
+             - `bash` — run shell commands (git status, git log, git diff, etc.)\n\
+             - `ls` — list directory contents\n\
+             - `gh` — GitHub CLI for ALL GitHub operations (repos, releases, issues, PRs). \
+             NEVER use HTTP requests to GitHub — always use `gh` CLI.\n\n\
+             Write a SPECIFIC recovery plan: which tools to call with which arguments to get back \
+             up to speed. Example: \"Run `git status` and `git diff` to see uncommitted changes, \
+             then `read_file src/main.rs` to verify the current state of the fix, then \
+             `session_search 'vision fallback'` to recover details from the investigation.\"\n\
+             Be concrete — include actual file paths, search queries, and commands.\n\n\
+             ## 9. Next Step\n\
+             State the single most important thing the agent should do when it wakes up. \
+             If the task is clear, continue immediately. If ambiguous, ask the user ONE focused \
+             follow-up question.\n\n\
+             ## 10. Continuation Message\n\
+             Write a SHORT, punchy message (2-4 sentences) that the agent will say to the user \
+             right after waking up from compaction. This message MUST:\n\
+             - Reference SPECIFIC things from the conversation (file names, user quotes, inside jokes, \
+             frustrations, wins) — prove the agent remembers everything\n\
+             - Mention what was just accomplished and what's next in a way that feels alive and engaged\n\
+             - Match the user's energy and communication style from the conversation\n\
+             - Be creative, surprising, maybe funny — make the user think \"holy shit it remembers\"\n\
+             - End with a clear action: what the agent is about to do next or a specific question\n\
+             DO NOT be generic. DO NOT say \"I'm ready to continue.\" Reference actual conversation details \
+             that only someone who was there would know.\n\n\
+             Tool approval status: {}\n\n\
+             BE EXHAUSTIVE. This is not a summary — it is a complete knowledge transfer. \
+             Include code snippets, exact paths, user quotes, error messages. \
+             The fresh agent has ZERO context beyond what you write here.",
             context.usage_percentage(),
             context.token_count,
             context.max_tokens,
@@ -253,12 +282,14 @@ impl AgentService {
 
         summary_messages.push(Message::user(compaction_prompt));
 
-        // Output budget: cap at 8k tokens for the summary itself (plenty for structured output)
-        let summary_max_tokens = 8_000u32.min(self.max_tokens);
-
         let request = LLMRequest::new(model_name.to_string(), summary_messages)
-            .with_max_tokens(summary_max_tokens)
-            .with_system("You are a precise summarization assistant. Your job is to create a structured breakdown of the conversation that will serve as the complete context for an AI agent continuing this work after context compaction. Be thorough — include every file, decision, and pending task.".to_string());
+            .with_max_tokens(self.max_tokens)
+            .with_system("You are a continuation document generator. Your job is to create an exhaustive, \
+             detailed knowledge transfer document from a conversation so that a fresh AI agent can \
+             continue the work seamlessly. You must capture every file path, code snippet, user preference, \
+             error, and pending task. The agent reading your output will have ZERO prior context — \
+             your document is its entire memory. Be thorough to the point of being verbose. \
+             Missing a single detail could cause the agent to repeat mistakes or violate user preferences.".to_string());
 
         // Use streaming so the TUI shows the summary being written in real-time
         // instead of freezing silently for 2-5 minutes on large contexts

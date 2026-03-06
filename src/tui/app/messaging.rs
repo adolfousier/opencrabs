@@ -64,10 +64,15 @@ impl App {
             .await?
             .ok_or_else(|| anyhow::anyhow!("Session not found"))?;
 
-        let messages = self
+        let all_messages = self
             .message_service
             .list_messages_for_session(session_id)
             .await?;
+
+        // Only load messages from the last compaction point forward —
+        // matches what the agent actually sees in its context window.
+        let messages =
+            crate::brain::agent::AgentService::messages_from_last_compaction(all_messages);
 
         self.current_session = Some(session.clone());
         self.set_plan_file_for_session(session.id);
@@ -1242,22 +1247,25 @@ impl App {
                 tracing::info!("✨ Prompt transformed with tool hints");
             }
 
-            // Add user message to UI — replace <<IMG:...>> markers with readable names
-            let display_content = Self::humanize_image_markers(&content);
-            let user_msg = DisplayMessage {
-                id: Uuid::new_v4(),
-                role: "user".to_string(),
-                content: display_content,
-                timestamp: chrono::Utc::now(),
-                token_count: None,
-                cost: None,
-                approval: None,
-                approve_menu: None,
-                details: None,
-                expanded: false,
-                tool_group: None,
-            };
-            self.messages.push(user_msg);
+            // Add user message to UI — skip internal system triggers (e.g. /compact)
+            let is_system_trigger = content.starts_with("[SYSTEM:");
+            if !is_system_trigger {
+                let display_content = Self::humanize_image_markers(&content);
+                let user_msg = DisplayMessage {
+                    id: Uuid::new_v4(),
+                    role: "user".to_string(),
+                    content: display_content,
+                    timestamp: chrono::Utc::now(),
+                    token_count: None,
+                    cost: None,
+                    approval: None,
+                    approve_menu: None,
+                    details: None,
+                    expanded: false,
+                    tool_group: None,
+                };
+                self.messages.push(user_msg);
+            }
 
             // Auto-scroll to show the new user message and re-enable auto-scroll
             self.auto_scroll = true;

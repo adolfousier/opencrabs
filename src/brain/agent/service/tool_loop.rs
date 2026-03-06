@@ -138,12 +138,9 @@ impl AgentService {
         });
         let context_window = self.context_limit;
 
-        let db_messages = Self::trim_messages_to_budget(
-            all_db_messages,
-            context_window as usize,
-            self.tool_registry.count(),
-            self.default_system_brain.as_deref(),
-        );
+        // Load from last compaction point — find the last CONTEXT COMPACTION marker
+        // and only load messages from there forward. No arbitrary trimming.
+        let db_messages = Self::messages_from_last_compaction(all_db_messages);
 
         let mut context =
             AgentContext::from_db_messages(session_id, db_messages, context_window as usize);
@@ -152,6 +149,9 @@ impl AgentService {
         if let Some(brain) = &self.default_system_brain {
             context.system_brain = Some(brain.clone());
         }
+
+        // Check for manual /compact before user_message is consumed
+        let is_manual_compact = user_message.contains("[SYSTEM: Compact context now.");
 
         // Build user message — detect and attach images from paths/URLs
         let user_msg = Self::build_user_message(&user_message).await;
@@ -170,12 +170,74 @@ impl AgentService {
             .await
             .map_err(|e| AgentError::Database(e.to_string()))?;
 
-        // Enforce 80% budget: LLM compact with full context (no truncation, 3 retries, warn on failure)
-        if self
+        // Manual /compact: force compaction and return summary directly — no second LLM call.
+        // The summary already contains next steps and follow-ups, so it IS the response.
+        if is_manual_compact {
+            match self
+                .compact_context(session_id, &mut context, &model_name)
+                .await
+            {
+                Ok(summary) => {
+                    // Persist compaction marker to DB so restarts load from this point
+                    let compaction_marker = format!(
+                        "[CONTEXT COMPACTION — The conversation was automatically compacted. \
+                         Below is a structured summary of everything before this point.]\n\n{}",
+                        summary
+                    );
+                    message_service
+                        .create_message(session_id, "user".to_string(), compaction_marker)
+                        .await
+                        .map_err(|e| AgentError::Database(e.to_string()))?;
+
+                    // Persist summary as the assistant response
+                    message_service
+                        .append_content(assistant_db_msg.id, &summary)
+                        .await
+                        .map_err(|e| AgentError::Database(e.to_string()))?;
+
+                    if let Some(ref cb) = progress_callback {
+                        cb(session_id, ProgressEvent::TokenCount(context.token_count));
+                    }
+
+                    return Ok(AgentResponse {
+                        message_id: assistant_db_msg.id,
+                        content: summary,
+                        stop_reason: Some(crate::brain::provider::StopReason::EndTurn),
+                        usage: crate::brain::provider::TokenUsage {
+                            input_tokens: 0,
+                            output_tokens: 0,
+                        },
+                        context_tokens: context.token_count as u32,
+                        cost: 0.0,
+                        model: model_name,
+                    });
+                }
+                Err(e) => {
+                    tracing::error!("Manual compaction failed: {}", e);
+                    // Fall through to normal flow if compaction fails
+                }
+            }
+        }
+
+        // Auto-compact: triggers at >80% usage
+        let compaction_result = self
             .enforce_context_budget(session_id, &mut context, &model_name, &progress_callback)
-            .await
-            .is_some()
-        {
+            .await;
+
+        if let Some(ref summary) = compaction_result {
+            // Persist compaction marker to DB so restarts load from this point
+            let compaction_marker = format!(
+                "[CONTEXT COMPACTION — The conversation was automatically compacted. \
+                 Below is a structured summary of everything before this point.]\n\n{}",
+                summary
+            );
+            if let Err(e) = message_service
+                .create_message(session_id, "user".to_string(), compaction_marker)
+                .await
+            {
+                tracing::error!("Failed to persist compaction marker to DB: {}", e);
+            }
+
             let mut cont_text =
                 "[SYSTEM: Context was auto-compacted. The summary above includes a snapshot \
                  of recent messages before compaction.\n\
@@ -241,11 +303,23 @@ impl AgentService {
             }
 
             // Enforce 80% budget before every API call
-            if self
+            if let Some(ref summary) = self
                 .enforce_context_budget(session_id, &mut context, &model_name, &progress_callback)
                 .await
-                .is_some()
             {
+                // Persist compaction marker to DB so restarts load from this point
+                let compaction_marker = format!(
+                    "[CONTEXT COMPACTION — The conversation was automatically compacted. \
+                     Below is a structured summary of everything before this point.]\n\n{}",
+                    summary
+                );
+                if let Err(e) = message_service
+                    .create_message(session_id, "user".to_string(), compaction_marker)
+                    .await
+                {
+                    tracing::error!("Failed to persist mid-loop compaction marker to DB: {}", e);
+                }
+
                 let mut cont_text =
                     "[SYSTEM: Context was auto-compacted mid-loop. The summary above includes \
                      a snapshot of recent messages. Review it and continue the task immediately. \
@@ -297,7 +371,23 @@ impl AgentService {
                         .compact_context(session_id, &mut context, &model_name)
                         .await
                     {
-                        Ok(_) => {
+                        Ok(summary) => {
+                            // Persist compaction marker to DB so restarts load from this point
+                            let compaction_marker = format!(
+                                "[CONTEXT COMPACTION — The conversation was automatically compacted. \
+                                 Below is a structured summary of everything before this point.]\n\n{}",
+                                summary
+                            );
+                            if let Err(e) = message_service
+                                .create_message(session_id, "user".to_string(), compaction_marker)
+                                .await
+                            {
+                                tracing::error!(
+                                    "Failed to persist emergency compaction marker to DB: {}",
+                                    e
+                                );
+                            }
+
                             let mut cont_text =
                                 "[SYSTEM: Emergency compaction — provider rejected the prompt as \
                                  too large. Context has been compacted. Acknowledge the compaction \
@@ -993,11 +1083,23 @@ impl AgentService {
             }
 
             // Enforce 80% budget after tool results (results can be massive)
-            if self
+            if let Some(ref summary) = self
                 .enforce_context_budget(session_id, &mut context, &model_name, &progress_callback)
                 .await
-                .is_some()
             {
+                // Persist compaction marker to DB so restarts load from this point
+                let compaction_marker = format!(
+                    "[CONTEXT COMPACTION — The conversation was automatically compacted. \
+                     Below is a structured summary of everything before this point.]\n\n{}",
+                    summary
+                );
+                if let Err(e) = message_service
+                    .create_message(session_id, "user".to_string(), compaction_marker)
+                    .await
+                {
+                    tracing::error!("Failed to persist post-tool compaction marker to DB: {}", e);
+                }
+
                 let mut cont_text =
                     "[SYSTEM: Mid-loop context compaction complete. The summary above has \
                      full context of everything done so far. Briefly acknowledge the \
