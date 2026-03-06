@@ -2,6 +2,7 @@ mod approval_policies;
 mod basic;
 mod model_selection;
 mod parallel_sessions;
+mod streaming_usage;
 
 use super::*;
 use crate::brain::provider::{

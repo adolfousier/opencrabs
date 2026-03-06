@@ -667,6 +667,9 @@ impl Provider for OpenAIProvider {
             inside_think: bool,
             /// Index into STRIP_CLOSE_TAGS for the currently active block
             active_close_tag: usize,
+            /// Stashed stop_reason from finish_reason chunk, emitted with
+            /// the final usage-only chunk (MiniMax/OpenAI include_usage flow).
+            pending_stop_reason: Option<crate::brain::provider::types::StopReason>,
         }
 
         let state = std::sync::Arc::new(std::sync::Mutex::new(StreamState {
@@ -676,6 +679,7 @@ impl Provider for OpenAIProvider {
             tool_calls: std::collections::HashMap::new(),
             inside_think: false,
             active_close_tag: 0,
+            pending_stop_reason: None,
         }));
 
         let event_stream = byte_stream
@@ -717,6 +721,21 @@ impl Provider for OpenAIProvider {
                                                 id: accum.id,
                                                 name: accum.name,
                                                 input,
+                                            },
+                                        }));
+                                    }
+                                    // If we still have a pending stop_reason (no usage-only chunk
+                                    // arrived), emit MessageDelta with fallback usage now.
+                                    if let Some(stop_reason) = st.pending_stop_reason.take() {
+                                        tracing::info!("[STREAM_USAGE] Final usage (fallback on DONE): input={}, output=0", total_input_tokens);
+                                        events.push(Ok(StreamEvent::MessageDelta {
+                                            delta: crate::brain::provider::types::MessageDelta {
+                                                stop_reason: Some(stop_reason),
+                                                stop_sequence: None,
+                                            },
+                                            usage: crate::brain::provider::types::TokenUsage {
+                                                input_tokens: total_input_tokens as u32,
+                                                output_tokens: 0,
                                             },
                                         }));
                                     }
@@ -883,25 +902,17 @@ impl Provider for OpenAIProvider {
                                             }));
                                         }
 
-                                        // Emit MessageDelta when finish_reason is present
-                                        // (decoupled from usage — MiniMax sends finish_reason
-                                        // without usage in the same chunk)
+                                        // Emit MessageDelta when finish_reason is present.
+                                        // Do NOT emit MessageStop here — providers that support
+                                        // stream_options.include_usage (MiniMax, OpenAI) send a
+                                        // final usage-only chunk AFTER this one. We handle
+                                        // MessageStop on [DONE] or the usage-only chunk below.
                                         if let Some(reason) = finish_reason_str {
-                                            let (raw_input, output_tokens) = if let Some(ref usage) = chunk.usage {
+                                            let (raw_input, raw_output) = if let Some(ref usage) = chunk.usage {
                                                 (usage.prompt_tokens.unwrap_or(0), usage.completion_tokens.unwrap_or(0))
                                             } else {
                                                 (0, 0)
                                             };
-                                            // Fall back to pre-computed token count when provider
-                                            // reports 0 (e.g. MiniMax always returns 0 in stream).
-                                            let input_tokens = if raw_input > 0 {
-                                                raw_input
-                                            } else {
-                                                total_input_tokens as u32
-                                            };
-                                            if input_tokens > 0 || output_tokens > 0 {
-                                                tracing::info!("[STREAM_USAGE] Final usage: input={}, output={}", input_tokens, output_tokens);
-                                            }
 
                                             let stop_reason = Some(match reason.as_str() {
                                                 "stop" => crate::brain::provider::types::StopReason::EndTurn,
@@ -910,19 +921,49 @@ impl Provider for OpenAIProvider {
                                                 _ => crate::brain::provider::types::StopReason::EndTurn,
                                             });
 
-                                            events.push(Ok(StreamEvent::MessageDelta {
-                                                delta: crate::brain::provider::types::MessageDelta {
-                                                    stop_reason,
-                                                    stop_sequence: None,
-                                                },
-                                                usage: crate::brain::provider::types::TokenUsage {
-                                                    input_tokens,
-                                                    output_tokens,
-                                                },
-                                            }));
+                                            // If this chunk already carries real usage (some
+                                            // providers inline it), emit immediately + stop.
+                                            if raw_input > 0 || raw_output > 0 {
+                                                tracing::info!("[STREAM_USAGE] Final usage (inline): input={}, output={}", raw_input, raw_output);
+                                                events.push(Ok(StreamEvent::MessageDelta {
+                                                    delta: crate::brain::provider::types::MessageDelta {
+                                                        stop_reason,
+                                                        stop_sequence: None,
+                                                    },
+                                                    usage: crate::brain::provider::types::TokenUsage {
+                                                        input_tokens: raw_input,
+                                                        output_tokens: raw_output,
+                                                    },
+                                                }));
+                                                events.push(Ok(StreamEvent::MessageStop));
+                                            } else {
+                                                // Stash stop_reason — we'll emit the final MessageDelta
+                                                // with real usage once the usage-only chunk arrives.
+                                                st.pending_stop_reason = stop_reason;
+                                            }
+                                        }
 
-                                            // Emit MessageStop — not all providers send [DONE]
-                                            events.push(Ok(StreamEvent::MessageStop));
+                                        // Handle usage-only chunk: choices is empty, usage has
+                                        // real token counts. MiniMax and OpenAI send this as
+                                        // the final chunk when stream_options.include_usage=true.
+                                        if chunk.choices.is_empty()
+                                            && let Some(ref usage) = chunk.usage {
+                                                let input = usage.prompt_tokens.unwrap_or(0);
+                                                let output = usage.completion_tokens.unwrap_or(0);
+                                                if input > 0 || output > 0 {
+                                                    tracing::info!("[STREAM_USAGE] Final usage: input={}, output={}", input, output);
+                                                    events.push(Ok(StreamEvent::MessageDelta {
+                                                        delta: crate::brain::provider::types::MessageDelta {
+                                                            stop_reason: st.pending_stop_reason.take(),
+                                                            stop_sequence: None,
+                                                        },
+                                                        usage: crate::brain::provider::types::TokenUsage {
+                                                            input_tokens: input,
+                                                            output_tokens: output,
+                                                        },
+                                                    }));
+                                                    events.push(Ok(StreamEvent::MessageStop));
+                                                }
                                         }
                                     }
                                     Err(e) => {

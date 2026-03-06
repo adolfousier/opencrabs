@@ -164,7 +164,12 @@ impl AgentService {
                     }
                 }
                 StreamEvent::MessageDelta { delta, usage } => {
-                    stop_reason = delta.stop_reason;
+                    // Only update stop_reason if the delta carries one — deferred
+                    // usage chunks send a second MessageDelta with stop_reason=None
+                    // that must not overwrite the real stop_reason.
+                    if delta.stop_reason.is_some() {
+                        stop_reason = delta.stop_reason;
+                    }
                     // Take the largest values — MiniMax sends two deltas:
                     // first (0,0), then the real usage. Other providers
                     // may only send one. Using max() handles both cases.
