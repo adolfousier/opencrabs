@@ -451,6 +451,15 @@ impl App {
                 });
                 true
             }
+            "/evolve" => {
+                self.push_system_message("Checking for updates...".to_string());
+                let sender = self.event_sender();
+                let _ = sender.send(TuiEvent::MessageSubmitted(
+                    "Use the `evolve` tool now to check for and install the latest version."
+                        .to_string(),
+                ));
+                true
+            }
             "/whisper" => {
                 self.push_system_message("Setting up WhisperCrabs...".to_string());
                 let sender = self.event_sender();

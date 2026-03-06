@@ -69,6 +69,11 @@ impl Tool for SlashCommandTool {
                     .into(),
             )),
             "/rebuild" => self.handle_rebuild(),
+            "/evolve" => Ok(ToolResult::success(
+                "Use the `evolve` tool to check for and install the latest release. \
+                 It downloads the pre-built binary from GitHub and hot-restarts."
+                    .into(),
+            )),
             "/approve" => self.handle_approve(args),
             "/help" => self.handle_help(),
             "/models" => self.handle_models(args),
@@ -211,6 +216,7 @@ impl SlashCommandTool {
              /cd       — Change working directory (args: path)\n\
              /compact  — Compact context (summarize + trim)\n\
              /rebuild  — Build from source & hot-restart\n\
+             /evolve   — Download latest release & hot-restart\n\
              /whisper  — Voice-to-text (TUI only)\n\
              /onboard  — Setup wizard (TUI only, use config_manager for programmatic changes)\n\n\
              You can also use config_manager to read/write any config setting directly."
@@ -577,6 +583,7 @@ impl SlashCommandTool {
                 "/cd",
                 "/compact",
                 "/rebuild",
+                "/evolve",
                 "/approve",
                 "/models",
                 "/sessions",

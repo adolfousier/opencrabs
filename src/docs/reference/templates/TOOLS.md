@@ -48,6 +48,8 @@ Use these **exact parameter names** when calling tools:
 | `channel_search` | `operation` | `channel`, `chat_id`, `query`, `n` |
 | `cron_manage` | `action` | `name`, `cron`, `tz`, `prompt`, `provider`, `model`, `thinking`, `auto_approve`, `deliver_to`, `job_id`, `enabled` |
 | `slack_send` | `action` | `message`, `channel_id`, `thread_ts`, `message_ts`, `emoji`, `user_id`, `topic`, `blocks`, `limit`, `file_path`, `caption` |
+| `evolve` | — | `check_only` |
+| `rebuild` | — | — |
 
 > **Note:** `grep` and `glob` use `pattern` (not `query`). `bash` uses `command` (not `cmd`). File tools use `path` (not `file` or `file_path`).
 > **`generate_image`:** Generate an image from a text prompt using Google Gemini. Returns the saved file path. Automatically sends as a native image on all channels — just include `<<IMG:path>>` in your reply or the channel handler sends it for you. Requires `[image.generation] enabled = true` in config. Run `/onboard:image` to set up.
@@ -62,6 +64,8 @@ Use these **exact parameter names** when calling tools:
 > **`telegram_send` actions (19):** `send`, `reply`, `edit`, `delete`, `pin`, `unpin`, `forward`, `send_photo`, `send_document`, `send_location`, `send_poll`, `send_buttons`, `get_chat`, `get_chat_administrators`, `get_chat_member_count`, `get_chat_member`, `ban_user`, `unban_user`, `set_reaction`
 > **`channel_search` operations (3):** `list_chats` (show known chats with message counts), `recent` (last N messages in a chat), `search` (find messages by keyword). Telegram Bot API cannot fetch message history due to privacy — OpenCrabs passively captures group messages as they arrive and stores them for later search. Works across all channels (Telegram, Discord, Slack, WhatsApp). If `list_chats` returns empty, it means no messages have been captured yet — ask the user to send a message in the group first, or ask for the chat_id directly and use `telegram_send get_chat` to fetch chat info.
 > **`cron_manage` actions (5):** `create` (schedule a new cron job), `list` (show all jobs), `delete` (remove a job by id), `enable` (activate a paused job), `disable` (pause a job without deleting). Jobs run in isolated sessions with configurable provider/model/thinking. Use `deliver_to` to send results to a channel (e.g. `telegram:chat_id`, `discord:channel_id`). Cron expressions follow standard 5-field format (min hour dom mon dow). See AGENTS.md for best practices on heartbeat vs cron.
+> **`evolve`:** Download the latest OpenCrabs release binary from GitHub and hot-restart. Use `check_only: true` to check for updates without installing. Works on all platforms (macOS arm64/amd64, Linux arm64/amd64, Windows amd64). No Rust toolchain needed — downloads pre-built binaries. Falls back to legacy asset naming for older releases. Available as `/evolve` slash command on TUI and all channels.
+> **`rebuild`:** Build OpenCrabs from source (`cargo build --release`) and hot-restart. Use when you need to build from source (e.g. after editing code). Requires Rust toolchain. Available as `/rebuild` slash command.
 > **Slack:** Always use `slack_send` instead of `http_request` for Slack — credentials handled securely. `thread_ts` and `message_ts` are Slack timestamps (e.g. `1503435956.000247`). Emoji names have no colons (e.g. `thumbsup`).
 > **`slack_send` actions (17):** `send`, `reply`, `react`, `unreact`, `edit`, `delete`, `pin`, `unpin`, `get_messages`, `get_channel`, `list_channels`, `get_user`, `list_members`, `kick_user`, `set_topic`, `send_blocks`, `send_file`
 

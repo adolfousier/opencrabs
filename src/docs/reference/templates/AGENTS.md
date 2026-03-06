@@ -171,15 +171,22 @@ All custom skills, tools, plugins, and implementations go in your **workspace**,
 ### Why This Matters
 - **`git pull` is always safe** — it only touches source code and default templates
 - **Your custom work is never overwritten** — skills, plugins, scripts, memory, config all live in `~/.opencrabs/`
-- **Upgrades are painless** — pull latest code, rebuild, done. Your customizations persist.
+- **Upgrades are painless** — `/evolve` downloads the latest binary, or pull + rebuild from source. Your customizations persist.
 
 ### Upgrading OpenCrabs
+
+**Option 1 — Binary update (recommended):**
+Type `/evolve` in the TUI or any channel. The agent downloads the latest release binary from GitHub and hot-restarts. No Rust toolchain needed.
+
+**Option 2 — Build from source:**
 ```bash
 cd /srv/rs/opencrabs    # or wherever your source lives
 git pull origin main
 cargo build --release
-# That's it. Your workspace at ~/.opencrabs/ is untouched.
+# Or type /rebuild in the TUI
 ```
+
+Both options leave your workspace at `~/.opencrabs/` untouched.
 
 ### Creating Custom Skills/Tools
 When you build something custom:

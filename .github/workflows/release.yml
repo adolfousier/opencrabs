@@ -60,30 +60,35 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact_name: opencrabs
-            asset_name: opencrabs-linux-amd64
+            asset_suffix: linux-amd64
 
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             artifact_name: opencrabs
-            asset_name: opencrabs-linux-arm64
+            asset_suffix: linux-arm64
 
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact_name: opencrabs.exe
-            asset_name: opencrabs-windows-amd64.exe
+            asset_suffix: windows-amd64
 
           - os: macos-latest
             target: x86_64-apple-darwin
             artifact_name: opencrabs
-            asset_name: opencrabs-macos-amd64
+            asset_suffix: macos-amd64
 
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact_name: opencrabs
-            asset_name: opencrabs-macos-arm64
+            asset_suffix: macos-arm64
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@nightly
@@ -119,20 +124,21 @@ jobs:
       - name: Create archive
         shell: bash
         run: |
+          ASSET_NAME="opencrabs-v${{ steps.version.outputs.version }}-${{ matrix.asset_suffix }}"
           cd target/${{ matrix.target }}/release
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            7z a ../../../${{ matrix.asset_name }}.zip ${{ matrix.artifact_name }}
+            7z a ../../../${ASSET_NAME}.zip ${{ matrix.artifact_name }}
           else
-            tar czf ../../../${{ matrix.asset_name }}.tar.gz ${{ matrix.artifact_name }}
+            tar czf ../../../${ASSET_NAME}.tar.gz ${{ matrix.artifact_name }}
           fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset_name }}
+          name: opencrabs-v${{ steps.version.outputs.version }}-${{ matrix.asset_suffix }}
           path: |
-            ${{ matrix.asset_name }}.tar.gz
-            ${{ matrix.asset_name }}.zip
+            opencrabs-v${{ steps.version.outputs.version }}-${{ matrix.asset_suffix }}.tar.gz
+            opencrabs-v${{ steps.version.outputs.version }}-${{ matrix.asset_suffix }}.zip
 
   create-release:
     name: Create Release

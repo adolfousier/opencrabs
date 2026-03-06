@@ -60,6 +60,7 @@ fn format_help() -> String {
         "`/usage`  — Session token & cost stats",
         "`/models` — Switch AI model",
         "`/stop`   — Abort current operation",
+        "`/evolve` — Download latest release & restart",
         "",
         "Any other message is sent to the AI agent.",
     ]

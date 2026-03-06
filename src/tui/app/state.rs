@@ -97,6 +97,10 @@ pub const SLASH_COMMANDS: &[SlashCommand] = &[
         description: "Build & restart from source",
     },
     SlashCommand {
+        name: "/evolve",
+        description: "Download latest release & restart",
+    },
+    SlashCommand {
         name: "/whisper",
         description: "Speak anywhere, paste to clipboard",
     },

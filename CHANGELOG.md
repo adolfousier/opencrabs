@@ -5,6 +5,28 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.54] - 2026-03-06
+
+### Added
+- **`/evolve` — binary self-update from GitHub releases** — New tool and slash command that checks the latest GitHub release, downloads the platform-specific binary, atomically replaces the current executable, and exec()-restarts into the new version. No Rust toolchain required. Fallback to legacy asset naming for backward compatibility with older releases. Available as `/evolve` slash command, `evolve` agent tool, and in the command palette
+  - `src/brain/tools/evolve.rs` (new), `src/brain/tools/mod.rs`, `src/cli/ui.rs`, `src/tui/app/messaging.rs`, `src/tui/app/state.rs`, `src/tui/render/help.rs`, `src/brain/tools/slash_command.rs`, `Cargo.toml` (`flate2`, `tar`)
+- **Versioned release assets** — CI now produces assets named `opencrabs-v{version}-{platform}.tar.gz` (e.g. `opencrabs-v0.2.54-macos-arm64.tar.gz`) instead of versionless names, making downloads unambiguous
+  - `.github/workflows/release.yml`
+
+### Fixed
+- **Smarter post-compaction brain recovery** — Instead of blindly loading all brain files after compaction (which bloated context), the agent now receives a pre-compaction snapshot of the last 8 messages alongside the summary. This lets it analyze what context it needs and selectively load only relevant brain files. 22 new end-to-end compaction tests
+  - `src/brain/agent/service/context.rs`, `src/brain/agent/service/tool_loop.rs`, `src/tests/compaction_test.rs` (new), `src/tests/mod.rs`
+
+### Upgrade Notes
+> **Existing users:** Update your brain files to include `/evolve` tool docs:
+> ```sh
+> cp src/docs/reference/templates/TOOLS.md ~/.opencrabs/TOOLS.md
+> cp src/docs/reference/templates/AGENTS.md ~/.opencrabs/AGENTS.md
+> ```
+> Or ask your agent: *"Update TOOLS.md and AGENTS.md from the repo templates"*
+>
+> **Future updates:** After this version, just type `/evolve` to update — no manual steps needed.
+
 ## [0.2.53] - 2026-03-05
 
 ### Added
@@ -1115,6 +1137,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.54]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.54
+[0.2.53]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.53
 [0.2.52]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.52
 [0.2.51]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.51
 [0.2.50]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.50

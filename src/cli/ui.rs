@@ -381,6 +381,11 @@ async fn cmd_chat_inner(
         Some(progress_callback.clone()),
     )));
 
+    // Register evolve tool (binary self-update from GitHub releases)
+    tool_registry.register(Arc::new(crate::brain::tools::evolve::EvolveTool::new(
+        Some(progress_callback.clone()),
+    )));
+
     // Create config watch channel — single source of truth for all hot-reloadable config.
     // All channel agents receive a Receiver and read the latest config per-message.
     let (config_tx, config_rx) = tokio::sync::watch::channel(config.clone());

@@ -1,6 +1,6 @@
 [package]
 name = "opencrabs"
-version = "0.2.53"
+version = "0.2.54"
 edition = "2024"
 authors = ["Adolfo Usier <adolfo@meetneura.ai>"]
 license = "MIT"
@@ -112,6 +112,10 @@ pdf-extract = "0.10"
 zip = "6.0"
 quick-xml = "0.37"
 tiktoken-rs = "0.9.1"
+
+# Archive extraction (for /evolve self-update)
+flate2 = "1"
+tar = "0.4"
 
 # Memory Search (FTS5 + vector search)
 qmd = "0.3"

@@ -600,10 +600,7 @@ mod tool {
         assert!(!result.success);
         assert!(
             result.output.contains("Invalid cron expression")
-                || result
-                    .error
-                    .as_ref()
-                    .is_some_and(|e| e.contains("Invalid"))
+                || result.error.as_ref().is_some_and(|e| e.contains("Invalid"))
         );
     }
 
@@ -720,10 +717,7 @@ mod tool {
         assert!(!result.success);
         assert!(
             result.output.contains("Unknown action")
-                || result
-                    .error
-                    .as_ref()
-                    .is_some_and(|e| e.contains("Unknown"))
+                || result.error.as_ref().is_some_and(|e| e.contains("Unknown"))
         );
     }
 

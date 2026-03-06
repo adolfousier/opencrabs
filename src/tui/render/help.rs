@@ -83,6 +83,7 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
         kv("/approve", "Tool approval policy", cyan),
         kv("/compact", "Compact context now", cyan),
         kv("/rebuild", "Build & restart from source", cyan),
+        kv("/evolve", "Download latest release & restart", cyan),
         kv("/cd", "Change working directory", cyan),
         kv("/whisper", "Speak anywhere, paste to clipboard", cyan),
         Line::from(""),
