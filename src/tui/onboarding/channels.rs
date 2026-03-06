@@ -24,8 +24,8 @@ impl OnboardingWizard {
             KeyCode::Enter => {
                 if self.focused_field >= count {
                     // "Continue" button — advance past channels
-                    tracing::debug!("[channels] Continue pressed, advancing to Gateway");
-                    self.step = OnboardingStep::Gateway;
+                    tracing::debug!("[channels] Continue pressed, advancing");
+                    self.next_step();
                 } else if self.focused_field < count && self.channel_toggles[self.focused_field].1 {
                     // Enter on an enabled channel — open its setup screen
                     let idx = self.focused_field;
@@ -86,7 +86,7 @@ impl OnboardingWizard {
             }
             KeyCode::Tab => {
                 // Tab also advances past channels
-                self.step = OnboardingStep::Gateway;
+                self.next_step();
             }
             _ => {}
         }

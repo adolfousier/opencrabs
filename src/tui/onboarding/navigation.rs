@@ -45,9 +45,9 @@ impl OnboardingWizard {
                     );
                     return;
                 }
-                // QuickStart: skip channels, go straight to gateway
+                // QuickStart: skip channels, go straight to daemon
                 if self.mode == WizardMode::QuickStart {
-                    self.step = OnboardingStep::Gateway;
+                    self.step = OnboardingStep::Daemon;
                 } else {
                     tracing::debug!("[next_step] ProviderAuth → Channels");
                     self.step = OnboardingStep::Channels;
@@ -56,7 +56,9 @@ impl OnboardingWizard {
             }
             OnboardingStep::Channels => {
                 // Handled by handle_channels_key — Enter on focused channel or Continue
-                self.step = OnboardingStep::Gateway;
+                self.step = OnboardingStep::VoiceSetup;
+                self.voice_field = VoiceField::GroqApiKey;
+                self.detect_existing_groq_key();
             }
             OnboardingStep::TelegramSetup
             | OnboardingStep::DiscordSetup
@@ -65,16 +67,6 @@ impl OnboardingWizard {
             | OnboardingStep::TrelloSetup => {
                 // Return to channel list after completing a channel setup
                 self.step = OnboardingStep::Channels;
-            }
-            OnboardingStep::Gateway => {
-                // QuickStart: skip voice, go straight to daemon
-                if self.mode == WizardMode::QuickStart {
-                    self.step = OnboardingStep::Daemon;
-                } else {
-                    self.step = OnboardingStep::VoiceSetup;
-                    self.voice_field = VoiceField::GroqApiKey;
-                    self.detect_existing_groq_key();
-                }
             }
             OnboardingStep::VoiceSetup => {
                 self.step = OnboardingStep::ImageSetup;
@@ -133,25 +125,18 @@ impl OnboardingWizard {
             | OnboardingStep::TrelloSetup => {
                 self.step = OnboardingStep::Channels;
             }
-            OnboardingStep::Gateway => {
-                if self.mode == WizardMode::QuickStart {
-                    self.step = OnboardingStep::ProviderAuth;
-                    self.auth_field = AuthField::Provider;
-                } else {
-                    self.step = OnboardingStep::Channels;
-                }
-            }
             OnboardingStep::VoiceSetup => {
-                self.step = OnboardingStep::Gateway;
+                self.step = OnboardingStep::Channels;
             }
             OnboardingStep::ImageSetup => {
                 self.step = OnboardingStep::VoiceSetup;
                 self.voice_field = VoiceField::GroqApiKey;
             }
             OnboardingStep::Daemon => {
-                // QuickStart: go back to Gateway, Advanced: go back to ImageSetup
+                // QuickStart: go back to ProviderAuth, Advanced: go back to ImageSetup
                 if self.mode == WizardMode::QuickStart {
-                    self.step = OnboardingStep::Gateway;
+                    self.step = OnboardingStep::ProviderAuth;
+                    self.auth_field = AuthField::Provider;
                 } else {
                     self.step = OnboardingStep::ImageSetup;
                     self.image_field = ImageField::VisionToggle;

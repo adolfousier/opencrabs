@@ -105,7 +105,6 @@ pub enum OnboardingStep {
     WhatsAppSetup,
     SlackSetup,
     TrelloSetup,
-    Gateway,
     VoiceSetup,
     ImageSetup,
     Daemon,
@@ -127,19 +126,18 @@ impl OnboardingStep {
             Self::WhatsAppSetup => 4, // sub-step of Channels
             Self::SlackSetup => 4,    // sub-step of Channels
             Self::TrelloSetup => 4,   // sub-step of Channels
-            Self::Gateway => 5,
-            Self::VoiceSetup => 6,
-            Self::ImageSetup => 7,
-            Self::Daemon => 8,
-            Self::HealthCheck => 9,
-            Self::BrainSetup => 10,
-            Self::Complete => 11,
+            Self::VoiceSetup => 5,
+            Self::ImageSetup => 6,
+            Self::Daemon => 7,
+            Self::HealthCheck => 8,
+            Self::BrainSetup => 9,
+            Self::Complete => 10,
         }
     }
 
     /// Total number of steps (excluding Complete)
     pub fn total() -> usize {
-        10
+        9
     }
 
     /// Step title
@@ -154,7 +152,6 @@ impl OnboardingStep {
             Self::WhatsAppSetup => "WhatsApp",
             Self::SlackSetup => "Slack Bot",
             Self::TrelloSetup => "Trello",
-            Self::Gateway => "API Gateway",
             Self::VoiceSetup => "Voice Superpowers",
             Self::ImageSetup => "Image Handling",
             Self::Daemon => "Always On",
@@ -176,7 +173,6 @@ impl OnboardingStep {
             Self::WhatsAppSetup => "Scan the QR code with your phone",
             Self::SlackSetup => "Hook up your Slack bot and app tokens",
             Self::TrelloSetup => "Hook up your Trello API Key and Token",
-            Self::Gateway => "Open up an HTTP API if you want one",
             Self::VoiceSetup => "Talk to me, literally",
             Self::ImageSetup => "Vision and image generation via Google Gemini",
             Self::Daemon => "Keep me running in the background",

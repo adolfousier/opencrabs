@@ -62,7 +62,6 @@ pub fn render_onboarding(f: &mut Frame, wizard: &OnboardingWizard) {
                 OnboardingStep::ModeSelect => render_mode_select(&mut lines, wizard),
                 OnboardingStep::Workspace => render_workspace(&mut lines, wizard),
                 OnboardingStep::Channels => render_channels(&mut lines, wizard),
-                OnboardingStep::Gateway => render_gateway(&mut lines, wizard),
                 OnboardingStep::TelegramSetup => render_telegram_setup(&mut lines, wizard),
                 OnboardingStep::DiscordSetup => render_discord_setup(&mut lines, wizard),
                 OnboardingStep::WhatsAppSetup => render_whatsapp_setup(&mut lines, wizard),
@@ -866,118 +865,6 @@ fn render_workspace(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
         "       SOUL.md, IDENTITY.md, USER.md, ...",
         Style::default().fg(Color::DarkGray),
     )));
-}
-
-fn render_gateway(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
-    let port_focused = wizard.focused_field == 0;
-    let bind_focused = wizard.focused_field == 1;
-    let auth_focused = wizard.focused_field == 2;
-
-    let cursor_p = if port_focused { "█" } else { "" };
-    lines.push(Line::from(vec![
-        Span::styled(
-            "  Port: ",
-            Style::default().fg(if port_focused {
-                BRAND_BLUE
-            } else {
-                Color::DarkGray
-            }),
-        ),
-        Span::styled(
-            format!("{}{}", wizard.gateway_port, cursor_p),
-            Style::default().fg(if port_focused {
-                Color::White
-            } else {
-                Color::DarkGray
-            }),
-        ),
-    ]));
-
-    let cursor_b = if bind_focused { "█" } else { "" };
-    lines.push(Line::from(vec![
-        Span::styled(
-            "  Bind: ",
-            Style::default().fg(if bind_focused {
-                BRAND_BLUE
-            } else {
-                Color::DarkGray
-            }),
-        ),
-        Span::styled(
-            format!("{}{}", wizard.gateway_bind, cursor_b),
-            Style::default().fg(if bind_focused {
-                Color::White
-            } else {
-                Color::DarkGray
-            }),
-        ),
-    ]));
-
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "  Auth Mode:".to_string(),
-        Style::default().fg(if auth_focused {
-            BRAND_BLUE
-        } else {
-            Color::DarkGray
-        }),
-    )));
-
-    let token_selected = wizard.gateway_auth == 0;
-    lines.push(Line::from(vec![
-        Span::styled(
-            if token_selected && auth_focused {
-                "  > "
-            } else {
-                "    "
-            },
-            Style::default().fg(ACCENT_GOLD),
-        ),
-        Span::styled(
-            if token_selected { "(*)" } else { "( )" },
-            Style::default().fg(if token_selected {
-                BRAND_GOLD
-            } else {
-                Color::DarkGray
-            }),
-        ),
-        Span::styled(
-            " Token (auto-generated)",
-            Style::default().fg(if token_selected {
-                Color::White
-            } else {
-                Color::DarkGray
-            }),
-        ),
-    ]));
-
-    let none_selected = !token_selected;
-    lines.push(Line::from(vec![
-        Span::styled(
-            if none_selected && auth_focused {
-                "  > "
-            } else {
-                "    "
-            },
-            Style::default().fg(ACCENT_GOLD),
-        ),
-        Span::styled(
-            if none_selected { "(*)" } else { "( )" },
-            Style::default().fg(if none_selected {
-                BRAND_GOLD
-            } else {
-                Color::DarkGray
-            }),
-        ),
-        Span::styled(
-            " None (open access)",
-            Style::default().fg(if none_selected {
-                Color::White
-            } else {
-                Color::DarkGray
-            }),
-        ),
-    ]));
 }
 
 fn render_channels(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
@@ -2497,16 +2384,6 @@ fn render_complete(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
             Style::default().fg(Color::White),
         ),
     ]));
-
-    if wizard.mode == WizardMode::Advanced {
-        lines.push(Line::from(vec![
-            Span::styled("  Gateway:  ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                format!("{}:{}", wizard.gateway_bind, wizard.gateway_port),
-                Style::default().fg(Color::White),
-            ),
-        ]));
-    }
 
     lines.push(Line::from(""));
     lines.push(Line::from(""));

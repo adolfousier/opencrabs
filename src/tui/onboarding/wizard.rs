@@ -26,12 +26,6 @@ pub struct OnboardingWizard {
     pub workspace_path: String,
     pub seed_templates: bool,
 
-    /// Step 4: Gateway
-    pub gateway_port: String,
-    pub gateway_bind: String,
-    /// 0=Token, 1=None
-    pub gateway_auth: usize,
-
     /// Step 5: Channels
     pub channel_toggles: Vec<(String, bool)>,
 
@@ -216,16 +210,6 @@ impl OnboardingWizard {
                 (0, String::new(), String::new(), String::new())
             };
 
-        // Pre-fill gateway settings from existing config
-        let gateway_port = existing_config
-            .as_ref()
-            .map(|c| c.gateway.port.to_string())
-            .unwrap_or_else(|| "18789".to_string());
-        let gateway_bind = existing_config
-            .as_ref()
-            .map(|c| c.gateway.bind.clone())
-            .unwrap_or_else(|| "127.0.0.1".to_string());
-
         let mut wizard = Self {
             step: OnboardingStep::ModeSelect,
             mode: WizardMode::QuickStart,
@@ -244,10 +228,6 @@ impl OnboardingWizard {
 
             workspace_path: default_workspace.to_string_lossy().to_string(),
             seed_templates: true,
-
-            gateway_port,
-            gateway_bind,
-            gateway_auth: 0,
 
             channel_toggles: CHANNEL_NAMES
                 .iter()
@@ -412,15 +392,6 @@ impl OnboardingWizard {
         // Detect if we have an existing API key for the selected provider
         wizard.detect_existing_key();
         wizard.reload_config_models();
-
-        // Load gateway settings
-        wizard.gateway_port = config.gateway.port.to_string();
-        wizard.gateway_bind = config.gateway.bind.clone();
-        wizard.gateway_auth = if config.gateway.auth_mode == "none" {
-            1
-        } else {
-            0
-        };
 
         // Load channel toggles (indices match CHANNEL_NAMES order)
         wizard.channel_toggles[0].1 = config.channels.telegram.enabled; // Telegram

@@ -69,10 +69,6 @@ pub const SLASH_COMMANDS: &[SlashCommand] = &[
         description: "Jump to image handling setup (vision + generation)",
     },
     SlashCommand {
-        name: "/onboard:gateway",
-        description: "Jump to API gateway settings",
-    },
-    SlashCommand {
         name: "/onboard:brain",
         description: "Jump to brain/persona setup",
     },

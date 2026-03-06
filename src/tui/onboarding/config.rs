@@ -346,19 +346,6 @@ impl OnboardingWizard {
             let _ = Config::write_array(section, "models", &self.config_models);
         }
 
-        // Gateway config
-        let _ = Config::write_key("gateway", "port", &self.gateway_port);
-        let _ = Config::write_key("gateway", "bind", &self.gateway_bind);
-        let _ = Config::write_key(
-            "gateway",
-            "auth_mode",
-            if self.gateway_auth == 0 {
-                "token"
-            } else {
-                "none"
-            },
-        );
-
         // Channel enabled flags (from channel_toggles: 0=Telegram, 1=Discord, 2=WhatsApp, 3=Slack)
         let _ = Config::write_key(
             "channels.telegram",

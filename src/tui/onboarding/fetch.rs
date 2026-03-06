@@ -4,65 +4,6 @@ use super::types::*;
 use super::wizard::OnboardingWizard;
 
 impl OnboardingWizard {
-    pub(super) fn handle_gateway_key(&mut self, event: KeyEvent) -> WizardAction {
-        match self.focused_field {
-            0 => {
-                // Port
-                match event.code {
-                    KeyCode::Char(c) if c.is_ascii_digit() => {
-                        self.gateway_port.push(c);
-                    }
-                    KeyCode::Backspace => {
-                        self.gateway_port.pop();
-                    }
-                    KeyCode::Tab | KeyCode::Enter => {
-                        self.focused_field = 1;
-                    }
-                    _ => {}
-                }
-            }
-            1 => {
-                // Bind address
-                match event.code {
-                    KeyCode::Char(c) => {
-                        self.gateway_bind.push(c);
-                    }
-                    KeyCode::Backspace => {
-                        self.gateway_bind.pop();
-                    }
-                    KeyCode::Tab | KeyCode::Enter => {
-                        self.focused_field = 2;
-                    }
-                    KeyCode::BackTab => {
-                        self.focused_field = 0;
-                    }
-                    _ => {}
-                }
-            }
-            2 => {
-                // Auth mode
-                match event.code {
-                    KeyCode::Up | KeyCode::Down | KeyCode::Char(' ') => {
-                        self.gateway_auth = if self.gateway_auth == 0 { 1 } else { 0 };
-                    }
-                    KeyCode::Enter => {
-                        self.next_step();
-                    }
-                    KeyCode::BackTab => {
-                        self.focused_field = 1;
-                    }
-                    _ => {}
-                }
-            }
-            _ => {
-                if event.code == KeyCode::Enter {
-                    self.next_step();
-                }
-            }
-        }
-        WizardAction::None
-    }
-
     pub(super) fn handle_voice_setup_key(&mut self, event: KeyEvent) -> WizardAction {
         match self.voice_field {
             VoiceField::GroqApiKey => match event.code {

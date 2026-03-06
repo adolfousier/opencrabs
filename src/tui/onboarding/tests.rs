@@ -31,9 +31,7 @@ fn test_advanced_mode_all_steps() {
     assert_eq!(wizard.step, OnboardingStep::ProviderAuth);
     wizard.next_step(); // ProviderAuth -> Channels
     assert_eq!(wizard.step, OnboardingStep::Channels);
-    wizard.next_step(); // Channels -> Gateway (nothing enabled)
-    assert_eq!(wizard.step, OnboardingStep::Gateway);
-    wizard.next_step(); // Gateway -> VoiceSetup (Advanced)
+    wizard.next_step(); // Channels -> VoiceSetup
     assert_eq!(wizard.step, OnboardingStep::VoiceSetup);
     wizard.next_step(); // VoiceSetup -> ImageSetup (Advanced)
     assert_eq!(wizard.step, OnboardingStep::ImageSetup);
@@ -61,14 +59,14 @@ fn test_channels_telegram_goes_to_telegram_setup() {
     wizard.next_step();
     assert_eq!(wizard.step, OnboardingStep::Channels);
 
-    // Continue to Gateway
+    // Continue to VoiceSetup
     wizard.focused_field = wizard.channel_toggles.len();
     wizard.handle_key(key(KeyCode::Enter));
-    assert_eq!(wizard.step, OnboardingStep::Gateway);
+    assert_eq!(wizard.step, OnboardingStep::VoiceSetup);
 }
 
 #[test]
-fn test_channels_whatsapp_skips_to_gateway() {
+fn test_channels_whatsapp_skips_to_voice() {
     let mut wizard = OnboardingWizard::new();
     wizard.mode = WizardMode::Advanced;
     wizard.api_key_input = "test-key".to_string();
@@ -79,8 +77,8 @@ fn test_channels_whatsapp_skips_to_gateway() {
 
     // Enable WhatsApp only (no token sub-step)
     wizard.channel_toggles[2].1 = true;
-    wizard.next_step(); // Channels -> Gateway (WhatsApp has no sub-step)
-    assert_eq!(wizard.step, OnboardingStep::Gateway);
+    wizard.next_step(); // Channels -> VoiceSetup (WhatsApp has no sub-step)
+    assert_eq!(wizard.step, OnboardingStep::VoiceSetup);
     // Verify channel_toggles WhatsApp is enabled
     assert!(wizard.channel_toggles[2].1);
 }
@@ -123,10 +121,10 @@ fn test_channels_full_chain_telegram_discord_slack() {
     wizard.next_step();
     assert_eq!(wizard.step, OnboardingStep::Channels);
 
-    // Continue to Gateway
+    // Continue to VoiceSetup
     wizard.focused_field = wizard.channel_toggles.len();
     wizard.handle_key(key(KeyCode::Enter));
-    assert_eq!(wizard.step, OnboardingStep::Gateway);
+    assert_eq!(wizard.step, OnboardingStep::VoiceSetup);
 }
 
 #[test]
@@ -142,12 +140,11 @@ fn test_step_numbers() {
     assert_eq!(OnboardingStep::ModeSelect.number(), 1);
     assert_eq!(OnboardingStep::Channels.number(), 4);
     assert_eq!(OnboardingStep::TelegramSetup.number(), 4); // sub-step of Channels
-    assert_eq!(OnboardingStep::Gateway.number(), 5);
-    assert_eq!(OnboardingStep::VoiceSetup.number(), 6);
-    assert_eq!(OnboardingStep::ImageSetup.number(), 7);
-    assert_eq!(OnboardingStep::HealthCheck.number(), 9);
-    assert_eq!(OnboardingStep::BrainSetup.number(), 10);
-    assert_eq!(OnboardingStep::total(), 10);
+    assert_eq!(OnboardingStep::VoiceSetup.number(), 5);
+    assert_eq!(OnboardingStep::ImageSetup.number(), 6);
+    assert_eq!(OnboardingStep::HealthCheck.number(), 8);
+    assert_eq!(OnboardingStep::BrainSetup.number(), 9);
+    assert_eq!(OnboardingStep::total(), 9);
 }
 
 #[test]
@@ -339,9 +336,7 @@ fn test_quickstart_skips_channels_voice() {
     assert_eq!(wizard.step, OnboardingStep::Workspace);
     wizard.next_step(); // Workspace -> ProviderAuth
     assert_eq!(wizard.step, OnboardingStep::ProviderAuth);
-    wizard.next_step(); // ProviderAuth -> Gateway (QuickStart skips Channels)
-    assert_eq!(wizard.step, OnboardingStep::Gateway);
-    wizard.next_step(); // Gateway -> Daemon (QuickStart skips Voice)
+    wizard.next_step(); // ProviderAuth -> Daemon (QuickStart skips Channels & Voice)
     assert_eq!(wizard.step, OnboardingStep::Daemon);
 }
 

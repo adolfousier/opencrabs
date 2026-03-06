@@ -30,10 +30,6 @@ pub struct Config {
     #[serde(default)]
     pub providers: ProviderConfigs,
 
-    /// HTTP API gateway configuration
-    #[serde(default)]
-    pub gateway: GatewayConfig,
-
     /// Messaging channel integrations
     #[serde(default)]
     pub channels: ChannelsConfig,
@@ -53,38 +49,6 @@ pub struct Config {
     /// Image generation and vision configuration
     #[serde(default)]
     pub image: ImageConfig,
-}
-
-/// HTTP API gateway configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GatewayConfig {
-    /// Gateway port (default: 18789)
-    #[serde(default = "default_gateway_port")]
-    pub port: u16,
-
-    /// Bind address (default: "127.0.0.1")
-    #[serde(default = "default_gateway_bind")]
-    pub bind: String,
-
-    /// Authentication mode: "token" or "none" (default: "token")
-    #[serde(default = "default_gateway_auth")]
-    pub auth_mode: String,
-
-    /// Whether the gateway is enabled
-    #[serde(default)]
-    pub enabled: bool,
-}
-
-fn default_gateway_port() -> u16 {
-    18789
-}
-
-fn default_gateway_bind() -> String {
-    "127.0.0.1".to_string()
-}
-
-fn default_gateway_auth() -> String {
-    "token".to_string()
 }
 
 /// A2A (Agent-to-Agent) protocol gateway configuration.
@@ -119,17 +83,6 @@ fn default_a2a_bind() -> String {
 
 fn default_a2a_port() -> u16 {
     18790
-}
-
-impl Default for GatewayConfig {
-    fn default() -> Self {
-        Self {
-            port: default_gateway_port(),
-            bind: default_gateway_bind(),
-            auth_mode: default_gateway_auth(),
-            enabled: false,
-        }
-    }
 }
 
 impl Default for A2aConfig {
@@ -1112,7 +1065,6 @@ impl Default for Config {
             },
             debug: DebugConfig::default(),
             providers: ProviderConfigs::default(),
-            gateway: GatewayConfig::default(),
             channels: ChannelsConfig::default(),
             voice: VoiceConfig::default(),
             agent: AgentConfig::default(),
@@ -1312,7 +1264,6 @@ impl Config {
             logging: overlay.logging,
             debug: overlay.debug,
             providers: overlay.providers,
-            gateway: overlay.gateway,
             channels: overlay.channels,
             voice: overlay.voice,
             agent: overlay.agent,

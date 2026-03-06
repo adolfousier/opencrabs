@@ -122,7 +122,6 @@ impl ConfigTool {
             Some("voice") => format_toml(&config.voice),
             Some("logging") => format_toml(&config.logging),
             Some("debug") => format_toml(&config.debug),
-            Some("gateway") => format_toml(&config.gateway),
             Some("channels") => format_toml(&config.channels),
             Some("crabrace") => format_toml(&config.crabrace),
             Some("database") => format_toml(&config.database),
@@ -130,7 +129,7 @@ impl ConfigTool {
             Some(other) => {
                 return Ok(ToolResult::error(format!(
                     "Unknown config section: '{}'. Valid: agent, voice, logging, debug, \
-                     gateway, channels, crabrace, database, providers",
+                     channels, crabrace, database, providers",
                     other
                 )));
             }

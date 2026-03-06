@@ -27,7 +27,6 @@ impl OnboardingWizard {
             OnboardingStep::ModeSelect => self.handle_mode_select_key(event),
             OnboardingStep::ProviderAuth => self.handle_provider_auth_key(event),
             OnboardingStep::Workspace => self.handle_workspace_key(event),
-            OnboardingStep::Gateway => self.handle_gateway_key(event),
             OnboardingStep::Channels => self.handle_channels_key(event),
             OnboardingStep::TelegramSetup => self.handle_telegram_setup_key(event),
             OnboardingStep::DiscordSetup => self.handle_discord_setup_key(event),

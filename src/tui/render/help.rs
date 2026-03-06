@@ -76,7 +76,6 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
         kv("/onboard:channels", "Jump to channel config", cyan),
         kv("/onboard:voice", "Jump to voice STT/TTS setup", cyan),
         kv("/onboard:image", "Jump to image handling setup", cyan),
-        kv("/onboard:gateway", "Jump to API gateway settings", cyan),
         kv("/onboard:brain", "Jump to brain/persona setup", cyan),
         kv("/doctor", "Run connection health check", cyan),
         kv("/sessions", "Session manager", cyan),

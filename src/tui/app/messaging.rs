@@ -362,7 +362,6 @@ impl App {
                     "provider" => OnboardingStep::ProviderAuth,
                     "workspace" => OnboardingStep::Workspace,
                     "channels" => OnboardingStep::Channels,
-                    "gateway" => OnboardingStep::Gateway,
                     "voice" => OnboardingStep::VoiceSetup,
                     "image" => OnboardingStep::ImageSetup,
                     "daemon" => OnboardingStep::Daemon,
