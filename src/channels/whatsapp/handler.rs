@@ -590,6 +590,43 @@ pub(crate) async fn handle_message(
                 let _ = client.send_message(info.source.chat.clone(), reply).await;
                 return;
             }
+            ChannelCommand::NewSession => {
+                match session_svc.create_session(Some("Chat".to_string())).await {
+                    Ok(new_session) => {
+                        if is_owner {
+                            *shared_session.lock().await = Some(new_session.id);
+                        } else {
+                            extra_sessions.lock().await.insert(
+                                phone.to_string(),
+                                (new_session.id, std::time::Instant::now()),
+                            );
+                        }
+                        let reply = waproto::whatsapp::Message {
+                            conversation: Some("✅ New session started.".to_string()),
+                            ..Default::default()
+                        };
+                        let _ = client.send_message(info.source.chat.clone(), reply).await;
+                    }
+                    Err(e) => {
+                        tracing::error!("WhatsApp: failed to create session: {}", e);
+                        let reply = waproto::whatsapp::Message {
+                            conversation: Some("Failed to create session.".to_string()),
+                            ..Default::default()
+                        };
+                        let _ = client.send_message(info.source.chat.clone(), reply).await;
+                    }
+                }
+                return;
+            }
+            ChannelCommand::Sessions(resp) => {
+                // WhatsApp has no inline buttons — send plain text list
+                let reply = waproto::whatsapp::Message {
+                    conversation: Some(resp.text),
+                    ..Default::default()
+                };
+                let _ = client.send_message(info.source.chat.clone(), reply).await;
+                return;
+            }
             ChannelCommand::Stop => {
                 let cancelled = wa_state.cancel_session(session_id).await;
                 let text = if cancelled {

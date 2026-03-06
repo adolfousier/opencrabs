@@ -116,6 +116,54 @@ pub async fn on_interaction(
                     continue;
                 }
 
+                // Session switch callback
+                if let Some(session_id_str) = action_id.strip_prefix("session:") {
+                    if let Ok(new_id) = session_id_str.parse::<Uuid>() {
+                        let cfg = state.config_rx.borrow().clone();
+                        let caller_id = block_actions
+                            .user
+                            .as_ref()
+                            .map(|u| u.id.0.as_str())
+                            .unwrap_or("");
+                        let is_owner = cfg.channels.slack.allowed_users.is_empty()
+                            || cfg
+                                .channels
+                                .slack
+                                .allowed_users
+                                .first()
+                                .map(|a| a == caller_id)
+                                .unwrap_or(false);
+
+                        if is_owner {
+                            *state.shared_session.lock().await = Some(new_id);
+                        } else {
+                            state.extra_sessions.lock().await.insert(
+                                caller_id.to_string(),
+                                (new_id, std::time::Instant::now()),
+                            );
+                        }
+                        if let Some(ref channel) = block_actions.channel {
+                            state
+                                .slack_state
+                                .register_session_channel(new_id, channel.id.0.to_string())
+                                .await;
+                            let token = SlackApiToken::new(SlackApiTokenValue::from(
+                                state.bot_token.clone(),
+                            ));
+                            let session = client.open_session(&token);
+                            let request = SlackApiChatPostMessageRequest::new(
+                                channel.id.clone(),
+                                SlackMessageContent::new().with_text(format!(
+                                    "✅ Switched to session `{}`",
+                                    &session_id_str[..8.min(session_id_str.len())]
+                                )),
+                            );
+                            let _ = session.chat_post_message(&request).await;
+                        }
+                    }
+                    continue;
+                }
+
                 let (approved, always, yolo, id) =
                     if let Some(id) = action_id.strip_prefix("approve:") {
                         (true, false, false, id.to_string())
@@ -612,6 +660,75 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                         };
                         SlackActionBlockElement::Button(SlackBlockButtonElement::new(
                             SlackActionId::new(format!("provider:{}", name)),
+                            SlackBlockPlainTextOnly::from(SlackBlockPlainText::new(display)),
+                        ))
+                    })
+                    .collect();
+                let mut blocks = vec![header];
+                for chunk in buttons.chunks(5) {
+                    blocks.push(SlackBlock::Actions(SlackActionsBlock::new(chunk.to_vec())));
+                }
+                let request = SlackApiChatPostMessageRequest::new(
+                    SlackChannelId::new(channel_id),
+                    SlackMessageContent::new().with_blocks(blocks),
+                );
+                let _ = session.chat_post_message(&request).await;
+                return;
+            }
+            ChannelCommand::NewSession => {
+                match state.session_svc.create_session(Some("Chat".to_string())).await {
+                    Ok(new_session) => {
+                        if is_owner {
+                            *state.shared_session.lock().await = Some(new_session.id);
+                        } else {
+                            state.extra_sessions.lock().await.insert(
+                                user_id.to_string(),
+                                (new_session.id, std::time::Instant::now()),
+                            );
+                        }
+                        state
+                            .slack_state
+                            .register_session_channel(new_session.id, channel_id.clone())
+                            .await;
+                        let token = SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
+                        let session = client.open_session(&token);
+                        let request = SlackApiChatPostMessageRequest::new(
+                            SlackChannelId::new(channel_id),
+                            SlackMessageContent::new().with_text("✅ New session started.".to_string()),
+                        );
+                        let _ = session.chat_post_message(&request).await;
+                    }
+                    Err(e) => {
+                        tracing::error!("Slack: failed to create session: {}", e);
+                        let token = SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
+                        let session = client.open_session(&token);
+                        let request = SlackApiChatPostMessageRequest::new(
+                            SlackChannelId::new(channel_id),
+                            SlackMessageContent::new().with_text("Failed to create session.".to_string()),
+                        );
+                        let _ = session.chat_post_message(&request).await;
+                    }
+                }
+                return;
+            }
+            ChannelCommand::Sessions(resp) => {
+                let token = SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
+                let session = client.open_session(&token);
+                let header = SlackBlock::Section(SlackSectionBlock::new().with_text(
+                    SlackBlockText::MarkDown(SlackBlockMarkDownText::new(resp.text.clone())),
+                ));
+                let buttons: Vec<SlackActionBlockElement> = resp
+                    .sessions
+                    .iter()
+                    .take(25)
+                    .map(|(id, label)| {
+                        let display = if *id == resp.current_session_id {
+                            format!("✓ {}", label)
+                        } else {
+                            label.clone()
+                        };
+                        SlackActionBlockElement::Button(SlackBlockButtonElement::new(
+                            SlackActionId::new(format!("session:{}", id)),
                             SlackBlockPlainTextOnly::from(SlackBlockPlainText::new(display)),
                         ))
                     })

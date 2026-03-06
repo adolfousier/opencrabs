@@ -162,9 +162,15 @@ impl TelegramAgent {
             let cb_handler = Update::filter_callback_query().endpoint({
                 let telegram_state = telegram_state.clone();
                 let agent = agent.clone();
+                let shared_session = shared_session.clone();
+                let extra_sessions = extra_sessions.clone();
+                let config_rx = config_rx.clone();
                 move |bot: Bot, query: CallbackQuery| {
                     let state = telegram_state.clone();
                     let agent = agent.clone();
+                    let shared_session = shared_session.clone();
+                    let extra_sessions = extra_sessions.clone();
+                    let config_rx = config_rx.clone();
                     async move {
                         if let Some(data) = query.data.as_deref() {
                             tracing::info!("Telegram callback query received: data={}", data);
@@ -240,6 +246,60 @@ impl TelegramAgent {
                                         .reply_markup(
                                             teloxide::types::InlineKeyboardMarkup::default(),
                                         )
+                                        .await;
+                                }
+                                return ResponseResult::Ok(());
+                            }
+
+                            // Session switch callback
+                            if let Some(session_id_str) = data.strip_prefix("session:") {
+                                if let Ok(new_id) = session_id_str.parse::<Uuid>() {
+                                    // Determine if caller is owner
+                                    let cfg = config_rx.borrow().clone();
+                                    let caller_id = query.from.id.0 as i64;
+                                    let owner_id = cfg
+                                        .channels
+                                        .telegram
+                                        .allowed_users
+                                        .first()
+                                        .and_then(|s| s.parse::<i64>().ok());
+                                    let is_owner = cfg.channels.telegram.allowed_users.is_empty()
+                                        || owner_id == Some(caller_id);
+
+                                    if is_owner {
+                                        *shared_session.lock().await = Some(new_id);
+                                    } else {
+                                        extra_sessions.lock().await.insert(
+                                            caller_id,
+                                            (new_id, std::time::Instant::now()),
+                                        );
+                                    }
+                                    state
+                                        .register_session_chat(new_id, query.message.as_ref().map(|m| m.chat().id.0).unwrap_or(caller_id))
+                                        .await;
+                                    let _ = bot
+                                        .answer_callback_query(&query.id)
+                                        .text("Session switched")
+                                        .await;
+                                    if let Some(msg) = &query.message {
+                                        use teloxide::payloads::EditMessageTextSetters;
+                                        use teloxide::prelude::Requester;
+                                        let _ = bot
+                                            .edit_message_text(
+                                                msg.chat().id,
+                                                msg.id(),
+                                                format!("✅ Switched to session <code>{}</code>", &session_id_str[..8.min(session_id_str.len())]),
+                                            )
+                                            .parse_mode(teloxide::types::ParseMode::Html)
+                                            .reply_markup(
+                                                teloxide::types::InlineKeyboardMarkup::default(),
+                                            )
+                                            .await;
+                                    }
+                                } else {
+                                    let _ = bot
+                                        .answer_callback_query(&query.id)
+                                        .text("Invalid session ID")
                                         .await;
                                 }
                                 return ResponseResult::Ok(());
