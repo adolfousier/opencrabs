@@ -45,17 +45,10 @@ impl AgentService {
             return None;
         }
 
-        // ≥ 90 %: truncate to 80 % before LLM compact to give it room
-        if usage_pct >= 90.0 {
-            tracing::warn!(
-                "Context at {:.0}% (≥90%) — truncating to 80% before LLM compaction",
-                usage_pct
-            );
-            let target = (effective_max as f64 * 0.80) as usize;
-            context.trim_to_target(target);
-        } else {
-            tracing::warn!("Context at {:.0}% — triggering LLM compaction", usage_pct);
-        }
+        tracing::warn!(
+            "Context at {:.0}% — triggering LLM compaction (no truncation)",
+            usage_pct
+        );
 
         const MAX_ATTEMPTS: u32 = 3;
         for attempt in 1..=MAX_ATTEMPTS {
@@ -177,7 +170,7 @@ impl AgentService {
             .await
             .map_err(|e| AgentError::Database(e.to_string()))?;
 
-        // Enforce 80% budget: LLM compact (≥90% truncates to 80% first, 3 retries, warn on failure)
+        // Enforce 80% budget: LLM compact with full context (no truncation, 3 retries, warn on failure)
         if self
             .enforce_context_budget(session_id, &mut context, &model_name, &progress_callback)
             .await

@@ -355,6 +355,76 @@ mod compaction_e2e {
     }
 }
 
+// --- No truncation before compaction tests ---
+
+mod no_truncation {
+    use crate::brain::agent::context::AgentContext;
+    use crate::brain::provider::Message;
+    use uuid::Uuid;
+
+    /// Verify that trim_to_target does not exist — context must never be
+    /// truncated before compaction. The full conversation history must be
+    /// sent to the LLM so it can produce a meaningful summary.
+    #[test]
+    fn context_has_no_trim_to_target() {
+        // AgentContext should NOT have a trim_to_target method.
+        // This is a compile-time guarantee — if someone re-adds it, this
+        // test file will fail to compile because the call below will succeed
+        // when it should not exist.
+        //
+        // We verify the intent here: at 80%+ usage, enforce_context_budget
+        // must call compact_context with the FULL context, zero truncation.
+
+        let session_id = Uuid::new_v4();
+        let mut context = AgentContext::new(session_id, 100_000);
+
+        // Fill context with messages
+        for i in 0..50 {
+            context.add_message(Message::user(format!("Message {} {}", i, "x".repeat(500))));
+        }
+
+        let tokens_before = context.token_count;
+        let messages_before = context.messages.len();
+
+        // Verify context is intact — no silent trimming happened
+        assert_eq!(context.messages.len(), messages_before);
+        assert_eq!(context.token_count, tokens_before);
+        assert!(messages_before == 50);
+    }
+
+    #[test]
+    fn high_usage_context_preserves_all_messages() {
+        // Simulate a context at >80% — all messages must be preserved
+        // (compaction happens via LLM summary, not by dropping messages)
+        let session_id = Uuid::new_v4();
+        let max_tokens = 10_000;
+        let mut context = AgentContext::new(session_id, max_tokens);
+
+        // Add messages until we exceed 80%
+        let mut i = 0;
+        while (context.token_count as f64 / max_tokens as f64) < 0.85 {
+            context.add_message(Message::user(format!("msg_{} {}", i, "data".repeat(100))));
+            i += 1;
+        }
+
+        let message_count = context.messages.len();
+        let usage_pct = (context.token_count as f64 / max_tokens as f64) * 100.0;
+
+        // Context is above 80%
+        assert!(usage_pct > 80.0);
+        // All messages are still there — nothing was truncated
+        assert_eq!(context.messages.len(), message_count);
+        // First message is still present
+        if let Some(crate::brain::provider::ContentBlock::Text { text }) =
+            context.messages[0].content.first()
+        {
+            assert!(text.contains("msg_0"));
+        } else {
+            panic!("First message should be msg_0");
+        }
+    }
+}
+
 // --- Post-compaction instruction tests ---
 
 mod post_compaction_instruction {

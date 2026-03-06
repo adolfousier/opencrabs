@@ -216,16 +216,6 @@ impl AgentContext {
 
     /// Hard-truncate old messages until token count is at or below `target_tokens`.
     /// Keeps at least 2 messages (the most recent pair) to maintain conversation validity.
-    pub fn trim_to_target(&mut self, target_tokens: usize) {
-        while self.token_count > target_tokens && self.messages.len() > 2 {
-            let tokens = self.estimate_message_tokens(&self.messages[0]);
-            self.token_count = self.token_count.saturating_sub(tokens);
-            self.messages.remove(0);
-        }
-        // Removing an assistant(tool_use) exposes an orphaned user(tool_result) — drop it
-        self.drop_leading_orphan_tool_results();
-    }
-
     /// Compact the context by replacing old messages with a summary.
     ///
     /// Keeps the last `keep_recent` messages and prepends a system-role
