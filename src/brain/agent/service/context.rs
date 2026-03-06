@@ -284,8 +284,23 @@ impl AgentService {
             }
         });
 
+        // Snapshot the last 8 messages as formatted text before compaction.
+        // This gives the agent immediate access to recent context without needing
+        // an extra session_search call after waking up.
+        let recent_snapshot = Self::format_recent_messages(&context.messages, 8);
+        let summary_with_context = if recent_snapshot.is_empty() {
+            summary.clone()
+        } else {
+            format!(
+                "{}\n\n## Recent Message Pairs (pre-compaction snapshot)\n\
+                 The following are the last messages before compaction — use them to \
+                 understand the current task state and decide what context to reload.\n\n{}",
+                summary, recent_snapshot
+            )
+        };
+
         // Compact the context: keep last 4 message pairs (8 messages)
-        context.compact_with_summary(summary.clone(), 8);
+        context.compact_with_summary(summary_with_context, 8);
 
         tracing::info!(
             "Context compacted: now at {:.0}% ({} tokens)",
@@ -304,6 +319,64 @@ impl AgentService {
         }
 
         Ok(summary)
+    }
+
+    /// Format the last N messages into a human-readable snapshot for post-compaction context.
+    /// Truncates long tool results to keep the snapshot concise.
+    pub(crate) fn format_recent_messages(messages: &[Message], n: usize) -> String {
+        use crate::brain::provider::{ContentBlock, Role};
+
+        let start = messages.len().saturating_sub(n);
+        let mut lines = Vec::new();
+
+        for msg in &messages[start..] {
+            let role_label = match msg.role {
+                Role::User => "**User**",
+                Role::Assistant => "**Assistant**",
+                Role::System => "**System**",
+            };
+
+            for block in &msg.content {
+                match block {
+                    ContentBlock::Text { text } => {
+                        // Truncate very long text blocks to 500 chars
+                        let display = if text.len() > 500 {
+                            format!("{}… [truncated]", &text[..500])
+                        } else {
+                            text.clone()
+                        };
+                        lines.push(format!("{}: {}", role_label, display));
+                    }
+                    ContentBlock::ToolUse { name, input, .. } => {
+                        let input_preview = {
+                            let s = input.to_string();
+                            if s.len() > 200 {
+                                format!("{}…", &s[..200])
+                            } else {
+                                s
+                            }
+                        };
+                        lines.push(format!(
+                            "{}: [tool_use: {}({})]",
+                            role_label, name, input_preview
+                        ));
+                    }
+                    ContentBlock::ToolResult { content, .. } => {
+                        let display = if content.len() > 300 {
+                            format!("{}… [truncated]", &content[..300])
+                        } else {
+                            content.clone()
+                        };
+                        lines.push(format!("{}: [tool_result: {}]", role_label, display));
+                    }
+                    ContentBlock::Image { .. } => {
+                        lines.push(format!("{}: [image]", role_label));
+                    }
+                }
+            }
+        }
+
+        lines.join("\n")
     }
 
     /// Save a compaction summary to a daily memory log at `~/.opencrabs/memory/YYYY-MM-DD.md`.

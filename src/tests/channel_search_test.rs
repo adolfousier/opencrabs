@@ -323,7 +323,6 @@ mod tool {
     }
 
     fn insert_msg(
-        repo: &ChannelMessageRepository,
         channel: &str,
         chat_id: &str,
         chat_name: &str,
@@ -372,8 +371,8 @@ mod tool {
     #[tokio::test]
     async fn test_list_chats_with_data() {
         let (_db, repo, tool) = setup().await;
-        let m1 = insert_msg(&repo, "telegram", "-100111", "Dev Group", "Alice", "hello");
-        let m2 = insert_msg(&repo, "telegram", "-100222", "Ops Group", "Bob", "world");
+        let m1 = insert_msg("telegram", "-100111", "Dev Group", "Alice", "hello");
+        let m2 = insert_msg("telegram", "-100222", "Ops Group", "Bob", "world");
         repo.insert(&m1).await.unwrap();
         repo.insert(&m2).await.unwrap();
 
@@ -388,8 +387,8 @@ mod tool {
     #[tokio::test]
     async fn test_list_chats_filtered_by_channel() {
         let (_db, repo, tool) = setup().await;
-        let m1 = insert_msg(&repo, "telegram", "-100111", "TG Group", "Alice", "tg");
-        let m2 = insert_msg(&repo, "discord", "DC001", "DC Chan", "Bob", "dc");
+        let m1 = insert_msg("telegram", "-100111", "TG Group", "Alice", "tg");
+        let m2 = insert_msg("discord", "DC001", "DC Chan", "Bob", "dc");
         repo.insert(&m1).await.unwrap();
         repo.insert(&m2).await.unwrap();
 
@@ -414,22 +413,8 @@ mod tool {
     #[tokio::test]
     async fn test_recent_returns_messages() {
         let (_db, repo, tool) = setup().await;
-        let m1 = insert_msg(
-            &repo,
-            "telegram",
-            "-100111",
-            "Group",
-            "Alice",
-            "first message",
-        );
-        let m2 = insert_msg(
-            &repo,
-            "telegram",
-            "-100111",
-            "Group",
-            "Bob",
-            "second message",
-        );
+        let m1 = insert_msg("telegram", "-100111", "Group", "Alice", "first message");
+        let m2 = insert_msg("telegram", "-100111", "Group", "Bob", "second message");
         repo.insert(&m1).await.unwrap();
         repo.insert(&m2).await.unwrap();
 
@@ -455,14 +440,7 @@ mod tool {
     async fn test_recent_with_n_limit() {
         let (_db, repo, tool) = setup().await;
         for i in 0..10 {
-            let m = insert_msg(
-                &repo,
-                "telegram",
-                "-100111",
-                "Group",
-                "Alice",
-                &format!("msg {i}"),
-            );
+            let m = insert_msg("telegram", "-100111", "Group", "Alice", &format!("msg {i}"));
             repo.insert(&m).await.unwrap();
         }
 
@@ -486,23 +464,14 @@ mod tool {
     async fn test_search_finds_messages() {
         let (_db, repo, tool) = setup().await;
         let m1 = insert_msg(
-            &repo,
             "telegram",
             "-100111",
             "Group",
             "Alice",
             "deploy failed on prod",
         );
-        let m2 = insert_msg(
-            &repo,
-            "telegram",
-            "-100111",
-            "Group",
-            "Bob",
-            "checking logs now",
-        );
+        let m2 = insert_msg("telegram", "-100111", "Group", "Bob", "checking logs now");
         let m3 = insert_msg(
-            &repo,
             "slack",
             "C999",
             "General",
@@ -524,15 +493,8 @@ mod tool {
     #[tokio::test]
     async fn test_search_with_channel_filter() {
         let (_db, repo, tool) = setup().await;
-        let m1 = insert_msg(
-            &repo,
-            "telegram",
-            "-100111",
-            "Group",
-            "Alice",
-            "error happened",
-        );
-        let m2 = insert_msg(&repo, "slack", "C999", "General", "Bob", "error resolved");
+        let m1 = insert_msg("telegram", "-100111", "Group", "Alice", "error happened");
+        let m2 = insert_msg("slack", "C999", "General", "Bob", "error resolved");
         repo.insert(&m1).await.unwrap();
         repo.insert(&m2).await.unwrap();
 
@@ -548,7 +510,7 @@ mod tool {
     #[tokio::test]
     async fn test_search_no_match() {
         let (_db, repo, tool) = setup().await;
-        let m = insert_msg(&repo, "telegram", "-100111", "Group", "Alice", "hello");
+        let m = insert_msg("telegram", "-100111", "Group", "Alice", "hello");
         repo.insert(&m).await.unwrap();
 
         let input = serde_json::json!({"operation": "search", "query": "nonexistent"});

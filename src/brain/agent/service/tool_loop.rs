@@ -184,14 +184,15 @@ impl AgentService {
             .is_some()
         {
             let mut cont_text =
-                "[SYSTEM: Context was auto-compacted. The summary above has full context. \
-                 MANDATORY POST-COMPACTION PROTOCOL:\n\
-                 1. FIRST call `load_brain_file` with name=\"all\" to reload your brain context \
-                 (identity, capabilities, user preferences, tool docs). This is REQUIRED — \
-                 brain files are NOT carried over after compaction.\n\
-                 2. Review the compaction summary above to understand current task state.\n\
-                 3. Continue the task using tools. Do NOT repeat completed work. \
-                 Do NOT ask for instructions.]"
+                "[SYSTEM: Context was auto-compacted. The summary above includes a snapshot \
+                 of recent messages before compaction.\n\
+                 POST-COMPACTION PROTOCOL:\n\
+                 1. Read the compaction summary and the recent message snapshot to understand \
+                 the current task, tools in use, and what you were doing.\n\
+                 2. If you need specific brain context, selectively load ONLY the relevant \
+                 brain file (e.g. TOOLS.md, SOUL.md, USER.md). NEVER use name=\"all\".\n\
+                 3. Continue the task immediately. Do NOT repeat completed work. \
+                 Do NOT ask the user for instructions — you have everything you need.]"
                     .to_string();
             if !self.auto_approve_tools {
                 cont_text.push_str("\n\nCRITICAL: Tool approval is REQUIRED. You MUST wait for user approval before EVERY tool execution. Do NOT batch tool calls without approval.");
@@ -253,9 +254,9 @@ impl AgentService {
                 .is_some()
             {
                 let mut cont_text =
-                    "[SYSTEM: Context was auto-compacted. The summary above has full context. \
-                     Continue the task immediately using tools. Do NOT repeat completed work. \
-                     Do NOT ask for instructions.]"
+                    "[SYSTEM: Context was auto-compacted mid-loop. The summary above includes \
+                     a snapshot of recent messages. Review it and continue the task immediately. \
+                     Do NOT repeat completed work. Do NOT ask for instructions.]"
                         .to_string();
                 if !self.auto_approve_tools {
                     cont_text.push_str("\n\nCRITICAL: Tool approval is REQUIRED. You MUST wait for user approval before EVERY tool execution. Do NOT batch tool calls without approval.");
