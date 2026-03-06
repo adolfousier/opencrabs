@@ -169,14 +169,66 @@ impl TelegramAgent {
                         if let Some(data) = query.data.as_deref() {
                             tracing::info!("Telegram callback query received: data={}", data);
 
-                            // Model switch callback
-                            if let Some(model_name) = data.strip_prefix("model:") {
+                            // Provider picker callback → show models for that provider
+                            if let Some(provider_name) = data.strip_prefix("provider:") {
+                                let resp = crate::channels::commands::models_for_provider(provider_name).await;
+                                if resp.models.is_empty() {
+                                    let _ = bot
+                                        .answer_callback_query(&query.id)
+                                        .text("No models available for this provider")
+                                        .await;
+                                    return ResponseResult::Ok(());
+                                }
+                                let _ = bot.answer_callback_query(&query.id).await;
+                                if let Some(msg) = &query.message {
+                                    use teloxide::payloads::EditMessageTextSetters;
+                                    use teloxide::prelude::Requester;
+                                    use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
+                                    let rows: Vec<Vec<InlineKeyboardButton>> = resp
+                                        .models
+                                        .iter()
+                                        .map(|m| {
+                                            let display = if *m == resp.current_model {
+                                                format!("✓ {}", m)
+                                            } else {
+                                                m.clone()
+                                            };
+                                            vec![InlineKeyboardButton::callback(
+                                                display,
+                                                format!("model:{}:{}", resp.provider_name, m),
+                                            )]
+                                        })
+                                        .collect();
+                                    let keyboard = InlineKeyboardMarkup::new(rows);
+                                    let text = crate::channels::telegram::handler::md_to_html(&resp.text);
+                                    let _ = bot
+                                        .edit_message_text(msg.chat().id, msg.id(), &text)
+                                        .parse_mode(teloxide::types::ParseMode::Html)
+                                        .reply_markup(keyboard)
+                                        .await;
+                                }
+                                return ResponseResult::Ok(());
+                            }
+
+                            // Model switch callback (format: model:<provider>:<model>)
+                            if let Some(rest) = data.strip_prefix("model:") {
+                                let (provider_name, model_name) = if let Some((p, m)) = rest.split_once(':') {
+                                    (Some(p), m)
+                                } else {
+                                    (None, rest)
+                                };
+                                // Switch provider if specified and different
+                                if let Some(pname) = provider_name
+                                    && let Ok(config) = crate::config::Config::load()
+                                    && let Ok(new_provider) = crate::brain::provider::factory::create_provider_by_name(&config, pname)
+                                {
+                                    agent.swap_provider(new_provider);
+                                }
                                 crate::channels::commands::switch_model(&agent, model_name);
                                 let _ = bot
                                     .answer_callback_query(&query.id)
                                     .text(format!("Switched to {}", model_name))
                                     .await;
-                                // Update the message to reflect the new selection
                                 if let Some(msg) = &query.message {
                                     let text =
                                         format!("✅ Model switched to <code>{}</code>", model_name);

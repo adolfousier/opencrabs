@@ -40,8 +40,66 @@ pub async fn on_interaction(
                 let action_id = action.action_id.0.as_str();
                 tracing::info!("Slack callback received: action_id={}", action_id);
 
-                // Model switch callback
-                if let Some(model_name) = action_id.strip_prefix("model:") {
+                // Provider picker callback → show models for that provider
+                if let Some(provider_name) = action_id.strip_prefix("provider:") {
+                    let resp = crate::channels::commands::models_for_provider(provider_name).await;
+                    tracing::info!("Slack: showing models for provider {}", provider_name);
+                    if let Some(ref channel) = block_actions.channel {
+                        let token =
+                            SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
+                        let session = client.open_session(&token);
+                        let header = SlackBlock::Section(SlackSectionBlock::new().with_text(
+                            SlackBlockText::MarkDown(SlackBlockMarkDownText::new(
+                                resp.text.clone(),
+                            )),
+                        ));
+                        let buttons: Vec<SlackActionBlockElement> = resp
+                            .models
+                            .iter()
+                            .take(25)
+                            .map(|m| {
+                                let label = if *m == resp.current_model {
+                                    format!("✓ {}", m)
+                                } else {
+                                    m.clone()
+                                };
+                                SlackActionBlockElement::Button(SlackBlockButtonElement::new(
+                                    SlackActionId::new(format!(
+                                        "model:{}:{}",
+                                        resp.provider_name, m
+                                    )),
+                                    SlackBlockPlainTextOnly::from(SlackBlockPlainText::new(label)),
+                                ))
+                            })
+                            .collect();
+                        let mut blocks = vec![header];
+                        for chunk in buttons.chunks(5) {
+                            blocks
+                                .push(SlackBlock::Actions(SlackActionsBlock::new(chunk.to_vec())));
+                        }
+                        let request = SlackApiChatPostMessageRequest::new(
+                            channel.id.clone(),
+                            SlackMessageContent::new().with_blocks(blocks),
+                        );
+                        let _ = session.chat_post_message(&request).await;
+                    }
+                    continue;
+                }
+
+                // Model switch callback (format: model:<provider>:<model>)
+                if let Some(rest) = action_id.strip_prefix("model:") {
+                    let (provider_name, model_name) = if let Some((p, m)) = rest.split_once(':') {
+                        (Some(p), m)
+                    } else {
+                        (None, rest)
+                    };
+                    if let Some(pname) = provider_name
+                        && let Ok(config) = crate::config::Config::load()
+                        && let Ok(new_provider) =
+                            crate::brain::provider::factory::create_provider_by_name(&config, pname)
+                    {
+                        state.agent.swap_provider(new_provider);
+                    }
                     crate::channels::commands::switch_model(&state.agent, model_name);
                     tracing::info!("Slack: model switched to {}", model_name);
                     if let Some(ref channel) = block_actions.channel {
@@ -543,18 +601,18 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                     SlackBlockText::MarkDown(SlackBlockMarkDownText::new(resp.text.clone())),
                 ));
                 let buttons: Vec<SlackActionBlockElement> = resp
-                    .models
+                    .providers
                     .iter()
                     .take(25)
-                    .map(|m| {
-                        let label = if *m == resp.current_model {
-                            format!("✓ {}", m)
+                    .map(|(name, label)| {
+                        let display = if *name == resp.current_provider {
+                            format!("✓ {}", label)
                         } else {
-                            m.clone()
+                            label.clone()
                         };
                         SlackActionBlockElement::Button(SlackBlockButtonElement::new(
-                            SlackActionId::new(format!("model:{}", m)),
-                            SlackBlockPlainTextOnly::from(SlackBlockPlainText::new(label)),
+                            SlackActionId::new(format!("provider:{}", name)),
+                            SlackBlockPlainTextOnly::from(SlackBlockPlainText::new(display)),
                         ))
                     })
                     .collect();

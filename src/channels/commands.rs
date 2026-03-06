@@ -15,16 +15,27 @@ pub enum ChannelCommand {
     Help(String),
     /// `/usage` — formatted session/cost stats
     Usage(String),
-    /// `/models` — model list for interactive switching
-    Models(ModelsResponse),
+    /// `/models` — provider picker (step 1: choose provider, step 2: choose model)
+    Models(ProvidersResponse),
     /// `/stop` — cancel the running agent task
     Stop,
     /// Not a recognised command — pass through to agent
     NotACommand,
 }
 
-/// Data for rendering a model-picker on the channel platform.
+/// Data for rendering a provider-picker on the channel platform.
+pub struct ProvidersResponse {
+    pub current_provider: String,
+    pub current_model: String,
+    /// Available providers (name, display label) that have API keys configured.
+    pub providers: Vec<(String, String)>,
+    /// Fallback text when platform buttons are unavailable.
+    pub text: String,
+}
+
+/// Data for rendering a model-picker after a provider is selected.
 pub struct ModelsResponse {
+    pub provider_name: String,
     pub current_model: String,
     pub models: Vec<String>,
     /// Fallback text when platform buttons are unavailable.
@@ -42,7 +53,7 @@ pub async fn handle_command(
     match trimmed {
         "/help" => ChannelCommand::Help(format_help()),
         "/usage" => ChannelCommand::Usage(format_usage(session_id, agent, session_svc).await),
-        "/models" => ChannelCommand::Models(format_models(agent).await),
+        "/models" => ChannelCommand::Models(format_providers(agent)),
         "/stop" => ChannelCommand::Stop,
         _ => ChannelCommand::NotACommand,
     }
@@ -54,13 +65,13 @@ fn format_help() -> String {
     [
         "📖 *Available Commands*",
         "",
+        "`/evolve` — Download latest release & restart",
         "`/help`   — Show this message",
-        "`/usage`  — Session token & cost stats",
         "`/models` — Switch AI model",
         "`/stop`   — Abort current operation",
-        "`/evolve` — Download latest release & restart",
+        "`/usage`  — Session token & cost stats",
         "",
-        "Any other message is sent to the AI agent.",
+        "🦀 Any other message is sent to OpenCrabs. 🦀",
     ]
     .join("\n")
 }
@@ -155,18 +166,148 @@ fn format_number(n: i64) -> String {
 
 // ── /models ─────────────────────────────────────────────────────────────────
 
-async fn format_models(agent: &AgentService) -> ModelsResponse {
+fn format_providers(agent: &AgentService) -> ProvidersResponse {
+    let current_provider = agent.provider_name();
     let current_model = agent.provider_model();
 
-    // Try live fetch, fall back to hardcoded list
-    let mut models = agent.fetch_models().await;
-    if models.is_empty() {
-        models = agent.supported_models();
+    let providers = configured_providers();
+
+    let mut text_lines = vec![
+        "🤖 *Switch Provider*".to_string(),
+        format!("Current: `{}` / `{}`", current_provider, current_model),
+        String::new(),
+    ];
+    for (name, label) in &providers {
+        let marker = if *name == current_provider {
+            " ✓"
+        } else {
+            ""
+        };
+        text_lines.push(format!("• `{}`{}", label, marker));
     }
 
-    // Build fallback text
+    ProvidersResponse {
+        current_provider,
+        current_model,
+        providers,
+        text: text_lines.join("\n"),
+    }
+}
+
+/// List configured providers (those with API keys set).
+fn configured_providers() -> Vec<(String, String)> {
+    let config = match crate::config::Config::load() {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+
+    let mut result = Vec::new();
+
+    if config
+        .providers
+        .anthropic
+        .as_ref()
+        .is_some_and(|p| p.api_key.is_some())
+    {
+        result.push(("anthropic".to_string(), "Anthropic".to_string()));
+    }
+    if config
+        .providers
+        .openai
+        .as_ref()
+        .is_some_and(|p| p.api_key.is_some())
+    {
+        result.push(("openai".to_string(), "OpenAI".to_string()));
+    }
+    if config
+        .providers
+        .openrouter
+        .as_ref()
+        .is_some_and(|p| p.api_key.is_some())
+    {
+        result.push(("openrouter".to_string(), "OpenRouter".to_string()));
+    }
+    if config
+        .providers
+        .minimax
+        .as_ref()
+        .is_some_and(|p| p.api_key.is_some())
+    {
+        result.push(("minimax".to_string(), "MiniMax".to_string()));
+    }
+    if config
+        .providers
+        .gemini
+        .as_ref()
+        .is_some_and(|p| p.api_key.is_some())
+    {
+        result.push(("gemini".to_string(), "Gemini".to_string()));
+    }
+    if let Some(ref customs) = config.providers.custom {
+        for (name, cfg) in customs {
+            if cfg.api_key.is_some() {
+                result.push((format!("custom:{}", name), format!("Custom ({})", name)));
+            }
+        }
+    }
+
+    result
+}
+
+/// Fetch models for a specific provider (called from callback handler).
+pub async fn models_for_provider(provider_name: &str) -> ModelsResponse {
+    let config = match crate::config::Config::load() {
+        Ok(c) => c,
+        Err(_) => {
+            return ModelsResponse {
+                provider_name: provider_name.to_string(),
+                current_model: String::new(),
+                models: vec![],
+                text: "Failed to load config.".to_string(),
+            };
+        }
+    };
+
+    // Create a temporary provider to fetch its models
+    let provider =
+        match crate::brain::provider::factory::create_provider_by_name(&config, provider_name) {
+            Ok(p) => p,
+            Err(e) => {
+                return ModelsResponse {
+                    provider_name: provider_name.to_string(),
+                    current_model: String::new(),
+                    models: vec![],
+                    text: format!("Failed to create provider: {}", e),
+                };
+            }
+        };
+
+    let current_model = provider.default_model().to_string();
+
+    // Try live fetch first, fall back to config models, then hardcoded
+    let mut models = provider.fetch_models().await;
+
+    // If fetch returned the hardcoded GPT fallback, check config models instead
+    if models.first().is_some_and(|m| m.starts_with("gpt-")) && provider.name() != "openai" {
+        // Fetch returned the hardcoded fallback — try config models
+        let config_models = provider_config_models(&config, provider_name);
+        if !config_models.is_empty() {
+            models = config_models;
+        }
+    }
+
+    if models.is_empty() {
+        models = provider.supported_models();
+    }
+
+    // Ensure current model is in the list
+    if !models.contains(&current_model) {
+        models.insert(0, current_model.clone());
+    }
+
+    let display_name = provider_display_name(provider_name);
     let mut text_lines = vec![
-        "🤖 *Available Models*".to_string(),
+        format!("🤖 *{} Models*", display_name),
         format!("Current: `{}`", current_model),
         String::new(),
     ];
@@ -176,9 +317,43 @@ async fn format_models(agent: &AgentService) -> ModelsResponse {
     }
 
     ModelsResponse {
+        provider_name: provider_name.to_string(),
         current_model,
         models,
         text: text_lines.join("\n"),
+    }
+}
+
+/// Get models from the provider's config section (for providers without /models endpoint).
+fn provider_config_models(config: &crate::config::Config, name: &str) -> Vec<String> {
+    let cfg = match name {
+        "anthropic" => config.providers.anthropic.as_ref(),
+        "openai" => config.providers.openai.as_ref(),
+        "openrouter" => config.providers.openrouter.as_ref(),
+        "minimax" => config.providers.minimax.as_ref(),
+        "gemini" => config.providers.gemini.as_ref(),
+        n if n.starts_with("custom:") => {
+            let custom_name = &n["custom:".len()..];
+            config
+                .providers
+                .custom
+                .as_ref()
+                .and_then(|m| m.get(custom_name))
+        }
+        _ => None,
+    };
+    cfg.map(|c| c.models.clone()).unwrap_or_default()
+}
+
+fn provider_display_name(name: &str) -> &str {
+    match name {
+        "anthropic" => "Anthropic",
+        "openai" => "OpenAI",
+        "openrouter" => "OpenRouter",
+        "minimax" => "MiniMax",
+        "gemini" => "Gemini",
+        n if n.starts_with("custom:") => &n["custom:".len()..],
+        other => other,
     }
 }
 

@@ -356,29 +356,28 @@ pub(crate) async fn handle_message(
             ChannelCommand::Models(resp) => {
                 use serenity::builder::{CreateActionRow, CreateButton, CreateMessage};
                 use serenity::model::application::ButtonStyle;
-                // Max 5 buttons per row, max 5 rows
+                // Show provider buttons (step 1 of two-step flow)
                 let rows: Vec<CreateActionRow> = resp
-                    .models
+                    .providers
                     .chunks(5)
                     .take(5)
                     .map(|chunk| {
                         CreateActionRow::Buttons(
                             chunk
                                 .iter()
-                                .map(|m| {
-                                    let label = if *m == resp.current_model {
-                                        format!("✓ {}", m)
+                                .map(|(name, label)| {
+                                    let display = if *name == resp.current_provider {
+                                        format!("✓ {}", label)
                                     } else {
-                                        m.clone()
+                                        label.clone()
                                     };
-                                    // Discord button labels max 80 chars
-                                    let label = if label.len() > 80 {
-                                        format!("{}…", &label[..79])
+                                    let display = if display.len() > 80 {
+                                        format!("{}…", &display[..79])
                                     } else {
-                                        label
+                                        display
                                     };
-                                    CreateButton::new(format!("model:{}", m))
-                                        .label(label)
+                                    CreateButton::new(format!("provider:{}", name))
+                                        .label(display)
                                         .style(ButtonStyle::Secondary)
                                 })
                                 .collect(),

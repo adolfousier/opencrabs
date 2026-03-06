@@ -685,17 +685,17 @@ pub(crate) async fn handle_message(
             }
             ChannelCommand::Models(resp) => {
                 let rows: Vec<Vec<InlineKeyboardButton>> = resp
-                    .models
+                    .providers
                     .iter()
-                    .map(|m| {
-                        let label = if *m == resp.current_model {
-                            format!("✓ {}", m)
+                    .map(|(name, label)| {
+                        let display = if *name == resp.current_provider {
+                            format!("✓ {}", label)
                         } else {
-                            m.clone()
+                            label.clone()
                         };
                         vec![InlineKeyboardButton::callback(
-                            label,
-                            format!("model:{}", m),
+                            display,
+                            format!("provider:{}", name),
                         )]
                     })
                     .collect();
@@ -1101,7 +1101,7 @@ pub(crate) async fn handle_message(
 }
 
 /// Convert simple markdown (`*bold*`, `` `code` ``) to Telegram HTML.
-fn md_to_html(s: &str) -> String {
+pub(crate) fn md_to_html(s: &str) -> String {
     // Replace `code` with <code>code</code>, then *bold* with <b>bold</b>
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();

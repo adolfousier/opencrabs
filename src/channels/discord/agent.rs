@@ -152,8 +152,82 @@ impl EventHandler for Handler {
             let custom_id = comp.data.custom_id.as_str();
             tracing::info!("Discord callback received: custom_id={}", custom_id);
 
-            // Model switch callback
-            if let Some(model_name) = custom_id.strip_prefix("model:") {
+            // Provider picker callback → show models for that provider
+            if let Some(provider_name) = custom_id.strip_prefix("provider:") {
+                let resp = crate::channels::commands::models_for_provider(provider_name).await;
+                if resp.models.is_empty() {
+                    let _ = comp
+                        .create_response(
+                            &ctx.http,
+                            serenity::builder::CreateInteractionResponse::Message(
+                                serenity::builder::CreateInteractionResponseMessage::new()
+                                    .content("No models available for this provider.")
+                                    .ephemeral(true),
+                            ),
+                        )
+                        .await;
+                    return;
+                }
+                use serenity::builder::{
+                    CreateActionRow, CreateButton, CreateInteractionResponse,
+                    CreateInteractionResponseMessage,
+                };
+                use serenity::model::application::ButtonStyle;
+                let rows: Vec<CreateActionRow> = resp
+                    .models
+                    .chunks(5)
+                    .take(5)
+                    .map(|chunk| {
+                        CreateActionRow::Buttons(
+                            chunk
+                                .iter()
+                                .map(|m| {
+                                    let label = if *m == resp.current_model {
+                                        format!("✓ {}", m)
+                                    } else {
+                                        m.clone()
+                                    };
+                                    let label = if label.len() > 80 {
+                                        format!("{}…", &label[..79])
+                                    } else {
+                                        label
+                                    };
+                                    CreateButton::new(format!("model:{}:{}", resp.provider_name, m))
+                                        .label(label)
+                                        .style(ButtonStyle::Secondary)
+                                })
+                                .collect(),
+                        )
+                    })
+                    .collect();
+                let _ = comp
+                    .create_response(
+                        &ctx.http,
+                        CreateInteractionResponse::Message(
+                            CreateInteractionResponseMessage::new()
+                                .content(&resp.text)
+                                .components(rows)
+                                .ephemeral(true),
+                        ),
+                    )
+                    .await;
+                return;
+            }
+
+            // Model switch callback (format: model:<provider>:<model>)
+            if let Some(rest) = custom_id.strip_prefix("model:") {
+                let (provider_name, model_name) = if let Some((p, m)) = rest.split_once(':') {
+                    (Some(p), m)
+                } else {
+                    (None, rest)
+                };
+                if let Some(pname) = provider_name
+                    && let Ok(config) = crate::config::Config::load()
+                    && let Ok(new_provider) =
+                        crate::brain::provider::factory::create_provider_by_name(&config, pname)
+                {
+                    self.agent.swap_provider(new_provider);
+                }
                 crate::channels::commands::switch_model(&self.agent, model_name);
                 let _ = comp
                     .create_response(
