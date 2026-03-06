@@ -28,9 +28,43 @@
 
 ---
 
+## Why OpenCrabs?
+
+OpenCrabs runs as a **single binary on your terminal** — no server, no gateway, no infrastructure. It makes direct HTTPS calls to LLM providers from your machine. Nothing else leaves your computer.
+
+### OpenCrabs vs Node.js Agent Frameworks
+
+| | **OpenCrabs** (Rust) | **Node.js Frameworks** (e.g. Open Claw) |
+|---|---|---|
+| **Binary size** | **17–22 MB** single binary, zero dependencies | **1 GB+** `node_modules` with hundreds of transitive packages |
+| **Runtime** | None — runs natively | Requires Node.js runtime + npm install |
+| **Attack surface** | Zero network listeners. Outbound HTTPS only | Server infrastructure: open ports, auth layers, middleware |
+| **API key security** | Keys on your machine only. `zeroize` clears them from RAM on drop, `[REDACTED]` in all debug output | Keys in env vars or config. GC doesn't guarantee memory clearing. Heap dumps can leak secrets |
+| **Data residency** | 100% local — SQLite DB, embeddings, brain files, all in `~/.opencrabs/` | Server-side storage, potential multi-tenant data, network transit |
+| **Supply chain** | Single compiled binary. Rust's type system prevents buffer overflows, use-after-free, data races at compile time | npm ecosystem: typosquatting, dependency confusion, prototype pollution |
+| **Memory safety** | Compile-time guarantees — no GC, no null pointers, no data races | GC-managed, prototype pollution, type coercion bugs |
+| **Concurrency** | tokio async + Rust ownership = zero data races guaranteed | Single-threaded event loop, worker threads share memory unsafely |
+| **Telemetry** | Zero. No analytics, no tracking, no remote logging | Server infra typically includes monitoring, logging pipelines, APM |
+
+### What stays local (never leaves your machine)
+
+- All chat sessions and messages (SQLite)
+- Tool executions (bash, file reads/writes, git)
+- Memory and embeddings (local vector search)
+- Brain files, config, API keys
+
+### What goes out (only when you use it)
+
+- Your messages to the LLM provider API (Anthropic, OpenAI, etc.)
+- Web search queries (optional tool)
+- GitHub API via `gh` CLI (optional tool)
+
+---
+
 ## Table of Contents
 
 - [Screenshots](#-screenshots)
+- [Why OpenCrabs?](#why-opencrabs)
 - [Core Features](#-core-features)
 - [Supported AI Providers](#-supported-ai-providers)
 - [Agent-to-Agent (A2A) Protocol](#-agent-to-agent-a2a-protocol)
