@@ -8,6 +8,7 @@ pub mod file;
 pub mod message;
 pub mod plan;
 pub mod session;
+pub mod usage_ledger;
 
 pub use channel_message::ChannelMessageRepository;
 pub use cron_job::CronJobRepository;
@@ -15,6 +16,7 @@ pub use file::FileRepository;
 pub use message::MessageRepository;
 pub use plan::PlanRepository;
 pub use session::{SessionListOptions, SessionRepository};
+pub use usage_ledger::UsageLedgerRepository;
 
 use anyhow::Result;
 

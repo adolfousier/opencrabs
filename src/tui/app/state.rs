@@ -238,6 +238,8 @@ pub struct App {
     pub current_session: Option<Session>,
     pub messages: Vec<DisplayMessage>,
     pub sessions: Vec<Session>,
+    /// All-time usage stats from the ledger (survives session deletes)
+    pub usage_ledger_stats: Vec<crate::db::repository::usage_ledger::ModelUsageStats>,
 
     /// UI state
     pub mode: AppMode,
@@ -445,6 +447,7 @@ impl App {
             current_session: None,
             messages: Vec::new(),
             sessions: Vec::new(),
+            usage_ledger_stats: Vec::new(),
             mode: AppMode::Splash,
             input_buffer: String::new(),
             cursor_position: 0,

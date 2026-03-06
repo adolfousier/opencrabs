@@ -276,7 +276,7 @@ impl App {
 
     /// Load all sessions
     pub(crate) async fn load_sessions(&mut self) -> Result<()> {
-        use crate::db::repository::SessionListOptions;
+        use crate::db::repository::{SessionListOptions, UsageLedgerRepository};
 
         self.sessions = self
             .session_service
@@ -286,6 +286,10 @@ impl App {
                 offset: 0,
             })
             .await?;
+
+        // Load all-time usage from the ledger (survives session deletes)
+        let ledger = UsageLedgerRepository::new(self.session_service.pool());
+        self.usage_ledger_stats = ledger.stats_by_model().await.unwrap_or_default();
 
         Ok(())
     }

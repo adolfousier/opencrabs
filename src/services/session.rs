@@ -4,7 +4,7 @@
 
 use crate::db::{
     models::Session,
-    repository::{SessionListOptions, SessionRepository},
+    repository::{SessionListOptions, SessionRepository, UsageLedgerRepository},
 };
 use crate::services::ServiceContext;
 use anyhow::{Context, Result};
@@ -21,6 +21,11 @@ impl SessionService {
     /// Create a new session service
     pub fn new(context: ServiceContext) -> Self {
         Self { context }
+    }
+
+    /// Access the underlying database pool
+    pub fn pool(&self) -> sqlx::SqlitePool {
+        self.context.pool()
     }
 
     /// Create a new session
@@ -107,17 +112,29 @@ impl SessionService {
         Ok(())
     }
 
-    /// Update session usage statistics
+    /// Update session usage statistics and record to the cumulative usage ledger.
+    /// The ledger persists even when sessions are deleted.
     pub async fn update_session_usage(&self, id: Uuid, token_count: i32, cost: f64) -> Result<()> {
         let mut session = self.get_session_required(id).await?;
         session.token_count += token_count;
         session.total_cost += cost;
         session.updated_at = Utc::now();
 
+        let model = session.model.clone().unwrap_or_default();
+
         let repo = SessionRepository::new(self.context.pool());
         repo.update(&session)
             .await
             .context("Failed to update session usage")?;
+
+        // Append to cumulative usage ledger (never deleted)
+        let ledger = UsageLedgerRepository::new(self.context.pool());
+        if let Err(e) = ledger
+            .record(&id.to_string(), &model, token_count, cost)
+            .await
+        {
+            tracing::warn!("Failed to record usage to ledger: {}", e);
+        }
 
         tracing::debug!(
             "Updated session usage: {} (+{} tokens, +${:.4})",

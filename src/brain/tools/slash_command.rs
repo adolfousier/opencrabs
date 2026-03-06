@@ -378,46 +378,29 @@ impl SlashCommandTool {
 
         // All-time stats
         lines.push(String::new());
-        if let Ok(sessions) = session_svc
-            .list_sessions(crate::db::repository::SessionListOptions::default())
-            .await
         {
-            let total = sessions.len();
-            let total_tokens: i64 = sessions.iter().map(|s| s.token_count as i64).sum();
-            let total_cost: f64 = sessions.iter().map(|s| s.total_cost).sum();
+            use crate::db::repository::UsageLedgerRepository;
+            let ledger = UsageLedgerRepository::new(session_svc.pool());
+            let ledger_stats = ledger.stats_by_model().await.unwrap_or_default();
+
+            let all_tokens: i64 = ledger_stats.iter().map(|s| s.total_tokens).sum();
+            let all_cost: f64 = ledger_stats.iter().map(|s| s.total_cost).sum();
+
+            let total_sessions = session_svc
+                .list_sessions(crate::db::repository::SessionListOptions::default())
+                .await
+                .map(|s| s.len())
+                .unwrap_or(0);
+
             lines.push(format!(
                 "All-Time: {} sessions, {} tokens, ${:.4}",
-                total, total_tokens, total_cost
+                total_sessions, all_tokens, all_cost
             ));
 
-            // Group by model
-            let mut by_model: std::collections::HashMap<String, (usize, i64, f64)> =
-                std::collections::HashMap::new();
-            for s in &sessions {
-                if s.token_count == 0 && s.total_cost == 0.0 {
-                    continue;
-                }
-                let model_key = s
-                    .model
-                    .clone()
-                    .filter(|m| !m.is_empty())
-                    .unwrap_or_else(|| "(unknown)".to_string());
-                let entry = by_model.entry(model_key).or_insert((0, 0, 0.0));
-                entry.0 += 1;
-                entry.1 += s.token_count as i64;
-                entry.2 += s.total_cost;
-            }
-
-            let mut entries: Vec<_> = by_model.iter().collect();
-            entries.sort_by(|a, b| {
-                b.1.2
-                    .partial_cmp(&a.1.2)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
-            for (model, (count, tokens, cost)) in entries.iter().take(10) {
+            for stats in ledger_stats.iter().take(10) {
                 lines.push(format!(
-                    "  {} — {} sessions, {} tokens, ${:.4}",
-                    model, count, tokens, cost
+                    "  {} — {} tokens, ${:.4}",
+                    stats.model, stats.total_tokens, stats.total_cost
                 ));
             }
         }
