@@ -650,9 +650,7 @@ impl App {
                 // Initial delay so TUI has time to settle
                 tokio::time::sleep(std::time::Duration::from_secs(10)).await;
                 loop {
-                    if let Some(latest) =
-                        crate::brain::tools::evolve::check_for_update().await
-                    {
+                    if let Some(latest) = crate::brain::tools::evolve::check_for_update().await {
                         let _ = tx.send(TuiEvent::SystemMessage(format!(
                             "Update available: v{} -> v{}. Type /evolve or ask Crabs to evolve.",
                             crate::VERSION,
