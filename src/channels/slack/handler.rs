@@ -152,11 +152,15 @@ pub async fn on_interaction(
                                 state.bot_token.clone(),
                             ));
                             let session = client.open_session(&token);
+                            let display = match state.session_svc.get_session(new_id).await {
+                                Ok(Some(s)) => s.title.unwrap_or_else(|| session_id_str[..8.min(session_id_str.len())].to_string()),
+                                _ => session_id_str[..8.min(session_id_str.len())].to_string(),
+                            };
                             let request = SlackApiChatPostMessageRequest::new(
                                 channel.id.clone(),
                                 SlackMessageContent::new().with_text(format!(
                                     "✅ Switched to session `{}`",
-                                    &session_id_str[..8.min(session_id_str.len())]
+                                    display
                                 )),
                             );
                             let _ = session.chat_post_message(&request).await;
@@ -774,8 +778,7 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                 // fall through to agent with the prompt as the message
             }
             ChannelCommand::UserSystem(text) => {
-                let token =
-                    SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
+                let token = SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
                 let session = client.open_session(&token);
                 let request = SlackApiChatPostMessageRequest::new(
                     SlackChannelId::new(channel_id),

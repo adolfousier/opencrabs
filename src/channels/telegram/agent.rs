@@ -162,12 +162,14 @@ impl TelegramAgent {
             let cb_handler = Update::filter_callback_query().endpoint({
                 let telegram_state = telegram_state.clone();
                 let agent = agent.clone();
+                let session_svc = session_svc.clone();
                 let shared_session = shared_session.clone();
                 let extra_sessions = extra_sessions.clone();
                 let config_rx = config_rx.clone();
                 move |bot: Bot, query: CallbackQuery| {
                     let state = telegram_state.clone();
                     let agent = agent.clone();
+                    let session_svc = session_svc.clone();
                     let shared_session = shared_session.clone();
                     let extra_sessions = extra_sessions.clone();
                     let config_rx = config_rx.clone();
@@ -288,7 +290,13 @@ impl TelegramAgent {
                                             .edit_message_text(
                                                 msg.chat().id,
                                                 msg.id(),
-                                                format!("✅ Switched to session <code>{}</code>", &session_id_str[..8.min(session_id_str.len())]),
+                                                {
+                                                    let display = match session_svc.get_session(new_id).await {
+                                                        Ok(Some(s)) => s.title.unwrap_or_else(|| session_id_str[..8.min(session_id_str.len())].to_string()),
+                                                        _ => session_id_str[..8.min(session_id_str.len())].to_string(),
+                                                    };
+                                                    format!("✅ Switched to session <code>{}</code>", display)
+                                                },
                                             )
                                             .parse_mode(teloxide::types::ParseMode::Html)
                                             .reply_markup(
