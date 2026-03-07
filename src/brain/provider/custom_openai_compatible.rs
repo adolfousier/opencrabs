@@ -118,6 +118,8 @@ pub struct OpenAIProvider {
     client: Client,
     custom_default_model: Option<String>,
     name: String,
+    /// When set, swap to this model for requests containing images.
+    vision_model: Option<String>,
 }
 
 impl OpenAIProvider {
@@ -137,6 +139,7 @@ impl OpenAIProvider {
             client,
             custom_default_model: None,
             name: "openai".to_string(),
+            vision_model: None,
         }
     }
 
@@ -156,6 +159,7 @@ impl OpenAIProvider {
             client,
             custom_default_model: None,
             name: "openai-compatible".to_string(),
+            vision_model: None,
         }
     }
 
@@ -175,6 +179,7 @@ impl OpenAIProvider {
             client,
             custom_default_model: None,
             name: "openai-compatible".to_string(),
+            vision_model: None,
         }
     }
 
@@ -187,6 +192,13 @@ impl OpenAIProvider {
     /// Set custom default model (useful for local LLMs with specific model names)
     pub fn with_default_model(mut self, model: String) -> Self {
         self.custom_default_model = Some(model);
+        self
+    }
+
+    /// Set vision model — used when images are present and the default model
+    /// doesn't support vision (e.g. MiniMax-Text-01 for MiniMax M2.5)
+    pub fn with_vision_model(mut self, model: String) -> Self {
+        self.vision_model = Some(model);
         self
     }
 
@@ -365,8 +377,31 @@ impl OpenAIProvider {
                 .collect()
         });
 
+        // If images are present and a vision_model is configured, swap to it
+        let has_images = messages.iter().any(|m| {
+            m.content
+                .as_ref()
+                .and_then(|c| c.as_array())
+                .map(|arr| arr.iter().any(|p| p.get("type").and_then(|t| t.as_str()) == Some("image_url")))
+                .unwrap_or(false)
+        });
+        let model = if has_images {
+            if let Some(ref vm) = self.vision_model {
+                tracing::info!(
+                    "Images detected — swapping model from {} to vision model {}",
+                    request.model,
+                    vm
+                );
+                vm.clone()
+            } else {
+                request.model
+            }
+        } else {
+            request.model
+        };
+
         OpenAIRequest {
-            model: request.model,
+            model,
             messages,
             temperature: request.temperature,
             max_tokens: request.max_tokens,
@@ -1046,8 +1081,7 @@ impl Provider for OpenAIProvider {
     }
 
     fn supports_vision(&self) -> bool {
-        // Only GPT-4 Vision models support vision
-        false
+        self.vision_model.is_some()
     }
 
     fn name(&self) -> &str {

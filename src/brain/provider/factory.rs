@@ -232,10 +232,26 @@ fn try_create_minimax(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     };
 
     tracing::info!("Using Minimax at: {}", full_url);
-    let provider = configure_openai_compatible(
+    let mut provider = configure_openai_compatible(
         OpenAIProvider::with_base_url(api_key.clone(), full_url).with_name("minimax"),
         minimax_config,
     );
+
+    // MiniMax M2.5 doesn't support vision — inject MiniMax-Text-01 into config
+    // so existing users get it automatically and can change it later
+    if minimax_config.vision_model.is_none() {
+        provider = provider.with_vision_model("MiniMax-Text-01".to_string());
+        if let Err(e) = crate::config::Config::write_key(
+            "providers.minimax",
+            "vision_model",
+            "MiniMax-Text-01",
+        ) {
+            tracing::warn!("Failed to persist minimax vision_model to config: {}", e);
+        } else {
+            tracing::info!("Auto-injected vision_model = MiniMax-Text-01 into providers.minimax config");
+        }
+    }
+
     Ok(Some(Arc::new(provider)))
 }
 
@@ -281,6 +297,10 @@ fn configure_openai_compatible(
     if let Some(model) = &config.default_model {
         tracing::info!("Using custom default model: {}", model);
         provider = provider.with_default_model(model.clone());
+    }
+    if let Some(vm) = &config.vision_model {
+        tracing::info!("Vision model configured: {}", vm);
+        provider = provider.with_vision_model(vm.clone());
     }
     provider
 }
@@ -375,6 +395,7 @@ mod tests {
                     base_url: None,
                     default_model: None,
                     models: vec![],
+                    vision_model: None,
                 }),
                 ..Default::default()
             },
@@ -397,6 +418,7 @@ mod tests {
                     base_url: Some("https://api.minimax.io/v1".to_string()),
                     default_model: Some("MiniMax-M2.5".to_string()),
                     models: vec![],
+                    vision_model: None,
                 }),
                 ..Default::default()
             },
@@ -417,6 +439,7 @@ mod tests {
                     base_url: None,
                     default_model: None,
                     models: vec![],
+                    vision_model: None,
                 }),
                 minimax: Some(ProviderConfig {
                     enabled: true,
@@ -424,6 +447,7 @@ mod tests {
                     base_url: Some("https://api.minimax.io/v1".to_string()),
                     default_model: None,
                     models: vec![],
+                    vision_model: None,
                 }),
                 ..Default::default()
             },
