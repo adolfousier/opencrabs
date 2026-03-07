@@ -72,10 +72,7 @@ mod session_db {
 
         let loaded = svc.get_session_required(session.id).await.unwrap();
         assert_eq!(loaded.title, Some("Renamed".into()));
-        assert_eq!(
-            loaded.working_directory,
-            Some("/home/user/proj".into())
-        );
+        assert_eq!(loaded.working_directory, Some("/home/user/proj".into()));
     }
 
     #[tokio::test]
@@ -126,8 +123,14 @@ mod session_db {
         let loaded2 = svc.get_session_required(s2.id).await.unwrap();
         let loaded3 = svc.get_session_required(s3.id).await.unwrap();
 
-        assert_eq!(loaded1.working_directory, Some("/home/user/project-a".into()));
-        assert_eq!(loaded2.working_directory, Some("/home/user/project-b".into()));
+        assert_eq!(
+            loaded1.working_directory,
+            Some("/home/user/project-a".into())
+        );
+        assert_eq!(
+            loaded2.working_directory,
+            Some("/home/user/project-b".into())
+        );
         assert!(loaded3.working_directory.is_none());
     }
 }

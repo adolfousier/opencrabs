@@ -89,3 +89,5 @@ cargo build --release
 ```
 
 **Important:** Custom skills, plugins, and scripts belong in `~/.opencrabs/`, not in the repo. See AGENTS.md for the full workspace layout. Anything in the repo directory gets overwritten on upgrade — anything in `~/.opencrabs/` survives forever.
+
+**After upgrading:** Brain files in `~/.opencrabs/` (TOOLS.md, AGENTS.md, etc.) are NOT auto-replaced on upgrade — they're yours. To pick up new features (like fallback providers, vision model config), ask your Crabs to fetch the latest templates and merge updates into your workspace brain files. New features like `[providers.fallback]` and `vision_model` won't appear in your brain until you refresh.
