@@ -853,6 +853,35 @@ pub(crate) async fn handle_message(
         agent_input
     };
 
+    // Inject recent group history so the agent has full conversation context.
+    let agent_input = if !is_dm {
+        let chat_id_str = msg.chat.id.0.to_string();
+        match channel_msg_repo
+            .recent(Some("telegram"), &chat_id_str, 30)
+            .await
+        {
+            Ok(messages) if !messages.is_empty() => {
+                let history: Vec<String> = messages
+                    .iter()
+                    .rev() // oldest first
+                    .map(|m| {
+                        let ts = m.created_at.format("%H:%M");
+                        format!("[{}] {}: {}", ts, m.sender_name, m.content)
+                    })
+                    .collect();
+                format!(
+                    "[Recent group history ({} messages):\n{}\n--- end history ---]\n{}",
+                    history.len(),
+                    history.join("\n"),
+                    agent_input
+                )
+            }
+            _ => agent_input,
+        }
+    } else {
+        agent_input
+    };
+
     // Tell the LLM its text response is automatically delivered to the chat,
     // so it should NOT use telegram_send for simple text replies.
     let agent_input = format!(

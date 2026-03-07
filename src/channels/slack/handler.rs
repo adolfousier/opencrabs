@@ -819,6 +819,35 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         agent_input
     };
 
+    // Inject recent channel history so the agent has full conversation context.
+    let agent_input = if !is_dm {
+        match state
+            .channel_msg_repo
+            .recent(Some("slack"), &channel_id, 30)
+            .await
+        {
+            Ok(messages) if !messages.is_empty() => {
+                let history: Vec<String> = messages
+                    .iter()
+                    .rev()
+                    .map(|m| {
+                        let ts = m.created_at.format("%H:%M");
+                        format!("[{}] {}: {}", ts, m.sender_name, m.content)
+                    })
+                    .collect();
+                format!(
+                    "[Recent channel history ({} messages):\n{}\n--- end history ---]\n{}",
+                    history.len(),
+                    history.join("\n"),
+                    agent_input
+                )
+            }
+            _ => agent_input,
+        }
+    } else {
+        agent_input
+    };
+
     // Tell the LLM its text response is automatically delivered to the chat,
     // so it should NOT use slack_send for simple text replies.
     let agent_input = format!(
