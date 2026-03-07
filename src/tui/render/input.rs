@@ -355,12 +355,20 @@ pub(super) fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
         .unwrap_or(&app.default_model_name)
         .to_string();
 
-    // Working directory (truncated if long)
+    // Working directory — collapse $HOME to ~, then truncate if still long
     let raw_dir = app.working_directory.to_string_lossy();
-    let display_dir = if raw_dir.len() > 40 {
-        format!("...{}", &raw_dir[raw_dir.len().saturating_sub(37)..])
+    let home_dir = dirs::home_dir()
+        .map(|h| h.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let short_dir = if !home_dir.is_empty() && raw_dir.starts_with(&home_dir) {
+        format!("~{}", &raw_dir[home_dir.len()..])
     } else {
         raw_dir.to_string()
+    };
+    let display_dir = if short_dir.len() > 40 {
+        format!("...{}", &short_dir[short_dir.len().saturating_sub(37)..])
+    } else {
+        short_dir
     };
 
     let session_text = format!(" {}", session_name);

@@ -272,8 +272,18 @@ pub(super) fn render_settings(f: &mut Frame, app: &App, area: Rect) {
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "~/.opencrabs/config.toml".into());
 
-    let brain_display = app.brain_path.display().to_string();
-    let wd_display = app.working_directory.display().to_string();
+    let home_dir = dirs::home_dir()
+        .map(|h| h.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let collapse_home = |path: &str| -> String {
+        if !home_dir.is_empty() && path.starts_with(&home_dir) {
+            format!("~{}", &path[home_dir.len()..])
+        } else {
+            path.to_string()
+        }
+    };
+    let brain_display = collapse_home(&app.brain_path.display().to_string());
+    let wd_display = collapse_home(&app.working_directory.display().to_string());
 
     let provider_name = app.provider_name();
     let mut lines = vec![
