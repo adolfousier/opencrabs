@@ -151,6 +151,20 @@ impl SlashCommandTool {
             )));
         }
 
+        // Persist to session DB so it survives session switches
+        if let Some(ref svc_ctx) = context.service_context {
+            let session_svc = crate::services::SessionService::new(svc_ctx.clone());
+            let sid = context.session_id;
+            let dir_str = canonical.to_string_lossy().to_string();
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    let _ = session_svc
+                        .update_session_working_directory(sid, Some(dir_str))
+                        .await;
+                });
+            });
+        }
+
         Ok(ToolResult::success(format!(
             "Working directory changed to: {}",
             canonical.display()

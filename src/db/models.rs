@@ -19,6 +19,7 @@ pub struct Session {
     pub archived_at: Option<DateTime<Utc>>,
     pub token_count: i32,
     pub total_cost: f64,
+    pub working_directory: Option<String>,
 }
 
 /// Message model
@@ -295,6 +296,7 @@ impl Session {
             archived_at: None,
             token_count: 0,
             total_cost: 0.0,
+            working_directory: None,
         }
     }
 
@@ -355,6 +357,7 @@ impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for Session {
                 .and_then(|ts| DateTime::from_timestamp(ts, 0)),
             token_count: row.try_get("token_count")?,
             total_cost: row.try_get("total_cost")?,
+            working_directory: row.try_get("working_directory")?,
         })
     }
 }

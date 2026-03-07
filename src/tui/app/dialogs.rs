@@ -1496,6 +1496,17 @@ impl App {
                 &canonical.to_string_lossy(),
             );
 
+            // Persist to session DB so it survives session switches
+            if let Some(ref session) = self.current_session {
+                let _ = self
+                    .session_service
+                    .update_session_working_directory(
+                        session.id,
+                        Some(canonical.to_string_lossy().to_string()),
+                    )
+                    .await;
+            }
+
             self.push_system_message(format!(
                 "Working directory changed to: {}",
                 canonical.display()

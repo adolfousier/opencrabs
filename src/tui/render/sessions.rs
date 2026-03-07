@@ -135,6 +135,22 @@ pub(super) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
                 ));
             }
 
+            // Working directory badge
+            if let Some(ref wd) = session.working_directory {
+                let home_dir = dirs::home_dir()
+                    .map(|h| h.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                let short = if !home_dir.is_empty() && wd.starts_with(&home_dir) {
+                    format!("~{}", &wd[home_dir.len()..])
+                } else {
+                    wd.clone()
+                };
+                spans.push(Span::styled(
+                    format!(" {}", short),
+                    Style::default().fg(Color::Rgb(100, 140, 180)),
+                ));
+            }
+
             // History size badge
             if session.token_count > 0 {
                 spans.push(Span::styled(

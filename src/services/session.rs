@@ -52,6 +52,7 @@ impl SessionService {
             provider_name,
             token_count: 0,
             total_cost: 0.0,
+            working_directory: None,
         };
 
         repo.create(&session)
@@ -142,6 +143,22 @@ impl SessionService {
             token_count,
             cost
         );
+        Ok(())
+    }
+
+    /// Update session working directory
+    pub async fn update_session_working_directory(
+        &self,
+        id: Uuid,
+        dir: Option<String>,
+    ) -> Result<()> {
+        sqlx::query("UPDATE sessions SET working_directory = ?, updated_at = ? WHERE id = ?")
+            .bind(&dir)
+            .bind(Utc::now().timestamp())
+            .bind(id.to_string())
+            .execute(&self.context.pool())
+            .await
+            .context("Failed to update session working directory")?;
         Ok(())
     }
 

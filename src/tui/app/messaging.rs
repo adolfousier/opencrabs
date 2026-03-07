@@ -97,6 +97,20 @@ impl App {
         self.streaming_output_tokens = 0;
         self.intermediate_text_received = false;
 
+        // Restore session's working directory if persisted
+        if let Some(ref dir_str) = session.working_directory {
+            let path = std::path::PathBuf::from(dir_str);
+            if path.is_dir() {
+                self.working_directory = path.clone();
+                self.agent_service.set_working_directory(path.clone());
+                let _ = crate::config::Config::write_key(
+                    "agent",
+                    "working_directory",
+                    &path.to_string_lossy(),
+                );
+            }
+        }
+
         self.current_session = Some(session.clone());
         self.set_plan_file_for_session(session.id);
         // Sync is_processing flag with per-session state

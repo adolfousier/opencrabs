@@ -65,7 +65,7 @@ pub async fn check_for_update() -> Option<String> {
 }
 
 /// Compare semver strings: returns true if `latest` is strictly newer than `current`.
-fn is_newer(latest: &str, current: &str) -> bool {
+pub fn is_newer(latest: &str, current: &str) -> bool {
     let parse = |v: &str| -> Vec<u64> { v.split('.').filter_map(|s| s.parse().ok()).collect() };
     let l = parse(latest);
     let c = parse(current);
