@@ -320,7 +320,8 @@ mod vision_model {
 
     #[test]
     fn with_vision_model_enables_vision() {
-        let provider = OpenAIProvider::new("test-key".into()).with_vision_model("gpt-4o".into());
+        let provider =
+            OpenAIProvider::new("test-key".into()).with_vision_model("gpt-5-nano".into());
         assert!(provider.supports_vision());
     }
 
@@ -360,7 +361,7 @@ default_model = "gpt-4"
                     base_url: None,
                     default_model: Some("gpt-4".into()),
                     models: vec![],
-                    vision_model: Some("gpt-4o".into()),
+                    vision_model: Some("gpt-5-nano".into()),
                 }),
                 ..Default::default()
             },

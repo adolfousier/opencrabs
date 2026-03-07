@@ -222,13 +222,13 @@ entries = [
 
 [providers.openai]
 entries = [
+  { prefix = "gpt-5-nano",          input_per_m = 0.10, output_per_m = 0.40  },
+  { prefix = "gpt-5-mini",         input_per_m = 0.30, output_per_m = 1.20  },
+  { prefix = "gpt-5",              input_per_m = 1.25, output_per_m = 10.0  },
   { prefix = "gpt-4o-mini",        input_per_m = 0.15, output_per_m = 0.60  },
   { prefix = "gpt-4o",             input_per_m = 2.50, output_per_m = 10.0  },
   { prefix = "gpt-4-turbo",        input_per_m = 10.0, output_per_m = 30.0  },
-  { prefix = "gpt-4-32k",          input_per_m = 60.0, output_per_m = 120.0 },
   { prefix = "gpt-4",              input_per_m = 30.0, output_per_m = 60.0  },
-  { prefix = "gpt-3.5-turbo-16k",  input_per_m = 3.0,  output_per_m = 4.0   },
-  { prefix = "gpt-3.5-turbo",      input_per_m = 0.50, output_per_m = 1.50  },
   { prefix = "o3-mini",            input_per_m = 1.10, output_per_m = 4.40  },
   { prefix = "o3",                 input_per_m = 10.0, output_per_m = 40.0  },
   { prefix = "o1-mini",            input_per_m = 1.10, output_per_m = 4.40  },

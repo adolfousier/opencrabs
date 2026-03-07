@@ -834,7 +834,7 @@ enabled = false
 
 [providers.openai]
 enabled = false
-default_model = "gpt-4o"
+default_model = "gpt-5-nano"
 
 # ── Image ─────────────────────────────────────────────────────────────────────
 

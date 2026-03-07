@@ -457,7 +457,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         // Custom provider: free-text model name input (no filter/search)
         let model_cursor = if model_focused { "█" } else { "" };
         let model_display = if app.model_selector_custom_model.is_empty() {
-            format!("enter model name (e.g. gpt-4o){}", model_cursor)
+            format!("enter model name (e.g. gpt-5-nano){}", model_cursor)
         } else {
             format!("{}{}", app.model_selector_custom_model, model_cursor)
         };

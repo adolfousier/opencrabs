@@ -5,6 +5,29 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.59] - 2026-03-07
+
+### Added
+- **Fallback provider chain** — Configure multiple fallback providers that are tried in sequence when the primary fails. Supports single (`provider = "openrouter"`) or array (`providers = ["openrouter", "anthropic"]`). Runtime retry wraps the primary provider transparently — no code changes needed downstream
+  - `src/brain/provider/fallback.rs` (new), `src/brain/provider/factory.rs`, `src/config/types.rs`
+- **Per-provider vision model** — Set `vision_model` in any provider config to auto-swap model when images are present. MiniMax auto-injects `vision_model = "MiniMax-Text-01"` on first run
+  - `src/brain/provider/custom_openai_compatible.rs`, `src/brain/provider/factory.rs`
+- **Session working directory persistence** — `/cd` changes now persist to DB per session, restored on session switch. Shown as `~/path` badge in sessions screen
+  - `src/db/models.rs`, `src/services/session.rs`, `src/tui/app/messaging.rs`, `src/tui/render/sessions.rs`, `src/migrations/20260307000001_add_session_working_dir.sql`
+- **28 new tests** — Fallback chain config (9), runtime fallback behavior (10), vision model wiring (6), factory integration (4)
+  - `src/tests/fallback_vision_test.rs`
+
+### Fixed
+- **Update checker semver comparison** — Used string inequality instead of proper version comparison. Now uses `is_newer()` with lexicographic semver segments, and detects source builds via `source_cargo_version()`
+  - `src/brain/tools/evolve.rs`
+- **Home directory in TUI paths** — Footer and help screen showed full `/Users/username/...` paths. Now collapsed to `~/...`
+  - `src/tui/render/input.rs`, `src/tui/render/help.rs`
+
+### Docs
+- **Fallback & vision docs** — Updated TOOLS.md, AGENTS.md, and BOOT.md templates with fallback provider config and vision_model documentation
+
+> **Existing users:** Your local brain files at `~/.opencrabs/` are not updated automatically. Ask your Crab to fetch the latest templates from `src/docs/reference/templates/` and merge updates into your workspace brain files. New features: `[providers.fallback]` for provider chain failover, `vision_model` per provider. Also ask your Crab if you have image/vision setup in place — if not, it can help configure it. If you have multiple providers with API keys already set, your Crab can wire up fallback protection in config.toml for you.
+
 ## [0.2.58] - 2026-03-07
 
 ### Fixed
@@ -1230,6 +1253,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.59]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.59
 [0.2.58]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.58
 [0.2.57]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.57
 [0.2.56]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.56
