@@ -26,6 +26,11 @@ fn platform_suffix() -> Option<&'static str> {
 
 /// Check GitHub for a newer release. Returns `Some(latest_version)` if an
 /// update is available, `None` if already on latest (or on error).
+///
+/// When running from source, the compiled-in version may lag behind the local
+/// `Cargo.toml` (e.g. after `git pull` but before `cargo build`). In that case
+/// we also check the source Cargo.toml — if it already matches the latest
+/// release, we suppress the update notice to avoid false positives.
 pub async fn check_for_update() -> Option<String> {
     let current_version = crate::VERSION;
     let client = reqwest::Client::new();
@@ -43,11 +48,36 @@ pub async fn check_for_update() -> Option<String> {
     let latest_tag = release["tag_name"].as_str()?;
     let latest_version = latest_tag.strip_prefix('v').unwrap_or(latest_tag);
 
-    if latest_version != current_version {
-        Some(latest_version.to_string())
-    } else {
-        None
+    if latest_version == current_version {
+        return None;
     }
+
+    // If running from source, check if Cargo.toml already has the latest version
+    // (user pulled but hasn't rebuilt yet — not a real update)
+    if let Some(source_version) = source_cargo_version()
+        && source_version == latest_version
+    {
+        return None;
+    }
+
+    Some(latest_version.to_string())
+}
+
+/// Try to read the version from the source Cargo.toml relative to the running
+/// binary. Returns `None` if not running from a source build or file not found.
+fn source_cargo_version() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    // Source builds live in target/release/ or target/debug/ under the repo root
+    let target_dir = exe.parent()?;
+    let repo_root = target_dir.parent()?.parent()?;
+    let cargo_toml = repo_root.join("Cargo.toml");
+    let content = std::fs::read_to_string(&cargo_toml).ok()?;
+    let table: toml::Table = content.parse().ok()?;
+    table
+        .get("package")?
+        .get("version")?
+        .as_str()
+        .map(String::from)
 }
 
 pub struct EvolveTool {
