@@ -124,6 +124,7 @@ impl CommandLoader {
             std::fs::create_dir_all(parent)?;
         }
 
+        crate::config::daily_backup(&self.toml_path, 7);
         let file = CommandsFile {
             commands: commands.to_vec(),
         };

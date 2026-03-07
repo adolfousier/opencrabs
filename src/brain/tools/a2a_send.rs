@@ -547,7 +547,7 @@ mod tests {
 
     #[test]
     fn test_default_impl() {
-        let _tool = A2aSendTool::default();
+        let _tool = A2aSendTool;
         assert_eq!(_tool.name(), "a2a_send");
     }
 }

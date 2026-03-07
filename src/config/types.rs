@@ -744,6 +744,65 @@ pub fn opencrabs_home() -> PathBuf {
     p
 }
 
+/// Daily backup of a config file. One copy per day, keeps `max_days` days.
+///
+/// Names backups `file.YYYY-MM-DD.bak`. If today's backup already exists,
+/// skips (avoids overwriting a clean daily snapshot with mid-day edits).
+/// Prunes backups older than `max_days`. Silently ignores errors — backup
+/// failure must never block a config write.
+pub fn daily_backup(path: &Path, max_days: usize) {
+    if !path.exists() {
+        return;
+    }
+    let parent = match path.parent() {
+        Some(p) => p,
+        None => return,
+    };
+    let stem = path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let today_backup = parent.join(format!("{stem}.{today}.bak"));
+
+    // Skip if today's backup already exists (preserve the day's first snapshot)
+    if today_backup.exists() {
+        return;
+    }
+
+    // Create today's backup
+    if let Err(e) = fs::copy(path, &today_backup) {
+        tracing::warn!("Failed to back up {} before write: {e}", path.display());
+        return;
+    }
+    tracing::debug!("Daily backup: {}", today_backup.display());
+
+    // Prune old backups beyond max_days
+    let prefix = format!("{stem}.");
+    let suffix = ".bak";
+    if let Ok(entries) = fs::read_dir(parent) {
+        let mut backups: Vec<String> = entries
+            .filter_map(|e| e.ok())
+            .filter_map(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                if name.starts_with(&prefix) && name.ends_with(suffix) && name != stem {
+                    Some(name)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        backups.sort();
+        backups.reverse(); // newest first
+        for old in backups.iter().skip(max_days) {
+            let _ = fs::remove_file(parent.join(old));
+            tracing::debug!("Pruned old backup: {old}");
+        }
+    }
+}
+
 /// Get path to keys.toml - separate file for sensitive API keys
 pub fn keys_path() -> PathBuf {
     opencrabs_home().join("keys.toml")
@@ -840,6 +899,7 @@ pub fn write_secret_key(section: &str, key: &str, value: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
+    daily_backup(&path, 7);
     let toml_str = toml::to_string_pretty(&doc)?;
     fs::write(&path, toml_str)?;
     tracing::info!("Wrote secret key [{section}].{key}");
@@ -1408,7 +1468,7 @@ impl Config {
         }
 
         // Back up before overwriting
-        Self::backup_config(&path, 5);
+        Self::backup_config(&path, 7);
 
         let toml_str = toml::to_string_pretty(&doc)?;
         fs::write(&path, toml_str)?;
@@ -1454,7 +1514,7 @@ impl Config {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        Self::backup_config(&path, 5);
+        Self::backup_config(&path, 7);
         let toml_str = toml::to_string_pretty(&doc)?;
         fs::write(&path, toml_str)?;
         tracing::info!(
@@ -1518,49 +1578,9 @@ impl Config {
         Ok(())
     }
 
-    /// Rotate config backups before writing.
-    ///
-    /// Keeps up to `max_backups` copies named `config.toml.backup1` (newest)
-    /// through `config.toml.backupN` (oldest). Oldest is deleted when limit is
-    /// exceeded. Silently ignores errors — backup failure must never block a
-    /// config write.
-    fn backup_config(path: &Path, max_backups: usize) {
-        // Only back up if the file actually exists
-        if !path.exists() {
-            return;
-        }
-
-        let parent = match path.parent() {
-            Some(p) => p,
-            None => return,
-        };
-        let stem = path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
-
-        // Rotate existing backups: N → N+1 (delete oldest if over limit)
-        for i in (1..=max_backups).rev() {
-            let src = parent.join(format!("{stem}.backup{i}"));
-            if i == max_backups {
-                // Drop the oldest backup
-                let _ = fs::remove_file(&src);
-            } else {
-                let dst = parent.join(format!("{stem}.backup{}", i + 1));
-                if src.exists() {
-                    let _ = fs::rename(&src, &dst);
-                }
-            }
-        }
-
-        // Copy current config → backup1
-        let backup1 = parent.join(format!("{stem}.backup1"));
-        if let Err(e) = fs::copy(path, &backup1) {
-            tracing::warn!("Failed to back up config before write: {e}");
-        } else {
-            tracing::debug!("Config backed up to {}", backup1.display());
-        }
+    /// Daily backup before writing. Delegates to the standalone function.
+    fn backup_config(path: &Path, max_days: usize) {
+        daily_backup(path, max_days);
     }
 
     /// Save configuration to a file
@@ -1575,7 +1595,7 @@ impl Config {
         }
 
         // Back up before overwriting
-        Self::backup_config(path, 5);
+        Self::backup_config(path, 7);
 
         fs::write(path, toml_string)
             .with_context(|| format!("Failed to write config file: {:?}", path))?;
