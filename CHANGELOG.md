@@ -5,6 +5,36 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.60] - 2026-03-07
+
+### Added
+- **A2A Send tool** — Agent-to-agent communication via A2A Protocol RC v1.0. Four actions: `discover` (fetch Agent Card), `send` (create task with message), `get` (poll task status), `cancel` (abort task). JSON-RPC 2.0 over HTTP with optional Bearer token auth
+  - `src/brain/tools/a2a_send.rs` (new), `src/brain/tools/mod.rs`, `src/cli/ui.rs`
+- **18 unit tests** for a2a_send — schema validation, approval logic, parameter validation, response text extraction, auth headers, Default impl
+  - `src/brain/tools/a2a_send.rs`
+
+### Fixed
+- **Cron jobs spawn new sessions** — Cron scheduler now shares the TUI's active session via `Arc<Mutex<Option<Uuid>>>` instead of creating new sessions. Falls back to initial session, then most recent — never spawns new
+  - `src/cron/scheduler.rs`, `src/cli/ui.rs`
+- **`/compact` fails silently** — Compaction errors were logged but not shown to user. Now returns visible error message with troubleshooting hints
+  - `src/brain/agent/service/tool_loop.rs`
+
+### Improved
+- **Channel context injection** — All channel handlers (Telegram, Discord, Slack, WhatsApp) now inject last 30 group messages as context before responding, so the agent stays aware of conversation flow
+  - `src/channels/telegram/handler.rs`, `src/channels/discord/handler.rs`, `src/channels/slack/handler.rs`, `src/channels/whatsapp/handler.rs`
+- **Telegram passive logging** — Voice, photo, and document messages in groups are now logged to `channel_messages` table after text extraction
+  - `src/channels/telegram/handler.rs`
+- **`/compact` on all channels** — Wired `ChannelCommand::Compact` to Telegram, Discord, Slack, and WhatsApp handlers
+  - `src/channels/commands.rs`, `src/channels/telegram/handler.rs`, `src/channels/discord/handler.rs`, `src/channels/slack/handler.rs`, `src/channels/whatsapp/handler.rs`
+
+### Docs
+- **A2A README update** — Accurate A2A section with api_key config, message/stream endpoints, a2a_send tool docs, two-agent connection guide, Bearer auth examples, security & persistence notes
+  - `README.md`
+
+### Tests
+- 6 unit tests for cron session resolution logic
+  - `src/tests/cron_test.rs`
+
 ## [0.2.59] - 2026-03-07
 
 ### Added
@@ -1253,6 +1283,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.60]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.60
 [0.2.59]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.59
 [0.2.58]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.58
 [0.2.57]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.57

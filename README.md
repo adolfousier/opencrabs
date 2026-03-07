@@ -174,7 +174,7 @@ Images are passed to the active model's vision pipeline if it supports multimoda
 | **Live Settings** | Agent can read/write `config.toml` at runtime; Settings TUI screen (press `S`) shows current config; approval policy persists across restarts. Default: auto-approve (use `/approve` to change) |
 | **Web Search** | DuckDuckGo (built-in, no key needed) + EXA AI (neural, free via MCP) by default; Brave Search optional (key in `keys.toml`) |
 | **Debug Logging** | `--debug` flag enables file logging; `DEBUG_LOGS_LOCATION` env var for custom log directory |
-| **Agent-to-Agent (A2A)** | HTTP gateway implementing A2A Protocol RC v1.0 — peer-to-peer agent communication via JSON-RPC 2.0. Supports `message/send`, `tasks/get`, `tasks/cancel`. Includes multi-agent debate (Bee Colony) with confidence-weighted consensus. Loopback-only by default; CORS origins must be explicitly configured |
+| **Agent-to-Agent (A2A)** | HTTP gateway implementing A2A Protocol RC v1.0 — peer-to-peer agent communication via JSON-RPC 2.0. Supports `message/send`, `message/stream` (SSE), `tasks/get`, `tasks/cancel`. Built-in `a2a_send` tool lets the agent proactively call remote A2A agents. Optional Bearer token auth. Includes multi-agent debate (Bee Colony) with confidence-weighted consensus. Task persistence across restarts |
 
 ---
 
@@ -394,7 +394,7 @@ Both tools use `gemini-3.1-flash-image-preview` ("Nano Banana") — Gemini's ded
 
 ## 🤝 Agent-to-Agent (A2A) Protocol
 
-OpenCrabs includes a built-in A2A gateway — an HTTP server implementing the [A2A Protocol RC v1.0](https://google.github.io/A2A/) for peer-to-peer agent communication. Other A2A-compatible agents can discover OpenCrabs, send it tasks, and get results back — all via standard JSON-RPC 2.0.
+OpenCrabs includes a built-in A2A gateway — an HTTP server implementing the [A2A Protocol RC v1.0](https://google.github.io/A2A/) for peer-to-peer agent communication. Other A2A-compatible agents can discover OpenCrabs, send it tasks, and get results back — all via standard JSON-RPC 2.0. The agent can also proactively call remote A2A agents using the built-in `a2a_send` tool.
 
 ### Enabling A2A
 
@@ -403,20 +403,50 @@ Add to `~/.opencrabs/config.toml`:
 ```toml
 [a2a]
 enabled = true
-bind = "127.0.0.1"   # Loopback only (default)
+bind = "127.0.0.1"   # Loopback only (default) — use "0.0.0.0" to expose
 port = 18790          # Gateway port
+# api_key = "your-secret"  # Optional Bearer token auth for incoming requests
 # allowed_origins = ["http://localhost:3000"]  # CORS (empty = blocked)
 ```
-
-No API keys required — A2A is config-only.
 
 ### Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/.well-known/agent.json` | GET | Agent Card — discover skills, capabilities, supported content types |
-| `/a2a/v1` | POST | JSON-RPC 2.0 — `message/send`, `tasks/get`, `tasks/cancel` |
+| `/a2a/v1` | POST | JSON-RPC 2.0 — `message/send`, `message/stream` (SSE), `tasks/get`, `tasks/cancel` |
 | `/a2a/health` | GET | Health check |
+
+### `a2a_send` Tool
+
+The agent has a built-in `a2a_send` tool to communicate with remote A2A agents:
+
+| Action | Description |
+|--------|-------------|
+| `discover` | Fetch a remote agent's Agent Card (no approval needed) |
+| `send` | Send a task message to a remote agent |
+| `get` | Check status of a remote task |
+| `cancel` | Cancel a running remote task |
+
+The tool supports optional `api_key` for authenticated endpoints and `context_id` for multi-turn conversations.
+
+### Connecting Two Agents
+
+**VPS agent** (`config.toml`):
+```toml
+[a2a]
+enabled = true
+bind = "0.0.0.0"
+port = 18790
+api_key = "shared-secret"
+```
+
+**Local agent** — connect via SSH tunnel (recommended, no ports to open):
+```bash
+ssh -L 18791:127.0.0.1:18790 user@your-vps
+```
+
+Now the local agent can reach the VPS agent at `http://127.0.0.1:18791`. The agent will use `a2a_send` with that URL automatically.
 
 ### Quick Start Examples
 
@@ -427,6 +457,7 @@ curl http://127.0.0.1:18790/.well-known/agent.json | jq .
 # Send a message (creates a task)
 curl -X POST http://127.0.0.1:18790/a2a/v1 \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-secret" \
   -d '{
     "jsonrpc": "2.0",
     "id": 1,
@@ -434,7 +465,7 @@ curl -X POST http://127.0.0.1:18790/a2a/v1 \
     "params": {
       "message": {
         "role": "user",
-        "parts": [{"kind": "text", "text": "What tools do you have?"}]
+        "parts": [{"text": "What tools do you have?"}]
       }
     }
   }'
@@ -442,11 +473,13 @@ curl -X POST http://127.0.0.1:18790/a2a/v1 \
 # Poll a task by ID
 curl -X POST http://127.0.0.1:18790/a2a/v1 \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-secret" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tasks/get","params":{"id":"TASK_ID"}}'
 
 # Cancel a running task
 curl -X POST http://127.0.0.1:18790/a2a/v1 \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-secret" \
   -d '{"jsonrpc":"2.0","id":3,"method":"tasks/cancel","params":{"id":"TASK_ID"}}'
 ```
 
@@ -454,11 +487,13 @@ curl -X POST http://127.0.0.1:18790/a2a/v1 \
 
 OpenCrabs supports multi-agent structured debate via the **Bee Colony** protocol — based on [ReConcile (ACL 2024)](https://arxiv.org/abs/2309.13007) confidence-weighted voting. Multiple "bee" agents argue across configurable rounds, each enriched with knowledge context from QMD memory search, then converge on a consensus answer with confidence scores.
 
-### Security Notes
+### Security & Persistence
 
 - **Loopback only** by default — binds to `127.0.0.1`, not `0.0.0.0`
+- **Bearer token auth** — set `api_key` to require `Authorization: Bearer <key>` on all JSON-RPC requests
 - **CORS locked down** — no cross-origin requests unless `allowed_origins` is explicitly set
-- **No authentication** built in — do not expose to public internet without a reverse proxy + auth layer
+- **Task persistence** — active tasks survive restarts via SQLite
+- For public exposure, use a reverse proxy (nginx/Caddy) with TLS + the `api_key` auth
 
 ---
 

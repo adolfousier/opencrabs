@@ -25,6 +25,7 @@ pub mod notebook;
 pub mod web_search;
 
 // Tool implementations - Phase 3: Workflow & Integration
+pub mod a2a_send;
 pub mod analyze_image;
 pub mod channel_search;
 pub mod config_tool;

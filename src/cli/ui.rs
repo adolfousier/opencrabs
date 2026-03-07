@@ -124,6 +124,9 @@ async fn cmd_chat_inner(
     tool_registry.register(Arc::new(CronManageTool::new(
         crate::db::CronJobRepository::new(db.pool().clone()),
     )));
+    // A2A send — agent can communicate with remote A2A agents
+    use crate::brain::tools::a2a_send::A2aSendTool;
+    tool_registry.register(Arc::new(A2aSendTool::new()));
     // Config management (read/write config.toml, commands.toml)
     tool_registry.register(Arc::new(ConfigTool));
     // Slash command invocation (agent can call any slash command)
