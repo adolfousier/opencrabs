@@ -859,3 +859,86 @@ mod scheduler {
         assert!(enabled.is_empty());
     }
 }
+
+// --- Session Resolution Tests ---
+
+mod session_resolution {
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+    use uuid::Uuid;
+
+    /// Helper that mimics CronScheduler::resolve_session_id logic
+    fn resolve(current: Option<Uuid>, initial: Option<Uuid>) -> Option<Uuid> {
+        current.or(initial)
+    }
+
+    #[test]
+    fn test_follows_user_to_current_session() {
+        let initial = Uuid::new_v4();
+        let current = Uuid::new_v4();
+        // When user has switched sessions, follow them
+        assert_eq!(resolve(Some(current), Some(initial)), Some(current));
+    }
+
+    #[test]
+    fn test_falls_back_to_initial_session() {
+        let initial = Uuid::new_v4();
+        // When no active session (e.g. user on session list screen), use initial
+        assert_eq!(resolve(None, Some(initial)), Some(initial));
+    }
+
+    #[test]
+    fn test_no_sessions_returns_none() {
+        // When neither exists (fresh start, no sessions created yet)
+        assert_eq!(resolve(None, None), None);
+    }
+
+    #[test]
+    fn test_same_session_stays_same() {
+        let session = Uuid::new_v4();
+        // User hasn't moved — same session used
+        assert_eq!(resolve(Some(session), Some(session)), Some(session));
+    }
+
+    #[tokio::test]
+    async fn test_shared_session_id_updates_are_visible() {
+        let shared: Arc<Mutex<Option<Uuid>>> = Arc::new(Mutex::new(None));
+        let shared_clone = shared.clone();
+
+        // Initially None
+        assert!(shared.lock().await.is_none());
+
+        // Simulate user opening a session
+        let session_id = Uuid::new_v4();
+        *shared_clone.lock().await = Some(session_id);
+        assert_eq!(*shared.lock().await, Some(session_id));
+
+        // Simulate user switching to another session
+        let new_session_id = Uuid::new_v4();
+        *shared_clone.lock().await = Some(new_session_id);
+        assert_eq!(*shared.lock().await, Some(new_session_id));
+
+        // Simulate user going to session list (no active session)
+        *shared_clone.lock().await = None;
+        assert!(shared.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_initial_session_captured_at_spawn() {
+        let session_id = Uuid::new_v4();
+        let shared: Arc<Mutex<Option<Uuid>>> = Arc::new(Mutex::new(Some(session_id)));
+
+        // Simulate what spawn() does: capture initial
+        let initial = *shared.lock().await;
+        assert_eq!(initial, Some(session_id));
+
+        // User switches session after spawn
+        let new_session = Uuid::new_v4();
+        *shared.lock().await = Some(new_session);
+
+        // initial is still the original
+        assert_eq!(initial, Some(session_id));
+        // but shared now points to new
+        assert_eq!(*shared.lock().await, Some(new_session));
+    }
+}

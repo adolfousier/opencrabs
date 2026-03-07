@@ -650,13 +650,14 @@ async fn cmd_chat_inner(
         app.resume_session_id = Some(uuid);
     }
 
-    // Spawn cron scheduler — polls every 60s, executes due jobs in isolated sessions
+    // Spawn cron scheduler — polls every 60s, executes jobs in the user's active session
     {
         let cron_repo = crate::db::CronJobRepository::new(db.pool().clone());
         let cron_scheduler = crate::cron::CronScheduler::new(
             cron_repo,
             channel_factory.clone(),
             service_context.clone(),
+            app.shared_session_id(),
         );
         let _cron_handle = cron_scheduler.spawn();
         tracing::info!("Cron scheduler spawned");
