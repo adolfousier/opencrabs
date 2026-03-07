@@ -48,7 +48,8 @@ pub async fn check_for_update() -> Option<String> {
     let latest_tag = release["tag_name"].as_str()?;
     let latest_version = latest_tag.strip_prefix('v').unwrap_or(latest_tag);
 
-    if latest_version == current_version {
+    // Only notify if latest is actually newer (not equal, not a downgrade)
+    if !is_newer(latest_version, current_version) {
         return None;
     }
 
@@ -61,6 +62,14 @@ pub async fn check_for_update() -> Option<String> {
     }
 
     Some(latest_version.to_string())
+}
+
+/// Compare semver strings: returns true if `latest` is strictly newer than `current`.
+fn is_newer(latest: &str, current: &str) -> bool {
+    let parse = |v: &str| -> Vec<u64> { v.split('.').filter_map(|s| s.parse().ok()).collect() };
+    let l = parse(latest);
+    let c = parse(current);
+    l > c
 }
 
 /// Try to read the version from the source Cargo.toml relative to the running
