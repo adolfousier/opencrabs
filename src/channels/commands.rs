@@ -23,6 +23,8 @@ pub enum ChannelCommand {
     Sessions(SessionsResponse),
     /// `/stop` — cancel the running agent task
     Stop,
+    /// `/compact` — trigger context compaction via the agent
+    Compact,
     /// User-defined command with action "prompt" — forward prompt text to the agent
     UserPrompt(String),
     /// User-defined command with action "system" — display text directly
@@ -68,6 +70,7 @@ pub async fn handle_command(
 ) -> ChannelCommand {
     let trimmed = text.trim();
     match trimmed {
+        "/compact" => ChannelCommand::Compact,
         "/help" => ChannelCommand::Help(format_help()),
         "/models" => ChannelCommand::Models(format_providers(agent)),
         "/new" => ChannelCommand::NewSession,
@@ -119,6 +122,7 @@ fn format_help() -> String {
     let mut lines = vec![
         "📖 *Available Commands*".to_string(),
         String::new(),
+        "`/compact`  — Compact context (summarize & trim)".to_string(),
         "`/evolve`   — Download latest release & restart".to_string(),
         "`/help`     — Show this message".to_string(),
         "`/models`   — Switch AI model".to_string(),
@@ -679,6 +683,7 @@ mod tests {
     /// Helper to name variants for panic messages (ChannelCommand has no Debug).
     fn variant_name(cmd: &ChannelCommand) -> &'static str {
         match cmd {
+            ChannelCommand::Compact => "Compact",
             ChannelCommand::Help(_) => "Help",
             ChannelCommand::Usage(_) => "Usage",
             ChannelCommand::Models(_) => "Models",

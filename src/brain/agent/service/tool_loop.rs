@@ -217,7 +217,32 @@ impl AgentService {
                 }
                 Err(e) => {
                     tracing::error!("Manual compaction failed: {}", e);
-                    // Fall through to normal flow if compaction fails
+                    let error_msg = format!(
+                        "Compaction failed: {}\n\nThis can happen if:\n\
+                         - The session has too few messages to summarize\n\
+                         - The AI provider returned an error\n\
+                         - The database is locked or inaccessible\n\n\
+                         Try again, or continue the conversation normally — \
+                         auto-compaction will trigger at 80% context usage.",
+                        e
+                    );
+                    message_service
+                        .append_content(assistant_db_msg.id, &error_msg)
+                        .await
+                        .map_err(|e2| AgentError::Database(e2.to_string()))?;
+
+                    return Ok(AgentResponse {
+                        message_id: assistant_db_msg.id,
+                        content: error_msg,
+                        stop_reason: Some(crate::brain::provider::StopReason::EndTurn),
+                        usage: crate::brain::provider::TokenUsage {
+                            input_tokens: 0,
+                            output_tokens: 0,
+                        },
+                        context_tokens: context.token_count as u32,
+                        cost: 0.0,
+                        model: model_name,
+                    });
                 }
             }
         }

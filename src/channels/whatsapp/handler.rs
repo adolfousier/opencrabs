@@ -641,6 +641,16 @@ pub(crate) async fn handle_message(
                 let _ = client.send_message(info.source.chat.clone(), reply).await;
                 return;
             }
+            ChannelCommand::Compact => {
+                let status = waproto::whatsapp::Message {
+                    conversation: Some("⏳ Compacting context...".to_string()),
+                    ..Default::default()
+                };
+                let _ = client.send_message(info.source.chat.clone(), status).await;
+                content =
+                    "[SYSTEM: Compact context now. Summarize this conversation for continuity.]"
+                        .to_string();
+            }
             ChannelCommand::UserPrompt(prompt) => {
                 content = prompt;
                 // fall through to agent with the prompt as the message

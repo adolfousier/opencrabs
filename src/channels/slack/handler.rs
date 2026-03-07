@@ -773,6 +773,18 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                 let _ = session.chat_post_message(&request).await;
                 return;
             }
+            ChannelCommand::Compact => {
+                let token = SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
+                let session = client.open_session(&token);
+                let request = SlackApiChatPostMessageRequest::new(
+                    SlackChannelId::new(channel_id.clone()),
+                    SlackMessageContent::new().with_text("⏳ Compacting context...".to_string()),
+                );
+                let _ = session.chat_post_message(&request).await;
+                content =
+                    "[SYSTEM: Compact context now. Summarize this conversation for continuity.]"
+                        .to_string();
+            }
             ChannelCommand::UserPrompt(prompt) => {
                 content = prompt;
                 // fall through to agent with the prompt as the message

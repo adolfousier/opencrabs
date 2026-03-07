@@ -461,6 +461,15 @@ pub(crate) async fn handle_message(
                 let _ = msg.channel_id.say(&ctx.http, reply).await;
                 return;
             }
+            ChannelCommand::Compact => {
+                let _ = msg
+                    .channel_id
+                    .say(&ctx.http, "⏳ Compacting context...")
+                    .await;
+                content =
+                    "[SYSTEM: Compact context now. Summarize this conversation for continuity.]"
+                        .to_string();
+            }
             ChannelCommand::UserPrompt(prompt) => {
                 content = prompt;
                 // fall through to agent with the prompt as the message
