@@ -661,6 +661,7 @@ impl App {
                     base_url: None,
                     default_model: Some(default_model.to_string()),
                     models: vec![],
+                    vision_model: None,
                 });
             }
             1 => {
@@ -671,6 +672,7 @@ impl App {
                     base_url: None,
                     default_model: Some(default_model.to_string()),
                     models: vec![],
+                    vision_model: None,
                 });
             }
             2 => {
@@ -681,6 +683,7 @@ impl App {
                     base_url: None,
                     default_model: Some(default_model.to_string()),
                     models: vec![],
+                    vision_model: None,
                 });
             }
             3 => {
@@ -691,6 +694,7 @@ impl App {
                     base_url: Some("https://openrouter.ai/api/v1/chat/completions".to_string()),
                     default_model: Some(default_model.to_string()),
                     models: vec![],
+                    vision_model: None,
                 });
             }
             4 => {
@@ -701,6 +705,7 @@ impl App {
                     base_url: Some("https://api.minimax.io/v1".to_string()),
                     default_model: Some(default_model.to_string()),
                     models: vec![],
+                    vision_model: None,
                 });
             }
             5 => {
@@ -720,6 +725,7 @@ impl App {
                         base_url: Some(self.model_selector_base_url.clone()),
                         default_model: Some(custom_model),
                         models: vec![],
+                        vision_model: None,
                     },
                 );
                 config.providers.custom = Some(customs);
