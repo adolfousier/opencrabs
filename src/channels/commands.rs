@@ -116,20 +116,34 @@ fn match_user_command_inner(
 // ── /help ───────────────────────────────────────────────────────────────────
 
 fn format_help() -> String {
-    [
-        "📖 *Available Commands*",
-        "",
-        "`/evolve`   — Download latest release & restart",
-        "`/help`     — Show this message",
-        "`/models`   — Switch AI model",
-        "`/new`      — Start a new session",
-        "`/sessions` — Switch between sessions",
-        "`/stop`     — Abort current operation",
-        "`/usage`    — Session token & cost stats",
-        "",
-        "🦀 Any other message is sent to OpenCrabs. 🦀",
-    ]
-    .join("\n")
+    let mut lines = vec![
+        "📖 *Available Commands*".to_string(),
+        String::new(),
+        "`/evolve`   — Download latest release & restart".to_string(),
+        "`/help`     — Show this message".to_string(),
+        "`/models`   — Switch AI model".to_string(),
+        "`/new`      — Start a new session".to_string(),
+        "`/sessions` — Switch between sessions".to_string(),
+        "`/stop`     — Abort current operation".to_string(),
+        "`/usage`    — Session token & cost stats".to_string(),
+    ];
+
+    // Append user-defined commands from commands.toml
+    let brain_path = crate::brain::BrainLoader::resolve_path();
+    let loader = crate::brain::CommandLoader::from_brain_path(&brain_path);
+    let mut user_cmds = loader.load();
+    if !user_cmds.is_empty() {
+        user_cmds.sort_by(|a, b| a.name.cmp(&b.name));
+        lines.push(String::new());
+        lines.push("📌 *Custom Commands*".to_string());
+        for cmd in &user_cmds {
+            lines.push(format!("`{}`  — {}", cmd.name, cmd.description));
+        }
+    }
+
+    lines.push(String::new());
+    lines.push("🦀 Any other message is sent to OpenCrabs. 🦀".to_string());
+    lines.join("\n")
 }
 
 // ── /usage ──────────────────────────────────────────────────────────────────
@@ -531,7 +545,13 @@ mod tests {
     fn format_help_contains_all_commands() {
         let help = format_help();
         for cmd in [
-            "/evolve", "/help", "/models", "/new", "/sessions", "/stop", "/usage",
+            "/evolve",
+            "/help",
+            "/models",
+            "/new",
+            "/sessions",
+            "/stop",
+            "/usage",
         ] {
             assert!(help.contains(cmd), "help text missing {}", cmd);
         }
@@ -540,7 +560,12 @@ mod tests {
     #[test]
     fn format_help_is_alphabetical() {
         let help = format_help();
-        let commands: Vec<&str> = help
+        // Only check built-in commands (before "Custom Commands" section)
+        let builtin_section = help
+            .split("Custom Commands")
+            .next()
+            .unwrap_or(&help);
+        let commands: Vec<&str> = builtin_section
             .lines()
             .filter_map(|line| {
                 let trimmed = line.trim().strip_prefix('`')?;
@@ -554,7 +579,7 @@ mod tests {
             .collect();
         let mut sorted = commands.clone();
         sorted.sort();
-        assert_eq!(commands, sorted, "help commands are not alphabetical");
+        assert_eq!(commands, sorted, "built-in help commands are not alphabetical");
     }
 
     // ── provider_display_name ──────────────────────────────────────────────
@@ -592,7 +617,11 @@ mod tests {
 
     #[test]
     fn user_command_prompt_no_args() {
-        let cmds = vec![make_cmd("/credits", "prompt", "Check my OpenRouter credits")];
+        let cmds = vec![make_cmd(
+            "/credits",
+            "prompt",
+            "Check my OpenRouter credits",
+        )];
         match match_user_command_inner("/credits", &cmds) {
             ChannelCommand::UserPrompt(p) => {
                 assert_eq!(p, "Check my OpenRouter credits");

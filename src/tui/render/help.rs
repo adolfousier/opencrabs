@@ -85,6 +85,22 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
         kv("/evolve", "Download latest release & restart", cyan),
         kv("/cd", "Change working directory", cyan),
         kv("/whisper", "Speak anywhere, paste to clipboard", cyan),
+    ];
+
+    // Append user-defined commands from commands.toml
+    let brain_path = crate::brain::BrainLoader::resolve_path();
+    let loader = crate::brain::CommandLoader::from_brain_path(&brain_path);
+    let mut user_cmds = loader.load();
+    if !user_cmds.is_empty() {
+        left.push(Line::from(""));
+        left.push(section_header("CUSTOM COMMANDS"));
+        user_cmds.sort_by(|a, b| a.name.cmp(&b.name));
+        for cmd in &user_cmds {
+            left.push(kv(&cmd.name, &cmd.description, cyan));
+        }
+    }
+
+    left.extend([
         Line::from(""),
         Line::from(""),
         Line::from(vec![
@@ -104,7 +120,7 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(" Back", Style::default().fg(Color::DarkGray)),
         ]),
         Line::from(""),
-    ];
+    ]);
 
     // ── RIGHT COLUMN ──
     let right = vec![
