@@ -102,7 +102,9 @@ OpenCrabs runs as a **single binary on your terminal** — no server, no gateway
 ### AI & Providers
 | Feature | Description |
 |---------|-------------|
-| **Multi-Provider** | Anthropic Claude, OpenAI, OpenRouter (400+ models), MiniMax, and any OpenAI-compatible API (Ollama, LM Studio, LocalAI). Model lists fetched live from provider APIs — new models available instantly. Each session remembers its provider + model and restores it on switch |
+| **Multi-Provider** | Anthropic Claude, OpenAI, OpenRouter (400+ models), MiniMax, Google Gemini, and any OpenAI-compatible API (Ollama, LM Studio, LocalAI). Model lists fetched live from provider APIs — new models available instantly. Each session remembers its provider + model and restores it on switch |
+| **Fallback Providers** | Configure a chain of fallback providers — if the primary fails, each fallback is tried in sequence automatically. Any configured provider can be a fallback. Config: `[providers.fallback] providers = ["openrouter", "anthropic"]` |
+| **Per-Provider Vision** | Set `vision_model` per provider to auto-swap model when images are present (e.g. MiniMax M2.5 → MiniMax-Text-01). Auto-configured for known providers on first run |
 | **Real-time Streaming** | Character-by-character response streaming with animated spinner showing model name and live text |
 | **Local LLM Support** | Run with LM Studio, Ollama, or any OpenAI-compatible endpoint — 100% private, zero-cost |
 | **Cost Tracking** | Per-message token count and cost displayed in header; `/usage` shows all-time breakdown grouped by model with real costs + estimates for historical sessions |
@@ -318,6 +320,30 @@ api_key = "nvapi-..."
 **Provider priority:** MiniMax > OpenRouter > Anthropic > OpenAI > Gemini > Custom. The first provider with `enabled = true` is used on new sessions. Each provider has its own API key in `keys.toml` — no sharing or confusion.
 
 **Per-session provider:** Each session remembers which provider and model it was using. Switch to Claude in one session, Kimi in another — when you `/sessions` switch between them, the provider restores automatically. No need to `/models` every time. New sessions inherit the current provider.
+
+### Fallback Providers
+
+If your primary provider goes down, fallback providers are tried automatically in sequence. Any provider with API keys already configured can be a fallback:
+
+```toml
+[providers.fallback]
+enabled = true
+providers = ["openrouter", "anthropic"]  # tried in order on failure
+```
+
+At runtime, if a request to the primary fails, each fallback is tried until one succeeds. Supports single (`provider = "openrouter"`) or multiple providers.
+
+### Per-Provider Vision Model
+
+If your default model doesn't support vision but another model on the same provider does, set `vision_model` to auto-swap when images are present:
+
+```toml
+[providers.minimax]
+default_model = "MiniMax-M2.5"
+vision_model = "MiniMax-Text-01"  # auto-swap for image requests
+```
+
+MiniMax auto-configures this on first run. Works with any provider — just set `vision_model` to a vision-capable model on the same API.
 
 ---
 
