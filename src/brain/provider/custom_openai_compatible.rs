@@ -232,7 +232,7 @@ impl OpenAIProvider {
         if let Some(system) = request.system {
             messages.push(OpenAIMessage {
                 role: "system".to_string(),
-                content: Some(system),
+                content: Some(serde_json::Value::String(system)),
                 tool_calls: None,
                 tool_call_id: None,
             });
@@ -248,6 +248,7 @@ impl OpenAIProvider {
 
             // Separate content blocks by type
             let mut text_parts = Vec::new();
+            let mut image_parts: Vec<serde_json::Value> = Vec::new();
             let mut tool_uses = Vec::new();
             let mut tool_results = Vec::new();
 
@@ -266,12 +267,39 @@ impl OpenAIProvider {
                     } => {
                         tool_results.push((tool_use_id, content));
                     }
-                    ContentBlock::Image { .. } => {
-                        // Skip images for now (OpenAI needs special handling)
-                        tracing::warn!("Image content blocks not yet supported for OpenAI");
+                    ContentBlock::Image { source } => {
+                        let url = match source {
+                            ImageSource::Base64 { media_type, data } => {
+                                format!("data:{};base64,{}", media_type, data)
+                            }
+                            ImageSource::Url { url } => url,
+                        };
+                        image_parts.push(serde_json::json!({
+                            "type": "image_url",
+                            "image_url": { "url": url }
+                        }));
                     }
                 }
             }
+
+            // Build content value: array when images present, string otherwise
+            let make_content = |texts: &[String], images: &[serde_json::Value]| -> Option<serde_json::Value> {
+                if !images.is_empty() {
+                    let mut parts: Vec<serde_json::Value> = Vec::new();
+                    if !texts.is_empty() {
+                        parts.push(serde_json::json!({
+                            "type": "text",
+                            "text": texts.join("\n")
+                        }));
+                    }
+                    parts.extend(images.iter().cloned());
+                    Some(serde_json::Value::Array(parts))
+                } else if !texts.is_empty() {
+                    Some(serde_json::Value::String(texts.join("\n")))
+                } else {
+                    None
+                }
+            };
 
             // Handle assistant messages with tool calls
             if !tool_uses.is_empty() {
@@ -287,15 +315,11 @@ impl OpenAIProvider {
                     })
                     .collect();
 
-                let content_str = if text_parts.is_empty() {
-                    None
-                } else {
-                    Some(text_parts.join("\n"))
-                };
+                let content_val = make_content(&text_parts, &image_parts);
 
                 messages.push(OpenAIMessage {
                     role: role.to_string(),
-                    content: content_str,
+                    content: content_val,
                     tool_calls: Some(openai_tool_calls),
                     tool_call_id: None,
                 });
@@ -305,23 +329,20 @@ impl OpenAIProvider {
                 for (tool_use_id, content) in tool_results {
                     messages.push(OpenAIMessage {
                         role: "tool".to_string(),
-                        content: Some(content),
+                        content: Some(serde_json::Value::String(content)),
                         tool_calls: None,
                         tool_call_id: Some(tool_use_id),
                     });
                 }
             }
-            // Handle regular text messages
+            // Handle regular text messages (with optional images)
             else {
-                let content_str = if text_parts.is_empty() {
-                    Some(String::new())
-                } else {
-                    Some(text_parts.join("\n"))
-                };
+                let content_val = make_content(&text_parts, &image_parts)
+                    .unwrap_or(serde_json::Value::String(String::new()));
 
                 messages.push(OpenAIMessage {
                     role: role.to_string(),
-                    content: content_str,
+                    content: Some(content_val),
                     tool_calls: None,
                     tool_call_id: None,
                 });
@@ -365,7 +386,7 @@ impl OpenAIProvider {
                 index: 0,
                 message: OpenAIMessage {
                     role: "assistant".to_string(),
-                    content: Some(String::new()),
+                    content: Some(serde_json::Value::String(String::new())),
                     tool_calls: None,
                     tool_call_id: None,
                 },
@@ -376,12 +397,30 @@ impl OpenAIProvider {
         let mut content_blocks = Vec::new();
 
         // Add text content if present, stripping <think>...</think> reasoning blocks
-        if let Some(content) = choice.message.content
-            && !content.is_empty()
-        {
-            let clean = strip_think_blocks(&content);
-            if !clean.is_empty() {
-                content_blocks.push(ContentBlock::Text { text: clean });
+        if let Some(ref content_val) = choice.message.content {
+            let text = match content_val {
+                serde_json::Value::String(s) => s.clone(),
+                serde_json::Value::Array(parts) => {
+                    // Extract text from content parts array
+                    parts
+                        .iter()
+                        .filter_map(|p| {
+                            if p.get("type")?.as_str()? == "text" {
+                                p.get("text")?.as_str().map(String::from)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                }
+                _ => String::new(),
+            };
+            if !text.is_empty() {
+                let clean = strip_think_blocks(&text);
+                if !clean.is_empty() {
+                    content_blocks.push(ContentBlock::Text { text: clean });
+                }
             }
         }
 
@@ -594,7 +633,10 @@ impl Provider for OpenAIProvider {
             .messages
             .iter()
             .map(|m| {
-                let content = m.content.as_deref().map(count_message_tokens).unwrap_or(4);
+                let content = m.content.as_ref().map(|v| {
+                    let s = v.as_str().unwrap_or("");
+                    count_message_tokens(s)
+                }).unwrap_or(4);
                 let tool_calls = m
                     .tool_calls
                     .as_ref()
@@ -1107,8 +1149,9 @@ struct StreamOptions {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct OpenAIMessage {
     role: String,
+    /// Either a plain string or an array of content parts (text + image_url).
     #[serde(skip_serializing_if = "Option::is_none")]
-    content: Option<String>,
+    content: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_calls: Option<Vec<OpenAIToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
