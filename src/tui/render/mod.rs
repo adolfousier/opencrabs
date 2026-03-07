@@ -33,7 +33,7 @@ use dialogs::{
     render_usage_dialog,
 };
 use help::{render_help, render_settings};
-use input::{render_input, render_slash_autocomplete, render_status_bar};
+use input::{render_emoji_picker, render_input, render_slash_autocomplete, render_status_bar};
 use plan_widget::render_plan_checklist;
 use sessions::render_sessions;
 
@@ -134,6 +134,8 @@ pub fn render(f: &mut Frame, app: &mut App) {
             render_status_bar(f, app, chunks[4]);
             if app.slash_suggestions_active {
                 render_slash_autocomplete(f, app, chunks[3]);
+            } else if app.emoji_picker_active {
+                render_emoji_picker(f, app, chunks[3]);
             }
         }
         AppMode::Sessions => {

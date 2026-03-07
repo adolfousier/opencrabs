@@ -304,6 +304,14 @@ pub struct App {
     pub slash_filtered: Vec<usize>,
     pub slash_selected_index: usize,
 
+    /// Emoji picker state
+    pub emoji_picker_active: bool,
+    /// (emoji char, shortcode) pairs matching current query
+    pub emoji_filtered: Vec<(&'static str, &'static str)>,
+    pub emoji_selected_index: usize,
+    /// Byte offset in input_buffer where the `:` trigger starts
+    pub emoji_colon_offset: usize,
+
     /// Session rename state
     pub session_renaming: bool,
     pub session_rename_buffer: String,
@@ -476,6 +484,10 @@ impl App {
             slash_suggestions_active: false,
             slash_filtered: Vec::new(),
             slash_selected_index: 0,
+            emoji_picker_active: false,
+            emoji_filtered: Vec::new(),
+            emoji_selected_index: 0,
+            emoji_colon_offset: 0,
             session_renaming: false,
             session_rename_buffer: String::new(),
             model_selector_models: Vec::new(),
@@ -1988,6 +2000,56 @@ impl App {
     pub(crate) fn reload_user_commands(&mut self) {
         let command_loader = CommandLoader::from_brain_path(&self.brain_path);
         self.user_commands = command_loader.load();
+    }
+
+    /// Update emoji picker based on the text behind the cursor.
+    /// Triggers when there's `:query` (colon + at least 1 char, no spaces).
+    pub(crate) fn update_emoji_picker(&mut self) {
+        // Search backwards from cursor for an unmatched ':'
+        let before_cursor = &self.input_buffer[..self.cursor_position];
+        if let Some(colon_pos) = before_cursor.rfind(':') {
+            let query = &before_cursor[colon_pos + 1..];
+            // Must have at least 1 char, no spaces, no other ':'
+            if !query.is_empty() && !query.contains(' ') && !query.contains(':') {
+                let query_lower = query.to_lowercase();
+                let max_results = 8;
+                self.emoji_filtered = emojis::iter()
+                    .filter_map(|e| {
+                        e.shortcodes()
+                            .find(|sc| sc.contains(&*query_lower))
+                            .map(|sc| (e.as_str(), sc))
+                    })
+                    .take(max_results)
+                    .collect();
+                if !self.emoji_filtered.is_empty() {
+                    self.emoji_picker_active = true;
+                    self.emoji_colon_offset = colon_pos;
+                    if self.emoji_selected_index >= self.emoji_filtered.len() {
+                        self.emoji_selected_index = 0;
+                    }
+                    return;
+                }
+            }
+        }
+        self.dismiss_emoji_picker();
+    }
+
+    /// Dismiss the emoji picker.
+    pub(crate) fn dismiss_emoji_picker(&mut self) {
+        self.emoji_picker_active = false;
+        self.emoji_filtered.clear();
+        self.emoji_selected_index = 0;
+    }
+
+    /// Insert the selected emoji, replacing `:query` with the emoji char.
+    pub(crate) fn accept_emoji(&mut self) {
+        if let Some(&(emoji, _)) = self.emoji_filtered.get(self.emoji_selected_index) {
+            let colon = self.emoji_colon_offset;
+            let end = self.cursor_position;
+            self.input_buffer.replace_range(colon..end, emoji);
+            self.cursor_position = colon + emoji.len();
+            self.dismiss_emoji_picker();
+        }
     }
 }
 

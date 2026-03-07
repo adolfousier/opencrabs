@@ -268,7 +268,9 @@ impl EventHandler for Handler {
                         .register_session_channel(new_id, comp.channel_id.get())
                         .await;
                     let display = match self.session_svc.get_session(new_id).await {
-                        Ok(Some(s)) => s.title.unwrap_or_else(|| session_id_str[..8.min(session_id_str.len())].to_string()),
+                        Ok(Some(s)) => s.title.unwrap_or_else(|| {
+                            session_id_str[..8.min(session_id_str.len())].to_string()
+                        }),
                         _ => session_id_str[..8.min(session_id_str.len())].to_string(),
                     };
                     let _ = comp
@@ -276,10 +278,7 @@ impl EventHandler for Handler {
                             &ctx.http,
                             serenity::builder::CreateInteractionResponse::Message(
                                 serenity::builder::CreateInteractionResponseMessage::new()
-                                    .content(format!(
-                                        "✅ Switched to session `{}`",
-                                        display
-                                    ))
+                                    .content(format!("✅ Switched to session `{}`", display))
                                     .ephemeral(true),
                             ),
                         )

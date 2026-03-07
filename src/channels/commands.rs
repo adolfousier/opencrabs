@@ -561,10 +561,7 @@ mod tests {
     fn format_help_is_alphabetical() {
         let help = format_help();
         // Only check built-in commands (before "Custom Commands" section)
-        let builtin_section = help
-            .split("Custom Commands")
-            .next()
-            .unwrap_or(&help);
+        let builtin_section = help.split("Custom Commands").next().unwrap_or(&help);
         let commands: Vec<&str> = builtin_section
             .lines()
             .filter_map(|line| {
@@ -579,7 +576,10 @@ mod tests {
             .collect();
         let mut sorted = commands.clone();
         sorted.sort();
-        assert_eq!(commands, sorted, "built-in help commands are not alphabetical");
+        assert_eq!(
+            commands, sorted,
+            "built-in help commands are not alphabetical"
+        );
     }
 
     // ── provider_display_name ──────────────────────────────────────────────

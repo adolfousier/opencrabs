@@ -491,6 +491,30 @@ impl App {
             // Other keys fall through to normal handling
         }
 
+        // When emoji picker is active, intercept navigation keys
+        if self.emoji_picker_active {
+            if keys::is_up(&event) {
+                self.emoji_selected_index = self.emoji_selected_index.saturating_sub(1);
+                return Ok(());
+            } else if keys::is_down(&event) {
+                if !self.emoji_filtered.is_empty() {
+                    self.emoji_selected_index =
+                        (self.emoji_selected_index + 1).min(self.emoji_filtered.len() - 1);
+                }
+                return Ok(());
+            } else if event.code == KeyCode::Tab
+                || keys::is_enter(&event)
+                || keys::is_submit(&event)
+            {
+                self.accept_emoji();
+                return Ok(());
+            } else if keys::is_cancel(&event) {
+                self.dismiss_emoji_picker();
+                return Ok(());
+            }
+            // Other keys fall through to normal handling (typing more chars refines the filter)
+        }
+
         // Any key other than Escape resets escape confirmation
         if !keys::is_cancel(&event) {
             self.escape_pending_at = None;
@@ -509,6 +533,7 @@ impl App {
                 self.input_buffer.clear();
                 self.cursor_position = 0;
                 self.slash_suggestions_active = false;
+                self.dismiss_emoji_picker();
                 return Ok(());
             }
 
@@ -538,6 +563,7 @@ impl App {
             self.cursor_position = 0;
             self.attachments.clear();
             self.slash_suggestions_active = false;
+            self.dismiss_emoji_picker();
 
             // Build message content with attachment markers for the agent.
             // Format: <<IMG:/path/to/file.png>> — handles spaces in paths.
@@ -659,6 +685,7 @@ impl App {
                     self.error_message_shown_at = None;
                     self.escape_pending_at = None;
                     self.slash_suggestions_active = false;
+                    self.dismiss_emoji_picker();
                 } else {
                     // Expired — treat as first Escape again
                     self.escape_pending_at = Some(std::time::Instant::now());
@@ -902,6 +929,11 @@ impl App {
 
         // Update slash autocomplete after any keystroke that modifies input
         self.update_slash_suggestions();
+
+        // Update emoji picker after any keystroke that modifies input
+        if !self.slash_suggestions_active {
+            self.update_emoji_picker();
+        }
 
         Ok(())
     }

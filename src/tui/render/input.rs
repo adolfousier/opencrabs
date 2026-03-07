@@ -268,6 +268,62 @@ pub(super) fn render_slash_autocomplete(f: &mut Frame, app: &App, input_area: Re
     f.render_widget(dropdown, dropdown_area);
 }
 
+/// Render the emoji picker popup above the input box.
+pub(super) fn render_emoji_picker(f: &mut Frame, app: &App, input_area: Rect) {
+    let count = app.emoji_filtered.len() as u16;
+    if count == 0 {
+        return;
+    }
+
+    let height = count + 2 + 2; // items + borders + padding
+    let width = 36u16.min(input_area.width);
+    let dropdown_area = Rect {
+        x: input_area.x + 1,
+        y: input_area.y.saturating_sub(height),
+        width,
+        height,
+    };
+
+    let lines: Vec<Line> = app
+        .emoji_filtered
+        .iter()
+        .enumerate()
+        .map(|(i, &(emoji, shortcode))| {
+            let is_selected = i == app.emoji_selected_index;
+            let style = if is_selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Gray)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Reset)
+            };
+            let sc_style = if is_selected {
+                Style::default().fg(Color::Black).bg(Color::Gray)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            };
+            Line::from(vec![
+                Span::styled(format!("  {} ", emoji), style),
+                Span::styled(format!(":{}: ", shortcode), sc_style),
+            ])
+        })
+        .collect();
+
+    let mut padded = Vec::with_capacity(lines.len() + 2);
+    padded.push(Line::from(""));
+    padded.extend(lines);
+    padded.push(Line::from(""));
+
+    f.render_widget(Clear, dropdown_area);
+    let dropdown = Paragraph::new(padded).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Rgb(120, 120, 120))),
+    );
+    f.render_widget(dropdown, dropdown_area);
+}
+
 /// Render the single-line status bar below the input box.
 ///
 /// Layout:  provider / model  ·  [policy]          ⠙ OpenCrabs is thinking... (3s)

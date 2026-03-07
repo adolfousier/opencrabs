@@ -121,6 +121,7 @@ tar = "0.4"
 # Memory Search (FTS5 + vector search)
 qmd = "0.3"
 llama-cpp-2 = "0.1.137"
+emojis = "0.8.0"
 
 
 

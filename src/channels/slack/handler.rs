@@ -153,15 +153,15 @@ pub async fn on_interaction(
                             ));
                             let session = client.open_session(&token);
                             let display = match state.session_svc.get_session(new_id).await {
-                                Ok(Some(s)) => s.title.unwrap_or_else(|| session_id_str[..8.min(session_id_str.len())].to_string()),
+                                Ok(Some(s)) => s.title.unwrap_or_else(|| {
+                                    session_id_str[..8.min(session_id_str.len())].to_string()
+                                }),
                                 _ => session_id_str[..8.min(session_id_str.len())].to_string(),
                             };
                             let request = SlackApiChatPostMessageRequest::new(
                                 channel.id.clone(),
-                                SlackMessageContent::new().with_text(format!(
-                                    "✅ Switched to session `{}`",
-                                    display
-                                )),
+                                SlackMessageContent::new()
+                                    .with_text(format!("✅ Switched to session `{}`", display)),
                             );
                             let _ = session.chat_post_message(&request).await;
                         }
