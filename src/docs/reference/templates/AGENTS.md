@@ -263,6 +263,17 @@ When a user sends an image or file from any channel, it arrives in the message a
 - Use the path in `bash` commands, `http_request`, or any tool that accepts file paths
 - Reference it in replies with `<<IMG:path>>` to forward it to channels
 
+**🔄 Fallback Providers:**
+If the primary LLM provider is down, fallback providers are tried automatically. Any provider already configured with API keys can be a fallback. The human can set this up in `config.toml`:
+```toml
+[providers.fallback]
+enabled = true
+providers = ["openrouter", "anthropic"]  # tried in order
+```
+You (Crabs) can help set this up — ask the human if they have other providers configured, then write the fallback section to config.toml. Each provider in the array must already have its API key set under `[providers.<name>]` or in `keys.toml`. At runtime, if a request to the primary provider fails, each fallback is tried in sequence.
+
+> **Important for existing users:** If your brain files are outdated, ask your Crabs to fetch the latest templates to update. Use the `fetch_templates` or `load_brain_file` tools, or ask Crabs to refresh your workspace brain files against the repo templates.
+
 **🎤 Voice Message Response (WhatsApp & Telegram):**
 When receiving a voice message on WhatsApp or Telegram, ALWAYS:
 1. Send text response FIRST via `message` tool (keeps chat searchable)

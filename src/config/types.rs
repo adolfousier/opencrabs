@@ -614,9 +614,14 @@ pub struct FallbackProviderConfig {
     #[serde(default)]
     pub enabled: bool,
 
-    /// Fallback provider type
-    #[serde(default)]
+    /// Legacy: single fallback provider type (backwards compat)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
+
+    /// Ordered list of fallback provider names — tried in sequence on failure.
+    /// Each name must match a configured provider (e.g. "anthropic", "openrouter").
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub providers: Vec<String>,
 }
 
 /// STT (Speech-to-Text) provider configurations

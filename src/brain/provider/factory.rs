@@ -14,74 +14,109 @@ use std::sync::Arc;
 /// No hardcoded priority - providers are enabled/disabled in config
 pub fn create_provider(config: &Config) -> Result<Arc<dyn Provider>> {
     // Check which providers are enabled in config.toml
-
-    // Try Minimax first
-    if config.providers.minimax.as_ref().is_some_and(|p| p.enabled) {
+    let primary: Option<Arc<dyn Provider>> = if config
+        .providers
+        .minimax
+        .as_ref()
+        .is_some_and(|p| p.enabled)
+    {
         tracing::info!("Using enabled provider: Minimax");
-        return try_create_minimax(config)?
-            .ok_or_else(|| anyhow::anyhow!("Minimax enabled but failed to create"));
-    }
-
-    // Try OpenRouter
-    if config
+        Some(
+            try_create_minimax(config)?
+                .ok_or_else(|| anyhow::anyhow!("Minimax enabled but failed to create"))?,
+        )
+    } else if config
         .providers
         .openrouter
         .as_ref()
         .is_some_and(|p| p.enabled)
     {
         tracing::info!("Using enabled provider: OpenRouter");
-        return try_create_openrouter(config)?
-            .ok_or_else(|| anyhow::anyhow!("OpenRouter enabled but failed to create"));
-    }
-
-    // Try Anthropic
-    if config
+        Some(
+            try_create_openrouter(config)?
+                .ok_or_else(|| anyhow::anyhow!("OpenRouter enabled but failed to create"))?,
+        )
+    } else if config
         .providers
         .anthropic
         .as_ref()
         .is_some_and(|p| p.enabled)
     {
         tracing::info!("Using enabled provider: Anthropic");
-        return try_create_anthropic(config)?
-            .ok_or_else(|| anyhow::anyhow!("Anthropic enabled but failed to create"));
-    }
-
-    // Try OpenAI (official)
-    if config.providers.openai.as_ref().is_some_and(|p| p.enabled) {
+        Some(
+            try_create_anthropic(config)?
+                .ok_or_else(|| anyhow::anyhow!("Anthropic enabled but failed to create"))?,
+        )
+    } else if config.providers.openai.as_ref().is_some_and(|p| p.enabled) {
         tracing::info!("Using enabled provider: OpenAI");
-        return try_create_openai(config)?
-            .ok_or_else(|| anyhow::anyhow!("OpenAI enabled but failed to create"));
-    }
-
-    // Try Custom OpenAI-compatible (first enabled named provider)
-    if config.providers.active_custom().is_some() {
+        Some(
+            try_create_openai(config)?
+                .ok_or_else(|| anyhow::anyhow!("OpenAI enabled but failed to create"))?,
+        )
+    } else if config.providers.active_custom().is_some() {
         tracing::info!("Using enabled provider: Custom OpenAI-Compatible");
-        return try_create_custom(config)?
-            .ok_or_else(|| anyhow::anyhow!("Custom provider enabled but failed to create"));
-    }
-
-    // Try Gemini
-    if config.providers.gemini.as_ref().is_some_and(|p| p.enabled) {
+        Some(
+            try_create_custom(config)?
+                .ok_or_else(|| anyhow::anyhow!("Custom provider enabled but failed to create"))?,
+        )
+    } else if config.providers.gemini.as_ref().is_some_and(|p| p.enabled) {
         tracing::info!("Using enabled provider: Google Gemini");
-        return try_create_gemini(config)?
-            .ok_or_else(|| anyhow::anyhow!("Gemini enabled but API key missing"));
-    }
+        Some(
+            try_create_gemini(config)?
+                .ok_or_else(|| anyhow::anyhow!("Gemini enabled but API key missing"))?,
+        )
+    } else {
+        None
+    };
 
-    // Try fallback if primary fails
-    if let Some(fallback) = &config.providers.fallback
+    // Build fallback chain if configured
+    let fallback_providers = if let Some(fallback) = &config.providers.fallback
         && fallback.enabled
-        && let Some(fallback_type) = &fallback.provider
     {
-        tracing::warn!(
-            "No primary provider enabled, trying fallback: {}",
-            fallback_type
-        );
-        return create_fallback(config, fallback_type);
-    }
+        let chain = fallback_chain(fallback);
+        let mut providers = Vec::new();
+        for name in &chain {
+            match create_fallback(config, name) {
+                Ok(p) => {
+                    tracing::info!("Fallback provider '{}' ready", name);
+                    providers.push(p);
+                }
+                Err(e) => {
+                    tracing::warn!("Fallback provider '{}' skipped: {}", name, e);
+                }
+            }
+        }
+        providers
+    } else {
+        Vec::new()
+    };
 
-    // No provider enabled - return placeholder provider so app can start and show onboarding
-    tracing::info!("No provider configured, using placeholder provider");
-    Ok(Arc::new(super::PlaceholderProvider))
+    match primary {
+        Some(provider) => {
+            if fallback_providers.is_empty() {
+                Ok(provider)
+            } else {
+                tracing::info!(
+                    "Wrapping primary provider with {} fallback(s)",
+                    fallback_providers.len()
+                );
+                Ok(Arc::new(super::FallbackProvider::new(
+                    provider,
+                    fallback_providers,
+                )))
+            }
+        }
+        None => {
+            // No primary — try fallbacks as primary candidates
+            if let Some(first) = fallback_providers.into_iter().next() {
+                tracing::warn!("No primary provider enabled, using first fallback");
+                Ok(first)
+            } else {
+                tracing::info!("No provider configured, using placeholder provider");
+                Ok(Arc::new(super::PlaceholderProvider))
+            }
+        }
+    }
 }
 
 /// Create a provider by name, ignoring the `enabled` flag.
@@ -143,6 +178,18 @@ fn try_create_custom_by_name(config: &Config, name: &str) -> Result<Option<Arc<d
     Ok(Some(Arc::new(provider)))
 }
 
+/// Build ordered fallback chain: `providers` array first, legacy `provider` as last resort.
+pub(crate) fn fallback_chain(fallback: &crate::config::FallbackProviderConfig) -> Vec<String> {
+    let mut chain: Vec<String> = fallback.providers.clone();
+    // Append legacy single `provider` if set and not already in the list
+    if let Some(ref legacy) = fallback.provider
+        && !chain.iter().any(|p| p == legacy)
+    {
+        chain.push(legacy.clone());
+    }
+    chain
+}
+
 /// Create fallback provider
 fn create_fallback(config: &Config, fallback_type: &str) -> Result<Arc<dyn Provider>> {
     match fallback_type {
@@ -163,15 +210,28 @@ fn create_fallback(config: &Config, fallback_type: &str) -> Result<Arc<dyn Provi
             tracing::info!("Using fallback: OpenAI");
             try_create_openai(config)?.ok_or_else(|| anyhow::anyhow!("OpenAI not configured"))
         }
+        "gemini" => {
+            tracing::info!("Using fallback: Gemini");
+            try_create_gemini(config)?.ok_or_else(|| anyhow::anyhow!("Gemini not configured"))
+        }
         "custom" => {
             tracing::info!("Using fallback: Custom OpenAI-Compatible");
             try_create_custom(config)?
                 .ok_or_else(|| anyhow::anyhow!("Custom provider not configured"))
         }
-        _ => Err(anyhow::anyhow!(
-            "Unknown fallback provider: {}",
-            fallback_type
-        )),
+        other => {
+            // Try as a named custom provider (e.g. "custom:mylocal")
+            if let Some(name) = other.strip_prefix("custom:") {
+                tracing::info!("Using fallback: Custom '{}'", name);
+                try_create_custom_by_name(config, name)?
+                    .ok_or_else(|| anyhow::anyhow!("Custom provider '{}' not configured", name))
+            } else {
+                Err(anyhow::anyhow!(
+                    "Unknown fallback provider: {}",
+                    other
+                ))
+            }
+        }
     }
 }
 
