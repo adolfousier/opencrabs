@@ -283,23 +283,24 @@ impl OpenAIProvider {
             }
 
             // Build content value: array when images present, string otherwise
-            let make_content = |texts: &[String], images: &[serde_json::Value]| -> Option<serde_json::Value> {
-                if !images.is_empty() {
-                    let mut parts: Vec<serde_json::Value> = Vec::new();
-                    if !texts.is_empty() {
-                        parts.push(serde_json::json!({
-                            "type": "text",
-                            "text": texts.join("\n")
-                        }));
+            let make_content =
+                |texts: &[String], images: &[serde_json::Value]| -> Option<serde_json::Value> {
+                    if !images.is_empty() {
+                        let mut parts: Vec<serde_json::Value> = Vec::new();
+                        if !texts.is_empty() {
+                            parts.push(serde_json::json!({
+                                "type": "text",
+                                "text": texts.join("\n")
+                            }));
+                        }
+                        parts.extend(images.iter().cloned());
+                        Some(serde_json::Value::Array(parts))
+                    } else if !texts.is_empty() {
+                        Some(serde_json::Value::String(texts.join("\n")))
+                    } else {
+                        None
                     }
-                    parts.extend(images.iter().cloned());
-                    Some(serde_json::Value::Array(parts))
-                } else if !texts.is_empty() {
-                    Some(serde_json::Value::String(texts.join("\n")))
-                } else {
-                    None
-                }
-            };
+                };
 
             // Handle assistant messages with tool calls
             if !tool_uses.is_empty() {
@@ -633,10 +634,14 @@ impl Provider for OpenAIProvider {
             .messages
             .iter()
             .map(|m| {
-                let content = m.content.as_ref().map(|v| {
-                    let s = v.as_str().unwrap_or("");
-                    count_message_tokens(s)
-                }).unwrap_or(4);
+                let content = m
+                    .content
+                    .as_ref()
+                    .map(|v| {
+                        let s = v.as_str().unwrap_or("");
+                        count_message_tokens(s)
+                    })
+                    .unwrap_or(4);
                 let tool_calls = m
                     .tool_calls
                     .as_ref()

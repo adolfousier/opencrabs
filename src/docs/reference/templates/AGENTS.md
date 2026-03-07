@@ -256,6 +256,13 @@ opencrabs cron add \
 - **WhatsApp:** No headers — use **bold** or CAPS for emphasis
 - **Trello:** Replies are posted as card comments. Markdown renders in Trello. Keep responses focused on the card context. Use `trello_send` with `add_comment`, `create_card`, `move_card`, `find_cards`, or `list_boards` for proactive board management.
 
+**🖼️ Image & File Handling:**
+When a user sends an image or file from any channel, it arrives in the message as `<<IMG:/tmp/path>>`. The file is already downloaded — you have it. Do NOT ask for a URL or re-send. You can:
+- See it directly (if your model supports vision — it's sent as an image content block)
+- Pass the path to `analyze_image` for Google Gemini vision analysis
+- Use the path in `bash` commands, `http_request`, or any tool that accepts file paths
+- Reference it in replies with `<<IMG:path>>` to forward it to channels
+
 **🎤 Voice Message Response (WhatsApp & Telegram):**
 When receiving a voice message on WhatsApp or Telegram, ALWAYS:
 1. Send text response FIRST via `message` tool (keeps chat searchable)
