@@ -5,6 +5,18 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.58] - 2026-03-07
+
+### Fixed
+- **Vision images in OpenAI-compatible providers** — `ContentBlock::Image` was silently dropped because `OpenAIMessage.content` only supported strings. Changed to `serde_json::Value` to support polymorphic content (string or array with `image_url` parts). Fixes image/vision failures on Telegram and all channels
+  - `src/brain/provider/custom_openai_compatible.rs`
+
+### Docs
+- **Image & file handling in brain templates** — Added `<<IMG:path>>` documentation to AGENTS.md and TOOLS.md templates so the agent knows how to handle incoming images from channels instead of hallucinating non-existent tools
+  - `src/docs/reference/templates/AGENTS.md`, `src/docs/reference/templates/TOOLS.md`
+
+> **Existing users:** Your local brain files at `~/.opencrabs/` are not updated automatically. Ask your Crab to compare templates at `src/docs/reference/templates/` against `~/.opencrabs/TOOLS.md` and `~/.opencrabs/AGENTS.md` and patch in the new image handling sections.
+
 ## [0.2.57] - 2026-03-07
 
 ### Added
@@ -1218,6 +1230,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.58]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.58
 [0.2.57]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.57
 [0.2.56]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.56
 [0.2.55]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.55
