@@ -521,7 +521,12 @@ Required for `/rebuild`, adding custom tools, or modifying the agent.
 - **Rust nightly (2024 edition)** — [Install Rust](https://rustup.rs/), then `rustup toolchain install nightly`. The project includes a `rust-toolchain.toml` that selects nightly automatically
 - **An API key** from at least one supported provider
 - **SQLite** (bundled via sqlx)
-- **Linux:** `build-essential`, `pkg-config`, `libssl-dev`, `libchafa-dev`
+- **macOS:** Xcode CLI Tools + `brew install cmake pkg-config` (requires macOS 15+)
+- **Linux (Debian/Ubuntu):** `sudo apt-get install build-essential pkg-config libssl-dev cmake`
+- **Linux (Fedora/RHEL):** `sudo dnf install gcc gcc-c++ make pkg-config openssl-devel cmake`
+- **Linux (Arch):** `sudo pacman -S base-devel pkg-config openssl cmake`
+
+> **One-liner setup:** `bash <(curl -sL https://raw.githubusercontent.com/adolfousier/opencrabs/main/scripts/setup.sh)` — detects your platform, installs all dependencies, and sets up Rust nightly.
 
 ```bash
 # Clone
@@ -1593,10 +1598,19 @@ Benchmarked with `cargo bench --bench memory` on release builds:
 
 ## 🐛 Platform Notes
 
+> **Automated setup:** Run `scripts/setup.sh` to detect your platform and install everything automatically.
+
 ### Linux
 
 ```bash
-sudo apt-get install build-essential pkg-config libssl-dev libchafa-dev
+# Debian/Ubuntu
+sudo apt-get install build-essential pkg-config libssl-dev cmake
+
+# Fedora/RHEL
+sudo dnf install gcc gcc-c++ make pkg-config openssl-devel cmake
+
+# Arch
+sudo pacman -S base-devel pkg-config openssl cmake
 ```
 
 #### Older CPUs (Sandy Bridge / AVX-only)
@@ -1612,6 +1626,11 @@ Pre-built `*-compat` binaries are also available on the [releases page](https://
 ### macOS
 
 Requires **macOS 15 (Sequoia)** or later.
+
+```bash
+# Install build dependencies
+brew install cmake pkg-config
+```
 
 #### Metal GPU crash on macOS 14 (Sonoma) or older
 
