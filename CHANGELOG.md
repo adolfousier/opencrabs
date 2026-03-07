@@ -5,6 +5,19 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.61] - 2026-03-07
+
+### Added
+- **Cross-platform setup script** — `scripts/setup.sh` detects OS (macOS, Debian/Ubuntu, Fedora/RHEL, Arch, WSL) and installs all build dependencies (cmake, pkg-config, build tools) plus Rust nightly. One-liner: `bash <(curl -sL .../scripts/setup.sh)`
+  - `scripts/setup.sh` (new)
+
+### Fixed
+- **Daily date-based config backup** — Config, keys, and commands files now use date-based backup filenames instead of overwriting a single backup
+
+### Docs
+- **Per-platform build prerequisites** — README now documents macOS (`brew install cmake pkg-config`), Fedora (`dnf`), and Arch (`pacman`) dependencies alongside existing Debian/Ubuntu instructions. Added one-liner setup reference
+  - `README.md`
+
 ## [0.2.60] - 2026-03-07
 
 ### Added
@@ -1283,6 +1296,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.61]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.61
 [0.2.60]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.60
 [0.2.59]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.59
 [0.2.58]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.58
