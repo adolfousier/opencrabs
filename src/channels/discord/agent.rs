@@ -267,6 +267,10 @@ impl EventHandler for Handler {
                     self.discord_state
                         .register_session_channel(new_id, comp.channel_id.get())
                         .await;
+                    let display = match self.session_svc.get_session(new_id).await {
+                        Ok(Some(s)) => s.title.unwrap_or_else(|| session_id_str[..8.min(session_id_str.len())].to_string()),
+                        _ => session_id_str[..8.min(session_id_str.len())].to_string(),
+                    };
                     let _ = comp
                         .create_response(
                             &ctx.http,
@@ -274,7 +278,7 @@ impl EventHandler for Handler {
                                 serenity::builder::CreateInteractionResponseMessage::new()
                                     .content(format!(
                                         "✅ Switched to session `{}`",
-                                        &session_id_str[..8.min(session_id_str.len())]
+                                        display
                                     ))
                                     .ephemeral(true),
                             ),
