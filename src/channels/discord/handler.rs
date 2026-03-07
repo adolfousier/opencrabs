@@ -402,7 +402,10 @@ pub(crate) async fn handle_message(
                         discord_state
                             .register_session_channel(new_session.id, msg.channel_id.get())
                             .await;
-                        let _ = msg.channel_id.say(&ctx.http, "✅ New session started.").await;
+                        let _ = msg
+                            .channel_id
+                            .say(&ctx.http, "✅ New session started.")
+                            .await;
                     }
                     Err(e) => {
                         tracing::error!("Discord: failed to create session: {}", e);
@@ -456,6 +459,14 @@ pub(crate) async fn handle_message(
                     "No operation in progress."
                 };
                 let _ = msg.channel_id.say(&ctx.http, reply).await;
+                return;
+            }
+            ChannelCommand::UserPrompt(prompt) => {
+                content = prompt;
+                // fall through to agent with the prompt as the message
+            }
+            ChannelCommand::UserSystem(text) => {
+                let _ = msg.channel_id.say(&ctx.http, &text).await;
                 return;
             }
             ChannelCommand::NotACommand => {}

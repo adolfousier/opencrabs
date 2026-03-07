@@ -137,10 +137,11 @@ pub async fn on_interaction(
                         if is_owner {
                             *state.shared_session.lock().await = Some(new_id);
                         } else {
-                            state.extra_sessions.lock().await.insert(
-                                caller_id.to_string(),
-                                (new_id, std::time::Instant::now()),
-                            );
+                            state
+                                .extra_sessions
+                                .lock()
+                                .await
+                                .insert(caller_id.to_string(), (new_id, std::time::Instant::now()));
                         }
                         if let Some(ref channel) = block_actions.channel {
                             state
@@ -676,7 +677,11 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                 return;
             }
             ChannelCommand::NewSession => {
-                match state.session_svc.create_session(Some("Chat".to_string())).await {
+                match state
+                    .session_svc
+                    .create_session(Some("Chat".to_string()))
+                    .await
+                {
                     Ok(new_session) => {
                         if is_owner {
                             *state.shared_session.lock().await = Some(new_session.id);
@@ -690,21 +695,25 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                             .slack_state
                             .register_session_channel(new_session.id, channel_id.clone())
                             .await;
-                        let token = SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
+                        let token =
+                            SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
                         let session = client.open_session(&token);
                         let request = SlackApiChatPostMessageRequest::new(
                             SlackChannelId::new(channel_id),
-                            SlackMessageContent::new().with_text("✅ New session started.".to_string()),
+                            SlackMessageContent::new()
+                                .with_text("✅ New session started.".to_string()),
                         );
                         let _ = session.chat_post_message(&request).await;
                     }
                     Err(e) => {
                         tracing::error!("Slack: failed to create session: {}", e);
-                        let token = SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
+                        let token =
+                            SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
                         let session = client.open_session(&token);
                         let request = SlackApiChatPostMessageRequest::new(
                             SlackChannelId::new(channel_id),
-                            SlackMessageContent::new().with_text("Failed to create session.".to_string()),
+                            SlackMessageContent::new()
+                                .with_text("Failed to create session.".to_string()),
                         );
                         let _ = session.chat_post_message(&request).await;
                     }
@@ -756,6 +765,21 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                 let request = SlackApiChatPostMessageRequest::new(
                     SlackChannelId::new(channel_id),
                     SlackMessageContent::new().with_text(reply.to_string()),
+                );
+                let _ = session.chat_post_message(&request).await;
+                return;
+            }
+            ChannelCommand::UserPrompt(prompt) => {
+                content = prompt;
+                // fall through to agent with the prompt as the message
+            }
+            ChannelCommand::UserSystem(text) => {
+                let token =
+                    SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
+                let session = client.open_session(&token);
+                let request = SlackApiChatPostMessageRequest::new(
+                    SlackChannelId::new(channel_id),
+                    SlackMessageContent::new().with_text(text),
                 );
                 let _ = session.chat_post_message(&request).await;
                 return;

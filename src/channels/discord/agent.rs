@@ -259,10 +259,10 @@ impl EventHandler for Handler {
                     if is_owner {
                         *self.shared_session.lock().await = Some(new_id);
                     } else {
-                        self.extra_sessions.lock().await.insert(
-                            caller_id,
-                            (new_id, std::time::Instant::now()),
-                        );
+                        self.extra_sessions
+                            .lock()
+                            .await
+                            .insert(caller_id, (new_id, std::time::Instant::now()));
                     }
                     self.discord_state
                         .register_session_channel(new_id, comp.channel_id.get())

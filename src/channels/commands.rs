@@ -23,6 +23,10 @@ pub enum ChannelCommand {
     Sessions(SessionsResponse),
     /// `/stop` — cancel the running agent task
     Stop,
+    /// User-defined command with action "prompt" — forward prompt text to the agent
+    UserPrompt(String),
+    /// User-defined command with action "system" — display text directly
+    UserSystem(String),
     /// Not a recognised command — pass through to agent
     NotACommand,
 }
@@ -67,12 +71,39 @@ pub async fn handle_command(
         "/help" => ChannelCommand::Help(format_help()),
         "/models" => ChannelCommand::Models(format_providers(agent)),
         "/new" => ChannelCommand::NewSession,
-        "/sessions" => ChannelCommand::Sessions(
-            format_sessions(session_id, session_svc).await,
-        ),
+        "/sessions" => ChannelCommand::Sessions(format_sessions(session_id, session_svc).await),
         "/stop" => ChannelCommand::Stop,
         "/usage" => ChannelCommand::Usage(format_usage(session_id, agent, session_svc).await),
+        _ if trimmed.starts_with('/') => match_user_command(trimmed),
         _ => ChannelCommand::NotACommand,
+    }
+}
+
+// ── User-defined commands ───────────────────────────────────────────────────
+
+fn match_user_command(text: &str) -> ChannelCommand {
+    let brain_path = crate::brain::BrainLoader::resolve_path();
+    let loader = crate::brain::CommandLoader::from_brain_path(&brain_path);
+    let commands = loader.load();
+
+    // Split "/command args" into command name and optional args
+    let (cmd_name, args) = text
+        .split_once(' ')
+        .map(|(c, a)| (c, a.trim()))
+        .unwrap_or((text, ""));
+
+    if let Some(cmd) = commands.iter().find(|c| c.name == cmd_name) {
+        let prompt = if args.is_empty() {
+            cmd.prompt.clone()
+        } else {
+            format!("{} {}", cmd.prompt, args)
+        };
+        match cmd.action.as_str() {
+            "system" => ChannelCommand::UserSystem(prompt),
+            _ => ChannelCommand::UserPrompt(prompt),
+        }
+    } else {
+        ChannelCommand::NotACommand
     }
 }
 
@@ -185,7 +216,10 @@ fn format_number(n: i64) -> String {
 
 // ── /sessions ──────────────────────────────────────────────────────────────
 
-async fn format_sessions(current_session_id: Uuid, session_svc: &SessionService) -> SessionsResponse {
+async fn format_sessions(
+    current_session_id: Uuid,
+    session_svc: &SessionService,
+) -> SessionsResponse {
     let sessions = session_svc
         .list_sessions(SessionListOptions {
             include_archived: false,

@@ -641,6 +641,18 @@ pub(crate) async fn handle_message(
                 let _ = client.send_message(info.source.chat.clone(), reply).await;
                 return;
             }
+            ChannelCommand::UserPrompt(prompt) => {
+                content = prompt;
+                // fall through to agent with the prompt as the message
+            }
+            ChannelCommand::UserSystem(text) => {
+                let reply = waproto::whatsapp::Message {
+                    conversation: Some(text),
+                    ..Default::default()
+                };
+                let _ = client.send_message(info.source.chat.clone(), reply).await;
+                return;
+            }
             ChannelCommand::NotACommand => {}
         }
     }

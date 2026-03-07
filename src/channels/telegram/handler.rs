@@ -674,6 +674,7 @@ pub(crate) async fn handle_message(
         .await;
 
     // ── Channel commands (/help, /usage, /models) ──────────────────────────
+    let mut text = text;
     if !is_voice {
         use crate::channels::commands::{self, ChannelCommand};
         match commands::handle_command(&text, session_id, &agent, &session_svc).await {
@@ -712,19 +713,16 @@ pub(crate) async fn handle_message(
                         if is_owner {
                             *shared_session.lock().await = Some(new_session.id);
                         } else {
-                            extra_sessions.lock().await.insert(
-                                user_id,
-                                (new_session.id, std::time::Instant::now()),
-                            );
+                            extra_sessions
+                                .lock()
+                                .await
+                                .insert(user_id, (new_session.id, std::time::Instant::now()));
                         }
                         telegram_state
                             .register_session_chat(new_session.id, msg.chat.id.0)
                             .await;
-                        bot.send_message(
-                            msg.chat.id,
-                            "✅ New session started.",
-                        )
-                        .await?;
+                        bot.send_message(msg.chat.id, "✅ New session started.")
+                            .await?;
                     }
                     Err(e) => {
                         tracing::error!("Telegram: failed to create session: {}", e);
@@ -765,6 +763,16 @@ pub(crate) async fn handle_message(
                     "No operation in progress."
                 };
                 bot.send_message(msg.chat.id, reply).await?;
+                return Ok(());
+            }
+            ChannelCommand::UserPrompt(prompt) => {
+                text = prompt;
+                // fall through to agent with the prompt as the message
+            }
+            ChannelCommand::UserSystem(text) => {
+                bot.send_message(msg.chat.id, md_to_html(&text))
+                    .parse_mode(ParseMode::Html)
+                    .await?;
                 return Ok(());
             }
             ChannelCommand::NotACommand => {} // fall through to agent
