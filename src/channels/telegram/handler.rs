@@ -519,6 +519,24 @@ pub(crate) async fn handle_message(
         return Ok(());
     };
 
+    // Log ALL processed messages (voice transcripts, photo captions, doc text) for group context.
+    // Text-only messages in groups were already logged above during respond_to filtering;
+    // this catches voice, photo, and document messages that bypassed the early return paths.
+    if !is_dm {
+        let log_content = if is_voice {
+            format!("[voice] {}", truncate_str(&text, 500))
+        } else if msg.photo().is_some() {
+            format!("[photo] {}", msg.caption().unwrap_or(""))
+        } else if msg.document().is_some() {
+            format!("[document] {}", msg.caption().unwrap_or(""))
+        } else {
+            String::new() // text was already logged above
+        };
+        if !log_content.is_empty() {
+            store_channel_msg(log_content).await;
+        }
+    }
+
     // Strip @bot_username from text when responding to a mention in groups
     let text = if !is_dm && respond_to == &RespondTo::Mention {
         if let Some(ref uname) = telegram_state.bot_username().await {
