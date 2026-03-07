@@ -1,7 +1,8 @@
 //! Analyze Image Tool
 //!
-//! Analyzes image files or URLs using Google Gemini's vision API.
-//! Can answer questions about image content.
+//! Analyzes image files or URLs using vision-capable models.
+//! Two backends: Google Gemini (default) or provider-native vision model
+//! (uses the same OpenAI-compatible API with a vision-capable model).
 
 use super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
@@ -210,12 +211,12 @@ impl Tool for AnalyzeImageTool {
     }
 }
 
-fn base64_encode(bytes: &[u8]) -> String {
+pub(crate) fn base64_encode(bytes: &[u8]) -> String {
     use base64::Engine;
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
-fn detect_mime_type(path: &str) -> &'static str {
+pub(crate) fn detect_mime_type(path: &str) -> &'static str {
     let lower = path.to_lowercase();
     if lower.ends_with(".png") {
         "image/png"

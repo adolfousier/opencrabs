@@ -434,6 +434,49 @@ fn try_create_anthropic(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     Ok(Some(Arc::new(provider)))
 }
 
+/// Returns `(api_key, base_url, vision_model)` for the first active provider
+/// that has a `vision_model` configured. Used to register the provider-native
+/// `analyze_image` tool when Gemini vision isn't set up.
+pub fn active_provider_vision(config: &Config) -> Option<(String, String, String)> {
+    // Check providers in priority order (same as create_provider)
+    let candidates: Vec<&ProviderConfig> = [
+        config.providers.minimax.as_ref(),
+        config.providers.openrouter.as_ref(),
+        config.providers.anthropic.as_ref(),
+        config.providers.openai.as_ref(),
+        config.providers.gemini.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|c| c.enabled)
+    .collect();
+
+    // Also check custom providers
+    let custom_iter = config
+        .providers
+        .custom
+        .as_ref()
+        .into_iter()
+        .flat_map(|m| m.values())
+        .filter(|c| c.enabled);
+
+    for cfg in candidates.into_iter().chain(custom_iter) {
+        if let (Some(api_key), Some(vision_model)) = (&cfg.api_key, &cfg.vision_model) {
+            let base_url = cfg
+                .base_url
+                .clone()
+                .unwrap_or_else(|| "https://api.openai.com/v1/chat/completions".to_string());
+            let base_url = if base_url.contains("/chat/completions") {
+                base_url
+            } else {
+                format!("{}/chat/completions", base_url.trim_end_matches('/'))
+            };
+            return Some((api_key.clone(), base_url, vision_model.clone()));
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

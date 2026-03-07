@@ -195,11 +195,16 @@ impl OpenAIProvider {
         self
     }
 
-    /// Set vision model — used when images are present and the default model
-    /// doesn't support vision (e.g. MiniMax-Text-01 for MiniMax M2.5)
+    /// Set vision model — used by the `analyze_image` tool as a provider-native
+    /// vision backend when Gemini vision isn't configured.
     pub fn with_vision_model(mut self, model: String) -> Self {
         self.vision_model = Some(model);
         self
+    }
+
+    /// Get the configured vision model name (if any).
+    pub fn vision_model(&self) -> Option<&str> {
+        self.vision_model.as_deref()
     }
 
     /// Build request headers
@@ -377,34 +382,8 @@ impl OpenAIProvider {
                 .collect()
         });
 
-        // If images are present and a vision_model is configured, swap to it
-        let has_images = messages.iter().any(|m| {
-            m.content
-                .as_ref()
-                .and_then(|c| c.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .any(|p| p.get("type").and_then(|t| t.as_str()) == Some("image_url"))
-                })
-                .unwrap_or(false)
-        });
-        let model = if has_images {
-            if let Some(ref vm) = self.vision_model {
-                tracing::info!(
-                    "Images detected — swapping model from {} to vision model {}",
-                    request.model,
-                    vm
-                );
-                vm.clone()
-            } else {
-                request.model
-            }
-        } else {
-            request.model
-        };
-
         OpenAIRequest {
-            model,
+            model: request.model,
             messages,
             temperature: request.temperature,
             max_tokens: request.max_tokens,
@@ -1350,9 +1329,12 @@ mod tests {
     #[test]
     fn test_calculate_cost() {
         let provider = OpenAIProvider::new("test-key".to_string());
-        // 1000 input + 1000 output tokens on gpt-3.5-turbo
-        // Cost: (1000/1M * 0.5) + (1000/1M * 1.5) = 0.0005 + 0.0015 = 0.002
-        let cost = provider.calculate_cost("gpt-3.5-turbo", 1000, 1000);
-        assert!((cost - 0.002).abs() < 0.0001);
+        // 1000 input + 1000 output tokens on gpt-5-nano
+        // Cost: (1000/1M * 0.10) + (1000/1M * 0.40) = 0.0001 + 0.0004 = 0.0005
+        let cost = provider.calculate_cost("gpt-5-nano", 1000, 1000);
+        assert!(
+            (cost - 0.0005).abs() < 0.0001,
+            "expected ~0.0005 but got {cost}"
+        );
     }
 }

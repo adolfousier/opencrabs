@@ -35,9 +35,10 @@ async fn cmd_chat_inner(
                 generate_image::GenerateImageTool, glob::GlobTool, grep::GrepTool,
                 http::HttpClientTool, load_brain_file::LoadBrainFileTool, ls::LsTool,
                 memory_search::MemorySearchTool, notebook::NotebookEditTool, plan_tool::PlanTool,
-                read::ReadTool, registry::ToolRegistry, session_search::SessionSearchTool,
-                slash_command::SlashCommandTool, task::TaskTool, web_search::WebSearchTool,
-                write::WriteTool, write_opencrabs_file::WriteOpenCrabsFileTool,
+                provider_vision::ProviderVisionTool, read::ReadTool, registry::ToolRegistry,
+                session_search::SessionSearchTool, slash_command::SlashCommandTool, task::TaskTool,
+                web_search::WebSearchTool, write::WriteTool,
+                write_opencrabs_file::WriteOpenCrabsFileTool,
             },
         },
         db::Database,
@@ -165,7 +166,7 @@ async fn cmd_chat_inner(
         )));
         tracing::info!("Registered generate_image tool");
     }
-    // Image vision tool (requires image.vision.enabled + api_key in config)
+    // Image vision tool — prefer Gemini, fall back to provider's vision_model
     if config.image.vision.enabled
         && let Some(ref key) = config.image.vision.api_key
     {
@@ -173,7 +174,16 @@ async fn cmd_chat_inner(
             key.clone(),
             config.image.vision.model.clone(),
         )));
-        tracing::info!("Registered analyze_image tool");
+        tracing::info!("Registered analyze_image tool (Gemini)");
+    } else if let Some((api_key, base_url, vision_model)) =
+        crate::brain::provider::factory::active_provider_vision(config)
+    {
+        tool_registry.register(Arc::new(ProviderVisionTool::new(
+            api_key,
+            base_url,
+            vision_model,
+        )));
+        tracing::info!("Registered analyze_image tool (provider vision model)");
     }
 
     // Index existing memory files and warm up embedding engine in the background

@@ -326,6 +326,16 @@ mod vision_model {
     }
 
     #[test]
+    fn vision_model_accessor() {
+        let provider =
+            OpenAIProvider::new("test-key".into()).with_vision_model("gpt-5-nano".into());
+        assert_eq!(provider.vision_model(), Some("gpt-5-nano"));
+
+        let no_vision = OpenAIProvider::new("test-key".into());
+        assert_eq!(no_vision.vision_model(), None);
+    }
+
+    #[test]
     fn vision_model_config_roundtrip() {
         let toml_str = r#"
 enabled = true
@@ -478,5 +488,131 @@ mod factory_fallback {
         // No providers configured at all — should end up with placeholder
         let provider = crate::brain::provider::factory::create_provider(&config).unwrap();
         assert_eq!(provider.name(), "none");
+    }
+}
+
+// --- Active provider vision discovery ---
+
+mod active_provider_vision {
+    use crate::brain::provider::factory::active_provider_vision;
+    use crate::config::{Config, ProviderConfig, ProviderConfigs};
+
+    #[test]
+    fn returns_none_when_no_providers() {
+        let config = Config::default();
+        assert!(active_provider_vision(&config).is_none());
+    }
+
+    #[test]
+    fn returns_none_when_no_vision_model() {
+        let config = Config {
+            providers: ProviderConfigs {
+                openai: Some(ProviderConfig {
+                    enabled: true,
+                    api_key: Some("key".into()),
+                    base_url: None,
+                    default_model: None,
+                    models: vec![],
+                    vision_model: None,
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(active_provider_vision(&config).is_none());
+    }
+
+    #[test]
+    fn returns_vision_model_from_active_provider() {
+        let config = Config {
+            providers: ProviderConfigs {
+                minimax: Some(ProviderConfig {
+                    enabled: true,
+                    api_key: Some("minimax-key".into()),
+                    base_url: Some("https://api.minimax.io/v1".into()),
+                    default_model: Some("MiniMax-M2.5".into()),
+                    models: vec![],
+                    vision_model: Some("MiniMax-Text-01".into()),
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let result = active_provider_vision(&config);
+        assert!(result.is_some());
+        let (api_key, base_url, vision_model) = result.unwrap();
+        assert_eq!(api_key, "minimax-key");
+        assert!(base_url.contains("minimax"));
+        assert_eq!(vision_model, "MiniMax-Text-01");
+    }
+
+    #[test]
+    fn skips_disabled_provider() {
+        let config = Config {
+            providers: ProviderConfigs {
+                minimax: Some(ProviderConfig {
+                    enabled: false,
+                    api_key: Some("key".into()),
+                    base_url: Some("https://api.minimax.io/v1".into()),
+                    default_model: None,
+                    models: vec![],
+                    vision_model: Some("MiniMax-Text-01".into()),
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(active_provider_vision(&config).is_none());
+    }
+
+    #[test]
+    fn skips_provider_without_api_key() {
+        let config = Config {
+            providers: ProviderConfigs {
+                openai: Some(ProviderConfig {
+                    enabled: true,
+                    api_key: None,
+                    base_url: None,
+                    default_model: None,
+                    models: vec![],
+                    vision_model: Some("gpt-5-nano".into()),
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(active_provider_vision(&config).is_none());
+    }
+
+    #[test]
+    fn picks_first_provider_with_vision_by_priority() {
+        let config = Config {
+            providers: ProviderConfigs {
+                minimax: Some(ProviderConfig {
+                    enabled: true,
+                    api_key: Some("minimax-key".into()),
+                    base_url: Some("https://api.minimax.io/v1".into()),
+                    default_model: None,
+                    models: vec![],
+                    vision_model: Some("MiniMax-Text-01".into()),
+                }),
+                openai: Some(ProviderConfig {
+                    enabled: true,
+                    api_key: Some("openai-key".into()),
+                    base_url: None,
+                    default_model: None,
+                    models: vec![],
+                    vision_model: Some("gpt-5-nano".into()),
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let (api_key, _, vision_model) = active_provider_vision(&config).unwrap();
+        // Minimax has higher priority
+        assert_eq!(api_key, "minimax-key");
+        assert_eq!(vision_model, "MiniMax-Text-01");
     }
 }

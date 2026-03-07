@@ -46,7 +46,7 @@ default_model = "qwen3-coder-next"
 [providers.openai]
 enabled = false
 default_model = "gpt-5-nano"  # Optional: override default model
-# vision_model = "gpt-5-nano"  # Optional: swap to this model when images are present
+# vision_model = "gpt-5-nano"  # Optional: describes images for the chat model when it lacks vision
 
 # ========================================
 # Anthropic Provider (Claude)
@@ -82,7 +82,7 @@ enabled = false
 base_url = "https://api.minimax.io/v1"
 default_model = "MiniMax-M2.5"
 models = ["MiniMax-M2.5", "MiniMax-M2.1", "MiniMax-Text-01"]
-vision_model = "MiniMax-Text-01"  # Auto-swap to this model when images are present
+vision_model = "MiniMax-Text-01"  # Describes images for the chat model when it lacks vision
 
 # ========================================
 # Fallback Providers (automatic failover)

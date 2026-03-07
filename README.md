@@ -104,7 +104,7 @@ OpenCrabs runs as a **single binary on your terminal** — no server, no gateway
 |---------|-------------|
 | **Multi-Provider** | Anthropic Claude, OpenAI, OpenRouter (400+ models), MiniMax, Google Gemini, and any OpenAI-compatible API (Ollama, LM Studio, LocalAI). Model lists fetched live from provider APIs — new models available instantly. Each session remembers its provider + model and restores it on switch |
 | **Fallback Providers** | Configure a chain of fallback providers — if the primary fails, each fallback is tried in sequence automatically. Any configured provider can be a fallback. Config: `[providers.fallback] providers = ["openrouter", "anthropic"]` |
-| **Per-Provider Vision** | Set `vision_model` per provider to auto-swap model when images are present (e.g. MiniMax M2.5 → MiniMax-Text-01). Auto-configured for known providers on first run |
+| **Per-Provider Vision** | Set `vision_model` per provider — the LLM calls `analyze_image` as a tool, which uses the vision model on the same provider API to describe images. The chat model stays the same and gets vision capability via tool call. Gemini vision takes priority when configured. Auto-configured for known providers (e.g. MiniMax) on first run |
 | **Real-time Streaming** | Character-by-character response streaming with animated spinner showing model name and live text |
 | **Local LLM Support** | Run with LM Studio, Ollama, or any OpenAI-compatible endpoint — 100% private, zero-cost |
 | **Cost Tracking** | Per-message token count and cost displayed in header; `/usage` shows all-time breakdown grouped by model with real costs + estimates for historical sessions |
@@ -335,12 +335,12 @@ At runtime, if a request to the primary fails, each fallback is tried until one 
 
 ### Per-Provider Vision Model
 
-If your default model doesn't support vision but another model on the same provider does, set `vision_model` to auto-swap when images are present:
+If your default model doesn't support vision but another model on the same provider does, set `vision_model`. The LLM calls `analyze_image` as a tool — the vision model describes the image and returns the description to the chat model as context:
 
 ```toml
 [providers.minimax]
 default_model = "MiniMax-M2.5"
-vision_model = "MiniMax-Text-01"  # auto-swap for image requests
+vision_model = "MiniMax-Text-01"  # describes images for the chat model
 ```
 
 MiniMax auto-configures this on first run. Works with any provider — just set `vision_model` to a vision-capable model on the same API.

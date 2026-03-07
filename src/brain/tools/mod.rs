@@ -36,6 +36,7 @@ pub mod http;
 pub mod load_brain_file;
 pub mod memory_search;
 pub mod plan_tool;
+pub mod provider_vision;
 pub mod rebuild;
 pub mod session_search;
 pub mod slash_command;

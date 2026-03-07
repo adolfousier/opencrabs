@@ -10,11 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Fallback provider chain** — Configure multiple fallback providers that are tried in sequence when the primary fails. Supports single (`provider = "openrouter"`) or array (`providers = ["openrouter", "anthropic"]`). Runtime retry wraps the primary provider transparently — no code changes needed downstream
   - `src/brain/provider/fallback.rs` (new), `src/brain/provider/factory.rs`, `src/config/types.rs`
-- **Per-provider vision model** — Set `vision_model` in any provider config to auto-swap model when images are present. MiniMax auto-injects `vision_model = "MiniMax-Text-01"` on first run
-  - `src/brain/provider/custom_openai_compatible.rs`, `src/brain/provider/factory.rs`
+- **Per-provider vision model** — Set `vision_model` in any provider config. The LLM calls `analyze_image` as a tool, which uses the vision model on the same provider API to describe images — giving any model vision capability without swapping the chat model. Falls back to Gemini vision when configured. MiniMax auto-injects `vision_model = "MiniMax-Text-01"` on first run
+  - `src/brain/tools/provider_vision.rs` (new), `src/brain/provider/factory.rs`
 - **Session working directory persistence** — `/cd` changes now persist to DB per session, restored on session switch. Shown as `~/path` badge in sessions screen
   - `src/db/models.rs`, `src/services/session.rs`, `src/tui/app/messaging.rs`, `src/tui/render/sessions.rs`, `src/migrations/20260307000001_add_session_working_dir.sql`
-- **28 new tests** — Fallback chain config (9), runtime fallback behavior (10), vision model wiring (6), factory integration (4)
+- **35 new tests** — Fallback chain config (9), runtime fallback behavior (10), vision model wiring (7), factory integration (4), active provider vision discovery (6)
   - `src/tests/fallback_vision_test.rs`
 
 ### Fixed
