@@ -295,6 +295,13 @@ impl AgentService {
             if let Some(ref token) = cancel_token
                 && token.is_cancelled()
             {
+                tracing::warn!(
+                    "🛑 Tool loop cancelled at iteration {} (cancel_token fired). \
+                     Accumulated text: {} chars, tool iterations so far: {}",
+                    iteration,
+                    accumulated_text.len(),
+                    iteration,
+                );
                 break;
             }
 
@@ -734,6 +741,11 @@ impl AgentService {
                 if let Some(ref token) = cancel_token
                     && token.is_cancelled()
                 {
+                    tracing::warn!(
+                        "🛑 Tool execution cancelled before '{}' at iteration {}",
+                        tool_name,
+                        iteration,
+                    );
                     break;
                 }
 
@@ -944,10 +956,13 @@ impl AgentService {
                     }
                 }
 
-                // Execute the tool (no approval needed)
+                // Execute the tool (no approval needed — mark context as approved
+                // so the registry's own approval check doesn't block it)
+                let mut approved_context = tool_context.clone();
+                approved_context.auto_approve = true;
                 match self
                     .tool_registry
-                    .execute(&tool_name, tool_input, &tool_context)
+                    .execute(&tool_name, tool_input, &approved_context)
                     .await
                 {
                     Ok(result) => {
@@ -1155,9 +1170,36 @@ impl AgentService {
             }
         }
 
-        let response = final_response.ok_or_else(|| {
-            AgentError::Internal("Tool loop ended without final response".to_string())
-        })?;
+        // If the loop broke without a final_response but we have accumulated text,
+        // synthesize a partial response instead of erroring — the user already saw the
+        // text streamed in real-time, so returning it keeps the TUI consistent.
+        let response = match final_response {
+            Some(resp) => resp,
+            None if !accumulated_text.is_empty() => {
+                tracing::warn!(
+                    "Synthesizing partial response from {} chars of accumulated text \
+                     (loop broke without final LLM response)",
+                    accumulated_text.len()
+                );
+                LLMResponse {
+                    id: String::new(),
+                    content: vec![ContentBlock::Text {
+                        text: accumulated_text.clone(),
+                    }],
+                    model: model_name.clone(),
+                    usage: crate::brain::provider::TokenUsage {
+                        input_tokens: total_input_tokens,
+                        output_tokens: total_output_tokens,
+                    },
+                    stop_reason: Some(crate::brain::provider::StopReason::EndTurn),
+                }
+            }
+            None => {
+                return Err(AgentError::Internal(
+                    "Tool loop ended without final response".to_string(),
+                ));
+            }
+        };
 
         // Extract text from the final response only (for TUI display).
         // Intermediate text was already shown in real-time via IntermediateText events.

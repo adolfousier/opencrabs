@@ -39,8 +39,8 @@ impl Tool for CronManageTool {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["create", "list", "delete", "enable", "disable"],
-                    "description": "Action to perform"
+                    "enum": ["create", "list", "delete", "enable", "disable", "test"],
+                    "description": "Action to perform. 'test' triggers a job immediately (runs on next scheduler tick within 60s)"
                 },
                 "name": {
                     "type": "string",
@@ -100,7 +100,7 @@ impl Tool for CronManageTool {
         // Only create and delete need approval; list/enable/disable are safe
         matches!(
             input.get("action").and_then(|v| v.as_str()),
-            Some("create") | Some("delete")
+            Some("create") | Some("delete") | Some("test")
         )
     }
 
@@ -116,8 +116,9 @@ impl Tool for CronManageTool {
             "delete" => self.delete_job(&input).await,
             "enable" => self.toggle_job(&input, true).await,
             "disable" => self.toggle_job(&input, false).await,
+            "test" => self.test_job(&input).await,
             unknown => Ok(ToolResult::error(format!(
-                "Unknown action '{unknown}'. Valid: create, list, delete, enable, disable"
+                "Unknown action '{unknown}'. Valid: create, list, delete, enable, disable, test"
             ))),
         }
     }
@@ -311,6 +312,60 @@ impl CronManageTool {
         } else {
             Ok(ToolResult::error(format!(
                 "No cron job found with ID '{job_id}'."
+            )))
+        }
+    }
+
+    async fn test_job(&self, input: &Value) -> Result<ToolResult> {
+        let job_id = match input.get("job_id").and_then(|v| v.as_str()) {
+            Some(id) if !id.is_empty() => id,
+            _ => {
+                // Also accept name
+                match input.get("name").and_then(|v| v.as_str()) {
+                    Some(name) if !name.is_empty() => {
+                        if let Ok(Some(job)) = self.repo.find_by_name(name).await {
+                            return self.trigger_by_id(&job.id.to_string(), &job.name).await;
+                        }
+                        return Ok(ToolResult::error(format!(
+                            "No cron job found with name '{name}'."
+                        )));
+                    }
+                    _ => {
+                        return Ok(ToolResult::error(
+                            "'job_id' or 'name' is required for test".to_string(),
+                        ));
+                    }
+                }
+            }
+        };
+
+        // Try ID first, then name
+        if let Ok(Some(job)) = self.repo.find_by_id(job_id).await {
+            return self.trigger_by_id(&job.id.to_string(), &job.name).await;
+        }
+        if let Ok(Some(job)) = self.repo.find_by_name(job_id).await {
+            return self.trigger_by_id(&job.id.to_string(), &job.name).await;
+        }
+
+        Ok(ToolResult::error(format!(
+            "No cron job found with ID or name '{job_id}'."
+        )))
+    }
+
+    async fn trigger_by_id(&self, id: &str, name: &str) -> Result<ToolResult> {
+        let triggered = self
+            .repo
+            .trigger_now(id)
+            .await
+            .map_err(|e| super::error::ToolError::Execution(e.to_string()))?;
+
+        if triggered {
+            Ok(ToolResult::success(format!(
+                "Cron job '{name}' (id={id}) triggered. It will execute on the next scheduler tick (within 60 seconds). Check logs for execution status."
+            )))
+        } else {
+            Ok(ToolResult::error(format!(
+                "Failed to trigger cron job '{id}'."
             )))
         }
     }

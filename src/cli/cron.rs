@@ -46,6 +46,7 @@ pub(crate) async fn cmd_cron(
         CronCommands::Remove { id } => cmd_remove(&repo, &id).await,
         CronCommands::Enable { id } => cmd_toggle(&repo, &id, true).await,
         CronCommands::Disable { id } => cmd_toggle(&repo, &id, false).await,
+        CronCommands::Test { id } => cmd_test(&repo, &id).await,
     }
 }
 
@@ -150,6 +151,17 @@ async fn cmd_toggle(repo: &CronJobRepository, id: &str, enabled: bool) -> Result
         println!("{icon} Cron job {state}: {job_id}");
     } else {
         println!("❌ No cron job found: {id}");
+    }
+    Ok(())
+}
+
+async fn cmd_test(repo: &CronJobRepository, id: &str) -> Result<()> {
+    let job_id = resolve_job_id(repo, id).await?;
+    if repo.trigger_now(&job_id).await? {
+        println!("🚀 Cron job triggered: {job_id}");
+        println!("   It will execute on the next scheduler tick (within 60 seconds).");
+    } else {
+        println!("❌ Failed to trigger cron job: {id}");
     }
     Ok(())
 }

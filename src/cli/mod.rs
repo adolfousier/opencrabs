@@ -189,6 +189,12 @@ pub enum CronCommands {
         /// Job ID or name
         id: String,
     },
+
+    /// Trigger a cron job immediately (runs on next scheduler tick)
+    Test {
+        /// Job ID or name
+        id: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]

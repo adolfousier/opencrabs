@@ -70,24 +70,34 @@ impl AgentService {
         const STREAM_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
         loop {
-            // Check for cancellation before waiting for the next event
-            if let Some(token) = cancel_token
-                && token.is_cancelled()
-            {
-                tracing::info!("Stream cancelled by user");
-                break;
-            }
-
-            let next = match tokio::time::timeout(STREAM_IDLE_TIMEOUT, stream.next()).await {
-                Ok(Some(item)) => item,
-                Ok(None) => break, // Stream ended normally
-                Err(_elapsed) => {
-                    tracing::warn!(
-                        "⏱️ Stream idle timeout after {}s — no event received from provider. \
-                         Treating as dropped stream (stop_reason=None → will retry).",
-                        STREAM_IDLE_TIMEOUT.as_secs()
-                    );
-                    break; // stop_reason stays None → triggers retry in tool_loop
+            // Race stream.next() against cancellation token and idle timeout.
+            // This ensures /stop takes effect immediately even mid-chunk.
+            let next = tokio::select! {
+                biased;
+                _ = async {
+                    if let Some(token) = cancel_token {
+                        token.cancelled().await;
+                    } else {
+                        // No cancel token — never resolves
+                        std::future::pending::<()>().await;
+                    }
+                } => {
+                    tracing::info!("Stream cancelled by user");
+                    break;
+                }
+                result = tokio::time::timeout(STREAM_IDLE_TIMEOUT, stream.next()) => {
+                    match result {
+                        Ok(Some(item)) => item,
+                        Ok(None) => break, // Stream ended normally
+                        Err(_elapsed) => {
+                            tracing::warn!(
+                                "⏱️ Stream idle timeout after {}s — no event received from provider. \
+                                 Treating as dropped stream (stop_reason=None → will retry).",
+                                STREAM_IDLE_TIMEOUT.as_secs()
+                            );
+                            break; // stop_reason stays None → triggers retry in tool_loop
+                        }
+                    }
                 }
             };
 

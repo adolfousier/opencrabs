@@ -139,7 +139,7 @@ impl TelegramAgent {
                         // process callback queries (approval button clicks)
                         // while the agent is running.
                         tokio::spawn(async move {
-                            let _ = handle_message(
+                            if let Err(e) = handle_message(
                                 bot,
                                 msg,
                                 agent,
@@ -151,7 +151,10 @@ impl TelegramAgent {
                                 config_rx,
                                 channel_msg_repo,
                             )
-                            .await;
+                            .await
+                            {
+                                tracing::error!("Telegram handle_message error: {e}");
+                            }
                         });
                         ResponseResult::Ok(())
                     }

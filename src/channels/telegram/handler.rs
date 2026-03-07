@@ -1083,6 +1083,11 @@ pub(crate) async fn handle_message(
     // Grab streaming message id (if any was created during streaming)
     let streaming_msg_id = streaming.lock().await.msg_id;
 
+    tracing::info!(
+        "Telegram: agent call completed for session {} — delivering final response",
+        session_id
+    );
+
     // ── Final response ────────────────────────────────────────────────────────
     match result {
         Ok(response) => {
@@ -1113,9 +1118,34 @@ pub(crate) async fn handle_message(
             let html = markdown_to_telegram_html(&text_only);
             if !html.is_empty() {
                 for chunk in split_message(&html, 4096) {
-                    bot.send_message(msg.chat.id, chunk)
+                    match bot
+                        .send_message(msg.chat.id, chunk.to_string())
                         .parse_mode(ParseMode::Html)
-                        .await?;
+                        .await
+                    {
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::warn!(
+                                "Telegram: HTML send failed ({e}), retrying as plain text"
+                            );
+                            // Fallback: send as plain text (strip HTML tags)
+                            let plain = chunk
+                                .replace("<b>", "")
+                                .replace("</b>", "")
+                                .replace("<i>", "")
+                                .replace("</i>", "")
+                                .replace("<code>", "")
+                                .replace("</code>", "")
+                                .replace("<pre>", "")
+                                .replace("</pre>", "")
+                                .replace("&lt;", "<")
+                                .replace("&gt;", ">")
+                                .replace("&amp;", "&");
+                            if let Err(e2) = bot.send_message(msg.chat.id, plain).await {
+                                tracing::error!("Telegram: plain text send also failed: {e2}");
+                            }
+                        }
+                    }
                 }
             }
 

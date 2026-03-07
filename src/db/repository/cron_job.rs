@@ -86,6 +86,18 @@ impl CronJobRepository {
         Ok(result.rows_affected() > 0)
     }
 
+    /// Set next_run_at to a past timestamp so the scheduler fires it on the next tick.
+    /// Also ensures the job is enabled.
+    pub async fn trigger_now(&self, id: &str) -> Result<bool> {
+        let result = sqlx::query(
+            "UPDATE cron_jobs SET next_run_at = '2000-01-01T00:00:00Z', enabled = 1, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
     pub async fn update_last_run(&self, id: &str, next_run_at: Option<&str>) -> Result<()> {
         sqlx::query(
             "UPDATE cron_jobs SET last_run_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), next_run_at = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
