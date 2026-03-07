@@ -14,60 +14,57 @@ use std::sync::Arc;
 /// No hardcoded priority - providers are enabled/disabled in config
 pub fn create_provider(config: &Config) -> Result<Arc<dyn Provider>> {
     // Check which providers are enabled in config.toml
-    let primary: Option<Arc<dyn Provider>> = if config
-        .providers
-        .minimax
-        .as_ref()
-        .is_some_and(|p| p.enabled)
-    {
-        tracing::info!("Using enabled provider: Minimax");
-        Some(
-            try_create_minimax(config)?
-                .ok_or_else(|| anyhow::anyhow!("Minimax enabled but failed to create"))?,
-        )
-    } else if config
-        .providers
-        .openrouter
-        .as_ref()
-        .is_some_and(|p| p.enabled)
-    {
-        tracing::info!("Using enabled provider: OpenRouter");
-        Some(
-            try_create_openrouter(config)?
-                .ok_or_else(|| anyhow::anyhow!("OpenRouter enabled but failed to create"))?,
-        )
-    } else if config
-        .providers
-        .anthropic
-        .as_ref()
-        .is_some_and(|p| p.enabled)
-    {
-        tracing::info!("Using enabled provider: Anthropic");
-        Some(
-            try_create_anthropic(config)?
-                .ok_or_else(|| anyhow::anyhow!("Anthropic enabled but failed to create"))?,
-        )
-    } else if config.providers.openai.as_ref().is_some_and(|p| p.enabled) {
-        tracing::info!("Using enabled provider: OpenAI");
-        Some(
-            try_create_openai(config)?
-                .ok_or_else(|| anyhow::anyhow!("OpenAI enabled but failed to create"))?,
-        )
-    } else if config.providers.active_custom().is_some() {
-        tracing::info!("Using enabled provider: Custom OpenAI-Compatible");
-        Some(
-            try_create_custom(config)?
-                .ok_or_else(|| anyhow::anyhow!("Custom provider enabled but failed to create"))?,
-        )
-    } else if config.providers.gemini.as_ref().is_some_and(|p| p.enabled) {
-        tracing::info!("Using enabled provider: Google Gemini");
-        Some(
-            try_create_gemini(config)?
-                .ok_or_else(|| anyhow::anyhow!("Gemini enabled but API key missing"))?,
-        )
-    } else {
-        None
-    };
+    let primary: Option<Arc<dyn Provider>> =
+        if config.providers.minimax.as_ref().is_some_and(|p| p.enabled) {
+            tracing::info!("Using enabled provider: Minimax");
+            Some(
+                try_create_minimax(config)?
+                    .ok_or_else(|| anyhow::anyhow!("Minimax enabled but failed to create"))?,
+            )
+        } else if config
+            .providers
+            .openrouter
+            .as_ref()
+            .is_some_and(|p| p.enabled)
+        {
+            tracing::info!("Using enabled provider: OpenRouter");
+            Some(
+                try_create_openrouter(config)?
+                    .ok_or_else(|| anyhow::anyhow!("OpenRouter enabled but failed to create"))?,
+            )
+        } else if config
+            .providers
+            .anthropic
+            .as_ref()
+            .is_some_and(|p| p.enabled)
+        {
+            tracing::info!("Using enabled provider: Anthropic");
+            Some(
+                try_create_anthropic(config)?
+                    .ok_or_else(|| anyhow::anyhow!("Anthropic enabled but failed to create"))?,
+            )
+        } else if config.providers.openai.as_ref().is_some_and(|p| p.enabled) {
+            tracing::info!("Using enabled provider: OpenAI");
+            Some(
+                try_create_openai(config)?
+                    .ok_or_else(|| anyhow::anyhow!("OpenAI enabled but failed to create"))?,
+            )
+        } else if config.providers.active_custom().is_some() {
+            tracing::info!("Using enabled provider: Custom OpenAI-Compatible");
+            Some(
+                try_create_custom(config)?.ok_or_else(|| {
+                    anyhow::anyhow!("Custom provider enabled but failed to create")
+                })?,
+            )
+        } else if config.providers.gemini.as_ref().is_some_and(|p| p.enabled) {
+            tracing::info!("Using enabled provider: Google Gemini");
+            Some(
+                try_create_gemini(config)?
+                    .ok_or_else(|| anyhow::anyhow!("Gemini enabled but API key missing"))?,
+            )
+        } else {
+            None
+        };
 
     // Build fallback chain if configured
     let fallback_providers = if let Some(fallback) = &config.providers.fallback
@@ -226,10 +223,7 @@ fn create_fallback(config: &Config, fallback_type: &str) -> Result<Arc<dyn Provi
                 try_create_custom_by_name(config, name)?
                     .ok_or_else(|| anyhow::anyhow!("Custom provider '{}' not configured", name))
             } else {
-                Err(anyhow::anyhow!(
-                    "Unknown fallback provider: {}",
-                    other
-                ))
+                Err(anyhow::anyhow!("Unknown fallback provider: {}", other))
             }
         }
     }
@@ -301,14 +295,14 @@ fn try_create_minimax(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     // so existing users get it automatically and can change it later
     if minimax_config.vision_model.is_none() {
         provider = provider.with_vision_model("MiniMax-Text-01".to_string());
-        if let Err(e) = crate::config::Config::write_key(
-            "providers.minimax",
-            "vision_model",
-            "MiniMax-Text-01",
-        ) {
+        if let Err(e) =
+            crate::config::Config::write_key("providers.minimax", "vision_model", "MiniMax-Text-01")
+        {
             tracing::warn!("Failed to persist minimax vision_model to config: {}", e);
         } else {
-            tracing::info!("Auto-injected vision_model = MiniMax-Text-01 into providers.minimax config");
+            tracing::info!(
+                "Auto-injected vision_model = MiniMax-Text-01 into providers.minimax config"
+            );
         }
     }
 

@@ -382,7 +382,10 @@ impl OpenAIProvider {
             m.content
                 .as_ref()
                 .and_then(|c| c.as_array())
-                .map(|arr| arr.iter().any(|p| p.get("type").and_then(|t| t.as_str()) == Some("image_url")))
+                .map(|arr| {
+                    arr.iter()
+                        .any(|p| p.get("type").and_then(|t| t.as_str()) == Some("image_url"))
+                })
                 .unwrap_or(false)
         });
         let model = if has_images {

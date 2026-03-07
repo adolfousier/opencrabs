@@ -6,8 +6,8 @@
 // --- Fallback chain config ---
 
 mod fallback_chain {
-    use crate::config::FallbackProviderConfig;
     use crate::brain::provider::factory::fallback_chain;
+    use crate::config::FallbackProviderConfig;
 
     #[test]
     fn empty_config_returns_empty_chain() {
@@ -42,10 +42,7 @@ mod fallback_chain {
             provider: Some("gemini".into()),
             providers: vec!["anthropic".into(), "openai".into()],
         };
-        assert_eq!(
-            fallback_chain(&cfg),
-            vec!["anthropic", "openai", "gemini"]
-        );
+        assert_eq!(fallback_chain(&cfg), vec!["anthropic", "openai", "gemini"]);
     }
 
     #[test]
@@ -312,8 +309,8 @@ mod fallback_runtime {
 // --- Vision model ---
 
 mod vision_model {
-    use crate::brain::provider::custom_openai_compatible::OpenAIProvider;
     use crate::brain::provider::Provider;
+    use crate::brain::provider::custom_openai_compatible::OpenAIProvider;
 
     #[test]
     fn no_vision_model_by_default() {
@@ -323,8 +320,7 @@ mod vision_model {
 
     #[test]
     fn with_vision_model_enables_vision() {
-        let provider =
-            OpenAIProvider::new("test-key".into()).with_vision_model("gpt-4o".into());
+        let provider = OpenAIProvider::new("test-key".into()).with_vision_model("gpt-4o".into());
         assert!(provider.supports_vision());
     }
 
