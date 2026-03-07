@@ -5,6 +5,42 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.57] - 2026-03-07
+
+### Added
+- **Two-step `/models` flow** — `/models` now shows a provider picker first, then model picker for the selected provider. Works across Telegram (inline buttons), Discord (buttons), Slack (action buttons), and WhatsApp (plain text). Handles providers without `/models` endpoint via config fallback
+  - `src/channels/commands.rs`, `src/channels/telegram/agent.rs`, `src/channels/telegram/handler.rs`, `src/channels/discord/agent.rs`, `src/channels/discord/handler.rs`, `src/channels/slack/handler.rs`
+- **`/new` and `/sessions` commands** — Create new sessions and switch between recent sessions from any channel. Inline buttons on Telegram/Discord/Slack, plain text on WhatsApp. Owner uses shared TUI session, non-owners get per-user sessions
+  - `src/channels/commands.rs`, `src/channels/telegram/agent.rs`, `src/channels/telegram/handler.rs`, `src/channels/discord/agent.rs`, `src/channels/discord/handler.rs`, `src/channels/slack/handler.rs`, `src/channels/whatsapp/handler.rs`
+- **User-defined slash commands on channels** — Custom commands from `commands.toml` (e.g. `/credits`) now work from Telegram, Discord, Slack, and WhatsApp. `action = "prompt"` forwards to the agent, `action = "system"` displays directly
+  - `src/channels/commands.rs`, `src/channels/telegram/handler.rs`, `src/channels/discord/handler.rs`, `src/channels/slack/handler.rs`, `src/channels/whatsapp/handler.rs`
+- **Custom commands in /help** — User-defined commands now appear in a "Custom Commands" section on both channel `/help` and the TUI help screen, sorted alphabetically with descriptions
+  - `src/channels/commands.rs`, `src/tui/render/help.rs`
+- **Emoji picker** — Type `:` followed by a shortcode to trigger an emoji autocomplete popup in the TUI. Arrow keys to navigate, Tab/Enter to insert, Esc to dismiss. Powered by the `emojis` crate
+  - `src/tui/app/state.rs`, `src/tui/app/input.rs`, `src/tui/render/input.rs`, `src/tui/render/mod.rs`, `Cargo.toml` (`emojis = "0.8.0"`)
+- **VOICE.md template** for voice configuration docs
+  - `src/docs/reference/templates/VOICE.md`
+- **"Why OpenCrabs?" README section** — security & binary size comparison vs Node.js frameworks
+  - `README.md`
+
+### Fixed
+- **Context counter accuracy** — System brain tokens are now counted, and token counts no longer drop between requests
+  - `src/brain/agent/service/builder.rs`, `src/brain/agent/service/context.rs`, `src/brain/agent/service/tool_loop.rs`, `src/tui/app/state.rs`
+- **Stream bleed between sessions** — Streaming state is now cleared on session switch, preventing leftover content from appearing in a new session
+  - `src/tui/app/messaging.rs`
+- **Session switch confirmation shows name** — Channel callbacks now display the session title (e.g. "Chat") instead of a truncated UUID
+  - `src/channels/telegram/agent.rs`, `src/channels/discord/agent.rs`, `src/channels/slack/handler.rs`
+
+### Removed
+- **HTTP gateway onboarding step** — Removed 339 lines of dead code. The gateway was inherited from OpenClaw's web UI design but never used; OpenCrabs runs via TUI/daemon and the A2A server handles external connections
+  - `src/config/types.rs`, `src/tui/onboarding/` (7 files), `src/tui/onboarding_render.rs`, `src/tui/render/help.rs`, `src/brain/tools/config_tool.rs`
+
+### Tests
+- 277-line context tracking test suite for brain token counting
+  - `src/brain/agent/service/tests/context_tracking.rs` (new)
+- 14 unit tests for channel commands: `format_number`, `format_help`, `provider_display_name`, `match_user_command_inner`
+  - `src/channels/commands.rs`
+
 ## [0.2.56] - 2026-03-06
 
 ### Added
@@ -1182,6 +1218,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.57]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.57
 [0.2.56]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.56
 [0.2.55]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.55
 [0.2.54]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.54
