@@ -68,7 +68,7 @@ impl OnboardingWizard {
             name
         } else {
             // fallback: first unfiltered model
-            self.all_model_names().first().copied().unwrap_or("default")
+            self.all_model_names().first().copied().unwrap_or("")
         }
     }
 

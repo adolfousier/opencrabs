@@ -164,6 +164,10 @@ pub struct LocalWhisper {
 impl LocalWhisper {
     /// Load a whisper model from disk.
     pub fn new(model_path: &Path) -> Result<Self> {
+        // Suppress whisper.cpp / ggml stderr output that bleeds into the TUI.
+        // Must be called before any whisper context is created.
+        suppress_whisper_logs();
+
         let path_str = model_path
             .to_str()
             .ok_or_else(|| anyhow::anyhow!("Model path is not valid UTF-8"))?;
@@ -252,14 +256,22 @@ fn decode_wav(bytes: &[u8]) -> Result<(Vec<f32>, u32)> {
     Ok((mono, spec.sample_rate))
 }
 
-/// Decode OGG (Vorbis) using symphonia.
+/// Decode OGG (Vorbis or Opus) using symphonia.
 fn decode_ogg(bytes: &[u8]) -> Result<(Vec<f32>, u32)> {
     use symphonia::core::audio::SampleBuffer;
-    use symphonia::core::codecs::DecoderOptions;
+    use symphonia::core::codecs::{CodecRegistry, DecoderOptions};
     use symphonia::core::formats::FormatOptions;
     use symphonia::core::io::MediaSourceStream;
     use symphonia::core::meta::MetadataOptions;
     use symphonia::core::probe::Hint;
+
+    // Build a codec registry that includes Opus (via libopus adapter)
+    // on top of symphonia's default codecs.
+    let mut codec_registry = CodecRegistry::new();
+    // Register all default codecs (Vorbis, PCM, etc.)
+    symphonia::default::register_enabled_codecs(&mut codec_registry);
+    // Register Opus decoder
+    codec_registry.register_all::<symphonia_adapter_libopus::OpusDecoder>();
 
     let cursor = std::io::Cursor::new(bytes.to_vec());
     let mss = MediaSourceStream::new(Box::new(cursor), Default::default());
@@ -287,7 +299,7 @@ fn decode_ogg(bytes: &[u8]) -> Result<(Vec<f32>, u32)> {
     let channels = track.codec_params.channels.map(|c| c.count()).unwrap_or(1);
     let track_id = track.id;
 
-    let mut decoder = symphonia::default::get_codecs()
+    let mut decoder = codec_registry
         .make(&track.codec_params, &DecoderOptions::default())
         .context("Failed to create audio decoder")?;
 
@@ -376,4 +388,30 @@ fn resample(input: &[f32], from_rate: u32, to_rate: u32) -> Result<Vec<f32>> {
     }
 
     Ok(output)
+}
+
+/// Redirect all whisper.cpp + ggml log output to a no-op callback.
+///
+/// Without this, whisper.cpp dumps verbose model-loading and inference debug
+/// lines (token probabilities, timestamps, decoder state) to stderr, which
+/// bleeds into the TUI and makes the display unreadable.
+fn suppress_whisper_logs() {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        // Safety: the callback is a plain C function that does nothing —
+        // no panics, no allocations, no unwinding.
+        unsafe {
+            whisper_rs_sys::whisper_log_set(Some(noop_log_callback), std::ptr::null_mut());
+        }
+    });
+}
+
+/// C-compatible no-op callback for whisper_log_set / ggml_log_set.
+extern "C" fn noop_log_callback(
+    _level: whisper_rs_sys::ggml_log_level,
+    _text: *const std::ffi::c_char,
+    _user_data: *mut std::ffi::c_void,
+) {
+    // Intentionally empty — swallow all whisper.cpp / ggml log output.
 }

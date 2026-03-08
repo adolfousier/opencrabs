@@ -651,6 +651,25 @@ async fn cmd_chat_inner(
         }
     }
 
+    // Channel manager — handles dynamic spawn/stop of channel agents on config reload
+    let channel_manager = Arc::new(crate::channels::ChannelManager::new(
+        channel_factory.clone(),
+        db.pool().clone(),
+        #[cfg(feature = "telegram")]
+        telegram_state.clone(),
+        #[cfg(feature = "whatsapp")]
+        whatsapp_state.clone(),
+        #[cfg(feature = "discord")]
+        discord_state.clone(),
+        #[cfg(feature = "slack")]
+        slack_state.clone(),
+        #[cfg(feature = "trello")]
+        trello_state.clone(),
+    ));
+
+    // Initial channel spawn — reconcile against current config
+    channel_manager.reconcile(config);
+
     // Spawn config hot-reload watcher — fires on any change to config.toml, keys.toml,
     // or commands.toml without requiring a restart.
     {
@@ -688,6 +707,14 @@ async fn cmd_chat_inner(
 
                 // TUI refresh — commands autocomplete + approval policy
                 let _ = sender.send(TuiEvent::ConfigReloaded);
+            }));
+        }
+
+        // Channel lifecycle — spawn/stop channels when enabled flag changes
+        {
+            let channel_mgr = channel_manager.clone();
+            callbacks.push(Arc::new(move |cfg: crate::config::Config| {
+                channel_mgr.reconcile(&cfg);
             }));
         }
 
@@ -732,189 +759,8 @@ async fn cmd_chat_inner(
         });
     }
 
-    // Spawn Telegram bot if configured
-    #[cfg(feature = "telegram")]
-    let _telegram_handle = {
-        let tg = &config.channels.telegram;
-        let tg_token = tg.token.clone();
-        let has_valid_token = tg_token
-            .as_ref()
-            .map(|t| {
-                if t.is_empty() || !t.contains(':') {
-                    return false;
-                }
-                let parts: Vec<&str> = t.splitn(2, ':').collect();
-                parts.len() == 2 && parts[0].parse::<u64>().is_ok() && parts[1].len() >= 30
-            })
-            .unwrap_or(false);
-
-        tracing::debug!(
-            "[Telegram] enabled={}, has_token={}, has_valid_token={}",
-            tg.enabled,
-            tg_token.is_some(),
-            has_valid_token
-        );
-
-        if tg.enabled && has_valid_token {
-            if let Some(ref token) = tg_token {
-                let tg_agent = channel_factory.create_agent_service();
-                let bot = crate::channels::telegram::TelegramAgent::new(
-                    tg_agent,
-                    service_context.clone(),
-                    app.shared_session_id(),
-                    telegram_state.clone(),
-                    channel_factory.config_rx(),
-                    crate::db::ChannelMessageRepository::new(db.pool().clone()),
-                );
-                tracing::info!(
-                    "Spawning Telegram bot ({} allowed users)",
-                    tg.allowed_users.len()
-                );
-                Some(bot.start(token.clone()))
-            } else {
-                tracing::debug!("Telegram enabled but no valid token configured");
-                None
-            }
-        } else {
-            None
-        }
-    };
-
-    // Spawn WhatsApp agent if configured (already paired via session.db)
-    #[cfg(feature = "whatsapp")]
-    let _whatsapp_handle = {
-        let wa = &config.channels.whatsapp;
-        if wa.enabled {
-            let wa_agent = crate::channels::whatsapp::WhatsAppAgent::new(
-                channel_factory.create_agent_service(),
-                service_context.clone(),
-                app.shared_session_id(),
-                whatsapp_state.clone(),
-                channel_factory.config_rx(),
-                crate::db::ChannelMessageRepository::new(db.pool().clone()),
-            );
-            tracing::info!(
-                "Spawning WhatsApp agent ({} allowed phones)",
-                wa.allowed_phones.len()
-            );
-            Some(wa_agent.start())
-        } else {
-            None
-        }
-    };
-
-    // Spawn Discord bot if configured (token-based, like Telegram)
-    #[cfg(feature = "discord")]
-    let _discord_handle = {
-        let dc = &config.channels.discord;
-        let dc_token = dc.token.clone();
-        // Discord tokens are typically ~70 chars, base64-like
-        let has_valid_token = dc_token
-            .as_ref()
-            .map(|t| !t.is_empty() && t.len() > 50)
-            .unwrap_or(false);
-        if dc.enabled && has_valid_token {
-            if let Some(ref token) = dc_token {
-                let dc_agent = crate::channels::discord::DiscordAgent::new(
-                    channel_factory.create_agent_service(),
-                    service_context.clone(),
-                    app.shared_session_id(),
-                    discord_state.clone(),
-                    channel_factory.config_rx(),
-                    crate::db::ChannelMessageRepository::new(db.pool().clone()),
-                );
-                tracing::info!(
-                    "Spawning Discord bot ({} allowed users)",
-                    dc.allowed_users.len()
-                );
-                Some(dc_agent.start(token.clone()))
-            } else {
-                tracing::debug!("Discord enabled but no valid token configured");
-                None
-            }
-        } else {
-            None
-        }
-    };
-
-    // Spawn Slack bot if configured (needs both bot token + app token for Socket Mode)
-    #[cfg(feature = "slack")]
-    let _slack_handle = {
-        let sl = &config.channels.slack;
-        let sl_token = sl.token.clone();
-        let sl_app_token = sl.app_token.clone();
-        let has_valid_tokens = sl_token
-            .as_ref()
-            .map(|t| !t.is_empty() && t.starts_with("xoxb-"))
-            .unwrap_or(false)
-            && sl_app_token
-                .as_ref()
-                .map(|t| !t.is_empty() && t.starts_with("xapp-"))
-                .unwrap_or(false);
-        if sl.enabled && has_valid_tokens {
-            if let (Some(bot_tok), Some(app_tok)) = (sl_token, sl_app_token) {
-                let sl_agent = crate::channels::slack::SlackAgent::new(
-                    channel_factory.create_agent_service(),
-                    service_context.clone(),
-                    app.shared_session_id(),
-                    slack_state.clone(),
-                    channel_factory.config_rx(),
-                    crate::db::ChannelMessageRepository::new(db.pool().clone()),
-                );
-                tracing::info!(
-                    "Spawning Slack bot ({} allowed user(s))",
-                    sl.allowed_users.len()
-                );
-                Some(sl_agent.start(bot_tok, app_tok))
-            } else {
-                tracing::debug!("Slack enabled but missing valid tokens");
-                None
-            }
-        } else {
-            None
-        }
-    };
-
-    // Spawn Trello agent if configured (polling-based, needs API Key + API Token + board IDs)
-    #[cfg(feature = "trello")]
-    let _trello_handle = {
-        let tr = &config.channels.trello;
-        let tr_api_key = tr.app_token.clone(); // app_token = API Key
-        let tr_api_token = tr.token.clone(); // token = API Token
-        let has_valid_creds = tr_api_key.as_ref().map(|k| !k.is_empty()).unwrap_or(false)
-            && tr_api_token
-                .as_ref()
-                .map(|t| !t.is_empty())
-                .unwrap_or(false);
-        let board_ids = tr.board_ids.clone();
-        let has_boards = !board_ids.is_empty();
-        if tr.enabled && has_valid_creds && has_boards {
-            if let (Some(api_key), Some(api_token)) = (tr_api_key, tr_api_token) {
-                let tr_agent = crate::channels::trello::TrelloAgent::new(
-                    channel_factory.create_agent_service(),
-                    service_context.clone(),
-                    tr.allowed_users.clone(),
-                    app.shared_session_id(),
-                    trello_state.clone(),
-                    board_ids,
-                    tr.poll_interval_secs,
-                    tr.session_idle_hours,
-                );
-                tracing::info!(
-                    "Spawning Trello agent ({} board(s), {} allowed user(s), poll={}s)",
-                    tr.board_ids.len(),
-                    tr.allowed_users.len(),
-                    tr.poll_interval_secs.unwrap_or(0),
-                );
-                Some(tr_agent.start(api_key, api_token))
-            } else {
-                tracing::debug!("Trello enabled but missing credentials");
-                None
-            }
-        } else {
-            None
-        }
-    };
+    // Channel spawning is handled by channel_manager.reconcile() above (line ~669).
+    // On config reload, reconcile() is called again to spawn/stop channels dynamically.
 
     // Run TUI or block in headless daemon mode
     if headless {
