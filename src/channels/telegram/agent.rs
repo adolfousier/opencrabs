@@ -183,6 +183,62 @@ impl TelegramAgent {
                             // Provider picker callback → show models for that provider
                             if let Some(provider_name) = data.strip_prefix("provider:") {
                                 let resp = crate::channels::commands::models_for_provider(provider_name).await;
+
+                                // Agent-handled providers (OpenRouter 300+ models, custom)
+                                // Switch to default if set, then let the agent follow up.
+                                if resp.agent_handled {
+                                    let session_id = *shared_session.lock().await;
+                                    let display = crate::channels::commands::provider_display_name(provider_name);
+                                    // Switch to this provider with its default model
+                                    if let Ok(config) = crate::config::Config::load()
+                                        && let Ok(new_provider) = crate::brain::provider::factory::create_provider_by_name(&config, provider_name)
+                                    {
+                                        agent.swap_provider(new_provider);
+                                    }
+                                    if !resp.current_model.is_empty() {
+                                        let _ = crate::channels::commands::switch_model(&agent, &resp.current_model, session_id).await;
+                                    }
+                                    let _ = bot.answer_callback_query(&query.id).await;
+                                    // Send synthetic message to agent so it handles follow-up
+                                    let prompt = if resp.current_model.is_empty() {
+                                        format!(
+                                            "[System: User selected {} provider but no default model is set. \
+                                             Ask them which model they want. Use config_manager tool to read \
+                                             providers section, then set the default_model. Keep current provider \
+                                             until a model is chosen.]",
+                                            display
+                                        )
+                                    } else {
+                                        format!(
+                                            "[System: User switched to {} provider with model {}. \
+                                             Confirm the switch. Ask if they want a different model — \
+                                             if so, use config_manager to update providers.{}.default_model \
+                                             and confirm.]",
+                                            display, resp.current_model,
+                                            if provider_name == "openrouter" { "openrouter" } else { provider_name }
+                                        )
+                                    };
+                                    if let Some(sid) = session_id {
+                                        let agent_clone = agent.clone();
+                                        let bot_clone = bot.clone();
+                                        let chat_id = query.message.as_ref().map(|m| m.chat().id).unwrap_or(teloxide::types::ChatId(0));
+                                        tokio::spawn(async move {
+                                            match agent_clone.send_message(sid, prompt, None).await {
+                                                Ok(resp) => {
+                                                    let html = crate::channels::telegram::handler::md_to_html(&resp.content);
+                                                    let _ = bot_clone.send_message(chat_id, html)
+                                                        .parse_mode(teloxide::types::ParseMode::Html)
+                                                        .await;
+                                                }
+                                                Err(e) => {
+                                                    tracing::error!("Agent follow-up failed: {}", e);
+                                                }
+                                            }
+                                        });
+                                    }
+                                    return ResponseResult::Ok(());
+                                }
+
                                 if resp.models.is_empty() {
                                     let _ = bot
                                         .answer_callback_query(&query.id)

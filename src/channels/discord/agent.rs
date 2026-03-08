@@ -155,6 +155,73 @@ impl EventHandler for Handler {
             // Provider picker callback → show models for that provider
             if let Some(provider_name) = custom_id.strip_prefix("provider:") {
                 let resp = crate::channels::commands::models_for_provider(provider_name).await;
+
+                // Agent-handled providers (OpenRouter 300+ models, custom)
+                if resp.agent_handled {
+                    let session_id = *self.shared_session.lock().await;
+                    let display = crate::channels::commands::provider_display_name(provider_name);
+                    if let Ok(config) = crate::config::Config::load()
+                        && let Ok(new_provider) =
+                            crate::brain::provider::factory::create_provider_by_name(
+                                &config,
+                                provider_name,
+                            )
+                    {
+                        self.agent.swap_provider(new_provider);
+                    }
+                    if !resp.current_model.is_empty() {
+                        let _ = crate::channels::commands::switch_model(
+                            &self.agent,
+                            &resp.current_model,
+                            session_id,
+                        )
+                        .await;
+                    }
+                    let _ = comp
+                        .create_response(
+                            &ctx.http,
+                            serenity::builder::CreateInteractionResponse::Acknowledge,
+                        )
+                        .await;
+                    if let Some(sid) = session_id {
+                        let prompt = if resp.current_model.is_empty() {
+                            format!(
+                                "[System: User selected {} provider but no default model is set. \
+                                 Ask them which model they want. Use config_manager tool to read \
+                                 providers section, then set the default_model. Keep current provider \
+                                 until a model is chosen.]",
+                                display
+                            )
+                        } else {
+                            format!(
+                                "[System: User switched to {} provider with model {}. \
+                                 Confirm the switch. Ask if they want a different model — \
+                                 if so, use config_manager to update providers.{}.default_model \
+                                 and confirm.]",
+                                display,
+                                resp.current_model,
+                                if provider_name == "openrouter" {
+                                    "openrouter"
+                                } else {
+                                    provider_name
+                                }
+                            )
+                        };
+                        let agent_clone = self.agent.clone();
+                        let http = ctx.http.clone();
+                        let channel_id = comp.channel_id;
+                        tokio::spawn(async move {
+                            match agent_clone.send_message(sid, prompt, None).await {
+                                Ok(r) => {
+                                    let _ = channel_id.say(&http, &r.content).await;
+                                }
+                                Err(e) => tracing::error!("Agent follow-up failed: {}", e),
+                            }
+                        });
+                    }
+                    return;
+                }
+
                 if resp.models.is_empty() {
                     let _ = comp
                         .create_response(
