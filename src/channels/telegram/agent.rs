@@ -235,10 +235,14 @@ impl TelegramAgent {
                                 {
                                     agent.swap_provider(new_provider);
                                 }
-                                crate::channels::commands::switch_model(&agent, model_name);
+                                let session_id = *shared_session.lock().await;
+                                let switch_text = match crate::channels::commands::switch_model(&agent, model_name, session_id).await {
+                                    Ok(ctx) => ctx,
+                                    Err(e) => format!("⚠️ {}", e),
+                                };
                                 let _ = bot
                                     .answer_callback_query(&query.id)
-                                    .text(format!("Switched to {}", model_name))
+                                    .text(&switch_text)
                                     .await;
                                 if let Some(msg) = &query.message {
                                     let text =

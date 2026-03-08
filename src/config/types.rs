@@ -538,6 +538,39 @@ impl ProviderConfigs {
     pub fn custom_by_name(&self, name: &str) -> Option<&ProviderConfig> {
         self.custom.as_ref()?.get(name)
     }
+
+    /// Return `(provider_name, default_model)` for the currently active provider,
+    /// using the same priority order as `factory::create_provider`.
+    pub fn active_provider_and_model(&self) -> (String, String) {
+        let candidates: &[(&str, Option<&ProviderConfig>)] = &[
+            ("minimax", self.minimax.as_ref()),
+            ("openrouter", self.openrouter.as_ref()),
+            ("anthropic", self.anthropic.as_ref()),
+            ("openai", self.openai.as_ref()),
+            ("gemini", self.gemini.as_ref()),
+        ];
+        for &(name, cfg) in candidates {
+            if let Some(c) = cfg
+                && c.enabled
+                && c.api_key.is_some()
+            {
+                let model = c
+                    .default_model
+                    .clone()
+                    .unwrap_or_else(|| "(default)".to_string());
+                return (name.to_string(), model);
+            }
+        }
+        // Check custom providers
+        if let Some((name, cfg)) = self.active_custom() {
+            let model = cfg
+                .default_model
+                .clone()
+                .unwrap_or_else(|| "(default)".to_string());
+            return (format!("custom:{}", name), model);
+        }
+        ("none".to_string(), "none".to_string())
+    }
 }
 
 /// Custom deserializer that handles both old flat format `[providers.custom]`

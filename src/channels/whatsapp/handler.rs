@@ -569,6 +569,9 @@ pub(crate) async fn handle_message(
         }
     };
 
+    // Sync channel agent's provider with config (TUI or other channel may have switched)
+    crate::channels::commands::sync_provider_from_config(&agent);
+
     // ── Channel commands (/help, /usage, /models, /stop) ────────────────────
     {
         use crate::channels::commands::{self, ChannelCommand};

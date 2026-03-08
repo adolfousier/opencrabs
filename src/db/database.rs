@@ -114,6 +114,9 @@ impl Database {
         self.pool.status().size > 0 || self.pool.status().max_size > 0
     }
 
+    /// Total number of migrations defined below — keep in sync when adding new ones.
+    const MIGRATION_COUNT: usize = 10;
+
     /// Run database migrations
     pub async fn run_migrations(&self) -> Result<()> {
         let migrations = Migrations::new(vec![
@@ -151,7 +154,30 @@ impl Database {
             .get()
             .await
             .context("Failed to get connection for migrations")?
-            .interact(move |conn| migrations.to_latest(conn))
+            .interact(move |conn| {
+                // Detect databases previously managed by sqlx: if the _sqlx_migrations
+                // table exists but rusqlite_migration hasn't run yet (user_version == 0),
+                // stamp the current version so we don't re-run already-applied migrations.
+                let user_version: i64 =
+                    conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
+                let has_sqlx: bool = conn
+                    .prepare(
+                        "SELECT COUNT(*) FROM sqlite_master \
+                         WHERE type='table' AND name='_sqlx_migrations'",
+                    )?
+                    .query_row([], |r| r.get::<_, i64>(0))
+                    .map(|c| c > 0)?;
+
+                if has_sqlx && user_version == 0 {
+                    tracing::info!(
+                        "Detected sqlx-managed database — stamping migration version to {}",
+                        Self::MIGRATION_COUNT
+                    );
+                    conn.pragma_update(None, "user_version", Self::MIGRATION_COUNT as i64)?;
+                }
+
+                migrations.to_latest(conn)
+            })
             .await
             .map_err(interact_err)?
             .context("Failed to run database migrations")?;
@@ -192,5 +218,101 @@ mod tests {
     async fn test_migrations() {
         let db = Database::connect_in_memory().await.unwrap();
         db.run_migrations().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_migrations_idempotent() {
+        let db = Database::connect_in_memory().await.unwrap();
+        db.run_migrations().await.unwrap();
+        // Running migrations a second time should be a no-op
+        db.run_migrations().await.unwrap();
+
+        let version: i64 = db
+            .pool
+            .get()
+            .await
+            .unwrap()
+            .interact(|conn| conn.pragma_query_value(None, "user_version", |r| r.get(0)))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(version, Database::MIGRATION_COUNT as i64);
+    }
+
+    /// Simulate upgrading from an sqlx-managed database: the _sqlx_migrations
+    /// table exists, all tables are already present, and user_version is 0.
+    /// run_migrations() must detect this and stamp the version without failing.
+    #[tokio::test]
+    async fn test_sqlx_upgrade_stamps_user_version() {
+        let db = Database::connect_in_memory().await.unwrap();
+
+        // 1. Run migrations normally to create all tables
+        db.run_migrations().await.unwrap();
+
+        // 2. Simulate a pre-existing sqlx DB: add _sqlx_migrations and reset user_version
+        db.pool
+            .get()
+            .await
+            .unwrap()
+            .interact(|conn| {
+                conn.execute_batch(
+                    "CREATE TABLE IF NOT EXISTS _sqlx_migrations (
+                        version INTEGER PRIMARY KEY,
+                        description TEXT NOT NULL,
+                        installed_on TEXT NOT NULL DEFAULT (datetime('now'))
+                    );
+                    PRAGMA user_version = 0;",
+                )
+            })
+            .await
+            .unwrap()
+            .unwrap();
+
+        // 3. run_migrations should detect sqlx and stamp, not fail
+        db.run_migrations().await.unwrap();
+
+        // 4. Verify user_version was set to MIGRATION_COUNT
+        let version: i64 = db
+            .pool
+            .get()
+            .await
+            .unwrap()
+            .interact(|conn| conn.pragma_query_value(None, "user_version", |r| r.get(0)))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(version, Database::MIGRATION_COUNT as i64);
+    }
+
+    /// Fresh database (no _sqlx_migrations, user_version=0) should run all
+    /// migrations normally and end at MIGRATION_COUNT.
+    #[tokio::test]
+    async fn test_fresh_db_runs_all_migrations() {
+        let db = Database::connect_in_memory().await.unwrap();
+
+        // Verify starts at 0
+        let before: i64 = db
+            .pool
+            .get()
+            .await
+            .unwrap()
+            .interact(|conn| conn.pragma_query_value(None, "user_version", |r| r.get(0)))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(before, 0);
+
+        db.run_migrations().await.unwrap();
+
+        let after: i64 = db
+            .pool
+            .get()
+            .await
+            .unwrap()
+            .interact(|conn| conn.pragma_query_value(None, "user_version", |r| r.get(0)))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after, Database::MIGRATION_COUNT as i64);
     }
 }

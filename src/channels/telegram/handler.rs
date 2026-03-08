@@ -691,6 +691,9 @@ pub(crate) async fn handle_message(
         .register_session_chat(session_id, msg.chat.id.0)
         .await;
 
+    // Sync channel agent's provider with config (TUI or other channel may have switched)
+    crate::channels::commands::sync_provider_from_config(&agent);
+
     // ── Channel commands (/help, /usage, /models) ──────────────────────────
     let mut text = text;
     if !is_voice {

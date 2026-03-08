@@ -100,16 +100,31 @@ pub async fn on_interaction(
                     {
                         state.agent.swap_provider(new_provider);
                     }
-                    crate::channels::commands::switch_model(&state.agent, model_name);
-                    tracing::info!("Slack: model switched to {}", model_name);
+                    let session_id = *state.shared_session.lock().await;
+                    let reply = match crate::channels::commands::switch_model(
+                        &state.agent,
+                        model_name,
+                        session_id,
+                    )
+                    .await
+                    {
+                        Ok(ctx) => {
+                            tracing::info!("Slack: model switched to {}", model_name);
+                            let _ = ctx;
+                            format!("✅ Model switched to `{}`", model_name)
+                        }
+                        Err(e) => {
+                            tracing::warn!("Slack: model switch failed: {}", e);
+                            format!("⚠️ {}", e)
+                        }
+                    };
                     if let Some(ref channel) = block_actions.channel {
                         let token =
                             SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
                         let session = client.open_session(&token);
                         let request = SlackApiChatPostMessageRequest::new(
                             channel.id.clone(),
-                            SlackMessageContent::new()
-                                .with_text(format!("✅ Model switched to `{}`", model_name)),
+                            SlackMessageContent::new().with_text(reply),
                         );
                         let _ = session.chat_post_message(&request).await;
                     }
@@ -631,6 +646,9 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         tracing::debug!("Slack: no processable content after file handling, ignoring");
         return;
     }
+
+    // Sync channel agent's provider with config (TUI or other channel may have switched)
+    crate::channels::commands::sync_provider_from_config(&state.agent);
 
     // ── Channel commands (/help, /usage, /models) ──────────────────────────
     {

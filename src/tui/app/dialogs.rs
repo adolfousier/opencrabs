@@ -817,32 +817,12 @@ impl App {
             tracing::warn!("Failed to save API key to keys.toml: {}", e);
         }
 
-        // Rebuild agent service with new provider
-        if let Err(e) = self.rebuild_agent_service().await {
-            // If rebuild fails, check if it's due to missing API key
-            if api_key.is_none() && provider_idx == 5 {
-                // Need API key - show message and stay in provider mode
-                self.push_system_message(format!(
-                    "API key required for {}. Type it and press Enter.",
-                    provider
-                        .name
-                        .split('(')
-                        .next()
-                        .unwrap_or(provider.name)
-                        .trim()
-                ));
-                return Ok(());
-            }
-            return Err(e);
-        }
-
-        // Get the selected model
+        // Resolve the selected model BEFORE rebuilding the provider so the new
+        // provider instance picks up the correct model from config on disk.
         let is_custom = provider_idx == 5;
         let selected_model = if is_custom {
-            // Custom provider: use free-text model name — must be set
             self.model_selector_custom_model.clone()
         } else if !self.model_selector_models.is_empty() {
-            // Non-custom: use filtered display list to get actual model name
             let filter = self.model_selector_filter.to_lowercase();
             let filtered: Vec<_> = self
                 .model_selector_models
@@ -865,31 +845,27 @@ impl App {
             self.default_model_name.clone()
         };
 
-        // Save the model to config
-        let custom_section2;
-        let section = match provider_idx {
-            0 => "providers.anthropic",
-            1 => "providers.openai",
-            2 => "providers.gemini",
-            3 => "providers.openrouter",
-            4 => "providers.minimax",
-            5 => {
-                let cname = if !self.model_selector_custom_name.is_empty() {
-                    self.model_selector_custom_name.clone()
-                } else if let Some((name, _)) = config.providers.active_custom() {
-                    name.to_string()
-                } else {
-                    "default".to_string()
-                };
-                custom_section2 = format!("providers.custom.{}", cname);
-                &custom_section2
-            }
-            _ => "providers.anthropic",
-        };
-
+        // Write default_model to config BEFORE rebuild so the provider picks it up
         if let Err(e) = crate::config::Config::write_key(section, "default_model", &selected_model)
         {
             tracing::warn!("Failed to persist model to config: {}", e);
+        }
+
+        // Rebuild agent service with new provider (now sees the correct model)
+        if let Err(e) = self.rebuild_agent_service().await {
+            if api_key.is_none() && provider_idx == 5 {
+                self.push_system_message(format!(
+                    "API key required for {}. Type it and press Enter.",
+                    provider
+                        .name
+                        .split('(')
+                        .next()
+                        .unwrap_or(provider.name)
+                        .trim()
+                ));
+                return Ok(());
+            }
+            return Err(e);
         }
 
         // Update app state
