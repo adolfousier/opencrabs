@@ -111,6 +111,7 @@ impl Tool for SlackSendTool {
                 },
                 "blocks": {
                     "type": "array",
+                    "items": { "type": "object" },
                     "description": "Slack Block Kit blocks array for send_blocks (JSON)"
                 },
                 "limit": {
