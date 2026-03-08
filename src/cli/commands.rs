@@ -130,18 +130,23 @@ pub(crate) async fn cmd_db(config: &crate::config::Config, operation: DbCommands
             println!("📊 Database Statistics\n");
             let db = Database::connect(&config.database.path).await?;
 
-            // Get counts using raw SQL for simplicity
-            let session_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions")
-                .fetch_one(db.pool())
-                .await?;
-
-            let message_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM messages")
-                .fetch_one(db.pool())
-                .await?;
-
-            let file_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM files")
-                .fetch_one(db.pool())
-                .await?;
+            let (session_count, message_count, file_count) = db
+                .pool()
+                .get()
+                .await
+                .context("Failed to get connection")?
+                .interact(|conn| {
+                    let sessions: i64 =
+                        conn.query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))?;
+                    let messages: i64 =
+                        conn.query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0))?;
+                    let files: i64 =
+                        conn.query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))?;
+                    Ok::<_, rusqlite::Error>((sessions, messages, files))
+                })
+                .await
+                .map_err(crate::db::interact_err)?
+                .context("Failed to query stats")?;
 
             println!("Sessions: {}", session_count);
             println!("Messages: {}", message_count);
@@ -152,18 +157,23 @@ pub(crate) async fn cmd_db(config: &crate::config::Config, operation: DbCommands
         DbCommands::Clear { force } => {
             let db = Database::connect(&config.database.path).await?;
 
-            // Get counts before clearing
-            let session_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions")
-                .fetch_one(db.pool())
-                .await?;
-
-            let message_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM messages")
-                .fetch_one(db.pool())
-                .await?;
-
-            let file_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM files")
-                .fetch_one(db.pool())
-                .await?;
+            let (session_count, message_count, file_count) = db
+                .pool()
+                .get()
+                .await
+                .context("Failed to get connection")?
+                .interact(|conn| {
+                    let sessions: i64 =
+                        conn.query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))?;
+                    let messages: i64 =
+                        conn.query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0))?;
+                    let files: i64 =
+                        conn.query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))?;
+                    Ok::<_, rusqlite::Error>((sessions, messages, files))
+                })
+                .await
+                .map_err(crate::db::interact_err)?
+                .context("Failed to query counts")?;
 
             if session_count == 0 && message_count == 0 && file_count == 0 {
                 println!("✨ Database is already empty");
@@ -195,15 +205,19 @@ pub(crate) async fn cmd_db(config: &crate::config::Config, operation: DbCommands
             println!("\n🗑️  Clearing database...");
 
             // Delete in correct order to respect foreign key constraints
-            sqlx::query("DELETE FROM messages")
-                .execute(db.pool())
-                .await?;
-
-            sqlx::query("DELETE FROM files").execute(db.pool()).await?;
-
-            sqlx::query("DELETE FROM sessions")
-                .execute(db.pool())
-                .await?;
+            db.pool()
+                .get()
+                .await
+                .context("Failed to get connection")?
+                .interact(|conn| {
+                    conn.execute("DELETE FROM messages", [])?;
+                    conn.execute("DELETE FROM files", [])?;
+                    conn.execute("DELETE FROM sessions", [])?;
+                    Ok::<_, rusqlite::Error>(())
+                })
+                .await
+                .map_err(crate::db::interact_err)?
+                .context("Failed to clear database")?;
 
             println!(
                 "✅ Successfully cleared {} sessions, {} messages, and {} files",

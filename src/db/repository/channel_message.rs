@@ -2,9 +2,11 @@
 //!
 //! Database operations for passively captured channel messages.
 
+use crate::db::Pool;
+use crate::db::database::interact_err;
 use crate::db::models::ChannelMessage;
 use anyhow::{Context, Result};
-use sqlx::SqlitePool;
+use rusqlite::params;
 
 /// Summary of a known chat
 pub struct ChatSummary {
@@ -18,38 +20,45 @@ pub struct ChatSummary {
 /// Repository for channel message operations
 #[derive(Clone)]
 pub struct ChannelMessageRepository {
-    pool: SqlitePool,
+    pool: Pool,
 }
 
 impl ChannelMessageRepository {
-    pub fn new(pool: SqlitePool) -> Self {
+    pub fn new(pool: Pool) -> Self {
         Self { pool }
     }
 
     /// Insert a single channel message
     pub async fn insert(&self, msg: &ChannelMessage) -> Result<()> {
-        sqlx::query(
-            r#"
-            INSERT OR IGNORE INTO channel_messages
-                (id, channel, channel_chat_id, channel_chat_name,
-                 sender_id, sender_name, content, message_type,
-                 platform_message_id, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            "#,
-        )
-        .bind(msg.id.to_string())
-        .bind(&msg.channel)
-        .bind(&msg.channel_chat_id)
-        .bind(&msg.channel_chat_name)
-        .bind(&msg.sender_id)
-        .bind(&msg.sender_name)
-        .bind(&msg.content)
-        .bind(&msg.message_type)
-        .bind(&msg.platform_message_id)
-        .bind(msg.created_at.timestamp())
-        .execute(&self.pool)
-        .await
-        .context("Failed to insert channel message")?;
+        let m = msg.clone();
+        self.pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.execute(
+                    "INSERT OR IGNORE INTO channel_messages
+                        (id, channel, channel_chat_id, channel_chat_name,
+                         sender_id, sender_name, content, message_type,
+                         platform_message_id, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                    params![
+                        m.id.to_string(),
+                        m.channel,
+                        m.channel_chat_id,
+                        m.channel_chat_name,
+                        m.sender_id,
+                        m.sender_name,
+                        m.content,
+                        m.message_type,
+                        m.platform_message_id,
+                        m.created_at.timestamp(),
+                    ],
+                )
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to insert channel message")?;
 
         Ok(())
     }
@@ -61,31 +70,34 @@ impl ChannelMessageRepository {
         chat_id: &str,
         limit: i64,
     ) -> Result<Vec<ChannelMessage>> {
-        let messages = if let Some(ch) = channel {
-            sqlx::query_as::<_, ChannelMessage>(
-                "SELECT * FROM channel_messages \
-                 WHERE channel = ? AND channel_chat_id = ? \
-                 ORDER BY created_at DESC LIMIT ?",
-            )
-            .bind(ch)
-            .bind(chat_id)
-            .bind(limit)
-            .fetch_all(&self.pool)
+        let ch = channel.map(|s| s.to_string());
+        let cid = chat_id.to_string();
+        self.pool
+            .get()
             .await
-        } else {
-            sqlx::query_as::<_, ChannelMessage>(
-                "SELECT * FROM channel_messages \
-                 WHERE channel_chat_id = ? \
-                 ORDER BY created_at DESC LIMIT ?",
-            )
-            .bind(chat_id)
-            .bind(limit)
-            .fetch_all(&self.pool)
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                if let Some(ch) = ch {
+                    let mut stmt = conn.prepare_cached(
+                        "SELECT * FROM channel_messages \
+                         WHERE channel = ?1 AND channel_chat_id = ?2 \
+                         ORDER BY created_at DESC LIMIT ?3",
+                    )?;
+                    let rows = stmt.query_map(params![ch, cid, limit], ChannelMessage::from_row)?;
+                    rows.collect::<std::result::Result<Vec<_>, _>>()
+                } else {
+                    let mut stmt = conn.prepare_cached(
+                        "SELECT * FROM channel_messages \
+                         WHERE channel_chat_id = ?1 \
+                         ORDER BY created_at DESC LIMIT ?2",
+                    )?;
+                    let rows = stmt.query_map(params![cid, limit], ChannelMessage::from_row)?;
+                    rows.collect::<std::result::Result<Vec<_>, _>>()
+                }
+            })
             .await
-        }
-        .context("Failed to fetch recent channel messages")?;
-
-        Ok(messages)
+            .map_err(interact_err)?
+            .context("Failed to fetch recent channel messages")
     }
 
     /// Search messages by content (LIKE-based)
@@ -96,107 +108,114 @@ impl ChannelMessageRepository {
         query: &str,
         limit: i64,
     ) -> Result<Vec<ChannelMessage>> {
+        let ch = channel.map(|s| s.to_string());
+        let cid = chat_id.map(|s| s.to_string());
         let pattern = format!("%{query}%");
-        let messages = match (channel, chat_id) {
-            (Some(ch), Some(cid)) => {
-                sqlx::query_as::<_, ChannelMessage>(
-                    "SELECT * FROM channel_messages \
-                     WHERE channel = ? AND channel_chat_id = ? AND content LIKE ? \
-                     ORDER BY created_at DESC LIMIT ?",
-                )
-                .bind(ch)
-                .bind(cid)
-                .bind(&pattern)
-                .bind(limit)
-                .fetch_all(&self.pool)
-                .await
-            }
-            (Some(ch), None) => {
-                sqlx::query_as::<_, ChannelMessage>(
-                    "SELECT * FROM channel_messages \
-                     WHERE channel = ? AND content LIKE ? \
-                     ORDER BY created_at DESC LIMIT ?",
-                )
-                .bind(ch)
-                .bind(&pattern)
-                .bind(limit)
-                .fetch_all(&self.pool)
-                .await
-            }
-            (None, Some(cid)) => {
-                sqlx::query_as::<_, ChannelMessage>(
-                    "SELECT * FROM channel_messages \
-                     WHERE channel_chat_id = ? AND content LIKE ? \
-                     ORDER BY created_at DESC LIMIT ?",
-                )
-                .bind(cid)
-                .bind(&pattern)
-                .bind(limit)
-                .fetch_all(&self.pool)
-                .await
-            }
-            (None, None) => {
-                sqlx::query_as::<_, ChannelMessage>(
-                    "SELECT * FROM channel_messages \
-                     WHERE content LIKE ? \
-                     ORDER BY created_at DESC LIMIT ?",
-                )
-                .bind(&pattern)
-                .bind(limit)
-                .fetch_all(&self.pool)
-                .await
-            }
-        }
-        .context("Failed to search channel messages")?;
 
-        Ok(messages)
+        self.pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| match (ch, cid) {
+                (Some(ch), Some(cid)) => {
+                    let mut stmt = conn.prepare_cached(
+                        "SELECT * FROM channel_messages \
+                             WHERE channel = ?1 AND channel_chat_id = ?2 AND content LIKE ?3 \
+                             ORDER BY created_at DESC LIMIT ?4",
+                    )?;
+                    let rows =
+                        stmt.query_map(params![ch, cid, pattern, limit], ChannelMessage::from_row)?;
+                    rows.collect::<std::result::Result<Vec<_>, _>>()
+                }
+                (Some(ch), None) => {
+                    let mut stmt = conn.prepare_cached(
+                        "SELECT * FROM channel_messages \
+                             WHERE channel = ?1 AND content LIKE ?2 \
+                             ORDER BY created_at DESC LIMIT ?3",
+                    )?;
+                    let rows =
+                        stmt.query_map(params![ch, pattern, limit], ChannelMessage::from_row)?;
+                    rows.collect::<std::result::Result<Vec<_>, _>>()
+                }
+                (None, Some(cid)) => {
+                    let mut stmt = conn.prepare_cached(
+                        "SELECT * FROM channel_messages \
+                             WHERE channel_chat_id = ?1 AND content LIKE ?2 \
+                             ORDER BY created_at DESC LIMIT ?3",
+                    )?;
+                    let rows =
+                        stmt.query_map(params![cid, pattern, limit], ChannelMessage::from_row)?;
+                    rows.collect::<std::result::Result<Vec<_>, _>>()
+                }
+                (None, None) => {
+                    let mut stmt = conn.prepare_cached(
+                        "SELECT * FROM channel_messages \
+                             WHERE content LIKE ?1 \
+                             ORDER BY created_at DESC LIMIT ?2",
+                    )?;
+                    let rows = stmt.query_map(params![pattern, limit], ChannelMessage::from_row)?;
+                    rows.collect::<std::result::Result<Vec<_>, _>>()
+                }
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to search channel messages")
     }
 
     /// List distinct chats with message count and last message time
     pub async fn list_chats(&self, channel: Option<&str>) -> Result<Vec<ChatSummary>> {
-        let rows: Vec<(String, String, Option<String>, i64, i64)> = if let Some(ch) = channel {
-            sqlx::query_as(
-                "SELECT channel, channel_chat_id, \
-                        MAX(channel_chat_name) as channel_chat_name, \
-                        COUNT(*) as message_count, \
-                        MAX(created_at) as last_message_at \
-                 FROM channel_messages \
-                 WHERE channel = ? \
-                 GROUP BY channel, channel_chat_id \
-                 ORDER BY last_message_at DESC",
-            )
-            .bind(ch)
-            .fetch_all(&self.pool)
+        let ch = channel.map(|s| s.to_string());
+        self.pool
+            .get()
             .await
-        } else {
-            sqlx::query_as(
-                "SELECT channel, channel_chat_id, \
-                        MAX(channel_chat_name) as channel_chat_name, \
-                        COUNT(*) as message_count, \
-                        MAX(created_at) as last_message_at \
-                 FROM channel_messages \
-                 GROUP BY channel, channel_chat_id \
-                 ORDER BY last_message_at DESC",
-            )
-            .fetch_all(&self.pool)
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                if let Some(ch) = ch {
+                    let mut stmt = conn.prepare_cached(
+                        "SELECT channel, channel_chat_id, \
+                                MAX(channel_chat_name) as channel_chat_name, \
+                                COUNT(*) as message_count, \
+                                MAX(created_at) as last_message_at \
+                         FROM channel_messages \
+                         WHERE channel = ?1 \
+                         GROUP BY channel, channel_chat_id \
+                         ORDER BY last_message_at DESC",
+                    )?;
+                    let rows = stmt.query_map(params![ch], |row| {
+                        Ok(ChatSummary {
+                            channel: row.get(0)?,
+                            channel_chat_id: row.get(1)?,
+                            channel_chat_name: row.get(2)?,
+                            message_count: row.get(3)?,
+                            last_message_at: row.get(4)?,
+                        })
+                    })?;
+                    rows.collect::<std::result::Result<Vec<_>, _>>()
+                } else {
+                    let mut stmt = conn.prepare_cached(
+                        "SELECT channel, channel_chat_id, \
+                                MAX(channel_chat_name) as channel_chat_name, \
+                                COUNT(*) as message_count, \
+                                MAX(created_at) as last_message_at \
+                         FROM channel_messages \
+                         GROUP BY channel, channel_chat_id \
+                         ORDER BY last_message_at DESC",
+                    )?;
+                    let rows = stmt.query_map([], |row| {
+                        Ok(ChatSummary {
+                            channel: row.get(0)?,
+                            channel_chat_id: row.get(1)?,
+                            channel_chat_name: row.get(2)?,
+                            message_count: row.get(3)?,
+                            last_message_at: row.get(4)?,
+                        })
+                    })?;
+                    rows.collect::<std::result::Result<Vec<_>, _>>()
+                }
+            })
             .await
-        }
-        .context("Failed to list channel chats")?;
-
-        Ok(rows
-            .into_iter()
-            .map(
-                |(channel, channel_chat_id, channel_chat_name, message_count, last_message_at)| {
-                    ChatSummary {
-                        channel,
-                        channel_chat_id,
-                        channel_chat_name,
-                        message_count,
-                        last_message_at,
-                    }
-                },
-            )
-            .collect())
+            .map_err(interact_err)?
+            .context("Failed to list channel chats")
     }
 }
 

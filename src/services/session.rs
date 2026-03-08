@@ -24,7 +24,7 @@ impl SessionService {
     }
 
     /// Access the underlying database pool
-    pub fn pool(&self) -> sqlx::SqlitePool {
+    pub fn pool(&self) -> crate::db::Pool {
         self.context.pool()
     }
 
@@ -152,12 +152,24 @@ impl SessionService {
         id: Uuid,
         dir: Option<String>,
     ) -> Result<()> {
-        sqlx::query("UPDATE sessions SET working_directory = ?, updated_at = ? WHERE id = ?")
-            .bind(&dir)
-            .bind(Utc::now().timestamp())
-            .bind(id.to_string())
-            .execute(&self.context.pool())
+        use crate::db::interact_err;
+        use rusqlite::params;
+
+        let id_str = id.to_string();
+        let now = Utc::now().timestamp();
+        self.context
+            .pool()
+            .get()
             .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.execute(
+                    "UPDATE sessions SET working_directory = ?1, updated_at = ?2 WHERE id = ?3",
+                    params![dir, now, id_str],
+                )
+            })
+            .await
+            .map_err(interact_err)?
             .context("Failed to update session working directory")?;
         Ok(())
     }

@@ -2,67 +2,88 @@
 //!
 //! Database operations for messages.
 
+use crate::db::Pool;
+use crate::db::database::interact_err;
 use crate::db::models::Message;
 use anyhow::{Context, Result};
-use sqlx::SqlitePool;
+use rusqlite::params;
 use uuid::Uuid;
 
 /// Repository for message operations
 #[derive(Clone)]
 pub struct MessageRepository {
-    pool: SqlitePool,
+    pool: Pool,
 }
 
 impl MessageRepository {
     /// Create a new message repository
-    pub fn new(pool: SqlitePool) -> Self {
+    pub fn new(pool: Pool) -> Self {
         Self { pool }
     }
 
     /// Find message by ID
     pub async fn find_by_id(&self, id: Uuid) -> Result<Option<Message>> {
-        let message = sqlx::query_as::<_, Message>("SELECT * FROM messages WHERE id = ?")
-            .bind(id.to_string())
-            .fetch_optional(&self.pool)
+        let id_str = id.to_string();
+        self.pool
+            .get()
             .await
-            .context("Failed to find message")?;
-
-        Ok(message)
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.prepare_cached("SELECT * FROM messages WHERE id = ?1")?
+                    .query_row(params![id_str], Message::from_row)
+                    .optional()
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to find message")
     }
 
     /// Find all messages for a session
     pub async fn find_by_session(&self, session_id: Uuid) -> Result<Vec<Message>> {
-        let messages = sqlx::query_as::<_, Message>(
-            "SELECT * FROM messages WHERE session_id = ? ORDER BY sequence ASC",
-        )
-        .bind(session_id.to_string())
-        .fetch_all(&self.pool)
-        .await
-        .context("Failed to find messages by session")?;
-
-        Ok(messages)
+        let sid = session_id.to_string();
+        self.pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                let mut stmt = conn.prepare_cached(
+                    "SELECT * FROM messages WHERE session_id = ?1 ORDER BY sequence ASC",
+                )?;
+                let rows = stmt.query_map(params![sid], Message::from_row)?;
+                rows.collect::<std::result::Result<Vec<_>, _>>()
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to find messages by session")
     }
 
     /// Create a new message
     pub async fn create(&self, message: &Message) -> Result<()> {
-        sqlx::query(
-            r#"
-            INSERT INTO messages (id, session_id, role, content, sequence,
-                                 created_at, token_count, cost)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            "#,
-        )
-        .bind(message.id.to_string())
-        .bind(message.session_id.to_string())
-        .bind(&message.role)
-        .bind(&message.content)
-        .bind(message.sequence)
-        .bind(message.created_at.timestamp())
-        .bind(message.token_count)
-        .bind(message.cost)
-        .execute(&self.pool)
-        .await
-        .context("Failed to create message")?;
+        let m = message.clone();
+        self.pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.execute(
+                    "INSERT INTO messages (id, session_id, role, content, sequence,
+                                         created_at, token_count, cost)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    params![
+                        m.id.to_string(),
+                        m.session_id.to_string(),
+                        m.role,
+                        m.content,
+                        m.sequence,
+                        m.created_at.timestamp(),
+                        m.token_count,
+                        m.cost,
+                    ],
+                )
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to create message")?;
 
         tracing::debug!(
             "Created message: {} in session: {}",
@@ -74,20 +95,22 @@ impl MessageRepository {
 
     /// Update an existing message
     pub async fn update(&self, message: &Message) -> Result<()> {
-        sqlx::query(
-            r#"
-            UPDATE messages
-            SET content = ?, token_count = ?, cost = ?
-            WHERE id = ?
-            "#,
-        )
-        .bind(&message.content)
-        .bind(message.token_count)
-        .bind(message.cost)
-        .bind(message.id.to_string())
-        .execute(&self.pool)
-        .await
-        .context("Failed to update message")?;
+        let m = message.clone();
+        self.pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.execute(
+                    "UPDATE messages
+                     SET content = ?1, token_count = ?2, cost = ?3
+                     WHERE id = ?4",
+                    params![m.content, m.token_count, m.cost, m.id.to_string()],
+                )
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to update message")?;
 
         tracing::debug!("Updated message: {}", message.id);
         Ok(())
@@ -95,11 +118,20 @@ impl MessageRepository {
 
     /// Append content to an existing message (for real-time history persistence)
     pub async fn append_content(&self, id: Uuid, content_to_append: &str) -> Result<()> {
-        sqlx::query("UPDATE messages SET content = content || ? WHERE id = ?")
-            .bind(content_to_append)
-            .bind(id.to_string())
-            .execute(&self.pool)
+        let id_str = id.to_string();
+        let content = content_to_append.to_string();
+        self.pool
+            .get()
             .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.execute(
+                    "UPDATE messages SET content = content || ?1 WHERE id = ?2",
+                    params![content, id_str],
+                )
+            })
+            .await
+            .map_err(interact_err)?
             .context("Failed to append to message")?;
 
         tracing::debug!("Appended content to message: {}", id);
@@ -108,10 +140,16 @@ impl MessageRepository {
 
     /// Delete a message
     pub async fn delete(&self, id: Uuid) -> Result<()> {
-        sqlx::query("DELETE FROM messages WHERE id = ?")
-            .bind(id.to_string())
-            .execute(&self.pool)
+        let id_str = id.to_string();
+        self.pool
+            .get()
             .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.execute("DELETE FROM messages WHERE id = ?1", params![id_str])
+            })
+            .await
+            .map_err(interact_err)?
             .context("Failed to delete message")?;
 
         tracing::debug!("Deleted message: {}", id);
@@ -125,38 +163,73 @@ impl MessageRepository {
 
     /// Count messages in a session
     pub async fn count_by_session(&self, session_id: Uuid) -> Result<i64> {
-        let result: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM messages WHERE session_id = ?")
-            .bind(session_id.to_string())
-            .fetch_one(&self.pool)
+        let sid = session_id.to_string();
+        self.pool
+            .get()
             .await
-            .context("Failed to count messages")?;
-
-        Ok(result.0)
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.query_row(
+                    "SELECT COUNT(*) FROM messages WHERE session_id = ?1",
+                    params![sid],
+                    |row| row.get(0),
+                )
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to count messages")
     }
 
     /// Get the last message in a session
     pub async fn get_last_message(&self, session_id: Uuid) -> Result<Option<Message>> {
-        let message = sqlx::query_as::<_, Message>(
-            "SELECT * FROM messages WHERE session_id = ? ORDER BY sequence DESC LIMIT 1",
-        )
-        .bind(session_id.to_string())
-        .fetch_optional(&self.pool)
-        .await
-        .context("Failed to get last message")?;
-
-        Ok(message)
+        let sid = session_id.to_string();
+        self.pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.prepare_cached(
+                    "SELECT * FROM messages WHERE session_id = ?1 ORDER BY sequence DESC LIMIT 1",
+                )?
+                .query_row(params![sid], Message::from_row)
+                .optional()
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to get last message")
     }
 
     /// Delete all messages in a session
     pub async fn delete_by_session(&self, session_id: Uuid) -> Result<()> {
-        sqlx::query("DELETE FROM messages WHERE session_id = ?")
-            .bind(session_id.to_string())
-            .execute(&self.pool)
+        let sid = session_id.to_string();
+        self.pool
+            .get()
             .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.execute("DELETE FROM messages WHERE session_id = ?1", params![sid])
+            })
+            .await
+            .map_err(interact_err)?
             .context("Failed to delete session messages")?;
 
         tracing::debug!("Deleted all messages for session: {}", session_id);
         Ok(())
+    }
+}
+
+/// Extension trait for rusqlite to add `.optional()` to query results
+trait OptionalExt<T> {
+    fn optional(self) -> rusqlite::Result<Option<T>>;
+}
+
+impl<T> OptionalExt<T> for rusqlite::Result<T> {
+    fn optional(self) -> rusqlite::Result<Option<T>> {
+        match self {
+            Ok(v) => Ok(Some(v)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 }
 

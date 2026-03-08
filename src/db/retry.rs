@@ -68,35 +68,27 @@ impl DbRetryConfig {
     }
 }
 
-/// Check if an error is a SQLite busy/locked error
-fn is_database_locked(err: &sqlx::Error) -> bool {
-    match err {
-        sqlx::Error::Database(db_err) => {
-            let msg = db_err.message().to_lowercase();
-            msg.contains("locked") || msg.contains("busy")
-        }
-        _ => false,
-    }
+/// Check if a rusqlite error is a SQLite busy/locked error
+fn is_database_locked(err: &rusqlite::Error) -> bool {
+    matches!(
+        err,
+        rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error {
+                code: rusqlite::ffi::ErrorCode::DatabaseBusy,
+                ..
+            },
+            _,
+        ) | rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error {
+                code: rusqlite::ffi::ErrorCode::DatabaseLocked,
+                ..
+            },
+            _,
+        )
+    )
 }
 
 /// Retry a database operation with exponential backoff
-///
-/// # Example
-/// ```no_run
-/// use opencrabs::db::retry::{retry_db_operation, DbRetryConfig};
-/// use sqlx::SqlitePool;
-///
-/// async fn example() {
-///     async fn insert_record(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-///         // ... database operation
-///         Ok(())
-///     }
-///
-///     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-///     let config = DbRetryConfig::default();
-///     let result = retry_db_operation(|| insert_record(&pool), &config).await;
-/// }
-/// ```
 pub async fn retry_db_operation<F, Fut, T, E>(
     mut operation: F,
     config: &DbRetryConfig,
@@ -110,7 +102,6 @@ where
     let mut last_error;
 
     loop {
-        // Try the operation
         match operation().await {
             Ok(result) => {
                 if attempt > 0 {
@@ -119,11 +110,9 @@ where
                 return Ok(result);
             }
             Err(err) => {
-                // Store error for potential final return
                 let error_msg = err.to_string();
                 last_error = err;
 
-                // Check if we should retry
                 let is_locked = error_msg.to_lowercase().contains("locked")
                     || error_msg.to_lowercase().contains("busy");
 
@@ -132,7 +121,6 @@ where
                     return Err(last_error);
                 }
 
-                // Check if we've exhausted attempts
                 if attempt >= config.max_attempts {
                     tracing::warn!(
                         "Max database retry attempts ({}) exceeded for lock error",
@@ -141,7 +129,6 @@ where
                     return Err(last_error);
                 }
 
-                // Calculate delay for this attempt
                 let delay = config.calculate_delay(attempt);
 
                 tracing::info!(
@@ -151,7 +138,6 @@ where
                     delay.as_millis()
                 );
 
-                // Wait before retrying
                 sleep(delay).await;
 
                 attempt += 1;
@@ -171,20 +157,19 @@ where
         .context("Database operation failed after retries")
 }
 
-/// Retry a database operation that returns sqlx::Result
-pub async fn retry_db_sqlx<F, Fut, T>(
+/// Retry a database operation that returns rusqlite::Result
+pub async fn retry_db_rusqlite<F, Fut, T>(
     mut operation: F,
     config: &DbRetryConfig,
-) -> std::result::Result<T, sqlx::Error>
+) -> std::result::Result<T, rusqlite::Error>
 where
     F: FnMut() -> Fut,
-    Fut: Future<Output = std::result::Result<T, sqlx::Error>>,
+    Fut: Future<Output = std::result::Result<T, rusqlite::Error>>,
 {
     let mut attempt = 0;
     let mut last_error;
 
     loop {
-        // Try the operation
         match operation().await {
             Ok(result) => {
                 if attempt > 0 {
@@ -193,7 +178,6 @@ where
                 return Ok(result);
             }
             Err(err) => {
-                // Check if this is a lock error
                 let is_locked = is_database_locked(&err);
 
                 if !is_locked {
@@ -201,10 +185,8 @@ where
                     return Err(err);
                 }
 
-                // Store error
                 last_error = err;
 
-                // Check if we've exhausted attempts
                 if attempt >= config.max_attempts {
                     tracing::warn!(
                         "Max database retry attempts ({}) exceeded for lock error",
@@ -213,7 +195,6 @@ where
                     return Err(last_error);
                 }
 
-                // Calculate delay for this attempt
                 let delay = config.calculate_delay(attempt);
 
                 tracing::info!(
@@ -223,7 +204,6 @@ where
                     delay.as_millis()
                 );
 
-                // Wait before retrying
                 sleep(delay).await;
 
                 attempt += 1;
@@ -276,14 +256,8 @@ mod tests {
 
     #[test]
     fn test_is_database_locked() {
-        use sqlx::Error;
-
-        // Test with a mock database error containing "locked"
-        let err = Error::Io(std::io::Error::other("database is locked"));
-        assert!(!is_database_locked(&err)); // IO errors don't count
-
-        // Test with non-lock error
-        let err = Error::RowNotFound;
+        // Non-lock error should return false
+        let err = rusqlite::Error::QueryReturnedNoRows;
         assert!(!is_database_locked(&err));
     }
 

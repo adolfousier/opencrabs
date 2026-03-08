@@ -6,6 +6,8 @@ authors = ["Adolfo Usier <adolfo@meetneura.ai>"]
 license = "MIT"
 description = "The autonomous AI agent. Single Rust binary. Every channel."
 repository = "https://github.com/adolfousier/opencrabs"
+homepage = "https://opencrabs.com"
+documentation = "https://docs.opencrabs.com"
 keywords = ["ai", "terminal", "assistant", "llm", "cli"]
 categories = ["command-line-utilities", "development-tools"]
 readme = "README.md"
@@ -24,8 +26,10 @@ clap = { version = "4.5", features = ["derive", "env", "cargo"] }
 ratatui = { version = "0.30", features = ["all-widgets"] }
 crossterm = { version = "0.29", features = ["event-stream"] }
 
-# Database (git main: libsqlite3-sys >=0.30,<0.37 — compatible with qmd's rusqlite)
-sqlx = { git = "https://github.com/launchbadge/sqlx", branch = "main", features = ["runtime-tokio", "tls-native-tls", "sqlite", "chrono", "uuid"] }
+# Database (deadpool-sqlite uses rusqlite 0.38, same as qmd — zero libsqlite3-sys conflicts)
+deadpool-sqlite = { version = "0.13", features = ["rt_tokio_1"] }
+rusqlite = { version = "0.38", features = ["bundled"] }
+rusqlite_migration = "2.4"
 
 # Cron scheduling
 cron = "0.15"
@@ -89,12 +93,12 @@ zeroize = { version = "1.8", features = ["derive"] }
 teloxide = { version = "0.13", features = ["macros"], optional = true }
 
 # WhatsApp
-whatsapp-rust = { version = "0.2", optional = true, default-features = false, features = ["tokio-transport", "ureq-client", "tokio-native"] }
-whatsapp-rust-tokio-transport = { version = "0.2", optional = true }
-whatsapp-rust-ureq-http-client = { version = "0.2", optional = true }
-wacore = { version = "0.2", optional = true }
-wacore-binary = { version = "0.2", optional = true }
-waproto = { version = "0.2", optional = true }
+whatsapp-rust = { version = "0.3", optional = true, default-features = false, features = ["tokio-transport", "ureq-client", "tokio-native"] }
+whatsapp-rust-tokio-transport = { version = "0.3", optional = true }
+whatsapp-rust-ureq-http-client = { version = "0.3", optional = true }
+wacore = { version = "0.3", optional = true }
+wacore-binary = { version = "0.3", optional = true }
+waproto = { version = "0.3", optional = true }
 qrcode = { version = "0.14", optional = true }
 rmp-serde = { version = "1", optional = true }
 
@@ -181,9 +185,5 @@ path = "src/benches/database.rs"
 name = "memory"
 harness = false
 path = "src/benches/memory.rs"
-
-[patch.crates-io]
-# Fix portable_simd API breakage on nightly >= 2025-12
-wacore-binary = { path = "src/patches/wacore-binary" }
 
 [lints.clippy]

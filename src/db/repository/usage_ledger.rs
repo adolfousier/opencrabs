@@ -3,8 +3,10 @@
 //! Cumulative usage tracking that persists across session deletes and compaction.
 //! Entries are append-only — never deleted.
 
+use crate::db::Pool;
+use crate::db::database::interact_err;
 use anyhow::{Context, Result};
-use sqlx::SqlitePool;
+use rusqlite::params;
 
 /// Aggregated usage stats grouped by model
 #[derive(Debug, Clone)]
@@ -18,11 +20,11 @@ pub struct ModelUsageStats {
 /// Repository for usage ledger operations
 #[derive(Clone)]
 pub struct UsageLedgerRepository {
-    pool: SqlitePool,
+    pool: Pool,
 }
 
 impl UsageLedgerRepository {
-    pub fn new(pool: SqlitePool) -> Self {
+    pub fn new(pool: Pool) -> Self {
         Self { pool }
     }
 
@@ -34,53 +36,67 @@ impl UsageLedgerRepository {
         token_count: i32,
         cost: f64,
     ) -> Result<()> {
-        sqlx::query(
-            "INSERT INTO usage_ledger (session_id, model, token_count, cost) VALUES (?, ?, ?, ?)",
-        )
-        .bind(session_id)
-        .bind(model)
-        .bind(token_count)
-        .bind(cost)
-        .execute(&self.pool)
-        .await
-        .context("Failed to record usage")?;
+        let sid = session_id.to_string();
+        let mdl = model.to_string();
+        self.pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.execute(
+                    "INSERT INTO usage_ledger (session_id, model, token_count, cost) VALUES (?1, ?2, ?3, ?4)",
+                    params![sid, mdl, token_count, cost],
+                )
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to record usage")?;
 
         Ok(())
     }
 
     /// Get all-time totals (tokens + cost)
     pub async fn totals(&self) -> Result<(i64, f64)> {
-        let row: (i64, f64) = sqlx::query_as(
-            "SELECT COALESCE(SUM(token_count), 0), COALESCE(SUM(cost), 0.0) FROM usage_ledger",
-        )
-        .fetch_one(&self.pool)
-        .await
-        .context("Failed to query usage totals")?;
-
-        Ok(row)
+        self.pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(|conn| {
+                conn.query_row(
+                    "SELECT COALESCE(SUM(token_count), 0), COALESCE(SUM(cost), 0.0) FROM usage_ledger",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to query usage totals")
     }
 
     /// Get usage stats grouped by model
     pub async fn stats_by_model(&self) -> Result<Vec<ModelUsageStats>> {
-        let rows: Vec<(String, i64, f64, i64)> = sqlx::query_as(
-            "SELECT model, COALESCE(SUM(token_count), 0), COALESCE(SUM(cost), 0.0), COUNT(*) \
-             FROM usage_ledger WHERE model != '' GROUP BY model ORDER BY SUM(cost) DESC",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .context("Failed to query usage by model")?;
-
-        Ok(rows
-            .into_iter()
-            .map(
-                |(model, total_tokens, total_cost, entry_count)| ModelUsageStats {
-                    model,
-                    total_tokens,
-                    total_cost,
-                    entry_count,
-                },
-            )
-            .collect())
+        self.pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(|conn| {
+                let mut stmt = conn.prepare_cached(
+                    "SELECT model, COALESCE(SUM(token_count), 0), COALESCE(SUM(cost), 0.0), COUNT(*) \
+                     FROM usage_ledger WHERE model != '' GROUP BY model ORDER BY SUM(cost) DESC",
+                )?;
+                let rows = stmt.query_map([], |row| {
+                    Ok(ModelUsageStats {
+                        model: row.get(0)?,
+                        total_tokens: row.get(1)?,
+                        total_cost: row.get(2)?,
+                        entry_count: row.get(3)?,
+                    })
+                })?;
+                rows.collect::<std::result::Result<Vec<_>, _>>()
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to query usage by model")
     }
 }
 

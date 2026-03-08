@@ -41,7 +41,7 @@ pub async fn handle_cancel_task(
     params: serde_json::Value,
     store: TaskStore,
     cancel_store: CancelStore,
-    pool: &sqlx::SqlitePool,
+    pool: &crate::db::Pool,
 ) -> JsonRpcResponse {
     let cancel_params: CancelTaskParams = match serde_json::from_value(params) {
         Ok(p) => p,

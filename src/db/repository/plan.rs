@@ -2,30 +2,41 @@
 //!
 //! Database operations for plans and plan tasks.
 
+use crate::db::Pool;
+use crate::db::database::interact_err;
 use crate::db::models::{Plan, PlanTask};
 use crate::tui::plan::{PlanDocument, PlanStatus, TaskStatus, TaskType};
 use anyhow::{Context, Result};
-use sqlx::SqlitePool;
+use rusqlite::params;
 use uuid::Uuid;
 
 /// Repository for plan operations
 #[derive(Clone)]
 pub struct PlanRepository {
-    pool: SqlitePool,
+    pool: Pool,
 }
 
 impl PlanRepository {
     /// Create a new plan repository
-    pub fn new(pool: SqlitePool) -> Self {
+    pub fn new(pool: Pool) -> Self {
         Self { pool }
     }
 
     /// Find plan by ID
     pub async fn find_by_id(&self, id: Uuid) -> Result<Option<PlanDocument>> {
-        let plan = sqlx::query_as::<_, Plan>("SELECT * FROM plans WHERE id = ?")
-            .bind(id.to_string())
-            .fetch_optional(&self.pool)
+        let id_str = id.to_string();
+        let plan = self
+            .pool
+            .get()
             .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.prepare_cached("SELECT * FROM plans WHERE id = ?1")?
+                    .query_row(params![id_str], Plan::from_row)
+                    .optional()
+            })
+            .await
+            .map_err(interact_err)?
             .context("Failed to find plan")?;
 
         let Some(plan) = plan else {
@@ -41,13 +52,22 @@ impl PlanRepository {
 
     /// Find all plans for a session
     pub async fn find_by_session_id(&self, session_id: Uuid) -> Result<Vec<PlanDocument>> {
-        let plans = sqlx::query_as::<_, Plan>(
-            "SELECT * FROM plans WHERE session_id = ? ORDER BY updated_at DESC",
-        )
-        .bind(session_id.to_string())
-        .fetch_all(&self.pool)
-        .await
-        .context("Failed to find plans by session")?;
+        let sid = session_id.to_string();
+        let plans = self
+            .pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                let mut stmt = conn.prepare_cached(
+                    "SELECT * FROM plans WHERE session_id = ?1 ORDER BY updated_at DESC",
+                )?;
+                let rows = stmt.query_map(params![sid], Plan::from_row)?;
+                rows.collect::<std::result::Result<Vec<_>, _>>()
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to find plans by session")?;
 
         let mut result = Vec::new();
         for plan in plans {
@@ -60,75 +80,82 @@ impl PlanRepository {
 
     /// Find tasks for a plan
     async fn find_tasks_by_plan_id(&self, plan_id: Uuid) -> Result<Vec<PlanTask>> {
-        let tasks = sqlx::query_as::<_, PlanTask>(
-            "SELECT * FROM plan_tasks WHERE plan_id = ? ORDER BY task_order ASC",
-        )
-        .bind(plan_id.to_string())
-        .fetch_all(&self.pool)
-        .await
-        .context("Failed to find plan tasks")?;
-
-        Ok(tasks)
+        let pid = plan_id.to_string();
+        self.pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                let mut stmt = conn.prepare_cached(
+                    "SELECT * FROM plan_tasks WHERE plan_id = ?1 ORDER BY task_order ASC",
+                )?;
+                let rows = stmt.query_map(params![pid], PlanTask::from_row)?;
+                rows.collect::<std::result::Result<Vec<_>, _>>()
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to find plan tasks")
     }
 
     /// Create a new plan with tasks
     pub async fn create(&self, plan: &PlanDocument) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
-
-        // Insert plan
         let (db_plan, db_tasks) = self.plan_to_db(plan)?;
 
-        sqlx::query(
-            r#"
-            INSERT INTO plans (id, session_id, title, description, context, risks,
-                             test_strategy, technical_stack, status, created_at, updated_at, approved_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            "#,
-        )
-        .bind(db_plan.id.to_string())
-        .bind(db_plan.session_id.to_string())
-        .bind(&db_plan.title)
-        .bind(&db_plan.description)
-        .bind(&db_plan.context)
-        .bind(&db_plan.risks)
-        .bind(&db_plan.test_strategy)
-        .bind(&db_plan.technical_stack)
-        .bind(&db_plan.status)
-        .bind(db_plan.created_at.timestamp())
-        .bind(db_plan.updated_at.timestamp())
-        .bind(db_plan.approved_at.map(|dt| dt.timestamp()))
-        .execute(&mut *tx)
-        .await
-        .context("Failed to create plan")?;
-
-        // Insert tasks
-        for task in db_tasks {
-            sqlx::query(
-                r#"
-                INSERT INTO plan_tasks (id, plan_id, task_order, title, description,
-                                       task_type, dependencies, complexity, acceptance_criteria,
-                                       status, notes, completed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                "#,
-            )
-            .bind(task.id.to_string())
-            .bind(task.plan_id.to_string())
-            .bind(task.task_order)
-            .bind(&task.title)
-            .bind(&task.description)
-            .bind(&task.task_type)
-            .bind(&task.dependencies)
-            .bind(task.complexity)
-            .bind(&task.acceptance_criteria)
-            .bind(&task.status)
-            .bind(&task.notes)
-            .bind(task.completed_at.map(|dt| dt.timestamp()))
-            .execute(&mut *tx)
+        self.pool
+            .get()
             .await
-            .context("Failed to create plan task")?;
-        }
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                let tx = conn.transaction()?;
 
-        tx.commit().await?;
+                tx.execute(
+                    "INSERT INTO plans (id, session_id, title, description, context, risks,
+                                     test_strategy, technical_stack, status, created_at, updated_at, approved_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                    params![
+                        db_plan.id.to_string(),
+                        db_plan.session_id.to_string(),
+                        db_plan.title,
+                        db_plan.description,
+                        db_plan.context,
+                        db_plan.risks,
+                        db_plan.test_strategy,
+                        db_plan.technical_stack,
+                        db_plan.status,
+                        db_plan.created_at.timestamp(),
+                        db_plan.updated_at.timestamp(),
+                        db_plan.approved_at.map(|dt| dt.timestamp()),
+                    ],
+                )?;
+
+                for task in &db_tasks {
+                    tx.execute(
+                        "INSERT INTO plan_tasks (id, plan_id, task_order, title, description,
+                                               task_type, dependencies, complexity, acceptance_criteria,
+                                               status, notes, completed_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                        params![
+                            task.id.to_string(),
+                            task.plan_id.to_string(),
+                            task.task_order,
+                            task.title,
+                            task.description,
+                            task.task_type,
+                            task.dependencies,
+                            task.complexity,
+                            task.acceptance_criteria,
+                            task.status,
+                            task.notes,
+                            task.completed_at.map(|dt| dt.timestamp()),
+                        ],
+                    )?;
+                }
+
+                tx.commit()
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to create plan")?;
 
         tracing::debug!("Created plan: {}", plan.id);
         Ok(())
@@ -136,69 +163,69 @@ impl PlanRepository {
 
     /// Update an existing plan
     pub async fn update(&self, plan: &PlanDocument) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
-
         let (db_plan, db_tasks) = self.plan_to_db(plan)?;
 
-        // Update plan
-        sqlx::query(
-            r#"
-            UPDATE plans
-            SET title = ?, description = ?, context = ?, risks = ?,
-                test_strategy = ?, technical_stack = ?,
-                status = ?, updated_at = ?, approved_at = ?
-            WHERE id = ?
-            "#,
-        )
-        .bind(&db_plan.title)
-        .bind(&db_plan.description)
-        .bind(&db_plan.context)
-        .bind(&db_plan.risks)
-        .bind(&db_plan.test_strategy)
-        .bind(&db_plan.technical_stack)
-        .bind(&db_plan.status)
-        .bind(db_plan.updated_at.timestamp())
-        .bind(db_plan.approved_at.map(|dt| dt.timestamp()))
-        .bind(db_plan.id.to_string())
-        .execute(&mut *tx)
-        .await
-        .context("Failed to update plan")?;
-
-        // Delete existing tasks and re-insert
-        sqlx::query("DELETE FROM plan_tasks WHERE plan_id = ?")
-            .bind(db_plan.id.to_string())
-            .execute(&mut *tx)
+        self.pool
+            .get()
             .await
-            .context("Failed to delete old plan tasks")?;
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                let tx = conn.transaction()?;
 
-        // Insert updated tasks
-        for task in db_tasks {
-            sqlx::query(
-                r#"
-                INSERT INTO plan_tasks (id, plan_id, task_order, title, description,
-                                       task_type, dependencies, complexity, acceptance_criteria,
-                                       status, notes, completed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                "#,
-            )
-            .bind(task.id.to_string())
-            .bind(task.plan_id.to_string())
-            .bind(task.task_order)
-            .bind(&task.title)
-            .bind(&task.description)
-            .bind(&task.task_type)
-            .bind(&task.dependencies)
-            .bind(task.complexity)
-            .bind(&task.acceptance_criteria)
-            .bind(&task.status)
-            .bind(&task.notes)
-            .bind(task.completed_at.map(|dt| dt.timestamp()))
-            .execute(&mut *tx)
+                tx.execute(
+                    "UPDATE plans
+                     SET title = ?1, description = ?2, context = ?3, risks = ?4,
+                         test_strategy = ?5, technical_stack = ?6,
+                         status = ?7, updated_at = ?8, approved_at = ?9
+                     WHERE id = ?10",
+                    params![
+                        db_plan.title,
+                        db_plan.description,
+                        db_plan.context,
+                        db_plan.risks,
+                        db_plan.test_strategy,
+                        db_plan.technical_stack,
+                        db_plan.status,
+                        db_plan.updated_at.timestamp(),
+                        db_plan.approved_at.map(|dt| dt.timestamp()),
+                        db_plan.id.to_string(),
+                    ],
+                )?;
+
+                // Delete existing tasks and re-insert
+                tx.execute(
+                    "DELETE FROM plan_tasks WHERE plan_id = ?1",
+                    params![db_plan.id.to_string()],
+                )?;
+
+                for task in &db_tasks {
+                    tx.execute(
+                        "INSERT INTO plan_tasks (id, plan_id, task_order, title, description,
+                                               task_type, dependencies, complexity, acceptance_criteria,
+                                               status, notes, completed_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                        params![
+                            task.id.to_string(),
+                            task.plan_id.to_string(),
+                            task.task_order,
+                            task.title,
+                            task.description,
+                            task.task_type,
+                            task.dependencies,
+                            task.complexity,
+                            task.acceptance_criteria,
+                            task.status,
+                            task.notes,
+                            task.completed_at.map(|dt| dt.timestamp()),
+                        ],
+                    )?;
+                }
+
+                tx.commit()
+            })
             .await
-            .context("Failed to update plan task")?;
-        }
-
-        tx.commit().await?;
+            .map_err(interact_err)?
+            .context("Failed to update plan")?;
 
         tracing::debug!("Updated plan: {}", plan.id);
         Ok(())
@@ -206,11 +233,15 @@ impl PlanRepository {
 
     /// Delete a plan and all its tasks
     pub async fn delete(&self, id: Uuid) -> Result<()> {
+        let id_str = id.to_string();
         // Tasks will be deleted automatically via CASCADE
-        sqlx::query("DELETE FROM plans WHERE id = ?")
-            .bind(id.to_string())
-            .execute(&self.pool)
+        self.pool
+            .get()
             .await
+            .context("Failed to get connection")?
+            .interact(move |conn| conn.execute("DELETE FROM plans WHERE id = ?1", params![id_str]))
+            .await
+            .map_err(interact_err)?
             .context("Failed to delete plan")?;
 
         tracing::debug!("Deleted plan: {}", id);
@@ -417,6 +448,21 @@ impl PlanRepository {
             TaskStatus::Skipped => "Skipped".to_string(),
             TaskStatus::Failed => "Failed".to_string(),
             TaskStatus::Blocked(reason) => format!("Blocked:{}", reason),
+        }
+    }
+}
+
+/// Extension trait for rusqlite to add `.optional()` to query results
+trait OptionalExt<T> {
+    fn optional(self) -> rusqlite::Result<Option<T>>;
+}
+
+impl<T> OptionalExt<T> for rusqlite::Result<T> {
+    fn optional(self) -> rusqlite::Result<Option<T>> {
+        match self {
+            Ok(v) => Ok(Some(v)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
         }
     }
 }

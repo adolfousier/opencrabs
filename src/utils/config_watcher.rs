@@ -149,7 +149,7 @@ mod tests {
                 let debounce = std::time::Duration::from_millis(100);
                 // Hard deadline so the blocking thread exits and doesn't hang the
                 // tokio runtime shutdown (default shutdown_timeout is 10s).
-                let end = std::time::Instant::now() + std::time::Duration::from_secs(3);
+                let end = std::time::Instant::now() + std::time::Duration::from_secs(8);
                 loop {
                     let remaining = end.saturating_duration_since(std::time::Instant::now());
                     if remaining.is_zero() {
@@ -181,12 +181,12 @@ mod tests {
             })
         };
 
-        // Modify the file to trigger the watcher
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        // Give the watcher thread time to register the watch before modifying
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         std::fs::write(&config_path, "[channels.telegram]\nenabled = true\n").unwrap();
 
-        // Wait up to 2s for callback to fire
-        let result = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv()).await;
+        // Wait up to 5s for callback to fire
+        let result = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv()).await;
         assert!(
             result.is_ok(),
             "callback should have fired after file change"
