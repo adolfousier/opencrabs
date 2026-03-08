@@ -5,6 +5,8 @@
 
 pub mod commands;
 mod factory;
+#[cfg(test)]
+mod tests;
 pub mod voice;
 
 #[cfg(feature = "discord")]

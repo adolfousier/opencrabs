@@ -6,8 +6,44 @@
 use uuid::Uuid;
 
 use crate::brain::agent::AgentService;
+use crate::config::Config;
 use crate::db::repository::SessionListOptions;
 use crate::services::SessionService;
+
+/// Sync the channel agent's provider with the current config.
+///
+/// Each channel has its own `AgentService` instance, so when the TUI (or another
+/// channel) switches models, this agent won't know until we check. Call this at
+/// the top of every message handler so the agent always uses the live provider.
+pub fn sync_provider_from_config(agent: &AgentService) {
+    let config = match Config::load() {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let (cfg_provider, cfg_model) = config.providers.active_provider_and_model();
+    let agent_provider = agent.provider_name();
+    let agent_model = agent.provider_model();
+
+    // Only swap if something changed
+    if cfg_provider != agent_provider || cfg_model != agent_model {
+        match crate::brain::provider::create_provider(&config) {
+            Ok(new_provider) => {
+                tracing::info!(
+                    "Channel agent synced: {} / {} → {} / {}",
+                    agent_provider,
+                    agent_model,
+                    cfg_provider,
+                    cfg_model,
+                );
+                agent.swap_provider(new_provider);
+            }
+            Err(e) => {
+                tracing::warn!("Failed to sync channel agent provider: {}", e);
+            }
+        }
+    }
+}
 
 /// Result of matching a channel message against known commands.
 pub enum ChannelCommand {
@@ -62,6 +98,8 @@ pub struct ModelsResponse {
 }
 
 /// Check if a message is a known channel command and return the response.
+/// Commands that produce output are persisted to session history so they
+/// appear in TUI and give the agent context about what happened.
 pub async fn handle_command(
     text: &str,
     session_id: Uuid,
@@ -69,7 +107,7 @@ pub async fn handle_command(
     session_svc: &SessionService,
 ) -> ChannelCommand {
     let trimmed = text.trim();
-    match trimmed {
+    let result = match trimmed {
         "/compact" => ChannelCommand::Compact,
         "/help" => ChannelCommand::Help(format_help()),
         "/models" => ChannelCommand::Models(format_providers(agent)),
@@ -79,6 +117,47 @@ pub async fn handle_command(
         "/usage" => ChannelCommand::Usage(format_usage(session_id, agent, session_svc).await),
         _ if trimmed.starts_with('/') => match_user_command(trimmed),
         _ => ChannelCommand::NotACommand,
+    };
+
+    // Persist command + response to session history
+    let response_text = match &result {
+        ChannelCommand::Help(body) | ChannelCommand::Usage(body) => Some(body.clone()),
+        ChannelCommand::Models(resp) => Some(resp.text.clone()),
+        ChannelCommand::Sessions(resp) => Some(resp.text.clone()),
+        ChannelCommand::NewSession => Some("New session started.".to_string()),
+        ChannelCommand::Stop => Some("Operation stopped.".to_string()),
+        ChannelCommand::UserSystem(body) => Some(body.clone()),
+        ChannelCommand::Compact | ChannelCommand::UserPrompt(_) | ChannelCommand::NotACommand => {
+            None
+        }
+    };
+
+    if let Some(response) = response_text {
+        persist_command_to_history(agent, session_id, trimmed, &response).await;
+    }
+
+    result
+}
+
+/// Save the user command and bot response to session message history.
+async fn persist_command_to_history(
+    agent: &AgentService,
+    session_id: Uuid,
+    command: &str,
+    response: &str,
+) {
+    let msg_svc = crate::services::MessageService::new(agent.context().clone());
+    if let Err(e) = msg_svc
+        .create_message(session_id, "user".to_string(), command.to_string())
+        .await
+    {
+        tracing::warn!("Failed to persist channel command to history: {}", e);
+    }
+    if let Err(e) = msg_svc
+        .create_message(session_id, "assistant".to_string(), response.to_string())
+        .await
+    {
+        tracing::warn!("Failed to persist channel command response to history: {}", e);
     }
 }
 
@@ -283,8 +362,14 @@ async fn format_sessions(
 // ── /models ─────────────────────────────────────────────────────────────────
 
 fn format_providers(agent: &AgentService) -> ProvidersResponse {
-    let current_provider = agent.provider_name();
-    let current_model = agent.provider_model();
+    // Read current provider/model from config (not the channel agent, which may be stale)
+    let (current_provider, current_model) = match crate::config::Config::load() {
+        Ok(cfg) => {
+            let (prov, model) = cfg.providers.active_provider_and_model();
+            (prov, model)
+        }
+        Err(_) => (agent.provider_name(), agent.provider_model()),
+    };
 
     let providers = configured_providers();
 
@@ -400,17 +485,37 @@ pub async fn models_for_provider(provider_name: &str) -> ModelsResponse {
 
     let current_model = provider.default_model().to_string();
 
-    // Try live fetch first, fall back to config models, then hardcoded
-    let mut models = provider.fetch_models().await;
-
-    // If fetch returned the hardcoded GPT fallback, check config models instead
-    if models.first().is_some_and(|m| m.starts_with("gpt-")) && provider.name() != "openai" {
-        // Fetch returned the hardcoded fallback — try config models
-        let config_models = provider_config_models(&config, provider_name);
-        if !config_models.is_empty() {
-            models = config_models;
+    // Prefer config models (fast, no network), then live fetch with timeout, then hardcoded
+    let config_models = provider_config_models(&config, provider_name);
+    let mut models = if !config_models.is_empty() {
+        config_models
+    } else {
+        // Live fetch with 10s timeout — OpenRouter can return thousands of models
+        match tokio::time::timeout(std::time::Duration::from_secs(10), provider.fetch_models())
+            .await
+        {
+            Ok(fetched) if !fetched.is_empty() => {
+                // Filter out hardcoded GPT fallback for non-OpenAI providers
+                if fetched.first().is_some_and(|m| m.starts_with("gpt-"))
+                    && provider.name() != "openai"
+                    && provider.name() != "openai-compatible"
+                {
+                    // Fallback returned GPT defaults — just use current model
+                    vec![current_model.clone()]
+                } else {
+                    fetched
+                }
+            }
+            Ok(_empty) => {
+                // Empty fetch result — just show current model
+                vec![current_model.clone()]
+            }
+            Err(_) => {
+                tracing::warn!("fetch_models timed out for provider '{}'", provider_name);
+                vec![current_model.clone()]
+            }
         }
-    }
+    };
 
     if models.is_empty() {
         models = provider.supported_models();
@@ -476,42 +581,78 @@ fn provider_display_name(name: &str) -> &str {
 // ── Model switching ─────────────────────────────────────────────────────────
 
 /// Switch the active model within the current provider and persist to config.
-pub fn switch_model(agent: &AgentService, model_name: &str) {
-    // Detect provider section from provider name
+/// Saves a `[Model changed to ...]` message to the session history so the agent
+/// is aware of the switch — matching TUI behaviour.
+/// Returns an error message on failure so channels can report it to the user.
+pub async fn switch_model(
+    agent: &AgentService,
+    model_name: &str,
+    session_id: Option<uuid::Uuid>,
+) -> Result<String, String> {
     let provider_name = agent.provider_name();
-    let section = match provider_name.to_lowercase().as_str() {
-        "anthropic" => "providers.anthropic",
-        "openai" => "providers.openai",
-        "gemini" | "google" => "providers.gemini",
-        "openrouter" => "providers.openrouter",
-        "minimax" => "providers.minimax",
-        _ => {
-            // Custom provider — try to write under providers.custom.<name>
-            // Fall back to just logging
-            tracing::info!(
-                "Channel: model switch to {} (custom provider {})",
-                model_name,
-                provider_name
-            );
-            return;
-        }
-    };
+    let section = provider_section(&provider_name)
+        .ok_or_else(|| format!("Unknown provider '{}' — cannot switch model", provider_name))?;
 
-    if let Err(e) = crate::config::Config::write_key(section, "default_model", model_name) {
+    crate::config::Config::write_key(&section, "default_model", model_name).map_err(|e| {
         tracing::warn!("Failed to persist model to config: {}", e);
-    } else {
-        tracing::info!(
-            "Channel: switched model to {} (provider: {})",
-            model_name,
-            provider_name
-        );
-    }
+        format!("Failed to save model: {}", e)
+    })?;
+
+    tracing::info!(
+        "Channel: switched model to {} (provider: {})",
+        model_name,
+        provider_name
+    );
 
     // Reload provider from config so the change takes effect immediately
-    if let Ok(config) = crate::config::Config::load()
-        && let Ok(new_provider) = crate::brain::provider::create_provider(&config)
-    {
-        agent.swap_provider(new_provider);
+    let config = crate::config::Config::load().map_err(|e| {
+        tracing::warn!("Failed to reload config after model switch: {}", e);
+        format!("Model saved but failed to reload config: {}", e)
+    })?;
+    let new_provider = crate::brain::provider::create_provider(&config).map_err(|e| {
+        tracing::warn!("Failed to create provider after model switch: {}", e);
+        format!("Model saved but failed to reload provider: {}", e)
+    })?;
+    let display_name = provider_display_name(&provider_name);
+    agent.swap_provider(new_provider);
+
+    let change_msg = format!(
+        "[Model changed to {} (provider: {})]",
+        model_name, display_name
+    );
+
+    // Persist to session history so the agent knows about the switch
+    if let Some(sid) = session_id {
+        let msg_svc = crate::services::MessageService::new(agent.context().clone());
+        if let Err(e) = msg_svc
+            .create_message(sid, "user".to_string(), change_msg.clone())
+            .await
+        {
+            tracing::warn!("Failed to persist model-change message: {}", e);
+        }
+    }
+
+    Ok(change_msg)
+}
+
+/// Map a provider name to its config section key.
+pub(crate) fn provider_section(provider_name: &str) -> Option<String> {
+    match provider_name.to_lowercase().as_str() {
+        "anthropic" => Some("providers.anthropic".to_string()),
+        "openai" => Some("providers.openai".to_string()),
+        "gemini" | "google" => Some("providers.gemini".to_string()),
+        "openrouter" => Some("providers.openrouter".to_string()),
+        "minimax" => Some("providers.minimax".to_string()),
+        n if n.starts_with("custom:") | n.starts_with("custom(") => {
+            // Extract custom provider name: "custom:deepseek" → "deepseek"
+            // or "Custom (deepseek)" → "deepseek"
+            let name = n
+                .strip_prefix("custom:")
+                .or_else(|| n.strip_prefix("custom(").and_then(|s| s.strip_suffix(')')))
+                .unwrap_or(n);
+            Some(format!("providers.custom.{}", name))
+        }
+        _ => None,
     }
 }
 

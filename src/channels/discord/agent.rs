@@ -228,13 +228,26 @@ impl EventHandler for Handler {
                 {
                     self.agent.swap_provider(new_provider);
                 }
-                crate::channels::commands::switch_model(&self.agent, model_name);
+                let session_id = *self.shared_session.lock().await;
+                let reply = match crate::channels::commands::switch_model(
+                    &self.agent,
+                    model_name,
+                    session_id,
+                )
+                .await
+                {
+                    Ok(ctx) => {
+                        let _ = ctx;
+                        format!("✅ Model switched to `{}`", model_name)
+                    }
+                    Err(e) => format!("⚠️ {}", e),
+                };
                 let _ = comp
                     .create_response(
                         &ctx.http,
                         serenity::builder::CreateInteractionResponse::Message(
                             serenity::builder::CreateInteractionResponseMessage::new()
-                                .content(format!("✅ Model switched to `{}`", model_name))
+                                .content(reply)
                                 .ephemeral(true),
                         ),
                     )
