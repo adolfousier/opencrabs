@@ -5,7 +5,7 @@
 use super::onboarding::{
     AuthField, BrainField, CHANNEL_NAMES, ChannelTestStatus, DiscordField, HealthStatus,
     ImageField, OnboardingStep, OnboardingWizard, PROVIDERS, SlackField, TelegramField,
-    TrelloField, VoiceField, WizardMode,
+    TrelloField, WizardMode,
 };
 use ratatui::{
     Frame,
@@ -1904,123 +1904,7 @@ fn render_image_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard)
 }
 
 fn render_voice_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
-    // STT section
-    lines.push(Line::from(Span::styled(
-        "  Speech-to-Text (Groq Whisper)".to_string(),
-        Style::default()
-            .fg(Color::White)
-            .add_modifier(Modifier::BOLD),
-    )));
-    lines.push(Line::from(Span::styled(
-        "  Transcribes voice notes from Telegram",
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::ITALIC),
-    )));
-    lines.push(Line::from(""));
-
-    let groq_focused = wizard.voice_field == VoiceField::GroqApiKey;
-    let (masked_key, key_hint) = if wizard.has_existing_groq_key() {
-        (
-            "**************************".to_string(),
-            " (from GROQ_API_KEY env)".to_string(),
-        )
-    } else if wizard.groq_api_key_input.is_empty() {
-        ("get key from console.groq.com".to_string(), String::new())
-    } else {
-        (
-            "*".repeat(wizard.groq_api_key_input.len().min(30)),
-            String::new(),
-        )
-    };
-    let cursor = if groq_focused && !wizard.has_existing_groq_key() {
-        "█"
-    } else {
-        ""
-    };
-
-    lines.push(Line::from(vec![
-        Span::styled(
-            "  Groq Key: ",
-            Style::default().fg(if groq_focused {
-                BRAND_BLUE
-            } else {
-                Color::DarkGray
-            }),
-        ),
-        Span::styled(
-            format!("{}{}", masked_key, cursor),
-            Style::default().fg(if wizard.has_existing_groq_key() {
-                Color::Cyan
-            } else if groq_focused {
-                Color::White
-            } else {
-                Color::DarkGray
-            }),
-        ),
-    ]));
-
-    if !key_hint.is_empty() && groq_focused {
-        lines.push(Line::from(Span::styled(
-            format!("  {}", key_hint.trim()),
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::ITALIC),
-        )));
-    }
-
-    lines.push(Line::from(""));
-
-    // TTS section
-    lines.push(Line::from(Span::styled(
-        "  Text-to-Speech (OpenAI TTS)".to_string(),
-        Style::default()
-            .fg(Color::White)
-            .add_modifier(Modifier::BOLD),
-    )));
-    lines.push(Line::from(Span::styled(
-        "  Reply with voice notes (uses OpenAI key)",
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::ITALIC),
-    )));
-    lines.push(Line::from(""));
-
-    let tts_focused = wizard.voice_field == VoiceField::TtsToggle;
-    lines.push(Line::from(vec![
-        Span::styled(
-            if tts_focused { " > " } else { "   " },
-            Style::default().fg(ACCENT_GOLD),
-        ),
-        Span::styled(
-            if wizard.tts_enabled { "[x]" } else { "[ ]" },
-            Style::default().fg(if wizard.tts_enabled {
-                BRAND_GOLD
-            } else {
-                Color::DarkGray
-            }),
-        ),
-        Span::styled(
-            " Enable TTS replies (ash voice)",
-            Style::default()
-                .fg(if tts_focused {
-                    Color::White
-                } else {
-                    Color::DarkGray
-                })
-                .add_modifier(if tts_focused {
-                    Modifier::BOLD
-                } else {
-                    Modifier::empty()
-                }),
-        ),
-    ]));
-
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "  Skip with Enter to set up later",
-        Style::default().fg(Color::DarkGray),
-    )));
+    super::onboarding::voice::render(lines, wizard);
 }
 
 fn render_daemon(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {

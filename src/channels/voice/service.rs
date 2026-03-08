@@ -124,6 +124,22 @@ struct TranscriptionResponse {
     text: String,
 }
 
+/// Transcribe audio bytes using a local whisper model (whisper.cpp).
+///
+/// Runs inference on a background thread via `spawn_blocking`.
+#[cfg(feature = "local-stt")]
+pub async fn transcribe_audio_local(
+    audio_bytes: Vec<u8>,
+    model_path: std::path::PathBuf,
+) -> Result<String> {
+    tokio::task::spawn_blocking(move || {
+        let whisper = super::local_whisper::LocalWhisper::new(&model_path)?;
+        whisper.transcribe(&audio_bytes)
+    })
+    .await
+    .context("Local STT task panicked")?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

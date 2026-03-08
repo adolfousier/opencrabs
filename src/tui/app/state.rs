@@ -1446,6 +1446,25 @@ impl App {
                     };
                 }
             }
+            TuiEvent::WhisperDownloadProgress(progress) => {
+                if let Some(ref mut wizard) = self.onboarding {
+                    wizard.stt_model_download_progress = Some(progress);
+                }
+            }
+            TuiEvent::WhisperDownloadComplete(result) => {
+                if let Some(ref mut wizard) = self.onboarding {
+                    wizard.stt_model_download_progress = None;
+                    match result {
+                        Ok(()) => {
+                            wizard.stt_model_downloaded = true;
+                            wizard.stt_model_download_error = None;
+                        }
+                        Err(e) => {
+                            wizard.stt_model_download_error = Some(e);
+                        }
+                    }
+                }
+            }
             TuiEvent::SudoPasswordRequested(request) => {
                 self.sudo_pending = Some(request);
                 self.sudo_input.clear();

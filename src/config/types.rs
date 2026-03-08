@@ -302,12 +302,29 @@ pub struct IMessageConfig {
     pub session_idle_hours: Option<f64>,
 }
 
+/// STT mode: API (Groq Whisper) or Local (whisper.cpp)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SttMode {
+    #[default]
+    Api,
+    Local,
+}
+
 /// Voice processing configuration (STT + TTS)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceConfig {
     /// Enable speech-to-text transcription
     #[serde(default)]
     pub stt_enabled: bool,
+
+    /// STT mode: "api" (Groq Whisper) or "local" (whisper.cpp)
+    #[serde(default)]
+    pub stt_mode: SttMode,
+
+    /// Local STT model preset (e.g. "local-tiny", "local-base", "local-small", "local-medium")
+    #[serde(default = "default_local_stt_model")]
+    pub local_stt_model: String,
 
     /// Enable text-to-speech replies
     #[serde(default)]
@@ -332,6 +349,9 @@ pub struct VoiceConfig {
     pub tts_provider: Option<ProviderConfig>,
 }
 
+fn default_local_stt_model() -> String {
+    "local-tiny".to_string()
+}
 fn default_tts_voice() -> String {
     "echo".to_string()
 }
@@ -343,6 +363,8 @@ impl Default for VoiceConfig {
     fn default() -> Self {
         Self {
             stt_enabled: false,
+            stt_mode: SttMode::default(),
+            local_stt_model: default_local_stt_model(),
             tts_enabled: false,
             tts_voice: default_tts_voice(),
             tts_model: default_tts_model(),

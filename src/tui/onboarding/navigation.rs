@@ -57,7 +57,7 @@ impl OnboardingWizard {
             OnboardingStep::Channels => {
                 // Handled by handle_channels_key — Enter on focused channel or Continue
                 self.step = OnboardingStep::VoiceSetup;
-                self.voice_field = VoiceField::GroqApiKey;
+                self.voice_field = VoiceField::SttModeSelect;
                 self.detect_existing_groq_key();
             }
             OnboardingStep::TelegramSetup
@@ -130,7 +130,7 @@ impl OnboardingWizard {
             }
             OnboardingStep::ImageSetup => {
                 self.step = OnboardingStep::VoiceSetup;
-                self.voice_field = VoiceField::GroqApiKey;
+                self.voice_field = VoiceField::SttModeSelect;
             }
             OnboardingStep::Daemon => {
                 // QuickStart: go back to ProviderAuth, Advanced: go back to ImageSetup

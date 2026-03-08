@@ -51,6 +51,7 @@ OpenCrabs runs as a **single binary on your terminal** — no server, no gateway
 - All chat sessions and messages (SQLite)
 - Tool executions (bash, file reads/writes, git)
 - Memory and embeddings (local vector search)
+- Voice transcription in local STT mode (whisper.cpp, on-device)
 - Brain files, config, API keys
 
 ### What goes out (only when you use it)
@@ -118,7 +119,7 @@ https://github.com/user-attachments/assets/7f45c5f8-acdf-48d5-b6a4-0e4811a9ee23
 | **Image Attachments** | Paste image paths or URLs into the input — auto-detected and attached as vision content blocks for multimodal models |
 | **PDF Support** | Attach PDF files by path — native Anthropic PDF support; for other providers, text is extracted locally via `pdf-extract` |
 | **Document Parsing** | Built-in `parse_document` tool extracts text from PDF, DOCX, HTML, TXT, MD, JSON, XML |
-| **Voice (STT)** | Telegram voice notes transcribed via Groq Whisper (`whisper-large-v3-turbo`) and processed as text. API key in `keys.toml` |
+| **Voice (STT)** | Voice notes transcribed via **API** (Groq Whisper `whisper-large-v3-turbo`) or **Local** (whisper.cpp via `whisper-rs`, runs on-device). Choose mode in `/onboard:voice`. Local mode: select model size (Tiny 75 MB / Base 142 MB / Small 466 MB / Medium 1.5 GB), download from HuggingFace, zero API cost. Build with `--features local-stt` to enable local mode |
 | **Voice (TTS)** | Agent replies to voice notes with audio via OpenAI TTS (`gpt-4o-mini-tts`, `ash` voice); falls back to text if disabled |
 | **Attachment Indicator** | Attached images show as `[IMG1:filename.png]` in the input title bar |
 | **Image Generation** | Agent generates images via Google Gemini (`gemini-3.1-flash-image-preview` "Nano Banana") using the `generate_image` tool — enabled via `/onboard:image`. Returned as native images/attachments in all channels |
@@ -644,7 +645,7 @@ First-time users are guided through a 9-step setup wizard that appears automatic
 | 3 | **Workspace** | Set brain workspace path (default `~/.opencrabs/`) → seed template files (SOUL.md, IDENTITY.md, etc.) |
 | 4 | **Gateway** | Configure HTTP API gateway: port, bind address, auth mode |
 | 5 | **Channels** | Toggle messaging integrations (Telegram, Discord, WhatsApp, Slack, Trello) |
-| 6 | **Voice** | Enable STT (Groq Whisper) for voice notes transcription from Telegram |
+| 6 | **Voice** | Choose STT mode: **API** (Groq Whisper) or **Local** (whisper.cpp, on-device). Local mode shows model picker with download progress. Toggle TTS replies |
 | 7 | **Image Handling** | Enable Gemini image generation and/or vision analysis — uses a separate Google AI key |
 | 8 | **Daemon** | Install background service (systemd on Linux, LaunchAgent on macOS) |
 | 9 | **Health Check** | Verify API key, config, workspace — shows pass/fail summary |
@@ -652,7 +653,33 @@ First-time users are guided through a 9-step setup wizard that appears automatic
 
 **QuickStart mode** skips steps 4-8 with sensible defaults. **Advanced mode** lets you configure everything.
 
-Type `/onboard:image` in chat to jump directly to the Image Handling step anytime.
+Type `/onboard:voice` or `/onboard:image` in chat to jump directly to Voice or Image setup anytime.
+
+#### Local STT (whisper.cpp)
+
+Run speech-to-text on-device with zero API cost. Requires the `local-stt` feature flag:
+
+```bash
+cargo install --path . --features local-stt
+```
+
+In `/onboard:voice`, select **Local** mode, pick a model size, and press Enter to download. Models are stored at `~/.local/share/opencrabs/models/whisper/`.
+
+| Model | Size | Quality |
+|-------|------|---------|
+| Tiny | ~75 MB | Fast, lower accuracy |
+| Base | ~142 MB | Good balance |
+| Small | ~466 MB | High accuracy |
+| Medium | ~1.5 GB | Best accuracy |
+
+Config (`config.toml`):
+```toml
+[voice]
+stt_enabled = true
+stt_mode = "local"          # "api" (default) or "local"
+local_stt_model = "local-base"  # local-tiny, local-base, local-small, local-medium
+tts_enabled = false
+```
 
 #### Brain Personalization (Step 10)
 
@@ -729,8 +756,13 @@ api_key = "your-exa-key"
 api_key = "your-brave-key"
 
 # Voice (STT/TTS)
+# API mode (default): uses Groq Whisper
 [providers.stt.groq]
 api_key = "your-groq-key"
+
+# Local mode: no API key needed — runs whisper.cpp on device
+# Set stt_mode = "local" and local_stt_model in config.toml
+# Build with: cargo install --features local-stt
 
 [providers.tts.openai]
 api_key = "your-openai-key"

@@ -1227,6 +1227,46 @@ impl App {
                 WizardAction::GenerateBrain => {
                     self.generate_brain_files().await;
                 }
+                WizardAction::DownloadWhisperModel => {
+                    #[cfg(feature = "local-stt")]
+                    {
+                        use crate::channels::voice::local_whisper::{
+                            DownloadProgress, LOCAL_MODEL_PRESETS,
+                        };
+                        let tui_sender = self.event_sender();
+                        if let Some(ref mut wizard) = self.onboarding {
+                            let idx = wizard.selected_local_stt_model;
+                            if idx < LOCAL_MODEL_PRESETS.len() {
+                                let preset = &LOCAL_MODEL_PRESETS[idx];
+                                wizard.stt_model_download_progress = Some(0.0);
+                                let (progress_tx, mut progress_rx) =
+                                    tokio::sync::mpsc::unbounded_channel::<DownloadProgress>();
+                                let fwd_sender = tui_sender.clone();
+                                tokio::spawn(async move {
+                                    while let Some(p) = progress_rx.recv().await {
+                                        let frac = match p.total {
+                                            Some(t) if t > 0 => p.downloaded as f64 / t as f64,
+                                            _ => 0.0,
+                                        };
+                                        let _ = fwd_sender
+                                            .send(TuiEvent::WhisperDownloadProgress(frac));
+                                    }
+                                });
+                                tokio::spawn(async move {
+                                    let result =
+                                        crate::channels::voice::local_whisper::download_model(
+                                            preset,
+                                            progress_tx,
+                                        )
+                                        .await;
+                                    let _ = tui_sender.send(TuiEvent::WhisperDownloadComplete(
+                                        result.map(|_| ()).map_err(|e| e.to_string()),
+                                    ));
+                                });
+                            }
+                        }
+                    }
+                }
                 WizardAction::None => {
                     // Stay in onboarding
                 }

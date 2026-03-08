@@ -72,7 +72,17 @@ pub struct OnboardingWizard {
 
     /// Step 6: Voice Setup
     pub voice_field: VoiceField,
+    /// 0 = API (Groq), 1 = Local (whisper.cpp)
+    pub stt_mode: usize,
     pub groq_api_key_input: String,
+    /// Index into LOCAL_MODEL_PRESETS (0=Tiny, 1=Base, 2=Small, 3=Medium)
+    pub selected_local_stt_model: usize,
+    /// Download progress (0.0 - 1.0), None if not downloading
+    pub stt_model_download_progress: Option<f64>,
+    /// Download status message
+    pub stt_model_download_error: Option<String>,
+    /// Whether the selected model is downloaded and ready
+    pub stt_model_downloaded: bool,
     pub tts_enabled: bool,
 
     /// Step 7: Image Setup
@@ -268,8 +278,13 @@ impl OnboardingWizard {
 
             channel_test_status: ChannelTestStatus::Idle,
 
-            voice_field: VoiceField::GroqApiKey,
+            voice_field: VoiceField::SttModeSelect,
+            stt_mode: 0,
             groq_api_key_input: String::new(),
+            selected_local_stt_model: 0,
+            stt_model_download_progress: None,
+            stt_model_download_error: None,
+            stt_model_downloaded: false,
             tts_enabled: false,
 
             image_field: ImageField::VisionToggle,
@@ -422,8 +437,25 @@ impl OnboardingWizard {
         };
 
         // Load voice settings
+        wizard.stt_mode = match config.voice.stt_mode {
+            crate::config::SttMode::Api => 0,
+            crate::config::SttMode::Local => 1,
+        };
         wizard.tts_enabled = config.voice.tts_enabled;
         wizard.detect_existing_groq_key();
+
+        // Resolve selected local model index from config
+        #[cfg(feature = "local-stt")]
+        {
+            use crate::channels::voice::local_whisper::{LOCAL_MODEL_PRESETS, is_model_downloaded};
+            if let Some(idx) = LOCAL_MODEL_PRESETS
+                .iter()
+                .position(|p| p.id == config.voice.local_stt_model)
+            {
+                wizard.selected_local_stt_model = idx;
+                wizard.stt_model_downloaded = is_model_downloaded(&LOCAL_MODEL_PRESETS[idx]);
+            }
+        }
 
         // Load image settings
         wizard.image_vision_enabled = config.image.vision.enabled;

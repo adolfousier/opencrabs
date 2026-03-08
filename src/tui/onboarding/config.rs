@@ -392,12 +392,38 @@ impl OnboardingWizard {
         );
 
         // Voice config
+        let is_local_stt = self.stt_mode == 1;
         let groq_key_exists = !self.groq_api_key_input.is_empty() || self.has_existing_groq_key();
-        let _ = Config::write_key("voice", "stt_enabled", &groq_key_exists.to_string());
+        let stt_enabled = if is_local_stt {
+            true // local mode is always enabled when selected
+        } else {
+            groq_key_exists
+        };
+        let _ = Config::write_key("voice", "stt_enabled", &stt_enabled.to_string());
+        let _ = Config::write_key(
+            "voice",
+            "stt_mode",
+            if is_local_stt { "local" } else { "api" },
+        );
         let _ = Config::write_key("voice", "tts_enabled", &self.tts_enabled.to_string());
 
-        // STT provider
-        if !self.groq_api_key_input.is_empty() || self.has_existing_groq_key() {
+        // Local STT model
+        if is_local_stt {
+            #[cfg(feature = "local-stt")]
+            {
+                use crate::channels::voice::local_whisper::LOCAL_MODEL_PRESETS;
+                if self.selected_local_stt_model < LOCAL_MODEL_PRESETS.len() {
+                    let _ = Config::write_key(
+                        "voice",
+                        "local_stt_model",
+                        LOCAL_MODEL_PRESETS[self.selected_local_stt_model].id,
+                    );
+                }
+            }
+        }
+
+        // STT provider (API mode only)
+        if !is_local_stt && groq_key_exists {
             let _ = Config::write_key("providers.stt.groq", "enabled", "true");
             let _ = Config::write_key(
                 "providers.stt.groq",

@@ -5,40 +5,7 @@ use super::wizard::OnboardingWizard;
 
 impl OnboardingWizard {
     pub(super) fn handle_voice_setup_key(&mut self, event: KeyEvent) -> WizardAction {
-        match self.voice_field {
-            VoiceField::GroqApiKey => match event.code {
-                KeyCode::Char(c) => {
-                    if self.has_existing_groq_key() {
-                        self.groq_api_key_input.clear();
-                    }
-                    self.groq_api_key_input.push(c);
-                }
-                KeyCode::Backspace => {
-                    if self.has_existing_groq_key() {
-                        self.groq_api_key_input.clear();
-                    } else {
-                        self.groq_api_key_input.pop();
-                    }
-                }
-                KeyCode::Tab | KeyCode::Enter => {
-                    self.voice_field = VoiceField::TtsToggle;
-                }
-                _ => {}
-            },
-            VoiceField::TtsToggle => match event.code {
-                KeyCode::Char(' ') | KeyCode::Up | KeyCode::Down => {
-                    self.tts_enabled = !self.tts_enabled;
-                }
-                KeyCode::BackTab => {
-                    self.voice_field = VoiceField::GroqApiKey;
-                }
-                KeyCode::Enter => {
-                    self.next_step();
-                }
-                _ => {}
-            },
-        }
-        WizardAction::None
+        super::voice::handle_key(self, event)
     }
 
     pub(super) fn handle_image_setup_key(&mut self, event: KeyEvent) -> WizardAction {

@@ -111,6 +111,12 @@ serenity = { version = "0.12", default-features = false, features = ["client", "
 slack-morphism = { version = "2", features = ["hyper"], optional = true }
 rustls = { version = "0.23", features = ["ring"], optional = true }
 
+# Local STT (whisper.cpp via whisper-rs)
+whisper-rs = { version = "0.15", optional = true }
+hound = { version = "3.5", optional = true }
+rubato = { version = "0.14", optional = true }
+symphonia = { version = "0.5", features = ["ogg", "vorbis", "wav", "pcm"], optional = true }
+
 # Misc
 unicode-width = "0.2"
 
@@ -154,6 +160,7 @@ trello = []
 whatsapp = ["whatsapp-rust", "whatsapp-rust-tokio-transport", "whatsapp-rust-ureq-http-client", "wacore", "wacore-binary", "waproto", "dep:qrcode", "dep:rmp-serde"]
 discord = ["serenity"]
 slack = ["slack-morphism", "rustls"]
+local-stt = ["whisper-rs", "hound", "rubato", "symphonia"]
 
 [profile.dev]
 opt-level = 0

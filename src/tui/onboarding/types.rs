@@ -266,7 +266,9 @@ pub enum ChannelTestStatus {
 /// Which field is focused in VoiceSetup step
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VoiceField {
+    SttModeSelect,
     GroqApiKey,
+    LocalModelSelect,
     TtsToggle,
 }
 
@@ -310,4 +312,6 @@ pub enum WizardAction {
     TestWhatsApp,
     /// Trigger async Trello connection test
     TestTrello,
+    /// Trigger async whisper model download
+    DownloadWhisperModel,
 }

@@ -13,6 +13,7 @@ mod keys;
 mod models;
 mod navigation;
 mod types;
+pub mod voice;
 mod wizard;
 
 #[cfg(test)]
