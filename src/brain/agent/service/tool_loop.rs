@@ -104,6 +104,16 @@ impl AgentService {
         override_approval_callback: Option<ApprovalCallback>,
         override_progress_callback: Option<ProgressCallback>,
     ) -> Result<AgentResponse> {
+        // Track this request for restart recovery
+        let pending_repo = crate::db::PendingRequestRepository::new(self.context.pool());
+        let request_id = Uuid::new_v4();
+        if let Err(e) = pending_repo
+            .insert(request_id, session_id, &user_message, "tui")
+            .await
+        {
+            tracing::warn!("Failed to track pending request: {}", e);
+        }
+
         // Per-call effective callbacks (override wins over service-level).
         // Track whether an explicit per-call override was provided so we can honour
         // channel approval callbacks even when the factory set auto_approve_tools=true.
@@ -114,6 +124,42 @@ impl AgentService {
         let progress_callback: Option<ProgressCallback> =
             override_progress_callback.or_else(|| self.progress_callback.clone());
 
+        // Run the actual loop
+        let result = self
+            .run_tool_loop_inner(
+                session_id,
+                user_message,
+                model,
+                cancel_token,
+                has_override_approval,
+                approval_callback,
+                has_progress_override,
+                progress_callback,
+            )
+            .await;
+
+        // Request finished — delete the tracking row. Only PROCESSING rows
+        // survive (meaning the process crashed/restarted mid-request).
+        if let Err(e) = pending_repo.delete(request_id).await {
+            tracing::warn!("Failed to clean up pending request: {}", e);
+        }
+
+        result
+    }
+
+    /// Inner tool loop — separated so `run_tool_loop` can wrap with request tracking.
+    #[allow(clippy::too_many_arguments)]
+    async fn run_tool_loop_inner(
+        &self,
+        session_id: Uuid,
+        user_message: String,
+        model: Option<String>,
+        cancel_token: Option<CancellationToken>,
+        has_override_approval: bool,
+        approval_callback: Option<ApprovalCallback>,
+        has_progress_override: bool,
+        progress_callback: Option<ProgressCallback>,
+    ) -> Result<AgentResponse> {
         // Get or create session
         let session_service = SessionService::new(self.context.clone());
         let _session = session_service

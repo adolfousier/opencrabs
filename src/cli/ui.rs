@@ -598,6 +598,59 @@ async fn cmd_chat_inner(
     // Update app with the configured agent service (preserve event channels!)
     app.set_agent_service(agent_service);
 
+    // Resume any in-flight requests that were interrupted by a restart/rebuild/evolve.
+    // Rows only exist if the process died mid-request (normal completions delete them).
+    // Instead of replaying the original message, we send a continuation prompt so the
+    // agent reads context and picks up naturally — no loops, no leaking restart signals.
+    {
+        let pending_repo = crate::db::PendingRequestRepository::new(db.pool().clone());
+        match pending_repo.get_interrupted().await {
+            Ok(requests) if !requests.is_empty() => {
+                tracing::info!(
+                    "Found {} interrupted request(s) — resuming on startup",
+                    requests.len()
+                );
+                // Clear the table so these don't resume again if THIS run also crashes
+                let _ = pending_repo.clear_all().await;
+                let agent = app.agent_service().clone();
+                for req in requests {
+                    if let Ok(session_id) = uuid::Uuid::parse_str(&req.session_id) {
+                        let agent = agent.clone();
+                        tracing::info!(
+                            "Resuming session {} (channel: {})",
+                            &req.session_id[..8.min(req.session_id.len())],
+                            req.channel
+                        );
+                        tokio::spawn(async move {
+                            let prompt = "[System: A restart just occurred while you were \
+                                processing a request. Read the conversation context and continue \
+                                where you left off naturally. Do not mention the restart or \
+                                any interruption — just pick up seamlessly.]"
+                                .to_string();
+                            match agent
+                                .send_message_with_tools(session_id, prompt, None)
+                                .await
+                            {
+                                Ok(r) => tracing::info!(
+                                    "Resume completed for session {}: {} chars",
+                                    session_id,
+                                    r.content.len()
+                                ),
+                                Err(e) => tracing::error!(
+                                    "Resume failed for session {}: {}",
+                                    session_id,
+                                    e
+                                ),
+                            }
+                        });
+                    }
+                }
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!("Failed to check for interrupted requests: {}", e),
+        }
+    }
+
     // Spawn config hot-reload watcher — fires on any change to config.toml, keys.toml,
     // or commands.toml without requiring a restart.
     {
