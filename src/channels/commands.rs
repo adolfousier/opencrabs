@@ -157,7 +157,10 @@ async fn persist_command_to_history(
         .create_message(session_id, "assistant".to_string(), response.to_string())
         .await
     {
-        tracing::warn!("Failed to persist channel command response to history: {}", e);
+        tracing::warn!(
+            "Failed to persist channel command response to history: {}",
+            e
+        );
     }
 }
 

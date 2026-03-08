@@ -5,6 +5,36 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.62] - 2026-03-08
+
+### Added
+- **Provider sync across TUI and channels** — Model/provider switches now propagate to all agents (TUI, Telegram, Discord, Slack, WhatsApp) via config. Each channel syncs its provider on every message, and TUI syncs on config reload
+  - `src/channels/commands.rs`, `src/tui/app/state.rs`, `src/config/types.rs`
+- **Channel commands persist to session history** — `/help`, `/models`, `/usage`, `/sessions`, `/new`, `/stop` now save to session DB so they appear in TUI history and give the agent context
+  - `src/channels/commands.rs`
+- **Crate-level docs for docs.rs** — Rewritten landing page with current providers, channels, features, and architecture table. Added `rust-version = 1.91` (MSRV)
+  - `src/lib.rs`, `src/main.rs`, `Cargo.toml`
+
+### Fixed
+- **sqlx → rusqlite upgrade path** — Auto-detect databases previously managed by sqlx (`_sqlx_migrations` table with `user_version=0`) and stamp migration version so existing databases don't fail on startup
+  - `src/db/database.rs`
+- **TUI model switch ordering** — Write `default_model` to config before `rebuild_agent_service()` so the provider loads the correct model instead of the stale one
+  - `src/tui/app/dialogs.rs`
+- **Channel model switch errors surfaced** — `switch_model` now returns errors to the user instead of silently dropping them. Model change is persisted to session history. Custom providers supported
+  - `src/channels/commands.rs`, `src/channels/telegram/agent.rs`, `src/channels/discord/agent.rs`, `src/channels/slack/handler.rs`
+- **`/models` hanging on OpenRouter/custom providers** — Added 10-second timeout on `fetch_models()`. Prefers config models (instant) over live fetch. Falls back to current model if fetch fails
+  - `src/channels/commands.rs`
+- **`/models` showing stale current model** — Provider picker now reads from config instead of the channel's separate (stale) AgentService instance
+  - `src/channels/commands.rs`
+- **slack_send blocks schema for OpenAI** — Added missing `items` field to `blocks` array schema. OpenAI strictly validates JSON schemas and rejects arrays without `items`. Closes #36
+  - `src/brain/tools/slack_send.rs`
+- **Flaky parallel_sessions test** — Fixed SQLite contention in concurrent write test by running sequentially (test validates provider isolation, not write concurrency)
+  - `src/brain/agent/service/tests/parallel_sessions.rs`
+
+### Removed
+- **Stale model from channel prefix** — Removed `| Model: X` from all channel system instructions since channel agents have separate AgentService instances making it unreliable
+  - `src/channels/telegram/handler.rs`, `src/channels/discord/handler.rs`, `src/channels/slack/handler.rs`, `src/channels/whatsapp/handler.rs`
+
 ## [0.2.61] - 2026-03-07
 
 ### Added
@@ -1246,7 +1276,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cleaner UI** — Removed emojis, reordered status bar
 - **README** — Added screenshots, updated structure
 
-[0.1.2]: https://github.com/adolfousier/opencrab/releases/tag/v0.1.2
+[0.1.2]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.2
 
 ## [0.1.1] - 2026-02-14
 
@@ -1261,7 +1291,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **system_prompt → system_brain** — Renamed across entire codebase to reflect dynamic brain architecture
 - **`/help` Fixed** — Opens Help dialog instead of pushing text message into chat
 
-[0.1.1]: https://github.com/adolfousier/opencrab/releases/tag/v0.1.1
+[0.1.1]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.1
 
 ## [0.1.0] - 2026-02-14
 
@@ -1296,6 +1326,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.62]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.62
 [0.2.61]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.61
 [0.2.60]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.60
 [0.2.59]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.59
