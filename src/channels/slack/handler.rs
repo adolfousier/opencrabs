@@ -48,6 +48,77 @@ pub async fn on_interaction(
                         let token =
                             SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
                         let session = client.open_session(&token);
+
+                        // Agent-handled providers (OpenRouter 300+ models, custom)
+                        if resp.agent_handled {
+                            let session_id = *state.shared_session.lock().await;
+                            let display =
+                                crate::channels::commands::provider_display_name(provider_name);
+                            if let Ok(config) = crate::config::Config::load()
+                                && let Ok(new_provider) =
+                                    crate::brain::provider::factory::create_provider_by_name(
+                                        &config,
+                                        provider_name,
+                                    )
+                            {
+                                state.agent.swap_provider(new_provider);
+                            }
+                            if !resp.current_model.is_empty() {
+                                let _ = crate::channels::commands::switch_model(
+                                    &state.agent,
+                                    &resp.current_model,
+                                    session_id,
+                                )
+                                .await;
+                            }
+                            if let Some(sid) = session_id {
+                                let prompt = if resp.current_model.is_empty() {
+                                    format!(
+                                        "[System: User selected {} provider but no default model is set. \
+                                         Ask them which model they want. Use config_manager tool to read \
+                                         providers section, then set the default_model. Keep current provider \
+                                         until a model is chosen.]",
+                                        display
+                                    )
+                                } else {
+                                    format!(
+                                        "[System: User switched to {} provider with model {}. \
+                                         Confirm the switch. Ask if they want a different model — \
+                                         if so, use config_manager to update providers.{}.default_model \
+                                         and confirm.]",
+                                        display,
+                                        resp.current_model,
+                                        if provider_name == "openrouter" {
+                                            "openrouter"
+                                        } else {
+                                            provider_name
+                                        }
+                                    )
+                                };
+                                let agent_clone = state.agent.clone();
+                                let bot_token = state.bot_token.clone();
+                                let channel_id_clone = channel.id.clone();
+                                let client_clone = client.clone();
+                                tokio::spawn(async move {
+                                    match agent_clone.send_message(sid, prompt, None).await {
+                                        Ok(r) => {
+                                            let token = SlackApiToken::new(
+                                                SlackApiTokenValue::from(bot_token),
+                                            );
+                                            let session = client_clone.open_session(&token);
+                                            let request = SlackApiChatPostMessageRequest::new(
+                                                channel_id_clone,
+                                                SlackMessageContent::new().with_text(r.content),
+                                            );
+                                            let _ = session.chat_post_message(&request).await;
+                                        }
+                                        Err(e) => tracing::error!("Agent follow-up failed: {}", e),
+                                    }
+                                });
+                            }
+                            continue;
+                        }
+
                         let header = SlackBlock::Section(SlackSectionBlock::new().with_text(
                             SlackBlockText::MarkDown(SlackBlockMarkDownText::new(
                                 resp.text.clone(),

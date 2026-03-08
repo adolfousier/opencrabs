@@ -247,7 +247,7 @@ fn try_create_openrouter(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
 
     tracing::info!("Using OpenRouter at: {}", base_url);
     let provider = configure_openai_compatible(
-        OpenAIProvider::with_base_url(api_key.clone(), base_url),
+        OpenAIProvider::with_base_url(api_key.clone(), base_url).with_name("openrouter"),
         openrouter_config,
     );
     Ok(Some(Arc::new(provider)))
@@ -371,16 +371,20 @@ fn try_create_openai(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         && openai_config.api_key.is_none()
     {
         tracing::info!("Using local LLM at: {}", base_url);
-        let provider =
-            configure_openai_compatible(OpenAIProvider::local(base_url.clone()), openai_config);
+        let provider = configure_openai_compatible(
+            OpenAIProvider::local(base_url.clone()).with_name("openai"),
+            openai_config,
+        );
         return Ok(Some(Arc::new(provider)));
     }
 
     // Official OpenAI API - has api_key
     if let Some(api_key) = &openai_config.api_key {
         tracing::info!("Using OpenAI provider");
-        let provider =
-            configure_openai_compatible(OpenAIProvider::new(api_key.clone()), openai_config);
+        let provider = configure_openai_compatible(
+            OpenAIProvider::new(api_key.clone()).with_name("openai"),
+            openai_config,
+        );
         return Ok(Some(Arc::new(provider)));
     }
 

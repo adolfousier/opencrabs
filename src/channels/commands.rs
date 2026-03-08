@@ -95,6 +95,9 @@ pub struct ModelsResponse {
     pub models: Vec<String>,
     /// Fallback text when platform buttons are unavailable.
     pub text: String,
+    /// When true, the provider has too many models for inline buttons (OpenRouter, custom).
+    /// Channels should switch to default immediately and let the agent handle follow-up.
+    pub agent_handled: bool,
 }
 
 /// Check if a message is a known channel command and return the response.
@@ -473,6 +476,7 @@ pub async fn models_for_provider(provider_name: &str) -> ModelsResponse {
                 current_model: String::new(),
                 models: vec![],
                 text: "Failed to load config.".to_string(),
+                agent_handled: false,
             };
         }
     };
@@ -487,33 +491,32 @@ pub async fn models_for_provider(provider_name: &str) -> ModelsResponse {
                     current_model: String::new(),
                     models: vec![],
                     text: format!("Failed to create provider: {}", e),
+                    agent_handled: false,
                 };
             }
         };
 
     let current_model = provider.default_model().to_string();
 
-    // Config models first (instant), then live fetch.
-    // Timeouts per provider — Anthropic/OpenAI/Gemini are fast (~1s),
-    // OpenRouter returns 300+ models (needs more time),
-    // custom endpoints may not have /models at all.
+    // OpenRouter (300+ models) and custom providers skip live fetch on channels.
+    // Switch to default immediately; the agent handles follow-up via config_manager tool.
+    if provider_name == "openrouter" || provider_name.starts_with("custom:") {
+        return ModelsResponse {
+            provider_name: provider_name.to_string(),
+            current_model,
+            models: vec![],
+            text: String::new(),
+            agent_handled: true,
+        };
+    }
+
+    // Standard providers: config models first (instant), then live fetch with timeout.
     let config_models = provider_config_models(&config, provider_name);
-    let skip_live = provider_name.starts_with("custom:");
-    let timeout_secs = match provider_name {
-        "anthropic" | "openai" | "gemini" | "minimax" => 10,
-        "openrouter" => 30,
-        _ => 10,
-    };
     let mut models = if !config_models.is_empty() {
         config_models
-    } else if skip_live {
-        vec![current_model.clone()]
     } else {
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(timeout_secs),
-            provider.fetch_models(),
-        )
-        .await
+        match tokio::time::timeout(std::time::Duration::from_secs(10), provider.fetch_models())
+            .await
         {
             Ok(fetched) if !fetched.is_empty() => fetched,
             Ok(_) => vec![current_model.clone()],
@@ -545,6 +548,7 @@ pub async fn models_for_provider(provider_name: &str) -> ModelsResponse {
         current_model,
         models,
         text: text_lines.join("\n"),
+        agent_handled: false,
     }
 }
 
@@ -569,7 +573,7 @@ fn provider_config_models(config: &crate::config::Config, name: &str) -> Vec<Str
     cfg.map(|c| c.models.clone()).unwrap_or_default()
 }
 
-fn provider_display_name(name: &str) -> &str {
+pub fn provider_display_name(name: &str) -> &str {
     match name {
         "anthropic" => "Anthropic",
         "openai" => "OpenAI",
