@@ -596,6 +596,30 @@ pub async fn switch_model(
     let section = provider_section(&provider_name)
         .ok_or_else(|| format!("Unknown provider '{}' — cannot switch model", provider_name))?;
 
+    // Toggle enabled flags — disable all others, enable selected (same as TUI)
+    let config =
+        crate::config::Config::load().map_err(|e| format!("Failed to load config: {}", e))?;
+    for s in [
+        "providers.anthropic",
+        "providers.openai",
+        "providers.gemini",
+        "providers.openrouter",
+        "providers.minimax",
+    ] {
+        if s != section {
+            let _ = crate::config::Config::write_key(s, "enabled", "false");
+        }
+    }
+    if let Some(ref customs) = config.providers.custom {
+        for name in customs.keys() {
+            let cs = format!("providers.custom.{}", name);
+            if cs != section {
+                let _ = crate::config::Config::write_key(&cs, "enabled", "false");
+            }
+        }
+    }
+    let _ = crate::config::Config::write_key(&section, "enabled", "true");
+
     crate::config::Config::write_key(&section, "default_model", model_name).map_err(|e| {
         tracing::warn!("Failed to persist model to config: {}", e);
         format!("Failed to save model: {}", e)
