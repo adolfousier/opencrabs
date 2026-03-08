@@ -5,6 +5,7 @@
 
 pub mod commands;
 mod factory;
+pub mod manager;
 #[cfg(test)]
 mod tests;
 pub mod voice;
@@ -21,3 +22,4 @@ pub mod trello;
 pub mod whatsapp;
 
 pub use factory::ChannelFactory;
+pub use manager::ChannelManager;

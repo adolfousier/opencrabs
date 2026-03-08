@@ -657,11 +657,8 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
 
             // Audio → STT
             if mime.starts_with("audio/") {
-                if voice_config.stt_enabled
-                    && let Some(ref stt_provider) = voice_config.stt_provider
-                    && let Some(ref stt_key) = stt_provider.api_key
-                {
-                    match crate::channels::voice::transcribe_audio(dl_bytes, stt_key).await {
+                if voice_config.stt_enabled {
+                    match crate::channels::voice::transcribe(dl_bytes, &voice_config).await {
                         Ok(transcript) => {
                             tracing::info!(
                                 "Slack: transcribed audio: {}",

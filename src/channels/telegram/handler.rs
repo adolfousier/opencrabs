@@ -313,27 +313,6 @@ pub(crate) async fn handle_message(
             return Ok(());
         }
 
-        let stt_key = match &voice_config.stt_provider {
-            Some(provider) => match &provider.api_key {
-                Some(key) => key.clone(),
-                None => {
-                    tracing::warn!("Telegram: voice note received but no STT API key configured");
-                    bot.send_message(
-                        msg.chat.id,
-                        "Voice transcription not configured (missing API key).",
-                    )
-                    .await?;
-                    return Ok(());
-                }
-            },
-            None => {
-                tracing::warn!("Telegram: voice note received but no STT provider configured");
-                bot.send_message(msg.chat.id, "Voice transcription not configured.")
-                    .await?;
-                return Ok(());
-            }
-        };
-
         tracing::info!(
             "Telegram: voice note from user {} ({}) — {}s",
             user_id,
@@ -367,8 +346,8 @@ pub(crate) async fn handle_message(
             }
         };
 
-        // Transcribe with STT provider
-        match crate::channels::voice::transcribe_audio(audio_bytes, &stt_key).await {
+        // Transcribe with STT dispatch (API or Local based on config)
+        match crate::channels::voice::transcribe(audio_bytes, &voice_config).await {
             Ok(transcript) => {
                 tracing::info!(
                     "Telegram: transcribed voice: {}",

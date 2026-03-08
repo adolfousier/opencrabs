@@ -7,6 +7,8 @@ use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::Deserialize;
 
+use crate::config::{SttMode, VoiceConfig};
+
 const GROQ_TRANSCRIPTION_URL: &str = "https://api.groq.com/openai/v1/audio/transcriptions";
 const OPENAI_SPEECH_URL: &str = "https://api.openai.com/v1/audio/speech";
 
@@ -16,6 +18,46 @@ const OPENAI_SPEECH_URL: &str = "https://api.openai.com/v1/audio/speech";
 /// Returns the transcribed text.
 pub async fn transcribe_audio(audio_bytes: Vec<u8>, groq_api_key: &str) -> Result<String> {
     transcribe_audio_with_url(audio_bytes, groq_api_key, GROQ_TRANSCRIPTION_URL).await
+}
+
+/// Dispatch STT transcription based on config mode (API or Local).
+///
+/// - `SttMode::Api` → Groq Whisper API (requires `groq_api_key`)
+/// - `SttMode::Local` → whisper.cpp on-device (requires downloaded model)
+pub async fn transcribe(audio_bytes: Vec<u8>, voice_config: &VoiceConfig) -> Result<String> {
+    match voice_config.stt_mode {
+        SttMode::Api => {
+            let api_key = voice_config
+                .stt_provider
+                .as_ref()
+                .and_then(|p| p.api_key.as_deref())
+                .ok_or_else(|| anyhow::anyhow!("STT API key not configured"))?;
+            transcribe_audio(audio_bytes, api_key).await
+        }
+        SttMode::Local => {
+            #[cfg(feature = "local-stt")]
+            {
+                let model_id = &voice_config.local_stt_model;
+                let preset = super::local_whisper::find_local_model(model_id)
+                    .ok_or_else(|| anyhow::anyhow!("Unknown local STT model: {}", model_id))?;
+                let path = super::local_whisper::model_path(preset);
+                if !path.exists() {
+                    anyhow::bail!(
+                        "Local STT model '{}' not downloaded. Run /onboard:voice or download manually.",
+                        model_id
+                    );
+                }
+                tracing::info!("Local STT: transcribing with model {}", model_id);
+                transcribe_audio_local(audio_bytes, path).await
+            }
+            #[cfg(not(feature = "local-stt"))]
+            {
+                anyhow::bail!(
+                    "Local STT not available — binary was built without the `local-stt` feature"
+                )
+            }
+        }
+    }
 }
 
 /// Internal: transcribe with configurable URL (for testing).
@@ -132,12 +174,28 @@ pub async fn transcribe_audio_local(
     audio_bytes: Vec<u8>,
     model_path: std::path::PathBuf,
 ) -> Result<String> {
-    tokio::task::spawn_blocking(move || {
+    let len = audio_bytes.len();
+    tracing::info!(
+        "Local STT: starting transcription ({} bytes audio, model {:?})",
+        len,
+        model_path
+    );
+
+    let handle = tokio::task::spawn_blocking(move || {
+        tracing::info!("Local STT: loading model...");
         let whisper = super::local_whisper::LocalWhisper::new(&model_path)?;
-        whisper.transcribe(&audio_bytes)
-    })
-    .await
-    .context("Local STT task panicked")?
+        tracing::info!("Local STT: model loaded, decoding audio...");
+        let result = whisper.transcribe(&audio_bytes);
+        tracing::info!("Local STT: transcription complete");
+        result
+    });
+
+    // 60s timeout — whisper inference should never take this long
+    match tokio::time::timeout(std::time::Duration::from_secs(60), handle).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(e)) => anyhow::bail!("Local STT task panicked: {}", e),
+        Err(_) => anyhow::bail!("Local STT timed out after 60s"),
+    }
 }
 
 #[cfg(test)]

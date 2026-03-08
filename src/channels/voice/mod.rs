@@ -8,7 +8,7 @@ pub mod local_whisper;
 
 mod service;
 
-pub use service::{synthesize_speech, transcribe_audio};
+pub use service::{synthesize_speech, transcribe, transcribe_audio};
 
 #[cfg(feature = "local-stt")]
 pub use service::transcribe_audio_local;

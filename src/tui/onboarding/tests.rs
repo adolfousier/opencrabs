@@ -132,7 +132,7 @@ fn test_voice_setup_defaults() {
     let wizard = OnboardingWizard::new();
     assert!(wizard.groq_api_key_input.is_empty());
     assert!(!wizard.tts_enabled);
-    assert_eq!(wizard.voice_field, VoiceField::GroqApiKey);
+    assert_eq!(wizard.voice_field, VoiceField::SttModeSelect);
 }
 
 #[test]

@@ -5,6 +5,26 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.63] - 2026-03-08
+
+### Added
+- **Local voice transcription (whisper.cpp)** — Full on-device speech-to-text via whisper.cpp behind the `local-stt` feature flag. Send voice notes on Telegram, WhatsApp, Discord, or Slack and get instant local transcription — zero API calls, zero latency, zero cost. Configurable via `stt_mode = "local"` and `local_stt_model` in config.toml. Supports tiny/base/small/medium models with automatic download via `/onboard:voice`. OGG/Opus decoding via `symphonia-adapter-libopus` for Telegram voice notes. STT dispatch routes between Groq Whisper API and local whisper.cpp based on config
+  - `src/channels/voice/service.rs`, `src/channels/voice/local_whisper.rs`, `src/channels/voice/mod.rs`, `Cargo.toml`
+- **Channel hot-reload** — Channels are now dynamically spawned/stopped when `channels.*.enabled` changes in config.toml at runtime. No restart needed. New `ChannelManager` reconciles running agents against config on every reload
+  - `src/channels/manager.rs` (new), `src/channels/mod.rs`, `src/cli/ui.rs`
+- **21 voice STT dispatch tests** — STT routing, config defaults, audio decode, codec registration, mock API dispatch
+  - `src/tests/voice_stt_dispatch_test.rs` (new), `src/tests/mod.rs`
+
+### Fixed
+- **whisper.cpp TUI bleeding** — Suppressed whisper.cpp/ggml stderr output via no-op C log callback. Model loading and inference debug lines no longer bleed into the TUI
+  - `src/channels/voice/local_whisper.rs`, `Cargo.toml` (`whisper-rs-sys` dependency)
+- **Onboarding model fallback writing `"default"` to config** — `selected_model_name()` fell back to literal `"default"` when no models were loaded, which got written to config.toml and caused MiniMax API to reject all requests. Now returns empty string; caller skips write
+  - `src/tui/onboarding/models.rs`
+- **Voice setup test** — Updated `test_voice_setup_defaults` assertion to match new STT mode select as first field
+  - `src/tui/onboarding/tests.rs`
+- **Windows CI flaky test** — `test_concurrent_sessions_independent` used `tokio::join!` with in-memory SQLite causing contention on Windows. Runs sequentially now
+  - `src/brain/agent/service/tests/parallel_sessions.rs`
+
 ## [0.2.62] - 2026-03-08
 
 ### Added
@@ -1326,6 +1346,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.63]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.63
 [0.2.62]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.62
 [0.2.61]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.61
 [0.2.60]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.60
