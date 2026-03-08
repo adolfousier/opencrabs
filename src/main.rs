@@ -1,3 +1,7 @@
+//! OpenCrabs binary entry point.
+//!
+//! See the [`opencrabs`] library crate for full documentation.
+
 use anyhow::Result;
 use clap::Parser;
 use opencrabs::{cli, logging};

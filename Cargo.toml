@@ -2,6 +2,7 @@
 name = "opencrabs"
 version = "0.2.61"
 edition = "2024"
+rust-version = "1.91"
 authors = ["Adolfo Usier <adolfo@meetneura.ai>"]
 license = "MIT"
 description = "The autonomous AI agent. Single Rust binary. Every channel."
@@ -11,6 +12,7 @@ documentation = "https://docs.opencrabs.com"
 keywords = ["ai", "terminal", "assistant", "llm", "cli"]
 categories = ["command-line-utilities", "development-tools"]
 readme = "README.md"
+# exclude = ["src/screenshots/"]
 
 [dependencies]
 # Async Runtime
@@ -126,8 +128,6 @@ tar = "0.4"
 qmd = "0.3"
 llama-cpp-2 = "0.1.137"
 emojis = "0.8.0"
-
-
 
 [dev-dependencies]
 rstest = "0.25"
