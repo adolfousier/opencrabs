@@ -139,7 +139,8 @@ pub async fn handle_command(
     result
 }
 
-/// Save the user command and bot response to session message history.
+/// Save the user command and bot response to session message history,
+/// then notify TUI so it refreshes live.
 async fn persist_command_to_history(
     agent: &AgentService,
     session_id: Uuid,
@@ -161,6 +162,10 @@ async fn persist_command_to_history(
             "Failed to persist channel command response to history: {}",
             e
         );
+    }
+    // Notify TUI to reload session messages (same mechanism as agent responses)
+    if let Some(tx) = agent.session_updated_tx() {
+        let _ = tx.send(session_id);
     }
 }
 
@@ -488,41 +493,36 @@ pub async fn models_for_provider(provider_name: &str) -> ModelsResponse {
 
     let current_model = provider.default_model().to_string();
 
-    // Prefer config models (fast, no network), then live fetch with timeout, then hardcoded
+    // Config models first (instant), then live fetch.
+    // Timeouts per provider — Anthropic/OpenAI/Gemini are fast (~1s),
+    // OpenRouter returns 300+ models (needs more time),
+    // custom endpoints may not have /models at all.
     let config_models = provider_config_models(&config, provider_name);
+    let skip_live = provider_name.starts_with("custom:");
+    let timeout_secs = match provider_name {
+        "anthropic" | "openai" | "gemini" | "minimax" => 10,
+        "openrouter" => 30,
+        _ => 10,
+    };
     let mut models = if !config_models.is_empty() {
         config_models
+    } else if skip_live {
+        vec![current_model.clone()]
     } else {
-        // Live fetch with 10s timeout — OpenRouter can return thousands of models
-        match tokio::time::timeout(std::time::Duration::from_secs(10), provider.fetch_models())
-            .await
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(timeout_secs),
+            provider.fetch_models(),
+        )
+        .await
         {
-            Ok(fetched) if !fetched.is_empty() => {
-                // Filter out hardcoded GPT fallback for non-OpenAI providers
-                if fetched.first().is_some_and(|m| m.starts_with("gpt-"))
-                    && provider.name() != "openai"
-                    && provider.name() != "openai-compatible"
-                {
-                    // Fallback returned GPT defaults — just use current model
-                    vec![current_model.clone()]
-                } else {
-                    fetched
-                }
-            }
-            Ok(_empty) => {
-                // Empty fetch result — just show current model
-                vec![current_model.clone()]
-            }
+            Ok(fetched) if !fetched.is_empty() => fetched,
+            Ok(_) => vec![current_model.clone()],
             Err(_) => {
-                tracing::warn!("fetch_models timed out for provider '{}'", provider_name);
+                tracing::warn!("fetch_models timed out for '{}'", provider_name);
                 vec![current_model.clone()]
             }
         }
     };
-
-    if models.is_empty() {
-        models = provider.supported_models();
-    }
 
     // Ensure current model is in the list
     if !models.contains(&current_model) {
