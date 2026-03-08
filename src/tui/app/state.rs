@@ -1327,8 +1327,7 @@ impl App {
                     Self::read_approval_policy_from_config();
                 // Sync agent provider if model changed (e.g. channel switched model)
                 if let Ok(config) = crate::config::Config::load() {
-                    let (cfg_prov, cfg_model) =
-                        config.providers.active_provider_and_model();
+                    let (cfg_prov, cfg_model) = config.providers.active_provider_and_model();
                     let cur_prov = self.agent_service.provider_name();
                     let cur_model = self.agent_service.provider_model();
                     if cfg_prov != cur_prov || cfg_model != cur_model {
@@ -1336,14 +1335,15 @@ impl App {
                             Ok(new_provider) => {
                                 tracing::info!(
                                     "TUI synced provider: {} / {} → {} / {}",
-                                    cur_prov, cur_model, cfg_prov, cfg_model,
+                                    cur_prov,
+                                    cur_model,
+                                    cfg_prov,
+                                    cfg_model,
                                 );
                                 self.agent_service.swap_provider(new_provider);
                             }
                             Err(e) => {
-                                tracing::warn!(
-                                    "ConfigReloaded: failed to swap provider: {}", e
-                                );
+                                tracing::warn!("ConfigReloaded: failed to swap provider: {}", e);
                             }
                         }
                     }
