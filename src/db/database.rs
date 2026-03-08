@@ -1,15 +1,33 @@
 //! Database connection management, pool configuration, and extension traits.
 
 use anyhow::{Context, Result};
-use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
+use deadpool_sqlite::{Config, Hook, InteractError, Pool as DeadPool, Runtime};
+use rusqlite_migration::{M, Migrations};
 use std::path::Path;
 
 /// Type alias for database pool
-pub type Pool = SqlitePool;
+pub type Pool = DeadPool;
+
+/// Map deadpool InteractError to anyhow
+pub fn interact_err(e: InteractError) -> anyhow::Error {
+    anyhow::anyhow!("Database interact error: {}", e)
+}
 
 /// Database connection manager
 pub struct Database {
-    pool: SqlitePool,
+    pool: Pool,
+}
+
+/// Apply PRAGMA settings to a rusqlite connection.
+///
+/// WAL mode, busy timeout, synchronous NORMAL, 64 MB page cache.
+fn apply_pragmas(conn: &rusqlite::Connection) -> std::result::Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         PRAGMA busy_timeout = 30000;
+         PRAGMA synchronous = NORMAL;
+         PRAGMA cache_size = -65536;",
+    )
 }
 
 impl Database {
@@ -34,37 +52,22 @@ impl Database {
         }
 
         let path_str = path.to_string_lossy().into_owned();
-        let url = format!("sqlite://{}?mode=rwc", path_str);
 
-        let pool = SqlitePoolOptions::new()
-            .max_connections(16)
-            .acquire_timeout(std::time::Duration::from_secs(30))
-            .after_connect(|conn, _meta| {
+        let pool = Config::new(&path_str)
+            .builder(Runtime::Tokio1)
+            .context("Failed to build pool config")?
+            .max_size(16)
+            .post_create(Hook::async_fn(|conn, _| {
                 Box::pin(async move {
-                    // WAL mode: readers and writers don't block each other.
-                    // This is the primary fix for concurrent channel + TUI access.
-                    sqlx::query("PRAGMA journal_mode = WAL")
-                        .execute(&mut *conn)
-                        .await?;
-                    // 30 s busy timeout — graceful queuing when two writers
-                    // briefly contend, instead of immediate SQLITE_BUSY error.
-                    sqlx::query("PRAGMA busy_timeout = 30000")
-                        .execute(&mut *conn)
-                        .await?;
-                    // NORMAL is safe under WAL and ~3× faster than FULL.
-                    sqlx::query("PRAGMA synchronous = NORMAL")
-                        .execute(&mut *conn)
-                        .await?;
-                    // 64 MB page cache per connection.
-                    sqlx::query("PRAGMA cache_size = -65536")
-                        .execute(&mut *conn)
-                        .await?;
+                    conn.interact(|conn| apply_pragmas(conn))
+                        .await
+                        .map_err(|e| deadpool_sqlite::HookError::Message(e.to_string().into()))?
+                        .map_err(|e| deadpool_sqlite::HookError::Message(e.to_string().into()))?;
                     Ok(())
                 })
-            })
-            .connect(&url)
-            .await
-            .context("Failed to connect to database")?;
+            }))
+            .build()
+            .context("Failed to create connection pool")?;
 
         tracing::info!(
             "Connected to database: {} (WAL, pool=16, busy_timeout=30s)",
@@ -74,76 +77,104 @@ impl Database {
     }
 
     /// Connect to an in-memory database (for testing)
+    ///
+    /// Each call creates a uniquely-named shared in-memory database so that
+    /// parallel tests never collide, while all connections *within* a single
+    /// test still see the same data.
     pub async fn connect_in_memory() -> Result<Self> {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(5)
-            .connect("sqlite::memory:")
-            .await
-            .context("Failed to connect to in-memory database")?;
+        let id = uuid::Uuid::new_v4().simple().to_string();
+        let uri = format!("file:mem_{}?mode=memory&cache=shared", id);
+        let pool = Config::new(uri)
+            .builder(Runtime::Tokio1)
+            .context("Failed to build pool config")?
+            .max_size(5)
+            .post_create(Hook::async_fn(|conn, _| {
+                Box::pin(async move {
+                    conn.interact(|conn| apply_pragmas(conn))
+                        .await
+                        .map_err(|e| deadpool_sqlite::HookError::Message(e.to_string().into()))?
+                        .map_err(|e| deadpool_sqlite::HookError::Message(e.to_string().into()))?;
+                    Ok(())
+                })
+            }))
+            .build()
+            .context("Failed to create in-memory pool")?;
 
         tracing::debug!("Connected to in-memory database");
         Ok(Self { pool })
     }
 
     /// Get a reference to the connection pool
-    pub fn pool(&self) -> &SqlitePool {
+    pub fn pool(&self) -> &Pool {
         &self.pool
     }
 
     /// Check if the database connection is still valid
     pub fn is_connected(&self) -> bool {
-        !self.pool.is_closed()
+        self.pool.status().size > 0 || self.pool.status().max_size > 0
     }
 
     /// Run database migrations
     pub async fn run_migrations(&self) -> Result<()> {
-        sqlx::migrate!("./src/migrations")
-            .run(&self.pool)
+        let migrations = Migrations::new(vec![
+            M::up(include_str!(
+                "../migrations/20251028000001_initial_schema.sql"
+            )),
+            M::up(include_str!(
+                "../migrations/20251028000002_modernize_schema.sql"
+            )),
+            M::up(include_str!("../migrations/20251111000001_add_plans.sql")),
+            M::up(include_str!(
+                "../migrations/20251113000001_add_plan_enhancements.sql"
+            )),
+            M::up(include_str!(
+                "../migrations/20260224000001_add_a2a_tasks.sql"
+            )),
+            M::up(include_str!(
+                "../migrations/20260226000001_add_session_provider.sql"
+            )),
+            M::up(include_str!(
+                "../migrations/20260305000001_add_channel_messages.sql"
+            )),
+            M::up(include_str!(
+                "../migrations/20260305000002_add_cron_jobs.sql"
+            )),
+            M::up(include_str!(
+                "../migrations/20260306000001_add_usage_ledger.sql"
+            )),
+            M::up(include_str!(
+                "../migrations/20260307000001_add_session_working_dir.sql"
+            )),
+        ]);
+
+        self.pool
+            .get()
             .await
+            .context("Failed to get connection for migrations")?
+            .interact(move |conn| migrations.to_latest(conn))
+            .await
+            .map_err(interact_err)?
             .context("Failed to run database migrations")?;
 
         tracing::info!("Database migrations completed");
         Ok(())
     }
 
-    /// Close the database connection
-    pub async fn close(self) -> Result<()> {
-        self.pool.close().await;
+    /// Close the database connection pool
+    pub fn close(&self) {
+        self.pool.close();
         tracing::info!("Database connection closed");
-        Ok(())
     }
 }
 
-/// Extension trait for SqlitePool to add convenience methods
-#[allow(async_fn_in_trait)]
+/// Extension trait for Pool convenience methods
 pub trait PoolExt {
-    /// Connect to a database file
-    async fn connect_file<P: AsRef<Path>>(path: P) -> Result<Self>
-    where
-        Self: Sized;
-
-    /// Connect to an in-memory database
-    async fn connect_in_memory() -> Result<Self>
-    where
-        Self: Sized;
-
-    /// Check if the pool is connected
     fn is_connected(&self) -> bool;
 }
 
-impl PoolExt for SqlitePool {
-    async fn connect_file<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let db = Database::connect(path).await?;
-        Ok(db.pool)
-    }
-
-    async fn connect_in_memory() -> Result<Self> {
-        let db = Database::connect_in_memory().await?;
-        Ok(db.pool)
-    }
-
+impl PoolExt for Pool {
     fn is_connected(&self) -> bool {
-        !self.is_closed()
+        self.status().size > 0 || self.status().max_size > 0
     }
 }
 
@@ -158,8 +189,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_pool_connect_in_memory() {
-        let pool = Pool::connect_in_memory().await.unwrap();
-        assert!(pool.is_connected());
+    async fn test_migrations() {
+        let db = Database::connect_in_memory().await.unwrap();
+        db.run_migrations().await.unwrap();
     }
 }

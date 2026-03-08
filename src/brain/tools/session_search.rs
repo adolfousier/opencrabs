@@ -7,20 +7,20 @@
 
 use super::error::Result;
 use super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
+use crate::db::Pool;
 use async_trait::async_trait;
 use qmd::{Store, hybrid_search_rrf};
 use serde_json::Value;
-use sqlx::SqlitePool;
 
 const COLLECTION: &str = "sessions";
 
 /// Tool for listing and searching session message history via QMD hybrid search.
 pub struct SessionSearchTool {
-    pool: SqlitePool,
+    pool: Pool,
 }
 
 impl SessionSearchTool {
-    pub fn new(pool: SqlitePool) -> Self {
+    pub fn new(pool: Pool) -> Self {
         Self { pool }
     }
 }

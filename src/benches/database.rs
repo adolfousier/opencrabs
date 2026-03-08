@@ -10,6 +10,7 @@
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use opencrabs::db::{Database, models::Session};
+use rusqlite::params;
 use tempfile::TempDir;
 
 /// Helper to create a test database in memory
@@ -31,28 +32,32 @@ fn bench_session_create(c: &mut Criterion) {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
                 let (db, _temp) = setup_test_db().await;
-                let pool = db.pool();
 
                 black_box({
                     let session = Session::new(Some("Test Session".to_string()), Some("claude-3-5-sonnet".to_string()), None);
-                    sqlx::query(
-                        r#"
-                        INSERT INTO sessions (id, title, model, created_at, updated_at, token_count, total_cost)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                        "#
-                    )
-                    .bind(session.id.to_string())
-                    .bind(&session.title)
-                    .bind(&session.model)
-                    .bind(session.created_at.timestamp())
-                    .bind(session.updated_at.timestamp())
-                    .bind(session.token_count)
-                    .bind(session.total_cost)
-                    .execute(pool)
-                    .await
-                    .unwrap();
-
-                    session.id
+                    db.pool()
+                        .get()
+                        .await
+                        .unwrap()
+                        .interact(move |conn| {
+                            conn.execute(
+                                "INSERT INTO sessions (id, title, model, created_at, updated_at, token_count, total_cost)
+                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                                params![
+                                    session.id.to_string(),
+                                    session.title,
+                                    session.model,
+                                    session.created_at.timestamp(),
+                                    session.updated_at.timestamp(),
+                                    session.token_count,
+                                    session.total_cost,
+                                ],
+                            )?;
+                            Ok::<_, rusqlite::Error>(session.id)
+                        })
+                        .await
+                        .unwrap()
+                        .unwrap()
                 })
             })
         });
@@ -68,40 +73,43 @@ fn bench_session_get(c: &mut Criterion) {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
                 let (db, _temp) = setup_test_db().await;
-                let pool = db.pool();
 
                 // Create a session first
                 let session = Session::new(Some("Test Session".to_string()), Some("claude-3-5-sonnet".to_string()), None);
-                sqlx::query(
-                    r#"
-                    INSERT INTO sessions (id, title, model, created_at, updated_at, token_count, total_cost)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    "#
-                )
-                .bind(session.id.to_string())
-                .bind(&session.title)
-                .bind(&session.model)
-                .bind(session.created_at.timestamp())
-                .bind(session.updated_at.timestamp())
-                .bind(session.token_count)
-                .bind(session.total_cost)
-                .execute(pool)
-                .await
-                .unwrap();
+                let sid = session.id.to_string();
+                let s = session.clone();
+                db.pool()
+                    .get()
+                    .await
+                    .unwrap()
+                    .interact(move |conn| {
+                        conn.execute(
+                            "INSERT INTO sessions (id, title, model, created_at, updated_at, token_count, total_cost)
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                            params![
+                                s.id.to_string(), s.title, s.model,
+                                s.created_at.timestamp(), s.updated_at.timestamp(),
+                                s.token_count, s.total_cost,
+                            ],
+                        )
+                    })
+                    .await
+                    .unwrap()
+                    .unwrap();
 
                 // Now benchmark retrieving it
                 black_box({
-                    sqlx::query_as::<_, Session>(
-                        r#"
-                        SELECT id, title, model, created_at, updated_at, archived_at, token_count, total_cost
-                        FROM sessions
-                        WHERE id = ?
-                        "#
-                    )
-                    .bind(session.id.to_string())
-                    .fetch_one(pool)
-                    .await
-                    .unwrap()
+                    db.pool()
+                        .get()
+                        .await
+                        .unwrap()
+                        .interact(move |conn| {
+                            conn.prepare_cached("SELECT * FROM sessions WHERE id = ?1")?
+                                .query_row(params![sid], Session::from_row)
+                        })
+                        .await
+                        .unwrap()
+                        .unwrap()
                 })
             })
         });
@@ -119,7 +127,6 @@ fn bench_session_list(c: &mut Criterion) {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 rt.block_on(async move {
                     let (db, _temp) = setup_test_db().await;
-                    let pool = db.pool();
 
                     // Create N sessions
                     for i in 0..count {
@@ -128,36 +135,43 @@ fn bench_session_list(c: &mut Criterion) {
                             Some("claude-3-5-sonnet".to_string()),
                             None,
                         );
-                        sqlx::query(
-                            r#"
-                            INSERT INTO sessions (id, title, model, created_at, updated_at, token_count, total_cost)
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
-                            "#
-                        )
-                        .bind(session.id.to_string())
-                        .bind(&session.title)
-                        .bind(&session.model)
-                        .bind(session.created_at.timestamp())
-                        .bind(session.updated_at.timestamp())
-                        .bind(session.token_count)
-                        .bind(session.total_cost)
-                        .execute(pool)
-                        .await
-                        .unwrap();
+                        let s = session.clone();
+                        db.pool()
+                            .get()
+                            .await
+                            .unwrap()
+                            .interact(move |conn| {
+                                conn.execute(
+                                    "INSERT INTO sessions (id, title, model, created_at, updated_at, token_count, total_cost)
+                                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                                    params![
+                                        s.id.to_string(), s.title, s.model,
+                                        s.created_at.timestamp(), s.updated_at.timestamp(),
+                                        s.token_count, s.total_cost,
+                                    ],
+                                )
+                            })
+                            .await
+                            .unwrap()
+                            .unwrap();
                     }
 
                     // Benchmark listing them
                     black_box({
-                        sqlx::query_as::<_, Session>(
-                            r#"
-                            SELECT id, title, model, created_at, updated_at, archived_at, token_count, total_cost
-                            FROM sessions
-                            ORDER BY created_at DESC
-                            "#
-                        )
-                        .fetch_all(pool)
-                        .await
-                        .unwrap()
+                        db.pool()
+                            .get()
+                            .await
+                            .unwrap()
+                            .interact(|conn| {
+                                let mut stmt = conn.prepare_cached(
+                                    "SELECT * FROM sessions ORDER BY created_at DESC",
+                                )?;
+                                let rows = stmt.query_map([], Session::from_row)?;
+                                rows.collect::<std::result::Result<Vec<_>, _>>()
+                            })
+                            .await
+                            .unwrap()
+                            .unwrap()
                     })
                 })
             });
@@ -175,52 +189,57 @@ fn bench_message_insert(c: &mut Criterion) {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
                 let (db, _temp) = setup_test_db().await;
-                let pool = db.pool();
 
                 // Create a session first
                 let session = Session::new(Some("Test Session".to_string()), Some("claude-3-5-sonnet".to_string()), None);
-                sqlx::query(
-                    r#"
-                    INSERT INTO sessions (id, title, model, created_at, updated_at, token_count, total_cost)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    "#
-                )
-                .bind(session.id.to_string())
-                .bind(&session.title)
-                .bind(&session.model)
-                .bind(session.created_at.timestamp())
-                .bind(session.updated_at.timestamp())
-                .bind(session.token_count)
-                .bind(session.total_cost)
-                .execute(pool)
-                .await
-                .unwrap();
+                let s = session.clone();
+                db.pool()
+                    .get()
+                    .await
+                    .unwrap()
+                    .interact(move |conn| {
+                        conn.execute(
+                            "INSERT INTO sessions (id, title, model, created_at, updated_at, token_count, total_cost)
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                            params![
+                                s.id.to_string(), s.title, s.model,
+                                s.created_at.timestamp(), s.updated_at.timestamp(),
+                                s.token_count, s.total_cost,
+                            ],
+                        )
+                    })
+                    .await
+                    .unwrap()
+                    .unwrap();
 
                 // Benchmark message insertion
                 black_box({
                     let message_id = uuid::Uuid::new_v4();
-                    let role = "user";
-                    let content = "Hello, this is a test message";
-                    let sequence = 1i32;
-                    let created_at = chrono::Utc::now();
+                    let session_id = session.id.to_string();
+                    let created_at = chrono::Utc::now().timestamp();
 
-                    sqlx::query(
-                        r#"
-                        INSERT INTO messages (id, session_id, role, content, sequence, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                        "#
-                    )
-                    .bind(message_id.to_string())
-                    .bind(session.id.to_string())
-                    .bind(role)
-                    .bind(content)
-                    .bind(sequence)
-                    .bind(created_at.timestamp())
-                    .execute(pool)
-                    .await
-                    .unwrap();
-
-                    message_id
+                    db.pool()
+                        .get()
+                        .await
+                        .unwrap()
+                        .interact(move |conn| {
+                            conn.execute(
+                                "INSERT INTO messages (id, session_id, role, content, sequence, created_at)
+                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                                params![
+                                    message_id.to_string(),
+                                    session_id,
+                                    "user",
+                                    "Hello, this is a test message",
+                                    1i32,
+                                    created_at,
+                                ],
+                            )?;
+                            Ok::<_, rusqlite::Error>(message_id)
+                        })
+                        .await
+                        .unwrap()
+                        .unwrap()
                 })
             })
         });
@@ -238,75 +257,78 @@ fn bench_message_query(c: &mut Criterion) {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 rt.block_on(async move {
                     let (db, _temp) = setup_test_db().await;
-                    let pool = db.pool();
 
                     // Create a session
                     let session = Session::new(Some("Test Session".to_string()), Some("claude-3-5-sonnet".to_string()), None);
-                    sqlx::query(
-                        r#"
-                        INSERT INTO sessions (id, title, model, created_at, updated_at, token_count, total_cost)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                        "#
-                    )
-                    .bind(session.id.to_string())
-                    .bind(&session.title)
-                    .bind(&session.model)
-                    .bind(session.created_at.timestamp())
-                    .bind(session.updated_at.timestamp())
-                    .bind(session.token_count)
-                    .bind(session.total_cost)
-                    .execute(pool)
-                    .await
-                    .unwrap();
+                    let s = session.clone();
+                    db.pool()
+                        .get()
+                        .await
+                        .unwrap()
+                        .interact(move |conn| {
+                            conn.execute(
+                                "INSERT INTO sessions (id, title, model, created_at, updated_at, token_count, total_cost)
+                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                                params![
+                                    s.id.to_string(), s.title, s.model,
+                                    s.created_at.timestamp(), s.updated_at.timestamp(),
+                                    s.token_count, s.total_cost,
+                                ],
+                            )
+                        })
+                        .await
+                        .unwrap()
+                        .unwrap();
 
                     // Insert N messages
                     for i in 0..count {
-                        let message_id = uuid::Uuid::new_v4();
+                        let session_id = session.id.to_string();
+                        let message_id = uuid::Uuid::new_v4().to_string();
                         let role = if i % 2 == 0 { "user" } else { "assistant" };
                         let content = format!("Test message {}", i);
                         let sequence = i as i32;
-                        let created_at = chrono::Utc::now();
+                        let created_at = chrono::Utc::now().timestamp();
 
-                        sqlx::query(
-                            r#"
-                            INSERT INTO messages (id, session_id, role, content, sequence, created_at)
-                            VALUES (?, ?, ?, ?, ?, ?)
-                            "#
-                        )
-                        .bind(message_id.to_string())
-                        .bind(session.id.to_string())
-                        .bind(role)
-                        .bind(&content)
-                        .bind(sequence)
-                        .bind(created_at.timestamp())
-                        .execute(pool)
-                        .await
-                        .unwrap();
+                        db.pool()
+                            .get()
+                            .await
+                            .unwrap()
+                            .interact(move |conn| {
+                                conn.execute(
+                                    "INSERT INTO messages (id, session_id, role, content, sequence, created_at)
+                                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                                    params![message_id, session_id, role, content, sequence, created_at],
+                                )
+                            })
+                            .await
+                            .unwrap()
+                            .unwrap();
                     }
 
                     // Benchmark querying all messages
+                    let sid = session.id.to_string();
                     black_box({
-                        #[derive(sqlx::FromRow)]
-                        #[allow(dead_code)]
-                        struct Message {
-                            id: String,
-                            role: String,
-                            content: String,
-                            sequence: i32,
-                        }
-
-                        sqlx::query_as::<_, Message>(
-                            r#"
-                            SELECT id, role, content, sequence
-                            FROM messages
-                            WHERE session_id = ?
-                            ORDER BY sequence ASC
-                            "#
-                        )
-                        .bind(session.id.to_string())
-                        .fetch_all(pool)
-                        .await
-                        .unwrap()
+                        db.pool()
+                            .get()
+                            .await
+                            .unwrap()
+                            .interact(move |conn| {
+                                let mut stmt = conn.prepare_cached(
+                                    "SELECT id, role, content, sequence FROM messages WHERE session_id = ?1 ORDER BY sequence ASC",
+                                )?;
+                                let rows = stmt.query_map(params![sid], |row| {
+                                    Ok((
+                                        row.get::<_, String>(0)?,
+                                        row.get::<_, String>(1)?,
+                                        row.get::<_, String>(2)?,
+                                        row.get::<_, i32>(3)?,
+                                    ))
+                                })?;
+                                rows.collect::<std::result::Result<Vec<_>, _>>()
+                            })
+                            .await
+                            .unwrap()
+                            .unwrap()
                     })
                 })
             });

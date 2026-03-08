@@ -4,8 +4,60 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
 use uuid::Uuid;
+
+// ─── Row helpers ─────────────────────────────────────────────────────────────
+
+/// Parse a UUID string column from a rusqlite row.
+pub fn uuid_col(row: &rusqlite::Row, col: &str) -> rusqlite::Result<Uuid> {
+    let s: String = row.get(col)?;
+    Uuid::parse_str(&s).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
+    })
+}
+
+/// Parse a Unix-timestamp column into `DateTime<Utc>`.
+pub fn timestamp_col(row: &rusqlite::Row, col: &str) -> rusqlite::Result<DateTime<Utc>> {
+    let ts: i64 = row.get(col)?;
+    DateTime::from_timestamp(ts, 0).ok_or_else(|| {
+        rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Integer,
+            format!("Invalid timestamp for {col}").into(),
+        )
+    })
+}
+
+/// Parse an optional Unix-timestamp column.
+pub fn opt_timestamp_col(
+    row: &rusqlite::Row,
+    col: &str,
+) -> rusqlite::Result<Option<DateTime<Utc>>> {
+    let ts: Option<i64> = row.get(col)?;
+    Ok(ts.and_then(|t| DateTime::from_timestamp(t, 0)))
+}
+
+/// Parse an RFC-3339 string column into `DateTime<Utc>`.
+pub fn rfc3339_col(row: &rusqlite::Row, col: &str) -> rusqlite::Result<DateTime<Utc>> {
+    let s: String = row.get(col)?;
+    DateTime::parse_from_rfc3339(&s)
+        .map(|d| d.with_timezone(&Utc))
+        .map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
+        })
+}
+
+/// Parse an optional RFC-3339 string column.
+pub fn opt_rfc3339_col(row: &rusqlite::Row, col: &str) -> rusqlite::Result<Option<DateTime<Utc>>> {
+    let s: Option<String> = row.get(col)?;
+    Ok(s.and_then(|v| {
+        DateTime::parse_from_rfc3339(&v)
+            .ok()
+            .map(|d| d.with_timezone(&Utc))
+    }))
+}
+
+// ─── Session ─────────────────────────────────────────────────────────────────
 
 /// Session model
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,6 +74,51 @@ pub struct Session {
     pub working_directory: Option<String>,
 }
 
+impl Session {
+    pub fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
+        Ok(Session {
+            id: uuid_col(row, "id")?,
+            title: row.get("title")?,
+            model: row.get("model")?,
+            provider_name: row.get("provider_name")?,
+            created_at: timestamp_col(row, "created_at")?,
+            updated_at: timestamp_col(row, "updated_at")?,
+            archived_at: opt_timestamp_col(row, "archived_at")?,
+            token_count: row.get("token_count")?,
+            total_cost: row.get("total_cost")?,
+            working_directory: row.get("working_directory")?,
+        })
+    }
+
+    /// Create a new session
+    pub fn new(
+        title: Option<String>,
+        model: Option<String>,
+        provider_name: Option<String>,
+    ) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4(),
+            title,
+            model,
+            provider_name,
+            created_at: now,
+            updated_at: now,
+            archived_at: None,
+            token_count: 0,
+            total_cost: 0.0,
+            working_directory: None,
+        }
+    }
+
+    /// Check if the session is archived
+    pub fn is_archived(&self) -> bool {
+        self.archived_at.is_some()
+    }
+}
+
+// ─── Message ─────────────────────────────────────────────────────────────────
+
 /// Message model
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
@@ -35,6 +132,37 @@ pub struct Message {
     pub cost: Option<f64>,
 }
 
+impl Message {
+    pub fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
+        Ok(Message {
+            id: uuid_col(row, "id")?,
+            session_id: uuid_col(row, "session_id")?,
+            role: row.get("role")?,
+            content: row.get("content")?,
+            sequence: row.get("sequence")?,
+            created_at: timestamp_col(row, "created_at")?,
+            token_count: row.get("token_count")?,
+            cost: row.get("cost")?,
+        })
+    }
+
+    /// Create a new message
+    pub fn new(session_id: Uuid, role: String, content: String, sequence: i32) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            session_id,
+            role,
+            content,
+            sequence,
+            created_at: Utc::now(),
+            token_count: None,
+            cost: None,
+        }
+    }
+}
+
+// ─── File ────────────────────────────────────────────────────────────────────
+
 /// File model
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct File {
@@ -46,8 +174,36 @@ pub struct File {
     pub updated_at: DateTime<Utc>,
 }
 
+impl File {
+    pub fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
+        Ok(File {
+            id: uuid_col(row, "id")?,
+            session_id: uuid_col(row, "session_id")?,
+            path: std::path::PathBuf::from(row.get::<_, String>("path")?),
+            content: row.get("content")?,
+            created_at: timestamp_col(row, "created_at")?,
+            updated_at: timestamp_col(row, "updated_at")?,
+        })
+    }
+
+    /// Create a new file record
+    pub fn new(session_id: Uuid, path: std::path::PathBuf, content: Option<String>) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4(),
+            session_id,
+            path,
+            content,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+}
+
+// ─── Attachment ──────────────────────────────────────────────────────────────
+
 /// Attachment model
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Attachment {
     pub id: Uuid,
     pub message_id: Uuid,
@@ -59,8 +215,26 @@ pub struct Attachment {
     pub created_at: DateTime<Utc>,
 }
 
+impl Attachment {
+    pub fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
+        Ok(Attachment {
+            id: uuid_col(row, "id")?,
+            message_id: uuid_col(row, "message_id")?,
+            attachment_type: row.get("attachment_type")?,
+            mime_type: row.get("mime_type")?,
+            path: row
+                .get::<_, Option<String>>("path")?
+                .map(std::path::PathBuf::from),
+            size_bytes: row.get("size_bytes")?,
+            created_at: timestamp_col(row, "created_at")?,
+        })
+    }
+}
+
+// ─── ToolExecution ───────────────────────────────────────────────────────────
+
 /// Tool execution model
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolExecution {
     pub id: Uuid,
     pub message_id: Uuid,
@@ -74,6 +248,24 @@ pub struct ToolExecution {
     pub executed_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
 }
+
+impl ToolExecution {
+    pub fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
+        Ok(ToolExecution {
+            id: uuid_col(row, "id")?,
+            message_id: uuid_col(row, "message_id")?,
+            tool_name: row.get("tool_name")?,
+            arguments: row.get("arguments")?,
+            result: row.get("result")?,
+            status: row.get("status")?,
+            approved_at: opt_timestamp_col(row, "approved_at")?,
+            executed_at: opt_timestamp_col(row, "executed_at")?,
+            created_at: timestamp_col(row, "created_at")?,
+        })
+    }
+}
+
+// ─── Plan ────────────────────────────────────────────────────────────────────
 
 /// Plan model
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,6 +287,27 @@ pub struct Plan {
     pub updated_at: DateTime<Utc>,
     pub approved_at: Option<DateTime<Utc>>,
 }
+
+impl Plan {
+    pub fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
+        Ok(Plan {
+            id: uuid_col(row, "id")?,
+            session_id: uuid_col(row, "session_id")?,
+            title: row.get("title")?,
+            description: row.get("description")?,
+            context: row.get("context")?,
+            risks: row.get("risks")?,
+            test_strategy: row.get("test_strategy")?,
+            technical_stack: row.get("technical_stack")?,
+            status: row.get("status")?,
+            created_at: timestamp_col(row, "created_at")?,
+            updated_at: timestamp_col(row, "updated_at")?,
+            approved_at: opt_timestamp_col(row, "approved_at")?,
+        })
+    }
+}
+
+// ─── PlanTask ────────────────────────────────────────────────────────────────
 
 /// Plan task model
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -118,6 +331,27 @@ pub struct PlanTask {
     pub completed_at: Option<DateTime<Utc>>,
 }
 
+impl PlanTask {
+    pub fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
+        Ok(PlanTask {
+            id: uuid_col(row, "id")?,
+            plan_id: uuid_col(row, "plan_id")?,
+            task_order: row.get("task_order")?,
+            title: row.get("title")?,
+            description: row.get("description")?,
+            task_type: row.get("task_type")?,
+            dependencies: row.get("dependencies")?,
+            complexity: row.get("complexity")?,
+            acceptance_criteria: row.get("acceptance_criteria")?,
+            status: row.get("status")?,
+            notes: row.get("notes")?,
+            completed_at: opt_timestamp_col(row, "completed_at")?,
+        })
+    }
+}
+
+// ─── ChannelMessage ──────────────────────────────────────────────────────────
+
 /// Channel message model — passive capture of messages from channel platforms
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelMessage {
@@ -134,6 +368,21 @@ pub struct ChannelMessage {
 }
 
 impl ChannelMessage {
+    pub fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
+        Ok(ChannelMessage {
+            id: uuid_col(row, "id")?,
+            channel: row.get("channel")?,
+            channel_chat_id: row.get("channel_chat_id")?,
+            channel_chat_name: row.get("channel_chat_name")?,
+            sender_id: row.get("sender_id")?,
+            sender_name: row.get("sender_name")?,
+            content: row.get("content")?,
+            message_type: row.get("message_type")?,
+            platform_message_id: row.get("platform_message_id")?,
+            created_at: timestamp_col(row, "created_at")?,
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         channel: String,
@@ -160,26 +409,7 @@ impl ChannelMessage {
     }
 }
 
-impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for ChannelMessage {
-    fn from_row(row: &'r sqlx::sqlite::SqliteRow) -> std::result::Result<Self, sqlx::Error> {
-        use sqlx::Row;
-
-        Ok(ChannelMessage {
-            id: Uuid::parse_str(row.try_get("id")?)
-                .map_err(|e| sqlx::Error::Decode(Box::new(e)))?,
-            channel: row.try_get("channel")?,
-            channel_chat_id: row.try_get("channel_chat_id")?,
-            channel_chat_name: row.try_get("channel_chat_name")?,
-            sender_id: row.try_get("sender_id")?,
-            sender_name: row.try_get("sender_name")?,
-            content: row.try_get("content")?,
-            message_type: row.try_get("message_type")?,
-            platform_message_id: row.try_get("platform_message_id")?,
-            created_at: DateTime::from_timestamp(row.try_get("created_at")?, 0)
-                .ok_or_else(|| sqlx::Error::Decode("Invalid timestamp for created_at".into()))?,
-        })
-    }
-}
+// ─── CronJob ─────────────────────────────────────────────────────────────────
 
 /// Cron job model — a scheduled isolated session
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -202,6 +432,26 @@ pub struct CronJob {
 }
 
 impl CronJob {
+    pub fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
+        Ok(CronJob {
+            id: uuid_col(row, "id")?,
+            name: row.get("name")?,
+            cron_expr: row.get("cron_expr")?,
+            timezone: row.get("timezone")?,
+            prompt: row.get("prompt")?,
+            provider: row.get("provider")?,
+            model: row.get("model")?,
+            thinking: row.get("thinking")?,
+            auto_approve: row.get::<_, i32>("auto_approve")? != 0,
+            deliver_to: row.get("deliver_to")?,
+            enabled: row.get::<_, i32>("enabled")? != 0,
+            last_run_at: opt_rfc3339_col(row, "last_run_at")?,
+            next_run_at: opt_rfc3339_col(row, "next_run_at")?,
+            created_at: rfc3339_col(row, "created_at")?,
+            updated_at: rfc3339_col(row, "updated_at")?,
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: String,
@@ -232,224 +482,6 @@ impl CronJob {
             created_at: now,
             updated_at: now,
         }
-    }
-}
-
-impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for CronJob {
-    fn from_row(row: &'r sqlx::sqlite::SqliteRow) -> std::result::Result<Self, sqlx::Error> {
-        use sqlx::Row;
-
-        let parse_ts = |val: Option<String>| -> Option<DateTime<Utc>> {
-            val.and_then(|s| {
-                DateTime::parse_from_rfc3339(&s)
-                    .ok()
-                    .map(|d| d.with_timezone(&Utc))
-            })
-        };
-
-        Ok(CronJob {
-            id: Uuid::parse_str(row.try_get("id")?)
-                .map_err(|e| sqlx::Error::Decode(Box::new(e)))?,
-            name: row.try_get("name")?,
-            cron_expr: row.try_get("cron_expr")?,
-            timezone: row.try_get("timezone")?,
-            prompt: row.try_get("prompt")?,
-            provider: row.try_get("provider")?,
-            model: row.try_get("model")?,
-            thinking: row.try_get("thinking")?,
-            auto_approve: row.try_get::<i32, _>("auto_approve")? != 0,
-            deliver_to: row.try_get("deliver_to")?,
-            enabled: row.try_get::<i32, _>("enabled")? != 0,
-            last_run_at: parse_ts(row.try_get("last_run_at")?),
-            next_run_at: parse_ts(row.try_get("next_run_at")?),
-            created_at: {
-                let s: String = row.try_get("created_at")?;
-                DateTime::parse_from_rfc3339(&s)
-                    .map(|d| d.with_timezone(&Utc))
-                    .map_err(|e| sqlx::Error::Decode(Box::new(e)))?
-            },
-            updated_at: {
-                let s: String = row.try_get("updated_at")?;
-                DateTime::parse_from_rfc3339(&s)
-                    .map(|d| d.with_timezone(&Utc))
-                    .map_err(|e| sqlx::Error::Decode(Box::new(e)))?
-            },
-        })
-    }
-}
-
-impl Session {
-    /// Create a new session
-    pub fn new(
-        title: Option<String>,
-        model: Option<String>,
-        provider_name: Option<String>,
-    ) -> Self {
-        let now = Utc::now();
-        Self {
-            id: Uuid::new_v4(),
-            title,
-            model,
-            provider_name,
-            created_at: now,
-            updated_at: now,
-            archived_at: None,
-            token_count: 0,
-            total_cost: 0.0,
-            working_directory: None,
-        }
-    }
-
-    /// Check if the session is archived
-    pub fn is_archived(&self) -> bool {
-        self.archived_at.is_some()
-    }
-}
-
-impl Message {
-    /// Create a new message
-    pub fn new(session_id: Uuid, role: String, content: String, sequence: i32) -> Self {
-        Self {
-            id: Uuid::new_v4(),
-            session_id,
-            role,
-            content,
-            sequence,
-            created_at: Utc::now(),
-            token_count: None,
-            cost: None,
-        }
-    }
-}
-
-impl File {
-    /// Create a new file record
-    pub fn new(session_id: Uuid, path: std::path::PathBuf, content: Option<String>) -> Self {
-        let now = Utc::now();
-        Self {
-            id: Uuid::new_v4(),
-            session_id,
-            path,
-            content,
-            created_at: now,
-            updated_at: now,
-        }
-    }
-}
-
-/// Manual FromRow implementations to handle type conversions
-impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for Session {
-    fn from_row(row: &'r sqlx::sqlite::SqliteRow) -> Result<Self, sqlx::Error> {
-        use sqlx::Row;
-
-        Ok(Session {
-            id: Uuid::parse_str(row.try_get("id")?)
-                .map_err(|e| sqlx::Error::Decode(Box::new(e)))?,
-            title: row.try_get("title")?,
-            model: row.try_get("model")?,
-            provider_name: row.try_get("provider_name")?,
-            created_at: DateTime::from_timestamp(row.try_get("created_at")?, 0)
-                .ok_or_else(|| sqlx::Error::Decode("Invalid timestamp for created_at".into()))?,
-            updated_at: DateTime::from_timestamp(row.try_get("updated_at")?, 0)
-                .ok_or_else(|| sqlx::Error::Decode("Invalid timestamp for updated_at".into()))?,
-            archived_at: row
-                .try_get::<Option<i64>, _>("archived_at")?
-                .and_then(|ts| DateTime::from_timestamp(ts, 0)),
-            token_count: row.try_get("token_count")?,
-            total_cost: row.try_get("total_cost")?,
-            working_directory: row.try_get("working_directory")?,
-        })
-    }
-}
-
-impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for Message {
-    fn from_row(row: &'r sqlx::sqlite::SqliteRow) -> Result<Self, sqlx::Error> {
-        use sqlx::Row;
-
-        Ok(Message {
-            id: Uuid::parse_str(row.try_get("id")?)
-                .map_err(|e| sqlx::Error::Decode(Box::new(e)))?,
-            session_id: Uuid::parse_str(row.try_get("session_id")?)
-                .map_err(|e| sqlx::Error::Decode(Box::new(e)))?,
-            role: row.try_get("role")?,
-            content: row.try_get("content")?,
-            sequence: row.try_get("sequence")?,
-            created_at: DateTime::from_timestamp(row.try_get("created_at")?, 0)
-                .ok_or_else(|| sqlx::Error::Decode("Invalid timestamp for created_at".into()))?,
-            token_count: row.try_get("token_count")?,
-            cost: row.try_get("cost")?,
-        })
-    }
-}
-
-impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for File {
-    fn from_row(row: &'r sqlx::sqlite::SqliteRow) -> Result<Self, sqlx::Error> {
-        use sqlx::Row;
-
-        Ok(File {
-            id: Uuid::parse_str(row.try_get("id")?)
-                .map_err(|e| sqlx::Error::Decode(Box::new(e)))?,
-            session_id: Uuid::parse_str(row.try_get("session_id")?)
-                .map_err(|e| sqlx::Error::Decode(Box::new(e)))?,
-            path: std::path::PathBuf::from(row.try_get::<String, _>("path")?),
-            content: row.try_get("content")?,
-            created_at: DateTime::from_timestamp(row.try_get("created_at")?, 0)
-                .ok_or_else(|| sqlx::Error::Decode("Invalid timestamp for created_at".into()))?,
-            updated_at: DateTime::from_timestamp(row.try_get("updated_at")?, 0)
-                .ok_or_else(|| sqlx::Error::Decode("Invalid timestamp for updated_at".into()))?,
-        })
-    }
-}
-
-impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for Plan {
-    fn from_row(row: &'r sqlx::sqlite::SqliteRow) -> Result<Self, sqlx::Error> {
-        use sqlx::Row;
-
-        Ok(Plan {
-            id: Uuid::parse_str(row.try_get("id")?)
-                .map_err(|e| sqlx::Error::Decode(Box::new(e)))?,
-            session_id: Uuid::parse_str(row.try_get("session_id")?)
-                .map_err(|e| sqlx::Error::Decode(Box::new(e)))?,
-            title: row.try_get("title")?,
-            description: row.try_get("description")?,
-            context: row.try_get("context")?,
-            risks: row.try_get("risks")?,
-            test_strategy: row.try_get("test_strategy")?,
-            technical_stack: row.try_get("technical_stack")?,
-            status: row.try_get("status")?,
-            created_at: DateTime::from_timestamp(row.try_get("created_at")?, 0)
-                .ok_or_else(|| sqlx::Error::Decode("Invalid timestamp for created_at".into()))?,
-            updated_at: DateTime::from_timestamp(row.try_get("updated_at")?, 0)
-                .ok_or_else(|| sqlx::Error::Decode("Invalid timestamp for updated_at".into()))?,
-            approved_at: row
-                .try_get::<Option<i64>, _>("approved_at")?
-                .and_then(|ts| DateTime::from_timestamp(ts, 0)),
-        })
-    }
-}
-
-impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for PlanTask {
-    fn from_row(row: &'r sqlx::sqlite::SqliteRow) -> Result<Self, sqlx::Error> {
-        use sqlx::Row;
-
-        Ok(PlanTask {
-            id: Uuid::parse_str(row.try_get("id")?)
-                .map_err(|e| sqlx::Error::Decode(Box::new(e)))?,
-            plan_id: Uuid::parse_str(row.try_get("plan_id")?)
-                .map_err(|e| sqlx::Error::Decode(Box::new(e)))?,
-            task_order: row.try_get("task_order")?,
-            title: row.try_get("title")?,
-            description: row.try_get("description")?,
-            task_type: row.try_get("task_type")?,
-            dependencies: row.try_get("dependencies")?,
-            complexity: row.try_get("complexity")?,
-            acceptance_criteria: row.try_get("acceptance_criteria")?,
-            status: row.try_get("status")?,
-            notes: row.try_get("notes")?,
-            completed_at: row
-                .try_get::<Option<i64>, _>("completed_at")?
-                .and_then(|ts| DateTime::from_timestamp(ts, 0)),
-        })
     }
 }
 

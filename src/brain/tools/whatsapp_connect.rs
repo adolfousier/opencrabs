@@ -99,7 +99,7 @@ pub async fn start_whatsapp_pairing() -> Result<WhatsAppConnectHandle> {
     let _ = std::fs::remove_file(&db_path);
 
     let backend = Arc::new(
-        crate::channels::whatsapp::sqlx_store::SqlxStore::new(db_path.to_string_lossy().as_ref())
+        crate::channels::whatsapp::store::Store::new(db_path.to_string_lossy().as_ref())
             .await
             .map_err(|e| {
                 super::error::ToolError::Internal(format!(
@@ -188,7 +188,7 @@ pub async fn reconnect_whatsapp() -> Result<WhatsAppConnectHandle> {
     // NOTE: No remove_file — we reconnect using the existing session.
 
     let backend = Arc::new(
-        crate::channels::whatsapp::sqlx_store::SqlxStore::new(db_path.to_string_lossy().as_ref())
+        crate::channels::whatsapp::store::Store::new(db_path.to_string_lossy().as_ref())
             .await
             .map_err(|e| {
                 super::error::ToolError::Internal(format!(
@@ -328,19 +328,18 @@ impl Tool for WhatsAppConnectTool {
         }
         let db_path = db_dir.join("session.db");
 
-        let backend = match crate::channels::whatsapp::sqlx_store::SqlxStore::new(
-            db_path.to_string_lossy().as_ref(),
-        )
-        .await
-        {
-            Ok(store) => Arc::new(store),
-            Err(e) => {
-                return Ok(ToolResult::error(format!(
-                    "Failed to open WhatsApp session store: {}",
-                    e
-                )));
-            }
-        };
+        let backend =
+            match crate::channels::whatsapp::store::Store::new(db_path.to_string_lossy().as_ref())
+                .await
+            {
+                Ok(store) => Arc::new(store),
+                Err(e) => {
+                    return Ok(ToolResult::error(format!(
+                        "Failed to open WhatsApp session store: {}",
+                        e
+                    )));
+                }
+            };
 
         // 2. Set up signaling channels for QR code and connection events
         let (qr_tx, mut qr_rx) = tokio::sync::mpsc::unbounded_channel::<String>();

@@ -5,7 +5,7 @@
 
 mod agent;
 pub(crate) mod handler;
-pub(crate) mod sqlx_store;
+pub(crate) mod store;
 
 pub use agent::WhatsAppAgent;
 

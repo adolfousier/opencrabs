@@ -121,7 +121,7 @@ async fn process_task(
     user_text: String,
     agent_service: Arc<AgentService>,
     service_context: ServiceContext,
-    pool: sqlx::SqlitePool,
+    pool: crate::db::Pool,
 ) {
     let session_service = SessionService::new(service_context);
     let title = format!(
@@ -206,7 +206,7 @@ async fn update_task_failed(
     task_id: &str,
     context_id: &str,
     error_msg: &str,
-    pool: &sqlx::SqlitePool,
+    pool: &crate::db::Pool,
 ) {
     let mut tasks = store.write().await;
     if let Some(task) = tasks.get_mut(task_id) {

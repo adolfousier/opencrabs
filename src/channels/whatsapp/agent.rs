@@ -12,7 +12,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use super::sqlx_store::SqlxStore;
+use super::store::Store;
 use wacore::types::events::Event;
 use whatsapp_rust::bot::Bot;
 use whatsapp_rust_tokio_transport::TokioWebSocketTransportFactory;
@@ -61,7 +61,7 @@ impl WhatsAppAgent {
                 let _ = std::fs::create_dir_all(parent);
             }
 
-            let backend = match SqlxStore::new(db_path.to_string_lossy().as_ref()).await {
+            let backend = match Store::new(db_path.to_string_lossy().as_ref()).await {
                 Ok(store) => Arc::new(store),
                 Err(e) => {
                     tracing::error!("WhatsApp: failed to open session store: {}", e);

@@ -121,7 +121,7 @@ async fn process_task_streaming(
     user_text: String,
     agent_service: Arc<AgentService>,
     service_context: ServiceContext,
-    pool: sqlx::SqlitePool,
+    pool: crate::db::Pool,
     tx: StreamTx,
 ) {
     let session_service = SessionService::new(service_context);
@@ -252,7 +252,7 @@ async fn send_final_status(
     context_id: &str,
     state: TaskState,
     message_text: &str,
-    pool: &sqlx::SqlitePool,
+    pool: &crate::db::Pool,
     tx: &StreamTx,
 ) {
     let status = TaskStatus {

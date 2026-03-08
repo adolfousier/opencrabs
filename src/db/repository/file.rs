@@ -2,81 +2,105 @@
 //!
 //! Database operations for file tracking.
 
+use crate::db::Pool;
+use crate::db::database::interact_err;
 use crate::db::models::File;
 use anyhow::{Context, Result};
-use sqlx::SqlitePool;
+use rusqlite::params;
 use std::path::Path;
 use uuid::Uuid;
 
 /// Repository for file operations
 #[derive(Clone)]
 pub struct FileRepository {
-    pool: SqlitePool,
+    pool: Pool,
 }
 
 impl FileRepository {
     /// Create a new file repository
-    pub fn new(pool: SqlitePool) -> Self {
+    pub fn new(pool: Pool) -> Self {
         Self { pool }
     }
 
     /// Find file by ID
     pub async fn find_by_id(&self, id: Uuid) -> Result<Option<File>> {
-        let file = sqlx::query_as::<_, File>("SELECT * FROM files WHERE id = ?")
-            .bind(id.to_string())
-            .fetch_optional(&self.pool)
+        let id_str = id.to_string();
+        self.pool
+            .get()
             .await
-            .context("Failed to find file")?;
-
-        Ok(file)
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.prepare_cached("SELECT * FROM files WHERE id = ?1")?
+                    .query_row(params![id_str], File::from_row)
+                    .optional()
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to find file")
     }
 
     /// Find all files for a session
     pub async fn find_by_session(&self, session_id: Uuid) -> Result<Vec<File>> {
-        let files = sqlx::query_as::<_, File>(
-            "SELECT * FROM files WHERE session_id = ? ORDER BY created_at DESC",
-        )
-        .bind(session_id.to_string())
-        .fetch_all(&self.pool)
-        .await
-        .context("Failed to find files by session")?;
-
-        Ok(files)
+        let sid = session_id.to_string();
+        self.pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                let mut stmt = conn.prepare_cached(
+                    "SELECT * FROM files WHERE session_id = ?1 ORDER BY created_at DESC",
+                )?;
+                let rows = stmt.query_map(params![sid], File::from_row)?;
+                rows.collect::<std::result::Result<Vec<_>, _>>()
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to find files by session")
     }
 
     /// Find file by path in a session
     pub async fn find_by_path(&self, session_id: Uuid, path: &Path) -> Result<Option<File>> {
-        let path_str = path.to_string_lossy();
-        let file =
-            sqlx::query_as::<_, File>("SELECT * FROM files WHERE session_id = ? AND path = ?")
-                .bind(session_id.to_string())
-                .bind(path_str.as_ref())
-                .fetch_optional(&self.pool)
-                .await
-                .context("Failed to find file by path")?;
-
-        Ok(file)
+        let sid = session_id.to_string();
+        let path_str = path.to_string_lossy().to_string();
+        self.pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.prepare_cached("SELECT * FROM files WHERE session_id = ?1 AND path = ?2")?
+                    .query_row(params![sid, path_str], File::from_row)
+                    .optional()
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to find file by path")
     }
 
     /// Create a new file record
     pub async fn create(&self, file: &File) -> Result<()> {
-        let path_str = file.path.to_string_lossy();
-
-        sqlx::query(
-            r#"
-            INSERT INTO files (id, session_id, path, content, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            "#,
-        )
-        .bind(file.id.to_string())
-        .bind(file.session_id.to_string())
-        .bind(path_str.as_ref())
-        .bind(&file.content)
-        .bind(file.created_at.timestamp())
-        .bind(file.updated_at.timestamp())
-        .execute(&self.pool)
-        .await
-        .context("Failed to create file record")?;
+        let f = file.clone();
+        let path_str = f.path.to_string_lossy().to_string();
+        self.pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.execute(
+                    "INSERT INTO files (id, session_id, path, content, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![
+                        f.id.to_string(),
+                        f.session_id.to_string(),
+                        path_str,
+                        f.content,
+                        f.created_at.timestamp(),
+                        f.updated_at.timestamp(),
+                    ],
+                )
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to create file record")?;
 
         tracing::debug!("Created file record: {} - {:?}", file.id, file.path);
         Ok(())
@@ -84,22 +108,28 @@ impl FileRepository {
 
     /// Update an existing file record
     pub async fn update(&self, file: &File) -> Result<()> {
-        let path_str = file.path.to_string_lossy();
-
-        sqlx::query(
-            r#"
-            UPDATE files
-            SET path = ?, content = ?, updated_at = ?
-            WHERE id = ?
-            "#,
-        )
-        .bind(path_str.as_ref())
-        .bind(&file.content)
-        .bind(file.updated_at.timestamp())
-        .bind(file.id.to_string())
-        .execute(&self.pool)
-        .await
-        .context("Failed to update file")?;
+        let f = file.clone();
+        let path_str = f.path.to_string_lossy().to_string();
+        self.pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.execute(
+                    "UPDATE files
+                     SET path = ?1, content = ?2, updated_at = ?3
+                     WHERE id = ?4",
+                    params![
+                        path_str,
+                        f.content,
+                        f.updated_at.timestamp(),
+                        f.id.to_string(),
+                    ],
+                )
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to update file")?;
 
         tracing::debug!("Updated file record: {}", file.id);
         Ok(())
@@ -107,10 +137,14 @@ impl FileRepository {
 
     /// Delete a file record
     pub async fn delete(&self, id: Uuid) -> Result<()> {
-        sqlx::query("DELETE FROM files WHERE id = ?")
-            .bind(id.to_string())
-            .execute(&self.pool)
+        let id_str = id.to_string();
+        self.pool
+            .get()
             .await
+            .context("Failed to get connection")?
+            .interact(move |conn| conn.execute("DELETE FROM files WHERE id = ?1", params![id_str]))
+            .await
+            .map_err(interact_err)?
             .context("Failed to delete file")?;
 
         tracing::debug!("Deleted file record: {}", id);
@@ -124,25 +158,54 @@ impl FileRepository {
 
     /// Count files in a session
     pub async fn count_by_session(&self, session_id: Uuid) -> Result<i64> {
-        let result: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM files WHERE session_id = ?")
-            .bind(session_id.to_string())
-            .fetch_one(&self.pool)
+        let sid = session_id.to_string();
+        self.pool
+            .get()
             .await
-            .context("Failed to count files")?;
-
-        Ok(result.0)
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.query_row(
+                    "SELECT COUNT(*) FROM files WHERE session_id = ?1",
+                    params![sid],
+                    |row| row.get(0),
+                )
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to count files")
     }
 
     /// Delete all file records for a session
     pub async fn delete_by_session(&self, session_id: Uuid) -> Result<()> {
-        sqlx::query("DELETE FROM files WHERE session_id = ?")
-            .bind(session_id.to_string())
-            .execute(&self.pool)
+        let sid = session_id.to_string();
+        self.pool
+            .get()
             .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.execute("DELETE FROM files WHERE session_id = ?1", params![sid])
+            })
+            .await
+            .map_err(interact_err)?
             .context("Failed to delete session files")?;
 
         tracing::debug!("Deleted all file records for session: {}", session_id);
         Ok(())
+    }
+}
+
+/// Extension trait for rusqlite to add `.optional()` to query results
+trait OptionalExt<T> {
+    fn optional(self) -> rusqlite::Result<Option<T>>;
+}
+
+impl<T> OptionalExt<T> for rusqlite::Result<T> {
+    fn optional(self) -> rusqlite::Result<Option<T>> {
+        match self {
+            Ok(v) => Ok(Some(v)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 }
 

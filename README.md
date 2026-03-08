@@ -1476,7 +1476,7 @@ opencrabs/
 │   ├── channels/         # Messaging integrations + voice (feature-gated)
 │   │   ├── factory.rs    # ChannelFactory — shared factory for channel agent services
 │   │   ├── telegram/     # Telegram bot (agent, handler)
-│   │   ├── whatsapp/     # WhatsApp Web client (agent, handler, sqlx_store)
+│   │   ├── whatsapp/     # WhatsApp Web client (agent, handler, store)
 │   │   ├── discord/      # Discord bot (agent, handler)
 │   │   ├── slack/        # Slack bot via Socket Mode (agent, handler)
 │   │   ├── trello/       # Trello board poller (agent, client, handler, models)

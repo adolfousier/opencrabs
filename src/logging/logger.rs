@@ -147,7 +147,7 @@ fn init_debug_logging(config: LogConfig) -> Result<LoggerGuard, Box<dyn std::err
     // Build environment filter
     let env_filter = EnvFilter::from_default_env()
         .add_directive(config.log_level.into())
-        .add_directive("sqlx=warn".parse()?)
+        .add_directive("rusqlite=warn".parse()?)
         .add_directive("hyper=warn".parse()?)
         .add_directive("reqwest=warn".parse()?)
         .add_directive("tower=warn".parse()?)
