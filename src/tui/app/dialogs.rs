@@ -1037,72 +1037,56 @@ impl App {
                     });
                 }
                 WizardAction::WhatsAppConnect => {
-                    // Reset the shared client slot so TestWhatsApp gets the new connection
+                    // Wipe session so agent shows fresh QR, then enable so
+                    // ChannelManager (re)starts the single agent bot.
                     #[cfg(feature = "whatsapp")]
-                    let client_slot = {
-                        let slot = self.whatsapp_test_client.clone();
-                        // Clear any previous client
-                        if let Ok(mut guard) = slot.try_lock() {
-                            *guard = None;
-                        }
-                        slot
-                    };
+                    {
+                        let wa_dir = crate::config::opencrabs_home().join("whatsapp");
+                        let _ = std::fs::remove_file(wa_dir.join("session.db"));
+                        let _ = std::fs::remove_file(wa_dir.join("session.db-wal"));
+                        let _ = std::fs::remove_file(wa_dir.join("session.db-shm"));
+                        let _ = crate::config::Config::write_key(
+                            "channels.whatsapp",
+                            "enabled",
+                            "true",
+                        );
+                    }
+
+                    // Subscribe to QR/connected events from the agent bot
+                    #[cfg(feature = "whatsapp")]
+                    let wa_state = self.whatsapp_state.clone();
                     let sender = self.event_sender();
                     tokio::spawn(async move {
-                        // Timeout the pairing setup itself (may hang if session DB is locked)
-                        let pairing_result = tokio::time::timeout(
-                            std::time::Duration::from_secs(15),
-                            crate::brain::tools::whatsapp_connect::start_whatsapp_pairing(),
-                        )
-                        .await;
-
-                        match pairing_result {
-                            Ok(Ok(handle)) => {
-                                // Forward QR codes to the TUI
-                                let qr_sender = sender.clone();
-                                let mut qr_rx = handle.qr_rx;
-                                tokio::spawn(async move {
-                                    while let Some(qr) = qr_rx.recv().await {
-                                        let _ = qr_sender.send(TuiEvent::WhatsAppQrCode(qr));
-                                    }
-                                });
-                                // Wait for connection (2 minute timeout)
-                                match tokio::time::timeout(
-                                    std::time::Duration::from_secs(120),
-                                    handle.connected_rx,
-                                )
-                                .await
-                                {
-                                    Ok(Ok(())) => {
-                                        // Capture client for test message
-                                        #[cfg(feature = "whatsapp")]
-                                        {
-                                            let mut src = handle.shared_client.lock().await;
-                                            if let Some(c) = src.take() {
-                                                *client_slot.lock().await = Some(c);
-                                            }
-                                        }
-                                        let _ = sender.send(TuiEvent::WhatsAppConnected);
-                                    }
-                                    Ok(Err(_)) => {
-                                        let _ = sender.send(TuiEvent::WhatsAppError(
-                                            "Connection channel closed unexpectedly".into(),
-                                        ));
-                                    }
-                                    Err(_) => {
-                                        let _ = sender.send(TuiEvent::WhatsAppError(
-                                            "Connection timed out (2 minutes)".into(),
-                                        ));
-                                    }
+                        #[cfg(feature = "whatsapp")]
+                        {
+                            let handle =
+                                crate::brain::tools::whatsapp_connect::subscribe_whatsapp_pairing(
+                                    &wa_state, false,
+                                );
+                            // Forward QR codes to the TUI
+                            let qr_sender = sender.clone();
+                            let mut qr_rx = handle.qr_rx;
+                            tokio::spawn(async move {
+                                while let Ok(qr) = qr_rx.recv().await {
+                                    let _ = qr_sender.send(TuiEvent::WhatsAppQrCode(qr));
                                 }
-                            }
-                            Ok(Err(e)) => {
-                                let _ = sender.send(TuiEvent::WhatsAppError(e.to_string()));
-                            }
-                            Err(_) => {
-                                let _ = sender.send(TuiEvent::WhatsAppError(
-                                    "WhatsApp bridge startup timed out. Is another instance running?".into(),
-                                ));
+                            });
+                            // Wait for connection (2 minute timeout)
+                            let mut connected_rx = handle.connected_rx;
+                            match tokio::time::timeout(
+                                std::time::Duration::from_secs(120),
+                                connected_rx.recv(),
+                            )
+                            .await
+                            {
+                                Ok(Ok(())) => {
+                                    let _ = sender.send(TuiEvent::WhatsAppConnected);
+                                }
+                                _ => {
+                                    let _ = sender.send(TuiEvent::WhatsAppError(
+                                        "Connection timed out (2 minutes)".into(),
+                                    ));
+                                }
                             }
                         }
                     });
@@ -1118,11 +1102,11 @@ impl App {
                         wizard.whatsapp_phone_input.clone()
                     };
                     #[cfg(feature = "whatsapp")]
-                    let client_slot = self.whatsapp_test_client.clone();
+                    let wa_state = self.whatsapp_state.clone();
                     let sender = self.event_sender();
                     tokio::spawn(async move {
                         #[cfg(feature = "whatsapp")]
-                        let result = test_whatsapp_connection(client_slot, &phone).await;
+                        let result = test_whatsapp_connection(wa_state, &phone).await;
                         #[cfg(not(feature = "whatsapp"))]
                         let result: Result<(), String> =
                             Err("WhatsApp feature not enabled".to_string());
@@ -1803,43 +1787,23 @@ async fn test_slack_connection(_token: &str, _channel_id: &str) -> Result<(), St
 /// Test WhatsApp connection by sending a message using the paired bot's client.
 #[cfg(feature = "whatsapp")]
 async fn test_whatsapp_connection(
-    client_slot: std::sync::Arc<
-        tokio::sync::Mutex<Option<std::sync::Arc<whatsapp_rust::client::Client>>>,
-    >,
+    wa_state: std::sync::Arc<crate::channels::whatsapp::WhatsAppState>,
     phone: &str,
 ) -> Result<(), String> {
-    let client = client_slot.lock().await.clone();
-    let client = match client {
-        Some(c) => c,
-        None => {
-            // No live client from this session — try reconnecting using existing session.db
-            let db_path = crate::config::opencrabs_home()
-                .join("whatsapp")
-                .join("session.db");
-            if !db_path.exists() {
-                return Err("WhatsApp not connected. Please scan the QR code first.".to_string());
-            }
-            let handle = crate::brain::tools::whatsapp_connect::reconnect_whatsapp()
-                .await
-                .map_err(|e| format!("WhatsApp reconnect failed: {e}"))?;
-            match tokio::time::timeout(std::time::Duration::from_secs(15), handle.connected_rx)
-                .await
-            {
-                Ok(Ok(())) => {
-                    let c =
-                        handle.shared_client.lock().await.take().ok_or_else(|| {
-                            "WhatsApp connected but client unavailable.".to_string()
-                        })?;
-                    *client_slot.lock().await = Some(c.clone());
-                    c
-                }
-                _ => {
-                    return Err(
-                        "WhatsApp reconnect timed out. Try re-scanning the QR code.".to_string()
-                    );
+    // Wait for the agent bot to be connected (up to 15 seconds)
+    let client = {
+        let mut client = wa_state.client().await;
+        if client.is_none() {
+            for _ in 0..30 {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                client = wa_state.client().await;
+                if client.is_some() {
+                    break;
                 }
             }
         }
+        client
+            .ok_or_else(|| "WhatsApp not connected. Please scan the QR code first.".to_string())?
     };
 
     if phone.is_empty() {

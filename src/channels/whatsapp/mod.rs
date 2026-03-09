@@ -44,6 +44,10 @@ pub struct WhatsAppState {
     pub pending_approvals: Mutex<HashMap<String, tokio::sync::oneshot::Sender<WaApproval>>>,
     /// Per-session cancel tokens for aborting in-flight agent tasks via /stop
     cancel_tokens: Mutex<HashMap<Uuid, CancellationToken>>,
+    /// Broadcast channel for QR codes — onboarding subscribes to this.
+    qr_tx: tokio::sync::broadcast::Sender<String>,
+    /// Broadcast channel for connection events — onboarding subscribes to this.
+    connected_tx: tokio::sync::broadcast::Sender<()>,
 }
 
 impl Default for WhatsAppState {
@@ -54,11 +58,15 @@ impl Default for WhatsAppState {
 
 impl WhatsAppState {
     pub fn new() -> Self {
+        let (qr_tx, _) = tokio::sync::broadcast::channel(8);
+        let (connected_tx, _) = tokio::sync::broadcast::channel(4);
         Self {
             client: Mutex::new(None),
             owner_jid: Mutex::new(None),
             pending_approvals: Mutex::new(HashMap::new()),
             cancel_tokens: Mutex::new(HashMap::new()),
+            qr_tx,
+            connected_tx,
         }
     }
 
@@ -86,12 +94,33 @@ impl WhatsAppState {
         }
     }
 
+    /// Broadcast a QR code to any subscribed onboarding UI.
+    pub fn broadcast_qr(&self, code: &str) {
+        let _ = self.qr_tx.send(code.to_string());
+    }
+
+    /// Broadcast a connected event to any subscribed onboarding UI.
+    pub fn broadcast_connected(&self) {
+        let _ = self.connected_tx.send(());
+    }
+
+    /// Subscribe to QR code events (used by onboarding).
+    pub fn subscribe_qr(&self) -> tokio::sync::broadcast::Receiver<String> {
+        self.qr_tx.subscribe()
+    }
+
+    /// Subscribe to connection events (used by onboarding).
+    pub fn subscribe_connected(&self) -> tokio::sync::broadcast::Receiver<()> {
+        self.connected_tx.subscribe()
+    }
+
     /// Store the connected client and owner JID.
     pub async fn set_connected(&self, client: Arc<Client>, owner_jid: Option<String>) {
         *self.client.lock().await = Some(client);
         if let Some(jid) = owner_jid {
             *self.owner_jid.lock().await = Some(jid);
         }
+        self.broadcast_connected();
     }
 
     /// Get a clone of the connected client, if any.

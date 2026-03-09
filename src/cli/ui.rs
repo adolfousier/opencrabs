@@ -241,9 +241,18 @@ async fn cmd_chat_inner(
             .with_working_directory(working_directory.clone()),
     );
 
+    // Shared WhatsApp state — single bot instance, shared between agent + onboarding
+    #[cfg(feature = "whatsapp")]
+    let whatsapp_state = Arc::new(crate::channels::whatsapp::WhatsAppState::new());
+
     // Create TUI app first (so we can get the event sender)
     tracing::debug!("Creating TUI app");
-    let mut app = tui::App::new(agent_service, service_context.clone());
+    let mut app = tui::App::new(
+        agent_service,
+        service_context.clone(),
+        #[cfg(feature = "whatsapp")]
+        whatsapp_state.clone(),
+    );
 
     // Get event sender from app
     let event_sender = app.event_sender();
@@ -434,16 +443,11 @@ async fn cmd_chat_inner(
         crate::brain::tools::telegram_send::TelegramSendTool::new(telegram_state.clone()),
     ));
 
-    // Shared WhatsApp state for proactive messaging (connect + send tools + static agent)
-    #[cfg(feature = "whatsapp")]
-    let whatsapp_state = Arc::new(crate::channels::whatsapp::WhatsAppState::new());
-
     // Register WhatsApp connect tool (agent-callable QR pairing)
     #[cfg(feature = "whatsapp")]
     tool_registry.register(Arc::new(
         crate::brain::tools::whatsapp_connect::WhatsAppConnectTool::new(
             Some(progress_callback.clone()),
-            channel_factory.clone(),
             whatsapp_state.clone(),
         ),
     ));

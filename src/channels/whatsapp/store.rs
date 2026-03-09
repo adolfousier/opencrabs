@@ -180,28 +180,6 @@ impl Store {
             .map_err(db_err)?;
         Ok(())
     }
-
-    /// Check if a paired device record exists (valid MessagePack data).
-    pub async fn device_exists(&self) -> Result<bool> {
-        let did = self.device_id;
-        self.pool
-            .get()
-            .await
-            .map_err(pool_err)?
-            .interact(move |conn| -> std::result::Result<bool, rusqlite::Error> {
-                let mut stmt = conn.prepare("SELECT data FROM wa_device WHERE id = ?1")?;
-                let result = stmt
-                    .query_row(params![did], |row| row.get::<_, Vec<u8>>(0))
-                    .optional()?;
-                match result {
-                    Some(data) => Ok(rmp_serde::from_slice::<Device>(&data).is_ok()),
-                    None => Ok(false),
-                }
-            })
-            .await
-            .map_err(interact_to_store_err)?
-            .map_err(db_err)
-    }
 }
 
 /// Extension trait for rusqlite optional queries
