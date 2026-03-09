@@ -43,7 +43,12 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install cmake -y
 
-      - name: Run tests
+      - name: Run tests (without local-stt on macOS)
+        if: runner.os == 'macOS'
+        run: cargo test --features "telegram,whatsapp,discord,slack,trello" --verbose
+
+      - name: Run tests (all features)
+        if: runner.os != 'macOS'
         run: cargo test --all-features --verbose
 
   publish-crate:
@@ -128,6 +133,10 @@ jobs:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
           CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
+          # Disable i8mm intrinsics on macOS ARM — CI runner clang detects them
+          # but compilation fails with vmmlaq_s32 errors
+          CMAKE_C_FLAGS: ${{ matrix.target == 'aarch64-apple-darwin' && '-march=armv8-a' || '' }}
+          CMAKE_CXX_FLAGS: ${{ matrix.target == 'aarch64-apple-darwin' && '-march=armv8-a' || '' }}
         run: cargo build --release --target ${{ matrix.target }} --all-features
 
       - name: Strip binary (Unix)
