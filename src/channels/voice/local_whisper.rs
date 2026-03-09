@@ -227,16 +227,11 @@ impl LocalWhisper {
         let model = candle_transformers::models::whisper::model::Whisper::load(&vb, config.clone())
             .context("Failed to build whisper model")?;
 
-        // Load mel filters from embedded binary data
-        let mel_bytes = match config.num_mel_bins {
-            80 => include_bytes!("mel_filters_80.bin").as_slice(),
-            128 => include_bytes!("mel_filters_128.bin").as_slice(),
-            n => anyhow::bail!("Unsupported mel filter count: {}", n),
-        };
-        let mut mel_filters = vec![0f32; mel_bytes.len() / 4];
-        <byteorder::LittleEndian as byteorder::ByteOrder>::read_f32_into(
-            mel_bytes,
-            &mut mel_filters,
+        // Compute mel filters at runtime (matches OpenAI whisper's filterbank)
+        let mel_filters = compute_mel_filters(
+            config.num_mel_bins,
+            candle_transformers::models::whisper::N_FFT,
+            candle_transformers::models::whisper::SAMPLE_RATE as u32,
         );
 
         Ok(Self {
@@ -257,11 +252,19 @@ impl LocalWhisper {
         }
 
         // Resample to 16kHz if needed
-        let audio_16k = if sample_rate == 16000 {
+        let mut audio_16k = if sample_rate == 16000 {
             samples
         } else {
             resample(&samples, sample_rate, 16000)?
         };
+
+        // Pad or truncate to exactly 30 seconds (N_SAMPLES = 480000) as whisper expects
+        let n_samples = candle_transformers::models::whisper::N_SAMPLES;
+        if audio_16k.len() > n_samples {
+            audio_16k.truncate(n_samples);
+        } else {
+            audio_16k.resize(n_samples, 0.0);
+        }
 
         // Compute log-mel spectrogram
         let mel = candle_transformers::models::whisper::audio::pcm_to_mel(
@@ -269,9 +272,21 @@ impl LocalWhisper {
             &audio_16k,
             &self.mel_filters,
         );
-        let mel_len = mel.len();
         let num_mel_bins = self.config.num_mel_bins;
-        let n_frames = mel_len / num_mel_bins;
+        let n_frames_raw = mel.len() / num_mel_bins;
+
+        // Truncate to N_FRAMES (3000) so after conv2 stride-2 we get 1500,
+        // which matches the encoder's max_source_positions positional embedding.
+        let expected_frames = candle_transformers::models::whisper::N_FRAMES;
+        let (mel, n_frames) = if n_frames_raw > expected_frames {
+            (
+                mel[..expected_frames * num_mel_bins].to_vec(),
+                expected_frames,
+            )
+        } else {
+            (mel, n_frames_raw)
+        };
+
         let mel = candle_core::Tensor::from_vec(mel, (1, num_mel_bins, n_frames), &self.device)
             .context("Failed to create mel tensor")?;
 
@@ -279,11 +294,15 @@ impl LocalWhisper {
         self.model.reset_kv_cache();
 
         // Encode audio
-        let audio_features = self
-            .model
-            .encoder
-            .forward(&mel, true)
-            .context("Encoder forward pass failed")?;
+        let audio_features = self.model.encoder.forward(&mel, true).map_err(|e| {
+            anyhow::anyhow!(
+                "Encoder forward failed: {}. Mel shape: {:?}, config: num_mel_bins={}, max_source_positions={}",
+                e,
+                mel.dims(),
+                self.config.num_mel_bins,
+                self.config.max_source_positions,
+            )
+        })?;
 
         // Build initial token sequence for decoding
         let vocab = self.tokenizer.get_vocab(true);
@@ -510,4 +529,50 @@ fn resample(input: &[f32], from_rate: u32, to_rate: u32) -> Result<Vec<f32>> {
     }
 
     Ok(output)
+}
+
+/// Compute mel filterbank coefficients matching OpenAI whisper's implementation.
+/// Returns a flat Vec of n_mels * n_freqs f32 values (row-major: filters[mel_idx * n_freqs + freq_idx]).
+pub fn compute_mel_filters(n_mels: usize, n_fft: usize, sample_rate: u32) -> Vec<f32> {
+    let n_freqs = n_fft / 2 + 1;
+    let sr = sample_rate as f64;
+
+    let hz_to_mel = |f: f64| -> f64 { 2595.0 * (1.0 + f / 700.0).log10() };
+    let mel_to_hz = |m: f64| -> f64 { 700.0 * (10f64.powf(m / 2595.0) - 1.0) };
+
+    let all_freqs: Vec<f64> = (0..n_freqs)
+        .map(|i| sr / 2.0 * i as f64 / (n_freqs - 1) as f64)
+        .collect();
+
+    let m_min = hz_to_mel(0.0);
+    let m_max = hz_to_mel(sr / 2.0);
+    let m_pts: Vec<f64> = (0..n_mels + 2)
+        .map(|i| m_min + (m_max - m_min) * i as f64 / (n_mels + 1) as f64)
+        .collect();
+    let f_pts: Vec<f64> = m_pts.iter().map(|&m| mel_to_hz(m)).collect();
+
+    let mut filters = vec![0.0f32; n_mels * n_freqs];
+    for i in 0..n_mels {
+        let f_prev = f_pts[i];
+        let f_curr = f_pts[i + 1];
+        let f_next = f_pts[i + 2];
+        // Slaney-style normalization
+        let enorm = if f_next != f_prev {
+            2.0 / (f_next - f_prev)
+        } else {
+            1.0
+        };
+        for j in 0..n_freqs {
+            let freq = all_freqs[j];
+            let v = if freq >= f_prev && freq <= f_curr && f_curr != f_prev {
+                (freq - f_prev) / (f_curr - f_prev)
+            } else if freq > f_curr && freq <= f_next && f_next != f_curr {
+                (f_next - freq) / (f_next - f_curr)
+            } else {
+                0.0
+            };
+            filters[i * n_freqs + j] = (v * enorm) as f32;
+        }
+    }
+    filters
 }

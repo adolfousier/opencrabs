@@ -117,7 +117,6 @@ candle-nn = { version = "0.9", optional = true }
 candle-transformers = { version = "0.9", optional = true }
 tokenizers = { version = "0.22", optional = true }
 hf-hub = { version = "0.5", optional = true }
-byteorder = { version = "1.5", optional = true }
 hound = { version = "3.5", optional = true }
 rubato = { version = "0.14", optional = true }
 symphonia = { version = "0.5", features = ["ogg", "vorbis", "wav", "pcm"], optional = true }
@@ -167,7 +166,7 @@ trello = []
 whatsapp = ["whatsapp-rust", "whatsapp-rust-tokio-transport", "whatsapp-rust-ureq-http-client", "wacore", "wacore-binary", "waproto", "dep:qrcode", "dep:rmp-serde"]
 discord = ["serenity"]
 slack = ["slack-morphism", "rustls"]
-local-stt = ["candle-core", "candle-nn", "candle-transformers", "tokenizers", "hf-hub", "byteorder", "hound", "rubato", "symphonia", "symphonia-adapter-libopus"]
+local-stt = ["candle-core", "candle-nn", "candle-transformers", "tokenizers", "hf-hub", "hound", "rubato", "symphonia", "symphonia-adapter-libopus"]
 local-tts = ["opusic-sys", "rubato"]
 
 [profile.dev]
