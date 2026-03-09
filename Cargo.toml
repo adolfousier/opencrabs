@@ -1,6 +1,6 @@
 [package]
 name = "opencrabs"
-version = "0.2.63"
+version = "0.2.64"
 edition = "2024"
 rust-version = "1.91"
 authors = ["Adolfo Usier <adolfo@meetneura.ai>"]
@@ -113,11 +113,11 @@ rustls = { version = "0.23", features = ["ring"], optional = true }
 
 # Local STT (whisper.cpp via whisper-rs)
 whisper-rs = { version = "0.15", optional = true }
-whisper-rs-sys = { version = "0.14", optional = true }
 hound = { version = "3.5", optional = true }
 rubato = { version = "0.14", optional = true }
 symphonia = { version = "0.5", features = ["ogg", "vorbis", "wav", "pcm"], optional = true }
 symphonia-adapter-libopus = { version = "0.2", optional = true }
+opusic-sys = { version = "0.5", optional = true, default-features = false }
 
 # Misc
 unicode-width = "0.2"
@@ -154,7 +154,7 @@ mockito = "1.7"
 pprof = { version = "0.15", features = ["flamegraph", "frame-pointer"], optional = true }
 
 [features]
-default = ["telegram", "whatsapp", "discord", "slack", "trello", "local-stt"]
+default = ["telegram", "whatsapp", "discord", "slack", "trello", "local-stt", "local-tts"]
 # Profiling feature enables pprof on Unix only (no-op on Windows)
 profiling = []
 telegram = ["teloxide"]
@@ -162,7 +162,8 @@ trello = []
 whatsapp = ["whatsapp-rust", "whatsapp-rust-tokio-transport", "whatsapp-rust-ureq-http-client", "wacore", "wacore-binary", "waproto", "dep:qrcode", "dep:rmp-serde"]
 discord = ["serenity"]
 slack = ["slack-morphism", "rustls"]
-local-stt = ["whisper-rs", "whisper-rs-sys", "hound", "rubato", "symphonia", "symphonia-adapter-libopus"]
+local-stt = ["whisper-rs", "hound", "rubato", "symphonia", "symphonia-adapter-libopus"]
+local-tts = ["opusic-sys", "rubato"]
 
 [profile.dev]
 opt-level = 0

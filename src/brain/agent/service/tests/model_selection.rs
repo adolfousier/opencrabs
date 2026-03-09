@@ -177,22 +177,22 @@ async fn test_different_sessions_different_models() {
         .await
         .unwrap();
 
-    let svc = Arc::clone(&agent_service);
-    let (resp_a, resp_b) = tokio::join!(
-        svc.send_message(
+    let resp_a = agent_service
+        .send_message(
             session_a.id,
             "Hello".to_string(),
-            Some("model-a".to_string())
-        ),
-        agent_service.send_message(
+            Some("model-a".to_string()),
+        )
+        .await
+        .unwrap();
+    let resp_b = agent_service
+        .send_message(
             session_b.id,
             "Hello".to_string(),
-            Some("model-b".to_string())
-        ),
-    );
-
-    let resp_a = resp_a.unwrap();
-    let resp_b = resp_b.unwrap();
+            Some("model-b".to_string()),
+        )
+        .await
+        .unwrap();
 
     assert_eq!(resp_a.model, "model-a", "session A should use model-a");
     assert_eq!(resp_b.model, "model-b", "session B should use model-b");

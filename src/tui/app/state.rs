@@ -1465,6 +1465,40 @@ impl App {
                     }
                 }
             }
+            TuiEvent::PiperDownloadProgress(progress) => {
+                if let Some(ref mut wizard) = self.onboarding {
+                    // Ignore stale progress events after download completed
+                    if !wizard.tts_voice_downloaded {
+                        wizard.tts_voice_download_progress = Some(progress);
+                    }
+                }
+            }
+            TuiEvent::PiperDownloadComplete(result) => {
+                if let Some(ref mut wizard) = self.onboarding {
+                    wizard.tts_voice_download_progress = None;
+                    match result {
+                        Ok(voice_id) => {
+                            wizard.tts_voice_downloaded = true;
+                            wizard.tts_voice_download_error = None;
+                            // Play voice preview after successful download
+                            #[cfg(feature = "local-tts")]
+                            {
+                                tokio::spawn(async move {
+                                    if let Err(e) =
+                                        crate::channels::voice::local_tts::preview_voice(&voice_id)
+                                            .await
+                                    {
+                                        tracing::warn!("Voice preview failed: {}", e);
+                                    }
+                                });
+                            }
+                        }
+                        Err(e) => {
+                            wizard.tts_voice_download_error = Some(e);
+                        }
+                    }
+                }
+            }
             TuiEvent::SudoPasswordRequested(request) => {
                 self.sudo_pending = Some(request);
                 self.sudo_input.clear();

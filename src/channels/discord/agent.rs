@@ -61,8 +61,8 @@ impl DiscordAgent {
             tracing::info!(
                 "Starting Discord bot with {} allowed user(s), STT={}, TTS={}",
                 cfg.channels.discord.allowed_users.len(),
-                cfg.voice.stt_enabled,
-                cfg.voice.tts_enabled,
+                cfg.voice_config().stt_enabled,
+                cfg.voice_config().tts_enabled,
             );
 
             let extra_sessions: Arc<Mutex<HashMap<u64, (Uuid, std::time::Instant)>>> =

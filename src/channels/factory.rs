@@ -103,20 +103,8 @@ impl ChannelFactory {
     }
 
     /// Read the current voice config from the watch channel (always latest).
-    /// Provider-level `voice` and `model` fields override the [voice] section defaults.
     pub fn voice_config(&self) -> VoiceConfig {
-        let cfg = self.config_rx.borrow();
-        let mut vc = cfg.voice.clone();
-        vc.stt_provider = cfg.providers.stt.as_ref().and_then(|s| s.groq.clone());
-        let tts_providers = cfg.providers.tts.as_ref();
-        vc.tts_provider = tts_providers.and_then(|t| t.openai.clone());
-        if let Some(ref v) = tts_providers.and_then(|t| t.voice.as_ref()) {
-            vc.tts_voice = v.to_string();
-        }
-        if let Some(ref m) = tts_providers.and_then(|t| t.model.as_ref()) {
-            vc.tts_model = m.to_string();
-        }
-        vc
+        self.config_rx.borrow().voice_config()
     }
 
     /// Read the current OpenAI TTS key from the watch channel (always latest).

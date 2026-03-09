@@ -88,8 +88,8 @@ impl WhatsAppAgent {
             let cfg = self.config_rx.borrow().clone();
             tracing::info!(
                 "WhatsApp agent running (STT={}, TTS={})",
-                cfg.voice.stt_enabled,
-                cfg.voice.tts_enabled,
+                cfg.voice_config().stt_enabled,
+                cfg.voice_config().tts_enabled,
             );
 
             // Derive owner JID from first allowed phone (for proactive messaging)

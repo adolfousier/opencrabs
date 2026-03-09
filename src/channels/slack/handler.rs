@@ -459,16 +459,7 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
     let respond_to = &sl_cfg.respond_to;
     let allowed_channels: HashSet<String> = sl_cfg.allowed_channels.iter().cloned().collect();
     let idle_timeout_hours = sl_cfg.session_idle_hours;
-    let mut voice_config = cfg.voice.clone();
-    voice_config.stt_provider = cfg.providers.stt.as_ref().and_then(|s| s.groq.clone());
-    let tts_providers = cfg.providers.tts.as_ref();
-    voice_config.tts_provider = tts_providers.and_then(|t| t.openai.clone());
-    if let Some(ref v) = tts_providers.and_then(|t| t.voice.as_ref()) {
-        voice_config.tts_voice = v.to_string();
-    }
-    if let Some(ref m) = tts_providers.and_then(|t| t.model.as_ref()) {
-        voice_config.tts_model = m.to_string();
-    }
+    let voice_config = cfg.voice_config();
 
     // Allowlist check — if allowed list is empty, accept all
     if !allowed.is_empty() && !allowed.contains(&user_id) {

@@ -45,7 +45,7 @@ jobs:
 
       - name: Run tests (Windows — no whatsapp/local-stt/local-tts)
         if: runner.os == 'Windows'
-        run: cargo test --no-default-features --features "telegram,discord,slack" --verbose
+        run: cargo test --no-default-features --features "telegram,discord,slack,whatsapp,trello" --verbose
 
       - name: Run tests (macOS — all features)
         if: runner.os == 'macOS'

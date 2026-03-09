@@ -19,26 +19,45 @@ fn voice_step_starts_on_stt_mode_select() {
     let mut wizard = OnboardingWizard::new();
     wizard.step = OnboardingStep::VoiceSetup;
     assert_eq!(wizard.voice_field, VoiceField::SttModeSelect);
-    assert_eq!(wizard.stt_mode, 0); // API by default
+    assert_eq!(wizard.stt_mode, 0); // Off by default
 }
 
 #[test]
-fn stt_mode_toggle_with_up_down() {
+fn stt_mode_cycles_with_up_down() {
     let mut wizard = OnboardingWizard::new();
     wizard.step = OnboardingStep::VoiceSetup;
     wizard.voice_field = VoiceField::SttModeSelect;
 
-    // Start at API (0), press Down -> Local (1)
+    // Start at Off (0), press Down -> API (1)
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
     assert_eq!(wizard.stt_mode, 1);
 
-    // Press Down again -> back to API (0) — it toggles
+    // Down -> Local (2)
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
+    assert_eq!(wizard.stt_mode, 2);
+
+    // Down -> wraps to Off (0)
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
     assert_eq!(wizard.stt_mode, 0);
 
-    // Press Up -> Local (1)
+    // Up from Off (0) -> Local (2)
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Up));
+    assert_eq!(wizard.stt_mode, 2);
+
+    // Up -> API (1)
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Up));
     assert_eq!(wizard.stt_mode, 1);
+}
+
+#[test]
+fn stt_mode_off_tab_goes_to_tts() {
+    let mut wizard = OnboardingWizard::new();
+    wizard.step = OnboardingStep::VoiceSetup;
+    wizard.voice_field = VoiceField::SttModeSelect;
+    wizard.stt_mode = 0; // Off
+
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Tab));
+    assert_eq!(wizard.voice_field, VoiceField::TtsModeSelect);
 }
 
 #[test]
@@ -46,7 +65,7 @@ fn stt_mode_api_tab_goes_to_groq_key() {
     let mut wizard = OnboardingWizard::new();
     wizard.step = OnboardingStep::VoiceSetup;
     wizard.voice_field = VoiceField::SttModeSelect;
-    wizard.stt_mode = 0; // API
+    wizard.stt_mode = 1; // API
 
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Tab));
     assert_eq!(wizard.voice_field, VoiceField::GroqApiKey);
@@ -57,7 +76,7 @@ fn stt_mode_local_tab_goes_to_local_model() {
     let mut wizard = OnboardingWizard::new();
     wizard.step = OnboardingStep::VoiceSetup;
     wizard.voice_field = VoiceField::SttModeSelect;
-    wizard.stt_mode = 1; // Local
+    wizard.stt_mode = 2; // Local
 
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Tab));
     assert_eq!(wizard.voice_field, VoiceField::LocalModelSelect);
@@ -68,7 +87,7 @@ fn stt_mode_enter_navigates_same_as_tab() {
     let mut wizard = OnboardingWizard::new();
     wizard.step = OnboardingStep::VoiceSetup;
     wizard.voice_field = VoiceField::SttModeSelect;
-    wizard.stt_mode = 0;
+    wizard.stt_mode = 1; // API
 
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Enter));
     assert_eq!(wizard.voice_field, VoiceField::GroqApiKey);
@@ -106,7 +125,7 @@ fn groq_key_tab_goes_to_tts() {
     wizard.voice_field = VoiceField::GroqApiKey;
 
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Tab));
-    assert_eq!(wizard.voice_field, VoiceField::TtsToggle);
+    assert_eq!(wizard.voice_field, VoiceField::TtsModeSelect);
 }
 
 #[test]
@@ -128,7 +147,7 @@ fn local_model_tab_goes_to_tts() {
     wizard.voice_field = VoiceField::LocalModelSelect;
 
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Tab));
-    assert_eq!(wizard.voice_field, VoiceField::TtsToggle);
+    assert_eq!(wizard.voice_field, VoiceField::TtsModeSelect);
 }
 
 #[test]
@@ -162,7 +181,7 @@ fn local_model_enter_when_downloaded_goes_to_tts() {
 
     let action = crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Enter));
     assert_eq!(action, WizardAction::None);
-    assert_eq!(wizard.voice_field, VoiceField::TtsToggle);
+    assert_eq!(wizard.voice_field, VoiceField::TtsModeSelect);
 }
 
 #[test]
@@ -178,51 +197,99 @@ fn local_model_enter_during_download_does_nothing() {
     assert_eq!(wizard.voice_field, VoiceField::LocalModelSelect); // stays
 }
 
-// ─── TTS toggle ─────────────────────────────────────────────────────────────
+// ─── TTS mode selection ─────────────────────────────────────────────────────
 
 #[test]
-fn tts_toggle_space_toggles() {
+fn tts_mode_cycles_with_down() {
     let mut wizard = OnboardingWizard::new();
     wizard.step = OnboardingStep::VoiceSetup;
-    wizard.voice_field = VoiceField::TtsToggle;
+    wizard.voice_field = VoiceField::TtsModeSelect;
+    assert_eq!(wizard.tts_mode, 0); // Off
     assert!(!wizard.tts_enabled);
 
-    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Char(' ')));
-    assert!(wizard.tts_enabled);
-
-    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Char(' ')));
-    assert!(!wizard.tts_enabled);
-}
-
-#[test]
-fn tts_toggle_up_down_toggles() {
-    let mut wizard = OnboardingWizard::new();
-    wizard.step = OnboardingStep::VoiceSetup;
-    wizard.voice_field = VoiceField::TtsToggle;
-
-    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Up));
-    assert!(wizard.tts_enabled);
-
+    // Down → API (1)
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
+    assert_eq!(wizard.tts_mode, 1);
+    assert!(wizard.tts_enabled);
+
+    // Down → Local (2)
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
+    assert_eq!(wizard.tts_mode, 2);
+    assert!(wizard.tts_enabled);
+
+    // Down → Off (0) — wraps
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
+    assert_eq!(wizard.tts_mode, 0);
     assert!(!wizard.tts_enabled);
 }
 
 #[test]
-fn tts_enter_advances_to_next_step() {
+fn tts_mode_cycles_with_up() {
     let mut wizard = OnboardingWizard::new();
     wizard.step = OnboardingStep::VoiceSetup;
-    wizard.voice_field = VoiceField::TtsToggle;
+    wizard.voice_field = VoiceField::TtsModeSelect;
+
+    // Up from Off (0) → Local (2)
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Up));
+    assert_eq!(wizard.tts_mode, 2);
+    assert!(wizard.tts_enabled);
+
+    // Up → API (1)
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Up));
+    assert_eq!(wizard.tts_mode, 1);
+    assert!(wizard.tts_enabled);
+}
+
+#[test]
+fn tts_off_enter_advances_to_next_step() {
+    let mut wizard = OnboardingWizard::new();
+    wizard.step = OnboardingStep::VoiceSetup;
+    wizard.voice_field = VoiceField::TtsModeSelect;
+    wizard.tts_mode = 0; // Off
 
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Enter));
     assert_eq!(wizard.step, OnboardingStep::ImageSetup);
 }
 
 #[test]
+fn tts_api_enter_advances_to_next_step() {
+    let mut wizard = OnboardingWizard::new();
+    wizard.step = OnboardingStep::VoiceSetup;
+    wizard.voice_field = VoiceField::TtsModeSelect;
+    wizard.tts_mode = 1; // API
+
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Enter));
+    assert_eq!(wizard.step, OnboardingStep::ImageSetup);
+}
+
+#[test]
+fn tts_local_enter_goes_to_voice_select() {
+    let mut wizard = OnboardingWizard::new();
+    wizard.step = OnboardingStep::VoiceSetup;
+    wizard.voice_field = VoiceField::TtsModeSelect;
+    wizard.tts_mode = 2; // Local
+
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Enter));
+    assert_eq!(wizard.voice_field, VoiceField::TtsLocalVoiceSelect);
+}
+
+#[test]
+fn tts_backtab_goes_to_stt_mode_when_stt_off() {
+    let mut wizard = OnboardingWizard::new();
+    wizard.step = OnboardingStep::VoiceSetup;
+    wizard.voice_field = VoiceField::TtsModeSelect;
+    wizard.stt_mode = 0; // Off
+
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::BackTab));
+    assert_eq!(wizard.voice_field, VoiceField::SttModeSelect);
+}
+
+#[test]
 fn tts_backtab_goes_to_groq_key_in_api_mode() {
     let mut wizard = OnboardingWizard::new();
     wizard.step = OnboardingStep::VoiceSetup;
-    wizard.voice_field = VoiceField::TtsToggle;
-    wizard.stt_mode = 0; // API
+    wizard.voice_field = VoiceField::TtsModeSelect;
+    wizard.stt_mode = 1; // API
 
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::BackTab));
     assert_eq!(wizard.voice_field, VoiceField::GroqApiKey);
@@ -232,8 +299,8 @@ fn tts_backtab_goes_to_groq_key_in_api_mode() {
 fn tts_backtab_goes_to_local_model_in_local_mode() {
     let mut wizard = OnboardingWizard::new();
     wizard.step = OnboardingStep::VoiceSetup;
-    wizard.voice_field = VoiceField::TtsToggle;
-    wizard.stt_mode = 1; // Local
+    wizard.voice_field = VoiceField::TtsModeSelect;
+    wizard.stt_mode = 2; // Local
 
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::BackTab));
     assert_eq!(wizard.voice_field, VoiceField::LocalModelSelect);
@@ -246,7 +313,7 @@ fn full_api_flow_stt_to_tts_to_next_step() {
     let mut wizard = OnboardingWizard::new();
     wizard.step = OnboardingStep::VoiceSetup;
     wizard.voice_field = VoiceField::SttModeSelect;
-    wizard.stt_mode = 0; // API mode
+    wizard.stt_mode = 1; // API mode
 
     // Tab → GroqApiKey
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Tab));
@@ -256,11 +323,11 @@ fn full_api_flow_stt_to_tts_to_next_step() {
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Char('x')));
     assert_eq!(wizard.groq_api_key_input, "x");
 
-    // Tab → TtsToggle
+    // Tab → TtsModeSelect
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Tab));
-    assert_eq!(wizard.voice_field, VoiceField::TtsToggle);
+    assert_eq!(wizard.voice_field, VoiceField::TtsModeSelect);
 
-    // Enter → next step
+    // Enter (tts_mode=0 Off) → next step
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Enter));
     assert_eq!(wizard.step, OnboardingStep::ImageSetup);
 }
@@ -431,6 +498,191 @@ fn wizard_action_download_whisper_model_variant() {
     assert_ne!(action, WizardAction::None);
 }
 
+// ─── TTS local voice selection ───────────────────────────────────────────────
+
+#[test]
+fn tts_local_voice_select_backtab_goes_to_tts_mode() {
+    let mut wizard = OnboardingWizard::new();
+    wizard.step = OnboardingStep::VoiceSetup;
+    wizard.voice_field = VoiceField::TtsLocalVoiceSelect;
+
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::BackTab));
+    assert_eq!(wizard.voice_field, VoiceField::TtsModeSelect);
+}
+
+#[test]
+fn tts_local_voice_select_tab_advances_step() {
+    let mut wizard = OnboardingWizard::new();
+    wizard.step = OnboardingStep::VoiceSetup;
+    wizard.voice_field = VoiceField::TtsLocalVoiceSelect;
+
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Tab));
+    assert_eq!(wizard.step, OnboardingStep::ImageSetup);
+}
+
+#[test]
+fn tts_local_voice_enter_when_downloaded_advances() {
+    // Enter always triggers download (delete old, download selected, play preview)
+    let mut wizard = OnboardingWizard::new();
+    wizard.step = OnboardingStep::VoiceSetup;
+    wizard.voice_field = VoiceField::TtsLocalVoiceSelect;
+    wizard.tts_voice_downloaded = true;
+
+    let action = crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Enter));
+    assert_eq!(action, WizardAction::DownloadPiperVoice);
+}
+
+#[test]
+fn tts_local_voice_enter_when_not_downloaded_returns_download() {
+    let mut wizard = OnboardingWizard::new();
+    wizard.step = OnboardingStep::VoiceSetup;
+    wizard.voice_field = VoiceField::TtsLocalVoiceSelect;
+    wizard.tts_voice_downloaded = false;
+    wizard.tts_voice_download_progress = None;
+
+    let action = crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Enter));
+    assert_eq!(action, WizardAction::DownloadPiperVoice);
+}
+
+#[test]
+fn tts_local_voice_enter_during_download_does_nothing() {
+    let mut wizard = OnboardingWizard::new();
+    wizard.step = OnboardingStep::VoiceSetup;
+    wizard.voice_field = VoiceField::TtsLocalVoiceSelect;
+    wizard.tts_voice_downloaded = false;
+    wizard.tts_voice_download_progress = Some(0.3);
+
+    let action = crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Enter));
+    assert_eq!(action, WizardAction::None);
+    assert_eq!(wizard.voice_field, VoiceField::TtsLocalVoiceSelect);
+}
+
+#[cfg(feature = "local-tts")]
+#[test]
+fn tts_local_voice_up_down_cycles() {
+    let mut wizard = OnboardingWizard::new();
+    wizard.step = OnboardingStep::VoiceSetup;
+    wizard.voice_field = VoiceField::TtsLocalVoiceSelect;
+    wizard.selected_tts_voice = 0;
+
+    // Down should increment
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
+    assert_eq!(wizard.selected_tts_voice, 1);
+
+    // Up should go back
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Up));
+    assert_eq!(wizard.selected_tts_voice, 0);
+
+    // Up at 0 stays at 0
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Up));
+    assert_eq!(wizard.selected_tts_voice, 0);
+}
+
+// ─── TTS config persistence ────────────────────────────────────────────────
+
+#[test]
+fn tts_mode_config_round_trip() {
+    use crate::config::TtsMode;
+
+    let json = serde_json::to_string(&TtsMode::Local).unwrap();
+    assert_eq!(json, "\"local\"");
+
+    let parsed: TtsMode = serde_json::from_str("\"api\"").unwrap();
+    assert_eq!(parsed, TtsMode::Api);
+
+    let parsed: TtsMode = serde_json::from_str("\"local\"").unwrap();
+    assert_eq!(parsed, TtsMode::Local);
+}
+
+// ─── TuiEvent Piper variants ───────────────────────────────────────────────
+
+#[test]
+fn tui_event_piper_progress_variant_exists() {
+    use crate::tui::events::TuiEvent;
+
+    let event = TuiEvent::PiperDownloadProgress(0.75);
+    match event {
+        TuiEvent::PiperDownloadProgress(p) => assert!((p - 0.75).abs() < f64::EPSILON),
+        _ => panic!("wrong variant"),
+    }
+}
+
+#[test]
+fn tui_event_piper_complete_ok() {
+    use crate::tui::events::TuiEvent;
+
+    let event = TuiEvent::PiperDownloadComplete(Ok("ryan".to_string()));
+    match event {
+        TuiEvent::PiperDownloadComplete(Ok(id)) => assert_eq!(id, "ryan"),
+        _ => panic!("wrong variant"),
+    }
+}
+
+#[test]
+fn tui_event_piper_complete_err() {
+    use crate::tui::events::TuiEvent;
+
+    let event = TuiEvent::PiperDownloadComplete(Err("download failed".to_string()));
+    match event {
+        TuiEvent::PiperDownloadComplete(Err(msg)) => assert_eq!(msg, "download failed"),
+        _ => panic!("wrong variant"),
+    }
+}
+
+// ─── WizardAction enum ─────────────────────────────────────────────────────
+
+#[test]
+fn wizard_action_download_piper_voice_variant() {
+    let action = WizardAction::DownloadPiperVoice;
+    assert_eq!(action, WizardAction::DownloadPiperVoice);
+    assert_ne!(action, WizardAction::None);
+    assert_ne!(action, WizardAction::DownloadWhisperModel);
+}
+
+// ─── TTS render smoke tests ────────────────────────────────────────────────
+
+#[test]
+fn voice_render_tts_mode_shows_tts_section() {
+    use ratatui::text::Line;
+
+    let mut wizard = OnboardingWizard::new();
+    wizard.voice_field = VoiceField::TtsModeSelect;
+    wizard.tts_mode = 0;
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    crate::tui::onboarding::voice::render(&mut lines, &wizard);
+
+    let text: String = lines
+        .iter()
+        .map(|l| l.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        text.contains("TTS") || text.contains("Text-to-Speech") || text.contains("tts"),
+        "Should render TTS section"
+    );
+}
+
+#[test]
+fn voice_render_tts_local_voice_shows_voice_list() {
+    use ratatui::text::Line;
+
+    let mut wizard = OnboardingWizard::new();
+    wizard.voice_field = VoiceField::TtsLocalVoiceSelect;
+    wizard.tts_mode = 2;
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    crate::tui::onboarding::voice::render(&mut lines, &wizard);
+
+    let text: String = lines
+        .iter()
+        .map(|l| l.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        text.contains("voice") || text.contains("Voice") || text.contains("local-tts"),
+        "Should render voice selection or feature note"
+    );
+}
+
 // ─── Rendering smoke test ───────────────────────────────────────────────────
 
 #[test]
@@ -448,7 +700,7 @@ fn voice_render_api_mode_shows_groq_field() {
     use ratatui::text::Line;
 
     let mut wizard = OnboardingWizard::new();
-    wizard.stt_mode = 0; // API
+    wizard.stt_mode = 1; // API
     wizard.voice_field = VoiceField::GroqApiKey;
     let mut lines: Vec<Line<'static>> = Vec::new();
     crate::tui::onboarding::voice::render(&mut lines, &wizard);
@@ -469,7 +721,7 @@ fn voice_render_local_mode_shows_model_select() {
     use ratatui::text::Line;
 
     let mut wizard = OnboardingWizard::new();
-    wizard.stt_mode = 1; // Local
+    wizard.stt_mode = 2; // Local
     wizard.voice_field = VoiceField::LocalModelSelect;
     let mut lines: Vec<Line<'static>> = Vec::new();
     crate::tui::onboarding::voice::render(&mut lines, &wizard);

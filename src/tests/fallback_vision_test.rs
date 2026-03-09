@@ -372,6 +372,7 @@ default_model = "gpt-4"
                     default_model: Some("gpt-4".into()),
                     models: vec![],
                     vision_model: Some("gpt-5-nano".into()),
+                    ..Default::default()
                 }),
                 ..Default::default()
             },
@@ -395,6 +396,7 @@ default_model = "gpt-4"
                     default_model: Some("gpt-4".into()),
                     models: vec![],
                     vision_model: None,
+                    ..Default::default()
                 }),
                 ..Default::default()
             },
@@ -422,6 +424,7 @@ mod factory_fallback {
                     default_model: None,
                     models: vec![],
                     vision_model: None,
+                    ..Default::default()
                 }),
                 ..Default::default()
             },
@@ -443,6 +446,7 @@ mod factory_fallback {
                     default_model: None,
                     models: vec![],
                     vision_model: None,
+                    ..Default::default()
                 }),
                 fallback: Some(FallbackProviderConfig {
                     enabled: false,
@@ -514,6 +518,7 @@ mod active_provider_vision {
                     default_model: None,
                     models: vec![],
                     vision_model: None,
+                    ..Default::default()
                 }),
                 ..Default::default()
             },
@@ -533,6 +538,7 @@ mod active_provider_vision {
                     default_model: Some("MiniMax-M2.5".into()),
                     models: vec![],
                     vision_model: Some("MiniMax-Text-01".into()),
+                    ..Default::default()
                 }),
                 ..Default::default()
             },
@@ -558,6 +564,7 @@ mod active_provider_vision {
                     default_model: None,
                     models: vec![],
                     vision_model: Some("MiniMax-Text-01".into()),
+                    ..Default::default()
                 }),
                 ..Default::default()
             },
@@ -577,6 +584,7 @@ mod active_provider_vision {
                     default_model: None,
                     models: vec![],
                     vision_model: Some("gpt-5-nano".into()),
+                    ..Default::default()
                 }),
                 ..Default::default()
             },
@@ -596,6 +604,7 @@ mod active_provider_vision {
                     default_model: None,
                     models: vec![],
                     vision_model: Some("MiniMax-Text-01".into()),
+                    ..Default::default()
                 }),
                 openai: Some(ProviderConfig {
                     enabled: true,
@@ -604,6 +613,7 @@ mod active_provider_vision {
                     default_model: None,
                     models: vec![],
                     vision_model: Some("gpt-5-nano".into()),
+                    ..Default::default()
                 }),
                 ..Default::default()
             },

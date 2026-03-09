@@ -206,11 +206,16 @@ impl AgentService {
         let user_msg = Self::build_user_message(&user_message).await;
         context.add_message(user_msg);
 
-        // Save user message to database (text only — images are ephemeral)
-        let _user_db_msg = message_service
-            .create_message(session_id, "user".to_string(), user_message)
-            .await
-            .map_err(|e| AgentError::Database(e.to_string()))?;
+        // Save user message to database (text only — images are ephemeral).
+        // Skip DB persistence for internal system continuations (restart recovery)
+        // — they go to context for the LLM but never appear in chat history.
+        let is_system_continuation = user_message.starts_with("[System:");
+        if !is_system_continuation {
+            let _user_db_msg = message_service
+                .create_message(session_id, "user".to_string(), user_message)
+                .await
+                .map_err(|e| AgentError::Database(e.to_string()))?;
+        }
 
         // Create assistant message placeholder NOW for real-time persistence.
         // We'll append content as we go and update with final tokens at the end.

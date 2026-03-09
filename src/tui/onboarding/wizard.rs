@@ -72,7 +72,7 @@ pub struct OnboardingWizard {
 
     /// Step 6: Voice Setup
     pub voice_field: VoiceField,
-    /// 0 = API (Groq), 1 = Local (whisper.cpp)
+    /// 0 = Off, 1 = API (Groq), 2 = Local (whisper.cpp)
     pub stt_mode: usize,
     pub groq_api_key_input: String,
     /// Index into LOCAL_MODEL_PRESETS (0=Tiny, 1=Base, 2=Small, 3=Medium)
@@ -84,6 +84,16 @@ pub struct OnboardingWizard {
     /// Whether the selected model is downloaded and ready
     pub stt_model_downloaded: bool,
     pub tts_enabled: bool,
+    /// 0 = Off, 1 = API (OpenAI), 2 = Local (Piper)
+    pub tts_mode: usize,
+    /// Index into PIPER_VOICES (0=ryan, 1=amy, etc.)
+    pub selected_tts_voice: usize,
+    /// Download progress for Piper voice (0.0 - 1.0), None if not downloading
+    pub tts_voice_download_progress: Option<f64>,
+    /// Download error message
+    pub tts_voice_download_error: Option<String>,
+    /// Whether the selected Piper voice is downloaded and ready
+    pub tts_voice_downloaded: bool,
 
     /// Step 7: Image Setup
     pub image_field: ImageField,
@@ -286,6 +296,11 @@ impl OnboardingWizard {
             stt_model_download_error: None,
             stt_model_downloaded: false,
             tts_enabled: false,
+            tts_mode: 0,
+            selected_tts_voice: 0,
+            tts_voice_download_progress: None,
+            tts_voice_download_error: None,
+            tts_voice_downloaded: false,
 
             image_field: ImageField::VisionToggle,
             image_vision_enabled: false,
@@ -436,13 +451,36 @@ impl OnboardingWizard {
             RespondTo::Mention => 2,
         };
 
-        // Load voice settings
-        wizard.stt_mode = match config.voice.stt_mode {
-            crate::config::SttMode::Api => 0,
-            crate::config::SttMode::Local => 1,
+        // Load voice settings (0=Off, 1=API, 2=Local for both STT and TTS)
+        let vc = config.voice_config();
+        wizard.stt_mode = if !vc.stt_enabled {
+            0 // Off
+        } else {
+            match vc.stt_mode {
+                crate::config::SttMode::Api => 1,
+                crate::config::SttMode::Local => 2,
+            }
         };
-        wizard.tts_enabled = config.voice.tts_enabled;
+        wizard.tts_enabled = vc.tts_enabled;
+        wizard.tts_mode = if !vc.tts_enabled {
+            0 // Off
+        } else {
+            match vc.tts_mode {
+                crate::config::TtsMode::Api => 1,
+                crate::config::TtsMode::Local => 2,
+            }
+        };
         wizard.detect_existing_groq_key();
+
+        // Resolve selected Piper voice index from config
+        #[cfg(feature = "local-tts")]
+        {
+            use crate::channels::voice::local_tts::{PIPER_VOICES, piper_voice_exists};
+            if let Some(idx) = PIPER_VOICES.iter().position(|v| v.id == vc.local_tts_voice) {
+                wizard.selected_tts_voice = idx;
+                wizard.tts_voice_downloaded = piper_voice_exists(PIPER_VOICES[idx].id);
+            }
+        }
 
         // Resolve selected local model index from config
         #[cfg(feature = "local-stt")]
@@ -450,7 +488,7 @@ impl OnboardingWizard {
             use crate::channels::voice::local_whisper::{LOCAL_MODEL_PRESETS, is_model_downloaded};
             if let Some(idx) = LOCAL_MODEL_PRESETS
                 .iter()
-                .position(|p| p.id == config.voice.local_stt_model)
+                .position(|p| p.id == vc.local_stt_model)
             {
                 wizard.selected_local_stt_model = idx;
                 wizard.stt_model_downloaded = is_model_downloaded(&LOCAL_MODEL_PRESETS[idx]);

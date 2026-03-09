@@ -391,40 +391,18 @@ impl OnboardingWizard {
             respond_to_values[self.slack_respond_to.min(2)],
         );
 
-        // Voice config
-        let is_local_stt = self.stt_mode == 1;
+        // Voice config (0=Off, 1=API, 2=Local for both STT and TTS)
+        let is_local_stt = self.stt_mode == 2;
+        let is_api_stt = self.stt_mode == 1;
         let groq_key_exists = !self.groq_api_key_input.is_empty() || self.has_existing_groq_key();
-        let stt_enabled = if is_local_stt {
-            true // local mode is always enabled when selected
-        } else {
-            groq_key_exists
-        };
-        let _ = Config::write_key("voice", "stt_enabled", &stt_enabled.to_string());
+
+        // STT API provider (Groq)
         let _ = Config::write_key(
-            "voice",
-            "stt_mode",
-            if is_local_stt { "local" } else { "api" },
+            "providers.stt.groq",
+            "enabled",
+            &(is_api_stt && groq_key_exists).to_string(),
         );
-        let _ = Config::write_key("voice", "tts_enabled", &self.tts_enabled.to_string());
-
-        // Local STT model
-        if is_local_stt {
-            #[cfg(feature = "local-stt")]
-            {
-                use crate::channels::voice::local_whisper::LOCAL_MODEL_PRESETS;
-                if self.selected_local_stt_model < LOCAL_MODEL_PRESETS.len() {
-                    let _ = Config::write_key(
-                        "voice",
-                        "local_stt_model",
-                        LOCAL_MODEL_PRESETS[self.selected_local_stt_model].id,
-                    );
-                }
-            }
-        }
-
-        // STT provider (API mode only)
-        if !is_local_stt && groq_key_exists {
-            let _ = Config::write_key("providers.stt.groq", "enabled", "true");
+        if is_api_stt && groq_key_exists {
             let _ = Config::write_key(
                 "providers.stt.groq",
                 "default_model",
@@ -432,10 +410,44 @@ impl OnboardingWizard {
             );
         }
 
-        // TTS provider
-        if self.tts_enabled && groq_key_exists {
-            let _ = Config::write_key("providers.tts.openai", "enabled", "true");
+        // STT local provider
+        let _ = Config::write_key("providers.stt.local", "enabled", &is_local_stt.to_string());
+        if is_local_stt {
+            #[cfg(feature = "local-stt")]
+            {
+                use crate::channels::voice::local_whisper::LOCAL_MODEL_PRESETS;
+                if self.selected_local_stt_model < LOCAL_MODEL_PRESETS.len() {
+                    let _ = Config::write_key(
+                        "providers.stt.local",
+                        "model",
+                        LOCAL_MODEL_PRESETS[self.selected_local_stt_model].id,
+                    );
+                }
+            }
+        }
+
+        // TTS API provider (OpenAI)
+        let is_api_tts = self.tts_enabled && self.tts_mode == 1;
+        let is_local_tts = self.tts_enabled && self.tts_mode == 2;
+        let _ = Config::write_key("providers.tts.openai", "enabled", &is_api_tts.to_string());
+        if is_api_tts {
             let _ = Config::write_key("providers.tts.openai", "default_model", "gpt-4o-mini-tts");
+        }
+
+        // TTS local provider (Piper)
+        let _ = Config::write_key("providers.tts.local", "enabled", &is_local_tts.to_string());
+        if is_local_tts {
+            #[cfg(feature = "local-tts")]
+            {
+                use crate::channels::voice::local_tts::PIPER_VOICES;
+                if self.selected_tts_voice < PIPER_VOICES.len() {
+                    let _ = Config::write_key(
+                        "providers.tts.local",
+                        "voice",
+                        PIPER_VOICES[self.selected_tts_voice].id,
+                    );
+                }
+            }
         }
 
         // Image config

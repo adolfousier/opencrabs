@@ -325,16 +325,7 @@ pub(crate) async fn handle_message(
     let wa_cfg = &cfg.channels.whatsapp;
     let allowed: HashSet<String> = wa_cfg.allowed_phones.iter().cloned().collect();
     let idle_timeout_hours = wa_cfg.session_idle_hours;
-    let mut voice_config = cfg.voice.clone();
-    voice_config.stt_provider = cfg.providers.stt.as_ref().and_then(|s| s.groq.clone());
-    let tts_providers = cfg.providers.tts.as_ref();
-    voice_config.tts_provider = tts_providers.and_then(|t| t.openai.clone());
-    if let Some(ref v) = tts_providers.and_then(|t| t.voice.as_ref()) {
-        voice_config.tts_voice = v.to_string();
-    }
-    if let Some(ref m) = tts_providers.and_then(|t| t.model.as_ref()) {
-        voice_config.tts_model = m.to_string();
-    }
+    let voice_config = cfg.voice_config();
 
     // SECURITY: When allowed_phones is configured, only respond to the owner.
     // Also check the recipient: when owner sends a message TO a contact,
@@ -985,19 +976,8 @@ pub(crate) async fn handle_message(
             }
 
             // If input was voice AND TTS is enabled, also send voice note after text
-            if has_aud
-                && voice_config.tts_enabled
-                && let Some(ref tts_provider) = voice_config.tts_provider
-                && let Some(ref tts_key) = tts_provider.api_key
-            {
-                match crate::channels::voice::synthesize_speech(
-                    &response.content,
-                    tts_key,
-                    &voice_config.tts_voice,
-                    &voice_config.tts_model,
-                )
-                .await
-                {
+            if has_aud && voice_config.tts_enabled {
+                match crate::channels::voice::synthesize(&response.content, &voice_config).await {
                     Ok(audio_bytes) => {
                         // WhatsApp requires uploading media to its servers first,
                         // then sending the message with the returned URL + crypto keys.

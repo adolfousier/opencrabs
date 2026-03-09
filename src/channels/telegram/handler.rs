@@ -130,22 +130,7 @@ pub(crate) async fn handle_message(
     let respond_to = &tg_cfg.respond_to;
     let allowed_channels: HashSet<String> = tg_cfg.allowed_channels.iter().cloned().collect();
     let idle_timeout_hours = tg_cfg.session_idle_hours;
-    let mut voice_config = cfg.voice.clone();
-    voice_config.stt_provider = cfg.providers.stt.as_ref().and_then(|s| s.groq.clone());
-    let tts_providers = cfg.providers.tts.as_ref();
-    voice_config.tts_provider = tts_providers.and_then(|t| t.openai.clone());
-    if let Some(ref v) = tts_providers.and_then(|t| t.voice.as_ref()) {
-        voice_config.tts_voice = v.to_string();
-    }
-    if let Some(ref m) = tts_providers.and_then(|t| t.model.as_ref()) {
-        voice_config.tts_model = m.to_string();
-    }
-    let openai_tts_key = cfg
-        .providers
-        .tts
-        .as_ref()
-        .and_then(|t| t.openai.as_ref())
-        .and_then(|p| p.api_key.clone());
+    let voice_config = cfg.voice_config();
 
     // Allowlist check — read from config (hot-reloaded via watch channel)
     if !allowed.is_empty() && !allowed.contains(&user_id) {
@@ -1186,18 +1171,8 @@ pub(crate) async fn handle_message(
             }
 
             // If input was voice AND TTS is enabled, also send voice note after text
-            if is_voice
-                && voice_config.tts_enabled
-                && let Some(ref oai_key) = openai_tts_key
-            {
-                match crate::channels::voice::synthesize_speech(
-                    &response.content,
-                    oai_key,
-                    &voice_config.tts_voice,
-                    &voice_config.tts_model,
-                )
-                .await
-                {
+            if is_voice && voice_config.tts_enabled {
+                match crate::channels::voice::synthesize(&response.content, &voice_config).await {
                     Ok(audio_bytes) => {
                         bot.send_voice(msg.chat.id, InputFile::memory(audio_bytes))
                             .await?;

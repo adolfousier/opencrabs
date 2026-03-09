@@ -42,7 +42,7 @@ impl OnboardingWizard {
         };
         if self.quick_jump_done {
             self.quick_jump_done = false;
-            return WizardAction::Cancel;
+            return WizardAction::QuickJumpDone;
         }
         action
     }

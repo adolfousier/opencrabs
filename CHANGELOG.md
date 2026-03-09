@@ -5,6 +5,30 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.64] - 2026-03-09
+
+### Added
+- **Local TTS via Piper** — On-device text-to-speech using Piper (Python venv + ONNX voice models). Six voice presets (Ryan, Amy, Lessac, Kristin, Joe, Cori). Configurable via `tts_mode = "local"` and `local_tts_voice` in config.toml. Gated behind `local-tts` feature flag (enabled by default)
+  - `src/channels/voice/local_tts.rs` (new), `src/channels/voice/service.rs`, `src/channels/voice/mod.rs`, `Cargo.toml`
+- **Off/API/Local mode for TTS** — TTS mode selector in `/onboard:voice` with three options: Off, API (OpenAI TTS), Local (Piper). Matches the existing STT mode selector
+  - `src/tui/onboarding/voice.rs`, `src/tui/onboarding/types.rs`, `src/config/types.rs`
+- **Voice preview after download** — Plays "Hey! I am {name}. Nice to meet you!" via system audio (afplay/aplay) after a Piper voice model downloads
+  - `src/channels/voice/local_tts.rs`
+
+### Fixed
+- **Telegram voice waveform missing** — `pcm_to_opus` was producing WAV (RIFF header) instead of OGG/Opus. Telegram's `send_voice` API requires OGG/Opus to display the voice waveform. Now properly encodes via `opusic-sys` (already linked) with OGG container (RFC 7845) and resamples Piper's 22050 Hz to 48000 Hz. Zero new system dependencies
+  - `src/channels/voice/local_tts.rs`, `Cargo.toml`
+- **Voice switching race condition** — `PiperDownloadProgress` events arriving after `PiperDownloadComplete` re-set `tts_voice_download_progress` to `Some(0.0)`, blocking re-download on voice switch. Now ignores stale progress after completion and resets download state on voice navigation
+  - `src/tui/app/state.rs`, `src/tui/onboarding/voice.rs`
+- **TTS config not persisted via quick-jump** — `/onboard:voice` quick-jump returned `WizardAction::Cancel` which dropped settings without saving. New `QuickJumpDone` action calls `apply_config()` before closing
+  - `src/tui/onboarding/types.rs`, `src/tui/onboarding/input.rs`, `src/tui/app/dialogs.rs`
+- **Piper venv never installed** — `setup_piper_venv()` was defined but never called before downloading voice models. Added `pathvalidate` to pip install (required by piper-tts)
+  - `src/tui/app/dialogs.rs`, `src/channels/voice/local_tts.rs`
+- **Voice preview used wrong voice name** — `PiperDownloadComplete` event now carries the `voice_id` string instead of reading the wizard's selection index (which could change during async download)
+  - `src/tui/events.rs`, `src/tui/app/state.rs`, `src/tui/app/dialogs.rs`
+- **Removed unnecessary `whisper-rs-sys` dependency** — Explicit `whisper-rs-sys` dep removed; `whisper-rs` pulls it in as transitive dep. Log suppression now uses `whisper_rs::set_log_callback` instead of direct sys FFI
+  - `Cargo.toml`, `src/channels/voice/local_whisper.rs`
+
 ## [0.2.63] - 2026-03-08
 
 ### Added
@@ -1346,6 +1370,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.64]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.64
 [0.2.63]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.63
 [0.2.62]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.62
 [0.2.61]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.61

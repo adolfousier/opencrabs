@@ -34,10 +34,6 @@ pub struct Config {
     #[serde(default)]
     pub channels: ChannelsConfig,
 
-    /// Voice processing (STT/TTS) configuration
-    #[serde(default)]
-    pub voice: VoiceConfig,
-
     /// Agent behaviour configuration
     #[serde(default)]
     pub agent: AgentConfig,
@@ -311,41 +307,28 @@ pub enum SttMode {
     Local,
 }
 
-/// Voice processing configuration (STT + TTS)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// TTS mode: API (OpenAI) or Local (Piper)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TtsMode {
+    #[default]
+    Api,
+    Local,
+}
+
+/// Runtime voice configuration — assembled from providers.stt / providers.tts.
+/// NOT serialized to config file.
+#[derive(Debug, Clone)]
 pub struct VoiceConfig {
-    /// Enable speech-to-text transcription
-    #[serde(default)]
     pub stt_enabled: bool,
-
-    /// STT mode: "api" (Groq Whisper) or "local" (whisper.cpp)
-    #[serde(default)]
     pub stt_mode: SttMode,
-
-    /// Local STT model preset (e.g. "local-tiny", "local-base", "local-small", "local-medium")
-    #[serde(default = "default_local_stt_model")]
     pub local_stt_model: String,
-
-    /// Enable text-to-speech replies
-    #[serde(default)]
     pub tts_enabled: bool,
-
-    /// TTS voice name (default: "echo")
-    #[serde(default = "default_tts_voice")]
+    pub tts_mode: TtsMode,
     pub tts_voice: String,
-
-    /// TTS model (default: "gpt-4o-mini-tts")
-    #[serde(default = "default_tts_model")]
     pub tts_model: String,
-
-    /// STT provider config (runtime - from providers.stt.*)
-    /// Not serialized to config file
-    #[serde(skip, default)]
+    pub local_tts_voice: String,
     pub stt_provider: Option<ProviderConfig>,
-
-    /// TTS provider config (runtime - from providers.tts.*)
-    /// Not serialized to config file
-    #[serde(skip, default)]
     pub tts_provider: Option<ProviderConfig>,
 }
 
@@ -358,6 +341,9 @@ fn default_tts_voice() -> String {
 fn default_tts_model() -> String {
     "gpt-4o-mini-tts".to_string()
 }
+fn default_local_tts_voice() -> String {
+    "ryan".to_string()
+}
 
 impl Default for VoiceConfig {
     fn default() -> Self {
@@ -366,8 +352,10 @@ impl Default for VoiceConfig {
             stt_mode: SttMode::default(),
             local_stt_model: default_local_stt_model(),
             tts_enabled: false,
+            tts_mode: TtsMode::default(),
             tts_voice: default_tts_voice(),
             tts_model: default_tts_model(),
+            local_tts_voice: default_local_tts_voice(),
             stt_provider: None,
             tts_provider: None,
         }
@@ -682,25 +670,67 @@ pub struct FallbackProviderConfig {
 /// STT (Speech-to-Text) provider configurations
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SttProviders {
-    /// Groq STT configuration
+    /// Groq STT configuration ([providers.stt.groq])
     #[serde(default)]
     pub groq: Option<ProviderConfig>,
+
+    /// Local whisper.cpp STT configuration ([providers.stt.local])
+    #[serde(default)]
+    pub local: Option<LocalSttConfig>,
+}
+
+/// Local STT (whisper.cpp) configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalSttConfig {
+    /// Whether local STT is enabled
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Model preset (e.g. "local-tiny", "local-base", "local-small", "local-medium")
+    #[serde(default = "default_local_stt_model")]
+    pub model: String,
+}
+
+impl Default for LocalSttConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            model: default_local_stt_model(),
+        }
+    }
 }
 
 /// TTS (Text-to-Speech) provider configurations
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TtsProviders {
-    /// OpenAI TTS configuration
+    /// OpenAI TTS configuration ([providers.tts.openai])
     #[serde(default)]
     pub openai: Option<ProviderConfig>,
 
-    /// TTS voice name — set under [providers.tts] (e.g. voice = "echo")
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub voice: Option<String>,
+    /// Local Piper TTS configuration ([providers.tts.local])
+    #[serde(default)]
+    pub local: Option<LocalTtsConfig>,
+}
 
-    /// TTS model — set under [providers.tts] (e.g. model = "gpt-4o-mini-tts")
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
+/// Local TTS (Piper) configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalTtsConfig {
+    /// Whether local TTS is enabled
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Piper voice name (default: "ryan")
+    #[serde(default = "default_local_tts_voice")]
+    pub voice: String,
+}
+
+impl Default for LocalTtsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            voice: default_local_tts_voice(),
+        }
+    }
 }
 
 /// Web Search provider configurations
@@ -751,6 +781,14 @@ pub struct ProviderConfig {
     /// request only (e.g. `vision_model = "MiniMax-Text-01"` for MiniMax M2.5).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vision_model: Option<String>,
+
+    /// TTS voice name (e.g. "echo") — only used by TTS providers
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voice: Option<String>,
+
+    /// TTS model override (e.g. "gpt-4o-mini-tts") — only used by TTS providers
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 fn default_enabled() -> bool {
@@ -1192,7 +1230,6 @@ impl Default for Config {
             debug: DebugConfig::default(),
             providers: ProviderConfigs::default(),
             channels: ChannelsConfig::default(),
-            voice: VoiceConfig::default(),
             agent: AgentConfig::default(),
             a2a: A2aConfig::default(),
             image: ImageConfig::default(),
@@ -1201,6 +1238,70 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Build a runtime `VoiceConfig` from `providers.stt` / `providers.tts`.
+    pub fn voice_config(&self) -> VoiceConfig {
+        let stt = self.providers.stt.as_ref();
+        let tts = self.providers.tts.as_ref();
+
+        // STT: enabled if groq or local is enabled
+        let groq_enabled = stt.and_then(|s| s.groq.as_ref()).is_some_and(|g| g.enabled);
+        let local_stt_enabled = stt
+            .and_then(|s| s.local.as_ref())
+            .is_some_and(|l| l.enabled);
+        let stt_enabled = groq_enabled || local_stt_enabled;
+        let stt_mode = if local_stt_enabled {
+            SttMode::Local
+        } else {
+            SttMode::Api
+        };
+        let local_stt_model = stt
+            .and_then(|s| s.local.as_ref())
+            .map(|l| l.model.clone())
+            .unwrap_or_else(default_local_stt_model);
+
+        // TTS: enabled if openai or local is enabled
+        let openai_tts_enabled = tts
+            .and_then(|t| t.openai.as_ref())
+            .is_some_and(|o| o.enabled);
+        let local_tts_enabled = tts
+            .and_then(|t| t.local.as_ref())
+            .is_some_and(|l| l.enabled);
+        let tts_enabled = openai_tts_enabled || local_tts_enabled;
+        let tts_mode = if local_tts_enabled {
+            TtsMode::Local
+        } else {
+            TtsMode::Api
+        };
+        let tts_voice = tts
+            .and_then(|t| t.openai.as_ref())
+            .and_then(|o| o.voice.clone())
+            .unwrap_or_else(default_tts_voice);
+        let tts_model = tts
+            .and_then(|t| t.openai.as_ref())
+            .and_then(|o| o.model.clone().or_else(|| o.default_model.clone()))
+            .unwrap_or_else(default_tts_model);
+        let local_tts_voice = tts
+            .and_then(|t| t.local.as_ref())
+            .map(|l| l.voice.clone())
+            .unwrap_or_else(default_local_tts_voice);
+
+        let stt_provider = stt.and_then(|s| s.groq.clone());
+        let tts_provider = tts.and_then(|t| t.openai.clone());
+
+        VoiceConfig {
+            stt_enabled,
+            stt_mode,
+            local_stt_model,
+            tts_enabled,
+            tts_mode,
+            tts_voice,
+            tts_model,
+            local_tts_voice,
+            stt_provider,
+            tts_provider,
+        }
+    }
+
     /// Load configuration from default locations
     ///
     /// Priority (lowest to highest):
@@ -1322,40 +1423,122 @@ impl Config {
             return;
         };
 
-        // Only rewrite if the trello section still uses the old key name.
-        // The struct alias keeps deserialization working, but we normalise the
-        // on-disk representation so future reads use the canonical key.
-        if !content.contains("allowed_channels") {
-            return;
+        let mut doc: toml::Value = match toml::from_str(&content) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+        let mut changed = false;
+
+        // ── Migration 1: channels.trello.allowed_channels → board_ids ──
+        if let Some(trello) = doc
+            .get_mut("channels")
+            .and_then(|c| c.get_mut("trello"))
+            .and_then(|t| t.as_table_mut())
+            && let Some(val) = trello.remove("allowed_channels")
+            && !trello.contains_key("board_ids")
+        {
+            trello.insert("board_ids".to_string(), val);
+            changed = true;
         }
 
-        // Simple line-by-line replacement scoped to the [channels.trello] section.
-        let mut in_trello = false;
-        let mut changed = false;
-        let mut lines: Vec<String> = content
-            .lines()
-            .map(|line| {
-                let trimmed = line.trim();
-                // Track which TOML section we are in.
-                if trimmed.starts_with('[') {
-                    in_trello = trimmed == "[channels.trello]";
+        // ── Migration 2: [voice] → providers.stt.* / providers.tts.* ──
+        if let Some(voice) = doc.get("voice").and_then(|v| v.as_table()).cloned() {
+            let root = doc.as_table_mut().unwrap();
+
+            // Ensure providers.stt and providers.tts tables exist
+            if !root.contains_key("providers") {
+                root.insert(
+                    "providers".to_string(),
+                    toml::Value::Table(toml::map::Map::new()),
+                );
+            }
+            let providers = root.get_mut("providers").unwrap().as_table_mut().unwrap();
+            if !providers.contains_key("stt") {
+                providers.insert("stt".to_string(), toml::Value::Table(toml::map::Map::new()));
+            }
+            if !providers.contains_key("tts") {
+                providers.insert("tts".to_string(), toml::Value::Table(toml::map::Map::new()));
+            }
+            // STT: stt_enabled + stt_mode → providers.stt.groq / providers.stt.local
+            let stt_enabled = voice
+                .get("stt_enabled")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let stt_mode = voice
+                .get("stt_mode")
+                .and_then(|v| v.as_str())
+                .unwrap_or("api")
+                .to_string();
+            if stt_enabled {
+                let stt = providers.get_mut("stt").unwrap().as_table_mut().unwrap();
+                if stt_mode == "local" {
+                    if !stt.contains_key("local") {
+                        stt.insert(
+                            "local".to_string(),
+                            toml::Value::Table(toml::map::Map::new()),
+                        );
+                    }
+                    let local = stt.get_mut("local").unwrap().as_table_mut().unwrap();
+                    local.entry("enabled").or_insert(toml::Value::Boolean(true));
+                    if let Some(model) = voice.get("local_stt_model") {
+                        local.entry("model").or_insert(model.clone());
+                    }
+                } else if let Some(groq) = stt.get_mut("groq").and_then(|g| g.as_table_mut()) {
+                    groq.entry("enabled").or_insert(toml::Value::Boolean(true));
                 }
-                if in_trello && trimmed.starts_with("allowed_channels") {
-                    changed = true;
-                    line.replacen("allowed_channels", "board_ids", 1)
-                } else {
-                    line.to_string()
+            }
+
+            // TTS: tts_enabled + tts_mode → providers.tts.openai / providers.tts.local
+            let tts_enabled = voice
+                .get("tts_enabled")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let tts_mode = voice
+                .get("tts_mode")
+                .and_then(|v| v.as_str())
+                .unwrap_or("api")
+                .to_string();
+            if tts_enabled {
+                let tts = providers.get_mut("tts").unwrap().as_table_mut().unwrap();
+                if tts_mode == "local" {
+                    if !tts.contains_key("local") {
+                        tts.insert(
+                            "local".to_string(),
+                            toml::Value::Table(toml::map::Map::new()),
+                        );
+                    }
+                    let local = tts.get_mut("local").unwrap().as_table_mut().unwrap();
+                    local.entry("enabled").or_insert(toml::Value::Boolean(true));
+                    if let Some(voice_name) = voice.get("local_tts_voice") {
+                        local.entry("voice").or_insert(voice_name.clone());
+                    }
+                } else if let Some(openai) = tts.get_mut("openai").and_then(|o| o.as_table_mut()) {
+                    openai
+                        .entry("enabled")
+                        .or_insert(toml::Value::Boolean(true));
+                    if let Some(v) = voice.get("tts_voice") {
+                        openai.entry("voice").or_insert(v.clone());
+                    }
+                    if let Some(m) = voice.get("tts_model") {
+                        openai.entry("model").or_insert(m.clone());
+                    }
                 }
-            })
-            .collect();
+            }
+
+            // Remove the old [voice] section
+            root.remove("voice");
+            changed = true;
+        }
 
         if !changed {
             return;
         }
 
-        lines.push(String::new()); // ensure trailing newline
-        if fs::write(path, lines.join("\n")).is_ok() {
-            tracing::info!("Config migrated: channels.trello.allowed_channels → board_ids");
+        Self::backup_config(path, 7);
+        if let Ok(toml_str) = toml::to_string_pretty(&doc)
+            && fs::write(path, toml_str).is_ok()
+        {
+            tracing::info!("Config migrated: [voice] → providers.stt/tts");
         }
     }
 
@@ -1391,7 +1574,6 @@ impl Config {
             debug: overlay.debug,
             providers: overlay.providers,
             channels: overlay.channels,
-            voice: overlay.voice,
             agent: overlay.agent,
             a2a: overlay.a2a,
             image: overlay.image,
@@ -1448,7 +1630,7 @@ impl Config {
 
     /// Write a key-value pair into the system config.toml using TOML merge.
     ///
-    /// `section` is a dotted path like "agent" or "voice".
+    /// `section` is a dotted path like "agent" or "providers.tts.local".
     /// `key` is the field name inside that section.
     /// `value` is the TOML-serialisable value.
     pub fn write_key(section: &str, key: &str, value: &str) -> Result<()> {

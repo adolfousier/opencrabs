@@ -1,4 +1,5 @@
-//! Voice setup step — STT mode selection, API key input, local model picker, TTS toggle.
+//! Voice setup step — STT mode selection, API key input, local model picker,
+//! TTS mode selection (API vs Local Piper), voice picker, download.
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::style::{Color, Modifier, Style};
@@ -19,21 +20,34 @@ pub fn handle_key(wizard: &mut OnboardingWizard, event: KeyEvent) -> WizardActio
         VoiceField::SttModeSelect => handle_stt_mode(wizard, event.code),
         VoiceField::GroqApiKey => handle_groq_key(wizard, event.code),
         VoiceField::LocalModelSelect => handle_local_model(wizard, event.code),
-        VoiceField::TtsToggle => handle_tts_toggle(wizard, event.code),
+        VoiceField::TtsModeSelect => handle_tts_mode(wizard, event.code),
+        VoiceField::TtsLocalVoiceSelect => handle_tts_voice(wizard, event.code),
     }
 }
 
 fn handle_stt_mode(wizard: &mut OnboardingWizard, key: KeyCode) -> WizardAction {
     match key {
         KeyCode::Up | KeyCode::Down => {
-            wizard.stt_mode = 1 - wizard.stt_mode;
+            // Cycle: 0=Off, 1=API, 2=Local
+            wizard.stt_mode = match key {
+                KeyCode::Up => {
+                    if wizard.stt_mode == 0 {
+                        2
+                    } else {
+                        wizard.stt_mode - 1
+                    }
+                }
+                _ => (wizard.stt_mode + 1) % 3,
+            };
         }
         KeyCode::Tab | KeyCode::Enter => {
-            if wizard.stt_mode == 0 {
-                wizard.voice_field = VoiceField::GroqApiKey;
-            } else {
-                wizard.voice_field = VoiceField::LocalModelSelect;
-                refresh_model_status(wizard);
+            match wizard.stt_mode {
+                1 => wizard.voice_field = VoiceField::GroqApiKey,
+                2 => {
+                    wizard.voice_field = VoiceField::LocalModelSelect;
+                    refresh_stt_model_status(wizard);
+                }
+                _ => wizard.voice_field = VoiceField::TtsModeSelect, // Off → skip to TTS
             }
         }
         _ => {}
@@ -57,7 +71,7 @@ fn handle_groq_key(wizard: &mut OnboardingWizard, key: KeyCode) -> WizardAction 
             }
         }
         KeyCode::Tab | KeyCode::Enter => {
-            wizard.voice_field = VoiceField::TtsToggle;
+            wizard.voice_field = VoiceField::TtsModeSelect;
         }
         KeyCode::BackTab => {
             wizard.voice_field = VoiceField::SttModeSelect;
@@ -72,22 +86,22 @@ fn handle_local_model(wizard: &mut OnboardingWizard, key: KeyCode) -> WizardActi
         KeyCode::Up if wizard.selected_local_stt_model > 0 => {
             wizard.selected_local_stt_model -= 1;
             wizard.stt_model_download_error = None;
-            refresh_model_status(wizard);
+            refresh_stt_model_status(wizard);
         }
-        KeyCode::Down if wizard.selected_local_stt_model + 1 < local_model_count() => {
+        KeyCode::Down if wizard.selected_local_stt_model + 1 < local_stt_model_count() => {
             wizard.selected_local_stt_model += 1;
             wizard.stt_model_download_error = None;
-            refresh_model_status(wizard);
+            refresh_stt_model_status(wizard);
         }
         KeyCode::Enter => {
             if wizard.stt_model_downloaded {
-                wizard.voice_field = VoiceField::TtsToggle;
+                wizard.voice_field = VoiceField::TtsModeSelect;
             } else if wizard.stt_model_download_progress.is_none() {
                 return WizardAction::DownloadWhisperModel;
             }
         }
         KeyCode::Tab => {
-            wizard.voice_field = VoiceField::TtsToggle;
+            wizard.voice_field = VoiceField::TtsModeSelect;
         }
         KeyCode::BackTab => {
             wizard.voice_field = VoiceField::SttModeSelect;
@@ -97,28 +111,78 @@ fn handle_local_model(wizard: &mut OnboardingWizard, key: KeyCode) -> WizardActi
     WizardAction::None
 }
 
-fn handle_tts_toggle(wizard: &mut OnboardingWizard, key: KeyCode) -> WizardAction {
+fn handle_tts_mode(wizard: &mut OnboardingWizard, key: KeyCode) -> WizardAction {
     match key {
-        KeyCode::Char(' ') | KeyCode::Up | KeyCode::Down => {
-            wizard.tts_enabled = !wizard.tts_enabled;
-        }
-        KeyCode::BackTab => {
-            wizard.voice_field = if wizard.stt_mode == 0 {
-                VoiceField::GroqApiKey
-            } else {
-                VoiceField::LocalModelSelect
+        KeyCode::Up | KeyCode::Down => {
+            // Cycle: 0=Off, 1=API, 2=Local
+            wizard.tts_mode = match key {
+                KeyCode::Up => {
+                    if wizard.tts_mode == 0 {
+                        2
+                    } else {
+                        wizard.tts_mode - 1
+                    }
+                }
+                _ => (wizard.tts_mode + 1) % 3,
             };
+            wizard.tts_enabled = wizard.tts_mode != 0;
         }
         KeyCode::Tab | KeyCode::Enter => {
-            wizard.next_step();
+            if wizard.tts_mode == 2 {
+                // Local selected — go to voice picker
+                wizard.voice_field = VoiceField::TtsLocalVoiceSelect;
+                refresh_tts_voice_status(wizard);
+            } else {
+                wizard.next_step();
+            }
+        }
+        KeyCode::BackTab => {
+            wizard.voice_field = match wizard.stt_mode {
+                1 => VoiceField::GroqApiKey,
+                2 => VoiceField::LocalModelSelect,
+                _ => VoiceField::SttModeSelect, // Off — back to STT selector
+            };
         }
         _ => {}
     }
     WizardAction::None
 }
 
-/// Refresh whether the currently selected local model is downloaded.
-fn refresh_model_status(wizard: &mut OnboardingWizard) {
+fn handle_tts_voice(wizard: &mut OnboardingWizard, key: KeyCode) -> WizardAction {
+    match key {
+        KeyCode::Up if wizard.selected_tts_voice > 0 => {
+            wizard.selected_tts_voice -= 1;
+            wizard.tts_voice_download_error = None;
+            wizard.tts_voice_download_progress = None;
+            refresh_tts_voice_status(wizard);
+        }
+        KeyCode::Down if wizard.selected_tts_voice + 1 < tts_voice_count() => {
+            wizard.selected_tts_voice += 1;
+            wizard.tts_voice_download_error = None;
+            wizard.tts_voice_download_progress = None;
+            refresh_tts_voice_status(wizard);
+        }
+        KeyCode::Enter => {
+            if wizard.tts_voice_download_progress.is_some() {
+                // Download in progress — do nothing
+            } else {
+                // Always download the selected voice (delete old, download new, play preview)
+                return WizardAction::DownloadPiperVoice;
+            }
+        }
+        KeyCode::Tab => {
+            wizard.next_step();
+        }
+        KeyCode::BackTab => {
+            wizard.voice_field = VoiceField::TtsModeSelect;
+        }
+        _ => {}
+    }
+    WizardAction::None
+}
+
+/// Refresh whether the currently selected local STT model is downloaded.
+fn refresh_stt_model_status(wizard: &mut OnboardingWizard) {
     #[cfg(feature = "local-stt")]
     {
         use crate::channels::voice::local_whisper::{LOCAL_MODEL_PRESETS, is_model_downloaded};
@@ -133,13 +197,41 @@ fn refresh_model_status(wizard: &mut OnboardingWizard) {
     }
 }
 
-/// Number of local model presets available.
-fn local_model_count() -> usize {
+/// Number of local STT model presets available.
+fn local_stt_model_count() -> usize {
     #[cfg(feature = "local-stt")]
     {
         crate::channels::voice::local_whisper::LOCAL_MODEL_PRESETS.len()
     }
     #[cfg(not(feature = "local-stt"))]
+    {
+        0
+    }
+}
+
+/// Refresh whether the currently selected Piper voice is downloaded.
+fn refresh_tts_voice_status(wizard: &mut OnboardingWizard) {
+    #[cfg(feature = "local-tts")]
+    {
+        use crate::channels::voice::local_tts::{PIPER_VOICES, piper_voice_exists};
+        if wizard.selected_tts_voice < PIPER_VOICES.len() {
+            wizard.tts_voice_downloaded =
+                piper_voice_exists(PIPER_VOICES[wizard.selected_tts_voice].id);
+        }
+    }
+    #[cfg(not(feature = "local-tts"))]
+    {
+        let _ = wizard;
+    }
+}
+
+/// Number of Piper voice presets available.
+fn tts_voice_count() -> usize {
+    #[cfg(feature = "local-tts")]
+    {
+        crate::channels::voice::local_tts::PIPER_VOICES.len()
+    }
+    #[cfg(not(feature = "local-tts"))]
     {
         0
     }
@@ -166,14 +258,19 @@ pub fn render(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
     render_stt_mode_selector(lines, wizard);
     lines.push(Line::from(""));
 
-    if wizard.stt_mode == 0 {
-        render_api_fields(lines, wizard);
-    } else {
-        render_local_fields(lines, wizard);
+    match wizard.stt_mode {
+        1 => render_api_fields(lines, wizard),
+        2 => render_local_stt_fields(lines, wizard),
+        _ => {} // Off — no sub-fields
     }
 
     lines.push(Line::from(""));
-    render_tts_toggle(lines, wizard);
+    render_tts_mode_selector(lines, wizard);
+
+    if wizard.tts_mode == 2 {
+        lines.push(Line::from(""));
+        render_local_tts_fields(lines, wizard);
+    }
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
@@ -199,11 +296,12 @@ fn render_stt_mode_selector(lines: &mut Vec<Line<'static>>, wizard: &OnboardingW
     )));
     lines.push(Line::from(""));
 
-    render_radio(lines, focused, wizard.stt_mode == 0, "API (Groq Whisper)");
+    render_radio(lines, focused, wizard.stt_mode == 0, "Off");
+    render_radio(lines, focused, wizard.stt_mode == 1, "API (Groq Whisper)");
     render_radio(
         lines,
         focused,
-        wizard.stt_mode == 1,
+        wizard.stt_mode == 2,
         "Local (whisper.cpp \u{2014} runs on device)",
     );
 }
@@ -258,7 +356,7 @@ fn render_api_fields(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) 
 }
 
 #[allow(unused_variables)]
-fn render_local_fields(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
+fn render_local_stt_fields(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
     let focused = wizard.voice_field == VoiceField::LocalModelSelect;
 
     lines.push(Line::from(Span::styled(
@@ -309,51 +407,87 @@ fn render_local_fields(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard
     }
 }
 
-fn render_tts_toggle(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
-    let focused = wizard.voice_field == VoiceField::TtsToggle;
+fn render_tts_mode_selector(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
+    let focused = wizard.voice_field == VoiceField::TtsModeSelect;
 
     lines.push(Line::from(Span::styled(
-        "  Text-to-Speech (OpenAI TTS)",
+        "  Text-to-Speech",
         Style::default()
             .fg(Color::White)
             .add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::from(Span::styled(
-        "  Reply with voice notes (uses OpenAI key)",
+        "  Reply with voice notes on channels",
         Style::default()
             .fg(Color::DarkGray)
             .add_modifier(Modifier::ITALIC),
     )));
     lines.push(Line::from(""));
 
-    lines.push(Line::from(vec![
-        Span::styled(
-            if focused { " > " } else { "   " },
-            Style::default().fg(ACCENT_GOLD),
-        ),
-        Span::styled(
-            if wizard.tts_enabled { "[x]" } else { "[ ]" },
-            Style::default().fg(if wizard.tts_enabled {
-                BRAND_GOLD
-            } else {
-                Color::DarkGray
-            }),
-        ),
-        Span::styled(
-            " Enable TTS replies (ash voice)",
-            Style::default()
-                .fg(if focused {
-                    Color::White
-                } else {
-                    Color::DarkGray
-                })
-                .add_modifier(if focused {
-                    Modifier::BOLD
-                } else {
-                    Modifier::empty()
-                }),
-        ),
-    ]));
+    render_radio(lines, focused, wizard.tts_mode == 0, "Off");
+    render_radio(
+        lines,
+        focused,
+        wizard.tts_mode == 1,
+        "API (OpenAI TTS \u{2014} uses OpenAI key)",
+    );
+    render_radio(
+        lines,
+        focused,
+        wizard.tts_mode == 2,
+        "Local (Piper \u{2014} runs on device, free)",
+    );
+}
+
+#[allow(unused_variables)]
+fn render_local_tts_fields(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
+    let focused = wizard.voice_field == VoiceField::TtsLocalVoiceSelect;
+
+    lines.push(Line::from(Span::styled(
+        "  Select voice:",
+        Style::default().fg(if focused { BRAND_BLUE } else { Color::DarkGray }),
+    )));
+
+    #[cfg(feature = "local-tts")]
+    {
+        use crate::channels::voice::local_tts::{PIPER_VOICES, piper_voice_exists};
+        for (i, voice) in PIPER_VOICES.iter().enumerate() {
+            let selected = i == wizard.selected_tts_voice;
+            let downloaded = piper_voice_exists(voice.id);
+            let label = format!(
+                "{}{}",
+                voice.label,
+                if downloaded { " \u{2713}" } else { "" }
+            );
+            render_radio(lines, focused, selected, &label);
+        }
+    }
+
+    #[cfg(not(feature = "local-tts"))]
+    lines.push(Line::from(Span::styled(
+        "  Not available (build with --features local-tts)",
+        Style::default().fg(Color::Red),
+    )));
+
+    // Download progress / status
+    if let Some(progress) = wizard.tts_voice_download_progress {
+        render_progress_bar(lines, progress);
+    } else if wizard.tts_voice_downloaded {
+        lines.push(Line::from(Span::styled(
+            "  Voice ready \u{2014} press Enter to continue",
+            Style::default().fg(Color::Cyan),
+        )));
+    } else if let Some(ref err) = wizard.tts_voice_download_error {
+        lines.push(Line::from(Span::styled(
+            format!("  Download failed: {}", err),
+            Style::default().fg(Color::Red),
+        )));
+    } else if focused {
+        lines.push(Line::from(Span::styled(
+            "  Press Enter to download voice model",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
 }
 
 // ─── Shared helpers ─────────────────────────────────────────────────────────

@@ -128,33 +128,27 @@ fn voice_config_default_is_api_mode() {
 }
 
 #[test]
-fn voice_config_stt_mode_serialization() {
-    // TOML round-trip
+fn voice_config_local_stt_from_providers() {
     let toml_str = r#"
-stt_enabled = true
-stt_mode = "local"
-local_stt_model = "local-base"
-tts_enabled = false
-tts_voice = "echo"
-tts_model = "gpt-4o-mini-tts"
+[providers.stt.local]
+enabled = true
+model = "local-base"
 "#;
-    let config: VoiceConfig = toml::from_str(toml_str).unwrap();
-    assert_eq!(config.stt_mode, SttMode::Local);
-    assert_eq!(config.local_stt_model, "local-base");
-    assert!(config.stt_enabled);
+    let config: crate::config::Config = toml::from_str(toml_str).unwrap();
+    let vc = config.voice_config();
+    assert_eq!(vc.stt_mode, SttMode::Local);
+    assert_eq!(vc.local_stt_model, "local-base");
+    assert!(vc.stt_enabled);
 }
 
 #[test]
-fn voice_config_missing_stt_mode_defaults_to_api() {
-    let toml_str = r#"
-stt_enabled = true
-tts_enabled = false
-tts_voice = "echo"
-tts_model = "gpt-4o-mini-tts"
-"#;
-    let config: VoiceConfig = toml::from_str(toml_str).unwrap();
-    assert_eq!(config.stt_mode, SttMode::Api);
-    assert_eq!(config.local_stt_model, "local-tiny"); // default
+fn voice_config_no_stt_defaults_to_api_disabled() {
+    let toml_str = "";
+    let config: crate::config::Config = toml::from_str(toml_str).unwrap();
+    let vc = config.voice_config();
+    assert_eq!(vc.stt_mode, SttMode::Api);
+    assert!(!vc.stt_enabled);
+    assert_eq!(vc.local_stt_model, "local-tiny"); // default
 }
 
 // ─── Audio decoding ────────────────────────────────────────────────────────
@@ -239,16 +233,16 @@ fn quick_jump_done_triggers_apply_config_flag() {
     let mut wizard = OnboardingWizard::new();
     wizard.quick_jump = true;
     wizard.step = OnboardingStep::VoiceSetup;
-    wizard.voice_field = VoiceField::TtsToggle;
+    wizard.voice_field = VoiceField::TtsModeSelect;
 
-    // Tab on TtsToggle calls next_step() → sets quick_jump_done
+    // Tab on TtsModeSelect (Off) calls next_step() → sets quick_jump_done
     let action = wizard.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
 
-    // In quick_jump mode, completing a step returns Cancel (after saving config)
+    // In quick_jump mode, completing a step returns QuickJumpDone (saves config then closes)
     assert_eq!(
         action,
-        crate::tui::onboarding::WizardAction::Cancel,
-        "Quick-jump should return Cancel after step completion"
+        crate::tui::onboarding::WizardAction::QuickJumpDone,
+        "Quick-jump should return QuickJumpDone after step completion"
     );
 }
 
@@ -274,7 +268,7 @@ fn non_quick_jump_tts_tab_advances_step() {
     let mut wizard = OnboardingWizard::new();
     wizard.quick_jump = false;
     wizard.step = OnboardingStep::VoiceSetup;
-    wizard.voice_field = VoiceField::TtsToggle;
+    wizard.voice_field = VoiceField::TtsModeSelect;
 
     let action = wizard.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
     assert_eq!(action, WizardAction::None);

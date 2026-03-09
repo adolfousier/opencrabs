@@ -67,22 +67,7 @@ pub(crate) async fn handle_message(
     let respond_to = &dc_cfg.respond_to;
     let allowed_channels: HashSet<String> = dc_cfg.allowed_channels.iter().cloned().collect();
     let idle_timeout_hours = dc_cfg.session_idle_hours;
-    let mut voice_config = cfg.voice.clone();
-    voice_config.stt_provider = cfg.providers.stt.as_ref().and_then(|s| s.groq.clone());
-    let tts_providers = cfg.providers.tts.as_ref();
-    voice_config.tts_provider = tts_providers.and_then(|t| t.openai.clone());
-    if let Some(ref v) = tts_providers.and_then(|t| t.voice.as_ref()) {
-        voice_config.tts_voice = v.to_string();
-    }
-    if let Some(ref m) = tts_providers.and_then(|t| t.model.as_ref()) {
-        voice_config.tts_model = m.to_string();
-    }
-    let openai_tts_key = cfg
-        .providers
-        .tts
-        .as_ref()
-        .and_then(|t| t.openai.as_ref())
-        .and_then(|p| p.api_key.clone());
+    let voice_config = cfg.voice_config();
 
     let user_id = msg.author.id.get() as i64;
 
@@ -616,18 +601,8 @@ pub(crate) async fn handle_message(
             }
 
             // TTS: send voice reply if input was audio and TTS is enabled
-            if is_voice
-                && voice_config.tts_enabled
-                && let Some(ref oai_key) = openai_tts_key
-            {
-                match crate::channels::voice::synthesize_speech(
-                    &response.content,
-                    oai_key,
-                    &voice_config.tts_voice,
-                    &voice_config.tts_model,
-                )
-                .await
-                {
+            if is_voice && voice_config.tts_enabled {
+                match crate::channels::voice::synthesize(&response.content, &voice_config).await {
                     Ok(audio_bytes) => {
                         let file = CreateAttachment::bytes(audio_bytes.as_slice(), "response.ogg");
                         if let Err(e) = msg

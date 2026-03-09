@@ -662,6 +662,7 @@ impl App {
                     default_model: Some(default_model.to_string()),
                     models: vec![],
                     vision_model: None,
+                    ..Default::default()
                 });
             }
             1 => {
@@ -673,6 +674,7 @@ impl App {
                     default_model: Some(default_model.to_string()),
                     models: vec![],
                     vision_model: None,
+                    ..Default::default()
                 });
             }
             2 => {
@@ -684,6 +686,7 @@ impl App {
                     default_model: Some(default_model.to_string()),
                     models: vec![],
                     vision_model: None,
+                    ..Default::default()
                 });
             }
             3 => {
@@ -695,6 +698,7 @@ impl App {
                     default_model: Some(default_model.to_string()),
                     models: vec![],
                     vision_model: None,
+                    ..Default::default()
                 });
             }
             4 => {
@@ -706,6 +710,7 @@ impl App {
                     default_model: Some(default_model.to_string()),
                     models: vec![],
                     vision_model: None,
+                    ..Default::default()
                 });
             }
             5 => {
@@ -726,6 +731,7 @@ impl App {
                         default_model: Some(custom_model),
                         models: vec![],
                         vision_model: None,
+                        ..Default::default()
                     },
                 );
                 config.providers.custom = Some(customs);
@@ -924,6 +930,21 @@ impl App {
             let action = wizard.handle_key(event);
             match action {
                 WizardAction::Cancel => {
+                    self.onboarding = None;
+                    self.switch_mode(AppMode::Chat).await?;
+                }
+                WizardAction::QuickJumpDone => {
+                    // Quick-jump completed a step — save config then close
+                    if let Some(ref wizard) = self.onboarding {
+                        if let Err(e) = wizard.apply_config() {
+                            self.push_system_message(format!(
+                                "Settings saved with warnings: {}",
+                                e
+                            ));
+                        } else {
+                            self.push_system_message("Settings saved.".to_string());
+                        }
+                    }
                     self.onboarding = None;
                     self.switch_mode(AppMode::Chat).await?;
                 }
@@ -1261,6 +1282,73 @@ impl App {
                                         .await;
                                     let _ = tui_sender.send(TuiEvent::WhisperDownloadComplete(
                                         result.map(|_| ()).map_err(|e| e.to_string()),
+                                    ));
+                                });
+                            }
+                        }
+                    }
+                }
+                WizardAction::DownloadPiperVoice => {
+                    #[cfg(feature = "local-tts")]
+                    {
+                        use crate::channels::voice::local_tts::{
+                            DownloadProgress, PIPER_VOICES, delete_other_voices,
+                        };
+                        let tui_sender = self.event_sender();
+                        if let Some(ref mut wizard) = self.onboarding {
+                            let idx = wizard.selected_tts_voice;
+                            if idx < PIPER_VOICES.len() {
+                                let voice_id = PIPER_VOICES[idx].id.to_string();
+                                delete_other_voices(&voice_id);
+                                wizard.tts_voice_download_progress = Some(0.0);
+                                let (progress_tx, mut progress_rx) =
+                                    tokio::sync::mpsc::unbounded_channel::<DownloadProgress>();
+                                let fwd_sender = tui_sender.clone();
+                                tokio::spawn(async move {
+                                    while let Some(p) = progress_rx.recv().await {
+                                        let frac = match p.total {
+                                            Some(t) if t > 0 => p.downloaded as f64 / t as f64,
+                                            _ => 0.0,
+                                        };
+                                        let _ =
+                                            fwd_sender.send(TuiEvent::PiperDownloadProgress(frac));
+                                    }
+                                });
+                                tokio::spawn(async move {
+                                    // Install Piper venv if not present
+                                    if !crate::channels::voice::local_tts::piper_venv_exists() {
+                                        let (setup_tx, mut setup_rx) =
+                                            tokio::sync::mpsc::unbounded_channel::<
+                                                crate::channels::voice::local_tts::SetupProgress,
+                                            >();
+                                        let setup_fwd = tui_sender.clone();
+                                        tokio::spawn(async move {
+                                            while let Some(p) = setup_rx.recv().await {
+                                                tracing::info!("Piper setup: {}", p.stage);
+                                                let _ = setup_fwd
+                                                    .send(TuiEvent::PiperDownloadProgress(0.0));
+                                            }
+                                        });
+                                        if let Err(e) =
+                                            crate::channels::voice::local_tts::setup_piper_venv(
+                                                setup_tx,
+                                            )
+                                            .await
+                                        {
+                                            let _ = tui_sender.send(
+                                                TuiEvent::PiperDownloadComplete(Err(e.to_string())),
+                                            );
+                                            return;
+                                        }
+                                    }
+                                    // Download voice model
+                                    let result = crate::channels::voice::local_tts::download_voice(
+                                        &voice_id,
+                                        progress_tx,
+                                    )
+                                    .await;
+                                    let _ = tui_sender.send(TuiEvent::PiperDownloadComplete(
+                                        result.map(|_| voice_id.clone()).map_err(|e| e.to_string()),
                                     ));
                                 });
                             }

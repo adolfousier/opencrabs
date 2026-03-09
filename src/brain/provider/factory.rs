@@ -497,6 +497,7 @@ mod tests {
                     default_model: None,
                     models: vec![],
                     vision_model: None,
+                    ..Default::default()
                 }),
                 ..Default::default()
             },
@@ -520,6 +521,7 @@ mod tests {
                     default_model: Some("MiniMax-M2.5".to_string()),
                     models: vec![],
                     vision_model: None,
+                    ..Default::default()
                 }),
                 ..Default::default()
             },
@@ -541,6 +543,7 @@ mod tests {
                     default_model: None,
                     models: vec![],
                     vision_model: None,
+                    ..Default::default()
                 }),
                 minimax: Some(ProviderConfig {
                     enabled: true,
@@ -549,6 +552,7 @@ mod tests {
                     default_model: None,
                     models: vec![],
                     vision_model: None,
+                    ..Default::default()
                 }),
                 ..Default::default()
             },

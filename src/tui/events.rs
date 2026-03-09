@@ -146,6 +146,11 @@ pub enum TuiEvent {
     /// Whisper model download completed (Ok or Err message)
     WhisperDownloadComplete(Result<(), String>),
 
+    /// Piper voice download progress (0.0–1.0)
+    PiperDownloadProgress(f64),
+    /// Piper voice download completed (Ok(voice_id) or Err message)
+    PiperDownloadComplete(Result<String, String>),
+
     /// A remote channel (Telegram, WhatsApp, Discord, Slack) completed an agent
     /// response — the TUI should refresh if it's the current session.
     SessionUpdated(Uuid),

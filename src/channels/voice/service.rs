@@ -101,6 +101,67 @@ async fn transcribe_audio_with_url(
     Ok(result.text)
 }
 
+/// Dispatch TTS synthesis based on config mode (API or Local).
+///
+/// - `TtsMode::Api` → OpenAI TTS API (requires `openai_api_key`)
+/// - `TtsMode::Local` → Piper on-device TTS (requires downloaded voice model)
+pub async fn synthesize(text: &str, voice_config: &VoiceConfig) -> Result<Vec<u8>> {
+    use crate::config::TtsMode;
+
+    if text.is_empty() {
+        anyhow::bail!("Cannot synthesize empty text");
+    }
+
+    match voice_config.tts_mode {
+        TtsMode::Api => {
+            let api_key = voice_config
+                .tts_provider
+                .as_ref()
+                .and_then(|p| p.api_key.as_deref())
+                .ok_or_else(|| anyhow::anyhow!("TTS API key not configured"))?;
+            synthesize_speech(
+                text,
+                api_key,
+                &voice_config.tts_voice,
+                &voice_config.tts_model,
+            )
+            .await
+        }
+        TtsMode::Local => {
+            #[cfg(feature = "local-tts")]
+            {
+                let voice_id = voice_config.local_tts_voice.clone();
+                tracing::info!("Local TTS: synthesizing with Piper voice {}", voice_id);
+                synthesize_speech_local(text, &voice_id).await
+            }
+            #[cfg(not(feature = "local-tts"))]
+            {
+                anyhow::bail!(
+                    "Local TTS not available — binary was built without the `local-tts` feature"
+                )
+            }
+        }
+    }
+}
+
+/// Synthesize speech using local Piper TTS. Runs in a blocking thread.
+#[cfg(feature = "local-tts")]
+async fn synthesize_speech_local(text: &str, voice_id: &str) -> Result<Vec<u8>> {
+    let text = text.to_string();
+    let voice_id = voice_id.to_string();
+
+    let handle = tokio::task::spawn_blocking(move || {
+        let engine = super::local_tts::PiperTts::new(&voice_id)?;
+        engine.synthesize_opus(&text)
+    });
+
+    match tokio::time::timeout(std::time::Duration::from_secs(120), handle).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(e)) => anyhow::bail!("Local TTS task panicked: {}", e),
+        Err(_) => anyhow::bail!("Local TTS timed out after 120s"),
+    }
+}
+
 /// Synthesize speech from text using OpenAI TTS.
 ///
 /// Returns OGG/Opus audio bytes suitable for Telegram voice notes.

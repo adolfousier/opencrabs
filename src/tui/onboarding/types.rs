@@ -269,7 +269,8 @@ pub enum VoiceField {
     SttModeSelect,
     GroqApiKey,
     LocalModelSelect,
-    TtsToggle,
+    TtsModeSelect,
+    TtsLocalVoiceSelect,
 }
 
 /// Which field is focused in ImageSetup step
@@ -314,4 +315,8 @@ pub enum WizardAction {
     TestTrello,
     /// Trigger async whisper model download
     DownloadWhisperModel,
+    /// Trigger async Piper voice model download
+    DownloadPiperVoice,
+    /// Quick-jump step completed — save config and close wizard
+    QuickJumpDone,
 }

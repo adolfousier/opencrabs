@@ -119,7 +119,18 @@ impl ConfigTool {
 
         let output = match section {
             Some("agent") => format_toml(&config.agent),
-            Some("voice") => format_toml(&config.voice),
+            Some("voice") => {
+                let vc = config.voice_config();
+                format!(
+                    "stt_enabled = {}\nstt_mode = {:?}\ntts_enabled = {}\ntts_mode = {:?}\ntts_voice = {:?}\nlocal_tts_voice = {:?}",
+                    vc.stt_enabled,
+                    vc.stt_mode,
+                    vc.tts_enabled,
+                    vc.tts_mode,
+                    vc.tts_voice,
+                    vc.local_tts_voice
+                )
+            }
             Some("logging") => format_toml(&config.logging),
             Some("debug") => format_toml(&config.debug),
             Some("channels") => format_toml(&config.channels),

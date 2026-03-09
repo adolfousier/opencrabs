@@ -146,6 +146,7 @@ impl ProviderUpdater {
                 default_model: None,
                 models: vec![],
                 vision_model: None,
+                ..Default::default()
             });
         let mut provider_opt = Some(entry.clone());
         let updated = Self::apply_provider_update(&mut provider_opt, provider);
@@ -171,6 +172,7 @@ impl ProviderUpdater {
                 default_model: None,
                 models: vec![],
                 vision_model: None,
+                ..Default::default()
             }
         });
 

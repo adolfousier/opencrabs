@@ -82,8 +82,8 @@ impl TelegramAgent {
             tracing::info!(
                 "Starting Telegram bot with {} allowed user(s), STT={}, TTS={}",
                 cfg.channels.telegram.allowed_users.len(),
-                cfg.voice.stt_enabled,
-                cfg.voice.tts_enabled,
+                cfg.voice_config().stt_enabled,
+                cfg.voice_config().tts_enabled,
             );
 
             let bot = Bot::new(token.clone());

@@ -501,7 +501,8 @@ impl SlashCommandTool {
         lines.push(String::new());
         lines.push(format!(
             "Voice: STT={}, TTS={}",
-            config.voice.stt_enabled, config.voice.tts_enabled
+            config.voice_config().stt_enabled,
+            config.voice_config().tts_enabled
         ));
 
         // Approval policy
