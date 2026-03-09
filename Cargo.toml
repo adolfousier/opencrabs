@@ -180,7 +180,7 @@ opt-level = 3
 lto = "fat"
 codegen-units = 1
 strip = true
-panic = "abort"
+panic = "unwind"
 
 [profile.release-small]
 inherits = "release"

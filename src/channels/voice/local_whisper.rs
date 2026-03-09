@@ -102,9 +102,11 @@ pub async fn download_model(
         preset.id
     );
 
-    // Build the model now to trigger download
+    // Build the model now to trigger download.
+    // Suppress stdout — kalosm-common prints "Running on CPU..." via println!
     let source = parse_whisper_source(preset)?;
     let progress_tx_clone = progress_tx.clone();
+    let _stdout_guard = suppress_stdout();
     rwhisper::WhisperBuilder::default()
         .with_source(source)
         .build_with_loading_handler(move |progress| match progress {
@@ -160,6 +162,58 @@ fn parse_whisper_source(preset: &LocalModelPreset) -> Result<rwhisper::WhisperSo
     }
 }
 
+// ─── Stdout suppressor ──────────────────────────────────────────────────────
+//
+// kalosm-common prints "Running on CPU, to run on GPU..." to stdout via println!.
+// This bleeds into the TUI (raw mode). We suppress fd 1 during model loading.
+//
+// SAFETY: This is only called while the TUI is in alternate screen.
+// The background preload in ui.rs is delayed 2s to guarantee this.
+// Brief fd suppression during a render tick just means one skipped frame.
+
+/// Temporarily redirect stdout to /dev/null. Returns a guard that restores it on drop.
+#[cfg(unix)]
+pub(crate) fn suppress_stdout() -> Option<StdoutGuard> {
+    use std::os::unix::io::AsRawFd;
+    unsafe {
+        let stdout_fd = std::io::stdout().as_raw_fd();
+        let saved = libc::dup(stdout_fd);
+        if saved < 0 {
+            return None;
+        }
+        let devnull = libc::open(c"/dev/null".as_ptr(), libc::O_WRONLY);
+        if devnull < 0 {
+            libc::close(saved);
+            return None;
+        }
+        libc::dup2(devnull, stdout_fd);
+        libc::close(devnull);
+        Some(StdoutGuard { saved_fd: saved })
+    }
+}
+
+#[cfg(unix)]
+pub(crate) struct StdoutGuard {
+    saved_fd: i32,
+}
+
+#[cfg(unix)]
+impl Drop for StdoutGuard {
+    fn drop(&mut self) {
+        use std::os::unix::io::AsRawFd;
+        unsafe {
+            let stdout_fd = std::io::stdout().as_raw_fd();
+            libc::dup2(self.saved_fd, stdout_fd);
+            libc::close(self.saved_fd);
+        }
+    }
+}
+
+#[cfg(not(unix))]
+pub(crate) fn suppress_stdout() -> Option<()> {
+    None
+}
+
 // ─── Transcription engine ───────────────────────────────────────────────────
 
 /// Local whisper transcription engine using rwhisper.
@@ -173,6 +227,8 @@ impl LocalWhisper {
         let source = parse_whisper_source(preset)?;
         tracing::info!("Local STT: loading rwhisper model ({})...", preset.repo_id);
 
+        // Suppress stdout — kalosm-common prints "Running on CPU..." via println!
+        let _stdout_guard = suppress_stdout();
         let model = rwhisper::WhisperBuilder::default()
             .with_source(source)
             .build_with_loading_handler(|progress| {
@@ -180,6 +236,7 @@ impl LocalWhisper {
             })
             .await
             .map_err(|e| anyhow::anyhow!("Failed to load whisper model: {}", e))?;
+        drop(_stdout_guard);
 
         tracing::info!("Local STT: rwhisper model loaded");
         Ok(Self { model })
@@ -194,11 +251,37 @@ impl LocalWhisper {
         }
 
         // Resample to 16kHz if needed
-        let audio_16k = if sample_rate == 16000 {
+        let mut audio_16k = if sample_rate == 16000 {
             samples
         } else {
             resample(&samples, sample_rate, 16000)?
         };
+
+        // Sanitize: replace NaN/Inf with 0.0 to prevent candle tensor panics
+        for s in audio_16k.iter_mut() {
+            if !s.is_finite() {
+                *s = 0.0;
+            }
+        }
+
+        // Whisper needs at least N_FFT (400) samples for a single FFT window.
+        // Pad very short audio to 1 second (16000 samples) to avoid edge cases
+        // in candle's mel spectrogram that can panic with panic=abort.
+        const MIN_SAMPLES: usize = 16000; // 1 second at 16kHz
+        if audio_16k.len() < MIN_SAMPLES {
+            tracing::debug!(
+                "Audio too short ({} samples), padding to {} samples",
+                audio_16k.len(),
+                MIN_SAMPLES
+            );
+            audio_16k.resize(MIN_SAMPLES, 0.0);
+        }
+
+        tracing::info!(
+            "Local STT: feeding {} samples ({:.1}s) to rwhisper",
+            audio_16k.len(),
+            audio_16k.len() as f64 / 16000.0
+        );
 
         // Create a rodio-compatible source from PCM samples
         let source = PcmSource::new(audio_16k, 16000);
