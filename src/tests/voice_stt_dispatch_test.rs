@@ -106,9 +106,13 @@ async fn dispatch_local_mode_model_not_downloaded_fails() {
     let result = crate::channels::voice::transcribe(vec![0u8; 50], &config).await;
     if let Err(e) = &result {
         let msg = e.to_string();
-        // Either "not downloaded" or decoding error (if model exists)
+        // rwhisper auto-downloads, so error is typically audio decode/probe failure
         assert!(
-            msg.contains("not downloaded") || msg.contains("decode") || msg.contains("whisper"),
+            msg.contains("not downloaded")
+                || msg.contains("decode")
+                || msg.contains("whisper")
+                || msg.contains("probe")
+                || msg.contains("audio"),
             "Expected download or decode error, got: {}",
             msg
         );

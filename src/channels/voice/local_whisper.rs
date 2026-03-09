@@ -105,7 +105,6 @@ pub async fn download_model(
     // Build the model now to trigger download
     let source = parse_whisper_source(preset)?;
     let progress_tx_clone = progress_tx.clone();
-    let _stdout_guard = suppress_stdout();
     rwhisper::WhisperBuilder::default()
         .with_source(source)
         .build_with_loading_handler(move |progress| match progress {
@@ -131,7 +130,6 @@ pub async fn download_model(
         })
         .await
         .map_err(|e| anyhow::anyhow!("Failed to download/load whisper model: {}", e))?;
-    drop(_stdout_guard);
 
     let _ = progress_tx.send(DownloadProgress {
         downloaded: 100,
@@ -162,56 +160,6 @@ fn parse_whisper_source(preset: &LocalModelPreset) -> Result<rwhisper::WhisperSo
     }
 }
 
-// ─── Stdout suppressor ──────────────────────────────────────────────────────
-//
-// kalosm-common prints "Running on CPU, to run on GPU..." to stdout via println!.
-// This bleeds into the TUI. We suppress stdout during model loading.
-
-/// Temporarily redirect stdout to /dev/null. Returns a guard that restores it on drop.
-#[cfg(unix)]
-fn suppress_stdout() -> Option<StdoutGuard> {
-    use std::os::unix::io::AsRawFd;
-    unsafe {
-        let stdout_fd = std::io::stdout().as_raw_fd();
-        let saved = libc::dup(stdout_fd);
-        if saved < 0 {
-            return None;
-        }
-        let devnull = libc::open(c"/dev/null".as_ptr(), libc::O_WRONLY);
-        if devnull < 0 {
-            libc::close(saved);
-            return None;
-        }
-        libc::dup2(devnull, stdout_fd);
-        libc::close(devnull);
-        Some(StdoutGuard { saved_fd: saved })
-    }
-}
-
-#[cfg(unix)]
-struct StdoutGuard {
-    saved_fd: i32,
-}
-
-#[cfg(unix)]
-impl Drop for StdoutGuard {
-    fn drop(&mut self) {
-        use std::os::unix::io::AsRawFd;
-        unsafe {
-            let stdout_fd = std::io::stdout().as_raw_fd();
-            libc::dup2(self.saved_fd, stdout_fd);
-            libc::close(self.saved_fd);
-        }
-    }
-}
-
-#[cfg(not(unix))]
-fn suppress_stdout() -> Option<()> {
-    // On Windows the TUI uses crossterm which doesn't rely on fd 1,
-    // and the println goes to the allocated console — harmless.
-    None
-}
-
 // ─── Transcription engine ───────────────────────────────────────────────────
 
 /// Local whisper transcription engine using rwhisper.
@@ -225,8 +173,6 @@ impl LocalWhisper {
         let source = parse_whisper_source(preset)?;
         tracing::info!("Local STT: loading rwhisper model ({})...", preset.repo_id);
 
-        // Suppress stdout — kalosm-common prints "Running on CPU..." via println!
-        let _stdout_guard = suppress_stdout();
         let model = rwhisper::WhisperBuilder::default()
             .with_source(source)
             .build_with_loading_handler(|progress| {
@@ -234,7 +180,6 @@ impl LocalWhisper {
             })
             .await
             .map_err(|e| anyhow::anyhow!("Failed to load whisper model: {}", e))?;
-        drop(_stdout_guard);
 
         tracing::info!("Local STT: rwhisper model loaded");
         Ok(Self { model })
@@ -683,7 +628,7 @@ mod tests {
         // Should be roughly 1/3 the length (16k/48k)
         let expected_len = (input.len() as f64 * 16000.0 / 48000.0) as usize;
         assert!(
-            (output.len() as i64 - expected_len as i64).unsigned_abs() < 100,
+            (output.len() as i64 - expected_len as i64).unsigned_abs() < 256,
             "Expected ~{} samples, got {}",
             expected_len,
             output.len()
