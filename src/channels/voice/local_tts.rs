@@ -360,6 +360,11 @@ impl PiperTts {
     pub fn synthesize_pcm(&self, text: &str) -> Result<Vec<i16>> {
         use std::io::Write;
 
+        let cleaned = clean_for_tts(text);
+        if cleaned.is_empty() {
+            anyhow::bail!("No speakable text after cleaning");
+        }
+
         let mut child = std::process::Command::new(&self.piper_bin)
             .arg("--model")
             .arg(&self.model_path)
@@ -372,7 +377,7 @@ impl PiperTts {
 
         if let Some(mut stdin) = child.stdin.take() {
             stdin
-                .write_all(text.as_bytes())
+                .write_all(cleaned.as_bytes())
                 .context("Failed to write text to piper")?;
         }
 
@@ -776,6 +781,124 @@ pub async fn preview_voice(voice_id: &str) -> Result<()> {
     }
 }
 
+// ─── Text sanitization for TTS ───────────────────────────────────────────────
+
+/// Clean text for TTS synthesis — strip markdown formatting, collapse whitespace,
+/// and remove characters that Piper would read literally or mangle.
+fn clean_for_tts(text: &str) -> String {
+    let mut s = text.to_string();
+
+    // Remove code blocks (``` ... ```)
+    while let Some(start) = s.find("```") {
+        if let Some(end) = s[start + 3..].find("```") {
+            s.replace_range(start..start + 3 + end + 3, " ");
+        } else {
+            s.replace_range(start..start + 3, " ");
+        }
+    }
+
+    // Remove inline code (`...`)
+    while let Some(start) = s.find('`') {
+        if let Some(end) = s[start + 1..].find('`') {
+            // Keep the text inside, just remove the backticks
+            s.remove(start + 1 + end);
+            s.remove(start);
+        } else {
+            s.remove(start);
+        }
+    }
+
+    // Remove markdown bold/italic markers (**, *, __)
+    s = s.replace("**", "");
+    s = s.replace("__", "");
+    s = s.replace('*', "");
+
+    // Remove markdown headers (# ## ### etc.)
+    s = s
+        .lines()
+        .map(|line| line.trim_start_matches('#').trim_start())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // Remove markdown links [text](url) → text
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '[' {
+            let mut link_text = String::new();
+            let mut found_close = false;
+            for c in chars.by_ref() {
+                if c == ']' {
+                    found_close = true;
+                    break;
+                }
+                link_text.push(c);
+            }
+            if found_close && chars.peek() == Some(&'(') {
+                chars.next(); // skip '('
+                for c in chars.by_ref() {
+                    if c == ')' {
+                        break;
+                    }
+                }
+                result.push_str(&link_text);
+            } else {
+                result.push_str(&link_text);
+            }
+        } else {
+            result.push(ch);
+        }
+    }
+    s = result;
+
+    // Remove bullet markers (- or •) at start of lines, join non-empty lines with periods
+    s = s
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim_start();
+            if let Some(rest) = trimmed.strip_prefix("- ") {
+                rest.trim()
+            } else if let Some(rest) = trimmed.strip_prefix("• ") {
+                rest.trim()
+            } else {
+                trimmed
+            }
+        })
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(". ");
+
+    // Remove excess punctuation that sounds weird (!!!, ???, ...)
+    // Collapse repeated punctuation to single
+    let mut prev_punct = false;
+    let mut cleaned = String::with_capacity(s.len());
+    for ch in s.chars() {
+        if ch == '!' || ch == '?' {
+            if !prev_punct {
+                cleaned.push(ch);
+            }
+            prev_punct = true;
+        } else {
+            prev_punct = false;
+            cleaned.push(ch);
+        }
+    }
+    s = cleaned;
+
+    // Remove ellipsis-style dots (... → .)
+    while s.contains("...") {
+        s = s.replace("...", ".");
+    }
+    while s.contains("..") {
+        s = s.replace("..", ".");
+    }
+
+    // Collapse multiple whitespace/newlines into single space
+    let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    s.trim().to_string()
+}
+
 /// Extract sample_rate from piper voice config JSON.
 fn extract_sample_rate(config: &str) -> Option<u32> {
     let needle = "\"sample_rate\"";
@@ -817,6 +940,41 @@ mod tests {
         assert!(ryan.onnx_url().contains("ryan"));
         assert!(ryan.onnx_url().ends_with(".onnx"));
         assert!(ryan.config_url().ends_with(".onnx.json"));
+    }
+
+    #[test]
+    fn test_clean_for_tts_strips_markdown() {
+        let input = "**Hello** *world*! Check `this code` out.";
+        let cleaned = clean_for_tts(input);
+        assert_eq!(cleaned, "Hello world! Check this code out.");
+    }
+
+    #[test]
+    fn test_clean_for_tts_collapses_whitespace() {
+        let input = "Hello    world   how   are  you";
+        let cleaned = clean_for_tts(input);
+        assert_eq!(cleaned, "Hello world how are you");
+    }
+
+    #[test]
+    fn test_clean_for_tts_collapses_punctuation() {
+        let input = "Wow!!! Really??? Yes...";
+        let cleaned = clean_for_tts(input);
+        assert_eq!(cleaned, "Wow! Really? Yes.");
+    }
+
+    #[test]
+    fn test_clean_for_tts_strips_headers() {
+        let input = "## My Header\nSome text";
+        let cleaned = clean_for_tts(input);
+        assert_eq!(cleaned, "My Header. Some text");
+    }
+
+    #[test]
+    fn test_clean_for_tts_strips_bullets() {
+        let input = "- First item\n- Second item";
+        let cleaned = clean_for_tts(input);
+        assert_eq!(cleaned, "First item. Second item");
     }
 
     #[test]

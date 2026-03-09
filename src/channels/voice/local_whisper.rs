@@ -217,8 +217,17 @@ impl LocalWhisper {
             }
         }
 
-        Ok(text.trim().to_string())
+        Ok(clean_transcript(&text))
     }
+}
+
+/// Clean up whisper transcript output — collapse whitespace and trim.
+fn clean_transcript(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_string()
 }
 
 /// Decode audio bytes (OGG or WAV) to f32 mono PCM samples + sample rate.
