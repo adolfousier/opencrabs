@@ -112,6 +112,7 @@ slack-morphism = { version = "2", features = ["hyper"], optional = true }
 rustls = { version = "0.23", features = ["ring"], optional = true }
 
 # Local STT (rwhisper — candle-based, pure Rust, no ggml conflict)
+# Metal/Accelerate features are enabled per-platform below
 rwhisper = { version = "0.4", optional = true }
 rodio = { version = "0.20", optional = true, default-features = false }
 hound = { version = "3.5", optional = true }
@@ -153,6 +154,10 @@ mockito = "1.7"
 [target.'cfg(unix)'.dependencies]
 # Profiling (Unix-only - not supported on Windows)
 pprof = { version = "0.15", features = ["flamegraph", "frame-pointer"], optional = true }
+
+# macOS: Metal GPU acceleration for local STT (rwhisper/candle)
+[target.'cfg(target_os = "macos")'.dependencies]
+rwhisper = { version = "0.4", optional = true, features = ["metal", "accelerate"] }
 
 [features]
 default = ["telegram", "whatsapp", "discord", "slack", "trello", "local-stt", "local-tts"]
