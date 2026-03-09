@@ -323,10 +323,24 @@ mod codec_tests {
     fn local_model_presets_have_valid_repo_ids() {
         use crate::channels::voice::local_whisper::LOCAL_MODEL_PRESETS;
 
+        let valid_sources = [
+            "QuantizedTiny",
+            "QuantizedTinyEn",
+            "Tiny",
+            "TinyEn",
+            "Base",
+            "BaseEn",
+            "Small",
+            "SmallEn",
+            "Medium",
+            "MediumEn",
+            "Large",
+            "LargeV2",
+        ];
         for preset in LOCAL_MODEL_PRESETS {
             assert!(
-                preset.repo_id.starts_with("openai/whisper-"),
-                "Repo ID should start with openai/whisper-: {}",
+                valid_sources.contains(&preset.repo_id),
+                "Repo ID should be a valid rwhisper source: {}",
                 preset.repo_id
             );
         }

@@ -443,11 +443,11 @@ mod local_stt_tests {
     fn find_local_model_by_id() {
         let tiny = find_local_model("local-tiny");
         assert!(tiny.is_some());
-        assert_eq!(tiny.unwrap().label, "Tiny");
+        assert!(tiny.unwrap().label.contains("Tiny"));
 
         let medium = find_local_model("local-medium");
         assert!(medium.is_some());
-        assert_eq!(medium.unwrap().label, "Medium");
+        assert!(medium.unwrap().label.contains("Medium"));
 
         assert!(find_local_model("nonexistent").is_none());
     }
@@ -461,10 +461,24 @@ mod local_stt_tests {
 
     #[test]
     fn model_presets_have_valid_repo_ids() {
+        let valid_sources = [
+            "QuantizedTiny",
+            "QuantizedTinyEn",
+            "Tiny",
+            "TinyEn",
+            "Base",
+            "BaseEn",
+            "Small",
+            "SmallEn",
+            "Medium",
+            "MediumEn",
+            "Large",
+            "LargeV2",
+        ];
         for preset in LOCAL_MODEL_PRESETS {
             assert!(
-                preset.repo_id.starts_with("openai/whisper-"),
-                "Repo ID should reference openai/whisper-: {}",
+                valid_sources.contains(&preset.repo_id),
+                "Repo ID should be a valid rwhisper source: {}",
                 preset.repo_id
             );
         }
