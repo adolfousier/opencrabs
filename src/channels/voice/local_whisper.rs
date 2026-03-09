@@ -1,13 +1,13 @@
-//! Local STT via candle whisper (pure Rust)
+//! Local STT via rwhisper (candle-based, pure Rust)
 //!
 //! Model presets, download, and transcription engine.
 //! Gated behind the `local-stt` feature flag.
 //!
-//! Uses candle-transformers' whisper implementation instead of whisper-rs/whisper.cpp
-//! to avoid ggml symbol conflicts with llama-cpp-sys-2 (issue #38).
+//! Uses rwhisper (built on candle-transformers) for quantized whisper inference.
+//! No ggml C dependencies — resolves symbol conflicts with llama-cpp-sys-2 (issue #38).
 
 use anyhow::{Context, Result};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 // ─── Model presets ──────────────────────────────────────────────────────────
 
@@ -17,40 +17,40 @@ pub struct LocalModelPreset {
     pub label: &'static str,
     pub file_name: &'static str,
     pub size_label: &'static str,
-    /// HuggingFace repo ID for candle model download.
+    /// rwhisper model source variant.
     pub repo_id: &'static str,
 }
 
 /// Available local whisper model sizes.
-/// Models are downloaded from HuggingFace in safetensors format.
+/// Uses rwhisper's quantized GGUF models (fast, small, pure Rust).
 pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
     LocalModelPreset {
         id: "local-tiny",
-        label: "Tiny",
-        file_name: "tiny.en",
-        size_label: "~75 MB",
-        repo_id: "openai/whisper-tiny.en",
+        label: "Tiny (Multilingual, Quantized)",
+        file_name: "tiny",
+        size_label: "~42 MB",
+        repo_id: "QuantizedTiny",
     },
     LocalModelPreset {
         id: "local-base",
-        label: "Base",
+        label: "Base (English)",
         file_name: "base.en",
         size_label: "~142 MB",
-        repo_id: "openai/whisper-base.en",
+        repo_id: "BaseEn",
     },
     LocalModelPreset {
         id: "local-small",
-        label: "Small",
+        label: "Small (English)",
         file_name: "small.en",
         size_label: "~466 MB",
-        repo_id: "openai/whisper-small.en",
+        repo_id: "SmallEn",
     },
     LocalModelPreset {
         id: "local-medium",
-        label: "Medium",
+        label: "Medium (English)",
         file_name: "medium.en",
         size_label: "~1.5 GB",
-        repo_id: "openai/whisper-medium.en",
+        repo_id: "MediumEn",
     },
 ];
 
@@ -73,10 +73,11 @@ pub fn model_path(preset: &LocalModelPreset) -> PathBuf {
 }
 
 /// Check if a model is already downloaded.
-/// For candle models we check if the config.json exists in the model dir.
-pub fn is_model_downloaded(preset: &LocalModelPreset) -> bool {
-    let dir = model_path(preset);
-    dir.join("config.json").exists() && dir.join("model.safetensors").exists()
+/// rwhisper handles its own caching, so we just check if the preset is valid.
+pub fn is_model_downloaded(_preset: &LocalModelPreset) -> bool {
+    // rwhisper auto-downloads and caches models — always return true
+    // to skip our manual download logic. The model will be fetched on first use.
+    true
 }
 
 // ─── Download ───────────────────────────────────────────────────────────────
@@ -90,161 +91,100 @@ pub struct DownloadProgress {
     pub error: Option<String>,
 }
 
-/// Download a model from HuggingFace Hub.
-///
-/// Downloads config.json, tokenizer.json, and model.safetensors.
+/// Download a model. With rwhisper, models are auto-downloaded on first use.
+/// This is kept for API compatibility with the onboarding flow.
 pub async fn download_model(
     preset: &LocalModelPreset,
     progress_tx: tokio::sync::mpsc::UnboundedSender<DownloadProgress>,
 ) -> Result<PathBuf> {
-    let dest = model_path(preset);
-    std::fs::create_dir_all(&dest).ok();
-
     tracing::info!(
-        "Downloading whisper model {} from HuggingFace ({})",
-        preset.id,
-        preset.repo_id
+        "Whisper model '{}' will be downloaded on first use by rwhisper",
+        preset.id
     );
 
-    let files_to_download = ["config.json", "tokenizer.json", "model.safetensors"];
-
-    let mut total_downloaded: u64 = 0;
-
-    for file_name in &files_to_download {
-        let url = format!(
-            "https://huggingface.co/{}/resolve/main/{}",
-            preset.repo_id, file_name
-        );
-        let file_path = dest.join(file_name);
-
-        // Skip if already exists
-        if file_path.exists() {
-            tracing::debug!("Skipping {} (already exists)", file_name);
-            continue;
-        }
-
-        let part_path = file_path.with_extension("part");
-
-        let response = reqwest::get(&url)
-            .await
-            .with_context(|| format!("Failed to download {}", file_name))?;
-
-        if !response.status().is_success() {
-            anyhow::bail!(
-                "Download failed for {}: HTTP {}",
-                file_name,
-                response.status()
-            );
-        }
-
-        let file_total = response.content_length();
-        let mut stream = response.bytes_stream();
-        let mut file = tokio::fs::File::create(&part_path)
-            .await
-            .context("Failed to create temp file")?;
-        let mut file_downloaded: u64 = 0;
-
-        use futures::StreamExt;
-        use tokio::io::AsyncWriteExt;
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.context("Download stream error")?;
-            file.write_all(&chunk)
-                .await
-                .context("Failed to write chunk")?;
-            file_downloaded += chunk.len() as u64;
-            total_downloaded += chunk.len() as u64;
-            let _ = progress_tx.send(DownloadProgress {
-                downloaded: total_downloaded,
-                total: file_total.map(|t| t + total_downloaded - file_downloaded),
-                done: false,
-                error: None,
-            });
-        }
-        file.flush().await?;
-        drop(file);
-
-        tokio::fs::rename(&part_path, &file_path)
-            .await
-            .with_context(|| format!("Failed to rename {}", file_name))?;
-
-        tracing::info!("Downloaded {} ({} bytes)", file_name, file_downloaded);
-    }
+    // Build the model now to trigger download
+    let source = parse_whisper_source(preset)?;
+    let progress_tx_clone = progress_tx.clone();
+    rwhisper::WhisperBuilder::default()
+        .with_source(source)
+        .build_with_loading_handler(move |progress| match progress {
+            rwhisper::ModelLoadingProgress::Downloading {
+                progress: file_progress,
+                ..
+            } => {
+                let _ = progress_tx_clone.send(DownloadProgress {
+                    downloaded: file_progress.progress,
+                    total: Some(file_progress.size),
+                    done: false,
+                    error: None,
+                });
+            }
+            rwhisper::ModelLoadingProgress::Loading { progress } => {
+                let _ = progress_tx_clone.send(DownloadProgress {
+                    downloaded: (progress * 100.0) as u64,
+                    total: Some(100),
+                    done: progress >= 1.0,
+                    error: None,
+                });
+            }
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to download/load whisper model: {}", e))?;
 
     let _ = progress_tx.send(DownloadProgress {
-        downloaded: total_downloaded,
-        total: Some(total_downloaded),
+        downloaded: 100,
+        total: Some(100),
         done: true,
         error: None,
     });
 
-    tracing::info!(
-        "Whisper model {} downloaded ({} total bytes)",
-        preset.id,
-        total_downloaded
-    );
-    Ok(dest)
+    Ok(model_path(preset))
+}
+
+/// Parse preset's repo_id into a WhisperSource.
+fn parse_whisper_source(preset: &LocalModelPreset) -> Result<rwhisper::WhisperSource> {
+    match preset.repo_id {
+        "QuantizedTiny" => Ok(rwhisper::WhisperSource::QuantizedTiny),
+        "QuantizedTinyEn" => Ok(rwhisper::WhisperSource::QuantizedTinyEn),
+        "Tiny" => Ok(rwhisper::WhisperSource::Tiny),
+        "TinyEn" => Ok(rwhisper::WhisperSource::TinyEn),
+        "Base" => Ok(rwhisper::WhisperSource::Base),
+        "BaseEn" => Ok(rwhisper::WhisperSource::BaseEn),
+        "Small" => Ok(rwhisper::WhisperSource::Small),
+        "SmallEn" => Ok(rwhisper::WhisperSource::SmallEn),
+        "Medium" => Ok(rwhisper::WhisperSource::Medium),
+        "MediumEn" => Ok(rwhisper::WhisperSource::MediumEn),
+        "Large" => Ok(rwhisper::WhisperSource::Large),
+        "LargeV2" => Ok(rwhisper::WhisperSource::LargeV2),
+        other => anyhow::bail!("Unknown whisper source: {}", other),
+    }
 }
 
 // ─── Transcription engine ───────────────────────────────────────────────────
 
-/// Local whisper transcription engine using candle.
+/// Local whisper transcription engine using rwhisper.
 pub struct LocalWhisper {
-    model: candle_transformers::models::whisper::model::Whisper,
-    tokenizer: tokenizers::Tokenizer,
-    config: candle_transformers::models::whisper::Config,
-    device: candle_core::Device,
-    mel_filters: Vec<f32>,
+    model: rwhisper::Whisper,
 }
 
 impl LocalWhisper {
-    /// Load a whisper model from a directory containing config.json,
-    /// tokenizer.json, and model.safetensors.
-    pub fn new(model_dir: &Path) -> Result<Self> {
-        use candle_core::Device;
-        use candle_nn::VarBuilder;
+    /// Build a whisper model for the given preset. Downloads on first use.
+    pub async fn new(preset: &LocalModelPreset) -> Result<Self> {
+        let source = parse_whisper_source(preset)?;
+        tracing::info!("Local STT: loading rwhisper model ({})...", preset.repo_id);
 
-        let device = Device::Cpu;
+        let model = rwhisper::WhisperBuilder::default()
+            .with_source(source)
+            .build()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to load whisper model: {}", e))?;
 
-        // Load config
-        let config_path = model_dir.join("config.json");
-        let config_str =
-            std::fs::read_to_string(&config_path).context("Failed to read config.json")?;
-        let config: candle_transformers::models::whisper::Config =
-            serde_json::from_str(&config_str).context("Failed to parse config.json")?;
-
-        // Load tokenizer
-        let tokenizer_path = model_dir.join("tokenizer.json");
-        let tokenizer = tokenizers::Tokenizer::from_file(&tokenizer_path)
-            .map_err(|e| anyhow::anyhow!("Failed to load tokenizer: {}", e))?;
-
-        // Load model weights
-        let model_path = model_dir.join("model.safetensors");
-        let vb = unsafe {
-            VarBuilder::from_mmaped_safetensors(&[model_path], candle_core::DType::F32, &device)
-                .context("Failed to load model weights")?
-        };
-
-        let model = candle_transformers::models::whisper::model::Whisper::load(&vb, config.clone())
-            .context("Failed to build whisper model")?;
-
-        // Compute mel filters at runtime (matches OpenAI whisper's filterbank)
-        let mel_filters = compute_mel_filters(
-            config.num_mel_bins,
-            candle_transformers::models::whisper::N_FFT,
-            candle_transformers::models::whisper::SAMPLE_RATE as u32,
-        );
-
-        Ok(Self {
-            model,
-            tokenizer,
-            config,
-            device,
-            mel_filters,
-        })
+        tracing::info!("Local STT: rwhisper model loaded");
+        Ok(Self { model })
     }
 
     /// Transcribe OGG/Opus or WAV audio bytes to text.
-    pub fn transcribe(&mut self, audio_bytes: &[u8]) -> Result<String> {
+    pub async fn transcribe(&self, audio_bytes: &[u8]) -> Result<String> {
         let (samples, sample_rate) = decode_audio(audio_bytes)?;
 
         if samples.is_empty() {
@@ -252,109 +192,76 @@ impl LocalWhisper {
         }
 
         // Resample to 16kHz if needed
-        let mut audio_16k = if sample_rate == 16000 {
+        let audio_16k = if sample_rate == 16000 {
             samples
         } else {
             resample(&samples, sample_rate, 16000)?
         };
 
-        // Pad or truncate to exactly 30 seconds (N_SAMPLES = 480000) as whisper expects
-        let n_samples = candle_transformers::models::whisper::N_SAMPLES;
-        if audio_16k.len() > n_samples {
-            audio_16k.truncate(n_samples);
-        } else {
-            audio_16k.resize(n_samples, 0.0);
+        // Create a rodio-compatible source from PCM samples
+        let source = PcmSource::new(audio_16k, 16000);
+
+        // Transcribe using rwhisper
+        use futures::StreamExt;
+        let mut task = self.model.transcribe(source);
+        let mut text = String::new();
+        while let Some(segment) = task.next().await {
+            text.push_str(segment.text());
         }
 
-        // Compute log-mel spectrogram
-        let mel = candle_transformers::models::whisper::audio::pcm_to_mel(
-            &self.config,
-            &audio_16k,
-            &self.mel_filters,
-        );
-        let num_mel_bins = self.config.num_mel_bins;
-        let n_frames_raw = mel.len() / num_mel_bins;
+        let cleaned = clean_transcript(&text);
+        tracing::info!("Local STT: transcribed {} chars", cleaned.len());
+        Ok(cleaned)
+    }
+}
 
-        // Truncate to N_FRAMES (3000) so after conv2 stride-2 we get 1500,
-        // which matches the encoder's max_source_positions positional embedding.
-        let expected_frames = candle_transformers::models::whisper::N_FRAMES;
-        let (mel, n_frames) = if n_frames_raw > expected_frames {
-            (
-                mel[..expected_frames * num_mel_bins].to_vec(),
-                expected_frames,
-            )
-        } else {
-            (mel, n_frames_raw)
-        };
+/// A rodio-compatible Source that wraps PCM f32 samples.
+struct PcmSource {
+    samples: Vec<f32>,
+    pos: usize,
+    sample_rate: u32,
+}
 
-        let mel = candle_core::Tensor::from_vec(mel, (1, num_mel_bins, n_frames), &self.device)
-            .context("Failed to create mel tensor")?;
-
-        // Reset KV cache before new transcription
-        self.model.reset_kv_cache();
-
-        // Encode audio
-        let audio_features = self.model.encoder.forward(&mel, true).map_err(|e| {
-            anyhow::anyhow!(
-                "Encoder forward failed: {}. Mel shape: {:?}, config: num_mel_bins={}, max_source_positions={}",
-                e,
-                mel.dims(),
-                self.config.num_mel_bins,
-                self.config.max_source_positions,
-            )
-        })?;
-
-        // Build initial token sequence for decoding
-        let vocab = self.tokenizer.get_vocab(true);
-        let sot = *vocab
-            .get(candle_transformers::models::whisper::SOT_TOKEN)
-            .unwrap_or(&50258u32);
-        let transcribe = *vocab
-            .get(candle_transformers::models::whisper::TRANSCRIBE_TOKEN)
-            .unwrap_or(&50359);
-        let no_timestamps = *vocab
-            .get(candle_transformers::models::whisper::NO_TIMESTAMPS_TOKEN)
-            .unwrap_or(&50363);
-        let eot = *vocab
-            .get(candle_transformers::models::whisper::EOT_TOKEN)
-            .unwrap_or(&50257);
-        let en = *vocab.get("<|en|>").unwrap_or(&50259);
-
-        let mut tokens: Vec<u32> = vec![sot, en, transcribe, no_timestamps];
-        let max_tokens = 224;
-
-        for _ in 0..max_tokens {
-            let token_tensor =
-                candle_core::Tensor::new(tokens.as_slice(), &self.device)?.unsqueeze(0)?;
-
-            let logits = self
-                .model
-                .decoder
-                .forward(&token_tensor, &audio_features, tokens.len() == 4)
-                .context("Decoder forward pass failed")?;
-
-            // Get logits for the last token position
-            let logits = self.model.decoder.final_linear(&logits)?;
-            let logits = logits.squeeze(0)?;
-            let last_logits = logits.get(logits.dim(0)? - 1)?;
-
-            let next_token = last_logits.argmax(0)?.to_scalar::<u32>()?;
-
-            if next_token == eot {
-                break;
-            }
-
-            tokens.push(next_token);
+impl PcmSource {
+    fn new(samples: Vec<f32>, sample_rate: u32) -> Self {
+        Self {
+            samples,
+            pos: 0,
+            sample_rate,
         }
+    }
+}
 
-        // Decode tokens to text (skip the initial prompt tokens)
-        let output_tokens: Vec<u32> = tokens[4..].to_vec();
-        let text = self
-            .tokenizer
-            .decode(&output_tokens, true)
-            .map_err(|e| anyhow::anyhow!("Tokenizer decode error: {}", e))?;
+impl Iterator for PcmSource {
+    type Item = f32;
+    fn next(&mut self) -> Option<f32> {
+        if self.pos < self.samples.len() {
+            let s = self.samples[self.pos];
+            self.pos += 1;
+            Some(s)
+        } else {
+            None
+        }
+    }
+}
 
-        Ok(clean_transcript(&text))
+impl rodio::Source for PcmSource {
+    fn current_frame_len(&self) -> Option<usize> {
+        Some(self.samples.len() - self.pos)
+    }
+
+    fn channels(&self) -> u16 {
+        1
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    fn total_duration(&self) -> Option<std::time::Duration> {
+        Some(std::time::Duration::from_secs_f64(
+            self.samples.len() as f64 / self.sample_rate as f64,
+        ))
     }
 }
 

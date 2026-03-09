@@ -40,7 +40,6 @@ pub async fn transcribe(audio_bytes: Vec<u8>, voice_config: &VoiceConfig) -> Res
                 let model_id = &voice_config.local_stt_model;
                 let preset = super::local_whisper::find_local_model(model_id)
                     .ok_or_else(|| anyhow::anyhow!("Unknown local STT model: {}", model_id))?;
-                let path = super::local_whisper::model_path(preset);
                 if !super::local_whisper::is_model_downloaded(preset) {
                     // Auto-download model transparently (migration from ggml → candle format)
                     tracing::info!(
@@ -69,7 +68,7 @@ pub async fn transcribe(audio_bytes: Vec<u8>, voice_config: &VoiceConfig) -> Res
                     tracing::info!("Local STT model '{}' downloaded successfully", model_id);
                 }
                 tracing::info!("Local STT: transcribing with model {}", model_id);
-                transcribe_audio_local(audio_bytes, path).await
+                transcribe_audio_local(audio_bytes, model_id.clone()).await
             }
             #[cfg(not(feature = "local-stt"))]
             {
@@ -250,62 +249,38 @@ struct TranscriptionResponse {
 
 /// Cached local whisper model — loaded once, reused across transcriptions.
 #[cfg(feature = "local-stt")]
-static CACHED_WHISPER: std::sync::Mutex<
-    Option<(std::path::PathBuf, super::local_whisper::LocalWhisper)>,
-> = std::sync::Mutex::new(None);
+static CACHED_WHISPER: tokio::sync::OnceCell<super::local_whisper::LocalWhisper> =
+    tokio::sync::OnceCell::const_new();
 
-/// Transcribe audio bytes using a local whisper model (candle).
+/// Transcribe audio bytes using a local whisper model (rwhisper).
 ///
 /// The model is loaded once and cached for subsequent calls.
-/// Runs inference on a background thread via `spawn_blocking`.
 #[cfg(feature = "local-stt")]
-pub async fn transcribe_audio_local(
-    audio_bytes: Vec<u8>,
-    model_path: std::path::PathBuf,
-) -> Result<String> {
+pub async fn transcribe_audio_local(audio_bytes: Vec<u8>, model_id: String) -> Result<String> {
     let len = audio_bytes.len();
     tracing::info!(
-        "Local STT: starting transcription ({} bytes audio, model {:?})",
+        "Local STT: starting transcription ({} bytes audio, model {})",
         len,
-        model_path
+        model_id
     );
 
-    let handle = tokio::task::spawn_blocking(move || {
-        let mut guard = CACHED_WHISPER
-            .lock()
-            .map_err(|e| anyhow::anyhow!("Whisper cache lock poisoned: {}", e))?;
+    let whisper = CACHED_WHISPER
+        .get_or_try_init(|| async {
+            let preset = super::local_whisper::find_local_model(&model_id)
+                .ok_or_else(|| anyhow::anyhow!("Unknown local STT model: {}", model_id))?;
+            super::local_whisper::LocalWhisper::new(preset).await
+        })
+        .await?;
 
-        // Load model if not cached or if the model path changed
-        let needs_load = match guard.as_ref() {
-            Some((cached_path, _)) => cached_path != &model_path,
-            None => true,
-        };
-
-        if needs_load {
-            tracing::info!("Local STT: loading model...");
-            let whisper = super::local_whisper::LocalWhisper::new(&model_path)?;
-            tracing::info!("Local STT: model loaded and cached");
-            *guard = Some((model_path, whisper));
+    match whisper.transcribe(&audio_bytes).await {
+        Ok(text) => {
+            tracing::info!("Local STT: transcription complete");
+            Ok(text)
         }
-
-        let (_, whisper) = guard.as_mut().unwrap();
-        match whisper.transcribe(&audio_bytes) {
-            Ok(text) => {
-                tracing::info!("Local STT: transcription complete");
-                Ok(text)
-            }
-            Err(e) => {
-                tracing::error!("Local STT: transcription failed: {}", e);
-                Err(e)
-            }
+        Err(e) => {
+            tracing::error!("Local STT: transcription failed: {}", e);
+            Err(e)
         }
-    });
-
-    // 60s timeout — whisper inference should never take this long
-    match tokio::time::timeout(std::time::Duration::from_secs(60), handle).await {
-        Ok(Ok(result)) => result,
-        Ok(Err(e)) => anyhow::bail!("Local STT task panicked: {}", e),
-        Err(_) => anyhow::bail!("Local STT timed out after 60s"),
     }
 }
 
