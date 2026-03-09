@@ -252,6 +252,20 @@ struct TranscriptionResponse {
 static CACHED_WHISPER: tokio::sync::OnceCell<super::local_whisper::LocalWhisper> =
     tokio::sync::OnceCell::const_new();
 
+/// Preload the local whisper model into the cache in the background.
+/// Called at startup when local STT is configured so the first voice message is fast.
+#[cfg(feature = "local-stt")]
+pub async fn preload_local_whisper(model_id: &str) -> Result<()> {
+    CACHED_WHISPER
+        .get_or_try_init(|| async {
+            let preset = super::local_whisper::find_local_model(model_id)
+                .ok_or_else(|| anyhow::anyhow!("Unknown local STT model: {}", model_id))?;
+            super::local_whisper::LocalWhisper::new(preset).await
+        })
+        .await?;
+    Ok(())
+}
+
 /// Transcribe audio bytes using a local whisper model (rwhisper).
 ///
 /// The model is loaded once and cached for subsequent calls.

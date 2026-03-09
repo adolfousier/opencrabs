@@ -302,7 +302,7 @@ fn render_stt_mode_selector(lines: &mut Vec<Line<'static>>, wizard: &OnboardingW
         lines,
         focused,
         wizard.stt_mode == 2,
-        "Local (whisper.cpp \u{2014} runs on device)",
+        "Local (Whisper \u{2014} runs on device)",
     );
 }
 

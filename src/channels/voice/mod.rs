@@ -15,4 +15,4 @@ mod service;
 pub use service::{synthesize, synthesize_speech, transcribe, transcribe_audio};
 
 #[cfg(feature = "local-stt")]
-pub use service::transcribe_audio_local;
+pub use service::{preload_local_whisper, transcribe_audio_local};

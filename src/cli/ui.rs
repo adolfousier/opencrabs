@@ -208,6 +208,26 @@ async fn cmd_chat_inner(
         }
     });
 
+    // Preload local whisper model in background if local STT is configured.
+    // Transparent migration: rwhisper auto-downloads the smaller quantized model (~42MB)
+    // on first use. Preloading here avoids delay on the first voice message.
+    #[cfg(feature = "local-stt")]
+    {
+        let vc = config.voice_config();
+        if vc.stt_mode == crate::config::SttMode::Local {
+            let model_id = vc.local_stt_model.clone();
+            tokio::spawn(async move {
+                tracing::info!("Background preload: local STT model '{}'", model_id);
+                match crate::channels::voice::preload_local_whisper(&model_id).await {
+                    Ok(()) => tracing::info!("Local STT model preloaded"),
+                    Err(e) => {
+                        tracing::warn!("Local STT preload failed (will retry on use): {}", e)
+                    }
+                }
+            });
+        }
+    }
+
     // Create service context
     let service_context = ServiceContext::new(db.pool().clone());
 
