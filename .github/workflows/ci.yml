@@ -28,10 +28,6 @@ jobs:
           toolchain: nightly
           components: rustfmt, clippy
 
-      - name: Install CMake (Windows)
-        if: runner.os == 'Windows'
-        run: choco install cmake -y
-
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
@@ -50,12 +46,15 @@ jobs:
           path: target
           key: ${{ runner.os }}-target-nightly-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Run tests (Windows)
-        if: runner.os == 'Windows'
-        run: cargo test --features telegram,discord,slack --verbose
+      - name: Install CMake (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake
 
-      - name: Run tests (Unix)
-        if: runner.os != 'Windows'
+      - name: Install CMake (Windows)
+        if: runner.os == 'Windows'
+        run: choco install cmake -y
+
+      - name: Run tests
         run: cargo test --all-features --verbose
 
   clippy:

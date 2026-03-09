@@ -1,2 +1,9 @@
+# Allow duplicate ggml symbols when both whisper-rs-sys and llama-cpp-sys-2
+# are linked together (both bundle their own copy of ggml).
+# macOS handles this automatically; Linux lld does not.
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-args=-Wl,--allow-multiple-definition"]
+
 [target.aarch64-unknown-linux-gnu]
 linker = "aarch64-linux-gnu-gcc"
+rustflags = ["-C", "link-args=-Wl,--allow-multiple-definition"]
