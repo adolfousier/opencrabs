@@ -470,6 +470,16 @@ impl OnboardingWizard {
                 crate::config::TtsMode::Local => 2,
             }
         };
+
+        // If Local was saved but the capability isn't available on this machine, reset to Off
+        if wizard.stt_mode == 2 && !crate::channels::voice::local_stt_available() {
+            wizard.stt_mode = 0;
+        }
+        if wizard.tts_mode == 2 && !crate::channels::voice::local_tts_available() {
+            wizard.tts_mode = 0;
+            wizard.tts_enabled = false;
+        }
+
         wizard.detect_existing_groq_key();
 
         // Resolve selected Piper voice index from config

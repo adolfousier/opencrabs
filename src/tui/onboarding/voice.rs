@@ -26,18 +26,23 @@ pub fn handle_key(wizard: &mut OnboardingWizard, event: KeyEvent) -> WizardActio
 }
 
 fn handle_stt_mode(wizard: &mut OnboardingWizard, key: KeyCode) -> WizardAction {
+    let max_mode = if crate::channels::voice::local_stt_available() {
+        3
+    } else {
+        2
+    };
     match key {
         KeyCode::Up | KeyCode::Down => {
-            // Cycle: 0=Off, 1=API, 2=Local
+            // Cycle: 0=Off, 1=API, 2=Local (only if local is available)
             wizard.stt_mode = match key {
                 KeyCode::Up => {
                     if wizard.stt_mode == 0 {
-                        2
+                        max_mode - 1
                     } else {
                         wizard.stt_mode - 1
                     }
                 }
-                _ => (wizard.stt_mode + 1) % 3,
+                _ => (wizard.stt_mode + 1) % max_mode,
             };
         }
         KeyCode::Tab | KeyCode::Enter => {
@@ -112,23 +117,28 @@ fn handle_local_model(wizard: &mut OnboardingWizard, key: KeyCode) -> WizardActi
 }
 
 fn handle_tts_mode(wizard: &mut OnboardingWizard, key: KeyCode) -> WizardAction {
+    let max_mode = if crate::channels::voice::local_tts_available() {
+        3
+    } else {
+        2
+    };
     match key {
         KeyCode::Up | KeyCode::Down => {
-            // Cycle: 0=Off, 1=API, 2=Local
+            // Cycle: 0=Off, 1=API, 2=Local (only if local is available)
             wizard.tts_mode = match key {
                 KeyCode::Up => {
                     if wizard.tts_mode == 0 {
-                        2
+                        max_mode - 1
                     } else {
                         wizard.tts_mode - 1
                     }
                 }
-                _ => (wizard.tts_mode + 1) % 3,
+                _ => (wizard.tts_mode + 1) % max_mode,
             };
             wizard.tts_enabled = wizard.tts_mode != 0;
         }
         KeyCode::Tab | KeyCode::Enter => {
-            if wizard.tts_mode == 2 {
+            if wizard.tts_mode == 2 && crate::channels::voice::local_tts_available() {
                 // Local selected — go to voice picker
                 wizard.voice_field = VoiceField::TtsLocalVoiceSelect;
                 refresh_tts_voice_status(wizard);
@@ -298,12 +308,14 @@ fn render_stt_mode_selector(lines: &mut Vec<Line<'static>>, wizard: &OnboardingW
 
     render_radio(lines, focused, wizard.stt_mode == 0, "Off");
     render_radio(lines, focused, wizard.stt_mode == 1, "API (Groq Whisper)");
-    render_radio(
-        lines,
-        focused,
-        wizard.stt_mode == 2,
-        "Local (Whisper \u{2014} runs on device)",
-    );
+    if crate::channels::voice::local_stt_available() {
+        render_radio(
+            lines,
+            focused,
+            wizard.stt_mode == 2,
+            "Local (Whisper \u{2014} runs on device)",
+        );
+    }
 }
 
 fn render_api_fields(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
@@ -431,12 +443,14 @@ fn render_tts_mode_selector(lines: &mut Vec<Line<'static>>, wizard: &OnboardingW
         wizard.tts_mode == 1,
         "API (OpenAI TTS \u{2014} uses OpenAI key)",
     );
-    render_radio(
-        lines,
-        focused,
-        wizard.tts_mode == 2,
-        "Local (Piper \u{2014} runs on device, free)",
-    );
+    if crate::channels::voice::local_tts_available() {
+        render_radio(
+            lines,
+            focused,
+            wizard.tts_mode == 2,
+            "Local (Piper \u{2014} runs on device, free)",
+        );
+    }
 }
 
 #[allow(unused_variables)]
