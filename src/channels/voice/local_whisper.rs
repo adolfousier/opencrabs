@@ -175,7 +175,9 @@ impl LocalWhisper {
 
         let model = rwhisper::WhisperBuilder::default()
             .with_source(source)
-            .build()
+            .build_with_loading_handler(|progress| {
+                tracing::debug!("rwhisper loading: {:?}", progress);
+            })
             .await
             .map_err(|e| anyhow::anyhow!("Failed to load whisper model: {}", e))?;
 
