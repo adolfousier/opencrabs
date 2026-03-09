@@ -402,14 +402,20 @@ fn suppress_whisper_logs() {
         // Safety: the callback is a plain C function that does nothing —
         // no panics, no allocations, no unwinding.
         unsafe {
-            whisper_rs::set_log_callback(Some(noop_log_callback), std::ptr::null_mut());
+            // ggml_log_level is c_uint on Unix but c_int on Windows.
+            // Transmute the noop callback to match WhisperLogCallback.
+            // Sound because the callback ignores all arguments.
+            let cb: whisper_rs::WhisperLogCallback =
+                std::mem::transmute(noop_log_callback as *const ());
+            whisper_rs::set_log_callback(cb, std::ptr::null_mut());
         }
     });
 }
 
-/// C-compatible no-op callback for whisper_log_set / ggml_log_set.
-extern "C" fn noop_log_callback(
-    _level: u32,
+/// C-compatible no-op log callback. Uses `c_int` as a placeholder —
+/// transmuted to match the platform-specific `ggml_log_level` at the call site.
+unsafe extern "C" fn noop_log_callback(
+    _level: std::os::raw::c_int,
     _text: *const std::ffi::c_char,
     _user_data: *mut std::ffi::c_void,
 ) {

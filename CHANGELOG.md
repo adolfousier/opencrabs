@@ -5,6 +5,24 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.65] - 2026-03-09
+
+### Added
+- **Local TTS via Piper** — On-device text-to-speech using Piper (Python venv + ONNX voice models). Six voice presets (Ryan, Amy, Lessac, Kristin, Joe, Cori). Configurable via `tts_mode = "local"` and `local_tts_voice` in config.toml. Gated behind `local-tts` feature flag (enabled by default)
+- **Off/API/Local mode for TTS** — TTS mode selector in `/onboard:voice` with three options: Off, API (OpenAI TTS), Local (Piper). Matches the existing STT mode selector
+- **Voice preview after download** — Plays "Hey! I am {name}. Nice to meet you!" via system audio (afplay/aplay) after a Piper voice model downloads
+- **WhatsApp session reset** — Press R on the WhatsApp onboarding screen to delete session.db and re-pair with a fresh QR code
+
+### Fixed
+- **Telegram voice waveform missing** — `pcm_to_opus` was producing WAV (RIFF header) instead of OGG/Opus. Now properly encodes via `opusic-sys` with OGG container (RFC 7845) and resamples Piper's 22050 Hz to 48000 Hz
+- **Voice switching race condition** — `PiperDownloadProgress` events arriving after `PiperDownloadComplete` re-set progress, blocking re-download on voice switch
+- **TTS config not persisted via quick-jump** — `/onboard:voice` quick-jump returned `WizardAction::Cancel` which dropped settings. New `QuickJumpDone` action calls `apply_config()` before closing
+- **Piper venv never installed** — `setup_piper_venv()` was defined but never called before downloading voice models
+- **Voice preview used wrong voice name** — `PiperDownloadComplete` event now carries the `voice_id` string instead of reading the wizard's selection index
+- **Removed unnecessary `whisper-rs-sys` dependency** — Explicit dep removed; `whisper-rs` pulls it in transitively
+- **Windows build failure** — Whisper log callback used wrong type (`u32` vs `ggml_log_level`) causing cross-platform compilation error
+- **Release workflow duplicate test job** — Removed redundant test job from release.yml that was blocking releases since v0.2.60
+
 ## [0.2.64] - 2026-03-09
 
 ### Added
