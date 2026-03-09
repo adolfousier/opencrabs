@@ -50,8 +50,8 @@ jobs:
       - name: Run tests (macOS — all features)
         if: runner.os == 'macOS'
         env:
-          CFLAGS: -march=armv8-a
-          CXXFLAGS: -march=armv8-a
+          CFLAGS: -march=armv8-a+crypto
+          CXXFLAGS: -march=armv8-a+crypto
         run: cargo test --all-features --verbose
 
       - name: Run tests (Linux — all features)
@@ -141,8 +141,8 @@ jobs:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
           CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
           # Disable i8mm intrinsics on macOS ARM — CI clang targets newer arch than M1
-          CFLAGS: ${{ matrix.target == 'aarch64-apple-darwin' && '-march=armv8-a' || '' }}
-          CXXFLAGS: ${{ matrix.target == 'aarch64-apple-darwin' && '-march=armv8-a' || '' }}
+          CFLAGS: ${{ matrix.target == 'aarch64-apple-darwin' && '-march=armv8-a+crypto' || '' }}
+          CXXFLAGS: ${{ matrix.target == 'aarch64-apple-darwin' && '-march=armv8-a+crypto' || '' }}
         run: cargo build --release --target ${{ matrix.target }} --all-features
 
       - name: Strip binary (Unix)
