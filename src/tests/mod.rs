@@ -9,5 +9,6 @@ pub mod onboarding_keys_test;
 //pub mod plan_mode_integration_test;
 pub mod session_working_dir_test;
 //pub mod streaming_test;
+pub mod evolve_test;
 pub mod voice_onboarding_test;
 pub mod voice_stt_dispatch_test;
