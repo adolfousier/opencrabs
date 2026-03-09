@@ -1333,7 +1333,7 @@ fn render_whatsapp_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWiza
             .join("session.db");
         if session_db.exists() {
             lines.push(Line::from(Span::styled(
-                "  Previously connected  ·  Press Enter to re-scan QR code",
+                "  Previously connected  ·  Press R to reset and re-pair",
                 Style::default().fg(Color::DarkGray),
             )));
         } else {

@@ -52,18 +52,10 @@ impl OnboardingWizard {
                             self.step = OnboardingStep::WhatsAppSetup;
                             self.reset_whatsapp_state();
                             self.detect_existing_whatsapp_phone();
-                            // If already paired, drop the user on the phone field so they
-                            // can confirm or change the number without re-scanning QR.
-                            // Do NOT mark whatsapp_connected=true — no live client this session.
-                            // They can always BackTab to Connection and re-scan if needed.
-                            let session_db = crate::config::opencrabs_home()
-                                .join("whatsapp")
-                                .join("session.db");
-                            if session_db.exists() {
-                                self.whatsapp_field = WhatsAppField::PhoneAllowlist;
-                            } else {
-                                self.whatsapp_field = WhatsAppField::Connection;
-                            }
+                            // Always start on Connection field so the user can see
+                            // the reset option (R) when already paired, or scan QR
+                            // when not paired. Tab advances to PhoneAllowlist.
+                            self.whatsapp_field = WhatsAppField::Connection;
                         }
                         3 => {
                             self.step = OnboardingStep::SlackSetup;
@@ -369,6 +361,20 @@ impl OnboardingWizard {
                     } else if !self.whatsapp_connecting {
                         self.whatsapp_connecting = true;
                         self.whatsapp_error = None;
+                        WizardAction::WhatsAppConnect
+                    } else {
+                        WizardAction::None
+                    }
+                }
+                KeyCode::Char('r') | KeyCode::Char('R') => {
+                    if !self.whatsapp_connecting {
+                        // Delete session.db to force fresh QR pairing
+                        let wa_dir = crate::config::opencrabs_home().join("whatsapp");
+                        let _ = std::fs::remove_file(wa_dir.join("session.db"));
+                        let _ = std::fs::remove_file(wa_dir.join("session.db-wal"));
+                        let _ = std::fs::remove_file(wa_dir.join("session.db-shm"));
+                        self.reset_whatsapp_state();
+                        self.whatsapp_connecting = true;
                         WizardAction::WhatsAppConnect
                     } else {
                         WizardAction::None
