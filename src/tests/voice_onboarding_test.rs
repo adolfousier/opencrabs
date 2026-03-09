@@ -460,10 +460,14 @@ mod local_stt_tests {
     }
 
     #[test]
-    fn model_url_contains_huggingface() {
-        let url = model_url("ggml-tiny.en.bin");
-        assert!(url.contains("huggingface.co"));
-        assert!(url.contains("ggml-tiny.en.bin"));
+    fn model_presets_have_valid_repo_ids() {
+        for preset in LOCAL_MODEL_PRESETS {
+            assert!(
+                preset.repo_id.starts_with("openai/whisper-"),
+                "Repo ID should reference openai/whisper-: {}",
+                preset.repo_id
+            );
+        }
     }
 
     #[test]

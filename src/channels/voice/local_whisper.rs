@@ -1,7 +1,10 @@
-//! Local STT via whisper.cpp (whisper-rs)
+//! Local STT via candle whisper (pure Rust)
 //!
 //! Model presets, download, and transcription engine.
 //! Gated behind the `local-stt` feature flag.
+//!
+//! Uses candle-transformers' whisper implementation instead of whisper-rs/whisper.cpp
+//! to avoid ggml symbol conflicts with llama-cpp-sys-2 (issue #38).
 
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
@@ -14,47 +17,46 @@ pub struct LocalModelPreset {
     pub label: &'static str,
     pub file_name: &'static str,
     pub size_label: &'static str,
+    /// HuggingFace repo ID for candle model download.
+    pub repo_id: &'static str,
 }
 
 /// Available local whisper model sizes.
+/// Models are downloaded from HuggingFace in safetensors format.
 pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
     LocalModelPreset {
         id: "local-tiny",
         label: "Tiny",
-        file_name: "ggml-tiny.en.bin",
+        file_name: "tiny.en",
         size_label: "~75 MB",
+        repo_id: "openai/whisper-tiny.en",
     },
     LocalModelPreset {
         id: "local-base",
         label: "Base",
-        file_name: "ggml-base.en.bin",
+        file_name: "base.en",
         size_label: "~142 MB",
+        repo_id: "openai/whisper-base.en",
     },
     LocalModelPreset {
         id: "local-small",
         label: "Small",
-        file_name: "ggml-small.en.bin",
+        file_name: "small.en",
         size_label: "~466 MB",
+        repo_id: "openai/whisper-small.en",
     },
     LocalModelPreset {
         id: "local-medium",
         label: "Medium",
-        file_name: "ggml-medium.en.bin",
+        file_name: "medium.en",
         size_label: "~1.5 GB",
+        repo_id: "openai/whisper-medium.en",
     },
 ];
 
 /// Look up a model preset by ID.
 pub fn find_local_model(id: &str) -> Option<&'static LocalModelPreset> {
     LOCAL_MODEL_PRESETS.iter().find(|m| m.id == id)
-}
-
-/// HuggingFace download URL for a whisper model file.
-pub fn model_url(file_name: &str) -> String {
-    format!(
-        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{}",
-        file_name
-    )
 }
 
 /// Directory where local models are stored.
@@ -65,14 +67,16 @@ pub fn models_dir() -> PathBuf {
     dir
 }
 
-/// Full path for a model preset.
+/// Full path for a model preset (directory containing model files).
 pub fn model_path(preset: &LocalModelPreset) -> PathBuf {
     models_dir().join(preset.file_name)
 }
 
 /// Check if a model is already downloaded.
+/// For candle models we check if the config.json exists in the model dir.
 pub fn is_model_downloaded(preset: &LocalModelPreset) -> bool {
-    model_path(preset).exists()
+    let dir = model_path(preset);
+    dir.join("config.json").exists() && dir.join("model.safetensors").exists()
 }
 
 // ─── Download ───────────────────────────────────────────────────────────────
@@ -86,101 +90,166 @@ pub struct DownloadProgress {
     pub error: Option<String>,
 }
 
-/// Download a model file with progress reporting.
+/// Download a model from HuggingFace Hub.
 ///
-/// Writes to a `.part` temp file, then renames atomically on success.
+/// Downloads config.json, tokenizer.json, and model.safetensors.
 pub async fn download_model(
     preset: &LocalModelPreset,
     progress_tx: tokio::sync::mpsc::UnboundedSender<DownloadProgress>,
 ) -> Result<PathBuf> {
-    use futures::StreamExt;
-
-    let url = model_url(preset.file_name);
     let dest = model_path(preset);
-    let part = dest.with_extension("part");
+    std::fs::create_dir_all(&dest).ok();
 
-    tracing::info!("Downloading whisper model {} from {}", preset.id, url);
+    tracing::info!(
+        "Downloading whisper model {} from HuggingFace ({})",
+        preset.id,
+        preset.repo_id
+    );
 
-    let response = reqwest::get(&url)
-        .await
-        .context("Failed to start model download")?;
+    let files_to_download = ["config.json", "tokenizer.json", "model.safetensors"];
 
-    if !response.status().is_success() {
-        let status = response.status();
-        anyhow::bail!("Download failed: HTTP {}", status);
-    }
+    let mut total_downloaded: u64 = 0;
 
-    let total = response.content_length();
-    let mut stream = response.bytes_stream();
-    let mut file = tokio::fs::File::create(&part)
-        .await
-        .context("Failed to create temp file")?;
-    let mut downloaded: u64 = 0;
+    for file_name in &files_to_download {
+        let url = format!(
+            "https://huggingface.co/{}/resolve/main/{}",
+            preset.repo_id, file_name
+        );
+        let file_path = dest.join(file_name);
 
-    use tokio::io::AsyncWriteExt;
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.context("Download stream error")?;
-        file.write_all(&chunk)
+        // Skip if already exists
+        if file_path.exists() {
+            tracing::debug!("Skipping {} (already exists)", file_name);
+            continue;
+        }
+
+        let part_path = file_path.with_extension("part");
+
+        let response = reqwest::get(&url)
             .await
-            .context("Failed to write chunk")?;
-        downloaded += chunk.len() as u64;
-        let _ = progress_tx.send(DownloadProgress {
-            downloaded,
-            total,
-            done: false,
-            error: None,
-        });
-    }
-    file.flush().await?;
-    drop(file);
+            .with_context(|| format!("Failed to download {}", file_name))?;
 
-    // Atomic rename
-    tokio::fs::rename(&part, &dest)
-        .await
-        .context("Failed to rename model file")?;
+        if !response.status().is_success() {
+            anyhow::bail!(
+                "Download failed for {}: HTTP {}",
+                file_name,
+                response.status()
+            );
+        }
+
+        let file_total = response.content_length();
+        let mut stream = response.bytes_stream();
+        let mut file = tokio::fs::File::create(&part_path)
+            .await
+            .context("Failed to create temp file")?;
+        let mut file_downloaded: u64 = 0;
+
+        use futures::StreamExt;
+        use tokio::io::AsyncWriteExt;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.context("Download stream error")?;
+            file.write_all(&chunk)
+                .await
+                .context("Failed to write chunk")?;
+            file_downloaded += chunk.len() as u64;
+            total_downloaded += chunk.len() as u64;
+            let _ = progress_tx.send(DownloadProgress {
+                downloaded: total_downloaded,
+                total: file_total.map(|t| t + total_downloaded - file_downloaded),
+                done: false,
+                error: None,
+            });
+        }
+        file.flush().await?;
+        drop(file);
+
+        tokio::fs::rename(&part_path, &file_path)
+            .await
+            .with_context(|| format!("Failed to rename {}", file_name))?;
+
+        tracing::info!("Downloaded {} ({} bytes)", file_name, file_downloaded);
+    }
 
     let _ = progress_tx.send(DownloadProgress {
-        downloaded,
-        total,
+        downloaded: total_downloaded,
+        total: Some(total_downloaded),
         done: true,
         error: None,
     });
 
     tracing::info!(
-        "Whisper model {} downloaded ({} bytes)",
+        "Whisper model {} downloaded ({} total bytes)",
         preset.id,
-        downloaded
+        total_downloaded
     );
     Ok(dest)
 }
 
 // ─── Transcription engine ───────────────────────────────────────────────────
 
-/// Local whisper transcription engine.
+/// Local whisper transcription engine using candle.
 pub struct LocalWhisper {
-    ctx: whisper_rs::WhisperContext,
+    model: candle_transformers::models::whisper::model::Whisper,
+    tokenizer: tokenizers::Tokenizer,
+    config: candle_transformers::models::whisper::Config,
+    device: candle_core::Device,
+    mel_filters: Vec<f32>,
 }
 
 impl LocalWhisper {
-    /// Load a whisper model from disk.
-    pub fn new(model_path: &Path) -> Result<Self> {
-        // Suppress whisper.cpp / ggml stderr output that bleeds into the TUI.
-        // Must be called before any whisper context is created.
-        suppress_whisper_logs();
+    /// Load a whisper model from a directory containing config.json,
+    /// tokenizer.json, and model.safetensors.
+    pub fn new(model_dir: &Path) -> Result<Self> {
+        use candle_core::Device;
+        use candle_nn::VarBuilder;
 
-        let path_str = model_path
-            .to_str()
-            .ok_or_else(|| anyhow::anyhow!("Model path is not valid UTF-8"))?;
-        let ctx = whisper_rs::WhisperContext::new_with_params(
-            path_str,
-            whisper_rs::WhisperContextParameters::default(),
-        )
-        .map_err(|e| anyhow::anyhow!("Failed to load whisper model: {}", e))?;
-        Ok(Self { ctx })
+        let device = Device::Cpu;
+
+        // Load config
+        let config_path = model_dir.join("config.json");
+        let config_str =
+            std::fs::read_to_string(&config_path).context("Failed to read config.json")?;
+        let config: candle_transformers::models::whisper::Config =
+            serde_json::from_str(&config_str).context("Failed to parse config.json")?;
+
+        // Load tokenizer
+        let tokenizer_path = model_dir.join("tokenizer.json");
+        let tokenizer = tokenizers::Tokenizer::from_file(&tokenizer_path)
+            .map_err(|e| anyhow::anyhow!("Failed to load tokenizer: {}", e))?;
+
+        // Load model weights
+        let model_path = model_dir.join("model.safetensors");
+        let vb = unsafe {
+            VarBuilder::from_mmaped_safetensors(&[model_path], candle_core::DType::F32, &device)
+                .context("Failed to load model weights")?
+        };
+
+        let model = candle_transformers::models::whisper::model::Whisper::load(&vb, config.clone())
+            .context("Failed to build whisper model")?;
+
+        // Load mel filters from embedded binary data
+        let mel_bytes = match config.num_mel_bins {
+            80 => include_bytes!("mel_filters_80.bin").as_slice(),
+            128 => include_bytes!("mel_filters_128.bin").as_slice(),
+            n => anyhow::bail!("Unsupported mel filter count: {}", n),
+        };
+        let mut mel_filters = vec![0f32; mel_bytes.len() / 4];
+        <byteorder::LittleEndian as byteorder::ByteOrder>::read_f32_into(
+            mel_bytes,
+            &mut mel_filters,
+        );
+
+        Ok(Self {
+            model,
+            tokenizer,
+            config,
+            device,
+            mel_filters,
+        })
     }
 
     /// Transcribe OGG/Opus or WAV audio bytes to text.
-    pub fn transcribe(&self, audio_bytes: &[u8]) -> Result<String> {
+    pub fn transcribe(&mut self, audio_bytes: &[u8]) -> Result<String> {
         let (samples, sample_rate) = decode_audio(audio_bytes)?;
 
         if samples.is_empty() {
@@ -194,28 +263,77 @@ impl LocalWhisper {
             resample(&samples, sample_rate, 16000)?
         };
 
-        // Run whisper inference
-        let mut state = self
-            .ctx
-            .create_state()
-            .map_err(|e| anyhow::anyhow!("Failed to create whisper state: {}", e))?;
-        let mut params =
-            whisper_rs::FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 1 });
-        params.set_print_special(false);
-        params.set_print_progress(false);
-        params.set_print_realtime(false);
-        params.set_print_timestamps(false);
+        // Compute log-mel spectrogram
+        let mel = candle_transformers::models::whisper::audio::pcm_to_mel(
+            &self.config,
+            &audio_16k,
+            &self.mel_filters,
+        );
+        let mel_len = mel.len();
+        let num_mel_bins = self.config.num_mel_bins;
+        let n_frames = mel_len / num_mel_bins;
+        let mel = candle_core::Tensor::from_vec(mel, (1, num_mel_bins, n_frames), &self.device)
+            .context("Failed to create mel tensor")?;
 
-        state
-            .full(params, &audio_16k)
-            .map_err(|e| anyhow::anyhow!("Whisper inference failed: {}", e))?;
+        // Reset KV cache before new transcription
+        self.model.reset_kv_cache();
 
-        let mut text = String::new();
-        for segment in state.as_iter() {
-            if let Ok(s) = segment.to_str() {
-                text.push_str(s);
+        // Encode audio
+        let audio_features = self
+            .model
+            .encoder
+            .forward(&mel, true)
+            .context("Encoder forward pass failed")?;
+
+        // Build initial token sequence for decoding
+        let vocab = self.tokenizer.get_vocab(true);
+        let sot = *vocab
+            .get(candle_transformers::models::whisper::SOT_TOKEN)
+            .unwrap_or(&50258u32);
+        let transcribe = *vocab
+            .get(candle_transformers::models::whisper::TRANSCRIBE_TOKEN)
+            .unwrap_or(&50359);
+        let no_timestamps = *vocab
+            .get(candle_transformers::models::whisper::NO_TIMESTAMPS_TOKEN)
+            .unwrap_or(&50363);
+        let eot = *vocab
+            .get(candle_transformers::models::whisper::EOT_TOKEN)
+            .unwrap_or(&50257);
+        let en = *vocab.get("<|en|>").unwrap_or(&50259);
+
+        let mut tokens: Vec<u32> = vec![sot, en, transcribe, no_timestamps];
+        let max_tokens = 224;
+
+        for _ in 0..max_tokens {
+            let token_tensor =
+                candle_core::Tensor::new(tokens.as_slice(), &self.device)?.unsqueeze(0)?;
+
+            let logits = self
+                .model
+                .decoder
+                .forward(&token_tensor, &audio_features, tokens.len() == 4)
+                .context("Decoder forward pass failed")?;
+
+            // Get logits for the last token position
+            let logits = self.model.decoder.final_linear(&logits)?;
+            let logits = logits.squeeze(0)?;
+            let last_logits = logits.get(logits.dim(0)? - 1)?;
+
+            let next_token = last_logits.argmax(0)?.to_scalar::<u32>()?;
+
+            if next_token == eot {
+                break;
             }
+
+            tokens.push(next_token);
         }
+
+        // Decode tokens to text (skip the initial prompt tokens)
+        let output_tokens: Vec<u32> = tokens[4..].to_vec();
+        let text = self
+            .tokenizer
+            .decode(&output_tokens, true)
+            .map_err(|e| anyhow::anyhow!("Tokenizer decode error: {}", e))?;
 
         Ok(clean_transcript(&text))
     }
@@ -274,12 +392,8 @@ fn decode_ogg(bytes: &[u8]) -> Result<(Vec<f32>, u32)> {
     use symphonia::core::meta::MetadataOptions;
     use symphonia::core::probe::Hint;
 
-    // Build a codec registry that includes Opus (via libopus adapter)
-    // on top of symphonia's default codecs.
     let mut codec_registry = CodecRegistry::new();
-    // Register all default codecs (Vorbis, PCM, etc.)
     symphonia::default::register_enabled_codecs(&mut codec_registry);
-    // Register Opus decoder
     codec_registry.register_all::<symphonia_adapter_libopus::OpusDecoder>();
 
     let cursor = std::io::Cursor::new(bytes.to_vec());
@@ -344,7 +458,6 @@ fn decode_ogg(bytes: &[u8]) -> Result<(Vec<f32>, u32)> {
         sample_buf.copy_interleaved_ref(decoded);
         let interleaved = sample_buf.samples();
 
-        // Mix to mono if multi-channel
         if channels > 1 {
             for chunk in interleaved.chunks(channels) {
                 all_samples.push(chunk.iter().sum::<f32>() / chunk.len() as f32);
@@ -397,36 +510,4 @@ fn resample(input: &[f32], from_rate: u32, to_rate: u32) -> Result<Vec<f32>> {
     }
 
     Ok(output)
-}
-
-/// Redirect all whisper.cpp + ggml log output to a no-op callback.
-///
-/// Without this, whisper.cpp dumps verbose model-loading and inference debug
-/// lines (token probabilities, timestamps, decoder state) to stderr, which
-/// bleeds into the TUI and makes the display unreadable.
-fn suppress_whisper_logs() {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        // Safety: the callback is a plain C function that does nothing —
-        // no panics, no allocations, no unwinding.
-        unsafe {
-            // ggml_log_level is c_uint on Unix but c_int on Windows.
-            // Transmute the noop callback to match WhisperLogCallback.
-            // Sound because the callback ignores all arguments.
-            let cb: whisper_rs::WhisperLogCallback =
-                std::mem::transmute(noop_log_callback as *const ());
-            whisper_rs::set_log_callback(cb, std::ptr::null_mut());
-        }
-    });
-}
-
-/// C-compatible no-op log callback. Uses `c_int` as a placeholder —
-/// transmuted to match the platform-specific `ggml_log_level` at the call site.
-unsafe extern "C" fn noop_log_callback(
-    _level: std::os::raw::c_int,
-    _text: *const std::ffi::c_char,
-    _user_data: *mut std::ffi::c_void,
-) {
-    // Intentionally empty — swallow all whisper.cpp / ggml log output.
 }
