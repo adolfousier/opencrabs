@@ -1,6 +1,7 @@
 //! WhatsApp Agent
 //!
-//! Agent struct and startup logic. Mirrors the Telegram agent pattern.
+//! Single bot instance — handles pairing, reconnection, and message processing.
+//! Onboarding subscribes to QR/connected events via WhatsAppState.
 
 use super::WhatsAppState;
 use super::handler;
@@ -48,8 +49,8 @@ impl WhatsAppAgent {
     }
 
     /// Start as a background task. Returns JoinHandle.
-    /// If already paired (session.db exists), reconnects silently.
-    /// If not paired, QR events are logged.
+    /// Always starts — if no session exists, emits QR events for onboarding.
+    /// If already paired, reconnects and handles messages.
     pub fn start(self) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             let db_path = crate::config::opencrabs_home()
@@ -68,22 +69,6 @@ impl WhatsAppAgent {
                     return;
                 }
             };
-
-            // Only start if already paired — unpaired sessions should use the
-            // whatsapp_connect tool which displays the QR code in the TUI.
-            match backend.device_exists().await {
-                Ok(true) => {}
-                Ok(false) => {
-                    tracing::info!(
-                        "WhatsApp: no paired session found — use 'connect WhatsApp' in chat to pair"
-                    );
-                    return;
-                }
-                Err(e) => {
-                    tracing::warn!("WhatsApp: couldn't check device state: {}", e);
-                    // Continue anyway — let the bot try
-                }
-            }
 
             let cfg = self.config_rx.borrow().clone();
             tracing::info!(
@@ -131,8 +116,7 @@ impl WhatsAppAgent {
                                 tracing::info!(
                                     "WhatsApp: QR code available (scan with your phone)"
                                 );
-                                // In static mode, just log — QR display is handled by the connect tool
-                                tracing::debug!("WhatsApp QR: {}", code);
+                                wa_state.broadcast_qr(code);
                             }
                             Event::Connected(_) => {
                                 tracing::info!("WhatsApp: connected successfully");

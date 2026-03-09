@@ -419,10 +419,9 @@ pub struct App {
     /// Path to the plan JSON file for the current session
     pub plan_file_path: Option<std::path::PathBuf>,
 
-    /// WhatsApp client captured during onboarding QR pairing — used to send the test message.
+    /// Shared WhatsApp state — single bot instance broadcasts QR/connected events.
     #[cfg(feature = "whatsapp")]
-    pub(crate) whatsapp_test_client:
-        Arc<tokio::sync::Mutex<Option<Arc<whatsapp_rust::client::Client>>>>,
+    pub(crate) whatsapp_state: Arc<crate::channels::whatsapp::WhatsAppState>,
 
     /// Services
     pub(crate) agent_service: Arc<AgentService>,
@@ -438,7 +437,11 @@ pub struct App {
 
 impl App {
     /// Create a new app instance
-    pub fn new(agent_service: Arc<AgentService>, context: ServiceContext) -> Self {
+    pub fn new(
+        agent_service: Arc<AgentService>,
+        context: ServiceContext,
+        #[cfg(feature = "whatsapp")] whatsapp_state: Arc<crate::channels::whatsapp::WhatsAppState>,
+    ) -> Self {
         let brain_path = BrainLoader::resolve_path();
         let command_loader = CommandLoader::from_brain_path(&brain_path);
         let user_commands = command_loader.load();
@@ -539,7 +542,7 @@ impl App {
             plan_document: None,
             plan_file_path: None,
             #[cfg(feature = "whatsapp")]
-            whatsapp_test_client: Arc::new(tokio::sync::Mutex::new(None)),
+            whatsapp_state,
             session_service: SessionService::new(context.clone()),
             message_service: MessageService::new(context),
             agent_service,
