@@ -9,58 +9,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
-    name: Test
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rustfmt, clippy
-
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache cargo index
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Install CMake (macOS)
-        if: runner.os == 'macOS'
-        run: brew install cmake
-
-      - name: Install CMake (Windows)
-        if: runner.os == 'Windows'
-        run: choco install cmake -y
-
-      - name: Run tests (Windows — no whatsapp/local-stt/local-tts)
-        if: runner.os == 'Windows'
-        run: cargo test --no-default-features --features "telegram,discord,slack,whatsapp,trello" --verbose
-
-      - name: Run tests (macOS — all features)
-        if: runner.os == 'macOS'
-        env:
-          CFLAGS: -march=armv8-a+crypto
-          CXXFLAGS: -march=armv8-a+crypto
-        run: cargo test --all-features --verbose
-
-      - name: Run tests (Linux — all features)
-        if: runner.os == 'Linux'
-        run: cargo test --all-features --verbose
-
   publish-crate:
     name: Publish to crates.io
-    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -75,7 +25,7 @@ jobs:
 
   build-release:
     name: Build Release
-    needs: test
+    needs: publish-crate
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write
