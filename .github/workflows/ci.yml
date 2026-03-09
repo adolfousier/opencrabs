@@ -61,8 +61,8 @@ jobs:
       - name: Run tests (macOS)
         if: runner.os == 'macOS'
         env:
-          CFLAGS: -march=armv8-a
-          CXXFLAGS: -march=armv8-a
+          CFLAGS: -march=armv8-a+crypto
+          CXXFLAGS: -march=armv8-a+crypto
         run: cargo test --all-features --verbose
 
       - name: Run tests (Linux)
@@ -114,9 +114,10 @@ jobs:
         run: cargo install cargo-tarpaulin
 
       - name: Generate coverage
-        run: cargo tarpaulin --out Xml --no-default-features --features "telegram,whatsapp,discord,slack,trello,local-tts"
+        run: cargo tarpaulin --out Xml --no-default-features --features "telegram,whatsapp,discord,slack,trello"
         # Note: local-stt excluded — tarpaulin uses rust-lld which can't handle
         # duplicate ggml symbols from whisper-rs-sys + llama-cpp-sys-2.
+        # local-tts added when feature lands on main.
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
