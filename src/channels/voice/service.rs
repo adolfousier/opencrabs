@@ -286,14 +286,24 @@ pub async fn transcribe_audio_local(audio_bytes: Vec<u8>, model_id: String) -> R
         })
         .await?;
 
-    match whisper.transcribe(&audio_bytes).await {
-        Ok(text) => {
+    // Generous timeout — CPU transcription of long audio can take minutes
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(300),
+        whisper.transcribe(&audio_bytes),
+    )
+    .await
+    {
+        Ok(Ok(text)) => {
             tracing::info!("Local STT: transcription complete");
             Ok(text)
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             tracing::error!("Local STT: transcription failed: {}", e);
             Err(e)
+        }
+        Err(_) => {
+            tracing::error!("Local STT: transcription timed out after 300s");
+            anyhow::bail!("Local STT transcription timed out (300s)")
         }
     }
 }
