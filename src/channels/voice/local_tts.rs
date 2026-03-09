@@ -783,44 +783,37 @@ pub async fn preview_voice(voice_id: &str) -> Result<()> {
 
 // ─── Text sanitization for TTS ───────────────────────────────────────────────
 
-/// Clean text for TTS synthesis — strip markdown formatting, collapse whitespace,
-/// and remove characters that Piper would read literally or mangle.
+/// Clean text for TTS synthesis — strip markdown formatting markers only,
+/// keep all actual content so Piper reads the full response naturally.
 fn clean_for_tts(text: &str) -> String {
     let mut s = text.to_string();
 
-    // Remove code blocks (``` ... ```)
-    while let Some(start) = s.find("```") {
-        if let Some(end) = s[start + 3..].find("```") {
-            s.replace_range(start..start + 3 + end + 3, " ");
-        } else {
-            s.replace_range(start..start + 3, " ");
-        }
-    }
+    // Strip code fence markers (```lang and ```) but keep the code content
+    s = s
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            !trimmed.starts_with("```")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
 
-    // Remove inline code (`...`)
-    while let Some(start) = s.find('`') {
-        if let Some(end) = s[start + 1..].find('`') {
-            // Keep the text inside, just remove the backticks
-            s.remove(start + 1 + end);
-            s.remove(start);
-        } else {
-            s.remove(start);
-        }
-    }
+    // Remove inline backticks but keep content inside
+    s = s.replace('`', "");
 
     // Remove markdown bold/italic markers (**, *, __)
     s = s.replace("**", "");
     s = s.replace("__", "");
     s = s.replace('*', "");
 
-    // Remove markdown headers (# ## ### etc.)
+    // Remove markdown headers (# ## ### etc.) but keep text
     s = s
         .lines()
         .map(|line| line.trim_start_matches('#').trim_start())
         .collect::<Vec<_>>()
         .join("\n");
 
-    // Remove markdown links [text](url) → text
+    // Remove markdown links [text](url) → keep text only
     let mut result = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();
     while let Some(ch) = chars.next() {
@@ -851,7 +844,7 @@ fn clean_for_tts(text: &str) -> String {
     }
     s = result;
 
-    // Remove bullet markers (- or •) at start of lines, join non-empty lines with periods
+    // Remove bullet markers (- or •) at start of lines
     s = s
         .lines()
         .map(|line| {
@@ -868,8 +861,7 @@ fn clean_for_tts(text: &str) -> String {
         .collect::<Vec<_>>()
         .join(". ");
 
-    // Remove excess punctuation that sounds weird (!!!, ???, ...)
-    // Collapse repeated punctuation to single
+    // Collapse repeated punctuation (!!! → !, ??? → ?)
     let mut prev_punct = false;
     let mut cleaned = String::with_capacity(s.len());
     for ch in s.chars() {
@@ -885,7 +877,7 @@ fn clean_for_tts(text: &str) -> String {
     }
     s = cleaned;
 
-    // Remove ellipsis-style dots (... → .)
+    // Collapse ellipsis (... → .)
     while s.contains("...") {
         s = s.replace("...", ".");
     }
@@ -894,9 +886,7 @@ fn clean_for_tts(text: &str) -> String {
     }
 
     // Collapse multiple whitespace/newlines into single space
-    let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
-
-    s.trim().to_string()
+    s.split_whitespace().collect::<Vec<_>>().join(" ").trim().to_string()
 }
 
 /// Extract sample_rate from piper voice config JSON.
@@ -944,9 +934,18 @@ mod tests {
 
     #[test]
     fn test_clean_for_tts_strips_markdown() {
-        let input = "**Hello** *world*! Check `this code` out.";
+        let input = "**Hello** *world*! Check `this_code` out.";
         let cleaned = clean_for_tts(input);
-        assert_eq!(cleaned, "Hello world! Check this code out.");
+        assert_eq!(cleaned, "Hello world! Check this_code out.");
+    }
+
+    #[test]
+    fn test_clean_for_tts_keeps_code_block_content() {
+        let input = "Here is code:\n\n```rust\nfn main() {}\n```\n\nDone.";
+        let cleaned = clean_for_tts(input);
+        assert!(cleaned.contains("fn main()"));
+        assert!(cleaned.contains("Done."));
+        assert!(!cleaned.contains("```"));
     }
 
     #[test]
