@@ -507,6 +507,89 @@ mod local_stt_tests {
     }
 }
 
+// ─── Capability detection ──────────────────────────────────────────────────
+
+#[test]
+fn local_stt_available_matches_feature() {
+    let available = crate::channels::voice::local_stt_available();
+    let expected = cfg!(feature = "local-stt");
+    assert_eq!(available, expected);
+}
+
+#[test]
+fn local_tts_available_matches_feature_and_python() {
+    let available = crate::channels::voice::local_tts_available();
+    if cfg!(feature = "local-tts") {
+        // With the feature compiled in, result depends on python3 being on PATH.
+        // We just verify it returns a bool without panicking.
+        let _ = available;
+    } else {
+        assert!(!available, "Should be false without local-tts feature");
+    }
+}
+
+#[test]
+fn local_tts_available_is_cached() {
+    // Calling twice should return the same value (OnceLock caching).
+    let first = crate::channels::voice::local_tts_available();
+    let second = crate::channels::voice::local_tts_available();
+    assert_eq!(first, second);
+}
+
+// ─── STT mode cycling respects availability ────────────────────────────────
+
+#[cfg(feature = "local-stt")]
+#[test]
+fn stt_mode_cycles_to_local_when_available() {
+    let mut wizard = OnboardingWizard::new();
+    wizard.step = OnboardingStep::VoiceSetup;
+    wizard.voice_field = VoiceField::SttModeSelect;
+    wizard.stt_mode = 1; // API
+
+    // Down → Local (2) — available because local-stt feature is on
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
+    assert_eq!(wizard.stt_mode, 2);
+
+    // Down → wraps to Off (0)
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
+    assert_eq!(wizard.stt_mode, 0);
+}
+
+#[cfg(feature = "local-stt")]
+#[test]
+fn stt_mode_up_from_off_goes_to_local_when_available() {
+    let mut wizard = OnboardingWizard::new();
+    wizard.step = OnboardingStep::VoiceSetup;
+    wizard.voice_field = VoiceField::SttModeSelect;
+    wizard.stt_mode = 0; // Off
+
+    // Up from Off → Local (2) when local-stt is available
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Up));
+    assert_eq!(wizard.stt_mode, 2);
+}
+
+// ─── Wizard resets unavailable modes ────────────────────────────────────────
+
+#[test]
+fn wizard_from_config_resets_local_stt_when_unavailable() {
+    // Build a config with local STT mode
+    let toml_str = r#"
+[providers.stt.local]
+enabled = true
+model = "local-tiny"
+"#;
+    let config: crate::config::Config = toml::from_str(toml_str).unwrap();
+    let wizard = OnboardingWizard::from_config(&config);
+
+    if crate::channels::voice::local_stt_available() {
+        // local-stt feature is compiled in → mode should be 2 (Local)
+        assert_eq!(wizard.stt_mode, 2);
+    } else {
+        // local-stt not available → should be reset to 0 (Off)
+        assert_eq!(wizard.stt_mode, 0);
+    }
+}
+
 // ─── Wizard action enum ────────────────────────────────────────────────────
 
 #[test]
