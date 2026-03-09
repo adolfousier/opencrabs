@@ -886,7 +886,11 @@ fn clean_for_tts(text: &str) -> String {
     }
 
     // Collapse multiple whitespace/newlines into single space
-    s.split_whitespace().collect::<Vec<_>>().join(" ").trim().to_string()
+    s.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_string()
 }
 
 /// Extract sample_rate from piper voice config JSON.

@@ -5,6 +5,14 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.66] - 2026-03-09
+
+### Fixed
+- **Windows MSVC build** — Duplicate ggml symbols (LNK2005) from whisper-rs-sys and llama-cpp-sys-2 resolved with `/FORCE:MULTIPLE` linker flag. aws-lc-sys `__builtin_bswap` errors fixed by forcing CMake builder on Windows
+- **TTS reads markdown literally** — Strip formatting markers (`**`, `` ` ``, ```` ``` ````, `#`, bullets) before sending text to Piper TTS. Code block content is kept and read aloud naturally
+- **STT transcript cleanup** — Collapse whitespace in whisper transcription output
+- **Single WhatsApp bot instance** — Onboarding subscribes to agent bot events via broadcast channels instead of creating a separate bot instance that conflicts with the agent
+
 ## [0.2.65] - 2026-03-09
 
 ### Added
@@ -1388,6 +1396,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.66]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.66
+[0.2.65]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.65
 [0.2.64]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.64
 [0.2.63]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.63
 [0.2.62]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.62
