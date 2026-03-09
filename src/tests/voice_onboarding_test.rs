@@ -590,6 +590,89 @@ model = "local-tiny"
     }
 }
 
+// ─── TTS mode cycling respects availability ─────────────────────────────────
+
+#[cfg(feature = "local-tts")]
+#[test]
+fn tts_mode_cycles_to_local_when_available() {
+    // This test only runs when local-tts feature is compiled in AND python3 is on PATH
+    if !crate::channels::voice::local_tts_available() {
+        return; // Skip — python3 not found
+    }
+    let mut wizard = OnboardingWizard::new();
+    wizard.step = OnboardingStep::VoiceSetup;
+    wizard.voice_field = VoiceField::TtsModeSelect;
+    wizard.tts_mode = 1; // API
+
+    // Down → Local (2) — available because local-tts + python3
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
+    assert_eq!(wizard.tts_mode, 2);
+    assert!(wizard.tts_enabled);
+
+    // Down → wraps to Off (0)
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
+    assert_eq!(wizard.tts_mode, 0);
+    assert!(!wizard.tts_enabled);
+}
+
+#[test]
+fn tts_mode_skips_local_when_unavailable() {
+    if crate::channels::voice::local_tts_available() {
+        return; // Skip — local TTS is available on this machine
+    }
+    let mut wizard = OnboardingWizard::new();
+    wizard.step = OnboardingStep::VoiceSetup;
+    wizard.voice_field = VoiceField::TtsModeSelect;
+    wizard.tts_mode = 0; // Off
+
+    // Down → API (1)
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
+    assert_eq!(wizard.tts_mode, 1);
+
+    // Down → wraps to Off (0), skipping Local
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
+    assert_eq!(wizard.tts_mode, 0);
+}
+
+#[test]
+fn stt_mode_skips_local_when_unavailable() {
+    if crate::channels::voice::local_stt_available() {
+        return; // Skip — local STT is available on this machine
+    }
+    let mut wizard = OnboardingWizard::new();
+    wizard.step = OnboardingStep::VoiceSetup;
+    wizard.voice_field = VoiceField::SttModeSelect;
+    wizard.stt_mode = 0; // Off
+
+    // Down → API (1)
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
+    assert_eq!(wizard.stt_mode, 1);
+
+    // Down → wraps to Off (0), skipping Local
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
+    assert_eq!(wizard.stt_mode, 0);
+}
+
+// ─── Wizard resets unavailable TTS mode ─────────────────────────────────────
+
+#[test]
+fn wizard_from_config_resets_local_tts_when_unavailable() {
+    let toml_str = r#"
+[providers.tts.local]
+enabled = true
+"#;
+    let config: crate::config::Config = toml::from_str(toml_str).unwrap();
+    let wizard = OnboardingWizard::from_config(&config);
+
+    if crate::channels::voice::local_tts_available() {
+        assert_eq!(wizard.tts_mode, 2);
+        assert!(wizard.tts_enabled);
+    } else {
+        assert_eq!(wizard.tts_mode, 0, "Should reset Local TTS to Off when unavailable");
+        assert!(!wizard.tts_enabled);
+    }
+}
+
 // ─── Wizard action enum ────────────────────────────────────────────────────
 
 #[test]

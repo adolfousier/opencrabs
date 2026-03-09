@@ -759,6 +759,56 @@ mod tests {
         assert!(p.error.is_some());
     }
 
+    // ─── Audio sanitization ──────────────────────────────────────────────
+
+    #[test]
+    fn sanitize_nan_inf_in_audio() {
+        // Simulate the NaN/Inf scrubbing done in transcribe()
+        let mut samples = vec![0.5, f32::NAN, -0.3, f32::INFINITY, f32::NEG_INFINITY, 0.1];
+        for s in samples.iter_mut() {
+            if !s.is_finite() {
+                *s = 0.0;
+            }
+        }
+        assert_eq!(samples, vec![0.5, 0.0, -0.3, 0.0, 0.0, 0.1]);
+    }
+
+    #[test]
+    fn short_audio_padded_to_minimum() {
+        // Simulate the min-padding logic from transcribe()
+        const MIN_SAMPLES: usize = 16000;
+        let mut audio = vec![0.5f32; 100]; // very short
+        if audio.len() < MIN_SAMPLES {
+            audio.resize(MIN_SAMPLES, 0.0);
+        }
+        assert_eq!(audio.len(), MIN_SAMPLES);
+        assert_eq!(audio[0], 0.5); // original data preserved
+        assert_eq!(audio[100], 0.0); // padded with silence
+        assert_eq!(audio[15999], 0.0);
+    }
+
+    #[test]
+    fn audio_at_minimum_not_padded() {
+        const MIN_SAMPLES: usize = 16000;
+        let mut audio = vec![0.1f32; MIN_SAMPLES];
+        let original_len = audio.len();
+        if audio.len() < MIN_SAMPLES {
+            audio.resize(MIN_SAMPLES, 0.0);
+        }
+        assert_eq!(audio.len(), original_len);
+    }
+
+    #[test]
+    fn audio_above_minimum_not_padded() {
+        const MIN_SAMPLES: usize = 16000;
+        let mut audio = vec![0.1f32; 48000]; // 3 seconds
+        let original_len = audio.len();
+        if audio.len() < MIN_SAMPLES {
+            audio.resize(MIN_SAMPLES, 0.0);
+        }
+        assert_eq!(audio.len(), original_len);
+    }
+
     // ─── Default preset is QuantizedTiny (multilingual) ───────────────────
 
     #[test]

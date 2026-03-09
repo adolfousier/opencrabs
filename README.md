@@ -1555,8 +1555,9 @@ cargo build --release
 # Small release build
 cargo build --profile release-small
 
-# Run tests
-cargo test
+# Run tests (256+ tests across 12 modules)
+cargo test --all-features
+# See TESTING.md for full test coverage documentation
 
 # Run benchmarks
 cargo bench
@@ -1575,6 +1576,8 @@ cargo clippy -- -D warnings
 | `discord` | Discord bot integration (default: enabled) |
 | `slack` | Slack bot integration (default: enabled) |
 | `trello` | Trello board polling + card management (default: enabled) |
+| `local-stt` | Local speech-to-text via rwhisper (candle-based, pure Rust) |
+| `local-tts` | Local text-to-speech via Piper (requires python3) |
 | `profiling` | Enable pprof flamegraph profiling (Unix only) |
 
 ### Performance
