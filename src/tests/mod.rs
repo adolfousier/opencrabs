@@ -1,3 +1,4 @@
+pub mod candle_whisper_test;
 pub mod channel_search_test;
 pub mod cli_test;
 pub mod compaction_test;

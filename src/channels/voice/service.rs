@@ -41,11 +41,32 @@ pub async fn transcribe(audio_bytes: Vec<u8>, voice_config: &VoiceConfig) -> Res
                 let preset = super::local_whisper::find_local_model(model_id)
                     .ok_or_else(|| anyhow::anyhow!("Unknown local STT model: {}", model_id))?;
                 let path = super::local_whisper::model_path(preset);
-                if !path.exists() {
-                    anyhow::bail!(
-                        "Local STT model '{}' not downloaded. Run /onboard:voice or download manually.",
+                if !super::local_whisper::is_model_downloaded(preset) {
+                    // Auto-download model transparently (migration from ggml → candle format)
+                    tracing::info!(
+                        "Local STT model '{}' not in candle format — downloading automatically",
                         model_id
                     );
+                    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+                    let preset_id = model_id.to_string();
+                    let download_preset = super::local_whisper::find_local_model(&preset_id)
+                        .ok_or_else(|| anyhow::anyhow!("Unknown model: {}", preset_id))?;
+                    let download_handle = tokio::spawn(async move {
+                        super::local_whisper::download_model(download_preset, tx).await
+                    });
+                    // Drain progress channel
+                    while let Some(progress) = rx.recv().await {
+                        if progress.done {
+                            break;
+                        }
+                        if let Some(err) = progress.error {
+                            anyhow::bail!("Model download failed: {}", err);
+                        }
+                    }
+                    download_handle
+                        .await
+                        .map_err(|e| anyhow::anyhow!("Download task failed: {}", e))??;
+                    tracing::info!("Local STT model '{}' downloaded successfully", model_id);
                 }
                 tracing::info!("Local STT: transcribing with model {}", model_id);
                 transcribe_audio_local(audio_bytes, path).await
@@ -227,8 +248,15 @@ struct TranscriptionResponse {
     text: String,
 }
 
-/// Transcribe audio bytes using a local whisper model (whisper.cpp).
+/// Cached local whisper model — loaded once, reused across transcriptions.
+#[cfg(feature = "local-stt")]
+static CACHED_WHISPER: std::sync::Mutex<
+    Option<(std::path::PathBuf, super::local_whisper::LocalWhisper)>,
+> = std::sync::Mutex::new(None);
+
+/// Transcribe audio bytes using a local whisper model (candle).
 ///
+/// The model is loaded once and cached for subsequent calls.
 /// Runs inference on a background thread via `spawn_blocking`.
 #[cfg(feature = "local-stt")]
 pub async fn transcribe_audio_local(
@@ -243,12 +271,34 @@ pub async fn transcribe_audio_local(
     );
 
     let handle = tokio::task::spawn_blocking(move || {
-        tracing::info!("Local STT: loading model...");
-        let mut whisper = super::local_whisper::LocalWhisper::new(&model_path)?;
-        tracing::info!("Local STT: model loaded, decoding audio...");
-        let result = whisper.transcribe(&audio_bytes);
-        tracing::info!("Local STT: transcription complete");
-        result
+        let mut guard = CACHED_WHISPER
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Whisper cache lock poisoned: {}", e))?;
+
+        // Load model if not cached or if the model path changed
+        let needs_load = match guard.as_ref() {
+            Some((cached_path, _)) => cached_path != &model_path,
+            None => true,
+        };
+
+        if needs_load {
+            tracing::info!("Local STT: loading model...");
+            let whisper = super::local_whisper::LocalWhisper::new(&model_path)?;
+            tracing::info!("Local STT: model loaded and cached");
+            *guard = Some((model_path, whisper));
+        }
+
+        let (_, whisper) = guard.as_mut().unwrap();
+        match whisper.transcribe(&audio_bytes) {
+            Ok(text) => {
+                tracing::info!("Local STT: transcription complete");
+                Ok(text)
+            }
+            Err(e) => {
+                tracing::error!("Local STT: transcription failed: {}", e);
+                Err(e)
+            }
+        }
     });
 
     // 60s timeout — whisper inference should never take this long
