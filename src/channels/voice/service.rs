@@ -244,7 +244,7 @@ pub async fn transcribe_audio_local(
 
     let handle = tokio::task::spawn_blocking(move || {
         tracing::info!("Local STT: loading model...");
-        let whisper = super::local_whisper::LocalWhisper::new(&model_path)?;
+        let mut whisper = super::local_whisper::LocalWhisper::new(&model_path)?;
         tracing::info!("Local STT: model loaded, decoding audio...");
         let result = whisper.transcribe(&audio_bytes);
         tracing::info!("Local STT: transcription complete");

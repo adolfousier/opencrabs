@@ -320,20 +320,14 @@ mod codec_tests {
     }
 
     #[test]
-    fn local_model_presets_have_valid_urls() {
-        use crate::channels::voice::local_whisper::{LOCAL_MODEL_PRESETS, model_url};
+    fn local_model_presets_have_valid_repo_ids() {
+        use crate::channels::voice::local_whisper::LOCAL_MODEL_PRESETS;
 
         for preset in LOCAL_MODEL_PRESETS {
-            let url = model_url(preset.file_name);
-            assert!(url.starts_with("https://"), "URL should be HTTPS: {}", url);
             assert!(
-                url.contains("huggingface.co"),
-                "URL should be HuggingFace: {}",
-                url
-            );
-            assert!(
-                url.contains(preset.file_name),
-                "URL should contain file name"
+                preset.repo_id.starts_with("openai/whisper-"),
+                "Repo ID should start with openai/whisper-: {}",
+                preset.repo_id
             );
         }
     }
