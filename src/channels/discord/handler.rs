@@ -161,6 +161,11 @@ pub(crate) async fn handle_message(
     let mut is_voice = false;
     let mut content = msg.content.clone();
 
+    // Show typing immediately when processing voice
+    if audio_attachment.is_some() && voice_config.stt_enabled {
+        let _ = msg.channel_id.broadcast_typing(&ctx.http).await;
+    }
+
     if let Some(audio) = audio_attachment
         && voice_config.stt_enabled
         && let Ok(resp) = reqwest::get(&audio.url).await

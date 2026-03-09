@@ -407,7 +407,10 @@ pub(crate) async fn handle_message(
         .unwrap_or("[image]");
     tracing::info!("WhatsApp: message from {}: {}", phone, text_preview);
 
-    // Audio/voice note → STT transcription
+    // Audio/voice note → show typing immediately and transcribe
+    if has_aud && voice_config.stt_enabled {
+        let _ = client.chatstate().send_composing(&info.source.chat).await;
+    }
     let mut content;
     if has_aud
         && voice_config.stt_enabled

@@ -305,6 +305,11 @@ pub(crate) async fn handle_message(
             voice.duration,
         );
 
+        // Show typing immediately so user knows we're processing
+        let _ = bot
+            .send_chat_action(msg.chat.id, teloxide::types::ChatAction::Typing)
+            .await;
+
         // Download the voice file from Telegram
         let file = bot.get_file(&voice.file.id).await?;
         let download_url = format!(
