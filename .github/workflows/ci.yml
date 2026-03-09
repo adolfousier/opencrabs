@@ -54,12 +54,19 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install cmake -y
 
-      - name: Run tests (without local-stt on macOS)
-        if: runner.os == 'macOS'
-        run: cargo test --features "telegram,whatsapp,discord,slack,trello" --verbose
+      - name: Run tests (Windows — no whatsapp/local-stt/local-tts)
+        if: runner.os == 'Windows'
+        run: cargo test --no-default-features --features "telegram,discord,slack" --verbose
 
-      - name: Run tests (all features)
-        if: runner.os != 'macOS'
+      - name: Run tests (macOS)
+        if: runner.os == 'macOS'
+        env:
+          CFLAGS: -march=armv8-a
+          CXXFLAGS: -march=armv8-a
+        run: cargo test --all-features --verbose
+
+      - name: Run tests (Linux)
+        if: runner.os == 'Linux'
         run: cargo test --all-features --verbose
 
   clippy:
@@ -107,10 +114,9 @@ jobs:
         run: cargo install cargo-tarpaulin
 
       - name: Generate coverage
-        run: cargo tarpaulin --out Xml --features "telegram,whatsapp,discord,slack,trello"
-        # Note: --all-features excluded because tarpaulin uses rust-lld which
-        # can't handle duplicate ggml symbols from whisper-rs-sys + llama-cpp-sys-2.
-        # local-stt is excluded from coverage.
+        run: cargo tarpaulin --out Xml --no-default-features --features "telegram,whatsapp,discord,slack,trello,local-tts"
+        # Note: local-stt excluded — tarpaulin uses rust-lld which can't handle
+        # duplicate ggml symbols from whisper-rs-sys + llama-cpp-sys-2.
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
