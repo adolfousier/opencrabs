@@ -18,10 +18,20 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@nightly
 
+      - name: Install ALSA dev
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
       - name: Publish
+        continue-on-error: true
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish --allow-dirty
+        run: |
+          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          if cargo search opencrabs --limit 1 | grep -q "opencrabs = \"${VERSION}\""; then
+            echo "v${VERSION} already on crates.io — skipping"
+          else
+            cargo publish --allow-dirty
+          fi
 
   build-release:
     name: Build Release
@@ -71,11 +81,14 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install cross-compilation tools (Linux ARM64)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          sudo apt-get install -y libasound2-dev
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+            sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          fi
 
       - name: Install CMake (Windows)
         if: matrix.os == 'windows-latest'

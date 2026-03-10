@@ -523,6 +523,52 @@ fn resample(input: &[f32], from_rate: u32, to_rate: u32) -> Result<Vec<f32>> {
     Ok(output)
 }
 
+/// Compute mel filterbank coefficients matching OpenAI whisper's implementation.
+/// Returns a flat Vec of n_mels * n_freqs f32 values (row-major: filters[mel_idx * n_freqs + freq_idx]).
+pub fn compute_mel_filters(n_mels: usize, n_fft: usize, sample_rate: u32) -> Vec<f32> {
+    let n_freqs = n_fft / 2 + 1;
+    let sr = sample_rate as f64;
+
+    let hz_to_mel = |f: f64| -> f64 { 2595.0 * (1.0 + f / 700.0).log10() };
+    let mel_to_hz = |m: f64| -> f64 { 700.0 * (10f64.powf(m / 2595.0) - 1.0) };
+
+    let all_freqs: Vec<f64> = (0..n_freqs)
+        .map(|i| sr / 2.0 * i as f64 / (n_freqs - 1) as f64)
+        .collect();
+
+    let m_min = hz_to_mel(0.0);
+    let m_max = hz_to_mel(sr / 2.0);
+    let m_pts: Vec<f64> = (0..n_mels + 2)
+        .map(|i| m_min + (m_max - m_min) * i as f64 / (n_mels + 1) as f64)
+        .collect();
+    let f_pts: Vec<f64> = m_pts.iter().map(|&m| mel_to_hz(m)).collect();
+
+    let mut filters = vec![0.0f32; n_mels * n_freqs];
+    for i in 0..n_mels {
+        let f_prev = f_pts[i];
+        let f_curr = f_pts[i + 1];
+        let f_next = f_pts[i + 2];
+        // Slaney-style normalization
+        let enorm = if f_next != f_prev {
+            2.0 / (f_next - f_prev)
+        } else {
+            1.0
+        };
+        for j in 0..n_freqs {
+            let freq = all_freqs[j];
+            let v = if freq >= f_prev && freq <= f_curr && f_curr != f_prev {
+                (freq - f_prev) / (f_curr - f_prev)
+            } else if freq > f_curr && freq <= f_next && f_next != f_curr {
+                (f_next - freq) / (f_next - f_curr)
+            } else {
+                0.0
+            };
+            filters[i * n_freqs + j] = (v * enorm) as f32;
+        }
+    }
+    filters
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -843,50 +889,4 @@ mod tests {
         );
         assert!(path_str.ends_with(preset.file_name));
     }
-}
-
-/// Compute mel filterbank coefficients matching OpenAI whisper's implementation.
-/// Returns a flat Vec of n_mels * n_freqs f32 values (row-major: filters[mel_idx * n_freqs + freq_idx]).
-pub fn compute_mel_filters(n_mels: usize, n_fft: usize, sample_rate: u32) -> Vec<f32> {
-    let n_freqs = n_fft / 2 + 1;
-    let sr = sample_rate as f64;
-
-    let hz_to_mel = |f: f64| -> f64 { 2595.0 * (1.0 + f / 700.0).log10() };
-    let mel_to_hz = |m: f64| -> f64 { 700.0 * (10f64.powf(m / 2595.0) - 1.0) };
-
-    let all_freqs: Vec<f64> = (0..n_freqs)
-        .map(|i| sr / 2.0 * i as f64 / (n_freqs - 1) as f64)
-        .collect();
-
-    let m_min = hz_to_mel(0.0);
-    let m_max = hz_to_mel(sr / 2.0);
-    let m_pts: Vec<f64> = (0..n_mels + 2)
-        .map(|i| m_min + (m_max - m_min) * i as f64 / (n_mels + 1) as f64)
-        .collect();
-    let f_pts: Vec<f64> = m_pts.iter().map(|&m| mel_to_hz(m)).collect();
-
-    let mut filters = vec![0.0f32; n_mels * n_freqs];
-    for i in 0..n_mels {
-        let f_prev = f_pts[i];
-        let f_curr = f_pts[i + 1];
-        let f_next = f_pts[i + 2];
-        // Slaney-style normalization
-        let enorm = if f_next != f_prev {
-            2.0 / (f_next - f_prev)
-        } else {
-            1.0
-        };
-        for j in 0..n_freqs {
-            let freq = all_freqs[j];
-            let v = if freq >= f_prev && freq <= f_curr && f_curr != f_prev {
-                (freq - f_prev) / (f_curr - f_prev)
-            } else if freq > f_curr && freq <= f_next && f_next != f_curr {
-                (f_next - freq) / (f_next - f_curr)
-            } else {
-                0.0
-            };
-            filters[i * n_freqs + j] = (v * enorm) as f32;
-        }
-    }
-    filters
 }

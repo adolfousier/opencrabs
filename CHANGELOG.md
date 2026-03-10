@@ -5,6 +5,32 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.67] - 2026-03-10
+
+### Changed
+- **Local STT engine: whisper-rs → rwhisper (candle)** — Replaced whisper-rs (ggml C) with rwhisper (candle-transformers, pure Rust). Eliminates ggml symbol conflicts with llama-cpp-sys-2 (issue #38). No C++ build dependency for whisper. Metal GPU acceleration on macOS
+- **Panic strategy: abort → unwind** — Release builds now use `panic = "unwind"` so panics in rwhisper's internal threads produce backtraces instead of instant core dumps
+
+### Added
+- **Evolve health check + rollback** — `/evolve` now runs a health check on the new binary before swapping, backs up the current binary, and automatically rolls back if the new version fails post-swap verification
+- **Runtime capability detection** — `local_stt_available()` (compile-time feature check) and `local_tts_available()` (runtime python3 probe, cached via OnceLock). Onboarding hides Local radio buttons when unavailable; mode cycling clamps to Off/API only
+- **Wizard config reset** — `from_config()` resets saved Local STT/TTS mode to Off at load time if the capability is absent on the machine
+- **Audio sanitization** — Scrub NaN/Inf from decoded audio, pad short audio to minimum 1s (16000 samples) to prevent candle tensor panics
+- **Comprehensive test coverage** — 950 tests (up from ~840). New: evolve version comparison, audio sanitization, TTS/STT availability cycling, capability detection, wizard reset, codec support. Added `TESTING.md` with full documentation
+- **TESTING.md** — Full test coverage documentation: 256+ tests across 12 modules with category breakdown
+
+### Fixed
+- **TUI broken on Linux (fd race)** — `suppress_stdout()` used `dup2` to redirect fd 1 during model loading, racing with TUI's `EnterAlternateScreen`. Removed process-wide fd redirection; background preload delayed 2s to start after alternate screen
+- **Stdout bleed in /onboard:voice** — Restored `suppress_stdout()` as `pub(crate)` for `download_model()` and `LocalWhisper::new()` — safe since TUI is already in alternate screen
+- **rwhisper crash on CPU Linux** — "illegal instruction core dumped" on older CPUs. Fixed via audio validation, padding, and panic=unwind
+- **Local STT transcription timeout** — Added 300s timeout to prevent indefinite hangs
+- **Typing indicator delay** — Show typing indicator immediately when processing voice messages
+- **Removed unnecessary sandybridge rustflag** — Global `target-cpu=sandybridge` in `.cargo/config.toml` was unnecessary and spammed warnings on non-x86 platforms
+
+### Docs
+- Document `RUSTFLAGS="-C target-cpu=native"` for AVX1-only CPUs (Sandy Bridge) in README
+- Add `local-stt` and `local-tts` to feature flags table in README
+
 ## [0.2.66] - 2026-03-09
 
 ### Fixed
@@ -1396,6 +1422,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.67]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.67
 [0.2.66]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.66
 [0.2.65]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.65
 [0.2.64]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.64
