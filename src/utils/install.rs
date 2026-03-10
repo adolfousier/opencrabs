@@ -122,7 +122,10 @@ mod tests {
 
     #[test]
     fn prebuilt_description() {
-        assert_eq!(InstallMethod::PrebuiltBinary.description(), "pre-built binary");
+        assert_eq!(
+            InstallMethod::PrebuiltBinary.description(),
+            "pre-built binary"
+        );
     }
 
     #[test]

@@ -805,10 +805,7 @@ async fn cmd_chat_inner(
 
         // Make sure raw mode is off and alternate screen is exited before showing dialog
         let _ = crossterm::terminal::disable_raw_mode();
-        let _ = crossterm::execute!(
-            std::io::stdout(),
-            crossterm::terminal::LeaveAlternateScreen
-        );
+        let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen);
 
         let error_msg = format!("{}", e);
         match super::crash_recovery::show_crash_recovery(&error_msg).await {
