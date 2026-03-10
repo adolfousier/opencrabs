@@ -52,7 +52,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             artifact_name: opencrabs
             asset_suffix: linux-arm64
@@ -71,23 +71,10 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install Linux dependencies
-        if: matrix.os == 'ubuntu-latest'
+        if: contains(matrix.os, 'ubuntu')
         run: |
           sudo apt-get update
-          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
-            # Install cross-compile tools from default (amd64) repos first
-            sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-            # Now add arm64 arch and ports sources for arm64 libs
-            sudo dpkg --add-architecture arm64
-            echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs) main universe" | sudo tee /etc/apt/sources.list.d/arm64-ports.list
-            echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs)-updates main universe" | sudo tee -a /etc/apt/sources.list.d/arm64-ports.list
-            echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $(lsb_release -cs)-security main universe" | sudo tee -a /etc/apt/sources.list.d/arm64-ports.list
-            # Only update the arm64 ports sources, not default ones
-            sudo apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/arm64-ports.list -o Dir::Etc::sourceparts=/dev/null
-            sudo apt-get install -y libasound2-dev:arm64
-          else
-            sudo apt-get install -y libasound2-dev
-          fi
+          sudo apt-get install -y libasound2-dev
 
       - name: Install CMake (Windows)
         if: matrix.os == 'windows-latest'
@@ -103,10 +90,6 @@ jobs:
 
       - name: Build
         env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
-          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
-          PKG_CONFIG_ALLOW_CROSS: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && '1' || '' }}
           # Disable i8mm intrinsics on macOS ARM — CI clang targets newer arch than M1
           CFLAGS: ${{ matrix.target == 'aarch64-apple-darwin' && '-march=armv8-a+crypto' || '' }}
           CXXFLAGS: ${{ matrix.target == 'aarch64-apple-darwin' && '-march=armv8-a+crypto' || '' }}
@@ -116,12 +99,7 @@ jobs:
 
       - name: Strip binary (Unix)
         if: matrix.os != 'windows-latest'
-        run: |
-          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
-            aarch64-linux-gnu-strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
-          else
-            strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
-          fi
+        run: strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
 
       - name: Create archive
         shell: bash
