@@ -3,7 +3,7 @@
 //! Covers the wizard step flow for both QuickStart and Advanced modes,
 //! plus edge cases around validation and back-navigation.
 
-use crate::tui::onboarding::{OnboardingStep, OnboardingWizard, WizardAction, WizardMode};
+use crate::tui::onboarding::{OnboardingStep, OnboardingWizard, WizardMode};
 
 fn wizard() -> OnboardingWizard {
     OnboardingWizard::default()

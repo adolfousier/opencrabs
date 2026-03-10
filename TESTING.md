@@ -15,7 +15,7 @@ cargo test --all-features
 | **Brain — Agent Context** | 12 | `src/brain/agent/context.rs` |
 | **Brain — Provider (Anthropic)** | 9 | `src/brain/provider/anthropic.rs` |
 | **Brain — Provider (Retry)** | 9 | `src/brain/provider/retry.rs` |
-| **Brain — Provider (Custom OpenAI)** | 5 | `src/brain/provider/custom_openai_compatible.rs` |
+| **Brain — Provider (Custom OpenAI)** | 9 | `src/brain/provider/custom_openai_compatible.rs` |
 | **Brain — Provider (Factory)** | 4 | `src/brain/provider/factory.rs` |
 | **Brain — Provider (Types/Error/Trait)** | 7 | `src/brain/provider/` |
 | **Brain — Tokenizer** | 8 | `src/brain/tokenizer.rs` |
@@ -63,6 +63,7 @@ cargo test --all-features
 | **Memory — Search** | 3 | `src/memory/search.rs` |
 | **Pricing** | 7 | `src/pricing.rs` |
 | **Logging** | 4 | `src/logging/logger.rs` |
+| **Utils — Install** | 6 | `src/utils/install.rs` |
 | **Utils** | 1 | `src/utils/` |
 | **CLI** | 1 | `src/cli.rs` |
 | Tests — CLI Parsing | 28 | `src/tests/cli_test.rs` |
@@ -71,7 +72,7 @@ cargo test --all-features
 | Tests — Voice STT Dispatch | 7 | `src/tests/voice_stt_dispatch_test.rs` |
 | Tests — Voice Onboarding | 7 | `src/tests/voice_onboarding_test.rs` |
 | Tests — Candle Whisper | 6 | `src/tests/candle_whisper_test.rs` |
-| Tests — Evolve (Self-Update) | 12 | `src/tests/evolve_test.rs` |
+| Tests — Evolve (Self-Update) | 16 | `src/tests/evolve_test.rs` |
 | Tests — Session & Working Dir | 15 | `src/tests/session_working_dir_test.rs` |
 | Tests — Message Compaction | 24 | `src/tests/compaction_test.rs` |
 | Tests — Fallback Vision | 35 | `src/tests/fallback_vision_test.rs` |
@@ -83,7 +84,8 @@ cargo test --all-features
 | Tests — Onboarding Types | 19 | `src/tests/onboarding_types_test.rs` |
 | Tests — Plan Document | 15 | `src/tests/plan_document_test.rs` |
 | Tests — TUI Error | 16 | `src/tests/tui_error_test.rs` |
-| **Total** | **1,089** | |
+| Tests — Queued Messages | 15 | `src/tests/queued_message_test.rs` |
+| **Total** | **1,118** | |
 
 ---
 

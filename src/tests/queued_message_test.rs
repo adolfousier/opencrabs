@@ -51,7 +51,7 @@ fn preview_multibyte_safe() {
     let japanese = "こんにちは世界テスト文字列です";
     let preview = format_preview(japanese, 40);
     // Should not panic on multibyte boundary
-    assert!(preview.len() > 0);
+    assert!(!preview.is_empty());
 }
 
 #[test]
@@ -116,12 +116,11 @@ async fn queue_overwrite_replaces_previous() {
 async fn queue_recall_clears_both() {
     // Simulates Up arrow recall: both the shared queue and local preview clear
     let queue: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-    let mut preview: Option<String> = None;
 
     // Queue a message
     let content = "queued msg".to_string();
     *queue.lock().await = Some(content.clone());
-    preview = Some(content);
+    let mut preview: Option<String> = Some(content);
 
     // Recall (Up arrow)
     let recalled = preview.take().unwrap();
@@ -136,13 +135,12 @@ async fn queue_recall_clears_both() {
 async fn queue_flush_clears_preview() {
     // Simulates IntermediateText flush
     let queue: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-    let mut preview: Option<String> = None;
 
     *queue.lock().await = Some("question".to_string());
-    preview = Some("question".to_string());
+    let mut preview: Option<String> = Some("question".to_string());
 
     // Flush (IntermediateText handler)
-    if let Some(_content) = queue.lock().await.take() {
+    if queue.lock().await.take().is_some() {
         preview = None;
     }
 
@@ -156,16 +154,14 @@ async fn queue_flush_clears_preview() {
 /// tool_group → queued_user_message → assistant_text
 #[test]
 fn ordering_queued_after_tools_before_assistant() {
-    let mut messages: Vec<(&str, &str)> = Vec::new();
-
-    // Step 1: flush tool group
-    messages.push(("tool_group", "3 tool calls"));
-
-    // Step 2: flush queued user message
-    messages.push(("user", "follow-up question"));
-
-    // Step 3: add assistant intermediate text
-    messages.push(("assistant", "Here's my response..."));
+    let messages: Vec<(&str, &str)> = vec![
+        // Step 1: flush tool group
+        ("tool_group", "3 tool calls"),
+        // Step 2: flush queued user message
+        ("user", "follow-up question"),
+        // Step 3: add assistant intermediate text
+        ("assistant", "Here's my response..."),
+    ];
 
     assert_eq!(messages[0].0, "tool_group");
     assert_eq!(messages[1].0, "user");
@@ -176,16 +172,14 @@ fn ordering_queued_after_tools_before_assistant() {
 /// tool_group → queued_user_message → assistant_response
 #[test]
 fn ordering_at_response_complete() {
-    let mut messages: Vec<(&str, &str)> = Vec::new();
-
-    // Tool group finalized
-    messages.push(("tool_group", "2 tool calls"));
-
-    // Queued message flushed
-    messages.push(("user", "what about X?"));
-
-    // Final assistant response
-    messages.push(("assistant", "About X..."));
+    let messages: Vec<(&str, &str)> = vec![
+        // Tool group finalized
+        ("tool_group", "2 tool calls"),
+        // Queued message flushed
+        ("user", "what about X?"),
+        // Final assistant response
+        ("assistant", "About X..."),
+    ];
 
     assert_eq!(messages[0].0, "tool_group");
     assert_eq!(messages[1].0, "user");
@@ -195,10 +189,7 @@ fn ordering_at_response_complete() {
 /// No queued message — just tool_group → assistant
 #[test]
 fn ordering_no_queued_message() {
-    let mut messages: Vec<(&str, &str)> = Vec::new();
-
-    messages.push(("tool_group", "1 tool call"));
-    messages.push(("assistant", "Done."));
+    let messages: Vec<(&str, &str)> = vec![("tool_group", "1 tool call"), ("assistant", "Done.")];
 
     assert_eq!(messages.len(), 2);
     assert_eq!(messages[0].0, "tool_group");

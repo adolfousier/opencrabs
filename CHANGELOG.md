@@ -5,6 +5,20 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.68] - 2026-03-10
+
+### Added
+- **Crash recovery dialog** — When the TUI crashes, a raw-terminal dialog lets users browse GitHub releases and roll back to older versions. Detects install method (pre-built binary, cargo install, source) and uses the correct upgrade strategy
+- **Install method detection** — New `InstallMethod` enum (`Source`, `CargoInstall`, `PrebuiltBinary`) with runtime detection. Used by crash recovery and `/evolve`
+- **Queued message preview** — Follow-up questions typed between tool calls now show a dimmed preview in the input box. Press Up to recall and edit before sending
+- **Test coverage** — 1,118 tests (up from 1,089). New: queued message lifecycle (15), install method detection (6), OpenAI max_completion_tokens (4), evolve install-method dispatch (4)
+
+### Fixed
+- **OpenAI newer models error** (#40) — gpt-4.1-*, gpt-5-*, o1-*, o3-*, o4-* models reject `max_tokens`; now sends `max_completion_tokens` for these model families
+- **TTS voice selection crash on missing python3 venv** (#39) — `local_tts_available()` now probes `python3 -c "import venv"` before offering local TTS. Error messages include platform-specific install instructions (e.g. `apt install python3-venv`)
+- **Queued messages dropped between tool calls** — Messages queued during tool execution were flushed before tool groups completed, causing them to appear in the wrong position. Now flushed after tool group finalization
+- **Evolve install-method awareness** — `/evolve` now dispatches to the correct upgrade path based on `InstallMethod::detect()`. Source builds suggest `/rebuild` instead of attempting binary download
+
 ## [0.2.67] - 2026-03-10
 
 ### Changed
@@ -1425,6 +1439,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.68]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.68
 [0.2.67]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.67
 [0.2.66]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.66
 [0.2.65]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.65
