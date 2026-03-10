@@ -37,15 +37,27 @@ pub fn local_stt_available() -> bool {
 }
 
 /// Returns true if local TTS (Piper) can run on this machine.
-/// Requires `python3` to be available on the system PATH.
+/// Requires `python3` with the `venv` module available on the system PATH.
 /// Result is cached so the probe runs at most once per process.
 pub fn local_tts_available() -> bool {
     #[cfg(feature = "local-tts")]
     {
         static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         *AVAILABLE.get_or_init(|| {
-            std::process::Command::new("python3")
+            // Check python3 exists
+            let python_ok = std::process::Command::new("python3")
                 .arg("--version")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+            if !python_ok {
+                return false;
+            }
+            // Check venv module is available (missing on some Debian/Ubuntu installs)
+            std::process::Command::new("python3")
+                .args(["-c", "import venv"])
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .status()

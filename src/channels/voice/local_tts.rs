@@ -171,7 +171,18 @@ pub async fn setup_piper_venv(
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("python3 -m venv failed: {stderr}");
+        let hint = if stderr.contains("ensurepip") || stderr.contains("No module named") {
+            if cfg!(target_os = "linux") {
+                "\n\nFix: install the venv module with:\n  sudo apt install python3-venv   # Debian/Ubuntu\n  sudo dnf install python3        # Fedora"
+            } else if cfg!(target_os = "macos") {
+                "\n\nFix: reinstall Python with:\n  brew install python3"
+            } else {
+                "\n\nFix: install Python 3 with the venv module included."
+            }
+        } else {
+            ""
+        };
+        anyhow::bail!("python3 -m venv failed: {stderr}{hint}");
     }
 
     let _ = progress_tx.send(SetupProgress {
