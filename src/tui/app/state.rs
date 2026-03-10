@@ -853,6 +853,24 @@ impl App {
         Ok(())
     }
 
+    /// Sync the current session's provider_name and model to match the active agent service.
+    /// Call after rebuild_agent_service() so the footer and sessions screen reflect the change.
+    pub(crate) async fn sync_session_to_provider(&mut self) {
+        let provider_name = self.agent_service.provider_name();
+        let model = self.default_model_name.clone();
+        if let Some(ref mut session) = self.current_session {
+            session.provider_name = Some(provider_name.clone());
+            session.model = Some(model);
+            let session_copy = session.clone();
+            if let Err(e) = self.session_service.update_session(&session_copy).await {
+                tracing::warn!("Failed to persist provider to session: {}", e);
+            }
+        }
+        // Cache provider instance
+        let provider_arc = self.agent_service.provider();
+        self.provider_cache.insert(provider_name, provider_arc);
+    }
+
     /// Get the agent service
     pub fn agent_service(&self) -> &Arc<AgentService> {
         &self.agent_service

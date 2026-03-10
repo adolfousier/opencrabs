@@ -1013,17 +1013,13 @@ impl App {
                                         )
                                     } else {
                                         (
-                                            super::onboarding::PROVIDERS
-                                                [wizard.selected_provider]
+                                            super::onboarding::PROVIDERS[wizard.selected_provider]
                                                 .name
                                                 .to_string(),
                                             wizard.selected_model_name().to_string(),
                                         )
                                     };
-                                    format!(
-                                        "[Model changed to {} (provider: {})]",
-                                        mname, pname
-                                    )
+                                    format!("[Model changed to {} (provider: {})]", mname, pname)
                                 }
                                 _ => "Settings saved.".to_string(),
                             };
@@ -1031,14 +1027,15 @@ impl App {
                         }
                     }
                     self.onboarding = None;
-                    if needs_rebuild
-                        && let Err(e) = self.rebuild_agent_service().await
-                    {
+                    if needs_rebuild && let Err(e) = self.rebuild_agent_service().await {
                         tracing::warn!("Failed to rebuild agent service: {}", e);
                         self.push_system_message(format!(
                             "Warning: Failed to reload provider: {}",
                             e
                         ));
+                    }
+                    if needs_rebuild {
+                        self.sync_session_to_provider().await;
                     }
                     self.switch_mode(AppMode::Chat).await?;
                 }
@@ -1082,6 +1079,7 @@ impl App {
                         }
                     }
                     self.onboarding = None;
+                    self.sync_session_to_provider().await;
                     self.switch_mode(AppMode::Chat).await?;
                 }
                 WizardAction::FetchModels => {
