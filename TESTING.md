@@ -76,7 +76,14 @@ cargo test --all-features
 | Tests — Message Compaction | 24 | `src/tests/compaction_test.rs` |
 | Tests — Fallback Vision | 35 | `src/tests/fallback_vision_test.rs` |
 | Tests — General | 100 | `src/tests/` |
-| **Total** | **950** | |
+| Tests — File Extract | 10 | `src/tests/file_extract_test.rs` |
+| Tests — Image Utils | 9 | `src/tests/image_util_test.rs` |
+| Tests — Onboarding Brain | 16 | `src/tests/onboarding_brain_test.rs` |
+| Tests — Onboarding Navigation | 22 | `src/tests/onboarding_navigation_test.rs` |
+| Tests — Onboarding Types | 19 | `src/tests/onboarding_types_test.rs` |
+| Tests — Plan Document | 15 | `src/tests/plan_document_test.rs` |
+| Tests — TUI Error | 16 | `src/tests/tui_error_test.rs` |
+| **Total** | **1,089** | |
 
 ---
 
