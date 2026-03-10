@@ -37,6 +37,12 @@ pub async fn transcribe(audio_bytes: Vec<u8>, voice_config: &VoiceConfig) -> Res
         SttMode::Local => {
             #[cfg(feature = "local-stt")]
             {
+                if !super::local_stt_available() {
+                    anyhow::bail!(
+                        "Local STT is not supported on this CPU — AVX2 is required. \
+                         Please switch to API STT in settings."
+                    );
+                }
                 let model_id = &voice_config.local_stt_model;
                 let preset = super::local_whisper::find_local_model(model_id)
                     .ok_or_else(|| anyhow::anyhow!("Unknown local STT model: {}", model_id))?;

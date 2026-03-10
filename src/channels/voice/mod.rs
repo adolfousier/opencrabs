@@ -18,8 +18,22 @@ pub use service::{synthesize, synthesize_speech, transcribe, transcribe_audio};
 pub use service::{preload_local_whisper, transcribe_audio_local};
 
 /// Returns true if local STT is compiled in and can run on this machine.
+///
+/// On x86_64, candle (the inference backend) requires AVX2. We check for it
+/// at runtime so that machines without AVX2 (e.g. Sandy Bridge) never attempt
+/// local STT and get a SIGILL crash.
 pub fn local_stt_available() -> bool {
-    cfg!(feature = "local-stt")
+    if !cfg!(feature = "local-stt") {
+        return false;
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        std::is_x86_feature_detected!("avx2")
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        true // ARM/Apple Silicon — no AVX2 constraint
+    }
 }
 
 /// Returns true if local TTS (Piper) can run on this machine.
