@@ -542,6 +542,14 @@ cargo build --release
 ./target/release/opencrabs
 ```
 
+> **Linux on older CPUs (Sandy Bridge / AVX1-only, no AVX2):** The local STT and embedding engine require at minimum AVX instructions. If your CPU has AVX but not AVX2 (e.g. Intel Sandy Bridge, Ivy Bridge — roughly 2011–2012), you must build with:
+> ```bash
+> RUSTFLAGS="-C target-cpu=native" cargo run --bin opencrabs
+> # or for release:
+> RUSTFLAGS="-C target-cpu=native" cargo build --release
+> ```
+> CPUs without AVX at all are not supported for local STT/embedding. API STT mode works on any machine.
+
 > **API Keys:** OpenCrabs uses `keys.toml` instead of `.env` for API keys. The onboarding wizard will help you set it up, or edit `~/.opencrabs/keys.toml` directly. Keys are handled at runtime — no OS environment pollution.
 
 > **First run?** The onboarding wizard will guide you through provider setup, workspace, and more. See [Onboarding Wizard](#-onboarding-wizard).
