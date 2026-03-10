@@ -1,9 +1,2 @@
-# Minimum CPU target for x86_64: Sandy Bridge (2011+) enables AVX which
-# candle and ggml require to function. SSE2-only (x86-64 baseline) is not
-# enough — local STT and embedding will crash without AVX.
-# Use RUSTFLAGS="-C target-cpu=native" to build optimised for your machine.
-[build]
-rustflags = ["-C", "target-cpu=sandybridge"]
-
 [target.aarch64-unknown-linux-gnu]
 linker = "aarch64-linux-gnu-gcc"
