@@ -668,7 +668,10 @@ enabled = true
         assert_eq!(wizard.tts_mode, 2);
         assert!(wizard.tts_enabled);
     } else {
-        assert_eq!(wizard.tts_mode, 0, "Should reset Local TTS to Off when unavailable");
+        assert_eq!(
+            wizard.tts_mode, 0,
+            "Should reset Local TTS to Off when unavailable"
+        );
         assert!(!wizard.tts_enabled);
     }
 }

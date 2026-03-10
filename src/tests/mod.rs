@@ -1,9 +1,9 @@
 pub mod candle_whisper_test;
 pub mod channel_search_test;
-pub mod evolve_test;
 pub mod cli_test;
 pub mod compaction_test;
 pub mod cron_test;
+pub mod evolve_test;
 //pub mod error_scenarios_test;
 pub mod fallback_vision_test;
 //pub mod integration_test;
