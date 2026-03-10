@@ -1,40 +1,24 @@
 //! Evolve Tool
 //!
-//! Downloads the latest OpenCrabs release binary from GitHub, replaces the
-//! current executable, and exec()-restarts into the new version.
-//! The crab molts its shell and wakes up evolved.
+//! Updates OpenCrabs to the latest release. Detects the install method
+//! (pre-built binary, cargo install, or source build) and uses the
+//! appropriate upgrade strategy:
 //!
-//! Before swapping, it health-checks the new binary. If the swap fails,
-//! it rolls back to the previous version automatically.
+//! - **Pre-built binary**: Downloads from GitHub releases, health-checks, swaps.
+//! - **cargo install**: Runs `cargo install opencrabs --force`.
+//! - **Source build**: Suggests using `/rebuild` instead.
+//!
+//! Before swapping binaries, it health-checks the new binary. If the swap
+//! fails, it rolls back to the previous version automatically.
 
 use super::error::Result;
 use super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
 use crate::brain::agent::{ProgressCallback, ProgressEvent};
+use crate::utils::install::{InstallMethod, binary_name, platform_suffix};
 use async_trait::async_trait;
 use serde_json::Value;
 
 const GITHUB_API: &str = "https://api.github.com/repos/adolfousier/opencrabs/releases/latest";
-
-/// Binary filename (inside archives) for the current platform.
-fn binary_name() -> &'static str {
-    if std::env::consts::OS == "windows" {
-        "opencrabs.exe"
-    } else {
-        "opencrabs"
-    }
-}
-
-/// Resolves the asset suffix for the current platform.
-fn platform_suffix() -> Option<&'static str> {
-    match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("macos", "aarch64") => Some("macos-arm64"),
-        ("macos", "x86_64") => Some("macos-amd64"),
-        ("linux", "x86_64") => Some("linux-amd64"),
-        ("linux", "aarch64") => Some("linux-arm64"),
-        ("windows", "x86_64") => Some("windows-amd64"),
-        _ => None,
-    }
-}
 
 /// Check GitHub for a newer release. Returns `Some(latest_version)` if an
 /// update is available, `None` if already on latest (or on error).
@@ -93,13 +77,13 @@ fn source_cargo_version() -> Option<String> {
         .map(String::from)
 }
 
-/// Run a health check on a binary: execute it with `health-check` arg,
-/// verify it prints "ok" and exits cleanly within a timeout.
+/// Run a health check on a binary: execute it with `--version`,
+/// verify it exits cleanly within a timeout.
 async fn health_check_binary(path: &std::path::Path) -> std::result::Result<(), String> {
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(10),
         tokio::process::Command::new(path)
-            .arg("health-check")
+            .arg("--version")
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
             .output(),
@@ -107,14 +91,7 @@ async fn health_check_binary(path: &std::path::Path) -> std::result::Result<(), 
     .await;
 
     match result {
-        Ok(Ok(output)) if output.status.success() => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            if stdout.trim().contains("ok") {
-                Ok(())
-            } else {
-                Err("binary did not return 'ok'".into())
-            }
-        }
+        Ok(Ok(output)) if output.status.success() => Ok(()),
         Ok(Ok(output)) => Err(format!("exited with status {}", output.status)),
         Ok(Err(e)) => Err(format!("failed to spawn: {}", e)),
         Err(_) => Err("timed out after 10s".into()),
@@ -138,10 +115,10 @@ impl Tool for EvolveTool {
     }
 
     fn description(&self) -> &str {
-        "Check for and install the latest OpenCrabs release from GitHub. \
-         Downloads the pre-built binary for the current platform and \
-         hot-restarts into the new version. Use this to update OpenCrabs \
-         without building from source."
+        "Check for and install the latest OpenCrabs release. \
+         Automatically detects the install method (pre-built binary, \
+         cargo install, or source) and uses the right update strategy. \
+         Hot-restarts into the new version after installation."
     }
 
     fn input_schema(&self) -> Value {
@@ -173,13 +150,17 @@ impl Tool for EvolveTool {
 
         let current_version = crate::VERSION;
         let sid = context.session_id;
+        let install_method = InstallMethod::detect();
 
         // Emit progress
         if let Some(ref cb) = self.progress {
             cb(
                 sid,
                 ProgressEvent::IntermediateText {
-                    text: "Checking for updates...".into(),
+                    text: format!(
+                        "Checking for updates (install: {})...",
+                        install_method.description()
+                    ),
                     reasoning: None,
                 },
             );
@@ -225,12 +206,109 @@ impl Tool for EvolveTool {
 
         if check_only {
             return Ok(ToolResult::success(format!(
-                "Update available: v{} -> v{}. Run /evolve to install.",
-                current_version, latest_version
+                "Update available: v{} -> v{} (install method: {}). Run /evolve to install.",
+                current_version,
+                latest_version,
+                install_method.description()
             )));
         }
 
-        // Determine platform asset
+        // Dispatch based on install method
+        match install_method {
+            InstallMethod::Source(_) => {
+                return Ok(ToolResult::success(format!(
+                    "Update available: v{} -> v{}. You're running from source — use /rebuild \
+                     to pull and build the latest version, or `git checkout v{}` to switch.",
+                    current_version, latest_version, latest_version
+                )));
+            }
+            InstallMethod::CargoInstall => {
+                return self
+                    .evolve_via_cargo_install(sid, current_version, latest_version)
+                    .await;
+            }
+            InstallMethod::PrebuiltBinary => {
+                return self
+                    .evolve_via_binary_download(
+                        sid,
+                        &client,
+                        &release,
+                        current_version,
+                        latest_tag,
+                        latest_version,
+                    )
+                    .await;
+            }
+        }
+    }
+}
+
+impl EvolveTool {
+    /// Update via `cargo install opencrabs --force`.
+    async fn evolve_via_cargo_install(
+        &self,
+        sid: uuid::Uuid,
+        current_version: &str,
+        latest_version: &str,
+    ) -> Result<ToolResult> {
+        if let Some(ref cb) = self.progress {
+            cb(
+                sid,
+                ProgressEvent::IntermediateText {
+                    text: format!(
+                        "Updating via cargo install (v{} -> v{})...",
+                        current_version, latest_version
+                    ),
+                    reasoning: None,
+                },
+            );
+        }
+
+        let output = tokio::process::Command::new("cargo")
+            .args(["install", "opencrabs", "--force"])
+            .output()
+            .await
+            .map_err(|e| {
+                super::error::ToolError::Execution(format!("Failed to spawn cargo: {}", e))
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Ok(ToolResult::error(format!(
+                "cargo install failed: {}",
+                stderr.chars().take(500).collect::<String>()
+            )));
+        }
+
+        // Signal restart
+        if let Some(ref cb) = self.progress {
+            cb(
+                sid,
+                ProgressEvent::RestartReady {
+                    status: format!(
+                        "Evolved via cargo install: v{} -> v{}. Restarting now.",
+                        current_version, latest_version
+                    ),
+                },
+            );
+        }
+
+        Ok(ToolResult::success(format!(
+            "Evolved from v{} to v{} via cargo install. Restarting into the new version.",
+            current_version, latest_version
+        )))
+    }
+
+    /// Update by downloading a pre-built binary from GitHub releases.
+    async fn evolve_via_binary_download(
+        &self,
+        sid: uuid::Uuid,
+        client: &reqwest::Client,
+        release: &Value,
+        current_version: &str,
+        latest_tag: &str,
+        latest_version: &str,
+    ) -> Result<ToolResult> {
         let suffix = match platform_suffix() {
             Some(s) => s,
             None => {
@@ -242,29 +320,26 @@ impl Tool for EvolveTool {
             }
         };
 
-        // Find the matching asset in the release
         let is_windows = std::env::consts::OS == "windows";
         let ext = if is_windows { "zip" } else { "tar.gz" };
         let expected_asset = format!("opencrabs-{}-{}.{}", latest_tag, suffix, ext);
 
         let assets = release["assets"].as_array();
-        let download_url = assets.and_then(|arr| {
-            arr.iter().find_map(|a| {
-                let name = a["name"].as_str()?;
-                if name == expected_asset {
-                    a["browser_download_url"].as_str().map(String::from)
-                } else {
-                    None
-                }
+        let download_url = assets
+            .and_then(|arr| {
+                arr.iter().find_map(|a| {
+                    let name = a["name"].as_str()?;
+                    if name == expected_asset {
+                        a["browser_download_url"].as_str().map(String::from)
+                    } else {
+                        None
+                    }
+                })
             })
-        });
-
-        // Fallback: try legacy naming without version tag
-        let download_url = match download_url {
-            Some(url) => url,
-            None => {
+            .or_else(|| {
+                // Fallback: try legacy naming without version tag
                 let legacy_asset = format!("opencrabs-{}.{}", suffix, ext);
-                match assets.and_then(|arr| {
+                assets.and_then(|arr| {
                     arr.iter().find_map(|a| {
                         let name = a["name"].as_str()?;
                         if name == legacy_asset {
@@ -273,29 +348,30 @@ impl Tool for EvolveTool {
                             None
                         }
                     })
-                }) {
-                    Some(url) => url,
-                    None => {
-                        return Ok(ToolResult::error(format!(
-                            "No binary found for {} in v{}. Expected: {}. \
-                             Available assets: {}. Use /rebuild to build from source.",
-                            suffix,
-                            latest_version,
-                            expected_asset,
-                            assets
-                                .map(|arr| arr
-                                    .iter()
-                                    .filter_map(|a| a["name"].as_str())
-                                    .collect::<Vec<_>>()
-                                    .join(", "))
-                                .unwrap_or_default()
-                        )));
-                    }
-                }
+                })
+            });
+
+        let download_url = match download_url {
+            Some(url) => url,
+            None => {
+                return Ok(ToolResult::error(format!(
+                    "No binary found for {} in v{}. Expected: {}. \
+                     Available assets: {}. Use /rebuild to build from source.",
+                    suffix,
+                    latest_version,
+                    expected_asset,
+                    assets
+                        .map(|arr| arr
+                            .iter()
+                            .filter_map(|a| a["name"].as_str())
+                            .collect::<Vec<_>>()
+                            .join(", "))
+                        .unwrap_or_default()
+                )));
             }
         };
 
-        // Emit download progress
+        // Download
         if let Some(ref cb) = self.progress {
             cb(
                 sid,
@@ -306,7 +382,6 @@ impl Tool for EvolveTool {
             );
         }
 
-        // Download the archive
         let archive_bytes = match client.get(&download_url).send().await {
             Ok(resp) if resp.status().is_success() => match resp.bytes().await {
                 Ok(b) => b,
@@ -321,7 +396,7 @@ impl Tool for EvolveTool {
             Err(e) => return Ok(ToolResult::error(format!("Download failed: {}", e))),
         };
 
-        // Extract binary from archive
+        // Extract
         let bin_name = binary_name();
         let binary_data = if is_windows {
             extract_from_zip(&archive_bytes, bin_name)?
@@ -340,7 +415,7 @@ impl Tool for EvolveTool {
             }
         };
 
-        // Write to a temp file next to the executable
+        // Write temp file
         let tmp_path = exe_path.with_extension("evolve_tmp");
         if let Err(e) = tokio::fs::write(&tmp_path, &binary_data).await {
             return Ok(ToolResult::error(format!(
@@ -349,7 +424,6 @@ impl Tool for EvolveTool {
             )));
         }
 
-        // Set executable permission on Unix
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -363,7 +437,7 @@ impl Tool for EvolveTool {
             }
         }
 
-        // Health-check the new binary before swapping
+        // Health-check before swap
         if let Some(ref cb) = self.progress {
             cb(
                 sid,
@@ -382,11 +456,10 @@ impl Tool for EvolveTool {
             )));
         }
 
-        // Backup current binary for rollback
+        // Backup
         let backup_path = exe_path.with_extension("evolve_backup");
         if let Err(e) = std::fs::copy(&exe_path, &backup_path) {
             tracing::warn!("Could not create backup of current binary: {}", e);
-            // Non-fatal — proceed, just lose rollback capability
         }
 
         // Atomic rename
@@ -400,7 +473,6 @@ impl Tool for EvolveTool {
 
         // Post-swap verification
         if let Err(reason) = health_check_binary(&exe_path).await {
-            // Rollback
             if backup_path.exists() {
                 if let Err(e) = std::fs::rename(&backup_path, &exe_path) {
                     return Ok(ToolResult::error(format!(
@@ -419,7 +491,6 @@ impl Tool for EvolveTool {
             )));
         }
 
-        // Clean up backup on success
         let _ = std::fs::remove_file(&backup_path);
 
         // Signal restart

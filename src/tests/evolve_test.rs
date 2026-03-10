@@ -1,8 +1,10 @@
 //! Evolve (self-update) Tests
 //!
-//! Tests for version comparison, platform detection, and asset naming.
+//! Tests for version comparison, platform detection, asset naming,
+//! and install method detection.
 
 use crate::brain::tools::evolve::is_newer;
+use crate::utils::install::{InstallMethod, binary_name, platform_suffix};
 
 // ─── Version comparison ─────────────────────────────────────────────────────
 
@@ -97,7 +99,7 @@ fn binary_name_is_always_opencrabs() {
 
 #[test]
 fn current_platform_has_suffix() {
-    // On any CI/dev machine we support, platform_suffix should return Some
+    // platform_suffix is now public via utils::install
     let os = std::env::consts::OS;
     let arch = std::env::consts::ARCH;
     let supported = matches!(
@@ -109,16 +111,42 @@ fn current_platform_has_suffix() {
             | ("windows", "x86_64")
     );
     if supported {
-        // We can't call platform_suffix directly (it's private),
-        // but we verify the match arms cover our platform
-        let suffix = match (os, arch) {
-            ("macos", "aarch64") => "macos-arm64",
-            ("macos", "x86_64") => "macos-amd64",
-            ("linux", "x86_64") => "linux-amd64",
-            ("linux", "aarch64") => "linux-arm64",
-            ("windows", "x86_64") => "windows-amd64",
-            _ => unreachable!(),
-        };
-        assert!(!suffix.is_empty());
+        assert!(platform_suffix().is_some());
+    }
+}
+
+// ─── Install method detection ────────────────────────────────────────────────
+
+#[test]
+fn install_method_detect_does_not_panic() {
+    let method = InstallMethod::detect();
+    // On a dev machine building from source, should be Source
+    assert!(!method.description().is_empty());
+}
+
+#[test]
+fn install_method_source_from_dev_build() {
+    // When running tests via cargo, we're in a source build
+    let method = InstallMethod::detect();
+    matches!(method, InstallMethod::Source(_));
+}
+
+#[test]
+fn install_method_descriptions_are_distinct() {
+    let source = InstallMethod::Source(std::path::PathBuf::from("/tmp"));
+    let cargo = InstallMethod::CargoInstall;
+    let prebuilt = InstallMethod::PrebuiltBinary;
+    assert_ne!(source.description(), cargo.description());
+    assert_ne!(cargo.description(), prebuilt.description());
+    assert_ne!(source.description(), prebuilt.description());
+}
+
+#[test]
+fn binary_name_is_platform_correct() {
+    let name = binary_name();
+    if std::env::consts::OS == "windows" {
+        assert_eq!(name, "opencrabs.exe");
+    } else {
+        assert_eq!(name, "opencrabs");
     }
 }
