@@ -68,7 +68,7 @@ pub async fn check_for_update() -> Option<String> {
 
 /// Check whether the release JSON contains a downloadable asset for the
 /// current platform.
-fn has_platform_asset(release: &serde_json::Value, tag: &str) -> bool {
+pub(crate) fn has_platform_asset(release: &serde_json::Value, tag: &str) -> bool {
     let suffix = match platform_suffix() {
         Some(s) => s,
         None => return false,
