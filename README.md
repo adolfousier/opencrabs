@@ -44,6 +44,7 @@ OpenCrabs runs as a **single binary on your terminal** — no server, no gateway
 | **Supply chain** | Single compiled binary. Rust's type system prevents buffer overflows, use-after-free, data races at compile time | npm ecosystem: typosquatting, dependency confusion, prototype pollution |
 | **Memory safety** | Compile-time guarantees — no GC, no null pointers, no data races | GC-managed, prototype pollution, type coercion bugs |
 | **Concurrency** | tokio async + Rust ownership = zero data races guaranteed | Single-threaded event loop, worker threads share memory unsafely |
+| **Native TTS/STT** | Built-in local speech-to-text (whisper.cpp) and text-to-speech — ~130 MB total stack, fully offline | No native voice. Requires external APIs (Google, AWS, Azure) or heavy Python dependencies (PyTorch, ~5 GB+) |
 | **Telemetry** | Zero. No analytics, no tracking, no remote logging | Server infra typically includes monitoring, logging pipelines, APM |
 
 ### What stays local (never leaves your machine)
@@ -103,7 +104,7 @@ https://github.com/user-attachments/assets/7f45c5f8-acdf-48d5-b6a4-0e4811a9ee23
 ### AI & Providers
 | Feature | Description |
 |---------|-------------|
-| **Multi-Provider** | Anthropic Claude, OpenAI, OpenRouter (400+ models), MiniMax, Google Gemini, and any OpenAI-compatible API (Ollama, LM Studio, LocalAI). Model lists fetched live from provider APIs — new models available instantly. Each session remembers its provider + model and restores it on switch |
+| **Multi-Provider** | Anthropic Claude, OpenAI, GitHub Models (30+ models), OpenRouter (400+ models), MiniMax, Google Gemini, and any OpenAI-compatible API (Ollama, LM Studio, LocalAI). Model lists fetched live from provider APIs — new models available instantly. Each session remembers its provider + model and restores it on switch |
 | **Fallback Providers** | Configure a chain of fallback providers — if the primary fails, each fallback is tried in sequence automatically. Any configured provider can be a fallback. Config: `[providers.fallback] providers = ["openrouter", "anthropic"]` |
 | **Per-Provider Vision** | Set `vision_model` per provider — the LLM calls `analyze_image` as a tool, which uses the vision model on the same provider API to describe images. The chat model stays the same and gets vision capability via tool call. Gemini vision takes priority when configured. Auto-configured for known providers (e.g. MiniMax) on first run |
 | **Real-time Streaming** | Character-by-character response streaming with animated spinner showing model name and live text |
@@ -204,6 +205,31 @@ OAuth tokens (`sk-ant-oat` prefix) are auto-detected — uses `Authorization: Be
 [providers.openai]
 api_key = "sk-YOUR_KEY"
 ```
+
+### GitHub Models
+
+**Models:** GPT-4o, o1, o3-mini, Phi-4, Llama 3.x, Mistral Large, DeepSeek-R1, Cohere Command R+, and 30+ more — browse the full catalog at [github.com/marketplace/models](https://github.com/marketplace/models)
+
+**Setup** — authenticate with the GitHub CLI (one-time, browser OAuth):
+```bash
+gh auth login
+```
+
+That's it. OpenCrabs auto-detects the token from `gh auth token`. Or paste a PAT (with `models:read` scope) from [github.com/settings/tokens](https://github.com/settings/tokens) into `keys.toml`:
+
+```toml
+[providers.github]
+api_key = "ghp_YOUR_TOKEN"
+```
+
+Enable in `config.toml`:
+```toml
+[providers.github]
+enabled = true
+default_model = "gpt-4o"
+```
+
+**Features:** Streaming, tools, OpenAI-compatible API at `models.github.ai/inference`. GitHub-specific API headers (`Accept`, `X-GitHub-Api-Version`) are injected automatically.
 
 ### OpenRouter — 400+ Models, One Key
 
@@ -1538,7 +1564,7 @@ opencrabs/
 │   │   └── runner.rs     # TUI event loop
 │   ├── utils/            # Utilities (retry, etc.)
 │   ├── migrations/       # SQLite migrations
-│   ├── tests/            # 1,125 tests (see TESTING.md)
+│   ├── tests/            # 1,171 tests (see TESTING.md)
 │   ├── benches/          # Criterion benchmarks
 │   └── docs/             # Documentation + screenshots
 ├── Cargo.toml
@@ -1563,7 +1589,7 @@ cargo build --release
 # Small release build
 cargo build --profile release-small
 
-# Run tests (1,125 tests across 60+ modules)
+# Run tests (1,171 tests across 60+ modules)
 cargo test --all-features
 # See TESTING.md for full test coverage documentation
 
