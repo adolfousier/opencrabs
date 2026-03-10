@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Local STT transcription timeout** — Added 300s timeout to prevent indefinite hangs
 - **Typing indicator delay** — Show typing indicator immediately when processing voice messages
 - **Removed unnecessary sandybridge rustflag** — Global `target-cpu=sandybridge` in `.cargo/config.toml` was unnecessary and spammed warnings on non-x86 platforms
+- **TTS voice selection not persisting** — Enter on a downloaded Piper voice re-triggered download instead of advancing. Config was never saved because `apply_config()` was never reached
+- **Linux CI missing ALSA dev** — `libasound2-dev` not installed on Ubuntu runners, breaking `--all-features` builds. Added to CI and release workflows including ARM64 cross-compile
+- **Release workflow resilience** — Individual platform build failures no longer block the GitHub Release creation
 
 ### Docs
 - Document `RUSTFLAGS="-C target-cpu=native"` for AVX1-only CPUs (Sandy Bridge) in README
