@@ -322,6 +322,50 @@ mod tests {
     }
 
     #[test]
+    fn test_calculate_cost_gpt4o() {
+        let cfg = PricingConfig::defaults();
+        // "gpt-4o" matches "gpt-4" prefix — $30/$60
+        let cost = cfg.calculate_cost("gpt-4o", 1_000_000, 1_000_000);
+        assert!(cost > 0.0);
+    }
+
+    #[test]
+    fn test_calculate_cost_o3_mini() {
+        let cfg = PricingConfig::defaults();
+        let cost = cfg.calculate_cost("o3-mini", 1_000_000, 1_000_000);
+        assert_eq!(cost, 5.50); // $1.10 + $4.40
+    }
+
+    #[test]
+    fn test_calculate_cost_o1() {
+        let cfg = PricingConfig::defaults();
+        let cost = cfg.calculate_cost("o1", 1_000_000, 1_000_000);
+        assert_eq!(cost, 75.0); // $15 + $60
+    }
+
+    #[test]
+    fn test_calculate_cost_llama_github_id() {
+        let cfg = PricingConfig::defaults();
+        // GitHub marketplace ID "Llama-3.3-70B-Instruct" matches "llama-3.3-70b" prefix
+        let cost = cfg.calculate_cost("Llama-3.3-70B-Instruct", 1_000_000, 1_000_000);
+        assert_eq!(cost, 1.38); // $0.59 + $0.79
+    }
+
+    #[test]
+    fn test_calculate_cost_deepseek_r1() {
+        let cfg = PricingConfig::defaults();
+        let cost = cfg.calculate_cost("DeepSeek-R1", 1_000_000, 1_000_000);
+        assert_eq!(cost, 2.74); // $0.55 + $2.19
+    }
+
+    #[test]
+    fn test_calculate_cost_gpt5() {
+        let cfg = PricingConfig::defaults();
+        let cost = cfg.calculate_cost("gpt-5", 1_000_000, 1_000_000);
+        assert_eq!(cost, 11.25); // $1.25 + $10.0
+    }
+
+    #[test]
     fn test_unknown_model_zero() {
         let cfg = PricingConfig::defaults();
         let cost = cfg.calculate_cost("some-unknown-model-xyz", 1_000_000, 1_000_000);

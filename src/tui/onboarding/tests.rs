@@ -404,8 +404,8 @@ fn test_brain_setup_defaults() {
 
 #[test]
 fn test_openrouter_provider_index() {
-    // OpenRouter is index 3, Custom is last
-    assert_eq!(PROVIDERS[3].name, "OpenRouter");
+    // OpenRouter is index 4, Custom is last
+    assert_eq!(PROVIDERS[4].name, "OpenRouter");
     assert_eq!(PROVIDERS.last().unwrap().name, "Custom OpenAI-Compatible");
 }
 
@@ -443,13 +443,15 @@ fn test_supports_model_fetch() {
     assert!(wizard.supports_model_fetch());
     wizard.selected_provider = 1; // OpenAI
     assert!(wizard.supports_model_fetch());
-    wizard.selected_provider = 2; // Gemini
+    wizard.selected_provider = 2; // GitHub (no /models endpoint)
     assert!(!wizard.supports_model_fetch());
-    wizard.selected_provider = 3; // OpenRouter
+    wizard.selected_provider = 3; // Gemini
+    assert!(!wizard.supports_model_fetch());
+    wizard.selected_provider = 4; // OpenRouter
     assert!(wizard.supports_model_fetch());
-    wizard.selected_provider = 4; // Minimax
+    wizard.selected_provider = 5; // Minimax
     assert!(!wizard.supports_model_fetch());
-    wizard.selected_provider = 5; // Custom
+    wizard.selected_provider = 6; // Custom
     assert!(!wizard.supports_model_fetch());
 }
 

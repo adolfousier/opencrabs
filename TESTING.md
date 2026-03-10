@@ -61,7 +61,7 @@ cargo test --all-features
 | **A2A — Server/Handler/Agent Card** | 7 | `src/a2a/` |
 | **Memory — Store** | 6 | `src/memory/store.rs` |
 | **Memory — Search** | 3 | `src/memory/search.rs` |
-| **Pricing** | 7 | `src/pricing.rs` |
+| **Pricing** | 13 | `src/pricing.rs` |
 | **Logging** | 4 | `src/logging/logger.rs` |
 | **Utils — Install** | 6 | `src/utils/install.rs` |
 | **Utils** | 1 | `src/utils/` |
@@ -76,6 +76,7 @@ cargo test --all-features
 | Tests — Session & Working Dir | 15 | `src/tests/session_working_dir_test.rs` |
 | Tests — Message Compaction | 24 | `src/tests/compaction_test.rs` |
 | Tests — Fallback Vision | 35 | `src/tests/fallback_vision_test.rs` |
+| Tests — GitHub Provider | 40 | `src/tests/github_provider_test.rs` |
 | Tests — General | 100 | `src/tests/` |
 | Tests — File Extract | 10 | `src/tests/file_extract_test.rs` |
 | Tests — Image Utils | 9 | `src/tests/image_util_test.rs` |
@@ -85,7 +86,7 @@ cargo test --all-features
 | Tests — Plan Document | 15 | `src/tests/plan_document_test.rs` |
 | Tests — TUI Error | 16 | `src/tests/tui_error_test.rs` |
 | Tests — Queued Messages | 15 | `src/tests/queued_message_test.rs` |
-| **Total** | **1,125** | |
+| **Total** | **1,171** | |
 
 ---
 

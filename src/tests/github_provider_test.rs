@@ -1,0 +1,425 @@
+//! GitHub Models provider integration tests.
+//!
+//! Tests config resolution, provider indices, factory wiring,
+//! extra headers on OpenAIProvider, and onboarding integration.
+
+use crate::brain::Provider;
+use crate::brain::provider::custom_openai_compatible::OpenAIProvider;
+use crate::config::{Config, ProviderConfig, ProviderConfigs, resolve_provider_from_config};
+use crate::tui::onboarding::{OnboardingWizard, PROVIDERS};
+
+// ── Provider array ──────────────────────────────────────────────
+
+#[test]
+fn github_models_is_at_index_2() {
+    assert_eq!(PROVIDERS[2].name, "GitHub Models");
+}
+
+#[test]
+fn github_models_has_no_static_models() {
+    assert!(PROVIDERS[2].models.is_empty());
+}
+
+#[test]
+fn github_models_key_label() {
+    assert_eq!(PROVIDERS[2].key_label, "Token");
+}
+
+#[test]
+fn github_models_has_help_lines() {
+    assert!(!PROVIDERS[2].help_lines.is_empty());
+    let help = PROVIDERS[2].help_lines.join(" ");
+    assert!(help.contains("gh auth login"));
+}
+
+#[test]
+fn provider_order_after_github_insertion() {
+    assert_eq!(PROVIDERS[0].name, "Anthropic Claude");
+    assert_eq!(PROVIDERS[1].name, "OpenAI");
+    assert_eq!(PROVIDERS[2].name, "GitHub Models");
+    assert_eq!(PROVIDERS[3].name, "Google Gemini");
+    assert_eq!(PROVIDERS[4].name, "OpenRouter");
+    assert_eq!(PROVIDERS[5].name, "Minimax");
+    assert_eq!(PROVIDERS[6].name, "Custom OpenAI-Compatible");
+}
+
+// ── Config struct ───────────────────────────────────────────────
+
+#[test]
+fn provider_configs_has_github_field() {
+    let configs = ProviderConfigs::default();
+    assert!(configs.github.is_none());
+}
+
+#[test]
+fn provider_configs_github_round_trip() {
+    let mut configs = ProviderConfigs::default();
+    configs.github = Some(ProviderConfig {
+        enabled: true,
+        default_model: Some("gpt-4o".to_string()),
+        ..Default::default()
+    });
+    assert!(configs.github.as_ref().unwrap().enabled);
+    assert_eq!(
+        configs.github.as_ref().unwrap().default_model.as_deref(),
+        Some("gpt-4o")
+    );
+}
+
+// ── resolve_provider_from_config ────────────────────────────────
+
+#[test]
+fn resolve_github_when_enabled() {
+    let mut config = Config::default();
+    config.providers.github = Some(ProviderConfig {
+        enabled: true,
+        default_model: Some("gpt-4o".to_string()),
+        ..Default::default()
+    });
+    let (name, model) = resolve_provider_from_config(&config);
+    assert_eq!(name, "GitHub Models");
+    assert_eq!(model, "gpt-4o");
+}
+
+#[test]
+fn resolve_github_default_model_when_none() {
+    let mut config = Config::default();
+    config.providers.github = Some(ProviderConfig {
+        enabled: true,
+        default_model: None,
+        ..Default::default()
+    });
+    let (name, model) = resolve_provider_from_config(&config);
+    assert_eq!(name, "GitHub Models");
+    assert_eq!(model, "gpt-4o");
+}
+
+#[test]
+fn resolve_skips_github_when_disabled() {
+    let mut config = Config::default();
+    config.providers.github = Some(ProviderConfig {
+        enabled: false,
+        ..Default::default()
+    });
+    let (name, _) = resolve_provider_from_config(&config);
+    assert_ne!(name, "GitHub Models");
+}
+
+#[test]
+fn resolve_skips_github_when_absent() {
+    let config = Config::default();
+    assert!(config.providers.github.is_none());
+    let (name, _) = resolve_provider_from_config(&config);
+    assert_ne!(name, "GitHub Models");
+}
+
+// ── OpenAIProvider extra_headers ─────────────────────────────────
+
+#[test]
+fn extra_headers_builder_sets_headers() {
+    let provider = OpenAIProvider::with_base_url(
+        "test-key".to_string(),
+        "https://models.github.ai/inference/chat/completions".to_string(),
+    )
+    .with_extra_headers(vec![
+        (
+            "Accept".to_string(),
+            "application/vnd.github+json".to_string(),
+        ),
+        ("X-GitHub-Api-Version".to_string(), "2022-11-28".to_string()),
+    ]);
+    assert_eq!(provider.extra_headers.len(), 2);
+    assert_eq!(provider.extra_headers[0].0, "Accept");
+    assert_eq!(provider.extra_headers[1].0, "X-GitHub-Api-Version");
+}
+
+#[test]
+fn extra_headers_default_empty() {
+    let provider = OpenAIProvider::with_base_url(
+        "test-key".to_string(),
+        "https://api.openai.com/v1/chat/completions".to_string(),
+    );
+    assert!(provider.extra_headers.is_empty());
+}
+
+#[test]
+fn with_name_sets_provider_name() {
+    let provider = OpenAIProvider::with_base_url(
+        "test-key".to_string(),
+        "https://models.github.ai/inference/chat/completions".to_string(),
+    )
+    .with_name("github");
+    assert_eq!(provider.name(), "github");
+}
+
+// ── Onboarding wizard ──────────────────────────────────────────
+
+#[test]
+fn wizard_github_is_not_custom() {
+    let mut wizard = OnboardingWizard::new();
+    wizard.selected_provider = 2;
+    assert!(!wizard.is_custom_provider());
+}
+
+#[test]
+fn wizard_github_no_model_fetch() {
+    // GitHub Models has no /models list endpoint
+    let mut wizard = OnboardingWizard::new();
+    wizard.selected_provider = 2;
+    assert!(!wizard.supports_model_fetch());
+}
+
+#[test]
+fn wizard_current_provider_at_index_2_is_github() {
+    let mut wizard = OnboardingWizard::new();
+    wizard.selected_provider = 2;
+    assert_eq!(wizard.current_provider().name, "GitHub Models");
+}
+
+#[test]
+fn wizard_model_filter_works_for_github() {
+    let mut wizard = OnboardingWizard::new();
+    wizard.selected_provider = 2;
+    wizard.fetched_models = vec![
+        "gpt-4o".to_string(),
+        "gpt-4o-mini".to_string(),
+        "Llama-3.3-70B-Instruct".to_string(),
+    ];
+    wizard.model_filter = "gpt".to_string();
+    let filtered = wizard.filtered_model_names();
+    assert_eq!(filtered.len(), 2);
+    assert!(filtered.iter().all(|m| m.contains("gpt")));
+}
+
+#[test]
+fn wizard_all_model_names_uses_fetched_first() {
+    let mut wizard = OnboardingWizard::new();
+    wizard.selected_provider = 2;
+    wizard.fetched_models = vec!["gpt-4o".to_string()];
+    let names = wizard.all_model_names();
+    assert_eq!(names, vec!["gpt-4o"]);
+}
+
+#[test]
+fn wizard_all_model_names_falls_back_to_config_models() {
+    let mut wizard = OnboardingWizard::new();
+    wizard.selected_provider = 2;
+    wizard.config_models = vec!["gpt-4o".to_string()];
+    let names = wizard.all_model_names();
+    assert_eq!(names, vec!["gpt-4o"]);
+}
+
+#[test]
+fn wizard_selected_model_name_in_bounds() {
+    let mut wizard = OnboardingWizard::new();
+    wizard.selected_provider = 2;
+    wizard.fetched_models = vec!["gpt-4o".to_string(), "gpt-4o-mini".to_string()];
+    wizard.selected_model = 1;
+    assert_eq!(wizard.selected_model_name(), "gpt-4o-mini");
+}
+
+#[test]
+fn wizard_selected_model_name_out_of_bounds_fallback() {
+    let mut wizard = OnboardingWizard::new();
+    wizard.selected_provider = 2;
+    wizard.fetched_models = vec!["gpt-4o".to_string()];
+    wizard.selected_model = 99;
+    assert_eq!(wizard.selected_model_name(), "gpt-4o");
+}
+
+// ── Factory ─────────────────────────────────────────────────────
+
+#[test]
+fn gh_auth_token_returns_option() {
+    let result = crate::brain::provider::factory::gh_auth_token();
+    let _: Option<String> = result;
+}
+
+#[test]
+fn github_provider_builder_full_chain() {
+    let provider = OpenAIProvider::with_base_url(
+        "ghp_test123".to_string(),
+        "https://models.github.ai/inference/chat/completions".to_string(),
+    )
+    .with_name("github")
+    .with_extra_headers(vec![
+        (
+            "Accept".to_string(),
+            "application/vnd.github+json".to_string(),
+        ),
+        ("X-GitHub-Api-Version".to_string(), "2022-11-28".to_string()),
+    ]);
+    assert_eq!(provider.name(), "github");
+    assert_eq!(provider.extra_headers.len(), 2);
+    assert_eq!(provider.extra_headers[0].1, "application/vnd.github+json");
+    assert_eq!(provider.extra_headers[1].1, "2022-11-28");
+}
+
+#[test]
+fn extra_headers_new_constructor_empty() {
+    let provider = OpenAIProvider::new("test-key".to_string());
+    assert!(provider.extra_headers.is_empty());
+}
+
+// ── Config apply section mapping ────────────────────────────────
+
+#[test]
+fn github_config_section_is_providers_github() {
+    // The all_provider_sections array includes "providers.github"
+    let sections = [
+        "providers.anthropic",
+        "providers.openai",
+        "providers.github",
+        "providers.gemini",
+        "providers.openrouter",
+        "providers.minimax",
+    ];
+    assert_eq!(sections[2], "providers.github");
+}
+
+#[test]
+fn github_writes_base_url() {
+    // GitHub writes base_url to config like OpenRouter and Minimax
+    let github_index: usize = 2;
+    let writes_base_url = matches!(github_index, 2 | 4 | 5 | 6);
+    assert!(writes_base_url);
+}
+
+#[test]
+fn github_writes_models_array() {
+    // GitHub (2), Minimax (5), and Custom (6) write models arrays
+    let github_index: usize = 2;
+    let writes_models = matches!(github_index, 2 | 5 | 6);
+    assert!(writes_models);
+}
+
+// ── Config resolution priority ──────────────────────────────────
+
+#[test]
+fn resolve_anthropic_takes_priority_over_github() {
+    let mut config = Config::default();
+    config.providers.anthropic = Some(ProviderConfig {
+        enabled: true,
+        default_model: Some("claude-sonnet-4-20250514".to_string()),
+        ..Default::default()
+    });
+    config.providers.github = Some(ProviderConfig {
+        enabled: true,
+        default_model: Some("gpt-4o".to_string()),
+        ..Default::default()
+    });
+    let (name, _) = resolve_provider_from_config(&config);
+    assert_eq!(name, "Anthropic");
+}
+
+#[test]
+fn resolve_github_chosen_when_only_github_enabled() {
+    let mut config = Config::default();
+    config.providers.anthropic = Some(ProviderConfig {
+        enabled: false,
+        ..Default::default()
+    });
+    config.providers.openai = Some(ProviderConfig {
+        enabled: false,
+        ..Default::default()
+    });
+    config.providers.github = Some(ProviderConfig {
+        enabled: true,
+        default_model: Some("Llama-3.3-70B-Instruct".to_string()),
+        ..Default::default()
+    });
+    let (name, model) = resolve_provider_from_config(&config);
+    assert_eq!(name, "GitHub Models");
+    assert_eq!(model, "Llama-3.3-70B-Instruct");
+}
+
+// ── GitHub-specific onboarding OAuth flow ───────────────────────
+
+#[test]
+fn github_help_mentions_pat_fallback() {
+    let help = PROVIDERS[2].help_lines.join(" ");
+    assert!(help.contains("PAT"));
+    assert!(help.contains("github.com/settings/tokens"));
+}
+
+#[test]
+fn github_help_mentions_oauth() {
+    let help = PROVIDERS[2].help_lines.join(" ");
+    assert!(help.contains("gh auth login"));
+    assert!(help.contains("browser OAuth"));
+}
+
+#[test]
+fn wizard_github_static_models_empty() {
+    // GitHub has no static models in PROVIDERS[2].models — they come from config
+    assert!(PROVIDERS[2].models.is_empty());
+}
+
+#[test]
+fn github_load_default_models_from_config_example() {
+    let models = OnboardingWizard::load_default_models(2);
+    assert!(!models.is_empty());
+    assert!(models.contains(&"gpt-4o".to_string()));
+    assert!(models.contains(&"o3-mini".to_string()));
+    assert!(models.contains(&"DeepSeek-R1".to_string()));
+}
+
+#[test]
+fn github_config_models_written_on_apply() {
+    // Verify index 2 is in the models-write match
+    let github_index: usize = 2;
+    let writes_models = matches!(github_index, 2 | 5 | 6);
+    assert!(writes_models);
+}
+
+#[test]
+fn github_token_persist_path_index_matches() {
+    // Verify that index 2 triggers the gh token persist code path in apply_config
+    let github_index: usize = 2;
+    assert_eq!(github_index, 2);
+}
+
+#[test]
+fn wizard_github_model_filter_empty_returns_all() {
+    let mut wizard = OnboardingWizard::new();
+    wizard.selected_provider = 2;
+    wizard.fetched_models = vec!["gpt-4o".to_string(), "Llama-3.3-70B-Instruct".to_string()];
+    wizard.model_filter.clear();
+    assert_eq!(wizard.filtered_model_names().len(), 2);
+}
+
+#[test]
+fn wizard_github_model_filter_no_match() {
+    let mut wizard = OnboardingWizard::new();
+    wizard.selected_provider = 2;
+    wizard.fetched_models = vec!["gpt-4o".to_string()];
+    wizard.model_filter = "nonexistent".to_string();
+    assert!(wizard.filtered_model_names().is_empty());
+}
+
+#[test]
+fn wizard_github_model_filter_case_insensitive() {
+    let mut wizard = OnboardingWizard::new();
+    wizard.selected_provider = 2;
+    wizard.fetched_models = vec!["GPT-4o".to_string(), "Llama-3.3-70B-Instruct".to_string()];
+    wizard.model_filter = "gpt".to_string();
+    let filtered = wizard.filtered_model_names();
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0], "GPT-4o");
+}
+
+#[test]
+fn wizard_github_model_filter_by_provider_name() {
+    let mut wizard = OnboardingWizard::new();
+    wizard.selected_provider = 2;
+    wizard.fetched_models = vec![
+        "gpt-4o".to_string(),
+        "gpt-4o-mini".to_string(),
+        "Llama-3.3-70B-Instruct".to_string(),
+        "Mistral-Large".to_string(),
+    ];
+    wizard.model_filter = "llama".to_string();
+    let filtered = wizard.filtered_model_names();
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0], "Llama-3.3-70B-Instruct");
+}

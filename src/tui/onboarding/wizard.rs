@@ -126,6 +126,13 @@ pub struct OnboardingWizard {
     pub generated_tools: Option<String>,
     pub generated_memory: Option<String>,
 
+    /// GitHub OAuth Device Flow state
+    pub github_user_code: Option<String>,
+    pub github_verification_uri: Option<String>,
+    pub github_device_code: Option<String>,
+    pub github_oauth_polling: bool,
+    pub github_oauth_error: Option<String>,
+
     /// Model filter (live search in model list)
     pub model_filter: String,
 
@@ -185,9 +192,16 @@ impl OnboardingWizard {
                         String::new(),
                         String::new(),
                     )
-                } else if config.providers.gemini.as_ref().is_some_and(|p| p.enabled) {
+                } else if config.providers.github.as_ref().is_some_and(|p| p.enabled) {
                     (
                         2,
+                        EXISTING_KEY_SENTINEL.to_string(),
+                        String::new(),
+                        String::new(),
+                    )
+                } else if config.providers.gemini.as_ref().is_some_and(|p| p.enabled) {
+                    (
+                        3,
                         EXISTING_KEY_SENTINEL.to_string(),
                         String::new(),
                         String::new(),
@@ -199,14 +213,14 @@ impl OnboardingWizard {
                     .is_some_and(|p| p.enabled)
                 {
                     (
-                        3,
+                        4,
                         EXISTING_KEY_SENTINEL.to_string(),
                         String::new(),
                         String::new(),
                     )
                 } else if config.providers.minimax.as_ref().is_some_and(|p| p.enabled) {
                     (
-                        4,
+                        5,
                         EXISTING_KEY_SENTINEL.to_string(),
                         String::new(),
                         String::new(),
@@ -222,7 +236,7 @@ impl OnboardingWizard {
                     let base = c.base_url.clone().unwrap_or_default();
                     let model = c.default_model.clone().unwrap_or_default();
                     custom_provider_name_init = Some(name.to_string());
-                    (5, EXISTING_KEY_SENTINEL.to_string(), base, model)
+                    (6, EXISTING_KEY_SENTINEL.to_string(), base, model)
                 } else {
                     (0, String::new(), String::new(), String::new())
                 }
@@ -328,6 +342,12 @@ impl OnboardingWizard {
             generated_tools: None,
             generated_memory: None,
 
+            github_user_code: None,
+            github_verification_uri: None,
+            github_device_code: None,
+            github_oauth_polling: false,
+            github_oauth_error: None,
+
             model_filter: String::new(),
             focused_field: 0,
             error_message: None,
@@ -371,34 +391,8 @@ impl OnboardingWizard {
             {
                 wizard.custom_model = model.clone();
             }
-        } else if config.providers.minimax.as_ref().is_some_and(|p| p.enabled) {
-            wizard.selected_provider = 4; // Minimax
-            if let Some(model) = &config
-                .providers
-                .minimax
-                .as_ref()
-                .and_then(|p| p.default_model.clone())
-            {
-                wizard.custom_model = model.clone();
-            }
-        } else if config
-            .providers
-            .openrouter
-            .as_ref()
-            .is_some_and(|p| p.enabled)
-        {
-            wizard.selected_provider = 3; // OpenRouter - fetches from API
-            if let Some(model) = &config
-                .providers
-                .openrouter
-                .as_ref()
-                .and_then(|p| p.default_model.clone())
-            {
-                wizard.custom_model = model.clone();
-            }
         } else if config.providers.openai.as_ref().is_some_and(|p| p.enabled) {
-            // Custom OpenAI-compatible
-            wizard.selected_provider = 5;
+            wizard.selected_provider = 1; // OpenAI
             if let Some(base_url) = &config
                 .providers
                 .openai
@@ -415,8 +409,43 @@ impl OnboardingWizard {
             {
                 wizard.custom_model = model.clone();
             }
+        } else if config.providers.github.as_ref().is_some_and(|p| p.enabled) {
+            wizard.selected_provider = 2; // GitHub Models
+            if let Some(model) = &config
+                .providers
+                .github
+                .as_ref()
+                .and_then(|p| p.default_model.clone())
+            {
+                wizard.custom_model = model.clone();
+            }
         } else if config.providers.gemini.as_ref().is_some_and(|p| p.enabled) {
-            wizard.selected_provider = 2; // Gemini
+            wizard.selected_provider = 3; // Gemini
+        } else if config
+            .providers
+            .openrouter
+            .as_ref()
+            .is_some_and(|p| p.enabled)
+        {
+            wizard.selected_provider = 4; // OpenRouter
+            if let Some(model) = &config
+                .providers
+                .openrouter
+                .as_ref()
+                .and_then(|p| p.default_model.clone())
+            {
+                wizard.custom_model = model.clone();
+            }
+        } else if config.providers.minimax.as_ref().is_some_and(|p| p.enabled) {
+            wizard.selected_provider = 5; // Minimax
+            if let Some(model) = &config
+                .providers
+                .minimax
+                .as_ref()
+                .and_then(|p| p.default_model.clone())
+            {
+                wizard.custom_model = model.clone();
+            }
         }
 
         // Detect if we have an existing API key for the selected provider

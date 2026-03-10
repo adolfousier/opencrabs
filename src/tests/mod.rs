@@ -4,6 +4,7 @@ pub mod cli_test;
 pub mod compaction_test;
 pub mod cron_test;
 pub mod evolve_test;
+pub mod github_provider_test;
 //pub mod error_scenarios_test;
 pub mod fallback_vision_test;
 pub mod file_extract_test;

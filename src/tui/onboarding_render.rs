@@ -484,7 +484,7 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
         let marker = if selected { "[*]" } else { "[ ]" };
 
         // For custom provider with a name set, show the name instead of generic label
-        let label = if i == 5 && !wizard.custom_provider_name.is_empty() {
+        let label = if i == 6 && !wizard.custom_provider_name.is_empty() {
             wizard.custom_provider_name.clone()
         } else {
             provider.name.to_string()
@@ -635,6 +635,91 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
                 }),
             ),
         ]));
+    } else if wizard.selected_provider == 2 {
+        // GitHub Models — OAuth Device Flow UI
+        let key_focused = wizard.auth_field == AuthField::ApiKey;
+
+        if wizard.has_existing_key() {
+            // Already authenticated
+            lines.push(Line::from(Span::styled(
+                "  GitHub authenticated",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )));
+            lines.push(Line::from(Span::styled(
+                "  Token: **************************",
+                Style::default().fg(Color::Cyan),
+            )));
+            if key_focused {
+                lines.push(Line::from(Span::styled(
+                    "  (press Enter to continue, or R to re-authenticate)",
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::ITALIC),
+                )));
+            }
+        } else if let Some(ref user_code) = wizard.github_user_code {
+            // Device code received — show it to the user
+            let uri = wizard
+                .github_verification_uri
+                .as_deref()
+                .unwrap_or("https://github.com/login/device");
+            lines.push(Line::from(Span::styled(
+                format!("  Visit: {}", uri),
+                Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
+            )));
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                format!("  Enter code:  {}", user_code),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            )));
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "  Waiting for authorization...",
+                Style::default().fg(BRAND_GOLD),
+            )));
+        } else if wizard.github_oauth_polling {
+            // Starting device flow
+            lines.push(Line::from(Span::styled(
+                "  Starting GitHub authentication...",
+                Style::default().fg(Color::DarkGray),
+            )));
+        } else if let Some(ref err) = wizard.github_oauth_error {
+            // Error
+            lines.push(Line::from(Span::styled(
+                format!("  {}", err),
+                Style::default().fg(Color::Red),
+            )));
+            lines.push(Line::from(""));
+            if key_focused {
+                lines.push(Line::from(Span::styled(
+                    "  Press Enter to retry or paste a token manually",
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
+        } else if key_focused {
+            // Idle — prompt to start device flow
+            lines.push(Line::from(Span::styled(
+                "  Press Enter to authenticate with GitHub",
+                Style::default().fg(Color::DarkGray),
+            )));
+            lines.push(Line::from(Span::styled(
+                "  Or paste a personal access token directly",
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
+            )));
+        } else {
+            lines.push(Line::from(Span::styled(
+                "  GitHub OAuth Device Flow",
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
+            )));
+        }
     } else {
         // Show help text for selected provider
         let provider = wizard.current_provider();
@@ -2218,7 +2303,7 @@ fn render_complete(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
 
     // Summary
     let provider = &PROVIDERS[wizard.selected_provider];
-    let provider_label = if wizard.selected_provider == 5 && !wizard.custom_provider_name.is_empty()
+    let provider_label = if wizard.selected_provider == 6 && !wizard.custom_provider_name.is_empty()
     {
         wizard.custom_provider_name.clone()
     } else {

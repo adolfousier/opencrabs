@@ -69,7 +69,7 @@ fn all_steps_have_titles() {
 
 #[test]
 fn provider_count_matches_expected() {
-    assert_eq!(PROVIDERS.len(), 6);
+    assert_eq!(PROVIDERS.len(), 7);
 }
 
 #[test]
@@ -79,7 +79,7 @@ fn anthropic_is_first_provider() {
 
 #[test]
 fn custom_provider_is_last() {
-    assert_eq!(PROVIDERS[5].name, "Custom OpenAI-Compatible");
+    assert_eq!(PROVIDERS[6].name, "Custom OpenAI-Compatible");
 }
 
 #[test]

@@ -17,10 +17,15 @@ impl OnboardingWizard {
             let has_key = match self.selected_provider {
                 0 => has_nonempty_key(config.providers.anthropic.as_ref()),
                 1 => has_nonempty_key(config.providers.openai.as_ref()),
-                2 => has_nonempty_key(config.providers.gemini.as_ref()),
-                3 => has_nonempty_key(config.providers.openrouter.as_ref()),
-                4 => has_nonempty_key(config.providers.minimax.as_ref()),
-                5 => {
+                2 => {
+                    // GitHub Models — check config key OR auto-detect from gh CLI
+                    has_nonempty_key(config.providers.github.as_ref())
+                        || crate::brain::provider::factory::gh_auth_token().is_some()
+                }
+                3 => has_nonempty_key(config.providers.gemini.as_ref()),
+                4 => has_nonempty_key(config.providers.openrouter.as_ref()),
+                5 => has_nonempty_key(config.providers.minimax.as_ref()),
+                6 => {
                     // Custom provider - also load base_url, model, and name
                     // Try enabled first, fall back to first entry in custom map
                     let found = config.providers.active_custom().or_else(|| {

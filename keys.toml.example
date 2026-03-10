@@ -15,6 +15,11 @@
 # Get from: console.anthropic.com
 api_key = ""
 
+[providers.github]
+# No key needed if `gh` CLI is installed — token auto-detected.
+# Or paste a GitHub PAT: github.com/settings/tokens
+api_key = ""
+
 [providers.openai]
 # Get from: platform.openai.com
 api_key = ""

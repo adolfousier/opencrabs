@@ -1017,6 +1017,10 @@ impl App {
                                 .as_ref()
                                 .and_then(|c| c.providers.minimax.as_ref())
                                 .and_then(|p| p.api_key.clone()),
+                            "GitHub Models" => loaded
+                                .as_ref()
+                                .and_then(|c| c.providers.github.as_ref())
+                                .and_then(|p| p.api_key.clone()),
                             _ => None,
                         }
                     } else if !wizard.api_key_input.is_empty() {
@@ -1034,6 +1038,99 @@ impl App {
                         )
                         .await;
                         let _ = sender.send(TuiEvent::OnboardingModelsFetched(models));
+                    });
+                }
+                WizardAction::GitHubDeviceAuth => {
+                    // Start GitHub OAuth Device Flow
+                    wizard.github_oauth_polling = true;
+                    wizard.github_oauth_error = None;
+                    wizard.github_user_code = None;
+                    wizard.github_verification_uri = None;
+
+                    let sender = self.event_sender();
+                    tokio::spawn(async move {
+                        let client = reqwest::Client::new();
+                        // Step 1: Request device code
+                        let resp = client
+                            .post("https://github.com/login/device/code")
+                            .header("Accept", "application/json")
+                            .form(&[
+                                ("client_id", "Ov23liGRBFSPmcCQBPTv"),
+                                ("scope", "read:user"),
+                            ])
+                            .send()
+                            .await;
+
+                        match resp {
+                            Ok(r) if r.status().is_success() => {
+                                if let Ok(body) = r.json::<serde_json::Value>().await
+                                    && let (Some(device_code), Some(user_code), Some(uri)) = (
+                                        body["device_code"].as_str(),
+                                        body["user_code"].as_str(),
+                                        body["verification_uri"].as_str(),
+                                    )
+                                {
+                                    let interval = body["interval"].as_u64().unwrap_or(5);
+                                    let device_code = device_code.to_string();
+                                    let _ = sender.send(TuiEvent::GitHubDeviceCode {
+                                        user_code: user_code.to_string(),
+                                        verification_uri: uri.to_string(),
+                                        device_code: device_code.clone(),
+                                        interval,
+                                    });
+
+                                    // Step 2: Poll for authorization
+                                    let poll_interval = std::time::Duration::from_secs(interval);
+                                    for _ in 0..120 {
+                                        tokio::time::sleep(poll_interval).await;
+                                        let poll = client
+                                            .post("https://github.com/login/oauth/access_token")
+                                            .header("Accept", "application/json")
+                                            .form(&[
+                                                ("client_id", "Ov23liGRBFSPmcCQBPTv"),
+                                                ("device_code", &device_code),
+                                                (
+                                                    "grant_type",
+                                                    "urn:ietf:params:oauth:grant-type:device_code",
+                                                ),
+                                            ])
+                                            .send()
+                                            .await;
+
+                                        if let Ok(pr) = poll
+                                            && let Ok(pb) = pr.json::<serde_json::Value>().await
+                                        {
+                                            if let Some(token) = pb["access_token"].as_str() {
+                                                let _ =
+                                                    sender.send(TuiEvent::GitHubOAuthAuthorized(
+                                                        token.to_string(),
+                                                    ));
+                                                return;
+                                            }
+                                            let err = pb["error"].as_str().unwrap_or("");
+                                            if err == "authorization_pending" || err == "slow_down"
+                                            {
+                                                continue;
+                                            }
+                                            // Real error (expired, access_denied, etc.)
+                                            let desc =
+                                                pb["error_description"].as_str().unwrap_or(err);
+                                            let _ = sender
+                                                .send(TuiEvent::GitHubOAuthError(desc.to_string()));
+                                            return;
+                                        }
+                                    }
+                                    let _ = sender.send(TuiEvent::GitHubOAuthError(
+                                        "Authorization timed out".to_string(),
+                                    ));
+                                }
+                            }
+                            _ => {
+                                let _ = sender.send(TuiEvent::GitHubOAuthError(
+                                    "Failed to start device flow".to_string(),
+                                ));
+                            }
+                        }
                     });
                 }
                 WizardAction::WhatsAppConnect => {

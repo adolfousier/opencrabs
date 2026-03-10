@@ -43,6 +43,12 @@ pub fn create_provider(config: &Config) -> Result<Arc<dyn Provider>> {
                 try_create_anthropic(config)?
                     .ok_or_else(|| anyhow::anyhow!("Anthropic enabled but failed to create"))?,
             )
+        } else if config.providers.github.as_ref().is_some_and(|p| p.enabled) {
+            tracing::info!("Using enabled provider: GitHub Models");
+            Some(
+                try_create_github(config)?
+                    .ok_or_else(|| anyhow::anyhow!("GitHub enabled but failed to create"))?,
+            )
         } else if config.providers.openai.as_ref().is_some_and(|p| p.enabled) {
             tracing::info!("Using enabled provider: OpenAI");
             Some(
@@ -129,6 +135,8 @@ pub fn create_provider_by_name(config: &Config, name: &str) -> Result<Arc<dyn Pr
             .ok_or_else(|| anyhow::anyhow!("Minimax not configured (missing API key)")),
         "openrouter" => try_create_openrouter(config)?
             .ok_or_else(|| anyhow::anyhow!("OpenRouter not configured (missing API key)")),
+        "github" => try_create_github(config)?
+            .ok_or_else(|| anyhow::anyhow!("GitHub not configured (missing token)")),
         "gemini" => try_create_gemini(config)?
             .ok_or_else(|| anyhow::anyhow!("Gemini not configured (missing API key)")),
         n if n.starts_with("custom:") => {
@@ -207,6 +215,10 @@ fn create_fallback(config: &Config, fallback_type: &str) -> Result<Arc<dyn Provi
             tracing::info!("Using fallback: OpenAI");
             try_create_openai(config)?.ok_or_else(|| anyhow::anyhow!("OpenAI not configured"))
         }
+        "github" => {
+            tracing::info!("Using fallback: GitHub Models");
+            try_create_github(config)?.ok_or_else(|| anyhow::anyhow!("GitHub not configured"))
+        }
         "gemini" => {
             tracing::info!("Using fallback: Gemini");
             try_create_gemini(config)?.ok_or_else(|| anyhow::anyhow!("Gemini not configured"))
@@ -227,6 +239,69 @@ fn create_fallback(config: &Config, fallback_type: &str) -> Result<Arc<dyn Provi
             }
         }
     }
+}
+
+/// Try to auto-detect a GitHub token from the `gh` CLI.
+/// Returns `None` if `gh` is not installed or not authenticated.
+pub(crate) fn gh_auth_token() -> Option<String> {
+    let output = std::process::Command::new("gh")
+        .args(["auth", "token"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if output.status.success() {
+        let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !token.is_empty() {
+            return Some(token);
+        }
+    }
+    None
+}
+
+/// Try to create GitHub Models provider if configured.
+/// Auto-detects token from `gh auth token` if no api_key in keys.toml.
+fn try_create_github(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
+    let github_config = match &config.providers.github {
+        Some(cfg) => cfg,
+        None => return Ok(None),
+    };
+
+    // Try explicit key first, then auto-detect from gh CLI
+    let api_key = github_config
+        .api_key
+        .clone()
+        .filter(|k| !k.is_empty())
+        .or_else(gh_auth_token);
+
+    let Some(api_key) = api_key else {
+        tracing::warn!(
+            "GitHub Models enabled but no token found. \
+             Run `gh auth login` or add a PAT to keys.toml."
+        );
+        return Ok(None);
+    };
+
+    let base_url = github_config
+        .base_url
+        .clone()
+        .unwrap_or_else(|| "https://models.github.ai/inference/chat/completions".to_string());
+
+    tracing::info!("Using GitHub Models at: {}", base_url);
+
+    let provider = configure_openai_compatible(
+        OpenAIProvider::with_base_url(api_key, base_url)
+            .with_name("github")
+            .with_extra_headers(vec![
+                (
+                    "Accept".to_string(),
+                    "application/vnd.github+json".to_string(),
+                ),
+                ("X-GitHub-Api-Version".to_string(), "2022-11-28".to_string()),
+            ]),
+        github_config,
+    );
+    Ok(Some(Arc::new(provider)))
 }
 
 /// Try to create OpenRouter provider if configured
@@ -448,6 +523,7 @@ pub fn active_provider_vision(config: &Config) -> Option<(String, String, String
         config.providers.openrouter.as_ref(),
         config.providers.anthropic.as_ref(),
         config.providers.openai.as_ref(),
+        config.providers.github.as_ref(),
         config.providers.gemini.as_ref(),
     ]
     .into_iter()

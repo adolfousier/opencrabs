@@ -127,6 +127,7 @@ pub fn is_first_time() -> bool {
         .as_ref()
         .is_some_and(|p| p.enabled)
         || config.providers.openai.as_ref().is_some_and(|p| p.enabled)
+        || config.providers.github.as_ref().is_some_and(|p| p.enabled)
         || config.providers.gemini.as_ref().is_some_and(|p| p.enabled)
         || config
             .providers
@@ -158,7 +159,7 @@ pub async fn fetch_provider_models(provider_index: usize, api_key: Option<&str>)
     }
 
     // Handle Minimax specially - no /models API, must use config
-    if provider_index == 4 {
+    if provider_index == 5 {
         // Minimax — NO /models API endpoint, must use config.models
         if let Ok(config) = crate::config::Config::load()
             && let Some(p) = &config.providers.minimax
@@ -207,7 +208,11 @@ pub async fn fetch_provider_models(provider_index: usize, api_key: Option<&str>)
             }
             req.send().await
         }
-        3 => {
+        2 => {
+            // GitHub Models — no /models list endpoint, uses config models
+            return Vec::new();
+        }
+        4 => {
             // OpenRouter — /api/v1/models
             let mut req = client.get("https://openrouter.ai/api/v1/models");
             if let Some(key) = api_key

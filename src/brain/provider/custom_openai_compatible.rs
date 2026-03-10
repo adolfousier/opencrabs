@@ -120,6 +120,8 @@ pub struct OpenAIProvider {
     name: String,
     /// When set, swap to this model for requests containing images.
     vision_model: Option<String>,
+    /// Extra headers injected into every request (e.g. GitHub Models API versioning).
+    pub(crate) extra_headers: Vec<(String, String)>,
 }
 
 impl OpenAIProvider {
@@ -140,6 +142,7 @@ impl OpenAIProvider {
             custom_default_model: None,
             name: "openai".to_string(),
             vision_model: None,
+            extra_headers: vec![],
         }
     }
 
@@ -160,6 +163,7 @@ impl OpenAIProvider {
             custom_default_model: None,
             name: "openai-compatible".to_string(),
             vision_model: None,
+            extra_headers: vec![],
         }
     }
 
@@ -180,7 +184,14 @@ impl OpenAIProvider {
             custom_default_model: None,
             name: "openai-compatible".to_string(),
             vision_model: None,
+            extra_headers: vec![],
         }
+    }
+
+    /// Add extra headers to every request (e.g. API versioning).
+    pub fn with_extra_headers(mut self, headers: Vec<(String, String)>) -> Self {
+        self.extra_headers = headers;
+        self
     }
 
     /// Set provider name (for logging)
@@ -230,6 +241,15 @@ impl OpenAIProvider {
             reqwest::header::CONTENT_TYPE,
             "application/json".parse().expect("valid content-type"),
         );
+
+        for (key, value) in &self.extra_headers {
+            if let (Ok(k), Ok(v)) = (
+                key.parse::<reqwest::header::HeaderName>(),
+                value.parse::<reqwest::header::HeaderValue>(),
+            ) {
+                headers.insert(k, v);
+            }
+        }
 
         Ok(headers)
     }

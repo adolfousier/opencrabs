@@ -7,24 +7,25 @@ use crate::tui::onboarding::{OnboardingWizard, PROVIDERS};
 
 #[test]
 fn test_provider_count_matches() {
-    // Verify PROVIDERS array has 6 entries
-    assert_eq!(PROVIDERS.len(), 6);
+    // Verify PROVIDERS array has 7 entries
+    assert_eq!(PROVIDERS.len(), 7);
 
     // Verify provider names
     assert_eq!(PROVIDERS[0].name, "Anthropic Claude");
     assert_eq!(PROVIDERS[1].name, "OpenAI");
-    assert_eq!(PROVIDERS[2].name, "Google Gemini");
-    assert_eq!(PROVIDERS[3].name, "OpenRouter");
-    assert_eq!(PROVIDERS[4].name, "Minimax");
-    assert_eq!(PROVIDERS[5].name, "Custom OpenAI-Compatible");
+    assert_eq!(PROVIDERS[2].name, "GitHub Models");
+    assert_eq!(PROVIDERS[3].name, "Google Gemini");
+    assert_eq!(PROVIDERS[4].name, "OpenRouter");
+    assert_eq!(PROVIDERS[5].name, "Minimax");
+    assert_eq!(PROVIDERS[6].name, "Custom OpenAI-Compatible");
 }
 
 #[test]
 fn test_is_custom_provider() {
     let mut wizard = OnboardingWizard::new();
 
-    // Index 5 is Custom
-    wizard.selected_provider = 5;
+    // Index 6 is Custom
+    wizard.selected_provider = 6;
     assert!(wizard.is_custom_provider());
 
     // Other indices are not Custom
@@ -32,7 +33,9 @@ fn test_is_custom_provider() {
     assert!(!wizard.is_custom_provider());
     wizard.selected_provider = 1;
     assert!(!wizard.is_custom_provider());
-    wizard.selected_provider = 4;
+    wizard.selected_provider = 2;
+    assert!(!wizard.is_custom_provider());
+    wizard.selected_provider = 5;
     assert!(!wizard.is_custom_provider());
 }
 
@@ -60,6 +63,7 @@ fn test_keys_toml_has_all_provider_sections() {
     let keys = ProviderConfigs::default();
     assert!(keys.anthropic.is_none());
     assert!(keys.openai.is_none());
+    assert!(keys.github.is_none());
     assert!(keys.gemini.is_none());
     assert!(keys.openrouter.is_none());
     assert!(keys.minimax.is_none());

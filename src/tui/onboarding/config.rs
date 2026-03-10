@@ -278,6 +278,7 @@ impl OnboardingWizard {
         let all_provider_sections = [
             "providers.anthropic",
             "providers.openai",
+            "providers.github",
             "providers.gemini",
             "providers.openrouter",
             "providers.minimax",
@@ -300,10 +301,11 @@ impl OnboardingWizard {
         let section = match self.selected_provider {
             0 => "providers.anthropic",
             1 => "providers.openai",
-            2 => "providers.gemini",
-            3 => "providers.openrouter",
-            4 => "providers.minimax",
-            5 => {
+            2 => "providers.github",
+            3 => "providers.gemini",
+            4 => "providers.openrouter",
+            5 => "providers.minimax",
+            6 => {
                 custom_section = format!("providers.custom.{}", self.custom_provider_name);
                 &custom_section
             }
@@ -320,17 +322,24 @@ impl OnboardingWizard {
 
         // Write base_url for providers that need it
         match self.selected_provider {
-            3 => {
+            2 => {
+                let _ = Config::write_key(
+                    section,
+                    "base_url",
+                    "https://models.github.ai/inference/chat/completions",
+                );
+            }
+            4 => {
                 let _ = Config::write_key(
                     section,
                     "base_url",
                     "https://openrouter.ai/api/v1/chat/completions",
                 );
             }
-            4 => {
+            5 => {
                 let _ = Config::write_key(section, "base_url", "https://api.minimax.io/v1");
             }
-            5 => {
+            6 => {
                 if !self.custom_base_url.is_empty() {
                     let _ = Config::write_key(section, "base_url", &self.custom_base_url);
                 }
@@ -342,7 +351,7 @@ impl OnboardingWizard {
         }
 
         // Write models array for providers that have static model lists
-        if !self.config_models.is_empty() && matches!(self.selected_provider, 4 | 5) {
+        if !self.config_models.is_empty() && matches!(self.selected_provider, 2 | 5 | 6) {
             let _ = Config::write_array(section, "models", &self.config_models);
         }
 
@@ -478,6 +487,15 @@ impl OnboardingWizard {
             && let Err(e) = crate::config::write_secret_key(section, "api_key", &self.api_key_input)
         {
             tracing::warn!("Failed to save API key to keys.toml: {}", e);
+        }
+
+        // GitHub Models: persist auto-detected gh CLI token to keys.toml
+        if self.selected_provider == 2
+            && self.has_existing_key()
+            && let Some(token) = crate::brain::provider::factory::gh_auth_token()
+            && let Err(e) = crate::config::write_secret_key(section, "api_key", &token)
+        {
+            tracing::warn!("Failed to save GitHub token to keys.toml: {}", e);
         }
 
         // Save STT/TTS keys to keys.toml

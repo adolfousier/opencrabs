@@ -20,6 +20,15 @@ pub const PROVIDERS: &[ProviderInfo] = &[
         help_lines: &["Get key from platform.openai.com"],
     },
     ProviderInfo {
+        name: "GitHub Models",
+        models: &[],
+        key_label: "Token",
+        help_lines: &[
+            "OAuth device flow or gh auth login for browser OAuth",
+            "Fallback: PAT from github.com/settings/tokens",
+        ],
+    },
+    ProviderInfo {
         name: "Google Gemini",
         models: &[],
         key_label: "API Key",
@@ -319,4 +328,6 @@ pub enum WizardAction {
     DownloadPiperVoice,
     /// Quick-jump step completed — save config and close wizard
     QuickJumpDone,
+    /// Start GitHub OAuth Device Flow (request device code)
+    GitHubDeviceAuth,
 }

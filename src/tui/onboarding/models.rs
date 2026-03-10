@@ -8,8 +8,8 @@ impl OnboardingWizard {
         // Try live config first
         if let Ok(config) = crate::config::Config::load() {
             match self.selected_provider {
-                4 => {
-                    if let Some(p) = &config.providers.minimax
+                2 => {
+                    if let Some(p) = &config.providers.github
                         && !p.models.is_empty()
                     {
                         self.config_models = p.models.clone();
@@ -17,6 +17,14 @@ impl OnboardingWizard {
                     }
                 }
                 5 => {
+                    if let Some(p) = &config.providers.minimax
+                        && !p.models.is_empty()
+                    {
+                        self.config_models = p.models.clone();
+                        return;
+                    }
+                }
+                6 => {
                     if let Some((_name, p)) = config.providers.active_custom()
                         && !p.models.is_empty()
                     {
@@ -74,11 +82,11 @@ impl OnboardingWizard {
 
     /// Whether the current provider supports live model fetching
     pub fn supports_model_fetch(&self) -> bool {
-        matches!(self.selected_provider, 0 | 1 | 3) // Anthropic, OpenAI, OpenRouter
+        matches!(self.selected_provider, 0 | 1 | 4) // Anthropic, OpenAI, OpenRouter
     }
 
-    /// Load default models from embedded config.toml.example for MiniMax and Custom
-    pub(super) fn load_default_models(provider_index: usize) -> Vec<String> {
+    /// Load default models from embedded config.toml.example for GitHub, MiniMax, and Custom
+    pub(crate) fn load_default_models(provider_index: usize) -> Vec<String> {
         // Parse the embedded config.toml.example to extract default models for a specific provider
         let config_content = include_str!("../../../config.toml.example");
         let mut models = Vec::new();
@@ -87,7 +95,19 @@ impl OnboardingWizard {
             && let Some(providers) = config.get("providers")
         {
             match provider_index {
-                4 => {
+                2 => {
+                    // GitHub Models
+                    if let Some(github) = providers.get("github")
+                        && let Some(models_arr) = github.get("models").and_then(|m| m.as_array())
+                    {
+                        for model in models_arr {
+                            if let Some(model_str) = model.as_str() {
+                                models.push(model_str.to_string());
+                            }
+                        }
+                    }
+                }
+                5 => {
                     // Minimax only
                     if let Some(minimax) = providers.get("minimax")
                         && let Some(models_arr) = minimax.get("models").and_then(|m| m.as_array())
@@ -99,7 +119,7 @@ impl OnboardingWizard {
                         }
                     }
                 }
-                5 => {
+                6 => {
                     // Custom providers only
                     if let Some(custom) = providers.get("custom")
                         && let Some(custom_table) = custom.as_table()

@@ -501,6 +501,10 @@ pub struct ProviderConfigs {
     #[serde(default, deserialize_with = "deserialize_custom_providers")]
     pub custom: Option<BTreeMap<String, ProviderConfig>>,
 
+    /// GitHub Models configuration (uses GitHub OAuth token from `gh auth token`)
+    #[serde(default)]
+    pub github: Option<ProviderConfig>,
+
     /// Google Gemini configuration
     #[serde(default)]
     pub gemini: Option<ProviderConfig>,
@@ -2148,6 +2152,15 @@ pub fn resolve_provider_from_config(config: &Config) -> (&str, &str) {
             .and_then(|p| p.default_model.as_deref())
             .unwrap_or("default");
         return ("OpenAI", model);
+    }
+    if config.providers.github.as_ref().is_some_and(|p| p.enabled) {
+        let model = config
+            .providers
+            .github
+            .as_ref()
+            .and_then(|p| p.default_model.as_deref())
+            .unwrap_or("gpt-4o");
+        return ("GitHub Models", model);
     }
     if config.providers.gemini.as_ref().is_some_and(|p| p.enabled) {
         let model = config
