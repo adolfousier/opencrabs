@@ -540,7 +540,19 @@ The onboarding wizard handles everything on first run.
 
 > **Note:** `/rebuild` works even with pre-built binaries — it auto-clones the source to `~/.opencrabs/source/` on first use, then builds and hot-restarts. For active development or adding custom tools, Option 2 gives you the source tree directly.
 
-### Option 2: Build from Source (full control)
+### Option 2: Install via Cargo
+
+```bash
+# Requires nightly Rust (WhatsApp protocol uses portable_simd)
+rustup toolchain install nightly
+cargo +nightly install opencrabs
+```
+
+> **Linux (Debian/Ubuntu):** Install system deps first: `sudo apt-get install build-essential pkg-config clang libclang-dev libasound2-dev libssl-dev cmake`
+>
+> **Large build:** The build can use 8GB+ in `/tmp`. If you run out of space: `CARGO_TARGET_DIR=~/.cargo/target cargo +nightly install opencrabs`
+
+### Option 3: Build from Source (full control)
 
 Required for `/rebuild`, adding custom tools, or modifying the agent.
 
@@ -549,7 +561,7 @@ Required for `/rebuild`, adding custom tools, or modifying the agent.
 - **An API key** from at least one supported provider
 - **SQLite** (bundled via sqlx)
 - **macOS:** Xcode CLI Tools + `brew install cmake pkg-config` (requires macOS 15+)
-- **Linux (Debian/Ubuntu):** `sudo apt-get install build-essential pkg-config libssl-dev cmake`
+- **Linux (Debian/Ubuntu):** `sudo apt-get install build-essential pkg-config clang libclang-dev libasound2-dev libssl-dev cmake`
 - **Linux (Fedora/RHEL):** `sudo dnf install gcc gcc-c++ make pkg-config openssl-devel cmake`
 - **Linux (Arch):** `sudo pacman -S base-devel pkg-config openssl cmake`
 
@@ -691,11 +703,11 @@ Type `/onboard:voice` or `/onboard:image` in chat to jump directly to Voice or I
 
 #### Local STT (whisper.cpp)
 
-Run speech-to-text on-device with zero API cost. Included by default in prebuilt binaries and `cargo install opencrabs`.
+Run speech-to-text on-device with zero API cost. Included by default in prebuilt binaries and `cargo +nightly install opencrabs`.
 
 In `/onboard:voice`, select **Local** mode, pick a model size, and press Enter to download. Models are stored at `~/.local/share/opencrabs/models/whisper/`.
 
-> **Building from source:** Local STT requires CMake and a C++ compiler (for whisper.cpp). To exclude it: `cargo install opencrabs --no-default-features --features telegram,whatsapp,discord,slack,trello`
+> **Building from source:** Local STT requires CMake and a C++ compiler (for whisper.cpp). To exclude it: `cargo +nightly install opencrabs --no-default-features --features telegram,whatsapp,discord,slack,trello`
 
 | Model | Size | Quality |
 |-------|------|---------|
@@ -1564,7 +1576,7 @@ opencrabs/
 │   │   └── runner.rs     # TUI event loop
 │   ├── utils/            # Utilities (retry, etc.)
 │   ├── migrations/       # SQLite migrations
-│   ├── tests/            # 1,171 tests (see TESTING.md)
+│   ├── tests/            # 1,178 tests (see TESTING.md)
 │   ├── benches/          # Criterion benchmarks
 │   └── docs/             # Documentation + screenshots
 ├── Cargo.toml
@@ -1589,7 +1601,7 @@ cargo build --release
 # Small release build
 cargo build --profile release-small
 
-# Run tests (1,171 tests across 60+ modules)
+# Run tests (1,178 tests across 60+ modules)
 cargo test --all-features
 # See TESTING.md for full test coverage documentation
 
