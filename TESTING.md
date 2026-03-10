@@ -72,7 +72,7 @@ cargo test --all-features
 | Tests — Voice STT Dispatch | 7 | `src/tests/voice_stt_dispatch_test.rs` |
 | Tests — Voice Onboarding | 7 | `src/tests/voice_onboarding_test.rs` |
 | Tests — Candle Whisper | 6 | `src/tests/candle_whisper_test.rs` |
-| Tests — Evolve (Self-Update) | 16 | `src/tests/evolve_test.rs` |
+| Tests — Evolve (Self-Update) | 23 | `src/tests/evolve_test.rs` |
 | Tests — Session & Working Dir | 15 | `src/tests/session_working_dir_test.rs` |
 | Tests — Message Compaction | 24 | `src/tests/compaction_test.rs` |
 | Tests — Fallback Vision | 35 | `src/tests/fallback_vision_test.rs` |
@@ -85,7 +85,7 @@ cargo test --all-features
 | Tests — Plan Document | 15 | `src/tests/plan_document_test.rs` |
 | Tests — TUI Error | 16 | `src/tests/tui_error_test.rs` |
 | Tests — Queued Messages | 15 | `src/tests/queued_message_test.rs` |
-| **Total** | **1,118** | |
+| **Total** | **1,125** | |
 
 ---
 
