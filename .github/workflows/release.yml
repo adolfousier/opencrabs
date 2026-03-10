@@ -15,23 +15,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check if already published
+        id: check
+        run: |
+          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if curl -sf "https://crates.io/api/v1/crates/opencrabs/$VERSION" > /dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "v$VERSION already on crates.io — skipping build"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install Rust
+        if: steps.check.outputs.published == 'false'
         uses: dtolnay/rust-toolchain@nightly
 
       - name: Install ALSA dev
+        if: steps.check.outputs.published == 'false'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
 
       - name: Publish
+        if: steps.check.outputs.published == 'false'
         continue-on-error: true
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
-          if cargo search opencrabs --limit 1 | grep -q "opencrabs = \"${VERSION}\""; then
-            echo "v${VERSION} already on crates.io — skipping"
-          else
-            cargo publish --allow-dirty
-          fi
+        run: cargo publish --allow-dirty
 
   build-release:
     name: Build Release
@@ -48,7 +57,7 @@ jobs:
             artifact_name: opencrabs
             asset_suffix: linux-amd64
 
-          - os: ubuntu-latest
+          - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             artifact_name: opencrabs
             asset_suffix: linux-arm64
@@ -82,15 +91,10 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install Linux dependencies
-        if: matrix.os == 'ubuntu-latest'
+        if: contains(matrix.os, 'ubuntu')
         run: |
           sudo apt-get update
           sudo apt-get install -y libasound2-dev
-          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
-            sudo dpkg --add-architecture arm64
-            sudo apt-get update
-            sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libasound2-dev:arm64
-          fi
 
       - name: Install CMake (Windows)
         if: matrix.os == 'windows-latest'
@@ -106,11 +110,6 @@ jobs:
 
       - name: Build
         env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
-          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
-          PKG_CONFIG_SYSROOT_DIR: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && '/usr/aarch64-linux-gnu' || '' }}
-          PKG_CONFIG_PATH: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && '/usr/lib/aarch64-linux-gnu/pkgconfig' || '' }}
           # Disable i8mm intrinsics on macOS ARM — CI clang targets newer arch than M1
           CFLAGS: ${{ matrix.target == 'aarch64-apple-darwin' && '-march=armv8-a+crypto' || '' }}
           CXXFLAGS: ${{ matrix.target == 'aarch64-apple-darwin' && '-march=armv8-a+crypto' || '' }}
@@ -120,12 +119,7 @@ jobs:
 
       - name: Strip binary (Unix)
         if: matrix.os != 'windows-latest'
-        run: |
-          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
-            aarch64-linux-gnu-strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
-          else
-            strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
-          fi
+        run: strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
 
       - name: Create archive
         shell: bash
@@ -193,12 +187,14 @@ jobs:
           # Use --clobber so the workflow can attach binaries to a release
           # that was already created manually (e.g. via `gh release create`)
           if gh release view "v${{ steps.version.outputs.version }}" &>/dev/null; then
-            # Release exists -- upload assets to it
+            # Release exists -- upload assets and ensure it's not a draft
             gh release upload "v${{ steps.version.outputs.version }}" \
               release-assets/* --clobber
+            gh release edit "v${{ steps.version.outputs.version }}" --draft=false
           else
             gh release create "v${{ steps.version.outputs.version }}" \
               --title "v${{ steps.version.outputs.version }}" \
               --notes-file /tmp/release_notes.md \
+              --latest \
               release-assets/*
           fi
