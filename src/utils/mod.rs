@@ -4,6 +4,7 @@ pub mod approval;
 pub mod config_watcher;
 pub mod file_extract;
 pub mod image;
+pub mod install;
 pub mod retry;
 pub mod sanitize;
 mod string;

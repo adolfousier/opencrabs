@@ -795,7 +795,37 @@ async fn cmd_chat_inner(
         return Ok(());
     }
     tracing::debug!("Launching TUI");
-    tui::run(app).await.context("TUI error")?;
+    let tui_result = tui::run(app).await;
+
+    if let Err(ref e) = tui_result {
+        // TUI crashed or failed to start — offer crash recovery dialog.
+        // This runs on the raw terminal (not alternate screen) so the user
+        // can see the error and pick an older version to roll back to.
+        tracing::error!("TUI crashed: {}", e);
+
+        // Make sure raw mode is off and alternate screen is exited before showing dialog
+        let _ = crossterm::terminal::disable_raw_mode();
+        let _ = crossterm::execute!(
+            std::io::stdout(),
+            crossterm::terminal::LeaveAlternateScreen
+        );
+
+        let error_msg = format!("{}", e);
+        match super::crash_recovery::show_crash_recovery(&error_msg).await {
+            Ok(super::crash_recovery::CrashRecoveryAction::Retry) => {
+                // User wants to retry — return the original error so the process
+                // exits, and they can relaunch manually. A full retry would need
+                // re-initializing everything which is not practical here.
+                println!("\n  Relaunch OpenCrabs to try again.\n");
+            }
+            Ok(super::crash_recovery::CrashRecoveryAction::Installed(v)) => {
+                println!("\n  Installed v{}. Relaunch to use it.\n", v);
+                return Ok(());
+            }
+            Ok(super::crash_recovery::CrashRecoveryAction::Quit) | Err(_) => {}
+        }
+        return tui_result.context("TUI error");
+    }
 
     // Print shutdown logo and rolling message
     {
