@@ -31,7 +31,12 @@ fn new_plan_has_unique_id() {
 #[test]
 fn add_task_appends() {
     let mut plan = PlanDocument::new(Uuid::new_v4(), "P".to_string(), "D".to_string());
-    let task = PlanTask::new(1, "Task 1".to_string(), "Do something".to_string(), TaskType::Create);
+    let task = PlanTask::new(
+        1,
+        "Task 1".to_string(),
+        "Do something".to_string(),
+        TaskType::Create,
+    );
     plan.add_task(task);
     assert_eq!(plan.tasks.len(), 1);
     assert_eq!(plan.tasks[0].title, "Task 1");
@@ -42,7 +47,12 @@ fn add_task_updates_timestamp() {
     let mut plan = PlanDocument::new(Uuid::new_v4(), "P".to_string(), "D".to_string());
     let before = plan.updated_at;
     std::thread::sleep(std::time::Duration::from_millis(10));
-    plan.add_task(PlanTask::new(1, "T".to_string(), "D".to_string(), TaskType::Create));
+    plan.add_task(PlanTask::new(
+        1,
+        "T".to_string(),
+        "D".to_string(),
+        TaskType::Create,
+    ));
     assert!(plan.updated_at >= before);
 }
 
@@ -50,7 +60,12 @@ fn add_task_updates_timestamp() {
 fn add_multiple_tasks() {
     let mut plan = PlanDocument::new(Uuid::new_v4(), "P".to_string(), "D".to_string());
     for i in 0..5 {
-        plan.add_task(PlanTask::new(i, format!("Task {i}"), format!("Desc {i}"), TaskType::Create));
+        plan.add_task(PlanTask::new(
+            i,
+            format!("Task {i}"),
+            format!("Desc {i}"),
+            TaskType::Create,
+        ));
     }
     assert_eq!(plan.tasks.len(), 5);
 }
@@ -140,7 +155,12 @@ fn plan_document_serializes_to_json() {
 #[test]
 fn plan_document_round_trip() {
     let mut plan = PlanDocument::new(Uuid::new_v4(), "Round Trip".to_string(), "D".to_string());
-    plan.add_task(PlanTask::new(1, "T1".to_string(), "D1".to_string(), TaskType::Create));
+    plan.add_task(PlanTask::new(
+        1,
+        "T1".to_string(),
+        "D1".to_string(),
+        TaskType::Create,
+    ));
     let json = serde_json::to_string(&plan).unwrap();
     let deserialized: PlanDocument = serde_json::from_str(&json).unwrap();
     assert_eq!(deserialized.title, "Round Trip");

@@ -86,7 +86,11 @@ fn custom_provider_is_last() {
 fn all_providers_have_key_label_and_help() {
     for (i, p) in PROVIDERS.iter().enumerate() {
         assert!(!p.key_label.is_empty(), "provider {} missing key_label", i);
-        assert!(!p.help_lines.is_empty(), "provider {} missing help_lines", i);
+        assert!(
+            !p.help_lines.is_empty(),
+            "provider {} missing help_lines",
+            i
+        );
     }
 }
 
@@ -166,4 +170,3 @@ fn image_field_variants() {
 fn brain_field_variants() {
     assert_ne!(BrainField::AboutMe, BrainField::AboutAgent);
 }
-

@@ -136,7 +136,10 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
         input_lines.push(Line::from(vec![
             Span::styled("  queued: ", dim_style),
             Span::styled(preview, dim_style.add_modifier(Modifier::ITALIC)),
-            Span::styled("  (Up to edit)", Style::default().fg(Color::Rgb(70, 70, 70))),
+            Span::styled(
+                "  (Up to edit)",
+                Style::default().fg(Color::Rgb(70, 70, 70)),
+            ),
         ]));
     }
 

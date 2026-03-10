@@ -11,8 +11,7 @@ use std::path::Path;
 
 use crate::utils::install::{InstallMethod, binary_name, platform_suffix};
 
-const GITHUB_RELEASES_API: &str =
-    "https://api.github.com/repos/adolfousier/opencrabs/releases";
+const GITHUB_RELEASES_API: &str = "https://api.github.com/repos/adolfousier/opencrabs/releases";
 
 /// A single release entry from GitHub.
 #[derive(Debug)]
@@ -128,13 +127,7 @@ async fn cargo_install_version(version: &str) -> Result<()> {
     );
 
     let status = tokio::process::Command::new("cargo")
-        .args([
-            "install",
-            "opencrabs",
-            "--version",
-            version,
-            "--force",
-        ])
+        .args(["install", "opencrabs", "--version", version, "--force"])
         .status()
         .await?;
 
@@ -155,10 +148,7 @@ async fn source_install_version(project_root: &Path, tag: &str, version: &str) -
     let dim = "\x1b[2m";
     let reset = "\x1b[0m";
 
-    println!(
-        "  {}Building v{} from source...{}",
-        orange, version, reset
-    );
+    println!("  {}Building v{} from source...{}", orange, version, reset);
 
     // Fetch tags and checkout
     let fetch = tokio::process::Command::new("git")
@@ -185,7 +175,10 @@ async fn source_install_version(project_root: &Path, tag: &str, version: &str) -
         );
     }
 
-    println!("  {}Building (this may take a few minutes)...{}", dim, reset);
+    println!(
+        "  {}Building (this may take a few minutes)...{}",
+        dim, reset
+    );
 
     let build = tokio::process::Command::new("cargo")
         .args(["build", "--release"])
@@ -241,20 +234,14 @@ async fn swap_binary(binary_data: &[u8], version: &str) -> Result<()> {
     if let Err(reason) = verify_binary(&exe_path).await {
         if backup_path.exists() {
             std::fs::rename(&backup_path, &exe_path)?;
-            anyhow::bail!(
-                "New binary failed verification ({}). Rolled back.",
-                reason
-            );
+            anyhow::bail!("New binary failed verification ({}). Rolled back.", reason);
         }
         anyhow::bail!("New binary failed verification: {}", reason);
     }
 
     let _ = std::fs::remove_file(&backup_path);
 
-    println!(
-        "  {}Successfully installed v{}{}",
-        orange, version, reset
-    );
+    println!("  {}Successfully installed v{}{}", orange, version, reset);
     Ok(())
 }
 
@@ -331,10 +318,7 @@ pub async fn show_crash_recovery(error_msg: &str) -> Result<CrashRecoveryAction>
     let install_method = InstallMethod::detect();
 
     println!();
-    println!(
-        "{}{}  OpenCrabs crashed during startup{}",
-        red, bold, reset
-    );
+    println!("{}{}  OpenCrabs crashed during startup{}", red, bold, reset);
     println!();
     println!("  {}{}{}", dim, error_msg, reset);
     println!(
@@ -449,9 +433,7 @@ pub async fn show_crash_recovery(error_msg: &str) -> Result<CrashRecoveryAction>
                         Err(anyhow::anyhow!("No binary available"))
                     }
                 }
-                InstallMethod::CargoInstall => {
-                    cargo_install_version(&entry.version).await
-                }
+                InstallMethod::CargoInstall => cargo_install_version(&entry.version).await,
                 InstallMethod::Source(root) => {
                     source_install_version(root, &entry.tag, &entry.version).await
                 }
@@ -467,10 +449,7 @@ pub async fn show_crash_recovery(error_msg: &str) -> Result<CrashRecoveryAction>
                     return Ok(CrashRecoveryAction::Installed(entry.version.clone()));
                 }
                 Err(e) => {
-                    println!(
-                        "\n  {}Installation failed: {}{}",
-                        red, e, reset
-                    );
+                    println!("\n  {}Installation failed: {}{}", red, e, reset);
                     println!("  Try a different version or quit.\n");
                     continue;
                 }

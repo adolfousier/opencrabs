@@ -64,14 +64,22 @@ fn info_constructor() {
 
 #[test]
 fn warning_constructor() {
-    let e = ErrorInfo::warning(ErrorCategory::Network, "Warn".to_string(), "msg".to_string());
+    let e = ErrorInfo::warning(
+        ErrorCategory::Network,
+        "Warn".to_string(),
+        "msg".to_string(),
+    );
     assert_eq!(e.severity, ErrorSeverity::Warning);
     assert_eq!(e.category, ErrorCategory::Network);
 }
 
 #[test]
 fn error_constructor() {
-    let e = ErrorInfo::error(ErrorCategory::Database, "Err".to_string(), "msg".to_string());
+    let e = ErrorInfo::error(
+        ErrorCategory::Database,
+        "Err".to_string(),
+        "msg".to_string(),
+    );
     assert_eq!(e.severity, ErrorSeverity::Error);
     assert_eq!(e.category, ErrorCategory::Database);
 }
