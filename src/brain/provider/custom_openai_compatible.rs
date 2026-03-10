@@ -382,11 +382,22 @@ impl OpenAIProvider {
                 .collect()
         });
 
+        // Newer OpenAI models (gpt-4.1-*, gpt-5-*, o1-*, o3-*) require
+        // max_completion_tokens instead of max_tokens. Use the new field
+        // for these models and fall back to max_tokens for everything else.
+        let uses_completion_tokens = uses_max_completion_tokens(&request.model);
+        let (max_tokens, max_completion_tokens) = if uses_completion_tokens {
+            (None, request.max_tokens)
+        } else {
+            (request.max_tokens, None)
+        };
+
         OpenAIRequest {
             model: request.model,
             messages,
             temperature: request.temperature,
-            max_tokens: request.max_tokens,
+            max_tokens,
+            max_completion_tokens,
             stream: Some(request.stream),
             stream_options: None,
             tools,
@@ -569,10 +580,11 @@ impl Provider for OpenAIProvider {
 
         let tool_count = openai_request.tools.as_ref().map(|t| t.len()).unwrap_or(0);
         tracing::info!(
-            "OpenAI API request: model={}, messages={}, max_tokens={}, tools={}",
+            "OpenAI API request: model={}, messages={}, max_tokens={:?}, max_completion_tokens={:?}, tools={}",
             model,
             message_count,
-            openai_request.max_tokens.unwrap_or(4096),
+            openai_request.max_tokens,
+            openai_request.max_completion_tokens,
             tool_count
         );
         if tool_count == 0 {
@@ -1142,6 +1154,17 @@ impl Provider for OpenAIProvider {
     }
 }
 
+/// Returns true if this model requires `max_completion_tokens` instead of `max_tokens`.
+/// Newer OpenAI models (gpt-4.1-*, gpt-5-*, o1-*, o3-*) reject `max_tokens`.
+fn uses_max_completion_tokens(model: &str) -> bool {
+    let m = model.to_lowercase();
+    m.starts_with("gpt-4.1")
+        || m.starts_with("gpt-5")
+        || m.starts_with("o1")
+        || m.starts_with("o3")
+        || m.starts_with("o4")
+}
+
 // ============================================================================
 // OpenAI API Types
 // ============================================================================
@@ -1152,8 +1175,12 @@ struct OpenAIRequest {
     messages: Vec<OpenAIMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
+    /// Legacy token limit field — used by older OpenAI models (gpt-4o, gpt-3.5, etc.)
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
+    /// New token limit field — required by newer OpenAI models (gpt-4.1-*, gpt-5-*, o1-*, o3-*)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_completion_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     stream: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1336,5 +1363,34 @@ mod tests {
             (cost - 0.0005).abs() < 0.0001,
             "expected ~0.0005 but got {cost}"
         );
+    }
+
+    #[test]
+    fn gpt41_uses_max_completion_tokens() {
+        assert!(super::uses_max_completion_tokens("gpt-4.1-mini"));
+        assert!(super::uses_max_completion_tokens("gpt-4.1-nano"));
+        assert!(super::uses_max_completion_tokens("gpt-4.1"));
+    }
+
+    #[test]
+    fn gpt5_uses_max_completion_tokens() {
+        assert!(super::uses_max_completion_tokens("gpt-5-mini"));
+        assert!(super::uses_max_completion_tokens("gpt-5"));
+    }
+
+    #[test]
+    fn o_series_uses_max_completion_tokens() {
+        assert!(super::uses_max_completion_tokens("o1-mini"));
+        assert!(super::uses_max_completion_tokens("o1-preview"));
+        assert!(super::uses_max_completion_tokens("o3-mini"));
+        assert!(super::uses_max_completion_tokens("o4-mini"));
+    }
+
+    #[test]
+    fn older_models_use_max_tokens() {
+        assert!(!super::uses_max_completion_tokens("gpt-4o"));
+        assert!(!super::uses_max_completion_tokens("gpt-4o-mini"));
+        assert!(!super::uses_max_completion_tokens("gpt-3.5-turbo"));
+        assert!(!super::uses_max_completion_tokens("gpt-4-turbo"));
     }
 }
