@@ -10,169 +10,73 @@ cargo test --all-features
 
 | Category | Tests | Location |
 |----------|------:|----------|
-| CLI Parsing | 28 | `src/tests/cli_test.rs` |
-| Cron Jobs & Scheduling | 45 | `src/tests/cron_test.rs` |
-| Channel Search | 23 | `src/tests/channel_search_test.rs` |
-| Voice STT Dispatch | 22 | `src/tests/voice_stt_dispatch_test.rs` |
-| Voice Onboarding | 48 | `src/tests/voice_onboarding_test.rs` |
-| Local Whisper (inline) | 25 | `src/channels/voice/local_whisper.rs` |
-| Candle Whisper | 6 | `src/tests/candle_whisper_test.rs` |
-| Evolve (Self-Update) | 12 | `src/tests/evolve_test.rs` |
-| Session & Working Dir | 12 | `src/tests/session_working_dir_test.rs` |
-| Message Compaction | 14 | `src/tests/compaction_test.rs` |
-| Fallback Vision | 17 | `src/tests/fallback_vision_test.rs` |
-| Onboarding Keys | 4 | `src/tests/onboarding_keys_test.rs` |
-| **Total** | **256+** | |
-
----
-
-## Test Modules
-
-### CLI Parsing (`src/tests/cli_test.rs`)
-
-Validates argument parsing for all CLI commands and flags.
-
-- `chat`, `run`, `init`, `config`, `db`, `daemon` subcommands
-- Flag combinations: `--debug`, `--config`, `--format`, `--auto-approve`
-- Error cases: invalid format, missing prompt, invalid subcommand
-
-### Cron Jobs & Scheduling (`src/tests/cron_test.rs`)
-
-Full coverage of the cron job system across 4 test modules.
-
-**CLI parsing** (15 tests) — `/cron add`, `/cron list`, `/cron remove`, `/cron enable/disable`, missing/invalid args
-
-**Database** (9 async tests) — insert, find by ID/name, list all/enabled, delete, set enabled, update last run, full field round-trip
-
-**Cron expressions** (3 tests) — valid/invalid expression validation, next-run calculation
-
-**Service** (15 async tests) — create/list, missing fields, invalid cron, duplicate names, enable/disable, approval requirements, deliver-to routing, due-time calculation
-
-**Session tracking** (4 tests) — follows user to current session, fallback to initial session, shared session ID updates
-
-### Channel Search (`src/tests/channel_search_test.rs`)
-
-Tests the channel message search repository and tool.
-
-**Repository** (11 async tests) — insert/recent, limit, channel filter, content search, cross-chat search, list chats, duplicate handling, field round-trip
-
-**Tool** (12 async tests) — list chats (empty/with data/filtered), recent messages (requires chat_id, returns messages, empty, n-limit), search (requires query, finds messages, channel filter, no match, unknown operation)
-
-### Voice STT Dispatch (`src/tests/voice_stt_dispatch_test.rs`)
-
-Tests STT routing logic, audio decoding, and codec support.
-
-**Dispatch routing** (5 async tests)
-- API mode: requires key, empty key fails, provider-no-key fails
-- Local mode: unknown model fails, model-not-downloaded fails (feature-gated)
-
-**VoiceConfig** (3 tests) — default is API mode, local STT from providers TOML, empty config defaults
-
-**Audio decoding** (4 tests, `local-stt` feature) — empty bytes fails, WAV magic detection, WAV sine generation + decode, resampler identity
-
-**Codec support** (3 tests, `local-stt` feature) — Opus decoder registration, symphonia OGG probe, model preset validation
-
-**API mock** (3 async tests) — Groq dispatch, mode selection routing, local whisper dispatch
-
-**Quick-jump** (3 tests) — quick-jump done triggers flag, Esc returns cancel, non-quick-jump advances step
-
-### Voice Onboarding (`src/tests/voice_onboarding_test.rs`)
-
-Tests the voice setup wizard step: STT/TTS mode selection, key input, model picker, navigation, config persistence, availability-gated cycling.
-
-**STT mode selection** (6 tests) — starts on SttModeSelect, cycles Up/Down, Off/API/Local Tab targets, Enter same as Tab
-
-**Groq API key** (4 tests) — typing appends, backspace removes, Tab/BackTab navigation
-
-**Local model selection** (5 tests) — Tab/BackTab navigation, Enter triggers download or advances, Enter during download is no-op
-
-**TTS mode selection** (7 tests) — cycles Up/Down, tts_enabled flag, Off/API enter advances, Local enter goes to voice picker, BackTab targets
-
-**TTS local voice** (5 tests) — BackTab to TTS mode, Tab advances step, Enter triggers download, Enter during download is no-op, Up/Down cycles voices
-
-**Capability detection** (3 tests)
-- `local_stt_available` matches compile-time feature flag
-- `local_tts_available` matches feature + python3 probe
-- `local_tts_available` is cached via OnceLock
-
-**Availability-gated cycling** (5 tests)
-- STT cycles to Local when `local-stt` feature enabled
-- STT Up from Off goes to Local when available
-- TTS cycles to Local when `local-tts` + python3 available
-- TTS skips Local when unavailable
-- STT skips Local when unavailable
-
-**Wizard reset** (2 tests)
-- `from_config` resets saved Local STT to Off when unavailable
-- `from_config` resets saved Local TTS to Off when unavailable
-
-**Config persistence** (4 tests) — SttMode/TtsMode serde round-trip, TuiEvent variants
-
-**Navigation flow** (4 tests) — full API flow, Channels->Voice->Image step transitions
-
-**Rendering smoke tests** (5 tests) — produces lines, API mode shows Groq field, Local mode shows model selector, TTS section, voice list
-
-### Local Whisper Inline Tests (`src/channels/voice/local_whisper.rs`)
-
-Unit tests co-located with the local STT engine (gated behind `local-stt` feature).
-
-**Transcript cleaning** (3 tests) — whitespace collapse, newlines/tabs, empty input
-
-**PcmSource (rodio::Source)** (4 tests) — iterates all samples, empty source, channels/sample_rate/duration metadata, frame_len decreases
-
-**Whisper source parsing** (2 tests) — all presets parse successfully, unknown source fails
-
-**Model management** (3 tests) — `is_model_downloaded` always true (rwhisper auto-downloads), unique preset IDs, model path under opencrabs dir
-
-**Audio decoding** (4 tests) — empty bytes fails, garbage bytes fails, WAV sine decode, stereo-to-mono mixdown
-
-**Resampling** (2 tests) — 48kHz to 16kHz ratio, resampled audio is non-silent
-
-**Audio sanitization** (4 tests) — NaN/Inf scrubbing, short audio padded to 16000 samples, at-minimum not padded, above-minimum not padded
-
-**Download progress** (2 tests) — done state, error state
-
-**Preset validation** (1 test) — default preset is QuantizedTiny (multilingual)
-
-### Candle Whisper (`src/tests/candle_whisper_test.rs`)
-
-Validates mel filterbank computation and model presets for the rwhisper integration.
-
-- Mel filters: correct shape (80 and 128 bins), non-zero values, no NaN/Inf/negative
-- Model presets: required fields, find by ID
-
-### Evolve / Self-Update (`src/tests/evolve_test.rs`)
-
-Tests version comparison and asset naming for the self-update system.
-
-**Version comparison** (7 tests) — major/minor/patch bumps, equal returns false, older returns false, different semver lengths, non-numeric segments
-
-**Asset naming** (3 tests) — single binary format (`opencrabs-v{tag}-{platform}.tar.gz`), Windows `.zip`, legacy fallback without version
-
-**Binary identity** (1 test) — binary name is always `opencrabs`
-
-**Platform support** (1 test) — current platform has a recognized suffix
-
-### Session & Working Directory (`src/tests/session_working_dir_test.rs`)
-
-**Working directory** (4 async tests) — new session has no dir, update persists, default has no dir, multiple sessions have independent dirs
-
-**Update checker** (8 tests) — newer patch/minor/major, same version, older version, two-segment versions
-
-### Message Compaction (`src/tests/compaction_test.rs`)
-
-**Snapshot formatting** (14 tests) — empty messages, user/assistant text, system messages, tool use/result blocks, image blocks, long text truncation at 500 chars
-
-### Fallback Vision (`src/tests/fallback_vision_test.rs`)
-
-**Fallback chain** (9+ tests) — empty config, legacy single provider, providers array, array+legacy dedup, TOML deserialization variants
-
-### Onboarding Keys (`src/tests/onboarding_keys_test.rs`)
-
-- Provider count matches constants
-- Custom provider detection
-- All providers use api_key_input
-- keys.toml has all provider sections
+| **Brain — Agent Service** | 42 | `src/brain/agent/service.rs` |
+| **Brain — Prompt Builder** | 20 | `src/brain/prompt_builder.rs` |
+| **Brain — Agent Context** | 12 | `src/brain/agent/context.rs` |
+| **Brain — Provider (Anthropic)** | 9 | `src/brain/provider/anthropic.rs` |
+| **Brain — Provider (Retry)** | 9 | `src/brain/provider/retry.rs` |
+| **Brain — Provider (Custom OpenAI)** | 5 | `src/brain/provider/custom_openai_compatible.rs` |
+| **Brain — Provider (Factory)** | 4 | `src/brain/provider/factory.rs` |
+| **Brain — Provider (Types/Error/Trait)** | 7 | `src/brain/provider/` |
+| **Brain — Tokenizer** | 8 | `src/brain/tokenizer.rs` |
+| **Brain — Commands** | 6 | `src/brain/commands.rs` |
+| **Brain — Self-Update** | 1 | `src/brain/self_update.rs` |
+| **Brain Tools — Plan Security** | 20 | `src/brain/tools/plan_tool.rs` |
+| **Brain Tools — Exa Search** | 18 | `src/brain/tools/exa_search.rs` |
+| **Brain Tools — Write File** | 17 | `src/brain/tools/write_opencrabs_file.rs` |
+| **Brain Tools — A2A Send** | 16 | `src/brain/tools/a2a_send.rs` |
+| **Brain Tools — Load Brain File** | 14 | `src/brain/tools/load_brain_file.rs` |
+| **Brain Tools — Brave Search** | 12 | `src/brain/tools/brave_search.rs` |
+| **Brain Tools — Doc Parser** | 10 | `src/brain/tools/doc_parser.rs` |
+| **Brain Tools — Registry** | 7 | `src/brain/tools/registry.rs` |
+| **Brain Tools — Slash Command** | 6 | `src/brain/tools/slash_command.rs` |
+| **Brain Tools — Bash** | 6 | `src/brain/tools/bash.rs` |
+| **Brain Tools — Write/Read/Config/Memory/Error** | 16 | `src/brain/tools/` |
+| **Channels — Voice Service** | 14 | `src/channels/voice/service.rs` |
+| **Channels — Voice Local TTS** | 14 | `src/channels/voice/local_tts.rs` |
+| **Channels — Voice Local Whisper** | 25 | `src/channels/voice/local_whisper.rs` |
+| **Channels — Commands** | 14 | `src/channels/commands.rs` |
+| **Channels — WhatsApp Store** | 15 | `src/channels/whatsapp/store.rs` |
+| **Channels — WhatsApp Handler** | 5 | `src/channels/whatsapp/handler.rs` |
+| **Channels — Telegram Handler** | 8 | `src/channels/telegram/handler.rs` |
+| **Channels — Slack Handler** | 2 | `src/channels/slack/handler.rs` |
+| **Channels — Discord Handler** | 2 | `src/channels/discord/handler.rs` |
+| **Channels — General** | 5 | `src/channels/` |
+| **Config — Types** | 19 | `src/config/types.rs` |
+| **Config — Secrets** | 5 | `src/config/secrets.rs` |
+| **Config — Update** | 4 | `src/config/update.rs` |
+| **Config — Crabrace** | 3 | `src/config/crabrace.rs` |
+| **DB — Repository (Plan)** | 15 | `src/db/repository/plan.rs` |
+| **DB — Retry** | 8 | `src/db/retry.rs` |
+| **DB — Database** | 5 | `src/db/database.rs` |
+| **DB — Models** | 4 | `src/db/models.rs` |
+| **DB — Repository (Other)** | 9 | `src/db/repository/` |
+| **Services — Plan** | 11 | `src/services/plan.rs` |
+| **Services — File** | 11 | `src/services/file.rs` |
+| **Services — Message** | 10 | `src/services/message.rs` |
+| **Services — Session** | 9 | `src/services/session.rs` |
+| **Services — Context** | 2 | `src/services/context.rs` |
+| **A2A — Debate** | 8 | `src/a2a/debate.rs` |
+| **A2A — Types** | 6 | `src/a2a/types.rs` |
+| **A2A — Server/Handler/Agent Card** | 7 | `src/a2a/` |
+| **Memory — Store** | 6 | `src/memory/store.rs` |
+| **Memory — Search** | 3 | `src/memory/search.rs` |
+| **Pricing** | 7 | `src/pricing.rs` |
+| **Logging** | 4 | `src/logging/logger.rs` |
+| **Utils** | 1 | `src/utils/` |
+| **CLI** | 1 | `src/cli.rs` |
+| Tests — CLI Parsing | 28 | `src/tests/cli_test.rs` |
+| Tests — Cron Jobs & Scheduling | 49 | `src/tests/cron_test.rs` |
+| Tests — Channel Search | 24 | `src/tests/channel_search_test.rs` |
+| Tests — Voice STT Dispatch | 7 | `src/tests/voice_stt_dispatch_test.rs` |
+| Tests — Voice Onboarding | 7 | `src/tests/voice_onboarding_test.rs` |
+| Tests — Candle Whisper | 6 | `src/tests/candle_whisper_test.rs` |
+| Tests — Evolve (Self-Update) | 12 | `src/tests/evolve_test.rs` |
+| Tests — Session & Working Dir | 15 | `src/tests/session_working_dir_test.rs` |
+| Tests — Message Compaction | 24 | `src/tests/compaction_test.rs` |
+| Tests — Fallback Vision | 35 | `src/tests/fallback_vision_test.rs` |
+| Tests — General | 100 | `src/tests/` |
+| **Total** | **950** | |
 
 ---
 
