@@ -14,6 +14,7 @@ pub mod onboarding_keys_test;
 pub mod onboarding_navigation_test;
 pub mod onboarding_types_test;
 pub mod plan_document_test;
+pub mod queued_message_test;
 //pub mod plan_mode_integration_test;
 pub mod session_working_dir_test;
 //pub mod streaming_test;

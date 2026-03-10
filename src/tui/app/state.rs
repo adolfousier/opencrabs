@@ -372,6 +372,10 @@ pub struct App {
     /// Queued message — shared with agent so it can be injected between tool calls
     pub(crate) message_queue: Arc<tokio::sync::Mutex<Option<String>>>,
 
+    /// Local copy of queued message text for display in the input area.
+    /// Set when a message is queued, cleared when injected or recalled via Up.
+    pub(crate) queued_message_preview: Option<String>,
+
     /// Shared session ID — channels (Telegram, WhatsApp) read this to use the same session
     pub(crate) shared_session_id: Arc<tokio::sync::Mutex<Option<Uuid>>>,
 
@@ -520,6 +524,7 @@ impl App {
             provider_cache: HashMap::new(),
             cancel_token: None,
             message_queue: Arc::new(tokio::sync::Mutex::new(None)),
+            queued_message_preview: None,
             shared_session_id: Arc::new(tokio::sync::Mutex::new(None)),
             default_model_name: agent_service.provider_model(),
             context_max_tokens: agent_service
@@ -1131,27 +1136,6 @@ impl App {
                 self.streaming_reasoning = None;
                 self.intermediate_text_received = true;
 
-                // Check if there was a queued message that was just processed
-                // If so, add it at the VERY END (after all assistant messages and tool calls)
-                if let Some(queued_content) = self.message_queue.lock().await.take() {
-                    let queued_msg = DisplayMessage {
-                        id: Uuid::new_v4(),
-                        role: "user".to_string(),
-                        content: Self::humanize_image_markers(&queued_content),
-                        timestamp: chrono::Utc::now(),
-                        token_count: None,
-                        cost: None,
-                        approval: None,
-                        approve_menu: None,
-                        details: Some("queued".to_string()), // Mark as queued
-                        expanded: false,
-                        tool_group: None,
-                    };
-                    // Push at the END so it appears below everything
-                    self.messages.push(queued_msg);
-                    tracing::info!("[TUI] Added queued message at end of conversation");
-                }
-
                 // Flush previous iteration's tool group FIRST, so tools appear
                 // before the next iteration's text (matches DB order).
                 if let Some(group) = self.active_tool_group.take() {
@@ -1173,6 +1157,27 @@ impl App {
                         expanded: false,
                         tool_group: Some(group),
                     });
+                }
+
+                // Flush queued user message AFTER tools, BEFORE next assistant text.
+                // This ensures follow-up questions appear between tool results and
+                // the assistant's next response — matching natural conversation flow.
+                if let Some(queued_content) = self.message_queue.lock().await.take() {
+                    self.queued_message_preview = None;
+                    self.messages.push(DisplayMessage {
+                        id: Uuid::new_v4(),
+                        role: "user".to_string(),
+                        content: Self::humanize_image_markers(&queued_content),
+                        timestamp: chrono::Utc::now(),
+                        token_count: None,
+                        cost: None,
+                        approval: None,
+                        approve_menu: None,
+                        details: Some("queued".to_string()),
+                        expanded: false,
+                        tool_group: None,
+                    });
+                    tracing::info!("[TUI] Injected queued message between tools and response");
                 }
 
                 // Then add the new intermediate text as a separate assistant message

@@ -122,6 +122,24 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
         }
     }
 
+    // Show queued message preview below the input (dimmed, with Up hint)
+    if let Some(ref queued) = app.queued_message_preview {
+        let flat = queued.replace('\n', " ");
+        let max_preview = input_content_width.saturating_sub(25);
+        let preview: String = if flat.chars().count() > max_preview {
+            let truncated: String = flat.chars().take(max_preview).collect();
+            format!("{}...", truncated)
+        } else {
+            flat
+        };
+        let dim_style = Style::default().fg(Color::Rgb(100, 100, 100));
+        input_lines.push(Line::from(vec![
+            Span::styled("  queued: ", dim_style),
+            Span::styled(preview, dim_style.add_modifier(Modifier::ITALIC)),
+            Span::styled("  (Up to edit)", Style::default().fg(Color::Rgb(70, 70, 70))),
+        ]));
+    }
+
     let border_style = Style::default().fg(Color::Rgb(120, 120, 120));
 
     // Context usage indicator (right-side bottom title)

@@ -1254,6 +1254,7 @@ impl App {
             // It will be added at the end after all assistant messages
 
             // Queue for injection between tool calls
+            self.queued_message_preview = Some(content.clone());
             *self.message_queue.lock().await = Some(content);
             return Ok(());
         }
@@ -1431,25 +1432,6 @@ impl App {
             }
         }
 
-        // Finalize any remaining queued message at the END (if agent didn't process it via IntermediateText)
-        if let Some(queued_content) = self.message_queue.lock().await.take() {
-            let queued_msg = DisplayMessage {
-                id: Uuid::new_v4(),
-                role: "user".to_string(),
-                content: Self::humanize_image_markers(&queued_content),
-                timestamp: chrono::Utc::now(),
-                token_count: None,
-                cost: None,
-                approval: None,
-                approve_menu: None,
-                details: Some("queued".to_string()),
-                expanded: false,
-                tool_group: None,
-            };
-            self.messages.push(queued_msg);
-            tracing::info!("[TUI] Added queued message at response complete");
-        }
-
         // Finalize active tool group as a quick_jump message BEFORE the response.
         // Matches DB reload order from expand_message.
         if let Some(group) = self.active_tool_group.take() {
@@ -1467,6 +1449,25 @@ impl App {
                 expanded: false,
                 tool_group: Some(group),
             });
+        }
+
+        // Flush any remaining queued message after tools (if agent didn't consume it via IntermediateText)
+        if let Some(queued_content) = self.message_queue.lock().await.take() {
+            self.queued_message_preview = None;
+            self.messages.push(DisplayMessage {
+                id: Uuid::new_v4(),
+                role: "user".to_string(),
+                content: Self::humanize_image_markers(&queued_content),
+                timestamp: chrono::Utc::now(),
+                token_count: None,
+                cost: None,
+                approval: None,
+                approve_menu: None,
+                details: Some("queued".to_string()),
+                expanded: false,
+                tool_group: None,
+            });
+            tracing::info!("[TUI] Added queued message at response complete (after tools)");
         }
 
         // Reload user commands (agent may have written new ones to commands.json)
