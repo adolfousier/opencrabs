@@ -595,7 +595,7 @@ impl Provider for OpenAIProvider {
 
         let model = request.model.clone();
         let message_count = request.messages.len();
-        let openai_request = self.to_openai_request(request);
+        let mut openai_request = self.to_openai_request(request);
         let retry_config = RetryConfig::default();
 
         let tool_count = openai_request.tools.as_ref().map(|t| t.len()).unwrap_or(0);
@@ -648,7 +648,34 @@ impl Provider for OpenAIProvider {
         )
         .await;
 
+        // Resilient fallback: if the API rejected max_tokens / max_completion_tokens,
+        // swap the fields and retry once.
         if let Err(ref e) = result {
+            if is_token_field_mismatch(&e.to_string()) {
+                tracing::warn!(
+                    "Token field mismatch for model {}, retrying with swapped fields",
+                    model
+                );
+                openai_request.swap_token_fields();
+                return retry_with_backoff(
+                    || async {
+                        let response = self
+                            .client
+                            .post(&self.base_url)
+                            .headers(self.headers()?)
+                            .json(&openai_request)
+                            .send()
+                            .await?;
+                        if !response.status().is_success() {
+                            return Err(self.handle_error(response).await);
+                        }
+                        let openai_response: OpenAIResponse = response.json().await?;
+                        Ok(self.from_openai_response(openai_response))
+                    },
+                    &retry_config,
+                )
+                .await;
+            }
             tracing::error!("OpenAI API request failed: {}", e);
         }
 
@@ -717,7 +744,7 @@ impl Provider for OpenAIProvider {
         let retry_config = RetryConfig::default();
 
         // Retry the stream connection establishment
-        let response = retry_with_backoff(
+        let mut response = retry_with_backoff(
             || async {
                 let response = self
                     .client
@@ -737,7 +764,37 @@ impl Provider for OpenAIProvider {
             },
             &retry_config,
         )
-        .await?;
+        .await;
+
+        // Resilient fallback: if the API rejected max_tokens / max_completion_tokens,
+        // swap the fields and retry once.
+        if let Err(ref e) = response
+            && is_token_field_mismatch(&e.to_string())
+        {
+            tracing::warn!(
+                "Token field mismatch for model {} (stream), retrying with swapped fields",
+                model
+            );
+            openai_request.swap_token_fields();
+            response = retry_with_backoff(
+                || async {
+                    let r = self
+                        .client
+                        .post(&self.base_url)
+                        .headers(self.headers()?)
+                        .json(&openai_request)
+                        .send()
+                        .await?;
+                    if !r.status().is_success() {
+                        return Err(self.handle_error(r).await);
+                    }
+                    Ok(r)
+                },
+                &retry_config,
+            )
+            .await;
+        }
+        let response = response?;
 
         // Parse Server-Sent Events stream - return Vec to emit multiple events like Anthropic
         let byte_stream = response.bytes_stream();
@@ -1156,12 +1213,31 @@ impl Provider for OpenAIProvider {
     }
 
     fn context_window(&self, model: &str) -> Option<u32> {
+        let m = model.to_lowercase();
+        // gpt-5 family
+        if m.starts_with("gpt-5") {
+            return Some(1_047_576); // 1M tokens
+        }
+        // gpt-4.1 family
+        if m.starts_with("gpt-4.1") {
+            return Some(1_047_576); // 1M tokens
+        }
+        // o-series reasoning models
+        if m.starts_with("o4") || m.starts_with("o3") {
+            return Some(200_000);
+        }
+        if m.starts_with("o1") {
+            return Some(200_000);
+        }
+        // gpt-4o family
+        if m.starts_with("gpt-4o") {
+            return Some(128_000);
+        }
         match model {
-            // OpenAI
-            "gpt-4-turbo-preview" => Some(128_000),
+            "gpt-4-turbo" | "gpt-4-turbo-preview" => Some(128_000),
             "gpt-4" => Some(8_192),
             "gpt-4-32k" => Some(32_768),
-            "gpt-3.5-turbo" => Some(4_096),
+            "gpt-3.5-turbo" => Some(16_384),
             "gpt-3.5-turbo-16k" => Some(16_384),
             _ => None,
         }
@@ -1176,7 +1252,7 @@ impl Provider for OpenAIProvider {
 
 /// Returns true if this model requires `max_completion_tokens` instead of `max_tokens`.
 /// Newer OpenAI models (gpt-4.1-*, gpt-5-*, o1-*, o3-*) reject `max_tokens`.
-fn uses_max_completion_tokens(model: &str) -> bool {
+pub(crate) fn uses_max_completion_tokens(model: &str) -> bool {
     let m = model.to_lowercase();
     m.starts_with("gpt-4.1")
         || m.starts_with("gpt-5")
@@ -1207,6 +1283,22 @@ struct OpenAIRequest {
     stream_options: Option<StreamOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<OpenAITool>>,
+}
+
+impl OpenAIRequest {
+    /// Swap max_tokens ↔ max_completion_tokens for retry after a 400 error.
+    fn swap_token_fields(&mut self) {
+        let old_max = self.max_tokens.take();
+        let old_completion = self.max_completion_tokens.take();
+        self.max_tokens = old_completion;
+        self.max_completion_tokens = old_max;
+    }
+}
+
+/// Returns true if the error message indicates a max_tokens / max_completion_tokens mismatch.
+pub(crate) fn is_token_field_mismatch(msg: &str) -> bool {
+    let m = msg.to_lowercase();
+    (m.contains("max_tokens") || m.contains("max_completion_tokens")) && m.contains("unsupported")
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1334,83 +1426,4 @@ struct OpenAIError {
     message: String,
     #[serde(rename = "type")]
     error_type: Option<String>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_openai_provider_creation() {
-        let provider = OpenAIProvider::new("test-key".to_string());
-        assert_eq!(provider.name(), "openai");
-        assert_eq!(provider.base_url, DEFAULT_OPENAI_API_URL);
-    }
-
-    #[test]
-    fn test_local_provider_creation() {
-        let provider =
-            OpenAIProvider::local("http://localhost:1234/v1/chat/completions".to_string());
-        assert_eq!(provider.api_key, "not-needed");
-    }
-
-    #[test]
-    fn test_supported_models() {
-        let provider = OpenAIProvider::new("test-key".to_string());
-        let models = provider.supported_models();
-        assert!(models.contains(&"gpt-4".to_string()));
-        assert!(models.contains(&"gpt-3.5-turbo".to_string()));
-    }
-
-    #[test]
-    fn test_context_window() {
-        let provider = OpenAIProvider::new("test-key".to_string());
-        assert_eq!(provider.context_window("gpt-4"), Some(8_192));
-        assert_eq!(
-            provider.context_window("gpt-4-turbo-preview"),
-            Some(128_000)
-        );
-        assert_eq!(provider.context_window("unknown"), None);
-    }
-
-    #[test]
-    fn test_calculate_cost() {
-        let provider = OpenAIProvider::new("test-key".to_string());
-        // 1000 input + 1000 output tokens on gpt-5-nano
-        // Cost: (1000/1M * 0.10) + (1000/1M * 0.40) = 0.0001 + 0.0004 = 0.0005
-        let cost = provider.calculate_cost("gpt-5-nano", 1000, 1000);
-        assert!(
-            (cost - 0.0005).abs() < 0.0001,
-            "expected ~0.0005 but got {cost}"
-        );
-    }
-
-    #[test]
-    fn gpt41_uses_max_completion_tokens() {
-        assert!(super::uses_max_completion_tokens("gpt-4.1-mini"));
-        assert!(super::uses_max_completion_tokens("gpt-4.1-nano"));
-        assert!(super::uses_max_completion_tokens("gpt-4.1"));
-    }
-
-    #[test]
-    fn gpt5_uses_max_completion_tokens() {
-        assert!(super::uses_max_completion_tokens("gpt-5-mini"));
-        assert!(super::uses_max_completion_tokens("gpt-5"));
-    }
-
-    #[test]
-    fn o_series_uses_max_completion_tokens() {
-        assert!(super::uses_max_completion_tokens("o1-mini"));
-        assert!(super::uses_max_completion_tokens("o1-preview"));
-        assert!(super::uses_max_completion_tokens("o3-mini"));
-        assert!(super::uses_max_completion_tokens("o4-mini"));
-    }
-
-    #[test]
-    fn older_models_use_max_tokens() {
-        assert!(!super::uses_max_completion_tokens("gpt-4o"));
-        assert!(!super::uses_max_completion_tokens("gpt-4o-mini"));
-        assert!(!super::uses_max_completion_tokens("gpt-3.5-turbo"));
-        assert!(!super::uses_max_completion_tokens("gpt-4-turbo"));
-    }
 }

@@ -209,8 +209,19 @@ pub async fn fetch_provider_models(provider_index: usize, api_key: Option<&str>)
             req.send().await
         }
         2 => {
-            // GitHub Models — no /models list endpoint, uses config models
-            return Vec::new();
+            // GitHub Models — no /models list endpoint, load from config or defaults
+            if let Ok(config) = crate::config::Config::load()
+                && let Some(p) = &config.providers.github
+            {
+                if !p.models.is_empty() {
+                    return p.models.clone();
+                }
+                if let Some(model) = &p.default_model {
+                    return vec![model.clone()];
+                }
+            }
+            // Fall back to config.toml.example defaults
+            return OnboardingWizard::load_default_models(2);
         }
         4 => {
             // OpenRouter — /api/v1/models

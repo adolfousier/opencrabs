@@ -937,7 +937,7 @@ impl App {
                         }
                     }
                 } else if self.mode == AppMode::ModelSelector {
-                    let is_custom = self.model_selector_provider_selected == 5;
+                    let is_custom = self.model_selector_provider_selected == 6;
                     match (self.model_selector_focused_field, is_custom) {
                         // Non-custom: field 1 = API key
                         (1, false) => {
@@ -1424,39 +1424,6 @@ impl App {
                     self.model_selector_models = models;
                     self.model_selector_selected = selected;
                     self.model_selector_filter.clear();
-                }
-            }
-            TuiEvent::GitHubDeviceCode {
-                user_code,
-                verification_uri,
-                device_code,
-                ..
-            } => {
-                if let Some(ref mut wizard) = self.onboarding {
-                    wizard.github_user_code = Some(user_code);
-                    wizard.github_verification_uri = Some(verification_uri);
-                    wizard.github_device_code = Some(device_code);
-                }
-            }
-            TuiEvent::GitHubOAuthAuthorized(token) => {
-                if let Some(ref mut wizard) = self.onboarding {
-                    wizard.github_oauth_polling = false;
-                    wizard.github_oauth_error = None;
-                    // Save token to keys.toml and mark as existing
-                    let _ = crate::config::Config::write_key("providers.github", "api_key", &token);
-                    wizard.api_key_input = "__EXISTING_KEY__".to_string();
-                    // Load models from config defaults
-                    let models = super::onboarding::OnboardingWizard::load_default_models(2);
-                    if !models.is_empty() {
-                        wizard.fetched_models = models;
-                        wizard.selected_model = 0;
-                    }
-                }
-            }
-            TuiEvent::GitHubOAuthError(err) => {
-                if let Some(ref mut wizard) = self.onboarding {
-                    wizard.github_oauth_polling = false;
-                    wizard.github_oauth_error = Some(err);
                 }
             }
             TuiEvent::WhatsAppQrCode(qr_data) => {

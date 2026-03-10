@@ -23,10 +23,7 @@ pub const PROVIDERS: &[ProviderInfo] = &[
         name: "GitHub Models",
         models: &[],
         key_label: "Token",
-        help_lines: &[
-            "OAuth device flow or gh auth login for browser OAuth",
-            "Fallback: PAT from github.com/settings/tokens",
-        ],
+        help_lines: &["Click link below to create a token, then paste it here"],
     },
     ProviderInfo {
         name: "Google Gemini",
@@ -328,6 +325,4 @@ pub enum WizardAction {
     DownloadPiperVoice,
     /// Quick-jump step completed — save config and close wizard
     QuickJumpDone,
-    /// Start GitHub OAuth Device Flow (request device code)
-    GitHubDeviceAuth,
 }

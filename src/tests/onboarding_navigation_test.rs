@@ -33,6 +33,7 @@ fn provider_auth_to_channels_in_advanced() {
 fn provider_auth_requires_api_key() {
     let mut w = wizard();
     w.step = OnboardingStep::ProviderAuth;
+    w.selected_provider = 0; // Anthropic — non-custom, requires API key
     w.api_key_input.clear();
     w.next_step();
     // Should not advance — error set

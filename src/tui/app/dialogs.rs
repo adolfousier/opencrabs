@@ -16,6 +16,7 @@ impl App {
         self.model_selector_has_existing_key = false;
 
         if let Ok(config) = crate::config::Config::load() {
+            // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=Custom
             let has_key = match provider_idx {
                 0 => config
                     .providers
@@ -29,20 +30,25 @@ impl App {
                     .is_some_and(|p| p.api_key.as_ref().is_some_and(|k| !k.is_empty())),
                 2 => config
                     .providers
-                    .gemini
+                    .github
                     .as_ref()
                     .is_some_and(|p| p.api_key.as_ref().is_some_and(|k| !k.is_empty())),
                 3 => config
                     .providers
-                    .openrouter
+                    .gemini
                     .as_ref()
                     .is_some_and(|p| p.api_key.as_ref().is_some_and(|k| !k.is_empty())),
                 4 => config
                     .providers
+                    .openrouter
+                    .as_ref()
+                    .is_some_and(|p| p.api_key.as_ref().is_some_and(|k| !k.is_empty())),
+                5 => config
+                    .providers
                     .minimax
                     .as_ref()
                     .is_some_and(|p| p.api_key.as_ref().is_some_and(|k| !k.is_empty())),
-                5 => {
+                6 => {
                     // Custom provider - load base_url, model, and name
                     // Use first custom from map (not active_custom which filters by enabled)
                     if let Some(map) = &config.providers.custom {
@@ -102,8 +108,16 @@ impl App {
                         .as_ref()
                         .and_then(|p| p.api_key.clone()),
                 ),
-                "gemini" => (
+                "GitHub Models" | "github" => (
                     2,
+                    config
+                        .providers
+                        .github
+                        .as_ref()
+                        .and_then(|p| p.api_key.clone()),
+                ),
+                "gemini" => (
+                    3,
                     config
                         .providers
                         .gemini
@@ -111,7 +125,7 @@ impl App {
                         .and_then(|p| p.api_key.clone()),
                 ),
                 "openrouter" => (
-                    3,
+                    4,
                     config
                         .providers
                         .openrouter
@@ -119,7 +133,7 @@ impl App {
                         .and_then(|p| p.api_key.clone()),
                 ),
                 "minimax" => (
-                    4,
+                    5,
                     config
                         .providers
                         .minimax
@@ -138,13 +152,13 @@ impl App {
                             c.default_model.clone().unwrap_or_default();
                         self.model_selector_custom_name = cname.to_string();
                     }
-                    (5, api_key)
+                    (6, api_key)
                 }
             }
         });
 
         // Determine which provider is enabled
-        // Indices: 0=Anthropic, 1=OpenAI, 2=Gemini, 3=OpenRouter, 4=Minimax, 5=Custom
+        // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=Custom
         let (provider_idx, api_key) = if let Some(resolved) = from_session {
             tracing::debug!("[open_model_selector] From session: {:?}", session_provider);
             resolved
@@ -173,7 +187,7 @@ impl App {
                 if base_url.contains("openrouter") {
                     tracing::debug!("[open_model_selector] OpenAI (OpenRouter) enabled");
                     (
-                        3,
+                        4,
                         config
                             .providers
                             .openai
@@ -183,7 +197,7 @@ impl App {
                 } else if base_url.contains("minimax") {
                     tracing::debug!("[open_model_selector] OpenAI (MiniMax) enabled");
                     (
-                        4,
+                        5,
                         config
                             .providers
                             .openai
@@ -196,7 +210,7 @@ impl App {
                         base_url
                     );
                     (
-                        5,
+                        6,
                         config
                             .providers
                             .openai
@@ -215,10 +229,20 @@ impl App {
                         .and_then(|p| p.api_key.clone()),
                 )
             }
+        } else if config.providers.github.as_ref().is_some_and(|p| p.enabled) {
+            tracing::debug!("[open_model_selector] GitHub Models enabled");
+            (
+                2,
+                config
+                    .providers
+                    .github
+                    .as_ref()
+                    .and_then(|p| p.api_key.clone()),
+            )
         } else if config.providers.gemini.as_ref().is_some_and(|p| p.enabled) {
             tracing::debug!("[open_model_selector] Gemini enabled");
             (
-                2,
+                3,
                 config
                     .providers
                     .gemini
@@ -233,7 +257,7 @@ impl App {
         {
             tracing::debug!("[open_model_selector] OpenRouter enabled");
             (
-                3,
+                4,
                 config
                     .providers
                     .openrouter
@@ -243,7 +267,7 @@ impl App {
         } else if config.providers.minimax.as_ref().is_some_and(|p| p.enabled) {
             tracing::debug!("[open_model_selector] MiniMax enabled");
             (
-                4,
+                5,
                 config
                     .providers
                     .minimax
@@ -259,7 +283,7 @@ impl App {
             self.model_selector_custom_model = custom_cfg.default_model.clone().unwrap_or_default();
             // Remember the custom provider name for saving
             self.model_selector_custom_name = name.to_string();
-            (5, custom_cfg.api_key.clone())
+            (6, custom_cfg.api_key.clone())
         } else {
             tracing::debug!("[open_model_selector] No provider enabled, defaulting to Anthropic");
             (0, None) // Default
@@ -311,7 +335,7 @@ impl App {
             // Tab cycles through fields:
             // - Normal providers: provider(0) -> api_key(1) -> model(2) -> provider(0)
             // - Custom provider: provider(0) -> base_url(1) -> api_key(2) -> model(3) -> provider(0)
-            let is_custom = self.model_selector_provider_selected == 5; // Custom provider index
+            let is_custom = self.model_selector_provider_selected == 6; // Custom provider index
             let max_field = if is_custom { 4 } else { 3 };
             self.model_selector_focused_field = (self.model_selector_focused_field + 1) % max_field;
             // If moving to provider, enable provider list; otherwise show model list
@@ -337,7 +361,7 @@ impl App {
                 self.detect_model_selector_key_for_provider();
             }
         } else if self.model_selector_focused_field == 1
-            && self.model_selector_provider_selected == 5
+            && self.model_selector_provider_selected == 6
         {
             // Base URL input for Custom provider (field 1)
             match event.code {
@@ -350,9 +374,9 @@ impl App {
                 _ => {}
             }
         } else if (self.model_selector_focused_field == 1
-            && self.model_selector_provider_selected != 5)
+            && self.model_selector_provider_selected != 6)
             || (self.model_selector_focused_field == 2
-                && self.model_selector_provider_selected == 5)
+                && self.model_selector_provider_selected == 6)
         {
             // API key input (field 1 for non-Custom, field 2 for Custom)
             match event.code {
@@ -365,7 +389,7 @@ impl App {
                 _ => {}
             }
         } else if self.model_selector_focused_field == 3
-            && self.model_selector_provider_selected == 5
+            && self.model_selector_provider_selected == 6
         {
             // Custom provider: free-text model name input (field 3)
             match event.code {
@@ -378,7 +402,7 @@ impl App {
                 _ => {}
             }
         } else if self.model_selector_focused_field == 4
-            && self.model_selector_provider_selected == 5
+            && self.model_selector_provider_selected == 6
         {
             // Custom provider: name identifier input (field 4 — last before save)
             match event.code {
@@ -393,7 +417,7 @@ impl App {
                 _ => {}
             }
         } else if self.model_selector_focused_field == 2
-            && self.model_selector_provider_selected != 5
+            && self.model_selector_provider_selected != 6
         {
             // Non-custom: filter/search model list (field 2)
             match event.code {
@@ -453,7 +477,7 @@ impl App {
 
         // Enter to confirm - move to next field
         if keys::is_enter(&event) {
-            let is_custom = self.model_selector_provider_selected == 5;
+            let is_custom = self.model_selector_provider_selected == 6;
 
             if self.model_selector_focused_field == 0 {
                 // On provider field - save config, DON'T close dialog
@@ -580,6 +604,9 @@ impl App {
         if let Some(ref mut p) = config.providers.openai {
             p.enabled = false;
         }
+        if let Some(ref mut p) = config.providers.github {
+            p.enabled = false;
+        }
         if let Some(ref mut p) = config.providers.gemini {
             p.enabled = false;
         }
@@ -591,6 +618,7 @@ impl App {
         }
 
         // Get existing key from config if not changing
+        // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=Custom
         let existing_key = match provider_idx {
             0 => config
                 .providers
@@ -608,26 +636,33 @@ impl App {
                 .cloned(),
             2 => config
                 .providers
-                .gemini
+                .github
                 .as_ref()
                 .and_then(|p| p.api_key.as_ref())
                 .filter(|k| !k.is_empty())
                 .cloned(),
             3 => config
                 .providers
-                .openrouter
+                .gemini
                 .as_ref()
                 .and_then(|p| p.api_key.as_ref())
                 .filter(|k| !k.is_empty())
                 .cloned(),
             4 => config
                 .providers
-                .minimax
+                .openrouter
                 .as_ref()
                 .and_then(|p| p.api_key.as_ref())
                 .filter(|k| !k.is_empty())
                 .cloned(),
             5 => config
+                .providers
+                .minimax
+                .as_ref()
+                .and_then(|p| p.api_key.as_ref())
+                .filter(|k| !k.is_empty())
+                .cloned(),
+            6 => config
                 .providers
                 .active_custom()
                 .and_then(|(_, p)| p.api_key.as_ref())
@@ -651,6 +686,7 @@ impl App {
         );
 
         // Build provider config based on selection
+        // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=Custom
         let default_model = provider.models.first().copied().unwrap_or("default");
         match provider_idx {
             0 => {
@@ -678,6 +714,20 @@ impl App {
                 });
             }
             2 => {
+                // GitHub Models
+                config.providers.github = Some(ProviderConfig {
+                    enabled: true,
+                    api_key: api_key.clone(),
+                    base_url: Some(
+                        "https://models.github.ai/inference/chat/completions".to_string(),
+                    ),
+                    default_model: Some(default_model.to_string()),
+                    models: vec![],
+                    vision_model: None,
+                    ..Default::default()
+                });
+            }
+            3 => {
                 // Gemini
                 config.providers.gemini = Some(ProviderConfig {
                     enabled: true,
@@ -689,7 +739,7 @@ impl App {
                     ..Default::default()
                 });
             }
-            3 => {
+            4 => {
                 // OpenRouter
                 config.providers.openrouter = Some(ProviderConfig {
                     enabled: true,
@@ -701,7 +751,7 @@ impl App {
                     ..Default::default()
                 });
             }
-            4 => {
+            5 => {
                 // Minimax
                 config.providers.minimax = Some(ProviderConfig {
                     enabled: true,
@@ -713,7 +763,7 @@ impl App {
                     ..Default::default()
                 });
             }
-            5 => {
+            6 => {
                 // Custom OpenAI-compatible (named provider)
                 let custom_model = self.model_selector_custom_model.clone();
                 let custom_name = if !self.model_selector_custom_name.is_empty() {
@@ -744,10 +794,11 @@ impl App {
         let section = match provider_idx {
             0 => "providers.anthropic",
             1 => "providers.openai",
-            2 => "providers.gemini",
-            3 => "providers.openrouter",
-            4 => "providers.minimax",
-            5 => {
+            2 => "providers.github",
+            3 => "providers.gemini",
+            4 => "providers.openrouter",
+            5 => "providers.minimax",
+            6 => {
                 // Resolve custom provider name: UI field > config active > "default"
                 let cname = if !self.model_selector_custom_name.is_empty() {
                     self.model_selector_custom_name.clone()
@@ -767,6 +818,7 @@ impl App {
         for s in [
             "providers.anthropic",
             "providers.openai",
+            "providers.github",
             "providers.gemini",
             "providers.openrouter",
             "providers.minimax",
@@ -790,21 +842,28 @@ impl App {
 
         // Write base_url if applicable
         match provider_idx {
-            3 => {
+            2 => {
                 let _ = crate::config::Config::write_key(
                     section,
                     "base_url",
-                    "https://openrouter.ai/api/v1/chat/completions",
+                    "https://models.github.ai/inference/chat/completions",
                 );
             }
             4 => {
                 let _ = crate::config::Config::write_key(
                     section,
                     "base_url",
+                    "https://openrouter.ai/api/v1/chat/completions",
+                );
+            }
+            5 => {
+                let _ = crate::config::Config::write_key(
+                    section,
+                    "base_url",
                     "https://api.minimax.io/v1",
                 );
             }
-            5 if !self.model_selector_base_url.is_empty() => {
+            6 if !self.model_selector_base_url.is_empty() => {
                 let _ = crate::config::Config::write_key(
                     section,
                     "base_url",
@@ -825,7 +884,7 @@ impl App {
 
         // Resolve the selected model BEFORE rebuilding the provider so the new
         // provider instance picks up the correct model from config on disk.
-        let is_custom = provider_idx == 5;
+        let is_custom = provider_idx == 6;
         let selected_model = if is_custom {
             self.model_selector_custom_model.clone()
         } else if !self.model_selector_models.is_empty() {
@@ -859,7 +918,7 @@ impl App {
 
         // Rebuild agent service with new provider (now sees the correct model)
         if let Err(e) = self.rebuild_agent_service().await {
-            if api_key.is_none() && provider_idx == 5 {
+            if api_key.is_none() && provider_idx == 6 {
                 self.push_system_message(format!(
                     "API key required for {}. Type it and press Enter.",
                     provider
@@ -895,7 +954,7 @@ impl App {
         // Only close dialog if explicitly requested
         if close_dialog {
             // Use user-configured name for custom providers (e.g. "nvidia"), fall back to generic
-            let provider_name = if provider_idx == 5 && !self.model_selector_custom_name.is_empty()
+            let provider_name = if provider_idx == 6 && !self.model_selector_custom_name.is_empty()
             {
                 self.model_selector_custom_name.clone()
             } else {
@@ -1038,99 +1097,6 @@ impl App {
                         )
                         .await;
                         let _ = sender.send(TuiEvent::OnboardingModelsFetched(models));
-                    });
-                }
-                WizardAction::GitHubDeviceAuth => {
-                    // Start GitHub OAuth Device Flow
-                    wizard.github_oauth_polling = true;
-                    wizard.github_oauth_error = None;
-                    wizard.github_user_code = None;
-                    wizard.github_verification_uri = None;
-
-                    let sender = self.event_sender();
-                    tokio::spawn(async move {
-                        let client = reqwest::Client::new();
-                        // Step 1: Request device code
-                        let resp = client
-                            .post("https://github.com/login/device/code")
-                            .header("Accept", "application/json")
-                            .form(&[
-                                ("client_id", "Ov23liGRBFSPmcCQBPTv"),
-                                ("scope", "read:user"),
-                            ])
-                            .send()
-                            .await;
-
-                        match resp {
-                            Ok(r) if r.status().is_success() => {
-                                if let Ok(body) = r.json::<serde_json::Value>().await
-                                    && let (Some(device_code), Some(user_code), Some(uri)) = (
-                                        body["device_code"].as_str(),
-                                        body["user_code"].as_str(),
-                                        body["verification_uri"].as_str(),
-                                    )
-                                {
-                                    let interval = body["interval"].as_u64().unwrap_or(5);
-                                    let device_code = device_code.to_string();
-                                    let _ = sender.send(TuiEvent::GitHubDeviceCode {
-                                        user_code: user_code.to_string(),
-                                        verification_uri: uri.to_string(),
-                                        device_code: device_code.clone(),
-                                        interval,
-                                    });
-
-                                    // Step 2: Poll for authorization
-                                    let poll_interval = std::time::Duration::from_secs(interval);
-                                    for _ in 0..120 {
-                                        tokio::time::sleep(poll_interval).await;
-                                        let poll = client
-                                            .post("https://github.com/login/oauth/access_token")
-                                            .header("Accept", "application/json")
-                                            .form(&[
-                                                ("client_id", "Ov23liGRBFSPmcCQBPTv"),
-                                                ("device_code", &device_code),
-                                                (
-                                                    "grant_type",
-                                                    "urn:ietf:params:oauth:grant-type:device_code",
-                                                ),
-                                            ])
-                                            .send()
-                                            .await;
-
-                                        if let Ok(pr) = poll
-                                            && let Ok(pb) = pr.json::<serde_json::Value>().await
-                                        {
-                                            if let Some(token) = pb["access_token"].as_str() {
-                                                let _ =
-                                                    sender.send(TuiEvent::GitHubOAuthAuthorized(
-                                                        token.to_string(),
-                                                    ));
-                                                return;
-                                            }
-                                            let err = pb["error"].as_str().unwrap_or("");
-                                            if err == "authorization_pending" || err == "slow_down"
-                                            {
-                                                continue;
-                                            }
-                                            // Real error (expired, access_denied, etc.)
-                                            let desc =
-                                                pb["error_description"].as_str().unwrap_or(err);
-                                            let _ = sender
-                                                .send(TuiEvent::GitHubOAuthError(desc.to_string()));
-                                            return;
-                                        }
-                                    }
-                                    let _ = sender.send(TuiEvent::GitHubOAuthError(
-                                        "Authorization timed out".to_string(),
-                                    ));
-                                }
-                            }
-                            _ => {
-                                let _ = sender.send(TuiEvent::GitHubOAuthError(
-                                    "Failed to start device flow".to_string(),
-                                ));
-                            }
-                        }
                     });
                 }
                 WizardAction::WhatsAppConnect => {

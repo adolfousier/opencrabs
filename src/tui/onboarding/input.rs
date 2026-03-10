@@ -298,15 +298,6 @@ impl OnboardingWizard {
                 _ => {}
             },
             AuthField::ApiKey => match event.code {
-                KeyCode::Char('r') | KeyCode::Char('R') if self.selected_provider == 2 => {
-                    // GitHub: re-authenticate via device flow
-                    self.api_key_input.clear();
-                    self.github_user_code = None;
-                    self.github_verification_uri = None;
-                    self.github_device_code = None;
-                    self.github_oauth_error = None;
-                    return WizardAction::GitHubDeviceAuth;
-                }
                 KeyCode::Char(c) => {
                     // If existing key is loaded and user starts typing, clear it (replace mode)
                     if self.has_existing_key() {
@@ -325,14 +316,15 @@ impl OnboardingWizard {
                     self.api_key_cursor = self.api_key_input.len();
                 }
                 KeyCode::Enter | KeyCode::Tab => {
-                    // GitHub: if no key yet, start OAuth device flow
+                    // GitHub: if no key pasted yet, re-check gh CLI token
                     if self.selected_provider == 2
                         && !self.has_existing_key()
                         && self.api_key_input.is_empty()
                     {
                         self.detect_existing_key();
                         if !self.has_existing_key() {
-                            return WizardAction::GitHubDeviceAuth;
+                            // No token — stay on this field
+                            return WizardAction::None;
                         }
                     }
                     self.auth_field = AuthField::Model;
@@ -343,6 +335,11 @@ impl OnboardingWizard {
                         self.fetched_models.clear();
                         self.selected_model = 0;
                         return WizardAction::FetchModels;
+                    }
+                    // For providers without live fetch, load defaults from config.toml.example
+                    if self.config_models.is_empty() && self.fetched_models.is_empty() {
+                        self.config_models = Self::load_default_models(self.selected_provider);
+                        self.selected_model = 0;
                     }
                 }
                 KeyCode::BackTab => {

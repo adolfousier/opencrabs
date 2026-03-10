@@ -325,7 +325,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         let marker = if selected { "[*]" } else { "[ ]" };
 
         // For custom provider with a name set, show the name instead of generic label
-        let label = if i == 5 && !app.model_selector_custom_name.is_empty() {
+        let label = if i == 6 && !app.model_selector_custom_name.is_empty() {
             app.model_selector_custom_name.clone()
         } else {
             provider.name.to_string()
@@ -360,7 +360,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
 
     lines.push(Line::from(""));
 
-    let is_custom = provider_idx == 5; // Custom provider index
+    let is_custom = provider_idx == 6; // Custom provider index
 
     // For Custom provider: show Base URL field first (field 1), then API Key (field 2)
     // For others: show API Key only (field 1)

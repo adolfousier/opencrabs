@@ -29,7 +29,7 @@ fn github_models_key_label() {
 fn github_models_has_help_lines() {
     assert!(!PROVIDERS[2].help_lines.is_empty());
     let help = PROVIDERS[2].help_lines.join(" ");
-    assert!(help.contains("gh auth login"));
+    assert!(help.contains("token"));
 }
 
 #[test]
@@ -53,12 +53,14 @@ fn provider_configs_has_github_field() {
 
 #[test]
 fn provider_configs_github_round_trip() {
-    let mut configs = ProviderConfigs::default();
-    configs.github = Some(ProviderConfig {
-        enabled: true,
-        default_model: Some("gpt-4o".to_string()),
+    let configs = ProviderConfigs {
+        github: Some(ProviderConfig {
+            enabled: true,
+            default_model: Some("gpt-4o".to_string()),
+            ..Default::default()
+        }),
         ..Default::default()
-    });
+    };
     assert!(configs.github.as_ref().unwrap().enabled);
     assert_eq!(
         configs.github.as_ref().unwrap().default_model.as_deref(),
@@ -91,7 +93,7 @@ fn resolve_github_default_model_when_none() {
     });
     let (name, model) = resolve_provider_from_config(&config);
     assert_eq!(name, "GitHub Models");
-    assert_eq!(model, "gpt-4o");
+    assert_eq!(model, "gpt-5-mini");
 }
 
 #[test]
@@ -148,8 +150,8 @@ fn with_name_sets_provider_name() {
         "test-key".to_string(),
         "https://models.github.ai/inference/chat/completions".to_string(),
     )
-    .with_name("github");
-    assert_eq!(provider.name(), "github");
+    .with_name("GitHub Models");
+    assert_eq!(provider.name(), "GitHub Models");
 }
 
 // ── Onboarding wizard ──────────────────────────────────────────
@@ -241,7 +243,7 @@ fn github_provider_builder_full_chain() {
         "ghp_test123".to_string(),
         "https://models.github.ai/inference/chat/completions".to_string(),
     )
-    .with_name("github")
+    .with_name("GitHub Models")
     .with_extra_headers(vec![
         (
             "Accept".to_string(),
@@ -249,7 +251,7 @@ fn github_provider_builder_full_chain() {
         ),
         ("X-GitHub-Api-Version".to_string(), "2022-11-28".to_string()),
     ]);
-    assert_eq!(provider.name(), "github");
+    assert_eq!(provider.name(), "GitHub Models");
     assert_eq!(provider.extra_headers.len(), 2);
     assert_eq!(provider.extra_headers[0].1, "application/vnd.github+json");
     assert_eq!(provider.extra_headers[1].1, "2022-11-28");
@@ -336,17 +338,10 @@ fn resolve_github_chosen_when_only_github_enabled() {
 // ── GitHub-specific onboarding OAuth flow ───────────────────────
 
 #[test]
-fn github_help_mentions_pat_fallback() {
+fn github_help_mentions_token_paste() {
     let help = PROVIDERS[2].help_lines.join(" ");
-    assert!(help.contains("PAT"));
-    assert!(help.contains("github.com/settings/tokens"));
-}
-
-#[test]
-fn github_help_mentions_oauth() {
-    let help = PROVIDERS[2].help_lines.join(" ");
-    assert!(help.contains("gh auth login"));
-    assert!(help.contains("browser OAuth"));
+    assert!(help.contains("token"));
+    assert!(help.contains("paste"));
 }
 
 #[test]
@@ -359,8 +354,8 @@ fn wizard_github_static_models_empty() {
 fn github_load_default_models_from_config_example() {
     let models = OnboardingWizard::load_default_models(2);
     assert!(!models.is_empty());
-    assert!(models.contains(&"gpt-4o".to_string()));
-    assert!(models.contains(&"o3-mini".to_string()));
+    assert!(models.contains(&"gpt-5-mini".to_string()));
+    assert!(models.contains(&"o4-mini".to_string()));
     assert!(models.contains(&"DeepSeek-R1".to_string()));
 }
 

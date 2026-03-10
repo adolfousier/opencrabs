@@ -126,13 +126,6 @@ pub struct OnboardingWizard {
     pub generated_tools: Option<String>,
     pub generated_memory: Option<String>,
 
-    /// GitHub OAuth Device Flow state
-    pub github_user_code: Option<String>,
-    pub github_verification_uri: Option<String>,
-    pub github_device_code: Option<String>,
-    pub github_oauth_polling: bool,
-    pub github_oauth_error: Option<String>,
-
     /// Model filter (live search in model list)
     pub model_filter: String,
 
@@ -341,12 +334,6 @@ impl OnboardingWizard {
             generated_agents: None,
             generated_tools: None,
             generated_memory: None,
-
-            github_user_code: None,
-            github_verification_uri: None,
-            github_device_code: None,
-            github_oauth_polling: false,
-            github_oauth_error: None,
 
             model_filter: String::new(),
             focused_field: 0,

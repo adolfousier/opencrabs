@@ -636,85 +636,70 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
             ),
         ]));
     } else if wizard.selected_provider == 2 {
-        // GitHub Models — OAuth Device Flow UI
+        // GitHub Models — clickable link + paste token
         let key_focused = wizard.auth_field == AuthField::ApiKey;
 
-        if wizard.has_existing_key() {
-            // Already authenticated
-            lines.push(Line::from(Span::styled(
-                "  GitHub authenticated",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            )));
-            lines.push(Line::from(Span::styled(
-                "  Token: **************************",
-                Style::default().fg(Color::Cyan),
-            )));
-            if key_focused {
-                lines.push(Line::from(Span::styled(
-                    "  (press Enter to continue, or R to re-authenticate)",
-                    Style::default()
-                        .fg(Color::DarkGray)
-                        .add_modifier(Modifier::ITALIC),
-                )));
-            }
-        } else if let Some(ref user_code) = wizard.github_user_code {
-            // Device code received — show it to the user
-            let uri = wizard
-                .github_verification_uri
-                .as_deref()
-                .unwrap_or("https://github.com/login/device");
-            lines.push(Line::from(Span::styled(
-                format!("  Visit: {}", uri),
-                Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
-            )));
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                format!("  Enter code:  {}", user_code),
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            )));
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                "  Waiting for authorization...",
-                Style::default().fg(BRAND_GOLD),
-            )));
-        } else if wizard.github_oauth_polling {
-            // Starting device flow
-            lines.push(Line::from(Span::styled(
-                "  Starting GitHub authentication...",
-                Style::default().fg(Color::DarkGray),
-            )));
-        } else if let Some(ref err) = wizard.github_oauth_error {
-            // Error
-            lines.push(Line::from(Span::styled(
-                format!("  {}", err),
-                Style::default().fg(Color::Red),
-            )));
-            lines.push(Line::from(""));
-            if key_focused {
-                lines.push(Line::from(Span::styled(
-                    "  Press Enter to retry or paste a token manually",
-                    Style::default().fg(Color::DarkGray),
-                )));
-            }
-        } else if key_focused {
-            // Idle — prompt to start device flow
-            lines.push(Line::from(Span::styled(
-                "  Press Enter to authenticate with GitHub",
-                Style::default().fg(Color::DarkGray),
-            )));
-            lines.push(Line::from(Span::styled(
-                "  Or paste a personal access token directly",
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::ITALIC),
-            )));
+        lines.push(Line::from(Span::styled(
+            "  1. Click: github.com/settings/tokens/new?scopes=read:user&description=OpenCrabs",
+            Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(Span::styled(
+            "  2. Click \"Generate token\", copy it",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
+        )));
+        lines.push(Line::from(Span::styled(
+            "  3. Paste below",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
+        )));
+        lines.push(Line::from(""));
+
+        let (masked_key, key_hint) = if wizard.has_existing_key() {
+            (
+                "**************************".to_string(),
+                " (already configured, type to replace)".to_string(),
+            )
+        } else if wizard.api_key_input.is_empty() {
+            ("paste your token here".to_string(), String::new())
         } else {
+            (
+                "*".repeat(wizard.api_key_input.len().min(30)),
+                String::new(),
+            )
+        };
+        let cursor = if key_focused && !wizard.has_existing_key() {
+            "\u{2588}"
+        } else {
+            ""
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled(
+                "  Token: ",
+                Style::default().fg(if key_focused {
+                    BRAND_BLUE
+                } else {
+                    Color::DarkGray
+                }),
+            ),
+            Span::styled(
+                format!("{}{}", masked_key, cursor),
+                Style::default().fg(if wizard.has_existing_key() {
+                    Color::Cyan
+                } else if key_focused {
+                    Color::White
+                } else {
+                    Color::DarkGray
+                }),
+            ),
+        ]));
+
+        if !key_hint.is_empty() && key_focused {
             lines.push(Line::from(Span::styled(
-                "  GitHub OAuth Device Flow",
+                format!("  {}", key_hint.trim()),
                 Style::default()
                     .fg(Color::DarkGray)
                     .add_modifier(Modifier::ITALIC),
@@ -786,8 +771,10 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
                     .add_modifier(Modifier::ITALIC),
             )));
         }
+    }
 
-        // Model selection (use fetched models when available, static fallback)
+    // Model selection — shared across all non-custom providers (including GitHub)
+    if !is_custom {
         let model_focused = wizard.auth_field == AuthField::Model;
         let model_count = wizard.model_count();
         if model_count > 0 || wizard.models_fetching {

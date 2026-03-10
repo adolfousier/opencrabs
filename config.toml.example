@@ -43,14 +43,12 @@ default_model = "qwen3-coder-next"
 # ========================================
 # GitHub Models Provider (Copilot / GitHub Models)
 # ========================================
-# No API key needed — authenticates via GitHub CLI.
-# Run: gh auth login   (browser-based, one-time)
-# Token auto-detected from: gh auth token
-# Or paste a GitHub PAT with models:read scope from github.com/settings/tokens
+# Auto-detected from GitHub CLI: gh auth login (browser-based, one-time)
+# Or paste a PAT from: github.com/settings/tokens/new?scopes=read:user&description=OpenCrabs
 [providers.github]
 enabled = false
-default_model = "gpt-4o"
-models = ["gpt-4o", "gpt-4o-mini", "o3-mini", "o1", "o1-mini", "Phi-4", "Llama-3.3-70B-Instruct", "Mistral-Large", "DeepSeek-R1", "Cohere-command-r-plus"]
+default_model = "gpt-5-mini"
+models = ["gpt-5-mini", "gpt-4.1-mini", "gpt-4.1-nano", "o4-mini", "o3-mini", "gpt-4o", "gpt-4o-mini", "Phi-4", "Llama-3.3-70B-Instruct", "Mistral-Large", "DeepSeek-R1", "Cohere-command-r-plus"]
 # Model IDs use marketplace names — browse: github.com/marketplace/models
 
 # ========================================

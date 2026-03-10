@@ -151,18 +151,6 @@ pub enum TuiEvent {
     /// Piper voice download completed (Ok(voice_id) or Err message)
     PiperDownloadComplete(Result<String, String>),
 
-    /// GitHub OAuth Device Flow: device code received, show to user
-    GitHubDeviceCode {
-        user_code: String,
-        verification_uri: String,
-        device_code: String,
-        interval: u64,
-    },
-    /// GitHub OAuth Device Flow: authorization complete, token received
-    GitHubOAuthAuthorized(String),
-    /// GitHub OAuth Device Flow: error
-    GitHubOAuthError(String),
-
     /// A remote channel (Telegram, WhatsApp, Discord, Slack) completed an agent
     /// response — the TUI should refresh if it's the current session.
     SessionUpdated(Uuid),

@@ -208,15 +208,15 @@ api_key = "sk-YOUR_KEY"
 
 ### GitHub Models
 
-**Models:** GPT-4o, o1, o3-mini, Phi-4, Llama 3.x, Mistral Large, DeepSeek-R1, Cohere Command R+, and 30+ more — browse the full catalog at [github.com/marketplace/models](https://github.com/marketplace/models)
+**Models:** GPT-5-mini, GPT-4.1-mini, GPT-4.1-nano, o4-mini, o3-mini, Phi-4, Llama 3.x, Mistral Large, DeepSeek-R1, Cohere Command R+, and 30+ more — browse the full catalog at [github.com/marketplace/models](https://github.com/marketplace/models)
 
-**Setup** — authenticate with the GitHub CLI (one-time, browser OAuth):
-```bash
-gh auth login
-```
+**Setup** — select GitHub Models in the onboarding wizard, click the link shown to create a token, paste it back. Done. The wizard handles config and model selection automatically.
 
-That's it. OpenCrabs auto-detects the token from `gh auth token`. Or paste a PAT (with `models:read` scope) from [github.com/settings/tokens](https://github.com/settings/tokens) into `keys.toml`:
+If you already have the GitHub CLI authenticated (`gh auth login`), the token is auto-detected — no setup needed at all.
 
+<details><summary>Manual config (without wizard)</summary>
+
+Paste a PAT from [github.com/settings/tokens/new](https://github.com/settings/tokens/new?scopes=read:user&description=OpenCrabs) into `keys.toml`:
 ```toml
 [providers.github]
 api_key = "ghp_YOUR_TOKEN"
@@ -226,8 +226,9 @@ Enable in `config.toml`:
 ```toml
 [providers.github]
 enabled = true
-default_model = "gpt-4o"
+default_model = "gpt-5-mini"
 ```
+</details>
 
 **Features:** Streaming, tools, OpenAI-compatible API at `models.github.ai/inference`. GitHub-specific API headers (`Accept`, `X-GitHub-Api-Version`) are injected automatically.
 

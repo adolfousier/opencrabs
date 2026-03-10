@@ -83,10 +83,11 @@ cargo test --all-features
 | Tests — Onboarding Brain | 16 | `src/tests/onboarding_brain_test.rs` |
 | Tests — Onboarding Navigation | 22 | `src/tests/onboarding_navigation_test.rs` |
 | Tests — Onboarding Types | 19 | `src/tests/onboarding_types_test.rs` |
+| Tests — OpenAI Provider | 15 | `src/tests/openai_provider_test.rs` |
 | Tests — Plan Document | 15 | `src/tests/plan_document_test.rs` |
 | Tests — TUI Error | 16 | `src/tests/tui_error_test.rs` |
 | Tests — Queued Messages | 15 | `src/tests/queued_message_test.rs` |
-| **Total** | **1,171** | |
+| **Total** | **1,178** | |
 
 ---
 

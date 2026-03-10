@@ -291,7 +291,7 @@ fn try_create_github(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
 
     let provider = configure_openai_compatible(
         OpenAIProvider::with_base_url(api_key, base_url)
-            .with_name("github")
+            .with_name("GitHub Models")
             .with_extra_headers(vec![
                 (
                     "Accept".to_string(),

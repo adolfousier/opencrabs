@@ -2106,30 +2106,7 @@ level = "info"
 /// Resolve provider name and model from config (for display purposes)
 #[allow(clippy::items_after_test_module)]
 pub fn resolve_provider_from_config(config: &Config) -> (&str, &str) {
-    // Check new dedicated providers first
-    if config.providers.minimax.as_ref().is_some_and(|p| p.enabled) {
-        let model = config
-            .providers
-            .minimax
-            .as_ref()
-            .and_then(|p| p.default_model.as_deref())
-            .unwrap_or("default");
-        return ("Minimax", model);
-    }
-    if config
-        .providers
-        .openrouter
-        .as_ref()
-        .is_some_and(|p| p.enabled)
-    {
-        let model = config
-            .providers
-            .openrouter
-            .as_ref()
-            .and_then(|p| p.default_model.as_deref())
-            .unwrap_or("default");
-        return ("OpenRouter", model);
-    }
+    // Check providers in priority order: Anthropic > OpenAI > GitHub > Gemini > OpenRouter > Minimax
     if config
         .providers
         .anthropic
@@ -2159,7 +2136,7 @@ pub fn resolve_provider_from_config(config: &Config) -> (&str, &str) {
             .github
             .as_ref()
             .and_then(|p| p.default_model.as_deref())
-            .unwrap_or("gpt-4o");
+            .unwrap_or("gpt-5-mini");
         return ("GitHub Models", model);
     }
     if config.providers.gemini.as_ref().is_some_and(|p| p.enabled) {
@@ -2170,6 +2147,29 @@ pub fn resolve_provider_from_config(config: &Config) -> (&str, &str) {
             .and_then(|p| p.default_model.as_deref())
             .unwrap_or("default");
         return ("Google Gemini", model);
+    }
+    if config
+        .providers
+        .openrouter
+        .as_ref()
+        .is_some_and(|p| p.enabled)
+    {
+        let model = config
+            .providers
+            .openrouter
+            .as_ref()
+            .and_then(|p| p.default_model.as_deref())
+            .unwrap_or("default");
+        return ("OpenRouter", model);
+    }
+    if config.providers.minimax.as_ref().is_some_and(|p| p.enabled) {
+        let model = config
+            .providers
+            .minimax
+            .as_ref()
+            .and_then(|p| p.default_model.as_deref())
+            .unwrap_or("default");
+        return ("Minimax", model);
     }
     if let Some((name, cfg)) = config.providers.active_custom() {
         let model = cfg.default_model.as_deref().unwrap_or("default");
