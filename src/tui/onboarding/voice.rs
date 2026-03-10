@@ -175,8 +175,11 @@ fn handle_tts_voice(wizard: &mut OnboardingWizard, key: KeyCode) -> WizardAction
         KeyCode::Enter => {
             if wizard.tts_voice_download_progress.is_some() {
                 // Download in progress — do nothing
+            } else if wizard.tts_voice_downloaded {
+                // Voice already downloaded — confirm and advance
+                wizard.next_step();
             } else {
-                // Always download the selected voice (delete old, download new, play preview)
+                // Download the selected voice (play preview on completion)
                 return WizardAction::DownloadPiperVoice;
             }
         }

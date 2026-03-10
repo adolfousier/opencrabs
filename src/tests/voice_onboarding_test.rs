@@ -733,14 +733,15 @@ fn tts_local_voice_select_tab_advances_step() {
 
 #[test]
 fn tts_local_voice_enter_when_downloaded_advances() {
-    // Enter always triggers download (delete old, download selected, play preview)
+    // Enter on an already-downloaded voice confirms and advances to next step
     let mut wizard = OnboardingWizard::new();
     wizard.step = OnboardingStep::VoiceSetup;
     wizard.voice_field = VoiceField::TtsLocalVoiceSelect;
     wizard.tts_voice_downloaded = true;
 
     let action = crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Enter));
-    assert_eq!(action, WizardAction::DownloadPiperVoice);
+    assert_eq!(action, WizardAction::None);
+    assert_eq!(wizard.step, OnboardingStep::ImageSetup);
 }
 
 #[test]
