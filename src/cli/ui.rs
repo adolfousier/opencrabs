@@ -208,31 +208,21 @@ async fn cmd_chat_inner(
         }
     });
 
-    // Preload local whisper model in background if local STT is configured.
-    // Transparent migration: rwhisper auto-downloads the smaller quantized model (~42MB)
-    // on first use. Preloading here avoids delay on the first voice message.
-    //
-    // NOTE: We delay the preload by 2s to ensure the TUI has entered alternate screen.
-    // kalosm-common prints "Running on CPU..." via println! on first model load.
-    // If this fires before the TUI takes over, it corrupts the terminal.
-    // After alternate screen is active, any stray println is overwritten by the next
-    // TUI render frame and is invisible to the user.
+    // Preload local whisper model before the TUI starts so candle's
+    // "Running on CPU..." println! fires on the raw terminal, not inside
+    // the alternate screen where it would bleed into the TUI layout.
     #[cfg(feature = "local-stt")]
     {
         let vc = config.voice_config();
-        if vc.stt_mode == crate::config::SttMode::Local {
+        if vc.stt_mode == crate::config::SttMode::Local
+            && crate::channels::voice::local_stt_available()
+        {
             let model_id = vc.local_stt_model.clone();
-            tokio::spawn(async move {
-                // Wait for TUI to enter alternate screen before loading the model.
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                tracing::info!("Background preload: local STT model '{}'", model_id);
-                match crate::channels::voice::preload_local_whisper(&model_id).await {
-                    Ok(()) => tracing::info!("Local STT model preloaded"),
-                    Err(e) => {
-                        tracing::warn!("Local STT preload failed (will retry on use): {}", e)
-                    }
-                }
-            });
+            tracing::info!("Preloading local STT model '{}'", model_id);
+            match crate::channels::voice::preload_local_whisper(&model_id).await {
+                Ok(()) => tracing::info!("Local STT model preloaded"),
+                Err(e) => tracing::warn!("Local STT preload failed (will retry on use): {}", e),
+            }
         }
     }
 
