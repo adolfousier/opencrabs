@@ -1,7 +1,7 @@
 //! Dialogs — model selector, onboarding wizard, file/directory pickers.
 
 use super::events::{AppMode, TuiEvent};
-use super::onboarding::WizardAction;
+use super::onboarding::{OnboardingStep, WizardAction};
 use super::*;
 use crate::brain::provider::{ContentBlock, LLMRequest};
 use anyhow::Result;
@@ -994,6 +994,7 @@ impl App {
                 }
                 WizardAction::QuickJumpDone => {
                     // Quick-jump completed a step — save config then close
+                    let mut needs_rebuild = false;
                     if let Some(ref wizard) = self.onboarding {
                         if let Err(e) = wizard.apply_config() {
                             self.push_system_message(format!(
@@ -1001,10 +1002,44 @@ impl App {
                                 e
                             ));
                         } else {
-                            self.push_system_message("Settings saved.".to_string());
+                            // Show what changed based on the step
+                            let msg = match wizard.step {
+                                OnboardingStep::ProviderAuth => {
+                                    needs_rebuild = true;
+                                    let (pname, mname) = if wizard.is_custom_provider() {
+                                        (
+                                            format!("Custom ({})", wizard.custom_provider_name),
+                                            wizard.custom_model.clone(),
+                                        )
+                                    } else {
+                                        (
+                                            super::onboarding::PROVIDERS
+                                                [wizard.selected_provider]
+                                                .name
+                                                .to_string(),
+                                            wizard.selected_model_name().to_string(),
+                                        )
+                                    };
+                                    format!(
+                                        "[Model changed to {} (provider: {})]",
+                                        mname, pname
+                                    )
+                                }
+                                _ => "Settings saved.".to_string(),
+                            };
+                            self.push_system_message(msg);
                         }
                     }
                     self.onboarding = None;
+                    if needs_rebuild
+                        && let Err(e) = self.rebuild_agent_service().await
+                    {
+                        tracing::warn!("Failed to rebuild agent service: {}", e);
+                        self.push_system_message(format!(
+                            "Warning: Failed to reload provider: {}",
+                            e
+                        ));
+                    }
                     self.switch_mode(AppMode::Chat).await?;
                 }
                 WizardAction::Complete => {
