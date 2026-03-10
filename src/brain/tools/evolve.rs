@@ -21,7 +21,8 @@ use serde_json::Value;
 const GITHUB_API: &str = "https://api.github.com/repos/adolfousier/opencrabs/releases/latest";
 
 /// Check GitHub for a newer release. Returns `Some(latest_version)` if an
-/// update is available, `None` if already on latest (or on error).
+/// update is available **and** a binary asset exists for this platform,
+/// `None` if already on latest, no asset ready, or on error.
 pub async fn check_for_update() -> Option<String> {
     let current_version = crate::VERSION;
     let client = reqwest::Client::new();
@@ -50,7 +51,45 @@ pub async fn check_for_update() -> Option<String> {
         return None;
     }
 
+    // For pre-built binary installs, only report "available" if the platform
+    // asset actually exists in the release (release may still be building).
+    if matches!(InstallMethod::detect(), InstallMethod::PrebuiltBinary)
+        && !has_platform_asset(&release, latest_tag)
+    {
+        tracing::debug!(
+            "Release {} exists but no asset for this platform yet",
+            latest_tag
+        );
+        return None;
+    }
+
     Some(latest_version.to_string())
+}
+
+/// Check whether the release JSON contains a downloadable asset for the
+/// current platform.
+fn has_platform_asset(release: &serde_json::Value, tag: &str) -> bool {
+    let suffix = match platform_suffix() {
+        Some(s) => s,
+        None => return false,
+    };
+    let ext = if std::env::consts::OS == "windows" {
+        "zip"
+    } else {
+        "tar.gz"
+    };
+    let expected = format!("opencrabs-{}-{}.{}", tag, suffix, ext);
+    let legacy = format!("opencrabs-{}.{}", suffix, ext);
+
+    release["assets"]
+        .as_array()
+        .map(|arr| {
+            arr.iter().any(|a| {
+                let name = a["name"].as_str().unwrap_or("");
+                name == expected || name == legacy
+            })
+        })
+        .unwrap_or(false)
 }
 
 /// Compare semver strings: returns true if `latest` is strictly newer than `current`.
@@ -78,23 +117,47 @@ fn source_cargo_version() -> Option<String> {
 }
 
 /// Run a health check on a binary: execute it with `--version`,
-/// verify it exits cleanly within a timeout.
+/// verify it exits cleanly within a timeout. Returns a detailed error
+/// with stderr output on failure.
 async fn health_check_binary(path: &std::path::Path) -> std::result::Result<(), String> {
+    let file_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(10),
         tokio::process::Command::new(path)
             .arg("--version")
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
             .output(),
     )
     .await;
 
     match result {
         Ok(Ok(output)) if output.status.success() => Ok(()),
-        Ok(Ok(output)) => Err(format!("exited with status {}", output.status)),
-        Ok(Err(e)) => Err(format!("failed to spawn: {}", e)),
-        Err(_) => Err("timed out after 10s".into()),
+        Ok(Ok(output)) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stderr_snippet: String = stderr.chars().take(200).collect();
+            Err(format!(
+                "exited with {} (binary: {} bytes, platform: {}/{}{})",
+                output.status,
+                file_size,
+                std::env::consts::OS,
+                std::env::consts::ARCH,
+                if stderr_snippet.is_empty() {
+                    String::new()
+                } else {
+                    format!(", stderr: {}", stderr_snippet)
+                }
+            ))
+        }
+        Ok(Err(e)) => Err(format!(
+            "failed to spawn: {} (binary: {} bytes, platform: {}/{})",
+            e,
+            file_size,
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        )),
+        Err(_) => Err(format!("timed out after 10s (binary: {} bytes)", file_size)),
     }
 }
 
@@ -201,6 +264,23 @@ impl Tool for EvolveTool {
             return Ok(ToolResult::success(format!(
                 "Already on the latest version (v{}).",
                 current_version
+            )));
+        }
+
+        // For pre-built binary installs, verify the platform asset exists
+        // before reporting the update as available (release may still be building).
+        if matches!(install_method, InstallMethod::PrebuiltBinary)
+            && !has_platform_asset(&release, latest_tag)
+        {
+            let asset_count = release["assets"].as_array().map(|a| a.len()).unwrap_or(0);
+            return Ok(ToolResult::error(format!(
+                "v{} release exists but the binary for {}/{} is not available yet \
+                 ({} assets uploaded so far). The release may still be building — \
+                 try again in a few minutes.",
+                latest_version,
+                std::env::consts::OS,
+                std::env::consts::ARCH,
+                asset_count
             )));
         }
 
@@ -384,6 +464,13 @@ impl EvolveTool {
 
         let archive_bytes = match client.get(&download_url).send().await {
             Ok(resp) if resp.status().is_success() => match resp.bytes().await {
+                Ok(b) if b.is_empty() => {
+                    return Ok(ToolResult::error(
+                        "Download returned empty file. The release asset may still be uploading — \
+                         try again in a few minutes."
+                            .into(),
+                    ));
+                }
                 Ok(b) => b,
                 Err(e) => return Ok(ToolResult::error(format!("Download failed: {}", e))),
             },
@@ -395,6 +482,12 @@ impl EvolveTool {
             }
             Err(e) => return Ok(ToolResult::error(format!("Download failed: {}", e))),
         };
+
+        tracing::info!(
+            "Downloaded {} ({} bytes)",
+            expected_asset,
+            archive_bytes.len()
+        );
 
         // Extract
         let bin_name = binary_name();
