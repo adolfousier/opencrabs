@@ -24,6 +24,7 @@ fn voice_step_starts_on_stt_mode_select() {
 
 #[test]
 fn stt_mode_cycles_with_up_down() {
+    let local_stt = crate::channels::voice::local_stt_available();
     let mut wizard = OnboardingWizard::new();
     wizard.step = OnboardingStep::VoiceSetup;
     wizard.voice_field = VoiceField::SttModeSelect;
@@ -32,21 +33,29 @@ fn stt_mode_cycles_with_up_down() {
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
     assert_eq!(wizard.stt_mode, 1);
 
-    // Down -> Local (2)
+    // Down -> Local (2) if available, else wraps to Off (0)
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
-    assert_eq!(wizard.stt_mode, 2);
+    if local_stt {
+        assert_eq!(wizard.stt_mode, 2);
 
-    // Down -> wraps to Off (0)
-    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
-    assert_eq!(wizard.stt_mode, 0);
+        // Down -> wraps to Off (0)
+        crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
+        assert_eq!(wizard.stt_mode, 0);
 
-    // Up from Off (0) -> Local (2)
-    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Up));
-    assert_eq!(wizard.stt_mode, 2);
+        // Up from Off (0) -> Local (2)
+        crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Up));
+        assert_eq!(wizard.stt_mode, 2);
 
-    // Up -> API (1)
-    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Up));
-    assert_eq!(wizard.stt_mode, 1);
+        // Up -> API (1)
+        crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Up));
+        assert_eq!(wizard.stt_mode, 1);
+    } else {
+        assert_eq!(wizard.stt_mode, 0); // wraps to Off, skipping Local
+
+        // Up from Off (0) -> API (1)
+        crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Up));
+        assert_eq!(wizard.stt_mode, 1);
+    }
 }
 
 #[test]
@@ -201,6 +210,7 @@ fn local_model_enter_during_download_does_nothing() {
 
 #[test]
 fn tts_mode_cycles_with_down() {
+    let local_tts = crate::channels::voice::local_tts_available();
     let mut wizard = OnboardingWizard::new();
     wizard.step = OnboardingStep::VoiceSetup;
     wizard.voice_field = VoiceField::TtsModeSelect;
@@ -212,32 +222,43 @@ fn tts_mode_cycles_with_down() {
     assert_eq!(wizard.tts_mode, 1);
     assert!(wizard.tts_enabled);
 
-    // Down → Local (2)
+    // Down → Local (2) if available, else wraps to Off (0)
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
-    assert_eq!(wizard.tts_mode, 2);
-    assert!(wizard.tts_enabled);
+    if local_tts {
+        assert_eq!(wizard.tts_mode, 2);
+        assert!(wizard.tts_enabled);
 
-    // Down → Off (0) — wraps
-    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
-    assert_eq!(wizard.tts_mode, 0);
-    assert!(!wizard.tts_enabled);
+        // Down → Off (0) — wraps
+        crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
+        assert_eq!(wizard.tts_mode, 0);
+        assert!(!wizard.tts_enabled);
+    } else {
+        assert_eq!(wizard.tts_mode, 0); // wraps to Off, skipping Local
+        assert!(!wizard.tts_enabled);
+    }
 }
 
 #[test]
 fn tts_mode_cycles_with_up() {
+    let local_tts = crate::channels::voice::local_tts_available();
     let mut wizard = OnboardingWizard::new();
     wizard.step = OnboardingStep::VoiceSetup;
     wizard.voice_field = VoiceField::TtsModeSelect;
 
-    // Up from Off (0) → Local (2)
+    // Up from Off (0) → Local (2) if available, else API (1)
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Up));
-    assert_eq!(wizard.tts_mode, 2);
-    assert!(wizard.tts_enabled);
+    if local_tts {
+        assert_eq!(wizard.tts_mode, 2);
+        assert!(wizard.tts_enabled);
 
-    // Up → API (1)
-    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Up));
-    assert_eq!(wizard.tts_mode, 1);
-    assert!(wizard.tts_enabled);
+        // Up → API (1)
+        crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Up));
+        assert_eq!(wizard.tts_mode, 1);
+        assert!(wizard.tts_enabled);
+    } else {
+        assert_eq!(wizard.tts_mode, 1); // API is max when Local unavailable
+        assert!(wizard.tts_enabled);
+    }
 }
 
 #[test]
@@ -264,6 +285,9 @@ fn tts_api_enter_advances_to_next_step() {
 
 #[test]
 fn tts_local_enter_goes_to_voice_select() {
+    if !crate::channels::voice::local_tts_available() {
+        return; // Local TTS not available — Enter on mode 2 won't navigate to voice select
+    }
     let mut wizard = OnboardingWizard::new();
     wizard.step = OnboardingStep::VoiceSetup;
     wizard.voice_field = VoiceField::TtsModeSelect;

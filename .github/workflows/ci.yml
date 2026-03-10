@@ -65,6 +65,10 @@ jobs:
           CXXFLAGS: -march=armv8-a+crypto
         run: cargo test --all-features --verbose
 
+      - name: Install ALSA dev (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
       - name: Run tests (Linux)
         if: runner.os == 'Linux'
         run: cargo test --all-features --verbose
@@ -80,6 +84,9 @@ jobs:
         with:
           toolchain: nightly
           components: clippy
+
+      - name: Install ALSA dev
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
 
       - name: Run clippy
         run: cargo clippy --lib --bins --tests --all-features -- -D warnings
@@ -110,6 +117,9 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly
+
+      - name: Install ALSA dev
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
 
       - name: Install tarpaulin
         run: cargo install cargo-tarpaulin

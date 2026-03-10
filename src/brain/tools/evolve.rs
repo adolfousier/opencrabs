@@ -3,6 +3,9 @@
 //! Downloads the latest OpenCrabs release binary from GitHub, replaces the
 //! current executable, and exec()-restarts into the new version.
 //! The crab molts its shell and wakes up evolved.
+//!
+//! Before swapping, it health-checks the new binary. If the swap fails,
+//! it rolls back to the previous version automatically.
 
 use super::error::Result;
 use super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
@@ -11,6 +14,15 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 const GITHUB_API: &str = "https://api.github.com/repos/adolfousier/opencrabs/releases/latest";
+
+/// Binary filename (inside archives) for the current platform.
+fn binary_name() -> &'static str {
+    if std::env::consts::OS == "windows" {
+        "opencrabs.exe"
+    } else {
+        "opencrabs"
+    }
+}
 
 /// Resolves the asset suffix for the current platform.
 fn platform_suffix() -> Option<&'static str> {
@@ -26,11 +38,6 @@ fn platform_suffix() -> Option<&'static str> {
 
 /// Check GitHub for a newer release. Returns `Some(latest_version)` if an
 /// update is available, `None` if already on latest (or on error).
-///
-/// When running from source, the compiled-in version may lag behind the local
-/// `Cargo.toml` (e.g. after `git pull` but before `cargo build`). In that case
-/// we also check the source Cargo.toml — if it already matches the latest
-/// release, we suppress the update notice to avoid false positives.
 pub async fn check_for_update() -> Option<String> {
     let current_version = crate::VERSION;
     let client = reqwest::Client::new();
@@ -48,13 +55,11 @@ pub async fn check_for_update() -> Option<String> {
     let latest_tag = release["tag_name"].as_str()?;
     let latest_version = latest_tag.strip_prefix('v').unwrap_or(latest_tag);
 
-    // Only notify if latest is actually newer (not equal, not a downgrade)
     if !is_newer(latest_version, current_version) {
         return None;
     }
 
     // If running from source, check if Cargo.toml already has the latest version
-    // (user pulled but hasn't rebuilt yet — not a real update)
     if let Some(source_version) = source_cargo_version()
         && source_version == latest_version
     {
@@ -76,7 +81,6 @@ pub fn is_newer(latest: &str, current: &str) -> bool {
 /// binary. Returns `None` if not running from a source build or file not found.
 fn source_cargo_version() -> Option<String> {
     let exe = std::env::current_exe().ok()?;
-    // Source builds live in target/release/ or target/debug/ under the repo root
     let target_dir = exe.parent()?;
     let repo_root = target_dir.parent()?.parent()?;
     let cargo_toml = repo_root.join("Cargo.toml");
@@ -87,6 +91,34 @@ fn source_cargo_version() -> Option<String> {
         .get("version")?
         .as_str()
         .map(String::from)
+}
+
+/// Run a health check on a binary: execute it with `health-check` arg,
+/// verify it prints "ok" and exits cleanly within a timeout.
+async fn health_check_binary(path: &std::path::Path) -> std::result::Result<(), String> {
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        tokio::process::Command::new(path)
+            .arg("health-check")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .output(),
+    )
+    .await;
+
+    match result {
+        Ok(Ok(output)) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if stdout.trim().contains("ok") {
+                Ok(())
+            } else {
+                Err("binary did not return 'ok'".into())
+            }
+        }
+        Ok(Ok(output)) => Err(format!("exited with status {}", output.status)),
+        Ok(Err(e)) => Err(format!("failed to spawn: {}", e)),
+        Err(_) => Err("timed out after 10s".into()),
+    }
 }
 
 pub struct EvolveTool {
@@ -211,7 +243,6 @@ impl Tool for EvolveTool {
         };
 
         // Find the matching asset in the release
-        // Asset naming: opencrabs-v{version}-{suffix}.tar.gz (or .zip for Windows)
         let is_windows = std::env::consts::OS == "windows";
         let ext = if is_windows { "zip" } else { "tar.gz" };
         let expected_asset = format!("opencrabs-{}-{}.{}", latest_tag, suffix, ext);
@@ -228,7 +259,7 @@ impl Tool for EvolveTool {
             })
         });
 
-        // Fallback: try legacy naming without version (opencrabs-{suffix}.tar.gz)
+        // Fallback: try legacy naming without version tag
         let download_url = match download_url {
             Some(url) => url,
             None => {
@@ -269,7 +300,7 @@ impl Tool for EvolveTool {
             cb(
                 sid,
                 ProgressEvent::IntermediateText {
-                    text: format!("Downloading v{}...", latest_version),
+                    text: format!("Downloading opencrabs v{}...", latest_version),
                     reasoning: None,
                 },
             );
@@ -291,13 +322,14 @@ impl Tool for EvolveTool {
         };
 
         // Extract binary from archive
+        let bin_name = binary_name();
         let binary_data = if is_windows {
-            extract_from_zip(&archive_bytes, "opencrabs.exe")?
+            extract_from_zip(&archive_bytes, bin_name)?
         } else {
-            extract_from_tar_gz(&archive_bytes, "opencrabs")?
+            extract_from_tar_gz(&archive_bytes, bin_name)?
         };
 
-        // Replace current executable
+        // Locate current executable
         let exe_path = match std::env::current_exe() {
             Ok(p) => p,
             Err(e) => {
@@ -308,7 +340,7 @@ impl Tool for EvolveTool {
             }
         };
 
-        // Write to a temp file next to the executable, then atomically rename
+        // Write to a temp file next to the executable
         let tmp_path = exe_path.with_extension("evolve_tmp");
         if let Err(e) = tokio::fs::write(&tmp_path, &binary_data).await {
             return Ok(ToolResult::error(format!(
@@ -331,8 +363,33 @@ impl Tool for EvolveTool {
             }
         }
 
-        // Atomic rename (on Unix this replaces the running binary on disk —
-        // the old binary stays in memory until exec() replaces the process)
+        // Health-check the new binary before swapping
+        if let Some(ref cb) = self.progress {
+            cb(
+                sid,
+                ProgressEvent::IntermediateText {
+                    text: "Verifying new binary...".into(),
+                    reasoning: None,
+                },
+            );
+        }
+
+        if let Err(reason) = health_check_binary(&tmp_path).await {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Ok(ToolResult::error(format!(
+                "Health check failed ({}). Keeping current v{}.",
+                reason, current_version
+            )));
+        }
+
+        // Backup current binary for rollback
+        let backup_path = exe_path.with_extension("evolve_backup");
+        if let Err(e) = std::fs::copy(&exe_path, &backup_path) {
+            tracing::warn!("Could not create backup of current binary: {}", e);
+            // Non-fatal — proceed, just lose rollback capability
+        }
+
+        // Atomic rename
         if let Err(e) = std::fs::rename(&tmp_path, &exe_path) {
             let _ = std::fs::remove_file(&tmp_path);
             return Ok(ToolResult::error(format!(
@@ -340,6 +397,30 @@ impl Tool for EvolveTool {
                 e
             )));
         }
+
+        // Post-swap verification
+        if let Err(reason) = health_check_binary(&exe_path).await {
+            // Rollback
+            if backup_path.exists() {
+                if let Err(e) = std::fs::rename(&backup_path, &exe_path) {
+                    return Ok(ToolResult::error(format!(
+                        "CRITICAL: New binary failed ({}) AND rollback failed: {}. Manual recovery needed.",
+                        reason, e
+                    )));
+                }
+                return Ok(ToolResult::error(format!(
+                    "New binary failed post-swap ({}). Rolled back to v{}.",
+                    reason, current_version
+                )));
+            }
+            return Ok(ToolResult::error(format!(
+                "New binary failed post-swap ({}). No backup for rollback.",
+                reason
+            )));
+        }
+
+        // Clean up backup on success
+        let _ = std::fs::remove_file(&backup_path);
 
         // Signal restart
         if let Some(ref cb) = self.progress {
