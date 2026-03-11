@@ -71,6 +71,9 @@ pub struct OnboardingWizard {
     pub trello_board_id_input: String,
     pub trello_allowed_users_input: String,
 
+    /// Cursor position for whichever channel text field is currently active
+    pub channel_input_cursor: usize,
+
     /// Channel test connection status
     pub channel_test_status: ChannelTestStatus,
 
@@ -315,6 +318,7 @@ impl OnboardingWizard {
             trello_board_id_input: String::new(),
             trello_allowed_users_input: String::new(),
 
+            channel_input_cursor: 0,
             channel_test_status: ChannelTestStatus::Idle,
 
             voice_field: VoiceField::SttModeSelect,

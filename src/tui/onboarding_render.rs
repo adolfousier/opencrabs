@@ -129,12 +129,17 @@ pub fn render_onboarding(f: &mut Frame, wizard: &OnboardingWizard) {
             ));
             footer.push(Span::styled("Setup", Style::default().fg(Color::White)));
         } else if is_channel_sub {
-            // Channel setup screens: arrow keys + tab nav
+            // Channel setup screens: tab nav + editing hints
             footer.push(Span::styled(
-                "[↑↓] ",
+                "[Tab] ",
                 Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
             ));
-            footer.push(Span::styled("Nav  ", Style::default().fg(Color::White)));
+            footer.push(Span::styled("Next  ", Style::default().fg(Color::White)));
+            footer.push(Span::styled(
+                "[←→] ",
+                Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
+            ));
+            footer.push(Span::styled("Cursor  ", Style::default().fg(Color::White)));
             footer.push(Span::styled(
                 "[Enter] ",
                 Style::default()
@@ -1215,6 +1220,10 @@ fn render_telegram_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWiza
     render_channel_test_status(lines, wizard);
 
     lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  Tab/Shift+Tab: nav fields | \u{2190}\u{2192}: cursor | Ctrl+\u{232b}: clear | Enter: confirm",
+        Style::default().fg(Color::DarkGray),
+    )));
 }
 
 fn render_discord_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
@@ -1403,6 +1412,10 @@ fn render_discord_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
     render_channel_test_status(lines, wizard);
 
     lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  Tab/Shift+Tab: nav fields | \u{2190}\u{2192}: cursor | Ctrl+\u{232b}: clear | Enter: confirm",
+        Style::default().fg(Color::DarkGray),
+    )));
 }
 
 fn render_whatsapp_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
@@ -1522,7 +1535,7 @@ fn render_whatsapp_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWiza
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "  Tab/Shift+Tab: nav fields | Ctrl+\u{232b}: clear | Enter: confirm | S: skip | Esc: back",
+        "  Tab/Shift+Tab: nav fields | \u{2190}\u{2192}: cursor | Ctrl+\u{232b}: clear | Enter: confirm | S: skip",
         Style::default().fg(Color::DarkGray),
     )));
 }
@@ -1761,6 +1774,10 @@ fn render_slack_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard)
     render_channel_test_status(lines, wizard);
 
     lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  Tab/Shift+Tab: nav fields | \u{2190}\u{2192}: cursor | Ctrl+\u{232b}: clear | Enter: confirm",
+        Style::default().fg(Color::DarkGray),
+    )));
 }
 
 /// Render respond_to selector: `  Respond to: [ all ]  dm_only  mention`
@@ -2624,4 +2641,8 @@ fn render_trello_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard
     render_channel_test_status(lines, wizard);
 
     lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  Tab/Shift+Tab: nav fields | \u{2190}\u{2192}: cursor | Ctrl+\u{232b}: clear | Enter: confirm",
+        Style::default().fg(Color::DarkGray),
+    )));
 }

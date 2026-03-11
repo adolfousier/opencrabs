@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use super::helpers::is_clear_field;
+use super::helpers::handle_text_input;
 use super::types::*;
 use super::wizard::OnboardingWizard;
 
@@ -136,54 +136,50 @@ impl OnboardingWizard {
             ChannelTestStatus::Idle => {}
         }
 
+        let existing_token = self.has_existing_telegram_token();
+        let existing_uid = self.has_existing_telegram_user_id();
         match self.telegram_field {
-            TelegramField::BotToken => match event.code {
-                KeyCode::Char(c) => {
-                    if self.has_existing_telegram_token() {
-                        self.telegram_token_input.clear();
-                    }
-                    self.telegram_token_input.push(c);
-                }
-                KeyCode::Backspace if is_clear_field(&event) => {
-                    self.telegram_token_input.clear();
-                }
-                KeyCode::Backspace => {
-                    if self.has_existing_telegram_token() {
-                        self.telegram_token_input.clear();
-                    } else {
-                        self.telegram_token_input.pop();
-                    }
-                }
-                KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
-                    self.telegram_field = TelegramField::UserID;
-                }
-                _ => {}
-            },
-            TelegramField::UserID => match event.code {
-                KeyCode::Char(c) if c.is_ascii_digit() => {
-                    if self.has_existing_telegram_user_id() {
-                        self.telegram_user_id_input.clear();
-                    }
-                    self.telegram_user_id_input.push(c);
-                }
-                KeyCode::Backspace if is_clear_field(&event) => {
-                    self.telegram_user_id_input.clear();
-                }
-                KeyCode::Backspace => {
-                    if self.has_existing_telegram_user_id() {
-                        self.telegram_user_id_input.clear();
-                    } else {
-                        self.telegram_user_id_input.pop();
+            TelegramField::BotToken => {
+                if handle_text_input(
+                    &event,
+                    &mut self.telegram_token_input,
+                    &mut self.channel_input_cursor,
+                    existing_token,
+                    None,
+                ) {
+                    // consumed
+                } else {
+                    match event.code {
+                        KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
+                            self.telegram_field = TelegramField::UserID;
+                            self.channel_input_cursor = self.telegram_user_id_input.len();
+                        }
+                        _ => {}
                     }
                 }
-                KeyCode::BackTab | KeyCode::Up => {
-                    self.telegram_field = TelegramField::BotToken;
+            }
+            TelegramField::UserID => {
+                if handle_text_input(
+                    &event,
+                    &mut self.telegram_user_id_input,
+                    &mut self.channel_input_cursor,
+                    existing_uid,
+                    Some(|c: char| c.is_ascii_digit()),
+                ) {
+                    // consumed
+                } else {
+                    match event.code {
+                        KeyCode::BackTab | KeyCode::Up => {
+                            self.telegram_field = TelegramField::BotToken;
+                            self.channel_input_cursor = self.telegram_token_input.len();
+                        }
+                        KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
+                            self.telegram_field = TelegramField::RespondTo;
+                        }
+                        _ => {}
+                    }
                 }
-                KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
-                    self.telegram_field = TelegramField::RespondTo;
-                }
-                _ => {}
-            },
+            }
             TelegramField::RespondTo => match event.code {
                 KeyCode::Left | KeyCode::Char('h') => {
                     self.telegram_respond_to = self.telegram_respond_to.saturating_sub(1);
@@ -233,79 +229,74 @@ impl OnboardingWizard {
             ChannelTestStatus::Idle => {}
         }
 
+        let existing_d_token = self.has_existing_discord_token();
+        let existing_d_ch = self.has_existing_discord_channel_id();
+        let existing_d_al = self.has_existing_discord_allowed_list();
         match self.discord_field {
-            DiscordField::BotToken => match event.code {
-                KeyCode::Char(c) => {
-                    if self.has_existing_discord_token() {
-                        self.discord_token_input.clear();
-                    }
-                    self.discord_token_input.push(c);
-                }
-                KeyCode::Backspace if is_clear_field(&event) => {
-                    self.discord_token_input.clear();
-                }
-                KeyCode::Backspace => {
-                    if self.has_existing_discord_token() {
-                        self.discord_token_input.clear();
-                    } else {
-                        self.discord_token_input.pop();
-                    }
-                }
-                KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
-                    self.discord_field = DiscordField::ChannelID;
-                }
-                _ => {}
-            },
-            DiscordField::ChannelID => match event.code {
-                KeyCode::Char(c) => {
-                    if self.has_existing_discord_channel_id() {
-                        self.discord_channel_id_input.clear();
-                    }
-                    self.discord_channel_id_input.push(c);
-                }
-                KeyCode::Backspace if is_clear_field(&event) => {
-                    self.discord_channel_id_input.clear();
-                }
-                KeyCode::Backspace => {
-                    if self.has_existing_discord_channel_id() {
-                        self.discord_channel_id_input.clear();
-                    } else {
-                        self.discord_channel_id_input.pop();
+            DiscordField::BotToken => {
+                if handle_text_input(
+                    &event,
+                    &mut self.discord_token_input,
+                    &mut self.channel_input_cursor,
+                    existing_d_token,
+                    None,
+                ) {
+                    // consumed
+                } else {
+                    match event.code {
+                        KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
+                            self.discord_field = DiscordField::ChannelID;
+                            self.channel_input_cursor = self.discord_channel_id_input.len();
+                        }
+                        _ => {}
                     }
                 }
-                KeyCode::BackTab | KeyCode::Up => {
-                    self.discord_field = DiscordField::BotToken;
-                }
-                KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
-                    self.discord_field = DiscordField::AllowedList;
-                }
-                _ => {}
-            },
-            DiscordField::AllowedList => match event.code {
-                KeyCode::Char(c) if c.is_ascii_digit() => {
-                    if self.has_existing_discord_allowed_list() {
-                        self.discord_allowed_list_input.clear();
-                    }
-                    self.discord_allowed_list_input.push(c);
-                }
-                KeyCode::Backspace if is_clear_field(&event) => {
-                    self.discord_allowed_list_input.clear();
-                }
-                KeyCode::Backspace => {
-                    if self.has_existing_discord_allowed_list() {
-                        self.discord_allowed_list_input.clear();
-                    } else {
-                        self.discord_allowed_list_input.pop();
+            }
+            DiscordField::ChannelID => {
+                if handle_text_input(
+                    &event,
+                    &mut self.discord_channel_id_input,
+                    &mut self.channel_input_cursor,
+                    existing_d_ch,
+                    None,
+                ) {
+                    // consumed
+                } else {
+                    match event.code {
+                        KeyCode::BackTab | KeyCode::Up => {
+                            self.discord_field = DiscordField::BotToken;
+                            self.channel_input_cursor = self.discord_token_input.len();
+                        }
+                        KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
+                            self.discord_field = DiscordField::AllowedList;
+                            self.channel_input_cursor = self.discord_allowed_list_input.len();
+                        }
+                        _ => {}
                     }
                 }
-                KeyCode::BackTab | KeyCode::Up => {
-                    self.discord_field = DiscordField::ChannelID;
+            }
+            DiscordField::AllowedList => {
+                if handle_text_input(
+                    &event,
+                    &mut self.discord_allowed_list_input,
+                    &mut self.channel_input_cursor,
+                    existing_d_al,
+                    Some(|c: char| c.is_ascii_digit()),
+                ) {
+                    // consumed
+                } else {
+                    match event.code {
+                        KeyCode::BackTab | KeyCode::Up => {
+                            self.discord_field = DiscordField::ChannelID;
+                            self.channel_input_cursor = self.discord_channel_id_input.len();
+                        }
+                        KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
+                            self.discord_field = DiscordField::RespondTo;
+                        }
+                        _ => {}
+                    }
                 }
-                KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
-                    self.discord_field = DiscordField::RespondTo;
-                }
-                _ => {}
-            },
+            }
             DiscordField::RespondTo => match event.code {
                 KeyCode::Left | KeyCode::Char('h') => {
                     self.discord_respond_to = self.discord_respond_to.saturating_sub(1);
@@ -411,52 +402,45 @@ impl OnboardingWizard {
                 }
                 _ => WizardAction::None,
             },
-            WhatsAppField::PhoneAllowlist => match event.code {
-                KeyCode::Char(c) if c.is_ascii_digit() || c == '+' || c == '-' || c == ' ' => {
-                    if self.has_existing_whatsapp_phone() {
-                        self.whatsapp_phone_input.clear();
+            WhatsAppField::PhoneAllowlist => {
+                let existing_phone = self.has_existing_whatsapp_phone();
+                if handle_text_input(
+                    &event,
+                    &mut self.whatsapp_phone_input,
+                    &mut self.channel_input_cursor,
+                    existing_phone,
+                    Some(|c: char| c.is_ascii_digit() || c == '+' || c == '-' || c == ' '),
+                ) {
+                    WizardAction::None
+                } else {
+                    match event.code {
+                        KeyCode::BackTab | KeyCode::Up => {
+                            self.whatsapp_field = WhatsAppField::Connection;
+                            self.whatsapp_connected = false;
+                            self.whatsapp_connecting = false;
+                            WizardAction::None
+                        }
+                        KeyCode::Tab | KeyCode::Down => {
+                            self.whatsapp_field = WhatsAppField::Connection;
+                            self.whatsapp_connected = false;
+                            self.whatsapp_connecting = false;
+                            WizardAction::None
+                        }
+                        KeyCode::Char('s') | KeyCode::Char('S') => {
+                            self.next_step();
+                            WizardAction::None
+                        }
+                        KeyCode::Enter => {
+                            if !self.whatsapp_phone_input.is_empty() {
+                                return WizardAction::TestWhatsApp;
+                            }
+                            self.next_step();
+                            WizardAction::None
+                        }
+                        _ => WizardAction::None,
                     }
-                    self.whatsapp_phone_input.push(c);
-                    WizardAction::None
                 }
-                KeyCode::Backspace if is_clear_field(&event) => {
-                    self.whatsapp_phone_input.clear();
-                    WizardAction::None
-                }
-                KeyCode::Backspace => {
-                    if self.has_existing_whatsapp_phone() {
-                        self.whatsapp_phone_input.clear();
-                    } else {
-                        self.whatsapp_phone_input.pop();
-                    }
-                    WizardAction::None
-                }
-                KeyCode::BackTab | KeyCode::Up => {
-                    self.whatsapp_field = WhatsAppField::Connection;
-                    self.whatsapp_connected = false;
-                    self.whatsapp_connecting = false;
-                    WizardAction::None
-                }
-                KeyCode::Tab | KeyCode::Down => {
-                    // Tab/Down from phone field wraps back to Connection
-                    self.whatsapp_field = WhatsAppField::Connection;
-                    self.whatsapp_connected = false;
-                    self.whatsapp_connecting = false;
-                    WizardAction::None
-                }
-                KeyCode::Char('s') | KeyCode::Char('S') => {
-                    self.next_step();
-                    WizardAction::None
-                }
-                KeyCode::Enter => {
-                    if !self.whatsapp_phone_input.is_empty() {
-                        return WizardAction::TestWhatsApp;
-                    }
-                    self.next_step();
-                    WizardAction::None
-                }
-                _ => WizardAction::None,
-            },
+            }
         }
     }
 
@@ -515,110 +499,100 @@ impl OnboardingWizard {
             ChannelTestStatus::Idle => {}
         }
 
+        let existing_t_ak = self.has_existing_trello_api_key();
+        let existing_t_at = self.has_existing_trello_api_token();
+        let existing_t_bd = self.has_existing_trello_board_id();
+        let existing_t_au = self.has_existing_trello_allowed_users();
         match self.trello_field {
-            TrelloField::ApiKey => match event.code {
-                KeyCode::Char(c) => {
-                    if self.has_existing_trello_api_key() {
-                        self.trello_api_key_input.clear();
-                    }
-                    self.trello_api_key_input.push(c);
-                }
-                KeyCode::Backspace if is_clear_field(&event) => {
-                    self.trello_api_key_input.clear();
-                }
-                KeyCode::Backspace => {
-                    if self.has_existing_trello_api_key() {
-                        self.trello_api_key_input.clear();
-                    } else {
-                        self.trello_api_key_input.pop();
-                    }
-                }
-                KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
-                    self.trello_field = TrelloField::ApiToken;
-                }
-                _ => {}
-            },
-            TrelloField::ApiToken => match event.code {
-                KeyCode::Char(c) => {
-                    if self.has_existing_trello_api_token() {
-                        self.trello_api_token_input.clear();
-                    }
-                    self.trello_api_token_input.push(c);
-                }
-                KeyCode::Backspace if is_clear_field(&event) => {
-                    self.trello_api_token_input.clear();
-                }
-                KeyCode::Backspace => {
-                    if self.has_existing_trello_api_token() {
-                        self.trello_api_token_input.clear();
-                    } else {
-                        self.trello_api_token_input.pop();
+            TrelloField::ApiKey => {
+                if handle_text_input(
+                    &event,
+                    &mut self.trello_api_key_input,
+                    &mut self.channel_input_cursor,
+                    existing_t_ak,
+                    None,
+                ) {
+                } else {
+                    match event.code {
+                        KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
+                            self.trello_field = TrelloField::ApiToken;
+                            self.channel_input_cursor = self.trello_api_token_input.len();
+                        }
+                        _ => {}
                     }
                 }
-                KeyCode::BackTab | KeyCode::Up => {
-                    self.trello_field = TrelloField::ApiKey;
-                }
-                KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
-                    self.trello_field = TrelloField::BoardId;
-                }
-                _ => {}
-            },
-            TrelloField::BoardId => match event.code {
-                KeyCode::Char(c) => {
-                    if self.has_existing_trello_board_id() {
-                        self.trello_board_id_input.clear();
-                    }
-                    self.trello_board_id_input.push(c);
-                }
-                KeyCode::Backspace if is_clear_field(&event) => {
-                    self.trello_board_id_input.clear();
-                }
-                KeyCode::Backspace => {
-                    if self.has_existing_trello_board_id() {
-                        self.trello_board_id_input.clear();
-                    } else {
-                        self.trello_board_id_input.pop();
+            }
+            TrelloField::ApiToken => {
+                if handle_text_input(
+                    &event,
+                    &mut self.trello_api_token_input,
+                    &mut self.channel_input_cursor,
+                    existing_t_at,
+                    None,
+                ) {
+                } else {
+                    match event.code {
+                        KeyCode::BackTab | KeyCode::Up => {
+                            self.trello_field = TrelloField::ApiKey;
+                            self.channel_input_cursor = self.trello_api_key_input.len();
+                        }
+                        KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
+                            self.trello_field = TrelloField::BoardId;
+                            self.channel_input_cursor = self.trello_board_id_input.len();
+                        }
+                        _ => {}
                     }
                 }
-                KeyCode::BackTab | KeyCode::Up => {
-                    self.trello_field = TrelloField::ApiToken;
-                }
-                KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
-                    self.trello_field = TrelloField::AllowedUsers;
-                }
-                _ => {}
-            },
-            TrelloField::AllowedUsers => match event.code {
-                KeyCode::Char(c) => {
-                    if self.has_existing_trello_allowed_users() {
-                        self.trello_allowed_users_input.clear();
-                    }
-                    self.trello_allowed_users_input.push(c);
-                }
-                KeyCode::Backspace if is_clear_field(&event) => {
-                    self.trello_allowed_users_input.clear();
-                }
-                KeyCode::Backspace => {
-                    if self.has_existing_trello_allowed_users() {
-                        self.trello_allowed_users_input.clear();
-                    } else {
-                        self.trello_allowed_users_input.pop();
+            }
+            TrelloField::BoardId => {
+                if handle_text_input(
+                    &event,
+                    &mut self.trello_board_id_input,
+                    &mut self.channel_input_cursor,
+                    existing_t_bd,
+                    None,
+                ) {
+                } else {
+                    match event.code {
+                        KeyCode::BackTab | KeyCode::Up => {
+                            self.trello_field = TrelloField::ApiToken;
+                            self.channel_input_cursor = self.trello_api_token_input.len();
+                        }
+                        KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
+                            self.trello_field = TrelloField::AllowedUsers;
+                            self.channel_input_cursor = self.trello_allowed_users_input.len();
+                        }
+                        _ => {}
                     }
                 }
-                KeyCode::BackTab | KeyCode::Up => {
-                    self.trello_field = TrelloField::BoardId;
-                }
-                KeyCode::Enter => {
-                    let has_key = !self.trello_api_key_input.is_empty();
-                    let has_token = !self.trello_api_token_input.is_empty();
-                    let has_board = !self.trello_board_id_input.is_empty();
-                    if has_key && has_token && has_board {
-                        return WizardAction::TestTrello;
+            }
+            TrelloField::AllowedUsers => {
+                if handle_text_input(
+                    &event,
+                    &mut self.trello_allowed_users_input,
+                    &mut self.channel_input_cursor,
+                    existing_t_au,
+                    None,
+                ) {
+                } else {
+                    match event.code {
+                        KeyCode::BackTab | KeyCode::Up => {
+                            self.trello_field = TrelloField::BoardId;
+                            self.channel_input_cursor = self.trello_board_id_input.len();
+                        }
+                        KeyCode::Enter => {
+                            let has_key = !self.trello_api_key_input.is_empty();
+                            let has_token = !self.trello_api_token_input.is_empty();
+                            let has_board = !self.trello_board_id_input.is_empty();
+                            if has_key && has_token && has_board {
+                                return WizardAction::TestTrello;
+                            }
+                            self.next_step();
+                        }
+                        _ => {}
                     }
-                    self.next_step();
                 }
-                _ => {}
-            },
+            }
         }
         WizardAction::None
     }
@@ -648,104 +622,94 @@ impl OnboardingWizard {
             ChannelTestStatus::Idle => {}
         }
 
+        let existing_s_bot = self.has_existing_slack_bot_token();
+        let existing_s_app = self.has_existing_slack_app_token();
+        let existing_s_ch = self.has_existing_slack_channel_id();
+        let existing_s_al = self.has_existing_slack_allowed_list();
         match self.slack_field {
-            SlackField::BotToken => match event.code {
-                KeyCode::Char(c) => {
-                    if self.has_existing_slack_bot_token() {
-                        self.slack_bot_token_input.clear();
-                    }
-                    self.slack_bot_token_input.push(c);
-                }
-                KeyCode::Backspace if is_clear_field(&event) => {
-                    self.slack_bot_token_input.clear();
-                }
-                KeyCode::Backspace => {
-                    if self.has_existing_slack_bot_token() {
-                        self.slack_bot_token_input.clear();
-                    } else {
-                        self.slack_bot_token_input.pop();
-                    }
-                }
-                KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
-                    self.slack_field = SlackField::AppToken;
-                }
-                _ => {}
-            },
-            SlackField::AppToken => match event.code {
-                KeyCode::Char(c) => {
-                    if self.has_existing_slack_app_token() {
-                        self.slack_app_token_input.clear();
-                    }
-                    self.slack_app_token_input.push(c);
-                }
-                KeyCode::Backspace if is_clear_field(&event) => {
-                    self.slack_app_token_input.clear();
-                }
-                KeyCode::Backspace => {
-                    if self.has_existing_slack_app_token() {
-                        self.slack_app_token_input.clear();
-                    } else {
-                        self.slack_app_token_input.pop();
+            SlackField::BotToken => {
+                if handle_text_input(
+                    &event,
+                    &mut self.slack_bot_token_input,
+                    &mut self.channel_input_cursor,
+                    existing_s_bot,
+                    None,
+                ) {
+                } else {
+                    match event.code {
+                        KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
+                            self.slack_field = SlackField::AppToken;
+                            self.channel_input_cursor = self.slack_app_token_input.len();
+                        }
+                        _ => {}
                     }
                 }
-                KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
-                    self.slack_field = SlackField::ChannelID;
-                }
-                KeyCode::BackTab | KeyCode::Up => {
-                    self.slack_field = SlackField::BotToken;
-                }
-                _ => {}
-            },
-            SlackField::ChannelID => match event.code {
-                KeyCode::Char(c) => {
-                    if self.has_existing_slack_channel_id() {
-                        self.slack_channel_id_input.clear();
-                    }
-                    self.slack_channel_id_input.push(c);
-                }
-                KeyCode::Backspace if is_clear_field(&event) => {
-                    self.slack_channel_id_input.clear();
-                }
-                KeyCode::Backspace => {
-                    if self.has_existing_slack_channel_id() {
-                        self.slack_channel_id_input.clear();
-                    } else {
-                        self.slack_channel_id_input.pop();
+            }
+            SlackField::AppToken => {
+                if handle_text_input(
+                    &event,
+                    &mut self.slack_app_token_input,
+                    &mut self.channel_input_cursor,
+                    existing_s_app,
+                    None,
+                ) {
+                } else {
+                    match event.code {
+                        KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
+                            self.slack_field = SlackField::ChannelID;
+                            self.channel_input_cursor = self.slack_channel_id_input.len();
+                        }
+                        KeyCode::BackTab | KeyCode::Up => {
+                            self.slack_field = SlackField::BotToken;
+                            self.channel_input_cursor = self.slack_bot_token_input.len();
+                        }
+                        _ => {}
                     }
                 }
-                KeyCode::BackTab | KeyCode::Up => {
-                    self.slack_field = SlackField::AppToken;
-                }
-                KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
-                    self.slack_field = SlackField::AllowedList;
-                }
-                _ => {}
-            },
-            SlackField::AllowedList => match event.code {
-                KeyCode::Char(c) => {
-                    if self.has_existing_slack_allowed_list() {
-                        self.slack_allowed_list_input.clear();
-                    }
-                    self.slack_allowed_list_input.push(c);
-                }
-                KeyCode::Backspace if is_clear_field(&event) => {
-                    self.slack_allowed_list_input.clear();
-                }
-                KeyCode::Backspace => {
-                    if self.has_existing_slack_allowed_list() {
-                        self.slack_allowed_list_input.clear();
-                    } else {
-                        self.slack_allowed_list_input.pop();
+            }
+            SlackField::ChannelID => {
+                if handle_text_input(
+                    &event,
+                    &mut self.slack_channel_id_input,
+                    &mut self.channel_input_cursor,
+                    existing_s_ch,
+                    None,
+                ) {
+                } else {
+                    match event.code {
+                        KeyCode::BackTab | KeyCode::Up => {
+                            self.slack_field = SlackField::AppToken;
+                            self.channel_input_cursor = self.slack_app_token_input.len();
+                        }
+                        KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
+                            self.slack_field = SlackField::AllowedList;
+                            self.channel_input_cursor = self.slack_allowed_list_input.len();
+                        }
+                        _ => {}
                     }
                 }
-                KeyCode::BackTab | KeyCode::Up => {
-                    self.slack_field = SlackField::ChannelID;
+            }
+            SlackField::AllowedList => {
+                if handle_text_input(
+                    &event,
+                    &mut self.slack_allowed_list_input,
+                    &mut self.channel_input_cursor,
+                    existing_s_al,
+                    None,
+                ) {
+                } else {
+                    match event.code {
+                        KeyCode::BackTab | KeyCode::Up => {
+                            self.slack_field = SlackField::ChannelID;
+                            self.channel_input_cursor = self.slack_channel_id_input.len();
+                        }
+                        KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
+                            self.slack_field = SlackField::RespondTo;
+                        }
+                        _ => {}
+                    }
                 }
-                KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
-                    self.slack_field = SlackField::RespondTo;
-                }
-                _ => {}
-            },
+            }
             SlackField::RespondTo => match event.code {
                 KeyCode::Left | KeyCode::Char('h') => {
                     self.slack_respond_to = self.slack_respond_to.saturating_sub(1);

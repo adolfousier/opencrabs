@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use super::helpers::is_clear_field;
+use super::helpers::{handle_text_paste, is_clear_field};
 use super::types::*;
 use super::wizard::OnboardingWizard;
 
@@ -64,22 +64,27 @@ impl OnboardingWizard {
                     clean.len(),
                     self.telegram_field
                 );
-                match self.telegram_field {
+                let field = self.telegram_field;
+                let existing_token = self.has_existing_telegram_token();
+                let existing_uid = self.has_existing_telegram_user_id();
+                match field {
                     TelegramField::BotToken => {
-                        if self.has_existing_telegram_token() {
-                            self.telegram_token_input.clear();
-                        }
-                        self.telegram_token_input.push_str(clean);
+                        handle_text_paste(
+                            clean,
+                            &mut self.telegram_token_input,
+                            &mut self.channel_input_cursor,
+                            existing_token,
+                            None,
+                        );
                     }
                     TelegramField::UserID => {
-                        // Only accept digits for user ID paste
-                        let digits: String = clean.chars().filter(|c| c.is_ascii_digit()).collect();
-                        if !digits.is_empty() {
-                            if self.has_existing_telegram_user_id() {
-                                self.telegram_user_id_input.clear();
-                            }
-                            self.telegram_user_id_input.push_str(&digits);
-                        }
+                        handle_text_paste(
+                            clean,
+                            &mut self.telegram_user_id_input,
+                            &mut self.channel_input_cursor,
+                            existing_uid,
+                            Some(|c: char| c.is_ascii_digit()),
+                        );
                     }
                     TelegramField::RespondTo => {} // selector, paste is no-op
                 }
@@ -90,27 +95,37 @@ impl OnboardingWizard {
                     clean.len(),
                     self.discord_field
                 );
-                match self.discord_field {
+                let field = self.discord_field;
+                let existing_token = self.has_existing_discord_token();
+                let existing_ch = self.has_existing_discord_channel_id();
+                let existing_al = self.has_existing_discord_allowed_list();
+                match field {
                     DiscordField::BotToken => {
-                        if self.has_existing_discord_token() {
-                            self.discord_token_input.clear();
-                        }
-                        self.discord_token_input.push_str(clean);
+                        handle_text_paste(
+                            clean,
+                            &mut self.discord_token_input,
+                            &mut self.channel_input_cursor,
+                            existing_token,
+                            None,
+                        );
                     }
                     DiscordField::ChannelID => {
-                        if self.has_existing_discord_channel_id() {
-                            self.discord_channel_id_input.clear();
-                        }
-                        self.discord_channel_id_input.push_str(clean);
+                        handle_text_paste(
+                            clean,
+                            &mut self.discord_channel_id_input,
+                            &mut self.channel_input_cursor,
+                            existing_ch,
+                            None,
+                        );
                     }
                     DiscordField::AllowedList => {
-                        let digits: String = clean.chars().filter(|c| c.is_ascii_digit()).collect();
-                        if !digits.is_empty() {
-                            if self.has_existing_discord_allowed_list() {
-                                self.discord_allowed_list_input.clear();
-                            }
-                            self.discord_allowed_list_input.push_str(&digits);
-                        }
+                        handle_text_paste(
+                            clean,
+                            &mut self.discord_allowed_list_input,
+                            &mut self.channel_input_cursor,
+                            existing_al,
+                            Some(|c: char| c.is_ascii_digit()),
+                        );
                     }
                     DiscordField::RespondTo => {} // selector, paste is no-op
                 }
@@ -121,30 +136,47 @@ impl OnboardingWizard {
                     clean.len(),
                     self.slack_field
                 );
-                match self.slack_field {
+                let field = self.slack_field;
+                let existing_bot = self.has_existing_slack_bot_token();
+                let existing_app = self.has_existing_slack_app_token();
+                let existing_ch = self.has_existing_slack_channel_id();
+                let existing_al = self.has_existing_slack_allowed_list();
+                match field {
                     SlackField::BotToken => {
-                        if self.has_existing_slack_bot_token() {
-                            self.slack_bot_token_input.clear();
-                        }
-                        self.slack_bot_token_input.push_str(clean);
+                        handle_text_paste(
+                            clean,
+                            &mut self.slack_bot_token_input,
+                            &mut self.channel_input_cursor,
+                            existing_bot,
+                            None,
+                        );
                     }
                     SlackField::AppToken => {
-                        if self.has_existing_slack_app_token() {
-                            self.slack_app_token_input.clear();
-                        }
-                        self.slack_app_token_input.push_str(clean);
+                        handle_text_paste(
+                            clean,
+                            &mut self.slack_app_token_input,
+                            &mut self.channel_input_cursor,
+                            existing_app,
+                            None,
+                        );
                     }
                     SlackField::ChannelID => {
-                        if self.has_existing_slack_channel_id() {
-                            self.slack_channel_id_input.clear();
-                        }
-                        self.slack_channel_id_input.push_str(clean);
+                        handle_text_paste(
+                            clean,
+                            &mut self.slack_channel_id_input,
+                            &mut self.channel_input_cursor,
+                            existing_ch,
+                            None,
+                        );
                     }
                     SlackField::AllowedList => {
-                        if self.has_existing_slack_allowed_list() {
-                            self.slack_allowed_list_input.clear();
-                        }
-                        self.slack_allowed_list_input.push_str(clean);
+                        handle_text_paste(
+                            clean,
+                            &mut self.slack_allowed_list_input,
+                            &mut self.channel_input_cursor,
+                            existing_al,
+                            None,
+                        );
                     }
                     SlackField::RespondTo => {} // selector, paste is no-op
                 }
@@ -155,47 +187,61 @@ impl OnboardingWizard {
                     clean.len(),
                     self.trello_field
                 );
-                match self.trello_field {
+                let field = self.trello_field;
+                let existing_ak = self.has_existing_trello_api_key();
+                let existing_at = self.has_existing_trello_api_token();
+                let existing_bd = self.has_existing_trello_board_id();
+                let existing_au = self.has_existing_trello_allowed_users();
+                match field {
                     TrelloField::ApiKey => {
-                        if self.has_existing_trello_api_key() {
-                            self.trello_api_key_input.clear();
-                        }
-                        self.trello_api_key_input.push_str(clean);
+                        handle_text_paste(
+                            clean,
+                            &mut self.trello_api_key_input,
+                            &mut self.channel_input_cursor,
+                            existing_ak,
+                            None,
+                        );
                     }
                     TrelloField::ApiToken => {
-                        if self.has_existing_trello_api_token() {
-                            self.trello_api_token_input.clear();
-                        }
-                        self.trello_api_token_input.push_str(clean);
+                        handle_text_paste(
+                            clean,
+                            &mut self.trello_api_token_input,
+                            &mut self.channel_input_cursor,
+                            existing_at,
+                            None,
+                        );
                     }
                     TrelloField::BoardId => {
-                        if self.has_existing_trello_board_id() {
-                            self.trello_board_id_input.clear();
-                        }
-                        self.trello_board_id_input.push_str(clean);
+                        handle_text_paste(
+                            clean,
+                            &mut self.trello_board_id_input,
+                            &mut self.channel_input_cursor,
+                            existing_bd,
+                            None,
+                        );
                     }
                     TrelloField::AllowedUsers => {
-                        if self.has_existing_trello_allowed_users() {
-                            self.trello_allowed_users_input.clear();
-                        }
-                        self.trello_allowed_users_input.push_str(clean);
+                        handle_text_paste(
+                            clean,
+                            &mut self.trello_allowed_users_input,
+                            &mut self.channel_input_cursor,
+                            existing_au,
+                            None,
+                        );
                     }
                 }
             }
             OnboardingStep::WhatsAppSetup
                 if self.whatsapp_field == WhatsAppField::PhoneAllowlist =>
             {
-                // Accept digits, +, - for phone number
-                let phone: String = clean
-                    .chars()
-                    .filter(|c| c.is_ascii_digit() || *c == '+' || *c == '-')
-                    .collect();
-                if !phone.is_empty() {
-                    if self.has_existing_whatsapp_phone() {
-                        self.whatsapp_phone_input.clear();
-                    }
-                    self.whatsapp_phone_input.push_str(&phone);
-                }
+                let existing = self.has_existing_whatsapp_phone();
+                handle_text_paste(
+                    clean,
+                    &mut self.whatsapp_phone_input,
+                    &mut self.channel_input_cursor,
+                    existing,
+                    Some(|c: char| c.is_ascii_digit() || c == '+' || c == '-'),
+                );
             }
             OnboardingStep::VoiceSetup => {
                 tracing::debug!("[paste] Groq API key pasted ({} chars)", clean.len());
