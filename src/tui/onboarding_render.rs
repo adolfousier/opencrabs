@@ -54,26 +54,26 @@ pub fn render_onboarding(f: &mut Frame, wizard: &OnboardingWizard) {
 
     let header_end = lines.len();
 
-    // Step-specific content; ProviderAuth returns a focused-line hint for scrolling
+    // Step-specific content; returns a focused-line hint for scrolling
     let focused_line: usize = match step {
         OnboardingStep::ProviderAuth => render_provider_auth(&mut lines, wizard),
+        OnboardingStep::Channels => render_channels(&mut lines, wizard),
+        OnboardingStep::TelegramSetup => render_telegram_setup(&mut lines, wizard),
+        OnboardingStep::DiscordSetup => render_discord_setup(&mut lines, wizard),
+        OnboardingStep::WhatsAppSetup => render_whatsapp_setup(&mut lines, wizard),
+        OnboardingStep::SlackSetup => render_slack_setup(&mut lines, wizard),
+        OnboardingStep::TrelloSetup => render_trello_setup(&mut lines, wizard),
         other => {
             match other {
                 OnboardingStep::ModeSelect => render_mode_select(&mut lines, wizard),
                 OnboardingStep::Workspace => render_workspace(&mut lines, wizard),
-                OnboardingStep::Channels => render_channels(&mut lines, wizard),
-                OnboardingStep::TelegramSetup => render_telegram_setup(&mut lines, wizard),
-                OnboardingStep::DiscordSetup => render_discord_setup(&mut lines, wizard),
-                OnboardingStep::WhatsAppSetup => render_whatsapp_setup(&mut lines, wizard),
-                OnboardingStep::SlackSetup => render_slack_setup(&mut lines, wizard),
-                OnboardingStep::TrelloSetup => render_trello_setup(&mut lines, wizard),
                 OnboardingStep::VoiceSetup => render_voice_setup(&mut lines, wizard),
                 OnboardingStep::ImageSetup => render_image_setup(&mut lines, wizard),
                 OnboardingStep::Daemon => render_daemon(&mut lines, wizard),
                 OnboardingStep::HealthCheck => render_health_check(&mut lines, wizard),
                 OnboardingStep::BrainSetup => render_brain_setup(&mut lines, wizard),
                 OnboardingStep::Complete => render_complete(&mut lines, wizard),
-                OnboardingStep::ProviderAuth => unreachable!(),
+                _ => unreachable!(),
             }
             0
         }
@@ -1003,15 +1003,19 @@ fn render_workspace(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
     )));
 }
 
-fn render_channels(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
+fn render_channels(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) -> usize {
     lines.push(Line::from(Span::styled(
         "  Pick your channels (Space to toggle):",
         Style::default().fg(Color::DarkGray),
     )));
     lines.push(Line::from(""));
 
+    let mut focused_line = 0;
     for (i, (name, enabled)) in wizard.channel_toggles.iter().enumerate() {
         let focused = i == wizard.focused_field;
+        if focused {
+            focused_line = lines.len();
+        }
         let prefix = if focused { " > " } else { "   " };
         let marker = if *enabled { "[x]" } else { "[ ]" };
         // Get the description from CHANNEL_NAMES
@@ -1050,6 +1054,9 @@ fn render_channels(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
 
     // "Continue" button at the bottom
     let continue_focused = wizard.focused_field >= wizard.channel_toggles.len();
+    if continue_focused {
+        focused_line = lines.len() + 1; // +1 for the blank line
+    }
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
         Span::styled(
@@ -1072,9 +1079,11 @@ fn render_channels(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
         ),
     ]));
     lines.push(Line::from(""));
+    focused_line
 }
 
-fn render_telegram_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
+fn render_telegram_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) -> usize {
+    let base = lines.len();
     // Help text
     lines.push(Line::from(Span::styled(
         "  1. Open Telegram, search @BotFather",
@@ -1224,9 +1233,17 @@ fn render_telegram_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWiza
         "  Tab/Shift+Tab: nav fields | \u{2190}\u{2192}: cursor | Ctrl+\u{232b}: clear | Enter: confirm",
         Style::default().fg(Color::DarkGray),
     )));
+    // Focused field for scrolling: token=base+4, uid=base+6, respond_to=base+10 (approx)
+    let offset = match wizard.telegram_field {
+        TelegramField::BotToken => 4,
+        TelegramField::UserID => 6,
+        TelegramField::RespondTo => lines.len().saturating_sub(base).saturating_sub(4),
+    };
+    base + offset
 }
 
-fn render_discord_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
+fn render_discord_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) -> usize {
+    let base = lines.len();
     // Help text
     lines.push(Line::from(Span::styled(
         "  1. Go to discord.com/developers/applications",
@@ -1416,10 +1433,18 @@ fn render_discord_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
         "  Tab/Shift+Tab: nav fields | \u{2190}\u{2192}: cursor | Ctrl+\u{232b}: clear | Enter: confirm",
         Style::default().fg(Color::DarkGray),
     )));
+    let offset = match wizard.discord_field {
+        DiscordField::BotToken => 4,
+        DiscordField::ChannelID => 6,
+        DiscordField::AllowedList => 8,
+        DiscordField::RespondTo => lines.len().saturating_sub(base).saturating_sub(4),
+    };
+    base + offset
 }
 
-fn render_whatsapp_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
+fn render_whatsapp_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) -> usize {
     use crate::tui::onboarding::WhatsAppField;
+    let base = lines.len();
 
     // Connection section
     let conn_focused = wizard.whatsapp_field == WhatsAppField::Connection;
@@ -1538,9 +1563,15 @@ fn render_whatsapp_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWiza
         "  Tab/Shift+Tab: nav fields | \u{2190}\u{2192}: cursor | Ctrl+\u{232b}: clear | Enter: confirm | S: skip",
         Style::default().fg(Color::DarkGray),
     )));
+    let offset = match wizard.whatsapp_field {
+        WhatsAppField::Connection => 0,
+        WhatsAppField::PhoneAllowlist => lines.len().saturating_sub(base).saturating_sub(6),
+    };
+    base + offset
 }
 
-fn render_slack_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
+fn render_slack_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) -> usize {
+    let base = lines.len();
     // Help text
     lines.push(Line::from(Span::styled(
         "  1. Go to api.slack.com/apps > Create App",
@@ -1778,6 +1809,14 @@ fn render_slack_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard)
         "  Tab/Shift+Tab: nav fields | \u{2190}\u{2192}: cursor | Ctrl+\u{232b}: clear | Enter: confirm",
         Style::default().fg(Color::DarkGray),
     )));
+    let offset = match wizard.slack_field {
+        SlackField::BotToken => 4,
+        SlackField::AppToken => 6,
+        SlackField::ChannelID => 8,
+        SlackField::AllowedList => 10,
+        SlackField::RespondTo => lines.len().saturating_sub(base).saturating_sub(4),
+    };
+    base + offset
 }
 
 /// Render respond_to selector: `  Respond to: [ all ]  dm_only  mention`
@@ -2411,7 +2450,8 @@ fn render_complete(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
     )));
 }
 
-fn render_trello_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
+fn render_trello_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) -> usize {
+    let base = lines.len();
     // Help text
     lines.push(Line::from(Span::styled(
         "  1. Go to trello.com/power-ups/admin > Create Power-Up",
@@ -2645,4 +2685,11 @@ fn render_trello_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard
         "  Tab/Shift+Tab: nav fields | \u{2190}\u{2192}: cursor | Ctrl+\u{232b}: clear | Enter: confirm",
         Style::default().fg(Color::DarkGray),
     )));
+    let offset = match wizard.trello_field {
+        TrelloField::ApiKey => 4,
+        TrelloField::ApiToken => 6,
+        TrelloField::BoardId => 8,
+        TrelloField::AllowedUsers => lines.len().saturating_sub(base).saturating_sub(4),
+    };
+    base + offset
 }

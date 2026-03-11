@@ -98,7 +98,7 @@ fn all_providers_have_key_label_and_help() {
 
 #[test]
 fn channel_count() {
-    assert_eq!(CHANNEL_NAMES.len(), 8);
+    assert_eq!(CHANNEL_NAMES.len(), 5);
 }
 
 #[test]
@@ -109,10 +109,10 @@ fn first_three_channels() {
 }
 
 #[test]
-fn coming_soon_channels() {
-    assert!(CHANNEL_NAMES[5].1.contains("Coming soon"));
-    assert!(CHANNEL_NAMES[6].1.contains("Coming soon"));
-    assert!(CHANNEL_NAMES[7].1.contains("Coming soon"));
+fn all_channels_have_descriptions() {
+    for (name, desc) in CHANNEL_NAMES {
+        assert!(!desc.is_empty(), "Channel {} must have a description", name);
+    }
 }
 
 // TEMPLATE_FILES and EXISTING_KEY_SENTINEL are pub(super) — tested in onboarding::tests
