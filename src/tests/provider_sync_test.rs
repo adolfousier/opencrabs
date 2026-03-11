@@ -105,7 +105,7 @@ fn onboarding_providers_covers_all_named_providers() {
 
 #[test]
 fn all_named_providers_resolve_to_known_name() {
-    let known_names = [
+    let known_names: &[&str] = &[
         "Anthropic",
         "OpenAI",
         "GitHub Copilot",
@@ -125,7 +125,7 @@ fn all_named_providers_resolve_to_known_name() {
         let config = config_with_only(provider);
         let (name, _) = resolve_provider_from_config(&config);
         assert!(
-            known_names.contains(&name.as_ref()),
+            known_names.contains(&name),
             "Provider '{}' resolved to unknown name '{}' — is it wired in resolve_provider_from_config?",
             provider,
             name

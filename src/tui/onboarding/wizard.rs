@@ -608,6 +608,16 @@ impl OnboardingWizard {
         self.selected_provider >= PROVIDERS.len() - 1
     }
 
+    /// Visual display order: 0-5 (static), 7..7+N (existing customs), 6 ("+ New Custom" last).
+    /// Navigation must follow this order so Up/Down match what's on screen.
+    pub fn provider_display_order(&self) -> Vec<usize> {
+        let num_customs = self.existing_custom_names.len();
+        (0..6)
+            .chain(7..7 + num_customs)
+            .chain(std::iter::once(6))
+            .collect()
+    }
+
     /// Whether the current api_key_input holds a pre-existing key (from env/keyring)
     pub fn has_existing_key(&self) -> bool {
         self.api_key_input == EXISTING_KEY_SENTINEL
