@@ -13,64 +13,115 @@ use std::sync::Arc;
 /// Create a provider based on config.toml
 /// No hardcoded priority - providers are enabled/disabled in config
 pub fn create_provider(config: &Config) -> Result<Arc<dyn Provider>> {
-    // Check which providers are enabled in config.toml
-    let primary: Option<Arc<dyn Provider>> =
-        if config.providers.minimax.as_ref().is_some_and(|p| p.enabled) {
-            tracing::info!("Using enabled provider: Minimax");
-            Some(
-                try_create_minimax(config)?
-                    .ok_or_else(|| anyhow::anyhow!("Minimax enabled but failed to create"))?,
-            )
-        } else if config
-            .providers
-            .openrouter
-            .as_ref()
-            .is_some_and(|p| p.enabled)
-        {
-            tracing::info!("Using enabled provider: OpenRouter");
-            Some(
-                try_create_openrouter(config)?
-                    .ok_or_else(|| anyhow::anyhow!("OpenRouter enabled but failed to create"))?,
-            )
-        } else if config
+    // Try the enabled provider. If it fails, warn and try others before giving up.
+    // Priority order: Anthropic > OpenAI > GitHub > Gemini > OpenRouter > Minimax > Custom
+    let enabled_attempts: Vec<(
+        &str,
+        Box<dyn FnOnce() -> Result<Option<Arc<dyn Provider>>> + '_>,
+    )> = vec![
+        ("Anthropic", Box::new(|| try_create_anthropic(config))),
+        ("OpenAI", Box::new(|| try_create_openai(config))),
+        ("GitHub Models", Box::new(|| try_create_github(config))),
+        ("Google Gemini", Box::new(|| try_create_gemini(config))),
+        ("OpenRouter", Box::new(|| try_create_openrouter(config))),
+        ("Minimax", Box::new(|| try_create_minimax(config))),
+        ("Custom", Box::new(|| try_create_custom(config))),
+    ];
+
+    // Which providers are enabled in config?
+    let is_enabled: Vec<bool> = vec![
+        config
             .providers
             .anthropic
             .as_ref()
-            .is_some_and(|p| p.enabled)
-        {
-            tracing::info!("Using enabled provider: Anthropic");
-            Some(
-                try_create_anthropic(config)?
-                    .ok_or_else(|| anyhow::anyhow!("Anthropic enabled but failed to create"))?,
-            )
-        } else if config.providers.github.as_ref().is_some_and(|p| p.enabled) {
-            tracing::info!("Using enabled provider: GitHub Models");
-            Some(
-                try_create_github(config)?
-                    .ok_or_else(|| anyhow::anyhow!("GitHub enabled but failed to create"))?,
-            )
-        } else if config.providers.openai.as_ref().is_some_and(|p| p.enabled) {
-            tracing::info!("Using enabled provider: OpenAI");
-            Some(
-                try_create_openai(config)?
-                    .ok_or_else(|| anyhow::anyhow!("OpenAI enabled but failed to create"))?,
-            )
-        } else if config.providers.active_custom().is_some() {
-            tracing::info!("Using enabled provider: Custom OpenAI-Compatible");
-            Some(
-                try_create_custom(config)?.ok_or_else(|| {
-                    anyhow::anyhow!("Custom provider enabled but failed to create")
-                })?,
-            )
-        } else if config.providers.gemini.as_ref().is_some_and(|p| p.enabled) {
-            tracing::info!("Using enabled provider: Google Gemini");
-            Some(
-                try_create_gemini(config)?
-                    .ok_or_else(|| anyhow::anyhow!("Gemini enabled but API key missing"))?,
-            )
-        } else {
-            None
-        };
+            .is_some_and(|p| p.enabled),
+        config.providers.openai.as_ref().is_some_and(|p| p.enabled),
+        config.providers.github.as_ref().is_some_and(|p| p.enabled),
+        config.providers.gemini.as_ref().is_some_and(|p| p.enabled),
+        config
+            .providers
+            .openrouter
+            .as_ref()
+            .is_some_and(|p| p.enabled),
+        config.providers.minimax.as_ref().is_some_and(|p| p.enabled),
+        config.providers.active_custom().is_some(),
+    ];
+
+    let mut primary: Option<Arc<dyn Provider>> = None;
+    let mut failed_name: Option<&str> = None;
+
+    for (i, (name, create_fn)) in enabled_attempts.into_iter().enumerate() {
+        if !is_enabled[i] {
+            continue;
+        }
+
+        match create_fn() {
+            Ok(Some(provider)) => {
+                if let Some(failed) = failed_name {
+                    tracing::warn!(
+                        "{} failed to initialize — fell back to {}. Use /onboard:provider to reconfigure.",
+                        failed,
+                        name
+                    );
+                    eprintln!(
+                        "Warning: {} failed — using {} instead. Run /onboard:provider to fix.",
+                        failed, name
+                    );
+                }
+                tracing::info!("Using enabled provider: {}", name);
+                primary = Some(provider);
+                break;
+            }
+            Ok(None) => {
+                tracing::warn!(
+                    "{} enabled but could not be created (missing API key?)",
+                    name
+                );
+                if failed_name.is_none() {
+                    failed_name = Some(name);
+                }
+                // Continue to try next enabled provider
+            }
+            Err(e) => {
+                tracing::error!("{} provider error: {}", name, e);
+                if failed_name.is_none() {
+                    failed_name = Some(name);
+                }
+                // Continue to try next enabled provider
+            }
+        }
+    }
+
+    // If the enabled provider failed, try ALL providers as fallback (any with keys)
+    if primary.is_none() && failed_name.is_some() {
+        let fallback_attempts: Vec<(
+            &str,
+            Box<dyn FnOnce() -> Result<Option<Arc<dyn Provider>>> + '_>,
+        )> = vec![
+            ("Anthropic", Box::new(|| try_create_anthropic(config))),
+            ("OpenAI", Box::new(|| try_create_openai(config))),
+            ("GitHub Models", Box::new(|| try_create_github(config))),
+            ("Google Gemini", Box::new(|| try_create_gemini(config))),
+            ("OpenRouter", Box::new(|| try_create_openrouter(config))),
+            ("Minimax", Box::new(|| try_create_minimax(config))),
+            ("Custom", Box::new(|| try_create_custom(config))),
+        ];
+
+        for (name, create_fn) in fallback_attempts {
+            if let Ok(Some(provider)) = create_fn() {
+                tracing::warn!(
+                    "Recovered using {} as fallback. Use /onboard:provider to set your preferred provider.",
+                    name
+                );
+                eprintln!(
+                    "Warning: fell back to {}. Run /onboard:provider to reconfigure.",
+                    name
+                );
+                primary = Some(provider);
+                break;
+            }
+        }
+    }
 
     // Build fallback chain if configured
     let fallback_providers = if let Some(fallback) = &config.providers.fallback
@@ -159,12 +210,14 @@ fn try_create_custom_by_name(config: &Config, name: &str) -> Result<Option<Arc<d
 
     let custom_config = match customs.get(name) {
         Some(cfg) => cfg.clone(),
-        None => return Ok(None),
+        None => {
+            tracing::warn!("Custom provider '{}' not found in config", name);
+            return Ok(None);
+        }
     };
 
-    let Some(api_key) = &custom_config.api_key else {
-        return Ok(None);
-    };
+    // API key is optional for local providers (LM Studio, Ollama, etc.)
+    let api_key = custom_config.api_key.clone().unwrap_or_default();
 
     let mut base_url = custom_config
         .base_url
@@ -312,6 +365,7 @@ fn try_create_openrouter(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     };
 
     let Some(api_key) = &openrouter_config.api_key else {
+        tracing::warn!("OpenRouter enabled but API key missing — check keys.toml");
         return Ok(None);
     };
 
@@ -389,12 +443,14 @@ fn try_create_minimax(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
 fn try_create_custom(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     let (name, custom_config) = match config.providers.active_custom() {
         Some((n, c)) => (n.to_string(), c.clone()),
-        None => return Ok(None),
+        None => {
+            tracing::warn!("Custom provider requested but no active custom provider found");
+            return Ok(None);
+        }
     };
 
-    let Some(api_key) = &custom_config.api_key else {
-        return Ok(None);
-    };
+    // API key is optional for local providers (LM Studio, Ollama, etc.)
+    let api_key = custom_config.api_key.clone().unwrap_or_default();
 
     let mut base_url = custom_config
         .base_url
@@ -406,9 +462,14 @@ fn try_create_custom(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         base_url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     }
 
-    tracing::info!("Using Custom OpenAI-compatible '{}' at: {}", name, base_url);
+    tracing::info!(
+        "Using Custom OpenAI-compatible '{}' at: {} (has_key={})",
+        name,
+        base_url,
+        !api_key.is_empty()
+    );
     let provider = configure_openai_compatible(
-        OpenAIProvider::with_base_url(api_key.clone(), base_url).with_name(&name),
+        OpenAIProvider::with_base_url(api_key, base_url).with_name(&name),
         &custom_config,
     );
     Ok(Some(Arc::new(provider)))
@@ -463,6 +524,7 @@ fn try_create_openai(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         return Ok(Some(Arc::new(provider)));
     }
 
+    tracing::warn!("OpenAI enabled but no API key and no base_url — check keys.toml");
     Ok(None)
 }
 
@@ -475,7 +537,10 @@ fn try_create_gemini(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
 
     let api_key = match &gemini_config.api_key {
         Some(key) if !key.is_empty() => key.clone(),
-        _ => return Ok(None),
+        _ => {
+            tracing::warn!("Gemini enabled but API key missing — check keys.toml");
+            return Ok(None);
+        }
     };
 
     let model = gemini_config
@@ -498,7 +563,10 @@ fn try_create_anthropic(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
 
     let api_key = match &anthropic_config.api_key {
         Some(key) => key.clone(),
-        None => return Ok(None),
+        None => {
+            tracing::warn!("Anthropic enabled but API key missing — check keys.toml");
+            return Ok(None);
+        }
     };
 
     let mut provider = AnthropicProvider::new(api_key);
