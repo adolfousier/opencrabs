@@ -10,15 +10,17 @@ use crate::config::{Config, ProviderConfig};
 use anyhow::Result;
 use std::sync::Arc;
 
+type ProviderAttempt<'a> = (
+    &'a str,
+    Box<dyn FnOnce() -> Result<Option<Arc<dyn Provider>>> + 'a>,
+);
+
 /// Create a provider based on config.toml
 /// No hardcoded priority - providers are enabled/disabled in config
 pub fn create_provider(config: &Config) -> Result<Arc<dyn Provider>> {
     // Try the enabled provider. If it fails, warn and try others before giving up.
     // Priority order: Anthropic > OpenAI > GitHub > Gemini > OpenRouter > Minimax > Custom
-    let enabled_attempts: Vec<(
-        &str,
-        Box<dyn FnOnce() -> Result<Option<Arc<dyn Provider>>> + '_>,
-    )> = vec![
+    let enabled_attempts: Vec<ProviderAttempt<'_>> = vec![
         ("Anthropic", Box::new(|| try_create_anthropic(config))),
         ("OpenAI", Box::new(|| try_create_openai(config))),
         ("GitHub Models", Box::new(|| try_create_github(config))),
@@ -94,10 +96,7 @@ pub fn create_provider(config: &Config) -> Result<Arc<dyn Provider>> {
 
     // If the enabled provider failed, try ALL providers as fallback (any with keys)
     if primary.is_none() && failed_name.is_some() {
-        let fallback_attempts: Vec<(
-            &str,
-            Box<dyn FnOnce() -> Result<Option<Arc<dyn Provider>>> + '_>,
-        )> = vec![
+        let fallback_attempts: Vec<ProviderAttempt<'_>> = vec![
             ("Anthropic", Box::new(|| try_create_anthropic(config))),
             ("OpenAI", Box::new(|| try_create_openai(config))),
             ("GitHub Models", Box::new(|| try_create_github(config))),
