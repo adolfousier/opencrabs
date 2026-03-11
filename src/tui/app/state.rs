@@ -328,6 +328,8 @@ pub struct App {
     pub model_selector_custom_model: String,
     /// Custom provider name (from config, e.g. "nvidia", "default")
     pub model_selector_custom_name: String,
+    /// Cached list of existing custom provider names for the provider list
+    pub model_selector_custom_names: Vec<String>,
     /// Focused field: 0=provider, 1=api_key, 2=model
     pub model_selector_focused_field: usize,
     pub model_selector_filter: String,
@@ -506,6 +508,7 @@ impl App {
             model_selector_base_url: String::new(),
             model_selector_custom_model: String::new(),
             model_selector_custom_name: String::new(),
+            model_selector_custom_names: Vec::new(),
             model_selector_focused_field: 0,
             model_selector_filter: String::new(),
             input_history: Self::load_history(),
@@ -955,7 +958,7 @@ impl App {
                         }
                     }
                 } else if self.mode == AppMode::ModelSelector {
-                    let is_custom = self.model_selector_provider_selected == 6;
+                    let is_custom = self.model_selector_provider_selected >= 6;
                     match (self.model_selector_focused_field, is_custom) {
                         // Non-custom: field 1 = API key
                         (1, false) => {

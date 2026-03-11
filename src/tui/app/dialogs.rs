@@ -49,11 +49,18 @@ impl App {
                     .as_ref()
                     .is_some_and(|p| p.api_key.as_ref().is_some_and(|k| !k.is_empty())),
                 6 => {
-                    // Custom provider - load base_url, model, and name
-                    // Use first custom from map (not active_custom which filters by enabled)
-                    if let Some(map) = &config.providers.custom {
-                        if let Some((name, c)) = map.iter().next() {
-                            self.model_selector_custom_name = name.to_string();
+                    // Index 6 = "+ New Custom Provider" — clear fields
+                    self.model_selector_custom_name.clear();
+                    self.model_selector_base_url.clear();
+                    self.model_selector_custom_model.clear();
+                    false
+                }
+                idx if idx >= 7 => {
+                    // Existing custom provider at index (idx - 7) in custom_names list
+                    let custom_idx = idx - 7;
+                    if let Some(cname) = self.model_selector_custom_names.get(custom_idx).cloned() {
+                        if let Some(c) = config.providers.custom_by_name(&cname) {
+                            self.model_selector_custom_name = cname;
                             self.model_selector_base_url = c.base_url.clone().unwrap_or_default();
                             self.model_selector_custom_model =
                                 c.default_model.clone().unwrap_or_default();
@@ -82,6 +89,14 @@ impl App {
 
         // Load config to get enabled provider
         let config = crate::config::Config::load().unwrap_or_default();
+
+        // Cache existing custom provider names early (needed for index mapping)
+        self.model_selector_custom_names = config
+            .providers
+            .custom
+            .as_ref()
+            .map(|m| m.keys().cloned().collect())
+            .unwrap_or_default();
 
         // Try session's provider first, then fall back to config
         let session_provider = self
@@ -152,7 +167,14 @@ impl App {
                             c.default_model.clone().unwrap_or_default();
                         self.model_selector_custom_name = cname.to_string();
                     }
-                    (6, api_key)
+                    // Map to index 7+ if this name exists in custom_names list
+                    let idx = self
+                        .model_selector_custom_names
+                        .iter()
+                        .position(|n| n == cname)
+                        .map(|pos| 7 + pos)
+                        .unwrap_or(6);
+                    (idx, api_key)
                 }
             }
         });
@@ -283,7 +305,14 @@ impl App {
             self.model_selector_custom_model = custom_cfg.default_model.clone().unwrap_or_default();
             // Remember the custom provider name for saving
             self.model_selector_custom_name = name.to_string();
-            (6, custom_cfg.api_key.clone())
+            // Map to index 7+ if this name exists in custom_names list
+            let idx = self
+                .model_selector_custom_names
+                .iter()
+                .position(|n| n == name)
+                .map(|pos| 7 + pos)
+                .unwrap_or(6);
+            (idx, custom_cfg.api_key.clone())
         } else {
             tracing::debug!("[open_model_selector] No provider enabled, defaulting to Anthropic");
             (0, None) // Default
@@ -335,7 +364,7 @@ impl App {
             // Tab cycles through fields:
             // - Normal providers: provider(0) -> api_key(1) -> model(2) -> provider(0)
             // - Custom provider: provider(0) -> base_url(1) -> api_key(2) -> model(3) -> provider(0)
-            let is_custom = self.model_selector_provider_selected == 6; // Custom provider index
+            let is_custom = self.model_selector_provider_selected >= 6; // Custom provider index
             let max_field = if is_custom { 4 } else { 3 };
             self.model_selector_focused_field = (self.model_selector_focused_field + 1) % max_field;
             // If moving to provider, enable provider list; otherwise show model list
@@ -349,8 +378,10 @@ impl App {
                     true
                 }
                 crossterm::event::KeyCode::Down => {
+                    // 7 static providers (0-6) + existing custom providers (7+)
+                    let max_idx = PROVIDERS.len() - 1 + self.model_selector_custom_names.len();
                     self.model_selector_provider_selected =
-                        (self.model_selector_provider_selected + 1).min(PROVIDERS.len() - 1);
+                        (self.model_selector_provider_selected + 1).min(max_idx);
                     true
                 }
                 _ => false,
@@ -361,7 +392,7 @@ impl App {
                 self.detect_model_selector_key_for_provider();
             }
         } else if self.model_selector_focused_field == 1
-            && self.model_selector_provider_selected == 6
+            && self.model_selector_provider_selected >= 6
         {
             // Base URL input for Custom provider (field 1)
             match event.code {
@@ -374,9 +405,9 @@ impl App {
                 _ => {}
             }
         } else if (self.model_selector_focused_field == 1
-            && self.model_selector_provider_selected != 6)
+            && self.model_selector_provider_selected < 6)
             || (self.model_selector_focused_field == 2
-                && self.model_selector_provider_selected == 6)
+                && self.model_selector_provider_selected >= 6)
         {
             // API key input (field 1 for non-Custom, field 2 for Custom)
             match event.code {
@@ -389,7 +420,7 @@ impl App {
                 _ => {}
             }
         } else if self.model_selector_focused_field == 3
-            && self.model_selector_provider_selected == 6
+            && self.model_selector_provider_selected >= 6
         {
             // Custom provider: free-text model name input (field 3)
             match event.code {
@@ -402,7 +433,7 @@ impl App {
                 _ => {}
             }
         } else if self.model_selector_focused_field == 4
-            && self.model_selector_provider_selected == 6
+            && self.model_selector_provider_selected >= 6
         {
             // Custom provider: name identifier input (field 4 — last before save)
             match event.code {
@@ -417,7 +448,7 @@ impl App {
                 _ => {}
             }
         } else if self.model_selector_focused_field == 2
-            && self.model_selector_provider_selected != 6
+            && self.model_selector_provider_selected < 6
         {
             // Non-custom: filter/search model list (field 2)
             match event.code {
@@ -477,16 +508,14 @@ impl App {
 
         // Enter to confirm - move to next field
         if keys::is_enter(&event) {
-            let is_custom = self.model_selector_provider_selected == 6;
+            let is_custom = self.model_selector_provider_selected >= 6;
 
             if self.model_selector_focused_field == 0 {
                 // On provider field - save config, DON'T close dialog
+                // Map indices >= 7 back to 6 for save (custom provider)
+                let save_idx = self.model_selector_provider_selected.min(6);
                 if let Err(e) = self
-                    .save_provider_selection_internal(
-                        self.model_selector_provider_selected,
-                        false,
-                        false,
-                    )
+                    .save_provider_selection_internal(save_idx, false, false)
                     .await
                 {
                     self.push_system_message(format!("Error: {}", e));
@@ -500,7 +529,8 @@ impl App {
                 || (self.model_selector_focused_field == 2 && is_custom)
             {
                 // On API key field (field 1 for non-Custom, field 2 for Custom)
-                let provider_idx = self.model_selector_provider_selected;
+                // Map >= 7 back to 6 for save (all custom providers use idx 6)
+                let provider_idx = self.model_selector_provider_selected.min(6);
 
                 // User typed a new key, or kept existing (just hit Enter to move on)
                 let key_changed = !self.model_selector_api_key.is_empty();
@@ -557,12 +587,15 @@ impl App {
                 } else {
                     self.error_message = None;
                     self.error_message_shown_at = None;
-                    self.save_provider_selection(self.model_selector_provider_selected, false)
-                        .await?;
+                    self.save_provider_selection(
+                        self.model_selector_provider_selected.min(6),
+                        false,
+                    )
+                    .await?;
                 }
             } else {
                 // Non-custom: on model field — save and close
-                self.save_provider_selection(self.model_selector_provider_selected, false)
+                self.save_provider_selection(self.model_selector_provider_selected.min(6), false)
                     .await?;
             }
         }
@@ -871,6 +904,27 @@ impl App {
                 );
             }
             _ => {}
+        }
+
+        // Refresh custom provider names list after saving (so new entries appear immediately)
+        if provider_idx == 6
+            && let Ok(fresh) = crate::config::Config::load()
+        {
+            self.model_selector_custom_names = fresh
+                .providers
+                .custom
+                .as_ref()
+                .map(|m| m.keys().cloned().collect())
+                .unwrap_or_default();
+            // Point selection to the newly saved custom provider
+            if !self.model_selector_custom_name.is_empty()
+                && let Some(pos) = self
+                    .model_selector_custom_names
+                    .iter()
+                    .position(|n| n == &self.model_selector_custom_name)
+            {
+                self.model_selector_provider_selected = 7 + pos;
+            }
         }
 
         // Only write key to keys.toml if the user typed a new one

@@ -344,3 +344,174 @@ fn no_active_custom_when_none() {
     let configs = ProviderConfigs::default();
     assert!(configs.active_custom().is_none());
 }
+
+// ── Custom provider list (model selector / onboarding) ──────────
+
+#[test]
+fn wizard_is_custom_for_new_and_existing() {
+    use crate::tui::onboarding::OnboardingWizard;
+    let mut wizard = OnboardingWizard::new();
+    // Index 6 = "+ New Custom Provider"
+    wizard.selected_provider = 6;
+    assert!(wizard.is_custom_provider());
+    // Index 7+ = existing custom providers
+    wizard.selected_provider = 7;
+    assert!(wizard.is_custom_provider());
+    wizard.selected_provider = 8;
+    assert!(wizard.is_custom_provider());
+    // Index < 6 = not custom
+    wizard.selected_provider = 0;
+    assert!(!wizard.is_custom_provider());
+    wizard.selected_provider = 5;
+    assert!(!wizard.is_custom_provider());
+}
+
+#[test]
+fn wizard_current_provider_clamps_for_existing_custom() {
+    use crate::tui::onboarding::{OnboardingWizard, PROVIDERS};
+    let mut wizard = OnboardingWizard::new();
+    // Index 7 should map to the Custom entry (index 6) in PROVIDERS
+    wizard.selected_provider = 7;
+    assert_eq!(wizard.current_provider().name, PROVIDERS[6].name);
+    wizard.selected_provider = 99;
+    assert_eq!(wizard.current_provider().name, PROVIDERS[6].name);
+}
+
+#[test]
+fn wizard_load_custom_fields_clears_for_new() {
+    use crate::tui::onboarding::OnboardingWizard;
+    let mut wizard = OnboardingWizard::new();
+    wizard.custom_provider_name = "leftover".to_string();
+    wizard.custom_base_url = "http://old-url".to_string();
+    wizard.custom_model = "old-model".to_string();
+    wizard.selected_provider = 6;
+    wizard.load_custom_fields_if_existing();
+    assert!(wizard.custom_provider_name.is_empty());
+    assert!(wizard.custom_base_url.is_empty());
+    assert!(wizard.custom_model.is_empty());
+}
+
+#[test]
+fn wizard_existing_custom_names_populated_from_config() {
+    use crate::tui::onboarding::OnboardingWizard;
+    // The wizard loads existing_custom_names from config in new()
+    // This test just verifies the field exists and is a Vec
+    let wizard = OnboardingWizard::new();
+    let _: &Vec<String> = &wizard.existing_custom_names;
+}
+
+#[test]
+fn multiple_custom_providers_in_config() {
+    // Verify BTreeMap preserves insertion order (alphabetical for BTreeMap)
+    let mut custom_map = BTreeMap::new();
+    custom_map.insert(
+        "nvidia".to_string(),
+        ProviderConfig {
+            enabled: false,
+            base_url: Some("https://integrate.api.nvidia.com/v1".to_string()),
+            default_model: Some("llama-3.3-70b".to_string()),
+            ..Default::default()
+        },
+    );
+    custom_map.insert(
+        "ollama".to_string(),
+        ProviderConfig {
+            enabled: true,
+            base_url: Some("http://localhost:11434/v1".to_string()),
+            default_model: Some("llama3".to_string()),
+            ..Default::default()
+        },
+    );
+    custom_map.insert(
+        "lmstudio".to_string(),
+        ProviderConfig {
+            enabled: false,
+            base_url: Some("http://localhost:1234/v1".to_string()),
+            default_model: Some("qwen".to_string()),
+            ..Default::default()
+        },
+    );
+    let configs = ProviderConfigs {
+        custom: Some(custom_map),
+        ..Default::default()
+    };
+
+    // active_custom should return the enabled one
+    let (name, _) = configs.active_custom().unwrap();
+    assert_eq!(name, "ollama");
+
+    // All names should be available as keys
+    let names: Vec<String> = configs.custom.as_ref().unwrap().keys().cloned().collect();
+    assert_eq!(names.len(), 3);
+    assert!(names.contains(&"nvidia".to_string()));
+    assert!(names.contains(&"ollama".to_string()));
+    assert!(names.contains(&"lmstudio".to_string()));
+}
+
+#[test]
+fn factory_switches_between_custom_providers() {
+    // Two custom providers, only one enabled — factory picks the enabled one
+    let mut custom_map = BTreeMap::new();
+    custom_map.insert(
+        "nvidia".to_string(),
+        ProviderConfig {
+            enabled: false,
+            base_url: Some("https://integrate.api.nvidia.com/v1".to_string()),
+            default_model: Some("llama-3.3-70b".to_string()),
+            ..Default::default()
+        },
+    );
+    custom_map.insert(
+        "local".to_string(),
+        ProviderConfig {
+            enabled: true,
+            base_url: Some("http://localhost:1234/v1".to_string()),
+            default_model: Some("qwen".to_string()),
+            ..Default::default()
+        },
+    );
+    let config = Config {
+        providers: ProviderConfigs {
+            custom: Some(custom_map),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let result = create_provider(&config);
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap().name(), "local");
+}
+
+#[test]
+fn create_by_name_picks_specific_custom() {
+    // Even when "local" is enabled, create_by_name("custom:nvidia") picks nvidia
+    let mut custom_map = BTreeMap::new();
+    custom_map.insert(
+        "nvidia".to_string(),
+        ProviderConfig {
+            enabled: false,
+            base_url: Some("https://integrate.api.nvidia.com/v1".to_string()),
+            default_model: Some("llama-3.3-70b".to_string()),
+            ..Default::default()
+        },
+    );
+    custom_map.insert(
+        "local".to_string(),
+        ProviderConfig {
+            enabled: true,
+            base_url: Some("http://localhost:1234/v1".to_string()),
+            default_model: Some("qwen".to_string()),
+            ..Default::default()
+        },
+    );
+    let config = Config {
+        providers: ProviderConfigs {
+            custom: Some(custom_map),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let result = create_provider_by_name(&config, "custom:nvidia");
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap().name(), "nvidia");
+}

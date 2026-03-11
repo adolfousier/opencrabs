@@ -21,6 +21,8 @@ pub struct OnboardingWizard {
     pub models_fetching: bool,
     /// Models from config.toml (used when API fetch not available)
     pub config_models: Vec<String>,
+    /// Cached list of existing custom provider names (for provider list)
+    pub existing_custom_names: Vec<String>,
 
     /// Step 4: Workspace
     pub workspace_path: String,
@@ -229,7 +231,14 @@ impl OnboardingWizard {
                     let base = c.base_url.clone().unwrap_or_default();
                     let model = c.default_model.clone().unwrap_or_default();
                     custom_provider_name_init = Some(name.to_string());
-                    (6, EXISTING_KEY_SENTINEL.to_string(), base, model)
+                    // Map to index 7+ for existing custom providers
+                    let idx = config
+                        .providers
+                        .custom
+                        .as_ref()
+                        .and_then(|m| m.keys().position(|k| k == name).map(|pos| 7 + pos))
+                        .unwrap_or(6);
+                    (idx, EXISTING_KEY_SENTINEL.to_string(), base, model)
                 } else {
                     (0, String::new(), String::new(), String::new())
                 }
@@ -252,6 +261,11 @@ impl OnboardingWizard {
             fetched_models: Vec::new(),
             models_fetching: false,
             config_models,
+            existing_custom_names: existing_config
+                .as_ref()
+                .and_then(|c| c.providers.custom.as_ref())
+                .map(|m| m.keys().cloned().collect())
+                .unwrap_or_default(),
 
             workspace_path: default_workspace.to_string_lossy().to_string(),
             seed_templates: true,
@@ -573,16 +587,41 @@ impl OnboardingWizard {
 
     /// Get provider info for currently selected provider
     pub fn current_provider(&self) -> &ProviderInfo {
-        &PROVIDERS[self.selected_provider]
+        // Indices >= 7 are existing custom providers — map to the Custom entry (index 6)
+        &PROVIDERS[self.selected_provider.min(PROVIDERS.len() - 1)]
     }
 
-    /// Check if the current provider is the "Custom" option
+    /// Check if the current provider is a custom option (new or existing)
     pub fn is_custom_provider(&self) -> bool {
-        self.selected_provider == PROVIDERS.len() - 1
+        self.selected_provider >= PROVIDERS.len() - 1
     }
 
     /// Whether the current api_key_input holds a pre-existing key (from env/keyring)
     pub fn has_existing_key(&self) -> bool {
         self.api_key_input == EXISTING_KEY_SENTINEL
+    }
+
+    /// When navigating to an existing custom provider (index >= 7), load its config fields.
+    /// For index 6 (new custom), clear the fields.
+    pub fn load_custom_fields_if_existing(&mut self) {
+        if self.selected_provider == 6 {
+            // "+ New Custom Provider" — clear fields
+            self.custom_provider_name.clear();
+            self.custom_base_url.clear();
+            self.custom_model.clear();
+        } else if self.selected_provider >= 7 {
+            let custom_idx = self.selected_provider - 7;
+            if let Some(cname) = self.existing_custom_names.get(custom_idx).cloned()
+                && let Ok(config) = crate::config::Config::load()
+                && let Some(c) = config.providers.custom_by_name(&cname)
+            {
+                self.custom_provider_name = cname;
+                self.custom_base_url = c.base_url.clone().unwrap_or_default();
+                self.custom_model = c.default_model.clone().unwrap_or_default();
+                if c.api_key.as_ref().is_some_and(|k| !k.is_empty()) {
+                    self.api_key_input = EXISTING_KEY_SENTINEL.to_string();
+                }
+            }
+        }
     }
 }

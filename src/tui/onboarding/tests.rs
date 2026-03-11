@@ -374,8 +374,9 @@ fn test_model_selection() {
     for _ in 0..20 {
         wizard.handle_key(key(KeyCode::Down));
     }
-    // Provider selection wraps or stays within bounds
-    assert!(wizard.selected_provider < PROVIDERS.len());
+    // Provider selection stays within bounds (7 static + existing custom providers)
+    let max_idx = PROVIDERS.len() + wizard.existing_custom_names.len();
+    assert!(wizard.selected_provider < max_idx);
 }
 
 #[test]

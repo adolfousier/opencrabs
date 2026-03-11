@@ -316,19 +316,31 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(""));
 
-    // Provider list (like onboarding)
-    for (i, provider) in PROVIDERS.iter().enumerate() {
+    // Provider list — 7 static providers + existing custom providers
+    // Total items = PROVIDERS.len() (7) + custom_names.len()
+    // Index 6 = "+ New Custom", 7+ = existing custom providers by name
+    let total_items = PROVIDERS.len() + app.model_selector_custom_names.len();
+    #[allow(clippy::needless_range_loop)] // indices 7+ are custom providers, not in PROVIDERS array
+    for i in 0..total_items {
         let selected = i == provider_idx;
         let focused = focused_field == 0;
 
         let prefix = if selected && focused { " > " } else { "   " };
         let marker = if selected { "[*]" } else { "[ ]" };
 
-        // For custom provider with a name set, show the name instead of generic label
-        let label = if i == 6 && !app.model_selector_custom_name.is_empty() {
-            app.model_selector_custom_name.clone()
+        let label = if i < PROVIDERS.len() {
+            if i == 6 {
+                "+ New Custom Provider".to_string()
+            } else {
+                PROVIDERS[i].name.to_string()
+            }
         } else {
-            provider.name.to_string()
+            // Existing custom provider name (indices 7+)
+            let custom_idx = i - 7;
+            app.model_selector_custom_names
+                .get(custom_idx)
+                .cloned()
+                .unwrap_or_else(|| "custom".to_string())
         };
 
         lines.push(Line::from(vec![
@@ -360,7 +372,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
 
     lines.push(Line::from(""));
 
-    let is_custom = provider_idx == 6; // Custom provider index
+    let is_custom = provider_idx >= 6; // Custom provider index
 
     // For Custom provider: show Base URL field first (field 1), then API Key (field 2)
     // For others: show API Key only (field 1)

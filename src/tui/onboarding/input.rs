@@ -274,16 +274,20 @@ impl OnboardingWizard {
                     self.api_key_input.clear();
                     self.fetched_models.clear();
                     self.config_models.clear();
+                    self.load_custom_fields_if_existing();
                     self.reload_config_models();
                     self.detect_existing_key();
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    self.selected_provider = (self.selected_provider + 1).min(PROVIDERS.len() - 1);
+                    // 7 static providers (0-6) + existing custom providers (7+)
+                    let max_idx = PROVIDERS.len() - 1 + self.existing_custom_names.len();
+                    self.selected_provider = (self.selected_provider + 1).min(max_idx);
                     self.selected_model = 0;
                     self.model_filter.clear();
                     self.api_key_input.clear();
                     self.fetched_models.clear();
                     self.config_models.clear();
+                    self.load_custom_fields_if_existing();
                     self.reload_config_models();
                     self.detect_existing_key();
                 }

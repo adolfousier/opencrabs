@@ -475,19 +475,30 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
     let is_custom = wizard.is_custom_provider();
     let mut focused_line: usize = 0;
 
-    // Provider list — no scroll needed, always at top
-    for (i, provider) in PROVIDERS.iter().enumerate() {
+    // Provider list — 7 static providers + existing custom providers
+    let total_items = PROVIDERS.len() + wizard.existing_custom_names.len();
+    #[allow(clippy::needless_range_loop)] // indices 7+ are custom providers, not in PROVIDERS array
+    for i in 0..total_items {
         let selected = i == wizard.selected_provider;
         let focused = wizard.auth_field == AuthField::Provider;
 
         let prefix = if selected && focused { " > " } else { "   " };
         let marker = if selected { "[*]" } else { "[ ]" };
 
-        // For custom provider with a name set, show the name instead of generic label
-        let label = if i == 6 && !wizard.custom_provider_name.is_empty() {
-            wizard.custom_provider_name.clone()
+        let label = if i < PROVIDERS.len() {
+            if i == 6 {
+                "+ New Custom Provider".to_string()
+            } else {
+                PROVIDERS[i].name.to_string()
+            }
         } else {
-            provider.name.to_string()
+            // Existing custom provider name (indices 7+)
+            let custom_idx = i - 7;
+            wizard
+                .existing_custom_names
+                .get(custom_idx)
+                .cloned()
+                .unwrap_or_else(|| "custom".to_string())
         };
 
         lines.push(Line::from(vec![
@@ -2289,8 +2300,8 @@ fn render_complete(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
     lines.push(Line::from(""));
 
     // Summary
-    let provider = &PROVIDERS[wizard.selected_provider];
-    let provider_label = if wizard.selected_provider == 6 && !wizard.custom_provider_name.is_empty()
+    let provider = &PROVIDERS[wizard.selected_provider.min(PROVIDERS.len() - 1)];
+    let provider_label = if wizard.selected_provider >= 6 && !wizard.custom_provider_name.is_empty()
     {
         wizard.custom_provider_name.clone()
     } else {
