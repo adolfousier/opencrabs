@@ -444,8 +444,8 @@ fn test_supports_model_fetch() {
     assert!(wizard.supports_model_fetch());
     wizard.selected_provider = 1; // OpenAI
     assert!(wizard.supports_model_fetch());
-    wizard.selected_provider = 2; // GitHub (no /models endpoint)
-    assert!(!wizard.supports_model_fetch());
+    wizard.selected_provider = 2; // GitHub Copilot (has /models endpoint)
+    assert!(wizard.supports_model_fetch());
     wizard.selected_provider = 3; // Gemini
     assert!(!wizard.supports_model_fetch());
     wizard.selected_provider = 4; // OpenRouter

@@ -17,6 +17,7 @@ pub use types::*;
 
 // Provider implementations
 pub mod anthropic;
+pub mod copilot;
 pub mod custom_openai_compatible;
 pub mod factory;
 pub mod fallback;

@@ -691,74 +691,78 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
             ),
         ]));
     } else if wizard.selected_provider == 2 {
-        // GitHub Models — clickable link + paste token
-        let key_focused = wizard.auth_field == AuthField::ApiKey;
+        // GitHub Copilot — OAuth device flow
+        use crate::tui::onboarding::GitHubDeviceFlowStatus;
 
-        lines.push(Line::from(Span::styled(
-            "  1. Click: github.com/settings/tokens/new?scopes=read:user&description=OpenCrabs",
-            Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
-        )));
-        lines.push(Line::from(Span::styled(
-            "  2. Click \"Generate token\", copy it",
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::ITALIC),
-        )));
-        lines.push(Line::from(Span::styled(
-            "  3. Paste below",
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::ITALIC),
-        )));
-        lines.push(Line::from(""));
-
-        let (masked_key, key_hint) = if wizard.has_existing_key() {
-            (
-                "**************************".to_string(),
-                " (already configured, type to replace)".to_string(),
-            )
-        } else if wizard.api_key_input.is_empty() {
-            ("paste your token here".to_string(), String::new())
-        } else {
-            (
-                "*".repeat(wizard.api_key_input.len().min(30)),
-                String::new(),
-            )
-        };
-        let cursor = if key_focused && !wizard.has_existing_key() {
-            "\u{2588}"
-        } else {
-            ""
-        };
-
-        lines.push(Line::from(vec![
-            Span::styled(
-                "  Token: ",
-                Style::default().fg(if key_focused {
-                    BRAND_BLUE
-                } else {
-                    Color::DarkGray
-                }),
-            ),
-            Span::styled(
-                format!("{}{}", masked_key, cursor),
-                Style::default().fg(if wizard.has_existing_key() {
-                    Color::Cyan
-                } else if key_focused {
-                    Color::White
-                } else {
-                    Color::DarkGray
-                }),
-            ),
-        ]));
-
-        if !key_hint.is_empty() && key_focused {
+        if wizard.has_existing_key() {
+            // Already authenticated
             lines.push(Line::from(Span::styled(
-                format!("  {}", key_hint.trim()),
+                "  ● Authenticated with GitHub Copilot",
+                Style::default().fg(Color::Green),
+            )));
+            lines.push(Line::from(Span::styled(
+                "  Press Enter to continue, or re-authenticate below",
                 Style::default()
                     .fg(Color::DarkGray)
                     .add_modifier(Modifier::ITALIC),
             )));
+        } else {
+            match &wizard.github_device_flow_status {
+                GitHubDeviceFlowStatus::Idle => {
+                    lines.push(Line::from(Span::styled(
+                        "  Uses your GitHub Copilot subscription (no API charges)",
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::ITALIC),
+                    )));
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled(
+                        "  Press Enter to sign in with GitHub",
+                        Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
+                    )));
+                }
+                GitHubDeviceFlowStatus::WaitingForUser => {
+                    lines.push(Line::from(Span::styled(
+                        "  1. Go to: github.com/login/device",
+                        Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
+                    )));
+                    if let Some(ref code) = wizard.github_user_code {
+                        lines.push(Line::from(Span::styled(
+                            format!("  2. Enter code: {}", code),
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                        )));
+                    }
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled(
+                        "  Waiting for authorization...",
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::ITALIC),
+                    )));
+                }
+                GitHubDeviceFlowStatus::Complete => {
+                    lines.push(Line::from(Span::styled(
+                        "  ● Authenticated successfully!",
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    )));
+                }
+                GitHubDeviceFlowStatus::Failed(err) => {
+                    lines.push(Line::from(Span::styled(
+                        format!("  ✗ {}", err),
+                        Style::default().fg(Color::Red),
+                    )));
+                    lines.push(Line::from(Span::styled(
+                        "  Press Enter to try again",
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::ITALIC),
+                    )));
+                }
+            }
         }
     } else {
         // Show help text for selected provider

@@ -125,6 +125,13 @@ pub enum TuiEvent {
     /// WhatsApp pairing failed during onboarding
     WhatsAppError(String),
 
+    /// GitHub Copilot device flow: display this code to the user
+    GitHubDeviceCode(String),
+    /// GitHub Copilot device flow: OAuth token obtained
+    GitHubOAuthComplete(String),
+    /// GitHub Copilot device flow: failed
+    GitHubOAuthError(String),
+
     /// A system message to display in chat
     SystemMessage(String),
 

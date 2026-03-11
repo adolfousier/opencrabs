@@ -209,7 +209,17 @@ pub async fn fetch_provider_models(provider_index: usize, api_key: Option<&str>)
             req.send().await
         }
         2 => {
-            // GitHub Models — no /models list endpoint, load from config or defaults
+            // GitHub Copilot — fetch from Copilot API using OAuth token
+            if let Some(key) = api_key
+                && !key.is_empty()
+            {
+                match crate::brain::provider::copilot::fetch_copilot_models(key).await {
+                    Ok(models) if !models.is_empty() => return models,
+                    Ok(_) => tracing::debug!("Copilot models endpoint returned empty list"),
+                    Err(e) => tracing::debug!("Copilot models fetch failed: {}", e),
+                }
+            }
+            // Fall back to config or defaults
             if let Ok(config) = crate::config::Config::load()
                 && let Some(p) = &config.providers.github
             {
@@ -220,7 +230,6 @@ pub async fn fetch_provider_models(provider_index: usize, api_key: Option<&str>)
                     return vec![model.clone()];
                 }
             }
-            // Fall back to config.toml.example defaults
             return OnboardingWizard::load_default_models(2);
         }
         4 => {

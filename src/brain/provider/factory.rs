@@ -23,7 +23,7 @@ pub fn create_provider(config: &Config) -> Result<Arc<dyn Provider>> {
     let enabled_attempts: Vec<ProviderAttempt<'_>> = vec![
         ("Anthropic", Box::new(|| try_create_anthropic(config))),
         ("OpenAI", Box::new(|| try_create_openai(config))),
-        ("GitHub Models", Box::new(|| try_create_github(config))),
+        ("GitHub Copilot", Box::new(|| try_create_github(config))),
         ("Google Gemini", Box::new(|| try_create_gemini(config))),
         ("OpenRouter", Box::new(|| try_create_openrouter(config))),
         ("Minimax", Box::new(|| try_create_minimax(config))),
@@ -99,7 +99,7 @@ pub fn create_provider(config: &Config) -> Result<Arc<dyn Provider>> {
         let fallback_attempts: Vec<ProviderAttempt<'_>> = vec![
             ("Anthropic", Box::new(|| try_create_anthropic(config))),
             ("OpenAI", Box::new(|| try_create_openai(config))),
-            ("GitHub Models", Box::new(|| try_create_github(config))),
+            ("GitHub Copilot", Box::new(|| try_create_github(config))),
             ("Google Gemini", Box::new(|| try_create_gemini(config))),
             ("OpenRouter", Box::new(|| try_create_openrouter(config))),
             ("Minimax", Box::new(|| try_create_minimax(config))),
@@ -268,7 +268,7 @@ fn create_fallback(config: &Config, fallback_type: &str) -> Result<Arc<dyn Provi
             try_create_openai(config)?.ok_or_else(|| anyhow::anyhow!("OpenAI not configured"))
         }
         "github" => {
-            tracing::info!("Using fallback: GitHub Models");
+            tracing::info!("Using fallback: GitHub Copilot");
             try_create_github(config)?.ok_or_else(|| anyhow::anyhow!("GitHub not configured"))
         }
         "gemini" => {
@@ -293,64 +293,47 @@ fn create_fallback(config: &Config, fallback_type: &str) -> Result<Arc<dyn Provi
     }
 }
 
-/// Try to auto-detect a GitHub token from the `gh` CLI.
-/// Returns `None` if `gh` is not installed or not authenticated.
-pub(crate) fn gh_auth_token() -> Option<String> {
-    let output = std::process::Command::new("gh")
-        .args(["auth", "token"])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
-    if output.status.success() {
-        let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !token.is_empty() {
-            return Some(token);
-        }
-    }
-    None
-}
-
-/// Try to create GitHub Models provider if configured.
-/// Auto-detects token from `gh auth token` if no api_key in keys.toml.
+/// Try to create GitHub Copilot provider if configured.
+/// Uses OAuth token to exchange for short-lived Copilot API tokens.
 fn try_create_github(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
+    use super::copilot::{COPILOT_CHAT_URL, CopilotTokenManager, copilot_extra_headers};
+
     let github_config = match &config.providers.github {
         Some(cfg) => cfg,
         None => return Ok(None),
     };
 
-    // Try explicit key first, then auto-detect from gh CLI
-    let api_key = github_config
-        .api_key
-        .clone()
-        .filter(|k| !k.is_empty())
-        .or_else(gh_auth_token);
+    let oauth_token = github_config.api_key.clone().filter(|k| !k.is_empty());
 
-    let Some(api_key) = api_key else {
+    let Some(oauth_token) = oauth_token else {
         tracing::warn!(
-            "GitHub Models enabled but no token found. \
-             Run `gh auth login` or add a PAT to keys.toml."
+            "GitHub Copilot enabled but no OAuth token found. \
+             Run /onboard:provider to authenticate."
         );
         return Ok(None);
     };
 
+    // Create the token manager — background task does the initial + recurring refresh
+    let manager = Arc::new(CopilotTokenManager::new(oauth_token));
+    manager.clone().start_background_refresh();
+
+    // Build a token_fn closure that reads the cached Copilot token
+    let mgr_clone = manager.clone();
+    let token_fn: super::custom_openai_compatible::TokenFn =
+        Arc::new(move || mgr_clone.get_cached_token());
+
     let base_url = github_config
         .base_url
         .clone()
-        .unwrap_or_else(|| "https://models.github.ai/inference/chat/completions".to_string());
+        .unwrap_or_else(|| COPILOT_CHAT_URL.to_string());
 
-    tracing::info!("Using GitHub Models at: {}", base_url);
+    tracing::info!("Using GitHub Copilot at: {}", base_url);
 
     let provider = configure_openai_compatible(
-        OpenAIProvider::with_base_url(api_key, base_url)
-            .with_name("GitHub Models")
-            .with_extra_headers(vec![
-                (
-                    "Accept".to_string(),
-                    "application/vnd.github+json".to_string(),
-                ),
-                ("X-GitHub-Api-Version".to_string(), "2022-11-28".to_string()),
-            ]),
+        OpenAIProvider::with_base_url("copilot-managed".to_string(), base_url)
+            .with_name("GitHub Copilot")
+            .with_token_fn(token_fn)
+            .with_extra_headers(copilot_extra_headers()),
         github_config,
     );
     Ok(Some(Arc::new(provider)))

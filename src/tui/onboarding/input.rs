@@ -294,7 +294,18 @@ impl OnboardingWizard {
                 }
                 KeyCode::Enter | KeyCode::Tab => {
                     self.detect_existing_key();
-                    if self.is_custom_provider() {
+                    if self.selected_provider == 2 {
+                        // GitHub Copilot: if already authenticated, go to model select
+                        if self.has_existing_key() {
+                            self.auth_field = AuthField::Model;
+                            // Copilot supports live model fetch
+                            self.fetched_models.clear();
+                            self.selected_model = 0;
+                            return WizardAction::FetchModels;
+                        }
+                        // Not yet authenticated — start device flow
+                        return WizardAction::GitHubDeviceFlow;
+                    } else if self.is_custom_provider() {
                         self.auth_field = AuthField::CustomName;
                     } else {
                         self.auth_field = AuthField::ApiKey;
@@ -325,17 +336,6 @@ impl OnboardingWizard {
                     self.api_key_cursor = self.api_key_input.len();
                 }
                 KeyCode::Enter | KeyCode::Tab | KeyCode::Down => {
-                    // GitHub: if no key pasted yet, re-check gh CLI token
-                    if self.selected_provider == 2
-                        && !self.has_existing_key()
-                        && self.api_key_input.is_empty()
-                    {
-                        self.detect_existing_key();
-                        if !self.has_existing_key() {
-                            // No token — stay on this field
-                            return WizardAction::None;
-                        }
-                    }
                     self.auth_field = AuthField::Model;
                     // Fetch live models when we have a key and provider supports it
                     if self.supports_model_fetch()

@@ -15,6 +15,7 @@ use async_trait::async_trait;
 use futures::stream::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use std::time::Duration;
 
 const DEFAULT_OPENAI_API_URL: &str = "https://api.openai.com/v1/chat/completions";
@@ -110,6 +111,10 @@ fn strip_think_blocks(text: &str) -> String {
     result.trim().to_string()
 }
 
+/// Dynamic token provider — called on every request to get the current bearer token.
+/// Used by Copilot provider where the token rotates every ~30 minutes.
+pub type TokenFn = Arc<dyn Fn() -> String + Send + Sync>;
+
 /// OpenAI provider for GPT models
 #[derive(Clone)]
 pub struct OpenAIProvider {
@@ -120,10 +125,12 @@ pub struct OpenAIProvider {
     name: String,
     /// When set, swap to this model for requests containing images.
     vision_model: Option<String>,
-    /// Extra headers injected into every request (e.g. GitHub Models API versioning).
+    /// Extra headers injected into every request (e.g. GitHub Copilot API versioning).
     pub(crate) extra_headers: Vec<(String, String)>,
     /// Configured context window size (overrides model-name heuristics).
     configured_context_window: Option<u32>,
+    /// Optional dynamic token provider (overrides api_key when set).
+    token_fn: Option<TokenFn>,
 }
 
 impl OpenAIProvider {
@@ -146,6 +153,7 @@ impl OpenAIProvider {
             vision_model: None,
             extra_headers: vec![],
             configured_context_window: None,
+            token_fn: None,
         }
     }
 
@@ -168,6 +176,7 @@ impl OpenAIProvider {
             vision_model: None,
             extra_headers: vec![],
             configured_context_window: None,
+            token_fn: None,
         }
     }
 
@@ -190,6 +199,7 @@ impl OpenAIProvider {
             vision_model: None,
             extra_headers: vec![],
             configured_context_window: None,
+            token_fn: None,
         }
     }
 
@@ -217,6 +227,13 @@ impl OpenAIProvider {
         self
     }
 
+    /// Set a dynamic token provider (overrides static api_key in headers).
+    /// Used by Copilot where the bearer token rotates every ~30 minutes.
+    pub fn with_token_fn(mut self, f: TokenFn) -> Self {
+        self.token_fn = Some(f);
+        self
+    }
+
     /// Set vision model — used by the `analyze_image` tool as a provider-native
     /// vision backend when Gemini vision isn't configured.
     pub fn with_vision_model(mut self, model: String) -> Self {
@@ -233,15 +250,22 @@ impl OpenAIProvider {
     fn headers(&self) -> std::result::Result<reqwest::header::HeaderMap, ProviderError> {
         let mut headers = reqwest::header::HeaderMap::new();
 
-        // Only add authorization if not using local
-        if self.api_key != "not-needed" {
-            // Sanitize API key: trim whitespace/newlines that may have leaked from input
-            let clean_key = self.api_key.trim();
+        // Resolve the bearer token: dynamic token_fn takes priority over static api_key
+        let bearer_key = if let Some(ref f) = self.token_fn {
+            let token = f();
+            if token.is_empty() { None } else { Some(token) }
+        } else if self.api_key != "not-needed" {
+            Some(self.api_key.trim().to_string())
+        } else {
+            None
+        };
+
+        if let Some(key) = bearer_key {
             let header_value: reqwest::header::HeaderValue =
-                format!("Bearer {}", clean_key).parse().map_err(|_| {
+                format!("Bearer {}", key).parse().map_err(|_| {
                     tracing::error!(
                         "API key contains invalid characters (length={}). Check keys.toml.",
-                        clean_key.len()
+                        key.len()
                     );
                     ProviderError::InvalidApiKey
                 })?;

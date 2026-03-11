@@ -326,7 +326,7 @@ impl OnboardingWizard {
                 let _ = Config::write_key(
                     section,
                     "base_url",
-                    "https://models.github.ai/inference/chat/completions",
+                    "https://api.githubcopilot.com/chat/completions",
                 );
             }
             4 => {
@@ -495,14 +495,7 @@ impl OnboardingWizard {
             tracing::warn!("Failed to save API key to keys.toml: {}", e);
         }
 
-        // GitHub Models: persist auto-detected gh CLI token to keys.toml
-        if self.selected_provider == 2
-            && self.has_existing_key()
-            && let Some(token) = crate::brain::provider::factory::gh_auth_token()
-            && let Err(e) = crate::config::write_secret_key(section, "api_key", &token)
-        {
-            tracing::warn!("Failed to save GitHub token to keys.toml: {}", e);
-        }
+        // (GitHub Copilot OAuth token is saved directly via the device flow handler)
 
         // Save STT/TTS keys to keys.toml
         if let Some(ref groq_key) = groq_key

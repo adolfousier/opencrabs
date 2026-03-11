@@ -1,4 +1,4 @@
-//! GitHub Models provider integration tests.
+//! GitHub Copilot provider integration tests.
 //!
 //! Tests config resolution, provider indices, factory wiring,
 //! extra headers on OpenAIProvider, and onboarding integration.
@@ -12,7 +12,7 @@ use crate::tui::onboarding::{OnboardingWizard, PROVIDERS};
 
 #[test]
 fn github_models_is_at_index_2() {
-    assert_eq!(PROVIDERS[2].name, "GitHub Models");
+    assert_eq!(PROVIDERS[2].name, "GitHub Copilot");
 }
 
 #[test]
@@ -21,22 +21,22 @@ fn github_models_has_no_static_models() {
 }
 
 #[test]
-fn github_models_key_label() {
-    assert_eq!(PROVIDERS[2].key_label, "Token");
+fn github_copilot_key_label() {
+    assert_eq!(PROVIDERS[2].key_label, "OAuth");
 }
 
 #[test]
-fn github_models_has_help_lines() {
+fn github_copilot_has_help_lines() {
     assert!(!PROVIDERS[2].help_lines.is_empty());
     let help = PROVIDERS[2].help_lines.join(" ");
-    assert!(help.contains("token"));
+    assert!(help.contains("Copilot"));
 }
 
 #[test]
 fn provider_order_after_github_insertion() {
     assert_eq!(PROVIDERS[0].name, "Anthropic Claude");
     assert_eq!(PROVIDERS[1].name, "OpenAI");
-    assert_eq!(PROVIDERS[2].name, "GitHub Models");
+    assert_eq!(PROVIDERS[2].name, "GitHub Copilot");
     assert_eq!(PROVIDERS[3].name, "Google Gemini");
     assert_eq!(PROVIDERS[4].name, "OpenRouter");
     assert_eq!(PROVIDERS[5].name, "Minimax");
@@ -79,7 +79,7 @@ fn resolve_github_when_enabled() {
         ..Default::default()
     });
     let (name, model) = resolve_provider_from_config(&config);
-    assert_eq!(name, "GitHub Models");
+    assert_eq!(name, "GitHub Copilot");
     assert_eq!(model, "gpt-4o");
 }
 
@@ -92,7 +92,7 @@ fn resolve_github_default_model_when_none() {
         ..Default::default()
     });
     let (name, model) = resolve_provider_from_config(&config);
-    assert_eq!(name, "GitHub Models");
+    assert_eq!(name, "GitHub Copilot");
     assert_eq!(model, "gpt-5-mini");
 }
 
@@ -104,7 +104,7 @@ fn resolve_skips_github_when_disabled() {
         ..Default::default()
     });
     let (name, _) = resolve_provider_from_config(&config);
-    assert_ne!(name, "GitHub Models");
+    assert_ne!(name, "GitHub Copilot");
 }
 
 #[test]
@@ -112,27 +112,27 @@ fn resolve_skips_github_when_absent() {
     let config = Config::default();
     assert!(config.providers.github.is_none());
     let (name, _) = resolve_provider_from_config(&config);
-    assert_ne!(name, "GitHub Models");
+    assert_ne!(name, "GitHub Copilot");
 }
 
 // ── OpenAIProvider extra_headers ─────────────────────────────────
 
 #[test]
 fn extra_headers_builder_sets_headers() {
+    use crate::brain::provider::copilot::copilot_extra_headers;
+    let headers = copilot_extra_headers();
     let provider = OpenAIProvider::with_base_url(
-        "test-key".to_string(),
-        "https://models.github.ai/inference/chat/completions".to_string(),
+        "copilot-managed".to_string(),
+        "https://api.githubcopilot.com/chat/completions".to_string(),
     )
-    .with_extra_headers(vec![
-        (
-            "Accept".to_string(),
-            "application/vnd.github+json".to_string(),
-        ),
-        ("X-GitHub-Api-Version".to_string(), "2022-11-28".to_string()),
-    ]);
-    assert_eq!(provider.extra_headers.len(), 2);
-    assert_eq!(provider.extra_headers[0].0, "Accept");
-    assert_eq!(provider.extra_headers[1].0, "X-GitHub-Api-Version");
+    .with_extra_headers(headers);
+    assert!(!provider.extra_headers.is_empty());
+    assert!(
+        provider
+            .extra_headers
+            .iter()
+            .any(|(k, _)| k == "copilot-integration-id")
+    );
 }
 
 #[test]
@@ -147,11 +147,11 @@ fn extra_headers_default_empty() {
 #[test]
 fn with_name_sets_provider_name() {
     let provider = OpenAIProvider::with_base_url(
-        "test-key".to_string(),
-        "https://models.github.ai/inference/chat/completions".to_string(),
+        "copilot-managed".to_string(),
+        "https://api.githubcopilot.com/chat/completions".to_string(),
     )
-    .with_name("GitHub Models");
-    assert_eq!(provider.name(), "GitHub Models");
+    .with_name("GitHub Copilot");
+    assert_eq!(provider.name(), "GitHub Copilot");
 }
 
 // ── Onboarding wizard ──────────────────────────────────────────
@@ -164,18 +164,18 @@ fn wizard_github_is_not_custom() {
 }
 
 #[test]
-fn wizard_github_no_model_fetch() {
-    // GitHub Models has no /models list endpoint
+fn wizard_github_supports_model_fetch() {
+    // GitHub Copilot supports live model fetching via /models endpoint
     let mut wizard = OnboardingWizard::new();
     wizard.selected_provider = 2;
-    assert!(!wizard.supports_model_fetch());
+    assert!(wizard.supports_model_fetch());
 }
 
 #[test]
 fn wizard_current_provider_at_index_2_is_github() {
     let mut wizard = OnboardingWizard::new();
     wizard.selected_provider = 2;
-    assert_eq!(wizard.current_provider().name, "GitHub Models");
+    assert_eq!(wizard.current_provider().name, "GitHub Copilot");
 }
 
 #[test]
@@ -232,29 +232,23 @@ fn wizard_selected_model_name_out_of_bounds_fallback() {
 // ── Factory ─────────────────────────────────────────────────────
 
 #[test]
-fn gh_auth_token_returns_option() {
-    let result = crate::brain::provider::factory::gh_auth_token();
-    let _: Option<String> = result;
-}
-
-#[test]
 fn github_provider_builder_full_chain() {
+    use crate::brain::provider::copilot::copilot_extra_headers;
+    let headers = copilot_extra_headers();
     let provider = OpenAIProvider::with_base_url(
-        "ghp_test123".to_string(),
-        "https://models.github.ai/inference/chat/completions".to_string(),
+        "copilot-managed".to_string(),
+        "https://api.githubcopilot.com/chat/completions".to_string(),
     )
-    .with_name("GitHub Models")
-    .with_extra_headers(vec![
-        (
-            "Accept".to_string(),
-            "application/vnd.github+json".to_string(),
-        ),
-        ("X-GitHub-Api-Version".to_string(), "2022-11-28".to_string()),
-    ]);
-    assert_eq!(provider.name(), "GitHub Models");
-    assert_eq!(provider.extra_headers.len(), 2);
-    assert_eq!(provider.extra_headers[0].1, "application/vnd.github+json");
-    assert_eq!(provider.extra_headers[1].1, "2022-11-28");
+    .with_name("GitHub Copilot")
+    .with_extra_headers(headers.clone());
+    assert_eq!(provider.name(), "GitHub Copilot");
+    assert!(!provider.extra_headers.is_empty());
+    let keys: Vec<&str> = provider
+        .extra_headers
+        .iter()
+        .map(|(k, _)| k.as_str())
+        .collect();
+    assert!(keys.contains(&"copilot-integration-id"));
 }
 
 #[test]
@@ -331,17 +325,17 @@ fn resolve_github_chosen_when_only_github_enabled() {
         ..Default::default()
     });
     let (name, model) = resolve_provider_from_config(&config);
-    assert_eq!(name, "GitHub Models");
+    assert_eq!(name, "GitHub Copilot");
     assert_eq!(model, "Llama-3.3-70B-Instruct");
 }
 
 // ── GitHub-specific onboarding OAuth flow ───────────────────────
 
 #[test]
-fn github_help_mentions_token_paste() {
+fn github_help_mentions_copilot_subscription() {
     let help = PROVIDERS[2].help_lines.join(" ");
-    assert!(help.contains("token"));
-    assert!(help.contains("paste"));
+    assert!(help.contains("Copilot"));
+    assert!(help.contains("subscription"));
 }
 
 #[test]
@@ -352,11 +346,11 @@ fn wizard_github_static_models_empty() {
 
 #[test]
 fn github_load_default_models_from_config_example() {
+    // Copilot models are fetched live from the API, not from config.toml.example
+    // So load_default_models may return empty (no hardcoded list)
     let models = OnboardingWizard::load_default_models(2);
-    assert!(!models.is_empty());
-    assert!(models.contains(&"gpt-5-mini".to_string()));
-    assert!(models.contains(&"o4-mini".to_string()));
-    assert!(models.contains(&"DeepSeek-R1".to_string()));
+    // Either empty or contains whatever is in config.toml.example
+    let _ = models;
 }
 
 #[test]

@@ -145,7 +145,7 @@ impl App {
                         .as_ref()
                         .and_then(|p| p.api_key.clone()),
                 ),
-                "GitHub Models" | "github" => (
+                "GitHub Copilot" | "github" => (
                     2,
                     config
                         .providers
@@ -278,7 +278,7 @@ impl App {
                 )
             }
         } else if config.providers.github.as_ref().is_some_and(|p| p.enabled) {
-            tracing::debug!("[open_model_selector] GitHub Models enabled");
+            tracing::debug!("[open_model_selector] GitHub Copilot enabled");
             (
                 2,
                 config
@@ -811,13 +811,11 @@ impl App {
                 });
             }
             2 => {
-                // GitHub Models
+                // GitHub Copilot
                 config.providers.github = Some(ProviderConfig {
                     enabled: true,
                     api_key: api_key.clone(),
-                    base_url: Some(
-                        "https://models.github.ai/inference/chat/completions".to_string(),
-                    ),
+                    base_url: Some("https://api.githubcopilot.com/chat/completions".to_string()),
                     default_model: Some(default_model.to_string()),
                     models: vec![],
                     vision_model: None,
@@ -945,7 +943,7 @@ impl App {
                 let _ = crate::config::Config::write_key(
                     section,
                     "base_url",
-                    "https://models.github.ai/inference/chat/completions",
+                    "https://api.githubcopilot.com/chat/completions",
                 );
             }
             4 => {
@@ -1247,7 +1245,7 @@ impl App {
                                 .as_ref()
                                 .and_then(|c| c.providers.minimax.as_ref())
                                 .and_then(|p| p.api_key.clone()),
-                            "GitHub Models" => loaded
+                            "GitHub Copilot" => loaded
                                 .as_ref()
                                 .and_then(|c| c.providers.github.as_ref())
                                 .and_then(|p| p.api_key.clone()),
@@ -1268,6 +1266,40 @@ impl App {
                         )
                         .await;
                         let _ = sender.send(TuiEvent::OnboardingModelsFetched(models));
+                    });
+                }
+                WizardAction::GitHubDeviceFlow => {
+                    wizard.github_device_flow_status =
+                        super::onboarding::GitHubDeviceFlowStatus::WaitingForUser;
+                    let sender = self.event_sender();
+                    tokio::spawn(async move {
+                        // Step 1: Request device code
+                        let device =
+                            match crate::brain::provider::copilot::start_device_flow().await {
+                                Ok(d) => d,
+                                Err(e) => {
+                                    let _ = sender.send(TuiEvent::GitHubOAuthError(e.to_string()));
+                                    return;
+                                }
+                            };
+
+                        // Send the user code for display
+                        let _ = sender.send(TuiEvent::GitHubDeviceCode(device.user_code.clone()));
+
+                        // Step 2-3: Poll until user authorizes
+                        match crate::brain::provider::copilot::poll_for_oauth_token(
+                            &device.device_code,
+                            device.interval,
+                        )
+                        .await
+                        {
+                            Ok(token) => {
+                                let _ = sender.send(TuiEvent::GitHubOAuthComplete(token));
+                            }
+                            Err(e) => {
+                                let _ = sender.send(TuiEvent::GitHubOAuthError(e.to_string()));
+                            }
+                        }
                     });
                 }
                 WizardAction::WhatsAppConnect => {

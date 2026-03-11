@@ -82,7 +82,7 @@ impl OnboardingWizard {
 
     /// Whether the current provider supports live model fetching
     pub fn supports_model_fetch(&self) -> bool {
-        matches!(self.selected_provider, 0 | 1 | 4) // Anthropic, OpenAI, OpenRouter
+        matches!(self.selected_provider, 0 | 1 | 2 | 4) // Anthropic, OpenAI, GitHub Copilot, OpenRouter
     }
 
     /// Load default models from embedded config.toml.example for GitHub, MiniMax, and Custom
@@ -96,7 +96,7 @@ impl OnboardingWizard {
         {
             match provider_index {
                 2 => {
-                    // GitHub Models
+                    // GitHub Copilot
                     if let Some(github) = providers.get("github")
                         && let Some(models_arr) = github.get("models").and_then(|m| m.as_array())
                     {

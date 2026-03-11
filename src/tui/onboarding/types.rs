@@ -1,6 +1,6 @@
 /// Sentinel value stored in api_key_input when a key was loaded from config.
 /// The actual key is never held in memory — this just signals "key exists".
-pub(super) const EXISTING_KEY_SENTINEL: &str = "__EXISTING_KEY__";
+pub const EXISTING_KEY_SENTINEL: &str = "__EXISTING_KEY__";
 
 /// Provider definitions
 pub const PROVIDERS: &[ProviderInfo] = &[
@@ -20,10 +20,10 @@ pub const PROVIDERS: &[ProviderInfo] = &[
         help_lines: &["Get key from platform.openai.com"],
     },
     ProviderInfo {
-        name: "GitHub Models",
+        name: "GitHub Copilot",
         models: &[],
-        key_label: "Token",
-        help_lines: &["Click link below to create a token, then paste it here"],
+        key_label: "OAuth",
+        help_lines: &["Sign in with GitHub to use your Copilot subscription"],
     },
     ProviderInfo {
         name: "Google Gemini",
@@ -288,6 +288,19 @@ pub enum ImageField {
     ApiKey,
 }
 
+/// GitHub Copilot device flow status
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GitHubDeviceFlowStatus {
+    /// Not started
+    Idle,
+    /// Waiting for user to enter code at github.com/login/device
+    WaitingForUser,
+    /// User authorized, token obtained
+    Complete,
+    /// Flow failed
+    Failed(String),
+}
+
 /// Which text area is focused in BrainSetup step
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrainField {
@@ -324,6 +337,8 @@ pub enum WizardAction {
     DownloadWhisperModel,
     /// Trigger async Piper voice model download
     DownloadPiperVoice,
+    /// Trigger GitHub Copilot OAuth device flow
+    GitHubDeviceFlow,
     /// Quick-jump step completed — save config and close wizard
     QuickJumpDone,
 }

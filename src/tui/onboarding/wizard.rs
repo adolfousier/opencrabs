@@ -130,6 +130,10 @@ pub struct OnboardingWizard {
     pub generated_tools: Option<String>,
     pub generated_memory: Option<String>,
 
+    /// GitHub Copilot device flow state
+    pub github_user_code: Option<String>,
+    pub github_device_flow_status: GitHubDeviceFlowStatus,
+
     /// Model filter (live search in model list)
     pub model_filter: String,
 
@@ -353,6 +357,9 @@ impl OnboardingWizard {
             generated_tools: None,
             generated_memory: None,
 
+            github_user_code: None,
+            github_device_flow_status: GitHubDeviceFlowStatus::Idle,
+
             model_filter: String::new(),
             focused_field: 0,
             error_message: None,
@@ -415,7 +422,7 @@ impl OnboardingWizard {
                 wizard.custom_model = model.clone();
             }
         } else if config.providers.github.as_ref().is_some_and(|p| p.enabled) {
-            wizard.selected_provider = 2; // GitHub Models
+            wizard.selected_provider = 2; // GitHub Copilot
             if let Some(model) = &config
                 .providers
                 .github

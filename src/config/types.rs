@@ -501,7 +501,7 @@ pub struct ProviderConfigs {
     #[serde(default, deserialize_with = "deserialize_custom_providers")]
     pub custom: Option<BTreeMap<String, ProviderConfig>>,
 
-    /// GitHub Models configuration (uses GitHub OAuth token from `gh auth token`)
+    /// GitHub Copilot configuration (uses OAuth device flow token)
     #[serde(default)]
     pub github: Option<ProviderConfig>,
 
@@ -1093,6 +1093,13 @@ fn merge_provider_keys(mut base: ProviderConfigs, keys: ProviderConfigs) -> Prov
         && is_real_key(&key)
     {
         let entry = base.gemini.get_or_insert_with(ProviderConfig::default);
+        entry.api_key = Some(key);
+    }
+    if let Some(k) = keys.github
+        && let Some(key) = k.api_key
+        && is_real_key(&key)
+    {
+        let entry = base.github.get_or_insert_with(ProviderConfig::default);
         entry.api_key = Some(key);
     }
     if let Some(custom_keys) = keys.custom {
@@ -2143,7 +2150,7 @@ pub fn resolve_provider_from_config(config: &Config) -> (&str, &str) {
             .as_ref()
             .and_then(|p| p.default_model.as_deref())
             .unwrap_or("gpt-5-mini");
-        return ("GitHub Models", model);
+        return ("GitHub Copilot", model);
     }
     if config.providers.gemini.as_ref().is_some_and(|p| p.enabled) {
         let model = config
