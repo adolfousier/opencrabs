@@ -8,8 +8,9 @@ use super::render;
 use anyhow::Result;
 use crossterm::{
     event::{
-        DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange,
-        KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+        DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
+        EnableFocusChange, EnableMouseCapture, KeyboardEnhancementFlags,
+        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
@@ -29,7 +30,8 @@ pub async fn run(mut app: App) -> Result<()> {
         stdout,
         EnterAlternateScreen,
         EnableBracketedPaste,
-        EnableFocusChange
+        EnableFocusChange,
+        EnableMouseCapture
     )?;
     // Enable keyboard enhancement for proper modifier key reporting.
     // DISAMBIGUATE_ESCAPE_CODES gives accurate modifier info without
@@ -62,7 +64,8 @@ pub async fn run(mut app: App) -> Result<()> {
         terminal.backend_mut(),
         LeaveAlternateScreen,
         DisableBracketedPaste,
-        DisableFocusChange
+        DisableFocusChange,
+        DisableMouseCapture
     )?;
     terminal.show_cursor()?;
 
