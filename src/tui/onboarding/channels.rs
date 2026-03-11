@@ -1,5 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
+use super::helpers::is_clear_field;
 use super::types::*;
 use super::wizard::OnboardingWizard;
 
@@ -143,6 +144,9 @@ impl OnboardingWizard {
                     }
                     self.telegram_token_input.push(c);
                 }
+                KeyCode::Backspace if is_clear_field(&event) => {
+                    self.telegram_token_input.clear();
+                }
                 KeyCode::Backspace => {
                     if self.has_existing_telegram_token() {
                         self.telegram_token_input.clear();
@@ -161,6 +165,9 @@ impl OnboardingWizard {
                         self.telegram_user_id_input.clear();
                     }
                     self.telegram_user_id_input.push(c);
+                }
+                KeyCode::Backspace if is_clear_field(&event) => {
+                    self.telegram_user_id_input.clear();
                 }
                 KeyCode::Backspace => {
                     if self.has_existing_telegram_user_id() {
@@ -234,6 +241,9 @@ impl OnboardingWizard {
                     }
                     self.discord_token_input.push(c);
                 }
+                KeyCode::Backspace if is_clear_field(&event) => {
+                    self.discord_token_input.clear();
+                }
                 KeyCode::Backspace => {
                     if self.has_existing_discord_token() {
                         self.discord_token_input.clear();
@@ -252,6 +262,9 @@ impl OnboardingWizard {
                         self.discord_channel_id_input.clear();
                     }
                     self.discord_channel_id_input.push(c);
+                }
+                KeyCode::Backspace if is_clear_field(&event) => {
+                    self.discord_channel_id_input.clear();
                 }
                 KeyCode::Backspace => {
                     if self.has_existing_discord_channel_id() {
@@ -274,6 +287,9 @@ impl OnboardingWizard {
                         self.discord_allowed_list_input.clear();
                     }
                     self.discord_allowed_list_input.push(c);
+                }
+                KeyCode::Backspace if is_clear_field(&event) => {
+                    self.discord_allowed_list_input.clear();
                 }
                 KeyCode::Backspace => {
                     if self.has_existing_discord_allowed_list() {
@@ -398,6 +414,10 @@ impl OnboardingWizard {
                     self.whatsapp_phone_input.push(c);
                     WizardAction::None
                 }
+                KeyCode::Backspace if is_clear_field(&event) => {
+                    self.whatsapp_phone_input.clear();
+                    WizardAction::None
+                }
                 KeyCode::Backspace => {
                     if self.has_existing_whatsapp_phone() {
                         self.whatsapp_phone_input.clear();
@@ -498,6 +518,9 @@ impl OnboardingWizard {
                     }
                     self.trello_api_key_input.push(c);
                 }
+                KeyCode::Backspace if is_clear_field(&event) => {
+                    self.trello_api_key_input.clear();
+                }
                 KeyCode::Backspace => {
                     if self.has_existing_trello_api_key() {
                         self.trello_api_key_input.clear();
@@ -516,6 +539,9 @@ impl OnboardingWizard {
                         self.trello_api_token_input.clear();
                     }
                     self.trello_api_token_input.push(c);
+                }
+                KeyCode::Backspace if is_clear_field(&event) => {
+                    self.trello_api_token_input.clear();
                 }
                 KeyCode::Backspace => {
                     if self.has_existing_trello_api_token() {
@@ -539,6 +565,9 @@ impl OnboardingWizard {
                     }
                     self.trello_board_id_input.push(c);
                 }
+                KeyCode::Backspace if is_clear_field(&event) => {
+                    self.trello_board_id_input.clear();
+                }
                 KeyCode::Backspace => {
                     if self.has_existing_trello_board_id() {
                         self.trello_board_id_input.clear();
@@ -560,6 +589,9 @@ impl OnboardingWizard {
                         self.trello_allowed_users_input.clear();
                     }
                     self.trello_allowed_users_input.push(c);
+                }
+                KeyCode::Backspace if is_clear_field(&event) => {
+                    self.trello_allowed_users_input.clear();
                 }
                 KeyCode::Backspace => {
                     if self.has_existing_trello_allowed_users() {
@@ -619,6 +651,9 @@ impl OnboardingWizard {
                     }
                     self.slack_bot_token_input.push(c);
                 }
+                KeyCode::Backspace if is_clear_field(&event) => {
+                    self.slack_bot_token_input.clear();
+                }
                 KeyCode::Backspace => {
                     if self.has_existing_slack_bot_token() {
                         self.slack_bot_token_input.clear();
@@ -637,6 +672,9 @@ impl OnboardingWizard {
                         self.slack_app_token_input.clear();
                     }
                     self.slack_app_token_input.push(c);
+                }
+                KeyCode::Backspace if is_clear_field(&event) => {
+                    self.slack_app_token_input.clear();
                 }
                 KeyCode::Backspace => {
                     if self.has_existing_slack_app_token() {
@@ -660,6 +698,9 @@ impl OnboardingWizard {
                     }
                     self.slack_channel_id_input.push(c);
                 }
+                KeyCode::Backspace if is_clear_field(&event) => {
+                    self.slack_channel_id_input.clear();
+                }
                 KeyCode::Backspace => {
                     if self.has_existing_slack_channel_id() {
                         self.slack_channel_id_input.clear();
@@ -681,6 +722,9 @@ impl OnboardingWizard {
                         self.slack_allowed_list_input.clear();
                     }
                     self.slack_allowed_list_input.push(c);
+                }
+                KeyCode::Backspace if is_clear_field(&event) => {
+                    self.slack_allowed_list_input.clear();
                 }
                 KeyCode::Backspace => {
                     if self.has_existing_slack_allowed_list() {

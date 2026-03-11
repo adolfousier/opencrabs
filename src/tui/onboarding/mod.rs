@@ -8,6 +8,7 @@ mod brain;
 mod channels;
 mod config;
 mod fetch;
+mod helpers;
 mod input;
 mod keys;
 mod models;
