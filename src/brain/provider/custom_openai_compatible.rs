@@ -1049,7 +1049,7 @@ impl Provider for OpenAIProvider {
                                             st.inside_think = inside;
                                             st.active_close_tag = close_idx;
 
-                                            if !filtered.trim().is_empty() {
+                                            if !filtered.is_empty() {
                                                 if !st.emitted_content_start {
                                                     st.emitted_content_start = true;
                                                     events.push(Ok(StreamEvent::ContentBlockStart {
