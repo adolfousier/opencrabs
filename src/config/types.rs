@@ -561,6 +561,7 @@ impl ProviderConfigs {
             ("openrouter", self.openrouter.as_ref()),
             ("anthropic", self.anthropic.as_ref()),
             ("openai", self.openai.as_ref()),
+            ("github", self.github.as_ref()),
             ("gemini", self.gemini.as_ref()),
         ];
         for &(name, cfg) in candidates {
