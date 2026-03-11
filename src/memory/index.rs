@@ -14,6 +14,7 @@ const BRAIN_FILES: &[&str] = &[
     "USER.md",
     "AGENTS.md",
     "TOOLS.md",
+    "CODE.md",
     "SECURITY.md",
     "MEMORY.md",
     "BOOT.md",
