@@ -554,3 +554,375 @@ fn test_fetch_models_bad_key_returns_empty() {
         models.len()
     );
 }
+
+// ── handle_text_input / handle_text_paste tests ──
+
+use super::helpers::{handle_text_input, handle_text_paste};
+
+fn key_mod(code: KeyCode, modifiers: crossterm::event::KeyModifiers) -> KeyEvent {
+    KeyEvent::new(code, modifiers)
+}
+
+#[test]
+fn test_text_input_char_insert_at_cursor() {
+    let mut buf = "hello".to_string();
+    let mut cursor = 3; // between 'l' and 'l'
+    let event = key(KeyCode::Char('X'));
+    assert!(handle_text_input(
+        &event,
+        &mut buf,
+        &mut cursor,
+        false,
+        None
+    ));
+    assert_eq!(buf, "helXlo");
+    assert_eq!(cursor, 4);
+}
+
+#[test]
+fn test_text_input_backspace_at_cursor() {
+    let mut buf = "hello".to_string();
+    let mut cursor = 3;
+    let event = key(KeyCode::Backspace);
+    assert!(handle_text_input(
+        &event,
+        &mut buf,
+        &mut cursor,
+        false,
+        None
+    ));
+    assert_eq!(buf, "helo");
+    assert_eq!(cursor, 2);
+}
+
+#[test]
+fn test_text_input_backspace_at_start_noop() {
+    let mut buf = "hello".to_string();
+    let mut cursor = 0;
+    let event = key(KeyCode::Backspace);
+    assert!(handle_text_input(
+        &event,
+        &mut buf,
+        &mut cursor,
+        false,
+        None
+    ));
+    assert_eq!(buf, "hello");
+    assert_eq!(cursor, 0);
+}
+
+#[test]
+fn test_text_input_delete_at_cursor() {
+    let mut buf = "hello".to_string();
+    let mut cursor = 2;
+    let event = key(KeyCode::Delete);
+    assert!(handle_text_input(
+        &event,
+        &mut buf,
+        &mut cursor,
+        false,
+        None
+    ));
+    assert_eq!(buf, "helo");
+    assert_eq!(cursor, 2);
+}
+
+#[test]
+fn test_text_input_delete_at_end_noop() {
+    let mut buf = "hello".to_string();
+    let mut cursor = 5;
+    let event = key(KeyCode::Delete);
+    assert!(handle_text_input(
+        &event,
+        &mut buf,
+        &mut cursor,
+        false,
+        None
+    ));
+    assert_eq!(buf, "hello");
+    assert_eq!(cursor, 5);
+}
+
+#[test]
+fn test_text_input_left_right_cursor() {
+    let mut buf = "abc".to_string();
+    let mut cursor = 2;
+
+    let left = key(KeyCode::Left);
+    assert!(handle_text_input(&left, &mut buf, &mut cursor, false, None));
+    assert_eq!(cursor, 1);
+
+    let right = key(KeyCode::Right);
+    assert!(handle_text_input(
+        &right,
+        &mut buf,
+        &mut cursor,
+        false,
+        None
+    ));
+    assert_eq!(cursor, 2);
+}
+
+#[test]
+fn test_text_input_home_end() {
+    let mut buf = "hello world".to_string();
+    let mut cursor = 5;
+
+    let home = key(KeyCode::Home);
+    assert!(handle_text_input(&home, &mut buf, &mut cursor, false, None));
+    assert_eq!(cursor, 0);
+
+    let end = key(KeyCode::End);
+    assert!(handle_text_input(&end, &mut buf, &mut cursor, false, None));
+    assert_eq!(cursor, buf.len());
+}
+
+#[test]
+fn test_text_input_sentinel_clears_on_char() {
+    let mut buf = "__EXISTING_KEY__".to_string();
+    let mut cursor = 16;
+    let event = key(KeyCode::Char('a'));
+    assert!(handle_text_input(&event, &mut buf, &mut cursor, true, None));
+    assert_eq!(buf, "a");
+    assert_eq!(cursor, 1);
+}
+
+#[test]
+fn test_text_input_sentinel_clears_on_backspace() {
+    let mut buf = "__EXISTING_KEY__".to_string();
+    let mut cursor = 16;
+    let event = key(KeyCode::Backspace);
+    assert!(handle_text_input(&event, &mut buf, &mut cursor, true, None));
+    assert_eq!(buf, "");
+    assert_eq!(cursor, 0);
+}
+
+#[test]
+fn test_text_input_sentinel_clears_on_delete() {
+    let mut buf = "__EXISTING_KEY__".to_string();
+    let mut cursor = 0;
+    let event = key(KeyCode::Delete);
+    assert!(handle_text_input(&event, &mut buf, &mut cursor, true, None));
+    assert_eq!(buf, "");
+    assert_eq!(cursor, 0);
+}
+
+#[test]
+fn test_text_input_ctrl_backspace_clears_all() {
+    let mut buf = "hello world".to_string();
+    let mut cursor = 5;
+    let event = key_mod(KeyCode::Backspace, crossterm::event::KeyModifiers::CONTROL);
+    assert!(handle_text_input(
+        &event,
+        &mut buf,
+        &mut cursor,
+        false,
+        None
+    ));
+    assert_eq!(buf, "");
+    assert_eq!(cursor, 0);
+}
+
+#[test]
+fn test_text_input_char_filter() {
+    let mut buf = String::new();
+    let mut cursor = 0;
+    let digits_only: Option<fn(char) -> bool> = Some(|c: char| c.is_ascii_digit());
+
+    // Letter rejected
+    let event = key(KeyCode::Char('a'));
+    assert!(handle_text_input(
+        &event,
+        &mut buf,
+        &mut cursor,
+        false,
+        digits_only
+    ));
+    assert_eq!(buf, "");
+
+    // Digit accepted
+    let event = key(KeyCode::Char('5'));
+    assert!(handle_text_input(
+        &event,
+        &mut buf,
+        &mut cursor,
+        false,
+        digits_only
+    ));
+    assert_eq!(buf, "5");
+    assert_eq!(cursor, 1);
+}
+
+#[test]
+fn test_text_input_enter_not_consumed() {
+    let mut buf = "hello".to_string();
+    let mut cursor = 5;
+    let event = key(KeyCode::Enter);
+    assert!(!handle_text_input(
+        &event,
+        &mut buf,
+        &mut cursor,
+        false,
+        None
+    ));
+    assert_eq!(buf, "hello"); // unchanged
+}
+
+#[test]
+fn test_text_input_word_jump_ctrl_left() {
+    let mut buf = "hello world foo".to_string();
+    let mut cursor = 15; // end
+    let event = key_mod(KeyCode::Left, crossterm::event::KeyModifiers::CONTROL);
+    assert!(handle_text_input(
+        &event,
+        &mut buf,
+        &mut cursor,
+        false,
+        None
+    ));
+    assert_eq!(cursor, 12); // start of "foo"
+    assert!(handle_text_input(
+        &event,
+        &mut buf,
+        &mut cursor,
+        false,
+        None
+    ));
+    assert_eq!(cursor, 6); // start of "world"
+}
+
+#[test]
+fn test_text_input_word_jump_ctrl_right() {
+    let mut buf = "hello world foo".to_string();
+    let mut cursor = 0;
+    let event = key_mod(KeyCode::Right, crossterm::event::KeyModifiers::CONTROL);
+    assert!(handle_text_input(
+        &event,
+        &mut buf,
+        &mut cursor,
+        false,
+        None
+    ));
+    assert_eq!(cursor, 6); // after "hello "
+    assert!(handle_text_input(
+        &event,
+        &mut buf,
+        &mut cursor,
+        false,
+        None
+    ));
+    assert_eq!(cursor, 12); // after "world "
+}
+
+// ── handle_text_paste tests ──
+
+#[test]
+fn test_text_paste_at_cursor() {
+    let mut buf = "helo".to_string();
+    let mut cursor = 2;
+    handle_text_paste("ll", &mut buf, &mut cursor, false, None);
+    assert_eq!(buf, "helllo");
+    assert_eq!(cursor, 4);
+}
+
+#[test]
+fn test_text_paste_sentinel_clears_first() {
+    let mut buf = "__EXISTING_KEY__".to_string();
+    let mut cursor = 16;
+    handle_text_paste("new-token-123", &mut buf, &mut cursor, true, None);
+    assert_eq!(buf, "new-token-123");
+    assert_eq!(cursor, 13);
+}
+
+#[test]
+fn test_text_paste_with_filter() {
+    let mut buf = String::new();
+    let mut cursor = 0;
+    handle_text_paste(
+        "abc123def456",
+        &mut buf,
+        &mut cursor,
+        false,
+        Some(|c: char| c.is_ascii_digit()),
+    );
+    assert_eq!(buf, "123456");
+    assert_eq!(cursor, 6);
+}
+
+#[test]
+fn test_text_paste_sentinel_then_filtered() {
+    let mut buf = "__EXISTING_KEY__".to_string();
+    let mut cursor = 16;
+    handle_text_paste(
+        "+1-555-1234",
+        &mut buf,
+        &mut cursor,
+        true,
+        Some(|c: char| c.is_ascii_digit() || c == '+' || c == '-'),
+    );
+    assert_eq!(buf, "+1-555-1234");
+    assert_eq!(cursor, 11);
+}
+
+// ── Channel input cursor integration tests ──
+
+#[test]
+fn test_telegram_sentinel_paste_replaces() {
+    let mut wizard = clean_wizard();
+    wizard.step = OnboardingStep::TelegramSetup;
+    wizard.telegram_field = TelegramField::BotToken;
+    wizard.telegram_token_input = EXISTING_KEY_SENTINEL.to_string();
+    wizard.channel_input_cursor = EXISTING_KEY_SENTINEL.len();
+
+    // Paste new token — should replace sentinel, not append
+    wizard.handle_paste("123456:ABC-DEF");
+    assert_eq!(wizard.telegram_token_input, "123456:ABC-DEF");
+    assert_eq!(wizard.channel_input_cursor, 14);
+}
+
+#[test]
+fn test_telegram_sentinel_backspace_clears() {
+    let mut wizard = clean_wizard();
+    wizard.step = OnboardingStep::TelegramSetup;
+    wizard.telegram_field = TelegramField::BotToken;
+    wizard.telegram_token_input = EXISTING_KEY_SENTINEL.to_string();
+    wizard.channel_input_cursor = EXISTING_KEY_SENTINEL.len();
+
+    wizard.handle_key(key(KeyCode::Backspace));
+    assert_eq!(wizard.telegram_token_input, "");
+    assert_eq!(wizard.channel_input_cursor, 0);
+}
+
+#[test]
+fn test_telegram_sentinel_enter_preserves() {
+    let mut wizard = clean_wizard();
+    wizard.mode = WizardMode::Advanced;
+    wizard.step = OnboardingStep::TelegramSetup;
+    wizard.telegram_field = TelegramField::BotToken;
+    wizard.telegram_token_input = EXISTING_KEY_SENTINEL.to_string();
+    wizard.channel_input_cursor = EXISTING_KEY_SENTINEL.len();
+
+    // Enter advances to next field, sentinel stays
+    wizard.handle_key(key(KeyCode::Enter));
+    assert_eq!(wizard.telegram_token_input, EXISTING_KEY_SENTINEL);
+    assert_eq!(wizard.telegram_field, TelegramField::UserID);
+}
+
+#[test]
+fn test_discord_cursor_movement_in_field() {
+    let mut wizard = clean_wizard();
+    wizard.step = OnboardingStep::DiscordSetup;
+    wizard.discord_field = DiscordField::ChannelID;
+    wizard.discord_channel_id_input = "12345".to_string();
+    wizard.channel_input_cursor = 5;
+
+    // Move left twice
+    wizard.handle_key(key(KeyCode::Left));
+    wizard.handle_key(key(KeyCode::Left));
+    assert_eq!(wizard.channel_input_cursor, 3);
+
+    // Type a char at cursor position
+    wizard.handle_key(key(KeyCode::Char('X')));
+    assert_eq!(wizard.discord_channel_id_input, "123X45");
+    assert_eq!(wizard.channel_input_cursor, 4);
+}
