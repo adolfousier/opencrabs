@@ -154,7 +154,7 @@ impl OnboardingWizard {
                         self.telegram_token_input.pop();
                     }
                 }
-                KeyCode::Tab | KeyCode::Enter => {
+                KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
                     self.telegram_field = TelegramField::UserID;
                 }
                 _ => {}
@@ -176,10 +176,10 @@ impl OnboardingWizard {
                         self.telegram_user_id_input.pop();
                     }
                 }
-                KeyCode::BackTab => {
+                KeyCode::BackTab | KeyCode::Up => {
                     self.telegram_field = TelegramField::BotToken;
                 }
-                KeyCode::Tab | KeyCode::Enter => {
+                KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
                     self.telegram_field = TelegramField::RespondTo;
                 }
                 _ => {}
@@ -191,7 +191,7 @@ impl OnboardingWizard {
                 KeyCode::Right | KeyCode::Char('l') | KeyCode::Char(' ') => {
                     self.telegram_respond_to = (self.telegram_respond_to + 1).min(2);
                 }
-                KeyCode::BackTab => {
+                KeyCode::BackTab | KeyCode::Up => {
                     self.telegram_field = TelegramField::UserID;
                 }
                 KeyCode::Enter => {
@@ -251,7 +251,7 @@ impl OnboardingWizard {
                         self.discord_token_input.pop();
                     }
                 }
-                KeyCode::Tab | KeyCode::Enter => {
+                KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
                     self.discord_field = DiscordField::ChannelID;
                 }
                 _ => {}
@@ -273,10 +273,10 @@ impl OnboardingWizard {
                         self.discord_channel_id_input.pop();
                     }
                 }
-                KeyCode::BackTab => {
+                KeyCode::BackTab | KeyCode::Up => {
                     self.discord_field = DiscordField::BotToken;
                 }
-                KeyCode::Tab | KeyCode::Enter => {
+                KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
                     self.discord_field = DiscordField::AllowedList;
                 }
                 _ => {}
@@ -298,10 +298,10 @@ impl OnboardingWizard {
                         self.discord_allowed_list_input.pop();
                     }
                 }
-                KeyCode::BackTab => {
+                KeyCode::BackTab | KeyCode::Up => {
                     self.discord_field = DiscordField::ChannelID;
                 }
-                KeyCode::Tab | KeyCode::Enter => {
+                KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
                     self.discord_field = DiscordField::RespondTo;
                 }
                 _ => {}
@@ -313,7 +313,7 @@ impl OnboardingWizard {
                 KeyCode::Right | KeyCode::Char('l') | KeyCode::Char(' ') => {
                     self.discord_respond_to = (self.discord_respond_to + 1).min(2);
                 }
-                KeyCode::BackTab => {
+                KeyCode::BackTab | KeyCode::Up => {
                     self.discord_field = DiscordField::AllowedList;
                 }
                 KeyCode::Enter => {
@@ -335,7 +335,12 @@ impl OnboardingWizard {
         // to go back, re-scan, or skip at any point.
         let is_nav = matches!(
             event.code,
-            KeyCode::BackTab | KeyCode::Tab | KeyCode::Char('s') | KeyCode::Char('S')
+            KeyCode::BackTab
+                | KeyCode::Up
+                | KeyCode::Tab
+                | KeyCode::Down
+                | KeyCode::Char('s')
+                | KeyCode::Char('S')
         );
         if is_nav {
             // Clear any test status so navigation doesn't get intercepted below
@@ -396,7 +401,7 @@ impl OnboardingWizard {
                         WizardAction::None
                     }
                 }
-                KeyCode::Tab => {
+                KeyCode::Tab | KeyCode::Down => {
                     self.whatsapp_field = WhatsAppField::PhoneAllowlist;
                     WizardAction::None
                 }
@@ -426,14 +431,14 @@ impl OnboardingWizard {
                     }
                     WizardAction::None
                 }
-                KeyCode::BackTab => {
+                KeyCode::BackTab | KeyCode::Up => {
                     self.whatsapp_field = WhatsAppField::Connection;
                     self.whatsapp_connected = false;
                     self.whatsapp_connecting = false;
                     WizardAction::None
                 }
-                KeyCode::Tab => {
-                    // Tab from phone field wraps back to Connection
+                KeyCode::Tab | KeyCode::Down => {
+                    // Tab/Down from phone field wraps back to Connection
                     self.whatsapp_field = WhatsAppField::Connection;
                     self.whatsapp_connected = false;
                     self.whatsapp_connecting = false;
@@ -528,7 +533,7 @@ impl OnboardingWizard {
                         self.trello_api_key_input.pop();
                     }
                 }
-                KeyCode::Tab | KeyCode::Enter => {
+                KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
                     self.trello_field = TrelloField::ApiToken;
                 }
                 _ => {}
@@ -550,10 +555,10 @@ impl OnboardingWizard {
                         self.trello_api_token_input.pop();
                     }
                 }
-                KeyCode::BackTab => {
+                KeyCode::BackTab | KeyCode::Up => {
                     self.trello_field = TrelloField::ApiKey;
                 }
-                KeyCode::Tab | KeyCode::Enter => {
+                KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
                     self.trello_field = TrelloField::BoardId;
                 }
                 _ => {}
@@ -575,10 +580,10 @@ impl OnboardingWizard {
                         self.trello_board_id_input.pop();
                     }
                 }
-                KeyCode::BackTab => {
+                KeyCode::BackTab | KeyCode::Up => {
                     self.trello_field = TrelloField::ApiToken;
                 }
-                KeyCode::Tab | KeyCode::Enter => {
+                KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
                     self.trello_field = TrelloField::AllowedUsers;
                 }
                 _ => {}
@@ -600,7 +605,7 @@ impl OnboardingWizard {
                         self.trello_allowed_users_input.pop();
                     }
                 }
-                KeyCode::BackTab => {
+                KeyCode::BackTab | KeyCode::Up => {
                     self.trello_field = TrelloField::BoardId;
                 }
                 KeyCode::Enter => {
@@ -661,7 +666,7 @@ impl OnboardingWizard {
                         self.slack_bot_token_input.pop();
                     }
                 }
-                KeyCode::Tab | KeyCode::Enter => {
+                KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
                     self.slack_field = SlackField::AppToken;
                 }
                 _ => {}
@@ -683,10 +688,10 @@ impl OnboardingWizard {
                         self.slack_app_token_input.pop();
                     }
                 }
-                KeyCode::Tab | KeyCode::Enter => {
+                KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
                     self.slack_field = SlackField::ChannelID;
                 }
-                KeyCode::BackTab => {
+                KeyCode::BackTab | KeyCode::Up => {
                     self.slack_field = SlackField::BotToken;
                 }
                 _ => {}
@@ -708,10 +713,10 @@ impl OnboardingWizard {
                         self.slack_channel_id_input.pop();
                     }
                 }
-                KeyCode::BackTab => {
+                KeyCode::BackTab | KeyCode::Up => {
                     self.slack_field = SlackField::AppToken;
                 }
-                KeyCode::Tab | KeyCode::Enter => {
+                KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
                     self.slack_field = SlackField::AllowedList;
                 }
                 _ => {}
@@ -733,10 +738,10 @@ impl OnboardingWizard {
                         self.slack_allowed_list_input.pop();
                     }
                 }
-                KeyCode::BackTab => {
+                KeyCode::BackTab | KeyCode::Up => {
                     self.slack_field = SlackField::ChannelID;
                 }
-                KeyCode::Tab | KeyCode::Enter => {
+                KeyCode::Tab | KeyCode::Down | KeyCode::Enter => {
                     self.slack_field = SlackField::RespondTo;
                 }
                 _ => {}
@@ -748,7 +753,7 @@ impl OnboardingWizard {
                 KeyCode::Right | KeyCode::Char('l') | KeyCode::Char(' ') => {
                     self.slack_respond_to = (self.slack_respond_to + 1).min(2);
                 }
-                KeyCode::BackTab => {
+                KeyCode::BackTab | KeyCode::Up => {
                     self.slack_field = SlackField::AllowedList;
                 }
                 KeyCode::Enter => {
