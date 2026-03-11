@@ -82,8 +82,21 @@ async fn cmd_chat_inner(
 
     // Select provider based on configuration using factory
     // Returns placeholder provider if none configured, so app can start and show onboarding
-    let provider = crate::brain::provider::create_provider(config)?;
-    tracing::info!("Using provider: {}", provider.name());
+    let provider = match crate::brain::provider::create_provider(config) {
+        Ok(p) => {
+            tracing::info!(
+                "Provider ready: {} (model: {})",
+                p.name(),
+                p.default_model()
+            );
+            p
+        }
+        Err(e) => {
+            tracing::error!("Failed to create provider: {}", e);
+            eprintln!("Error: failed to create provider: {}", e);
+            return Err(e);
+        }
+    };
 
     // Create tool registry
     tracing::debug!("Setting up tool registry");
