@@ -5,6 +5,29 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.69] - 2026-03-11
+
+### Added
+- **GitHub Models provider** ([#41](https://github.com/adolfousier/opencrabs/issues/41)) — New provider with auto-detection via `gh auth token`. No API key needed for users already authenticated with the GitHub CLI. Supports GPT-4o, GPT-4.1, o3/o4-mini and all GitHub Models catalog
+- **Custom provider management** — All `providers.custom.*` entries now appear as individual selectable items in both `/models` and `/onboard:providers`. Users can add unlimited custom providers (nvidia, ollama, lmstudio, etc.) and switch between them with a single keypress
+- **Context window configuration** — New `context_window` field for custom/local providers in both UI screens and config.toml. Enables auto-compaction for models not recognized by name (e.g. local LLMs via LM Studio or Ollama)
+- **Shift+Tab navigation** ([#43](https://github.com/adolfousier/opencrabs/issues/43)) — Move backwards between fields in all onboarding and setup screens. Shift+Tab reverses through fields, Escape goes back to the previous screen
+- **CODE.md brain template** — Coding standards template for brain files: modular architecture, testing, security-first patterns
+- **Test coverage** — 1,218 tests (up from 1,118). New: `context_window_test.rs` (14), `custom_provider_test.rs` (27), plus expanded voice onboarding, evolve, and file extract tests
+
+### Fixed
+- **`/models` crash on custom providers** — Index out of bounds panic when selecting existing custom providers (indices 7+) in the model selector dialog
+- **Base URL corruption** — Switching between custom providers appended URLs instead of replacing them (e.g. `https://nvidia.com/v1http://127.0.0.1:1234`)
+- **Provider index mapping** — Corrected index resolution for GitHub Models, model selection, and display names across onboarding and model selector
+- **Session footer sync** — Provider/model details now update in the footer immediately after onboarding or model change
+- **Onboarding quick-jump** — Shows provider/model details instead of generic "Settings saved" message
+- **Factory hardening** — Provider factory never crashes on missing API keys; falls back gracefully through the provider chain
+- **Custom provider list order** — Existing custom providers now appear before "+ New Custom Provider" button in both provider lists
+
+### Docs
+- Document nightly toolchain requirement for `cargo install` with system dependency instructions
+- Add native TTS/STT comparison row to framework feature table
+
 ## [0.2.68] - 2026-03-10
 
 ### Added
@@ -1439,6 +1462,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.69]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.69
 [0.2.68]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.68
 [0.2.67]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.67
 [0.2.66]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.66
