@@ -926,3 +926,126 @@ fn test_discord_cursor_movement_in_field() {
     assert_eq!(wizard.discord_channel_id_input, "123X45");
     assert_eq!(wizard.channel_input_cursor, 4);
 }
+
+// --- Provider display order & navigation with custom providers ---
+
+#[test]
+fn test_provider_display_order_no_customs() {
+    let mut wizard = clean_wizard();
+    wizard.existing_custom_names.clear();
+    let order = wizard.provider_display_order();
+    // 0-5 static, then 6 ("+ New Custom") last
+    assert_eq!(order, vec![0, 1, 2, 3, 4, 5, 6]);
+}
+
+#[test]
+fn test_provider_display_order_with_customs() {
+    let mut wizard = clean_wizard();
+    wizard.existing_custom_names = vec!["nvidia".into(), "opus".into(), "opusdistil".into()];
+    let order = wizard.provider_display_order();
+    // 0-5 static, 7,8,9 existing customs, 6 ("+ New Custom") last
+    assert_eq!(order, vec![0, 1, 2, 3, 4, 5, 7, 8, 9, 6]);
+}
+
+#[test]
+fn test_provider_nav_down_from_last_static_goes_to_first_custom() {
+    let mut wizard = clean_wizard();
+    wizard.step = OnboardingStep::ProviderAuth;
+    wizard.auth_field = AuthField::Provider;
+    wizard.existing_custom_names = vec!["nvidia".into(), "opus".into()];
+    wizard.selected_provider = 5; // Minimax (last static)
+
+    wizard.handle_key(key(KeyCode::Down));
+    // Should go to nvidia (index 7), not "+ New Custom" (index 6)
+    assert_eq!(
+        wizard.selected_provider, 7,
+        "Down from Minimax should go to first custom provider, not +New Custom"
+    );
+}
+
+#[test]
+fn test_provider_nav_down_through_customs_to_new() {
+    let mut wizard = clean_wizard();
+    wizard.step = OnboardingStep::ProviderAuth;
+    wizard.auth_field = AuthField::Provider;
+    wizard.existing_custom_names = vec!["nvidia".into()];
+    wizard.selected_provider = 7; // nvidia
+
+    wizard.handle_key(key(KeyCode::Down));
+    // Should go to "+ New Custom" (index 6) which is visually last
+    assert_eq!(
+        wizard.selected_provider, 6,
+        "Down from last custom should go to +New Custom"
+    );
+}
+
+#[test]
+fn test_provider_nav_up_from_new_custom_goes_to_last_custom() {
+    let mut wizard = clean_wizard();
+    wizard.step = OnboardingStep::ProviderAuth;
+    wizard.auth_field = AuthField::Provider;
+    wizard.existing_custom_names = vec!["nvidia".into(), "opus".into()];
+    wizard.selected_provider = 6; // "+ New Custom"
+
+    wizard.handle_key(key(KeyCode::Up));
+    // Should go to opus (index 8), not Minimax (index 5)
+    assert_eq!(
+        wizard.selected_provider, 8,
+        "Up from +New Custom should go to last custom provider"
+    );
+}
+
+#[test]
+fn test_provider_nav_up_from_first_custom_goes_to_last_static() {
+    let mut wizard = clean_wizard();
+    wizard.step = OnboardingStep::ProviderAuth;
+    wizard.auth_field = AuthField::Provider;
+    wizard.existing_custom_names = vec!["nvidia".into(), "opus".into()];
+    wizard.selected_provider = 7; // nvidia (first custom)
+
+    wizard.handle_key(key(KeyCode::Up));
+    assert_eq!(
+        wizard.selected_provider, 5,
+        "Up from first custom should go to Minimax"
+    );
+}
+
+#[test]
+fn test_provider_nav_clamps_at_top_and_bottom() {
+    let mut wizard = clean_wizard();
+    wizard.step = OnboardingStep::ProviderAuth;
+    wizard.auth_field = AuthField::Provider;
+    wizard.existing_custom_names = vec!["nvidia".into()];
+
+    // At top, Up stays at 0
+    wizard.selected_provider = 0;
+    wizard.handle_key(key(KeyCode::Up));
+    assert_eq!(wizard.selected_provider, 0);
+
+    // At bottom ("+ New Custom" = 6), Down stays
+    wizard.selected_provider = 6;
+    wizard.handle_key(key(KeyCode::Down));
+    assert_eq!(wizard.selected_provider, 6);
+}
+
+#[test]
+fn test_provider_nav_full_cycle_matches_display_order() {
+    let mut wizard = clean_wizard();
+    wizard.step = OnboardingStep::ProviderAuth;
+    wizard.auth_field = AuthField::Provider;
+    wizard.existing_custom_names = vec!["nvidia".into(), "opus".into()];
+    wizard.selected_provider = 0;
+
+    let expected_order = wizard.provider_display_order();
+    let mut visited = vec![wizard.selected_provider];
+
+    for _ in 1..expected_order.len() {
+        wizard.handle_key(key(KeyCode::Down));
+        visited.push(wizard.selected_provider);
+    }
+
+    assert_eq!(
+        visited, expected_order,
+        "Navigation order must match display order"
+    );
+}

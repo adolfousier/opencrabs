@@ -498,11 +498,7 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
     // Provider list — 6 static providers, then existing custom names, then "+ New Custom" last.
     // Internal indices: 0-5=static, 6="+New Custom", 7+=existing customs.
     // Visual order: 0-5, then 7+, then 6 (existing customs before add button).
-    let num_customs = wizard.existing_custom_names.len();
-    let display_order: Vec<usize> = (0..6)
-        .chain(7..7 + num_customs)
-        .chain(std::iter::once(6))
-        .collect();
+    let display_order = wizard.provider_display_order();
     for &idx in &display_order {
         let selected = idx == wizard.selected_provider;
         let focused = wizard.auth_field == AuthField::Provider;

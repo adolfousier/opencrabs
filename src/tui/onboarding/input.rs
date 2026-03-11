@@ -315,7 +315,14 @@ impl OnboardingWizard {
         match self.auth_field {
             AuthField::Provider => match event.code {
                 KeyCode::Up | KeyCode::Char('k') => {
-                    self.selected_provider = self.selected_provider.saturating_sub(1);
+                    let order = self.provider_display_order();
+                    let pos = order
+                        .iter()
+                        .position(|&i| i == self.selected_provider)
+                        .unwrap_or(0);
+                    if pos > 0 {
+                        self.selected_provider = order[pos - 1];
+                    }
                     self.selected_model = 0;
                     self.model_filter.clear();
                     self.api_key_input.clear();
@@ -326,9 +333,14 @@ impl OnboardingWizard {
                     self.detect_existing_key();
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    // 7 static providers (0-6) + existing custom providers (7+)
-                    let max_idx = PROVIDERS.len() - 1 + self.existing_custom_names.len();
-                    self.selected_provider = (self.selected_provider + 1).min(max_idx);
+                    let order = self.provider_display_order();
+                    let pos = order
+                        .iter()
+                        .position(|&i| i == self.selected_provider)
+                        .unwrap_or(0);
+                    if pos + 1 < order.len() {
+                        self.selected_provider = order[pos + 1];
+                    }
                     self.selected_model = 0;
                     self.model_filter.clear();
                     self.api_key_input.clear();
