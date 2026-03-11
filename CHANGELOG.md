@@ -5,6 +5,24 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.71] - 2026-03-11
+
+### Fixed
+- **Streaming format loss on Copilot provider** — Newline-only stream deltas were dropped by a `.trim().is_empty()` check, stripping all markdown formatting from Copilot responses
+- **Session restore on restart** — App now persists the last active session ID to `~/.opencrabs/last_session` and restores it on startup, instead of picking whichever session was most recently modified
+
+## [0.2.70] - 2026-03-11
+
+### Added
+- **GitHub Copilot OAuth device flow** — Replaces the old GitHub Models PAT integration. Users authenticate via OAuth device flow (github.com/login/device), no PAT or GitHub CLI required. Automatic token refresh in the background. Works with any active Copilot subscription
+- **Hard command blocklist for bash tool** — Catastrophic commands (rm -rf /, mkfs, dd on disks, etc.) are now blocked at the tool level before execution
+- **Stable-first nightly-fallback for /evolve** — `cargo install` now tries stable toolchain first, falls back to nightly only if needed
+- **Onboarding navigation improvements** — Shift+Tab moves backwards between fields, Ctrl+Backspace clears input, arrow keys navigate channel and provider setup screens
+- **Test coverage** — 1,286 tests (up from 1,218). New: onboarding field navigation (36), Copilot provider (8), evolve tests (23), audio sanitization tests
+
+### Fixed
+- **keys.toml merge for GitHub provider** — OAuth tokens saved to keys.toml were never loaded back into config (pre-existing bug masked by old gh CLI fallback)
+
 ## [0.2.69] - 2026-03-11
 
 ### Added
@@ -1462,6 +1480,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.71]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.71
+[0.2.70]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.70
 [0.2.69]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.69
 [0.2.68]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.68
 [0.2.67]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.67

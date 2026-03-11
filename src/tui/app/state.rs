@@ -655,6 +655,10 @@ impl App {
                     }
                 }
             });
+        } else if let Some(last_id) = Self::read_last_session_id()
+            && self.session_service.get_session(last_id).await?.is_some()
+        {
+            self.load_session(last_id).await?;
         } else if let Some(session) = self.session_service.get_most_recent_session().await? {
             self.load_session(session.id).await?;
         } else {

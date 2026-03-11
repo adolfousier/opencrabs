@@ -158,6 +158,9 @@ impl App {
         // Clear unread indicator for this session
         self.sessions_with_unread.remove(&session_id);
 
+        // Persist as last active session so startup restores it
+        Self::save_last_session_id(session_id);
+
         // Auto-restore provider if session has a different one than current
         if let Some(ref saved_provider) = session.provider_name {
             let current_provider = self.agent_service.provider_name();
@@ -214,6 +217,20 @@ impl App {
         }
 
         Ok(())
+    }
+
+    /// Persist the current session ID to `~/.opencrabs/last_session` so
+    /// the next startup can restore the correct session.
+    fn save_last_session_id(session_id: Uuid) {
+        let base = crate::config::opencrabs_home();
+        let _ = std::fs::write(base.join("last_session"), session_id.to_string());
+    }
+
+    /// Read the last active session ID from disk.
+    pub(crate) fn read_last_session_id() -> Option<Uuid> {
+        let base = crate::config::opencrabs_home();
+        let content = std::fs::read_to_string(base.join("last_session")).ok()?;
+        Uuid::parse_str(content.trim()).ok()
     }
 
     /// Trim a list of DB messages to fit within a token budget (newest messages kept).
