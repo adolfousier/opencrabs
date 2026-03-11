@@ -59,16 +59,13 @@ pub struct ProviderInfo {
 }
 
 /// Channel definitions for the unified Channels step.
-/// Index mapping: 0=Telegram, 1=Discord, 2=WhatsApp, 3=Slack, 4=Trello, 5=Signal, 6=Google Chat, 7=iMessage
+/// Index mapping: 0=Telegram, 1=Discord, 2=WhatsApp, 3=Slack, 4=Trello
 pub const CHANNEL_NAMES: &[(&str, &str)] = &[
     ("Telegram", "Bot token (via @BotFather)"),
     ("Discord", "Bot token (via Developer Portal)"),
     ("WhatsApp", "QR code pairing"),
     ("Slack", "Socket Mode (bot + app tokens)"),
     ("Trello", "API Key + Token from trello.com/power-ups/admin"),
-    ("Signal", "Coming soon"),
-    ("Google Chat", "Coming soon"),
-    ("iMessage", "Coming soon"),
 ];
 
 /// Template files to seed in the workspace

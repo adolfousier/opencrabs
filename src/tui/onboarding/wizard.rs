@@ -474,9 +474,6 @@ impl OnboardingWizard {
         wizard.channel_toggles[2].1 = config.channels.whatsapp.enabled; // WhatsApp
         wizard.channel_toggles[3].1 = config.channels.slack.enabled; // Slack
         wizard.channel_toggles[4].1 = config.channels.trello.enabled; // Trello
-        wizard.channel_toggles[5].1 = config.channels.signal.enabled; // Signal
-        wizard.channel_toggles[6].1 = config.channels.google_chat.enabled; // Google Chat
-        wizard.channel_toggles[7].1 = config.channels.imessage.enabled; // iMessage
 
         // Load respond_to per channel
         use crate::config::RespondTo;

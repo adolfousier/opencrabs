@@ -182,7 +182,7 @@ fn test_channel_toggles_default_off() {
         .collect();
     assert!(toggle_names.contains(&"Telegram"));
     assert!(toggle_names.contains(&"Discord"));
-    assert!(toggle_names.contains(&"iMessage"));
+    assert!(toggle_names.contains(&"Trello"));
 }
 
 /// Create a wizard with clean defaults (no config auto-detection).
