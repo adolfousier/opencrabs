@@ -14,6 +14,12 @@ mod utils;
 // Re-export for sibling modules (e.g. onboarding_render)
 pub(in crate::tui) use utils::char_boundary_at_width;
 
+// Re-export for tests
+#[cfg(test)]
+pub(crate) use chat::reasoning_to_lines;
+#[cfg(test)]
+pub(crate) use tools::collapse_build_output;
+
 use super::app::App;
 use super::events::AppMode;
 use super::onboarding_render;

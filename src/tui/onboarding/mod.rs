@@ -24,7 +24,8 @@ mod tests;
 pub use types::{
     AuthField, BrainField, CHANNEL_NAMES, ChannelTestStatus, DiscordField, EXISTING_KEY_SENTINEL,
     GitHubDeviceFlowStatus, HealthStatus, ImageField, OnboardingStep, PROVIDERS, ProviderInfo,
-    SlackField, TelegramField, TrelloField, VoiceField, WhatsAppField, WizardAction, WizardMode,
+    SlackField, TEMPLATE_FILES, TelegramField, TrelloField, VoiceField, WhatsAppField,
+    WizardAction, WizardMode,
 };
 
 pub use wizard::OnboardingWizard;

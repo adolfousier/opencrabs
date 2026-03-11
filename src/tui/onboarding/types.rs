@@ -72,7 +72,7 @@ pub const CHANNEL_NAMES: &[(&str, &str)] = &[
 ];
 
 /// Template files to seed in the workspace
-pub(super) const TEMPLATE_FILES: &[(&str, &str)] = &[
+pub const TEMPLATE_FILES: &[(&str, &str)] = &[
     (
         "SOUL.md",
         include_str!("../../docs/reference/templates/SOUL.md"),

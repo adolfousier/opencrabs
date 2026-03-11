@@ -8,7 +8,7 @@ use super::embedding::{backfill_embeddings, embed_content};
 use super::{COLLECTION_BRAIN, COLLECTION_MEMORY};
 
 /// Brain files loaded from the workspace root (`~/.opencrabs/`).
-const BRAIN_FILES: &[&str] = &[
+pub const BRAIN_FILES: &[&str] = &[
     "SOUL.md",
     "IDENTITY.md",
     "USER.md",

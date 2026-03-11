@@ -17,7 +17,7 @@ use unicode_width::UnicodeWidthStr;
 
 /// Render reasoning/thinking text as plain lines, preserving literal newlines.
 /// Unlike `parse_markdown`, single `\n` is honoured instead of being collapsed.
-fn reasoning_to_lines(text: &str) -> Vec<Line<'static>> {
+pub(crate) fn reasoning_to_lines(text: &str) -> Vec<Line<'static>> {
     text.split('\n')
         .map(|l| Line::from(Span::raw(l.to_string())))
         .collect()

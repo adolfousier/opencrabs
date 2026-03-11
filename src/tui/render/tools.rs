@@ -353,7 +353,7 @@ pub(super) fn render_inline_approval<'a>(
 /// Lines like "Compiling foo v1.0", "Downloading crates...", "Checking bar v2.0"
 /// are collapsed into a single summary line like "Compiled 47 crates".
 /// Non-build lines (errors, warnings, test output) pass through unchanged.
-fn collapse_build_output(details: &str) -> Vec<String> {
+pub(crate) fn collapse_build_output(details: &str) -> Vec<String> {
     let build_prefixes = [
         "   Compiling ",
         "   Checking ",

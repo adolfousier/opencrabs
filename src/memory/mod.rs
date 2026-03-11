@@ -10,7 +10,7 @@ mod search;
 mod store;
 
 pub use embedding::{embed_content, engine_if_ready, get_engine};
-pub use index::{index_file, reindex};
+pub use index::{BRAIN_FILES, index_file, reindex};
 pub use search::search;
 pub use store::get_store;
 
