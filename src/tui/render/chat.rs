@@ -15,6 +15,14 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
+/// Render reasoning/thinking text as plain lines, preserving literal newlines.
+/// Unlike `parse_markdown`, single `\n` is honoured instead of being collapsed.
+fn reasoning_to_lines(text: &str) -> Vec<Line<'static>> {
+    text.split('\n')
+        .map(|l| Line::from(Span::raw(l.to_string())))
+        .collect()
+}
+
 /// Render the chat messages
 pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
@@ -202,7 +210,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                 && let Some(ref details) = app.messages[msg_idx].details
             {
                 lines.push(Line::from(""));
-                let reasoning_lines = parse_markdown(details);
+                let reasoning_lines = reasoning_to_lines(details);
                 let reasoning_style = Style::default()
                     .fg(Color::DarkGray)
                     .add_modifier(Modifier::ITALIC);
@@ -287,7 +295,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                         .add_modifier(Modifier::ITALIC | Modifier::BOLD),
                 ),
             ]));
-            let reasoning_lines = parse_markdown(reasoning);
+            let reasoning_lines = reasoning_to_lines(reasoning);
             let reasoning_style = Style::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::ITALIC);
@@ -373,7 +381,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                     .add_modifier(Modifier::ITALIC | Modifier::BOLD),
             ),
         ]));
-        let reasoning_lines = parse_markdown(reasoning);
+        let reasoning_lines = reasoning_to_lines(reasoning);
         let reasoning_style = Style::default()
             .fg(Color::DarkGray)
             .add_modifier(Modifier::ITALIC);
