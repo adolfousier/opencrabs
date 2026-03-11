@@ -30,7 +30,7 @@ cargo test --all-features
 | **Brain Tools — Doc Parser** | 10 | `src/brain/tools/doc_parser.rs` |
 | **Brain Tools — Registry** | 7 | `src/brain/tools/registry.rs` |
 | **Brain Tools — Slash Command** | 6 | `src/brain/tools/slash_command.rs` |
-| **Brain Tools — Bash** | 6 | `src/brain/tools/bash.rs` |
+| **Brain Tools — Bash** | 21 | `src/brain/tools/bash.rs` |
 | **Brain Tools — Write/Read/Config/Memory/Error** | 16 | `src/brain/tools/` |
 | **Channels — Voice Service** | 14 | `src/channels/voice/service.rs` |
 | **Channels — Voice Local TTS** | 14 | `src/channels/voice/local_tts.rs` |
@@ -89,7 +89,8 @@ cargo test --all-features
 | Tests — Queued Messages | 15 | `src/tests/queued_message_test.rs` |
 | Tests — Custom Provider | 27 | `src/tests/custom_provider_test.rs` |
 | Tests — Context Window | 14 | `src/tests/context_window_test.rs` |
-| **Total** | **1,218** | |
+| Tests — Onboarding Field Nav | 46 | `src/tests/onboarding_field_nav_test.rs` |
+| **Total** | **1,279** | |
 
 ---
 
