@@ -18,9 +18,8 @@ impl OnboardingWizard {
                 0 => has_nonempty_key(config.providers.anthropic.as_ref()),
                 1 => has_nonempty_key(config.providers.openai.as_ref()),
                 2 => {
-                    // GitHub Models — check config key OR auto-detect from gh CLI
+                    // GitHub Copilot — check config key (OAuth token)
                     has_nonempty_key(config.providers.github.as_ref())
-                        || crate::brain::provider::factory::gh_auth_token().is_some()
                 }
                 3 => has_nonempty_key(config.providers.gemini.as_ref()),
                 4 => has_nonempty_key(config.providers.openrouter.as_ref()),

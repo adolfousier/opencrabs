@@ -114,7 +114,7 @@ fn ignores_unrelated_errors() {
     assert!(!is_token_field_mismatch("model not found"));
 }
 
-// ── Extra headers (GitHub Models uses this) ──────────────────────
+// ── Extra headers (GitHub Copilot uses this) ──────────────────────
 
 #[test]
 fn extra_headers_builder() {
@@ -126,8 +126,8 @@ fn extra_headers_builder() {
 
 #[test]
 fn with_name_changes_provider_name() {
-    let provider = OpenAIProvider::new("key".to_string()).with_name("GitHub Models");
-    assert_eq!(provider.name(), "GitHub Models");
+    let provider = OpenAIProvider::new("key".to_string()).with_name("GitHub Copilot");
+    assert_eq!(provider.name(), "GitHub Copilot");
 }
 
 #[test]

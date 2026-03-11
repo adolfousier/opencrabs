@@ -1450,6 +1450,45 @@ impl App {
                     self.model_selector_filter.clear();
                 }
             }
+            TuiEvent::GitHubDeviceCode(code) => {
+                if let Some(ref mut wizard) = self.onboarding {
+                    wizard.github_user_code = Some(code);
+                    wizard.github_device_flow_status =
+                        super::onboarding::GitHubDeviceFlowStatus::WaitingForUser;
+                }
+            }
+            TuiEvent::GitHubOAuthComplete(oauth_token) => {
+                if let Some(ref mut wizard) = self.onboarding {
+                    wizard.github_device_flow_status =
+                        super::onboarding::GitHubDeviceFlowStatus::Complete;
+                    // Save the OAuth token to keys.toml
+                    if let Err(e) =
+                        crate::config::write_secret_key("providers.github", "api_key", &oauth_token)
+                    {
+                        tracing::warn!("Failed to save Copilot OAuth token: {}", e);
+                    }
+                    // Mark key as existing and advance to model selection
+                    wizard.api_key_input = super::onboarding::EXISTING_KEY_SENTINEL.to_string();
+                    wizard.auth_field = super::onboarding::AuthField::Model;
+                    wizard.fetched_models.clear();
+                    wizard.selected_model = 0;
+                    // Trigger model fetch using the OAuth token
+                    let token = oauth_token.clone();
+                    let sender = self.event_sender();
+                    tokio::spawn(async move {
+                        let models =
+                            super::onboarding::fetch_provider_models(2, Some(&token)).await;
+                        let _ = sender.send(TuiEvent::OnboardingModelsFetched(models));
+                    });
+                }
+            }
+            TuiEvent::GitHubOAuthError(err) => {
+                if let Some(ref mut wizard) = self.onboarding {
+                    wizard.github_device_flow_status =
+                        super::onboarding::GitHubDeviceFlowStatus::Failed(err);
+                    wizard.github_user_code = None;
+                }
+            }
             TuiEvent::WhatsAppQrCode(qr_data) => {
                 if let Some(ref mut wizard) = self.onboarding {
                     wizard.set_whatsapp_qr(&qr_data);

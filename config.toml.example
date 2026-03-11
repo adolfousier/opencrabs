@@ -41,15 +41,15 @@ default_model = "qwen3-coder-next"
 # models = ["mistral", "llama3", "codellama"]
 
 # ========================================
-# GitHub Models Provider (Copilot / GitHub Models)
+# GitHub Copilot Provider
 # ========================================
-# Auto-detected from GitHub CLI: gh auth login (browser-based, one-time)
-# Or paste a PAT from: github.com/settings/tokens/new?scopes=read:user&description=OpenCrabs
+# Uses your GitHub Copilot subscription via OAuth device flow.
+# Run /onboard:provider and select GitHub Copilot to sign in.
+# base_url = "https://api.githubcopilot.com/chat/completions"
 [providers.github]
 enabled = false
-default_model = "gpt-5-mini"
-models = ["gpt-5-mini", "gpt-4.1-mini", "gpt-4.1-nano", "o4-mini", "o3-mini", "gpt-4o", "gpt-4o-mini", "Phi-4", "Llama-3.3-70B-Instruct", "Mistral-Large", "DeepSeek-R1", "Cohere-command-r-plus"]
-# Model IDs use marketplace names — browse: github.com/marketplace/models
+default_model = "gpt-4o"
+# Models are fetched live from the Copilot API
 
 # ========================================
 # Official OpenAI Provider
