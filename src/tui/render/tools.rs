@@ -142,8 +142,9 @@ pub(super) fn render_tool_group<'a>(
             } else {
                 // Show tool output details
                 if let Some(ref details) = call.details {
+                    let detail_lines = collapse_build_output(details);
                     let default_detail_style = Style::default().fg(Color::Rgb(90, 90, 90));
-                    for detail_line in details.lines().take(30) {
+                    for detail_line in detail_lines.iter().take(30) {
                         let line_style = if detail_line.starts_with("+ ") {
                             Style::default().fg(Color::Rgb(60, 185, 185))
                         } else if detail_line.starts_with("- ") {
@@ -158,18 +159,17 @@ pub(super) fn render_tool_group<'a>(
                                 format!("    {}  ", continuation),
                                 Style::default().fg(Color::DarkGray),
                             ),
-                            Span::styled(detail_line.to_string(), line_style),
+                            Span::styled(detail_line.clone(), line_style),
                         ]));
                     }
-                    let line_count = details.lines().count();
-                    if line_count > 30 {
+                    if detail_lines.len() > 30 {
                         lines.push(Line::from(vec![
                             Span::styled(
                                 format!("    {}  ", continuation),
                                 Style::default().fg(Color::DarkGray),
                             ),
                             Span::styled(
-                                format!("... ({} more lines)", line_count - 30),
+                                format!("... ({} more lines)", detail_lines.len() - 30),
                                 Style::default()
                                     .fg(Color::Rgb(120, 120, 120))
                                     .add_modifier(Modifier::ITALIC),
@@ -346,6 +346,72 @@ pub(super) fn render_inline_approval<'a>(
             )]));
         }
     }
+}
+
+/// Collapse consecutive cargo build progress lines into a summary.
+///
+/// Lines like "Compiling foo v1.0", "Downloading crates...", "Checking bar v2.0"
+/// are collapsed into a single summary line like "Compiled 47 crates".
+/// Non-build lines (errors, warnings, test output) pass through unchanged.
+fn collapse_build_output(details: &str) -> Vec<String> {
+    let build_prefixes = [
+        "   Compiling ",
+        "   Checking ",
+        "  Downloading ",
+        "    Updating ",
+        "   Documenting ",
+        "     Running ",
+        "       Fresh ",
+        "    Fetching ",
+        "  Downloaded ",
+        "     Locking ",
+        "   Packaging ",
+    ];
+
+    let mut result: Vec<String> = Vec::new();
+    let mut build_count: usize = 0;
+    let mut last_build_verb = "";
+
+    let flush_build = |result: &mut Vec<String>, count: usize, verb: &str| {
+        if count > 0 {
+            let label = match verb {
+                "Compiling" | "Checking" => "Compiled",
+                "Downloading" | "Downloaded" | "Fetching" => "Downloaded",
+                _ => "Processed",
+            };
+            result.push(format!("   {} {} crates", label, count));
+        }
+    };
+
+    for line in details.lines() {
+        let trimmed = line.trim_start();
+        let is_build = build_prefixes.iter().any(|prefix| line.starts_with(prefix));
+        // Also match "Finished" lines (e.g. "Finished `dev` profile")
+        let is_finished = trimmed.starts_with("Finished ");
+
+        if is_build {
+            // Extract verb for grouping
+            let verb = trimmed.split_whitespace().next().unwrap_or("");
+            if build_count > 0 && verb != last_build_verb {
+                flush_build(&mut result, build_count, last_build_verb);
+                build_count = 0;
+            }
+            last_build_verb = verb;
+            build_count += 1;
+        } else {
+            flush_build(&mut result, build_count, last_build_verb);
+            build_count = 0;
+            if !is_finished || result.is_empty() {
+                result.push(line.to_string());
+            } else {
+                // Replace "Finished" with a cleaner version
+                result.push(line.to_string());
+            }
+        }
+    }
+    flush_build(&mut result, build_count, last_build_verb);
+
+    result
 }
 
 /// Render the /approve policy selector menu
