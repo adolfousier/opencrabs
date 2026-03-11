@@ -298,7 +298,8 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         .and_then(|s| s.model.clone())
         .unwrap_or_else(|| app.provider_model());
 
-    let dialog_height = (model_count as u16 + 20).min(area.height.saturating_sub(4));
+    let custom_extra = app.model_selector_custom_names.len() as u16;
+    let dialog_height = (model_count as u16 + custom_extra + 24).min(area.height.saturating_sub(4));
     let dialog_width = 64u16.min(area.width.saturating_sub(4));
 
     let v_chunks = Layout::default()
@@ -322,27 +323,27 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(""));
 
-    // Provider list — 7 static providers + existing custom providers
-    // Total items = PROVIDERS.len() (7) + custom_names.len()
-    // Index 6 = "+ New Custom", 7+ = existing custom providers by name
-    let total_items = PROVIDERS.len() + app.model_selector_custom_names.len();
-    #[allow(clippy::needless_range_loop)] // indices 7+ are custom providers, not in PROVIDERS array
-    for i in 0..total_items {
-        let selected = i == provider_idx;
+    // Provider list — 6 static providers, then existing custom names, then "+ New Custom" last.
+    // Internal indices: 0-5=static, 6="+New Custom", 7+=existing customs.
+    // Visual order: 0-5, then 7+, then 6 (so existing customs appear before the add button).
+    let num_customs = app.model_selector_custom_names.len();
+    let display_order: Vec<usize> = (0..6)
+        .chain(7..7 + num_customs)
+        .chain(std::iter::once(6))
+        .collect();
+    for &idx in &display_order {
+        let selected = idx == provider_idx;
         let focused = focused_field == 0;
 
         let prefix = if selected && focused { " > " } else { "   " };
         let marker = if selected { "[*]" } else { "[ ]" };
 
-        let label = if i < PROVIDERS.len() {
-            if i == 6 {
-                "+ New Custom Provider".to_string()
-            } else {
-                PROVIDERS[i].name.to_string()
-            }
+        let label = if idx == 6 {
+            "+ New Custom Provider".to_string()
+        } else if idx < PROVIDERS.len() {
+            PROVIDERS[idx].name.to_string()
         } else {
-            // Existing custom provider name (indices 7+)
-            let custom_idx = i - 7;
+            let custom_idx = idx - 7;
             app.model_selector_custom_names
                 .get(custom_idx)
                 .cloned()
@@ -602,6 +603,35 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
                 }),
             ),
         ]));
+
+        // Context Window field (field 5)
+        let cw_focused = focused_field == 5;
+        let cw_cursor = if cw_focused { "█" } else { "" };
+        let cw_display = if app.model_selector_context_window.is_empty() {
+            format!("e.g. 128000 (optional){}", cw_cursor)
+        } else {
+            format!("{}{}", app.model_selector_context_window, cw_cursor)
+        };
+        lines.push(Line::from(vec![
+            Span::styled(
+                "  Context Window: ",
+                Style::default().fg(if cw_focused {
+                    BRAND_BLUE
+                } else {
+                    Color::DarkGray
+                }),
+            ),
+            Span::styled(
+                cw_display,
+                Style::default().fg(if cw_focused {
+                    Color::Reset
+                } else if app.model_selector_context_window.is_empty() {
+                    Color::DarkGray
+                } else {
+                    Color::Cyan
+                }),
+            ),
+        ]));
     }
 
     lines.push(Line::from(""));
@@ -616,7 +646,9 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
             ],
             1 => vec![("[Type]", "Base URL"), ("[Enter]", "Next")],
             2 => vec![("[Type]", "API Key"), ("[Enter]", "Next")],
-            3 => vec![("[Type]", "Model name"), ("[Enter]", "Confirm")],
+            3 => vec![("[Type]", "Model name"), ("[Enter]", "Next")],
+            4 => vec![("[Type]", "Provider name"), ("[Enter]", "Next")],
+            5 => vec![("[Type]", "Context window (tokens)"), ("[Enter]", "Save")],
             _ => vec![],
         }
     } else {

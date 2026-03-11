@@ -346,6 +346,10 @@ impl OnboardingWizard {
                 if !self.custom_model.is_empty() {
                     let _ = Config::write_key(section, "default_model", &self.custom_model);
                 }
+                if !self.custom_context_window.is_empty() {
+                    let _ =
+                        Config::write_key(section, "context_window", &self.custom_context_window);
+                }
             }
             _ => {}
         }

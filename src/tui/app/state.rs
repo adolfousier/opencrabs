@@ -326,6 +326,8 @@ pub struct App {
     pub model_selector_has_existing_key: bool,
     pub model_selector_base_url: String,
     pub model_selector_custom_model: String,
+    /// Context window size for custom providers (digits only, e.g. "128000")
+    pub model_selector_context_window: String,
     /// Custom provider name (from config, e.g. "nvidia", "default")
     pub model_selector_custom_name: String,
     /// Cached list of existing custom provider names for the provider list
@@ -507,6 +509,7 @@ impl App {
             model_selector_has_existing_key: false,
             model_selector_base_url: String::new(),
             model_selector_custom_model: String::new(),
+            model_selector_context_window: String::new(),
             model_selector_custom_name: String::new(),
             model_selector_custom_names: Vec::new(),
             model_selector_focused_field: 0,

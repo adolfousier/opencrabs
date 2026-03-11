@@ -16,6 +16,8 @@ pub struct OnboardingWizard {
     pub custom_provider_name: String,
     pub custom_base_url: String,
     pub custom_model: String,
+    /// Context window size in tokens for custom providers (e.g. "32000")
+    pub custom_context_window: String,
     /// Models fetched live from provider API (overrides static list when non-empty)
     pub fetched_models: Vec<String>,
     pub models_fetching: bool,
@@ -231,6 +233,7 @@ impl OnboardingWizard {
                     let base = c.base_url.clone().unwrap_or_default();
                     let model = c.default_model.clone().unwrap_or_default();
                     custom_provider_name_init = Some(name.to_string());
+                    // context_window is set after wizard construction below
                     // Map to index 7+ for existing custom providers
                     let idx = config
                         .providers
@@ -258,6 +261,7 @@ impl OnboardingWizard {
             custom_provider_name: custom_provider_name_init.unwrap_or_default(),
             custom_base_url,
             custom_model,
+            custom_context_window: String::new(),
             fetched_models: Vec::new(),
             models_fetching: false,
             config_models,
@@ -609,6 +613,7 @@ impl OnboardingWizard {
             self.custom_provider_name.clear();
             self.custom_base_url.clear();
             self.custom_model.clear();
+            self.custom_context_window.clear();
         } else if self.selected_provider >= 7 {
             let custom_idx = self.selected_provider - 7;
             if let Some(cname) = self.existing_custom_names.get(custom_idx).cloned()
@@ -618,6 +623,10 @@ impl OnboardingWizard {
                 self.custom_provider_name = cname;
                 self.custom_base_url = c.base_url.clone().unwrap_or_default();
                 self.custom_model = c.default_model.clone().unwrap_or_default();
+                self.custom_context_window = c
+                    .context_window
+                    .map(|cw| cw.to_string())
+                    .unwrap_or_default();
                 if c.api_key.as_ref().is_some_and(|k| !k.is_empty()) {
                     self.api_key_input = EXISTING_KEY_SENTINEL.to_string();
                 }

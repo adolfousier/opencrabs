@@ -215,6 +215,7 @@ pub enum AuthField {
     CustomBaseUrl,
     CustomApiKey,
     CustomModel,
+    CustomContextWindow,
 }
 
 /// Which field is focused in DiscordSetup step

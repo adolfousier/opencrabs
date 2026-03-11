@@ -451,14 +451,26 @@ impl OnboardingWizard {
                 KeyCode::Backspace => {
                     self.custom_model.pop();
                 }
-                KeyCode::Enter => {
-                    self.next_step();
+                KeyCode::Enter | KeyCode::Tab => {
+                    self.auth_field = AuthField::CustomContextWindow;
                 }
                 KeyCode::BackTab => {
                     self.auth_field = AuthField::CustomApiKey;
                 }
-                KeyCode::Tab => {
+                _ => {}
+            },
+            AuthField::CustomContextWindow => match event.code {
+                KeyCode::Char(c) if c.is_ascii_digit() => {
+                    self.custom_context_window.push(c);
+                }
+                KeyCode::Backspace => {
+                    self.custom_context_window.pop();
+                }
+                KeyCode::Enter | KeyCode::Tab => {
                     self.next_step();
+                }
+                KeyCode::BackTab => {
+                    self.auth_field = AuthField::CustomModel;
                 }
                 _ => {}
             },

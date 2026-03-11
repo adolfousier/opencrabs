@@ -58,6 +58,7 @@ impl App {
                     self.model_selector_custom_name.clear();
                     self.model_selector_base_url.clear();
                     self.model_selector_custom_model.clear();
+                    self.model_selector_context_window.clear();
                     false
                 }
                 idx if idx >= 7 => {
@@ -81,6 +82,10 @@ impl App {
                             self.model_selector_base_url = c.base_url.clone().unwrap_or_default();
                             self.model_selector_custom_model =
                                 c.default_model.clone().unwrap_or_default();
+                            self.model_selector_context_window = c
+                                .context_window
+                                .map(|cw| cw.to_string())
+                                .unwrap_or_default();
                             c.api_key.as_ref().is_some_and(|k| !k.is_empty())
                         } else {
                             false
@@ -182,6 +187,10 @@ impl App {
                         self.model_selector_base_url = c.base_url.clone().unwrap_or_default();
                         self.model_selector_custom_model =
                             c.default_model.clone().unwrap_or_default();
+                        self.model_selector_context_window = c
+                            .context_window
+                            .map(|cw| cw.to_string())
+                            .unwrap_or_default();
                         self.model_selector_custom_name = cname.to_string();
                     }
                     // Map to index 7+ if this name exists in custom_names list
@@ -320,6 +329,10 @@ impl App {
             }
             // Load existing model name so /models doesn't lose it
             self.model_selector_custom_model = custom_cfg.default_model.clone().unwrap_or_default();
+            self.model_selector_context_window = custom_cfg
+                .context_window
+                .map(|cw| cw.to_string())
+                .unwrap_or_default();
             // Remember the custom provider name for saving
             self.model_selector_custom_name = name.to_string();
             // Map to index 7+ if this name exists in custom_names list
@@ -389,7 +402,7 @@ impl App {
             // - Normal providers: provider(0) -> api_key(1) -> model(2) -> provider(0)
             // - Custom provider: provider(0) -> base_url(1) -> api_key(2) -> model(3) -> provider(0)
             let is_custom = self.model_selector_provider_selected >= 6; // Custom provider index
-            let max_field = if is_custom { 4 } else { 3 };
+            let max_field = if is_custom { 5 } else { 3 };
             self.model_selector_focused_field = (self.model_selector_focused_field + 1) % max_field;
             // If moving to provider, enable provider list; otherwise show model list
             self.model_selector_showing_providers = self.model_selector_focused_field == 0;
@@ -464,7 +477,7 @@ impl App {
         } else if self.model_selector_focused_field == 4
             && self.model_selector_provider_selected >= 6
         {
-            // Custom provider: name identifier input (field 4 — last before save)
+            // Custom provider: name identifier input (field 4)
             match event.code {
                 crossterm::event::KeyCode::Char(c) => {
                     self.model_selector_custom_name.push(c);
@@ -473,6 +486,19 @@ impl App {
                 }
                 crossterm::event::KeyCode::Backspace => {
                     self.model_selector_custom_name.pop();
+                }
+                _ => {}
+            }
+        } else if self.model_selector_focused_field == 5
+            && self.model_selector_provider_selected >= 6
+        {
+            // Custom provider: context window input (field 5 — last before save)
+            match event.code {
+                crossterm::event::KeyCode::Char(c) if c.is_ascii_digit() => {
+                    self.model_selector_context_window.push(c);
+                }
+                crossterm::event::KeyCode::Backspace => {
+                    self.model_selector_context_window.pop();
                 }
                 _ => {}
             }
@@ -617,7 +643,7 @@ impl App {
                 // Custom: after model, go to name field (field 4)
                 self.model_selector_focused_field = 4;
             } else if is_custom && self.model_selector_focused_field == 4 {
-                // Custom: on name field — validate then save
+                // Custom: on name field — validate then go to context window
                 if self.model_selector_custom_name.is_empty() {
                     self.error_message =
                         Some("Enter a name identifier for this provider".to_string());
@@ -625,12 +651,12 @@ impl App {
                 } else {
                     self.error_message = None;
                     self.error_message_shown_at = None;
-                    self.save_provider_selection(
-                        self.model_selector_provider_selected.min(6),
-                        false,
-                    )
-                    .await?;
+                    self.model_selector_focused_field = 5;
                 }
+            } else if is_custom && self.model_selector_focused_field == 5 {
+                // Custom: on context window field — save
+                self.save_provider_selection(self.model_selector_provider_selected.min(6), false)
+                    .await?;
             } else {
                 // Non-custom: on model field — save and close
                 self.save_provider_selection(self.model_selector_provider_selected.min(6), false)
@@ -843,6 +869,7 @@ impl App {
                     "custom".to_string()
                 };
                 let mut customs = config.providers.custom.unwrap_or_default();
+                let context_window = self.model_selector_context_window.parse::<u32>().ok();
                 customs.insert(
                     custom_name,
                     ProviderConfig {
@@ -852,6 +879,7 @@ impl App {
                         default_model: Some(custom_model),
                         models: vec![],
                         vision_model: None,
+                        context_window,
                         ..Default::default()
                     },
                 );
@@ -940,6 +968,13 @@ impl App {
                     "base_url",
                     &self.model_selector_base_url,
                 );
+                if !self.model_selector_context_window.is_empty() {
+                    let _ = crate::config::Config::write_key(
+                        section,
+                        "context_window",
+                        &self.model_selector_context_window,
+                    );
+                }
             }
             _ => {}
         }

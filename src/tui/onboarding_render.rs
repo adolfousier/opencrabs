@@ -475,25 +475,27 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
     let is_custom = wizard.is_custom_provider();
     let mut focused_line: usize = 0;
 
-    // Provider list — 7 static providers + existing custom providers
-    let total_items = PROVIDERS.len() + wizard.existing_custom_names.len();
-    #[allow(clippy::needless_range_loop)] // indices 7+ are custom providers, not in PROVIDERS array
-    for i in 0..total_items {
-        let selected = i == wizard.selected_provider;
+    // Provider list — 6 static providers, then existing custom names, then "+ New Custom" last.
+    // Internal indices: 0-5=static, 6="+New Custom", 7+=existing customs.
+    // Visual order: 0-5, then 7+, then 6 (existing customs before add button).
+    let num_customs = wizard.existing_custom_names.len();
+    let display_order: Vec<usize> = (0..6)
+        .chain(7..7 + num_customs)
+        .chain(std::iter::once(6))
+        .collect();
+    for &idx in &display_order {
+        let selected = idx == wizard.selected_provider;
         let focused = wizard.auth_field == AuthField::Provider;
 
         let prefix = if selected && focused { " > " } else { "   " };
         let marker = if selected { "[*]" } else { "[ ]" };
 
-        let label = if i < PROVIDERS.len() {
-            if i == 6 {
-                "+ New Custom Provider".to_string()
-            } else {
-                PROVIDERS[i].name.to_string()
-            }
+        let label = if idx == 6 {
+            "+ New Custom Provider".to_string()
+        } else if idx < PROVIDERS.len() {
+            PROVIDERS[idx].name.to_string()
         } else {
-            // Existing custom provider name (indices 7+)
-            let custom_idx = i - 7;
+            let custom_idx = idx - 7;
             wizard
                 .existing_custom_names
                 .get(custom_idx)
@@ -640,6 +642,33 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
             Span::styled(
                 format!("{}{}", model_display, cursor),
                 Style::default().fg(if model_focused {
+                    Color::White
+                } else {
+                    Color::DarkGray
+                }),
+            ),
+        ]));
+
+        // Context Window field
+        let cw_focused = wizard.auth_field == AuthField::CustomContextWindow;
+        let cw_display = if wizard.custom_context_window.is_empty() {
+            "e.g. 128000 (optional)".to_string()
+        } else {
+            wizard.custom_context_window.clone()
+        };
+        let cursor = if cw_focused { "█" } else { "" };
+        lines.push(Line::from(vec![
+            Span::styled(
+                "  Context:  ",
+                Style::default().fg(if cw_focused {
+                    BRAND_BLUE
+                } else {
+                    Color::DarkGray
+                }),
+            ),
+            Span::styled(
+                format!("{}{}", cw_display, cursor),
+                Style::default().fg(if cw_focused {
                     Color::White
                 } else {
                     Color::DarkGray
