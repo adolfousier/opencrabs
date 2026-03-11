@@ -97,6 +97,14 @@ pub(super) const TEMPLATE_FILES: &[(&str, &str)] = &[
         "MEMORY.md",
         include_str!("../../docs/reference/templates/MEMORY.md"),
     ),
+    (
+        "CODE.md",
+        include_str!("../../docs/reference/templates/CODE.md"),
+    ),
+    (
+        "SECURITY.md",
+        include_str!("../../docs/reference/templates/SECURITY.md"),
+    ),
 ];
 
 /// Current step in the onboarding wizard
