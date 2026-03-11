@@ -205,16 +205,17 @@ impl App {
                         }
                     }
                 }
-                // Update display model name from restored provider
-                self.default_model_name = session
-                    .model
-                    .clone()
-                    .unwrap_or_else(|| self.agent_service.provider_model());
-                self.context_max_tokens = self
-                    .agent_service
-                    .context_window_for_model(&self.default_model_name);
             }
         }
+
+        // Always update display model name from session record
+        self.default_model_name = session
+            .model
+            .clone()
+            .unwrap_or_else(|| self.agent_service.provider_model());
+        self.context_max_tokens = self
+            .agent_service
+            .context_window_for_model(&self.default_model_name);
 
         Ok(())
     }
