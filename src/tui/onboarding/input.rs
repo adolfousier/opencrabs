@@ -324,7 +324,7 @@ impl OnboardingWizard {
                     }
                     self.api_key_cursor = self.api_key_input.len();
                 }
-                KeyCode::Enter | KeyCode::Tab => {
+                KeyCode::Enter | KeyCode::Tab | KeyCode::Down => {
                     // GitHub: if no key pasted yet, re-check gh CLI token
                     if self.selected_provider == 2
                         && !self.has_existing_key()
@@ -351,7 +351,7 @@ impl OnboardingWizard {
                         self.selected_model = 0;
                     }
                 }
-                KeyCode::BackTab => {
+                KeyCode::BackTab | KeyCode::Up => {
                     self.auth_field = AuthField::Provider;
                 }
                 _ => {}
@@ -401,7 +401,7 @@ impl OnboardingWizard {
                 KeyCode::Backspace => {
                     self.custom_provider_name.pop();
                 }
-                KeyCode::Enter | KeyCode::Tab => {
+                KeyCode::Enter | KeyCode::Tab | KeyCode::Down => {
                     if self.custom_provider_name.is_empty() {
                         self.error_message =
                             Some("Enter a name identifier for this provider".to_string());
@@ -410,7 +410,7 @@ impl OnboardingWizard {
                     self.custom_provider_name = self.custom_provider_name.to_lowercase();
                     self.auth_field = AuthField::CustomBaseUrl;
                 }
-                KeyCode::BackTab => {
+                KeyCode::BackTab | KeyCode::Up => {
                     self.auth_field = AuthField::Provider;
                 }
                 _ => {}
@@ -425,10 +425,10 @@ impl OnboardingWizard {
                 KeyCode::Backspace => {
                     self.custom_base_url.pop();
                 }
-                KeyCode::Enter | KeyCode::Tab => {
+                KeyCode::Enter | KeyCode::Tab | KeyCode::Down => {
                     self.auth_field = AuthField::CustomApiKey;
                 }
-                KeyCode::BackTab => {
+                KeyCode::BackTab | KeyCode::Up => {
                     self.auth_field = AuthField::CustomName;
                 }
                 _ => {}
@@ -450,10 +450,10 @@ impl OnboardingWizard {
                         self.api_key_input.pop();
                     }
                 }
-                KeyCode::Enter | KeyCode::Tab => {
+                KeyCode::Enter | KeyCode::Tab | KeyCode::Down => {
                     self.auth_field = AuthField::CustomModel;
                 }
-                KeyCode::BackTab => {
+                KeyCode::BackTab | KeyCode::Up => {
                     self.auth_field = AuthField::CustomBaseUrl;
                 }
                 _ => {}
@@ -468,10 +468,10 @@ impl OnboardingWizard {
                 KeyCode::Backspace => {
                     self.custom_model.pop();
                 }
-                KeyCode::Enter | KeyCode::Tab => {
+                KeyCode::Enter | KeyCode::Tab | KeyCode::Down => {
                     self.auth_field = AuthField::CustomContextWindow;
                 }
-                KeyCode::BackTab => {
+                KeyCode::BackTab | KeyCode::Up => {
                     self.auth_field = AuthField::CustomApiKey;
                 }
                 _ => {}
@@ -486,10 +486,10 @@ impl OnboardingWizard {
                 KeyCode::Backspace => {
                     self.custom_context_window.pop();
                 }
-                KeyCode::Enter | KeyCode::Tab => {
+                KeyCode::Enter | KeyCode::Tab | KeyCode::Down => {
                     self.next_step();
                 }
-                KeyCode::BackTab => {
+                KeyCode::BackTab | KeyCode::Up => {
                     self.auth_field = AuthField::CustomModel;
                 }
                 _ => {}

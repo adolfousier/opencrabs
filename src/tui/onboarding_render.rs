@@ -91,55 +91,71 @@ pub fn render_onboarding(f: &mut Frame, wizard: &OnboardingWizard) {
     // Navigation footer
     if step != OnboardingStep::Complete {
         lines.push(Line::from(""));
-        if wizard.quick_jump {
-            let mut footer: Vec<Span<'static>> = vec![
-                Span::styled(
-                    " [Esc] ",
-                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("Exit  ", Style::default().fg(Color::White)),
-            ];
-            if step == OnboardingStep::HealthCheck {
-                footer.push(Span::styled(
-                    "[Enter] ",
-                    Style::default()
-                        .fg(ACCENT_GOLD)
-                        .add_modifier(Modifier::BOLD),
-                ));
-                if wizard.health_complete {
-                    footer.push(Span::styled("Re-check", Style::default().fg(Color::White)));
-                } else {
-                    footer.push(Span::styled("Check", Style::default().fg(Color::White)));
-                }
-            } else {
-                if step != OnboardingStep::ModeSelect {
-                    footer.push(Span::styled(
-                        "[Tab] ",
-                        Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
-                    ));
-                    footer.push(Span::styled(
-                        "Next Field  ",
-                        Style::default().fg(Color::White),
-                    ));
-                }
-                footer.push(Span::styled(
-                    "[Enter] ",
-                    Style::default()
-                        .fg(ACCENT_GOLD)
-                        .add_modifier(Modifier::BOLD),
-                ));
-                footer.push(Span::styled("Confirm", Style::default().fg(Color::White)));
-            }
-            lines.push(Line::from(footer));
-        } else {
-            let mut footer: Vec<Span<'static>> = vec![
-                Span::styled(
-                    " [Esc] ",
-                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("Back  ", Style::default().fg(Color::White)),
-            ];
 
+        let is_channels = step == OnboardingStep::Channels;
+        let is_channel_sub = matches!(
+            step,
+            OnboardingStep::TelegramSetup
+                | OnboardingStep::DiscordSetup
+                | OnboardingStep::WhatsAppSetup
+                | OnboardingStep::SlackSetup
+                | OnboardingStep::TrelloSetup
+        );
+        let esc_label = if wizard.quick_jump { "Exit" } else { "Back" };
+
+        let mut footer: Vec<Span<'static>> = vec![
+            Span::styled(
+                " [Esc] ",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{}  ", esc_label),
+                Style::default().fg(Color::White),
+            ),
+        ];
+
+        if is_channels {
+            // Channels list: Space toggles, Enter opens setup, arrow keys navigate
+            footer.push(Span::styled(
+                "[Space] ",
+                Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
+            ));
+            footer.push(Span::styled("Toggle  ", Style::default().fg(Color::White)));
+            footer.push(Span::styled(
+                "[Enter] ",
+                Style::default()
+                    .fg(ACCENT_GOLD)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            footer.push(Span::styled("Setup", Style::default().fg(Color::White)));
+        } else if is_channel_sub {
+            // Channel setup screens: arrow keys + tab nav
+            footer.push(Span::styled(
+                "[↑↓] ",
+                Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
+            ));
+            footer.push(Span::styled("Nav  ", Style::default().fg(Color::White)));
+            footer.push(Span::styled(
+                "[Enter] ",
+                Style::default()
+                    .fg(ACCENT_GOLD)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            footer.push(Span::styled("Confirm", Style::default().fg(Color::White)));
+        } else if step == OnboardingStep::HealthCheck {
+            footer.push(Span::styled(
+                "[Enter] ",
+                Style::default()
+                    .fg(ACCENT_GOLD)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            if wizard.health_complete {
+                footer.push(Span::styled("Re-check", Style::default().fg(Color::White)));
+            } else {
+                footer.push(Span::styled("Check", Style::default().fg(Color::White)));
+            }
+        } else {
+            // All other steps: Tab/Shift+Tab field nav + Enter confirm
             if step != OnboardingStep::ModeSelect {
                 footer.push(Span::styled(
                     "[Tab] ",
@@ -150,7 +166,6 @@ pub fn render_onboarding(f: &mut Frame, wizard: &OnboardingWizard) {
                     Style::default().fg(Color::White),
                 ));
             }
-
             footer.push(Span::styled(
                 "[Enter] ",
                 Style::default()
@@ -158,9 +173,9 @@ pub fn render_onboarding(f: &mut Frame, wizard: &OnboardingWizard) {
                     .add_modifier(Modifier::BOLD),
             ));
             footer.push(Span::styled("Confirm", Style::default().fg(Color::White)));
-
-            lines.push(Line::from(footer));
         }
+
+        lines.push(Line::from(footer));
     }
 
     // Bottom padding
@@ -1048,10 +1063,6 @@ fn render_channels(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
         ),
     ]));
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "  Space toggle | Enter setup channel | Tab skip",
-        Style::default().fg(Color::DarkGray),
-    )));
 }
 
 fn render_telegram_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
@@ -1200,10 +1211,6 @@ fn render_telegram_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWiza
     render_channel_test_status(lines, wizard);
 
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "  Tab/Shift+Tab: nav fields | Ctrl+\u{232b}: clear | Enter: confirm | Esc: back",
-        Style::default().fg(Color::DarkGray),
-    )));
 }
 
 fn render_discord_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
@@ -1392,10 +1399,6 @@ fn render_discord_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
     render_channel_test_status(lines, wizard);
 
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "  Tab/Shift+Tab: nav fields | Ctrl+\u{232b}: clear | Enter: confirm | Esc: back",
-        Style::default().fg(Color::DarkGray),
-    )));
 }
 
 fn render_whatsapp_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
@@ -1754,10 +1757,6 @@ fn render_slack_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard)
     render_channel_test_status(lines, wizard);
 
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "  Tab/Shift+Tab: nav fields | Ctrl+\u{232b}: clear | Enter: confirm | Esc: back",
-        Style::default().fg(Color::DarkGray),
-    )));
 }
 
 /// Render respond_to selector: `  Respond to: [ all ]  dm_only  mention`
@@ -2621,8 +2620,4 @@ fn render_trello_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard
     render_channel_test_status(lines, wizard);
 
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "  Tab/Shift+Tab: nav fields | Ctrl+\u{232b}: clear | Enter: confirm | Esc: back",
-        Style::default().fg(Color::DarkGray),
-    )));
 }

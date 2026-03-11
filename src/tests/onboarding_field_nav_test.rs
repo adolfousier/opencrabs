@@ -465,3 +465,108 @@ fn alt_backspace_clears_discord_token_input() {
     w.handle_key(alt_backspace());
     assert!(w.discord_token_input.is_empty());
 }
+
+// ── Arrow Up/Down field navigation ─────────────────────────────
+
+#[test]
+fn arrow_down_advances_telegram_field() {
+    let mut w = clean_wizard();
+    w.step = OnboardingStep::TelegramSetup;
+    w.telegram_field = TelegramField::BotToken;
+
+    w.handle_key(key(KeyCode::Down));
+    assert_eq!(w.telegram_field, TelegramField::UserID);
+}
+
+#[test]
+fn arrow_up_goes_back_telegram_field() {
+    let mut w = clean_wizard();
+    w.step = OnboardingStep::TelegramSetup;
+    w.telegram_field = TelegramField::UserID;
+
+    w.handle_key(key(KeyCode::Up));
+    assert_eq!(w.telegram_field, TelegramField::BotToken);
+}
+
+#[test]
+fn arrow_down_advances_discord_field() {
+    let mut w = clean_wizard();
+    w.step = OnboardingStep::DiscordSetup;
+    w.discord_field = DiscordField::BotToken;
+
+    w.handle_key(key(KeyCode::Down));
+    assert_eq!(w.discord_field, DiscordField::ChannelID);
+}
+
+#[test]
+fn arrow_up_goes_back_discord_field() {
+    let mut w = clean_wizard();
+    w.step = OnboardingStep::DiscordSetup;
+    w.discord_field = DiscordField::ChannelID;
+
+    w.handle_key(key(KeyCode::Up));
+    assert_eq!(w.discord_field, DiscordField::BotToken);
+}
+
+#[test]
+fn arrow_down_advances_slack_field() {
+    let mut w = clean_wizard();
+    w.step = OnboardingStep::SlackSetup;
+    w.slack_field = SlackField::BotToken;
+
+    w.handle_key(key(KeyCode::Down));
+    assert_eq!(w.slack_field, SlackField::AppToken);
+}
+
+#[test]
+fn arrow_up_goes_back_slack_field() {
+    let mut w = clean_wizard();
+    w.step = OnboardingStep::SlackSetup;
+    w.slack_field = SlackField::AppToken;
+
+    w.handle_key(key(KeyCode::Up));
+    assert_eq!(w.slack_field, SlackField::BotToken);
+}
+
+#[test]
+fn arrow_down_advances_trello_field() {
+    let mut w = clean_wizard();
+    w.step = OnboardingStep::TrelloSetup;
+    w.trello_field = TrelloField::ApiKey;
+
+    w.handle_key(key(KeyCode::Down));
+    assert_eq!(w.trello_field, TrelloField::ApiToken);
+}
+
+#[test]
+fn arrow_up_goes_back_trello_field() {
+    let mut w = clean_wizard();
+    w.step = OnboardingStep::TrelloSetup;
+    w.trello_field = TrelloField::ApiToken;
+
+    w.handle_key(key(KeyCode::Up));
+    assert_eq!(w.trello_field, TrelloField::ApiKey);
+}
+
+#[test]
+fn arrow_down_advances_custom_provider_field() {
+    let mut w = clean_wizard();
+    w.step = OnboardingStep::ProviderAuth;
+    w.selected_provider = 6;
+    w.auth_field = AuthField::CustomName;
+    w.custom_provider_name = "test".to_string();
+
+    w.handle_key(key(KeyCode::Down));
+    assert_eq!(w.auth_field, AuthField::CustomBaseUrl);
+}
+
+#[test]
+fn arrow_up_goes_back_custom_provider_field() {
+    let mut w = clean_wizard();
+    w.step = OnboardingStep::ProviderAuth;
+    w.selected_provider = 6;
+    w.auth_field = AuthField::CustomBaseUrl;
+
+    w.handle_key(key(KeyCode::Up));
+    assert_eq!(w.auth_field, AuthField::CustomName);
+}
