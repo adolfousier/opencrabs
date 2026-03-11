@@ -1187,25 +1187,22 @@ impl App {
                     });
                 }
 
-                // Flush queued user message AFTER tools, BEFORE next assistant text.
-                // This ensures follow-up questions appear between tool results and
-                // the assistant's next response — matching natural conversation flow.
-                if let Some(queued_content) = self.message_queue.lock().await.take() {
+                // Clear queued message from the queue (already shown in chat at queue time)
+                if self.message_queue.lock().await.take().is_some() {
                     self.queued_message_preview = None;
-                    self.messages.push(DisplayMessage {
-                        id: Uuid::new_v4(),
-                        role: "user".to_string(),
-                        content: Self::humanize_image_markers(&queued_content),
-                        timestamp: chrono::Utc::now(),
-                        token_count: None,
-                        cost: None,
-                        approval: None,
-                        approve_menu: None,
-                        details: Some("queued".to_string()),
-                        expanded: false,
-                        tool_group: None,
-                    });
-                    tracing::info!("[TUI] Injected queued message between tools and response");
+                    // Remove "queued" styling so the message renders normally
+                    if let Some(msg) = self
+                        .messages
+                        .iter_mut()
+                        .rev()
+                        .find(|m| m.role == "user" && m.details.as_deref() == Some("queued"))
+                    {
+                        msg.details = None;
+                        // Invalidate render cache for this message
+                        let msg_id = msg.id;
+                        self.render_cache.retain(|k, _| k.0 != msg_id);
+                    }
+                    tracing::info!("[TUI] Cleared queued message (already displayed in chat)");
                 }
 
                 // Then add the new intermediate text as a separate assistant message

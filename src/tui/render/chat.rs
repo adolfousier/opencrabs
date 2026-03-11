@@ -150,14 +150,17 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             app.render_cache.insert(cache_key, parsed);
         }
         let content_lines = app.render_cache[&cache_key].clone();
+        let is_queued = is_user && app.messages[msg_idx].details.as_deref() == Some("queued");
         for (i, line) in content_lines.into_iter().enumerate() {
             let mut padded_spans = if i == 0 {
                 if is_user {
                     // User: arrow prefix
-                    vec![Span::styled(
-                        "\u{276F} ",
-                        Style::default().fg(Color::Rgb(100, 100, 100)),
-                    )]
+                    let prefix_color = if is_queued {
+                        Color::Rgb(60, 60, 60)
+                    } else {
+                        Color::Rgb(100, 100, 100)
+                    };
+                    vec![Span::styled("\u{276F} ", Style::default().fg(prefix_color))]
                 } else {
                     // Assistant: colored dot prefix
                     vec![Span::styled(
@@ -170,7 +173,19 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             } else {
                 vec![Span::raw("  ")]
             };
-            padded_spans.extend(line.spans);
+            if is_queued {
+                // Dim all spans for queued messages
+                padded_spans.extend(line.spans.into_iter().map(|s| {
+                    Span::styled(
+                        s.content,
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::ITALIC),
+                    )
+                }));
+            } else {
+                padded_spans.extend(line.spans);
+            }
             let padded_line = Line::from(padded_spans);
             for wrapped in wrap_line_with_padding(padded_line, content_width, "  ") {
                 if let Some(bg) = msg_bg {
