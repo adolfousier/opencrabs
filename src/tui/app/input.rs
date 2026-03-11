@@ -880,8 +880,15 @@ impl App {
                     self.open_file_picker().await?;
                 }
                 KeyCode::Char(c)
-                    if event.modifiers.is_empty() || event.modifiers == KeyModifiers::SHIFT =>
+                    if !event.modifiers.contains(KeyModifiers::CONTROL)
+                        || event.modifiers.contains(KeyModifiers::ALT) =>
                 {
+                    // Accept character input when:
+                    // - No CONTROL modifier (normal typing, SHIFT, SUPER, etc.)
+                    // - CONTROL+ALT together (AltGr on Windows — needed for / ? @ \
+                    //   on non-US keyboard layouts)
+                    // This excludes CONTROL-only combos (Ctrl+C, Ctrl+N, etc.)
+                    // which are handled earlier in the input chain.
                     self.input_buffer.insert(self.cursor_position, c);
                     self.cursor_position += c.len_utf8();
                 }
