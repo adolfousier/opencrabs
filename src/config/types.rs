@@ -786,6 +786,12 @@ pub struct ProviderConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vision_model: Option<String>,
 
+    /// Context window size in tokens for this provider's model.
+    /// Used by auto-compaction to know when to summarize history.
+    /// Essential for custom/local providers whose models aren't recognized by name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u32>,
+
     /// TTS voice name (e.g. "echo") — only used by TTS providers
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub voice: Option<String>,

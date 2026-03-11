@@ -12,6 +12,11 @@ impl App {
     /// Sets a boolean flag — never loads the actual key into memory.
     pub(crate) fn detect_model_selector_key_for_provider(&mut self) {
         let provider_idx = self.model_selector_provider_selected;
+        tracing::debug!(
+            "[detect_key] provider_idx={}, custom_names={:?}",
+            provider_idx,
+            self.model_selector_custom_names,
+        );
         self.model_selector_api_key.clear();
         self.model_selector_has_existing_key = false;
 
@@ -58,8 +63,20 @@ impl App {
                 idx if idx >= 7 => {
                     // Existing custom provider at index (idx - 7) in custom_names list
                     let custom_idx = idx - 7;
+                    tracing::debug!(
+                        "[detect_key] existing custom: idx={}, custom_idx={}, names_len={}",
+                        idx,
+                        custom_idx,
+                        self.model_selector_custom_names.len(),
+                    );
                     if let Some(cname) = self.model_selector_custom_names.get(custom_idx).cloned() {
                         if let Some(c) = config.providers.custom_by_name(&cname) {
+                            tracing::debug!(
+                                "[detect_key] loaded custom '{}': base_url={:?}, model={:?}",
+                                cname,
+                                c.base_url,
+                                c.default_model,
+                            );
                             self.model_selector_custom_name = cname;
                             self.model_selector_base_url = c.base_url.clone().unwrap_or_default();
                             self.model_selector_custom_model =
@@ -326,6 +343,13 @@ impl App {
 
         self.model_selector_provider_selected = provider_idx;
 
+        tracing::info!(
+            "[open_model_selector] resolved: provider_idx={}, has_key={}, custom_names={:?}",
+            provider_idx,
+            api_key.is_some(),
+            self.model_selector_custom_names,
+        );
+
         // Track whether key exists — never load the actual key into UI state
         self.model_selector_has_existing_key = api_key.is_some();
         self.model_selector_api_key.clear();
@@ -389,6 +413,11 @@ impl App {
 
             // If provider changed, detect existing key for the new provider
             if provider_changed {
+                tracing::debug!(
+                    "[model_selector] provider navigated to idx={}, custom_names_len={}",
+                    self.model_selector_provider_selected,
+                    self.model_selector_custom_names.len(),
+                );
                 self.detect_model_selector_key_for_provider();
             }
         } else if self.model_selector_focused_field == 1
@@ -509,6 +538,15 @@ impl App {
         // Enter to confirm - move to next field
         if keys::is_enter(&event) {
             let is_custom = self.model_selector_provider_selected >= 6;
+
+            tracing::debug!(
+                "[model_selector] Enter pressed: field={}, provider_idx={}, is_custom={}, custom_name='{}', base_url='{}'",
+                self.model_selector_focused_field,
+                self.model_selector_provider_selected,
+                is_custom,
+                self.model_selector_custom_name,
+                self.model_selector_base_url,
+            );
 
             if self.model_selector_focused_field == 0 {
                 // On provider field - save config, DON'T close dialog
@@ -916,6 +954,10 @@ impl App {
                 .as_ref()
                 .map(|m| m.keys().cloned().collect())
                 .unwrap_or_default();
+            tracing::debug!(
+                "[save_provider] refreshed custom_names after save: {:?}",
+                self.model_selector_custom_names,
+            );
             // Point selection to the newly saved custom provider
             if !self.model_selector_custom_name.is_empty()
                 && let Some(pos) = self
@@ -924,6 +966,11 @@ impl App {
                     .position(|n| n == &self.model_selector_custom_name)
             {
                 self.model_selector_provider_selected = 7 + pos;
+                tracing::debug!(
+                    "[save_provider] mapped custom '{}' to idx={}",
+                    self.model_selector_custom_name,
+                    7 + pos,
+                );
             }
         }
 
@@ -1140,7 +1187,9 @@ impl App {
                     let provider_idx = wizard.selected_provider;
                     // Resolve API key from config (keys.toml) or raw input
                     let api_key = if wizard.has_existing_key() {
-                        let provider_name = super::onboarding::PROVIDERS[provider_idx].name;
+                        let provider_name = super::onboarding::PROVIDERS
+                            [provider_idx.min(super::onboarding::PROVIDERS.len() - 1)]
+                        .name;
                         let loaded = crate::config::Config::load().ok();
                         match provider_name {
                             "Anthropic Claude" => loaded

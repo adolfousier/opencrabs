@@ -491,6 +491,10 @@ fn configure_openai_compatible(
         tracing::info!("Vision model configured: {}", vm);
         provider = provider.with_vision_model(vm.clone());
     }
+    if let Some(cw) = config.context_window {
+        tracing::info!("Context window configured: {} tokens", cw);
+        provider = provider.with_context_window(cw);
+    }
     provider
 }
 

@@ -122,6 +122,8 @@ pub struct OpenAIProvider {
     vision_model: Option<String>,
     /// Extra headers injected into every request (e.g. GitHub Models API versioning).
     pub(crate) extra_headers: Vec<(String, String)>,
+    /// Configured context window size (overrides model-name heuristics).
+    configured_context_window: Option<u32>,
 }
 
 impl OpenAIProvider {
@@ -143,6 +145,7 @@ impl OpenAIProvider {
             name: "openai".to_string(),
             vision_model: None,
             extra_headers: vec![],
+            configured_context_window: None,
         }
     }
 
@@ -164,6 +167,7 @@ impl OpenAIProvider {
             name: "openai-compatible".to_string(),
             vision_model: None,
             extra_headers: vec![],
+            configured_context_window: None,
         }
     }
 
@@ -185,12 +189,19 @@ impl OpenAIProvider {
             name: "openai-compatible".to_string(),
             vision_model: None,
             extra_headers: vec![],
+            configured_context_window: None,
         }
     }
 
     /// Add extra headers to every request (e.g. API versioning).
     pub fn with_extra_headers(mut self, headers: Vec<(String, String)>) -> Self {
         self.extra_headers = headers;
+        self
+    }
+
+    /// Set a configured context window size that overrides model-name heuristics.
+    pub fn with_context_window(mut self, size: u32) -> Self {
+        self.configured_context_window = Some(size);
         self
     }
 
@@ -1213,6 +1224,10 @@ impl Provider for OpenAIProvider {
     }
 
     fn context_window(&self, model: &str) -> Option<u32> {
+        // User-configured value takes priority over model-name heuristics
+        if let Some(cw) = self.configured_context_window {
+            return Some(cw);
+        }
         let m = model.to_lowercase();
         // gpt-5 family
         if m.starts_with("gpt-5") {

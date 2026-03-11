@@ -269,7 +269,18 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
 
     let focused_field = app.model_selector_focused_field; // 0=provider, 1=api_key, 2=model
     let provider_idx = app.model_selector_provider_selected;
-    let selected_provider = &PROVIDERS[provider_idx];
+    let clamped_idx = provider_idx.min(PROVIDERS.len() - 1);
+
+    tracing::trace!(
+        "[render_model_selector] provider_idx={}, clamped={}, PROVIDERS.len={}, custom_names={:?}, focused_field={}",
+        provider_idx,
+        clamped_idx,
+        PROVIDERS.len(),
+        app.model_selector_custom_names,
+        focused_field,
+    );
+
+    let selected_provider = &PROVIDERS[clamped_idx];
 
     // Get models from fetched list, filtered by search text
     let filter = app.model_selector_filter.to_lowercase();
@@ -279,11 +290,6 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         .filter(|m| filter.is_empty() || m.to_lowercase().contains(&filter))
         .map(|s| s.as_ref())
         .collect();
-
-    // If no models fetched yet, show placeholder
-    if display_models.is_empty() {
-        // Don't show static fallback - tell user to confirm to fetch
-    }
 
     let model_count = display_models.len();
     let current_model = app
