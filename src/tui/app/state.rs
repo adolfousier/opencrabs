@@ -629,7 +629,7 @@ impl App {
             let token = CancellationToken::new();
             self.cancel_token = Some(token.clone());
             tokio::spawn(async move {
-                let wake_up = "[SYSTEM: You just rebuilt yourself from source and restarted \
+                let wake_up = "[System: You just rebuilt yourself from source and restarted \
                     via exec(). Greet the user, confirm the restart succeeded, and continue \
                     where you left off.]";
                 match agent_service
