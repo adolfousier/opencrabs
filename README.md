@@ -57,7 +57,7 @@ OpenCrabs runs as a **single binary on your terminal** — no server, no gateway
 
 ### What goes out (only when you use it)
 
-- Your messages to the LLM provider API (Anthropic, OpenAI, etc.)
+- Your messages to the LLM provider API (Anthropic, OpenAI, GitHub Copilot, etc.)
 - Web search queries (optional tool)
 - GitHub API via `gh` CLI (optional tool)
 
@@ -104,7 +104,7 @@ https://github.com/user-attachments/assets/7f45c5f8-acdf-48d5-b6a4-0e4811a9ee23
 ### AI & Providers
 | Feature | Description |
 |---------|-------------|
-| **Multi-Provider** | Anthropic Claude, OpenAI, GitHub Models (30+ models), OpenRouter (400+ models), MiniMax, Google Gemini, and any OpenAI-compatible API (Ollama, LM Studio, LocalAI). Model lists fetched live from provider APIs — new models available instantly. Each session remembers its provider + model and restores it on switch |
+| **Multi-Provider** | Anthropic Claude, OpenAI, GitHub Copilot (uses your Copilot subscription), OpenRouter (400+ models), MiniMax, Google Gemini, and any OpenAI-compatible API (Ollama, LM Studio, LocalAI). Model lists fetched live from provider APIs — new models available instantly. Each session remembers its provider + model and restores it on switch |
 | **Fallback Providers** | Configure a chain of fallback providers — if the primary fails, each fallback is tried in sequence automatically. Any configured provider can be a fallback. Config: `[providers.fallback] providers = ["openrouter", "anthropic"]` |
 | **Per-Provider Vision** | Set `vision_model` per provider — the LLM calls `analyze_image` as a tool, which uses the vision model on the same provider API to describe images. The chat model stays the same and gets vision capability via tool call. Gemini vision takes priority when configured. Auto-configured for known providers (e.g. MiniMax) on first run |
 | **Real-time Streaming** | Character-by-character response streaming with animated spinner showing model name and live text |
@@ -206,31 +206,28 @@ OAuth tokens (`sk-ant-oat` prefix) are auto-detected — uses `Authorization: Be
 api_key = "sk-YOUR_KEY"
 ```
 
-### GitHub Models
+### GitHub Copilot
 
-**Models:** GPT-5-mini, GPT-4.1-mini, GPT-4.1-nano, o4-mini, o3-mini, Phi-4, Llama 3.x, Mistral Large, DeepSeek-R1, Cohere Command R+, and 30+ more — browse the full catalog at [github.com/marketplace/models](https://github.com/marketplace/models)
+**Use your GitHub Copilot subscription** — no API charges, no tokens to manage. OpenCrabs authenticates via the same OAuth device flow used by VS Code and other Copilot tools.
 
-**Setup** — select GitHub Models in the onboarding wizard, click the link shown to create a token, paste it back. Done. The wizard handles config and model selection automatically.
+**Setup** — select GitHub Copilot in the onboarding wizard and press Enter. You'll see a one-time code to enter at [github.com/login/device](https://github.com/login/device). Once authorized, models are fetched from the Copilot API automatically.
 
-If you already have the GitHub CLI authenticated (`gh auth login`), the token is auto-detected — no setup needed at all.
+**Requirements:** An active [GitHub Copilot](https://github.com/features/copilot) subscription (Individual, Business, or Enterprise).
 
 <details><summary>Manual config (without wizard)</summary>
 
-Paste a PAT from [github.com/settings/tokens/new](https://github.com/settings/tokens/new?scopes=read:user&description=OpenCrabs) into `keys.toml`:
-```toml
-[providers.github]
-api_key = "ghp_YOUR_TOKEN"
-```
+The OAuth token is saved automatically during onboarding. If you need to re-authenticate, run `/onboard:provider` and select GitHub Copilot.
 
 Enable in `config.toml`:
 ```toml
 [providers.github]
 enabled = true
-default_model = "gpt-5-mini"
+default_model = "gpt-4o"
+base_url = "https://api.githubcopilot.com/chat/completions"
 ```
 </details>
 
-**Features:** Streaming, tools, OpenAI-compatible API at `models.github.ai/inference`. GitHub-specific API headers (`Accept`, `X-GitHub-Api-Version`) are injected automatically.
+**Features:** Streaming, tools, OpenAI-compatible API at `api.githubcopilot.com`. Copilot-specific headers (`copilot-integration-id`, `editor-version`) are injected automatically. Short-lived API tokens are refreshed in the background every ~25 minutes.
 
 ### OpenRouter — 400+ Models, One Key
 
@@ -345,7 +342,7 @@ default_model = "moonshotai/kimi-k2.5"
 api_key = "nvapi-..."
 ```
 
-**Provider priority:** MiniMax > OpenRouter > Anthropic > OpenAI > Gemini > Custom. The first provider with `enabled = true` is used on new sessions. Each provider has its own API key in `keys.toml` — no sharing or confusion.
+**Provider priority:** MiniMax > OpenRouter > Anthropic > OpenAI > GitHub Copilot > Gemini > Custom. The first provider with `enabled = true` is used on new sessions. Each provider has its own API key in `keys.toml` — no sharing or confusion.
 
 **Per-session provider:** Each session remembers which provider and model it was using. Switch to Claude in one session, Kimi in another — when you `/sessions` switch between them, the provider restores automatically. No need to `/models` every time. New sessions inherit the current provider.
 
@@ -688,7 +685,7 @@ First-time users are guided through a 9-step setup wizard that appears automatic
 | Step | Title | What It Does |
 |------|-------|-------------|
 | 1 | **Mode Selection** | QuickStart (sensible defaults) vs Advanced (full control) |
-| 2 | **Model & Auth** | Pick provider (Anthropic, OpenAI, Gemini, OpenRouter, Minimax, Custom) → enter token/key → model list fetched live from API → select model. Auto-detects existing keys from `keys.toml` |
+| 2 | **Model & Auth** | Pick provider (Anthropic, OpenAI, GitHub Copilot, Gemini, OpenRouter, Minimax, Custom) → enter token/key or sign in via OAuth → model list fetched live from API → select model. Auto-detects existing keys from `keys.toml` |
 | 3 | **Workspace** | Set brain workspace path (default `~/.opencrabs/`) → seed template files (SOUL.md, IDENTITY.md, etc.) |
 | 4 | **Gateway** | Configure HTTP API gateway: port, bind address, auth mode |
 | 5 | **Channels** | Toggle messaging integrations (Telegram, Discord, WhatsApp, Slack, Trello) |
@@ -763,6 +760,9 @@ api_key = "sk-ant-api03-YOUR_KEY"    # or OAuth: "sk-ant-oat01-..."
 
 [providers.openai]
 api_key = "sk-YOUR_KEY"
+
+[providers.github]
+api_key = "gho_..."                  # OAuth token (auto-saved by onboarding wizard)
 
 [providers.openrouter]
 api_key = "sk-or-YOUR_KEY"
@@ -1549,7 +1549,7 @@ opencrabs/
 │   ├── app/              # Application lifecycle
 │   ├── brain/            # Intelligence layer — LLM providers, agent, tools, brain system
 │   │   ├── agent/        # Agent service + context management
-│   │   ├── provider/     # Provider implementations (Anthropic, OpenAI-Compatible: OpenRouter, Minimax, Custom)
+│   │   ├── provider/     # Provider implementations (Anthropic, GitHub Copilot, OpenAI-Compatible: OpenRouter, Minimax, Custom)
 │   │   ├── tools/        # Tool system (read, write, bash, glob, grep, memory_search, etc.)
 │   │   ├── tokenizer.rs  # Token counting (tiktoken-based)
 │   │   ├── prompt_builder.rs  # BrainLoader — assembles system brain from workspace files
@@ -1577,7 +1577,7 @@ opencrabs/
 │   │   └── runner.rs     # TUI event loop
 │   ├── utils/            # Utilities (retry, etc.)
 │   ├── migrations/       # SQLite migrations
-│   ├── tests/            # 1,279 tests (see TESTING.md)
+│   ├── tests/            # 1,286 tests (see TESTING.md)
 │   ├── benches/          # Criterion benchmarks
 │   └── docs/             # Documentation + screenshots
 ├── Cargo.toml
@@ -1602,7 +1602,7 @@ cargo build --release
 # Small release build
 cargo build --profile release-small
 
-# Run tests (1,279 tests across 60+ modules)
+# Run tests (1,286 tests across 60+ modules)
 cargo test --all-features
 # See TESTING.md for full test coverage documentation
 

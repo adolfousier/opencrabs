@@ -17,6 +17,7 @@ cargo test --all-features
 | **Brain — Provider (Retry)** | 9 | `src/brain/provider/retry.rs` |
 | **Brain — Provider (Custom OpenAI)** | 9 | `src/brain/provider/custom_openai_compatible.rs` |
 | **Brain — Provider (Factory)** | 4 | `src/brain/provider/factory.rs` |
+| **Brain — Provider (Copilot)** | 8 | `src/brain/provider/copilot.rs` |
 | **Brain — Provider (Types/Error/Trait)** | 7 | `src/brain/provider/` |
 | **Brain — Tokenizer** | 8 | `src/brain/tokenizer.rs` |
 | **Brain — Commands** | 6 | `src/brain/commands.rs` |
@@ -76,7 +77,7 @@ cargo test --all-features
 | Tests — Session & Working Dir | 15 | `src/tests/session_working_dir_test.rs` |
 | Tests — Message Compaction | 24 | `src/tests/compaction_test.rs` |
 | Tests — Fallback Vision | 35 | `src/tests/fallback_vision_test.rs` |
-| Tests — GitHub Provider | 39 | `src/tests/github_provider_test.rs` |
+| Tests — GitHub Copilot Provider | 38 | `src/tests/github_provider_test.rs` |
 | Tests — File Extract | 36 | `src/tests/file_extract_test.rs` |
 | Tests — Image Utils | 9 | `src/tests/image_util_test.rs` |
 | Tests — Onboarding Brain | 21 | `src/tests/onboarding_brain_test.rs` |
@@ -90,7 +91,7 @@ cargo test --all-features
 | Tests — Custom Provider | 27 | `src/tests/custom_provider_test.rs` |
 | Tests — Context Window | 14 | `src/tests/context_window_test.rs` |
 | Tests — Onboarding Field Nav | 46 | `src/tests/onboarding_field_nav_test.rs` |
-| **Total** | **1,279** | |
+| **Total** | **1,286** | |
 
 ---
 
