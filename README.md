@@ -86,6 +86,7 @@ OpenCrabs runs as a **single binary on your terminal** — no server, no gateway
 - [Development](#-development)
 - [Platform Notes](#-platform-notes)
 - [Troubleshooting](#-troubleshooting)
+- [Companion Tools](#-companion-tools)
 - [Disclaimers](#-disclaimers)
 - [Contributing](#-contributing)
 - [License](#-license)
@@ -169,7 +170,7 @@ Images are passed to the active model's vision pipeline if it supports multimoda
 ### Agent Capabilities
 | Feature | Description |
 |---------|-------------|
-| **Built-in Tools** | Read/write/edit files, bash, glob, grep, web search (DuckDuckGo + EXA default, no key needed; Brave optional), and more |
+| **Full Terminal Access** | 30+ built-in tools (file I/O, glob, grep, web search, code execution, image gen/analysis, memory search, cron jobs) plus **any CLI tool on your system** via `bash` — GitHub CLI, Docker, SSH, Python, Node, ffmpeg, curl, and everything else just work |
 | **Per-Session Isolation** | Each session is an independent agent with its own provider, model, context, and tool state. Sessions can run tasks in parallel against different providers — ask Claude a question in one session while Kimi works on code in another |
 | **Self-Sustaining** | Agent can modify its own source, build, test, and hot-restart via Unix `exec()` |
 | **Natural Language Commands** | Tell OpenCrabs to create slash commands — it writes them to `commands.toml` autonomously via the `config_manager` tool |
@@ -1106,29 +1107,74 @@ A full example with all built-in providers (Anthropic, OpenAI, MiniMax, Google, 
 
 ## 🔧 Tool System
 
-OpenCrabs includes a built-in tool execution system. The AI can use these tools during conversation:
+OpenCrabs includes 30+ built-in tools. The AI can use these during conversation:
 
+#### File & Code
 | Tool | Description |
 |------|-------------|
 | `read_file` | Read file contents with syntax awareness |
 | `write_file` | Create or modify files |
 | `edit_file` | Precise text replacements in files |
-| `bash` | Execute shell commands |
+| `bash` | Execute shell commands — **any CLI tool on your system works** |
 | `ls` | List directory contents |
 | `glob` | Find files matching patterns |
 | `grep` | Search file contents with regex |
-| `web_search` | Search the web (DuckDuckGo, always available, no key needed) |
-| `exa_search` | Neural web search via EXA AI (free via MCP, no API key needed; set key in `keys.toml` for higher rate limits) |
-| `brave_search` | Web search via Brave Search (set key in `keys.toml` — free $5/mo credits at brave.com/search/api) |
 | `execute_code` | Run code in various languages |
 | `notebook_edit` | Edit Jupyter notebooks |
 | `parse_document` | Extract text from PDF, DOCX, HTML |
-| `task_manager` | Manage agent tasks |
+
+#### Search & Web
+| Tool | Description |
+|------|-------------|
+| `web_search` | Search the web (DuckDuckGo, always available, no key needed) |
+| `exa_search` | Neural web search via EXA AI (free via MCP, no API key needed; set key in `keys.toml` for higher rate limits) |
+| `brave_search` | Web search via Brave Search (set key in `keys.toml` — free $5/mo credits at brave.com/search/api) |
 | `http_request` | Make HTTP requests |
 | `memory_search` | Hybrid semantic search across past memory logs — FTS5 keyword + vector embeddings (768-dim, local GGUF model) combined via RRF. No API key needed, runs offline |
+
+#### Image
+| Tool | Description |
+|------|-------------|
+| `generate_image` | Generate images via Google Gemini — auto-sent as native images on all channels |
+| `analyze_image` | Analyze images (local files or URLs) via vision model — uses Gemini vision or provider's `vision_model` |
+
+#### Channel Tools
+| Tool | Description |
+|------|-------------|
+| `telegram_send` | 19 actions: send, reply, edit, delete, pin, forward, send_photo, send_document, polls, buttons, admin ops |
+| `discord_send` | 17 actions: send, reply, react, edit, delete, pin, threads, embeds, roles, kick, ban, send_file |
+| `slack_send` | 17 actions: send, reply, react, edit, delete, pin, blocks, topics, members, send_file |
+| `trello_send` | 22 actions: cards, comments, checklists, labels, members, attachments, board management, search |
+| `channel_search` | Search captured message history across all channels (Telegram, Discord, Slack, WhatsApp) |
+
+#### Agent & System
+| Tool | Description |
+|------|-------------|
+| `task_manager` | Manage agent tasks |
+| `plan` | Create structured execution plans |
 | `config_manager` | Read/write config.toml and commands.toml at runtime (change settings, add/remove commands, reload config) |
 | `session_context` | Access session information |
-| `plan` | Create structured execution plans |
+| `cron_manage` | Schedule recurring jobs — create, list, enable/disable, delete. Deliver results to any channel |
+| `a2a_send` | Send tasks to remote A2A-compatible agents via JSON-RPC 2.0 |
+| `evolve` | Download latest release binary from GitHub and hot-restart (no Rust toolchain needed) |
+| `rebuild` | Build from source (`cargo build --release`) and hot-restart |
+
+### System CLI Tools
+
+OpenCrabs can leverage **any CLI tool installed on your system** via `bash`. Common integrations:
+
+| Tool | Purpose | Example |
+|------|---------|---------|
+| `gh` | GitHub CLI — issues, PRs, repos, releases, actions | `gh issue list`, `gh pr create` |
+| `gog` | Google CLI — Gmail, Calendar (OAuth) | `gog gmail search "is:unread"`, `gog calendar events` |
+| `docker` | Container management | `docker ps`, `docker compose up` |
+| `ssh` | Remote server access | `ssh user@host "command"` |
+| `node` | Run JavaScript/TypeScript tools | `node script.js` |
+| `python3` | Run Python scripts and tools | `python3 analyze.py` |
+| `ffmpeg` | Audio/video processing | `ffmpeg -i input.mp4 output.gif` |
+| `curl` | HTTP requests (fallback when `http_request` insufficient) | `curl -s api.example.com` |
+
+Any tool on your `$PATH` works. If it runs in your terminal, OpenCrabs can use it.
 
 ---
 
@@ -1763,57 +1809,41 @@ This reliably resolves the issue. A fix is coming in a future release.
 
 ---
 
-### SocialCrabs (Twitter/X, Instagram, LinkedIn)
+## 🧩 Companion Tools
 
-SocialCrabs is the social media automation template for OpenCrabs. It uses **CLI + GraphQL** to interact with social platforms — fast, reliable, no browser needed.
+### WhisperCrabs — Voice-to-Text
 
-#### Authentication
+[WhisperCrabs](https://github.com/adolfousier/whispercrabs) is a floating voice-to-text tool. Click to record, click to stop, transcribes, copies to clipboard.
 
-SocialCrabs uses cookie-based authentication. Get your cookies from the browser:
+- **Local** (whisper.cpp, on-device) or **API** transcription
+- Fully controllable via D-Bus — start/stop recording, switch providers, view history
+- Works as an OpenCrabs tool: use D-Bus to control WhisperCrabs from the agent
 
-1. Open x.com in Chrome/Edge
-2. Open DevTools (F12) → Application → Cookies → x.com
-3. Copy `auth_token` and `ct0` values
-4. Save to `sessions/twitter.json` or use `sync-bird-cookies.ts`
+### SocialCrabs — Social Media Automation
 
-Or run: `node dist/cli.js session login twitter` for interactive login.
-
-#### CLI Commands
-
-All engagement goes through the CLI using Twitter's GraphQL API:
+[SocialCrabs](https://github.com/adolfousier/socialcrabs) automates social media via **CLI + GraphQL** — Twitter/X, Instagram, LinkedIn. No browser needed.
 
 ```bash
-cd /path/to/socialcrabs
-
 # Twitter/X
 node dist/cli.js x whoami
 node dist/cli.js x search "query" -n 10
-node dist/cli.js x home -n 20
-node dist/cli.js x mentions -n 10
-node dist/cli.js x like <tweet-url>
+node dist/cli.js x tweet "Hello world"
 node dist/cli.js x reply <tweet-url> "your reply"
-node dist/cli.js x tweet "your post"
-node dist/cli.js x follow <username>
 
 # Instagram
-node dist/cli.js ig posts <username> -n 3
 node dist/cli.js ig like <post-url>
 node dist/cli.js ig comment <post-url> "your comment"
+node dist/cli.js ig dm <username> "message"
 
 # LinkedIn
 node dist/cli.js linkedin search "AI founder" -n 10
 node dist/cli.js linkedin like <post-url>
-node dist/cli.js linkedin comment <post-url> "your comment"
+node dist/cli.js linkedin connect <profile-url>
 ```
 
-#### Troubleshooting
+**Setup:** Clone repo → add platform cookies/credentials to `.env` → `node dist/cli.js session login <platform>`. Cookie-based auth — grab `auth_token` + `ct0` from browser DevTools.
 
-| Issue | Fix |
-|-------|-----|
-| Session expired | Run `node dist/cli.js session login twitter` |
-| Auth errors | Verify `auth_token` and `ct0` in `sessions/twitter.json` are current |
-| Login modal / "Like a post to share the love" | Cookies expired. Get fresh `auth_token` + `ct0` from browser DevTools → Application → Cookies → x.com, then re-sync to `sessions/twitter.json` |
-| Rate limited | Wait a few minutes, GraphQL has strict limits |
+OpenCrabs uses SocialCrabs CLI commands via `bash`. Read operations are safe; write operations (tweet, like, follow) require explicit user approval.
 
 ---
 
