@@ -1201,7 +1201,7 @@ fn render_telegram_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWiza
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "  Tab: next field | Enter: test/continue | Esc: back",
+        "  Tab/Shift+Tab: nav fields | Ctrl+\u{232b}: clear | Enter: confirm | Esc: back",
         Style::default().fg(Color::DarkGray),
     )));
 }
@@ -1393,7 +1393,7 @@ fn render_discord_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "  Tab: next field | Enter: test/continue | Esc: back",
+        "  Tab/Shift+Tab: nav fields | Ctrl+\u{232b}: clear | Enter: confirm | Esc: back",
         Style::default().fg(Color::DarkGray),
     )));
 }
@@ -1515,7 +1515,7 @@ fn render_whatsapp_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWiza
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "  Tab: next field | Enter: test/continue | S: skip | Esc: back",
+        "  Tab/Shift+Tab: nav fields | Ctrl+\u{232b}: clear | Enter: confirm | S: skip | Esc: back",
         Style::default().fg(Color::DarkGray),
     )));
 }
@@ -1755,7 +1755,7 @@ fn render_slack_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard)
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "  Tab: next field | Enter: test/continue | Esc: back",
+        "  Tab/Shift+Tab: nav fields | Ctrl+\u{232b}: clear | Enter: confirm | Esc: back",
         Style::default().fg(Color::DarkGray),
     )));
 }
@@ -2622,7 +2622,7 @@ fn render_trello_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "  Tab: next field | Enter: test/continue | Esc: back",
+        "  Tab/Shift+Tab: nav fields | Ctrl+\u{232b}: clear | Enter: confirm | Esc: back",
         Style::default().fg(Color::DarkGray),
     )));
 }

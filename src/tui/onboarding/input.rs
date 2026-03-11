@@ -1,5 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
+use super::helpers::is_clear_field;
 use super::types::*;
 use super::wizard::OnboardingWizard;
 
@@ -310,6 +311,10 @@ impl OnboardingWizard {
                     self.api_key_input.push(c);
                     self.api_key_cursor = self.api_key_input.len();
                 }
+                KeyCode::Backspace if is_clear_field(&event) => {
+                    self.api_key_input.clear();
+                    self.api_key_cursor = 0;
+                }
                 KeyCode::Backspace => {
                     // If existing key sentinel, clear entirely on backspace
                     if self.has_existing_key() {
@@ -390,6 +395,9 @@ impl OnboardingWizard {
                 KeyCode::Char(c) => {
                     self.custom_provider_name.push(c);
                 }
+                KeyCode::Backspace if is_clear_field(&event) => {
+                    self.custom_provider_name.clear();
+                }
                 KeyCode::Backspace => {
                     self.custom_provider_name.pop();
                 }
@@ -411,6 +419,9 @@ impl OnboardingWizard {
                 KeyCode::Char(c) => {
                     self.custom_base_url.push(c);
                 }
+                KeyCode::Backspace if is_clear_field(&event) => {
+                    self.custom_base_url.clear();
+                }
                 KeyCode::Backspace => {
                     self.custom_base_url.pop();
                 }
@@ -428,6 +439,9 @@ impl OnboardingWizard {
                         self.api_key_input.clear();
                     }
                     self.api_key_input.push(c);
+                }
+                KeyCode::Backspace if is_clear_field(&event) => {
+                    self.api_key_input.clear();
                 }
                 KeyCode::Backspace => {
                     if self.has_existing_key() {
@@ -448,6 +462,9 @@ impl OnboardingWizard {
                 KeyCode::Char(c) => {
                     self.custom_model.push(c);
                 }
+                KeyCode::Backspace if is_clear_field(&event) => {
+                    self.custom_model.clear();
+                }
                 KeyCode::Backspace => {
                     self.custom_model.pop();
                 }
@@ -462,6 +479,9 @@ impl OnboardingWizard {
             AuthField::CustomContextWindow => match event.code {
                 KeyCode::Char(c) if c.is_ascii_digit() => {
                     self.custom_context_window.push(c);
+                }
+                KeyCode::Backspace if is_clear_field(&event) => {
+                    self.custom_context_window.clear();
                 }
                 KeyCode::Backspace => {
                     self.custom_context_window.pop();
