@@ -1542,6 +1542,105 @@ The heartbeat prompt is loaded into the agent's brain every turn. When the heart
 
 **Rule of thumb:** Use heartbeats for lightweight monitoring that benefits from conversation context. Use cron jobs for standalone tasks that need exact timing, different models, or isolation.
 
+### Autostart on Boot
+
+To keep OpenCrabs always running, set it to start automatically with your system.
+
+#### Linux (systemd)
+
+```bash
+mkdir -p ~/.config/systemd/user
+
+cat > ~/.config/systemd/user/opencrabs.service << 'EOF'
+[Unit]
+Description=OpenCrabs AI Agent
+After=network.target
+
+[Service]
+ExecStart=%h/.cargo/bin/opencrabs daemon
+Restart=on-failure
+RestartSec=5
+Environment=OPENCRABS_HOME=%h/.opencrabs
+
+[Install]
+WantedBy=default.target
+EOF
+
+systemctl --user daemon-reload
+systemctl --user enable opencrabs
+systemctl --user start opencrabs
+
+# Check status
+systemctl --user status opencrabs
+
+# View logs
+journalctl --user -u opencrabs -f
+```
+
+> Replace `%h/.cargo/bin/opencrabs` with the actual path to your binary if you installed it elsewhere (e.g. `/usr/local/bin/opencrabs`).
+
+#### macOS (launchd)
+
+```bash
+cat > ~/Library/LaunchAgents/com.opencrabs.agent.plist << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.opencrabs.agent</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/opencrabs</string>
+        <string>daemon</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/opencrabs.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/opencrabs.err</string>
+</dict>
+</plist>
+EOF
+
+launchctl load ~/Library/LaunchAgents/com.opencrabs.agent.plist
+
+# Check status
+launchctl list | grep opencrabs
+
+# Stop and unload
+launchctl unload ~/Library/LaunchAgents/com.opencrabs.agent.plist
+```
+
+> Update the path in `ProgramArguments` to match your install. For cargo installs: `~/.cargo/bin/opencrabs`. For source builds: `/path/to/target/release/opencrabs`.
+
+#### Windows (Task Scheduler)
+
+1. Press `Win + R`, type `taskschd.msc`, hit Enter
+2. Click **Create Basic Task** in the right panel
+3. Name: `OpenCrabs`, Description: `OpenCrabs AI Agent`
+4. Trigger: **When I log on**
+5. Action: **Start a program**
+6. Program: `C:\Users\<you>\.cargo\bin\opencrabs.exe` (or wherever your binary lives)
+7. Arguments: `daemon`
+8. Check **Open the Properties dialog** before finishing
+9. In Properties > Settings, check **If the task fails, restart every 1 minute**
+
+Or via PowerShell:
+
+```powershell
+$action = New-ScheduledTaskAction -Execute "$env:USERPROFILE\.cargo\bin\opencrabs.exe" -Argument "daemon"
+$trigger = New-ScheduledTaskTrigger -AtLogon
+$settings = New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+Register-ScheduledTask -TaskName "OpenCrabs" -Action $action -Trigger $trigger -Settings $settings -Description "OpenCrabs AI Agent"
+```
+
+> All platforms: cron jobs, heartbeats, and channel listeners (Telegram, Discord, Slack, WhatsApp) work in daemon mode. The TUI is not needed for background operation.
+
 ---
 
 ## 🏗️ Architecture
