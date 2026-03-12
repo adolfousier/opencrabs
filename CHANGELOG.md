@@ -5,6 +5,25 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.75] - 2026-03-12
+
+### Added
+- **Post-evolve brain update prompt** — After `/evolve` restarts, Crabs announces the new version, diffs brain templates, and offers to update user's brain files
+- **WhatsApp error reporting** — Agent errors (session store failures, connection issues) now broadcast to the TUI with specific error messages, log paths, and retry/reset instructions
+- **QR render tests** — 8 tests for Unicode QR code rendering (width consistency, expected characters, quiet zone)
+- **WhatsApp state tests** — 7 tests for broadcast channel behavior (QR, connected, error channels)
+- **Post-evolve tests** — 5 tests for version comparison and evolve message format
+- **Test coverage** — 1,394 tests (up from 1,373)
+- **Autostart-on-boot instructions** — README now covers systemd (Linux), launchd (macOS), and Task Scheduler (Windows)
+
+### Fixed
+- **WhatsApp QR popup width on Windows** — Used `unicode_width::UnicodeWidthStr` instead of `str::len()` for correct display column calculation (3 bytes per Unicode block char was tripling the width)
+
+### Changed
+- **Assets consolidated** — Screenshots, icons, and scripts moved from root directories into `src/assets/` and `src/scripts/`
+- **SocialCrabs docs expanded** — Full setup guide, natural language usage examples, and per-platform command reference in README
+- **GitHub Actions Node.js 24** — Added `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true` to CI and release workflows
+
 ## [0.2.74] - 2026-03-12
 
 ### Added
@@ -1532,6 +1551,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.75]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.75
 [0.2.74]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.74
 [0.2.73]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.73
 [0.2.72]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.72
