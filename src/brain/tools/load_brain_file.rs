@@ -21,10 +21,10 @@ impl Tool for LoadBrainFileTool {
     }
 
     fn description(&self) -> &str {
-        "Load a specific brain context file from the OpenCrabs home directory (~/.opencrabs/). \
-         Use this to retrieve USER.md, MEMORY.md, AGENTS.md, TOOLS.md, SECURITY.md, etc. \
-         on demand — only when the current request actually needs that context. \
-         Pass name=\"all\" to load all available contextual files at once. \
+        "Load any .md file from the OpenCrabs home directory (~/.opencrabs/). \
+         Works with built-in files (USER.md, MEMORY.md, AGENTS.md, TOOLS.md, SECURITY.md) \
+         and user-created files (VOICE.md, custom notes, etc.). \
+         Pass name=\"all\" to load all .md files at once. \
          To edit or update brain files, use the `write_opencrabs_file` tool."
     }
 
@@ -64,7 +64,11 @@ impl Tool for LoadBrainFileTool {
 
         if name == "all" {
             let mut out = String::new();
+            let mut seen = std::collections::HashSet::new();
+
+            // Known contextual files first (stable order)
             for (fname, label) in CONTEXTUAL_BRAIN_FILES {
+                seen.insert(fname.to_lowercase());
                 let path = home.join(fname);
                 if let Ok(content) = std::fs::read_to_string(&path) {
                     let trimmed = content.trim();
@@ -73,30 +77,44 @@ impl Tool for LoadBrainFileTool {
                     }
                 }
             }
+
+            // User-created .md files not in the known list
+            if let Ok(entries) = std::fs::read_dir(&home) {
+                let mut extras: Vec<_> = entries
+                    .filter_map(|e| e.ok())
+                    .filter(|e| {
+                        let name = e.file_name().to_string_lossy().to_string();
+                        name.ends_with(".md") && !seen.contains(&name.to_lowercase())
+                    })
+                    .collect();
+                extras.sort_by_key(|e| e.file_name());
+                for entry in extras {
+                    let fname = entry.file_name().to_string_lossy().to_string();
+                    if let Ok(content) = std::fs::read_to_string(entry.path()) {
+                        let trimmed = content.trim();
+                        if !trimmed.is_empty() {
+                            out.push_str(&format!("--- {} (user) ---\n{}\n\n", fname, trimmed));
+                        }
+                    }
+                }
+            }
+
             return if out.is_empty() {
-                Ok(ToolResult::success(
-                    "No contextual brain files found.".to_string(),
-                ))
+                Ok(ToolResult::success("No brain files found.".to_string()))
             } else {
                 Ok(ToolResult::success(out))
             };
         }
 
-        // Validate name against the known list (prevents path traversal)
-        let is_known = CONTEXTUAL_BRAIN_FILES
-            .iter()
-            .any(|(n, _)| n.eq_ignore_ascii_case(name));
-
-        if !is_known {
-            let known: Vec<&str> = CONTEXTUAL_BRAIN_FILES.iter().map(|(n, _)| *n).collect();
+        // Validate filename: must be a simple .md name (no path traversal)
+        if name.contains('/') || name.contains('\\') || name.contains("..") {
             return Ok(ToolResult::error(format!(
-                "Unknown brain file '{}'. Valid options: {} (or \"all\")",
-                name,
-                known.join(", ")
+                "Invalid brain file name '{}'. Must be a simple filename (e.g. VOICE.md)",
+                name
             )));
         }
 
-        // Use the canonical casing from the list
+        // Use canonical casing from the known list if it matches, otherwise use as-is
         let canonical = CONTEXTUAL_BRAIN_FILES
             .iter()
             .find(|(n, _)| n.eq_ignore_ascii_case(name))

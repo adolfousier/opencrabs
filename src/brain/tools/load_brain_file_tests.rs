@@ -72,38 +72,43 @@ async fn test_empty_name_returns_error() {
 }
 
 #[tokio::test]
-async fn test_unknown_file_returns_error_with_valid_list() {
-    // Attempting to load an arbitrary file outside the allow-list must be rejected.
-    // This is the path-traversal guard.
+async fn test_path_traversal_rejected() {
     let result = tool()
         .execute(serde_json::json!({"name": "../../etc/passwd"}), &ctx())
         .await
         .unwrap();
-    assert!(!result.success, "unknown file must fail");
+    assert!(!result.success, "path traversal must fail");
     let err = result.error.unwrap();
     assert!(
-        err.contains("Unknown brain file"),
-        "error must say 'Unknown brain file'"
-    );
-    // Error should enumerate valid options so the agent can self-correct
-    assert!(
-        err.contains("MEMORY.md"),
-        "error should list MEMORY.md as valid"
-    );
-    assert!(
-        err.contains("USER.md"),
-        "error should list USER.md as valid"
+        err.contains("Invalid brain file name"),
+        "error must say 'Invalid brain file name', got: {}",
+        err
     );
 }
 
 #[tokio::test]
-async fn test_unknown_custom_name_rejected() {
+async fn test_slash_in_name_rejected() {
     let result = tool()
-        .execute(serde_json::json!({"name": "EVIL.md"}), &ctx())
+        .execute(serde_json::json!({"name": "sub/file.md"}), &ctx())
         .await
         .unwrap();
-    assert!(!result.success);
-    assert!(result.error.unwrap().contains("Unknown brain file"));
+    assert!(!result.success, "slash in name must fail");
+    assert!(result.error.unwrap().contains("Invalid brain file name"));
+}
+
+#[tokio::test]
+async fn test_custom_user_file_accepted() {
+    // User-created files like VOICE.md must be loadable — not rejected by an allowlist
+    let result = tool()
+        .execute(serde_json::json!({"name": "VOICE.md"}), &ctx())
+        .await
+        .unwrap();
+    // Should succeed (file found) or gracefully report not found — never error
+    assert!(
+        result.success,
+        "custom user file must not be rejected, got error: {:?}",
+        result.error
+    );
 }
 
 // ── on-demand retrieval (core flow) ──────────────────────────────────────────
