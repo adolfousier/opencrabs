@@ -819,7 +819,10 @@ mod tests {
     fn provider_aliases_normalize_and_match() {
         assert_eq!(normalize_provider_name("GitHub Copilot"), "github");
         assert_eq!(normalize_provider_name("Google Gemini"), "gemini");
-        assert_eq!(normalize_provider_name("custom(DeepSeek)"), "custom:deepseek");
+        assert_eq!(
+            normalize_provider_name("custom(DeepSeek)"),
+            "custom:deepseek"
+        );
         assert!(provider_names_match("custom:deepseek", "deepseek"));
     }
 
