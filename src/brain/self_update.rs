@@ -190,6 +190,7 @@ impl SelfUpdater {
 
         let err = std::process::Command::new(&self.binary_path)
             .args(["chat", "--session", &session_id.to_string()])
+            .env("OPENCRABS_EVOLVED_FROM", crate::VERSION)
             .exec(); // Replaces the process — only returns on error
 
         Err(anyhow::anyhow!("exec() failed: {}", err))
