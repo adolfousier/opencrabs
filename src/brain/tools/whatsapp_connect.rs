@@ -67,6 +67,8 @@ pub struct WhatsAppConnectHandle {
     pub qr_rx: tokio::sync::broadcast::Receiver<String>,
     /// Fires once when WhatsApp connects.
     pub connected_rx: tokio::sync::broadcast::Receiver<()>,
+    /// Receives error messages from the agent bot.
+    pub error_rx: tokio::sync::broadcast::Receiver<String>,
     /// Shared WhatsApp state — use `client()` after connected for test messages.
     pub wa_state: Arc<crate::channels::whatsapp::WhatsAppState>,
 }
@@ -88,6 +90,7 @@ pub fn subscribe_whatsapp_pairing(
     WhatsAppConnectHandle {
         qr_rx: wa_state.subscribe_qr(),
         connected_rx: wa_state.subscribe_connected(),
+        error_rx: wa_state.subscribe_error(),
         wa_state: wa_state.clone(),
     }
 }

@@ -48,6 +48,8 @@ pub struct WhatsAppState {
     qr_tx: tokio::sync::broadcast::Sender<String>,
     /// Broadcast channel for connection events — onboarding subscribes to this.
     connected_tx: tokio::sync::broadcast::Sender<()>,
+    /// Broadcast channel for error events — onboarding subscribes to this.
+    error_tx: tokio::sync::broadcast::Sender<String>,
 }
 
 impl Default for WhatsAppState {
@@ -60,6 +62,7 @@ impl WhatsAppState {
     pub fn new() -> Self {
         let (qr_tx, _) = tokio::sync::broadcast::channel(8);
         let (connected_tx, _) = tokio::sync::broadcast::channel(4);
+        let (error_tx, _) = tokio::sync::broadcast::channel(4);
         Self {
             client: Mutex::new(None),
             owner_jid: Mutex::new(None),
@@ -67,6 +70,7 @@ impl WhatsAppState {
             cancel_tokens: Mutex::new(HashMap::new()),
             qr_tx,
             connected_tx,
+            error_tx,
         }
     }
 
@@ -112,6 +116,16 @@ impl WhatsAppState {
     /// Subscribe to connection events (used by onboarding).
     pub fn subscribe_connected(&self) -> tokio::sync::broadcast::Receiver<()> {
         self.connected_tx.subscribe()
+    }
+
+    /// Broadcast an error to any subscribed onboarding UI.
+    pub fn broadcast_error(&self, msg: &str) {
+        let _ = self.error_tx.send(msg.to_string());
+    }
+
+    /// Subscribe to error events (used by onboarding).
+    pub fn subscribe_error(&self) -> tokio::sync::broadcast::Receiver<String> {
+        self.error_tx.subscribe()
     }
 
     /// Store the connected client and owner JID.

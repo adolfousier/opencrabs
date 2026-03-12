@@ -354,8 +354,9 @@ pub fn render_onboarding(f: &mut Frame, wizard: &OnboardingWizard) {
 /// Render the WhatsApp QR code as a centered full-screen popup with white
 /// background and black foreground so the code is always scannable.
 fn render_whatsapp_qr_popup(f: &mut Frame, qr_text: &str, area: Rect) {
+    use unicode_width::UnicodeWidthStr;
     let qr_lines: Vec<&str> = qr_text.lines().collect();
-    let qr_w = qr_lines.iter().map(|l| l.len()).max().unwrap_or(0) as u16;
+    let qr_w = qr_lines.iter().map(|l| l.width()).max().unwrap_or(0) as u16;
     let qr_h = qr_lines.len() as u16;
 
     // popup = QR + 2 border + 2 header rows (instruction + blank) + 1 footer
@@ -1470,13 +1471,17 @@ fn render_whatsapp_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWiza
         )));
     } else if let Some(ref err) = wizard.whatsapp_error {
         lines.push(Line::from(Span::styled(
-            format!("  {}", err),
+            format!("  Error: {}", err),
             Style::default().fg(Color::Red),
+        )));
+        lines.push(Line::from(Span::styled(
+            "  Logs: ~/.opencrabs/logs/",
+            Style::default().fg(Color::DarkGray),
         )));
         lines.push(Line::from(""));
         if conn_focused {
             lines.push(Line::from(Span::styled(
-                "  Press Enter to retry or 'S' to skip",
+                "  Press Enter to retry, 'R' to reset session, or 'S' to skip",
                 Style::default().fg(Color::DarkGray),
             )));
         }

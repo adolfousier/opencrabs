@@ -65,7 +65,13 @@ impl WhatsAppAgent {
             let backend = match Store::new(db_path.to_string_lossy().as_ref()).await {
                 Ok(store) => Arc::new(store),
                 Err(e) => {
-                    tracing::error!("WhatsApp: failed to open session store: {}", e);
+                    let msg = format!(
+                        "Failed to open session store at {}: {}",
+                        db_path.display(),
+                        e
+                    );
+                    tracing::error!("WhatsApp: {}", msg);
+                    self.whatsapp_state.broadcast_error(&msg);
                     return;
                 }
             };
@@ -161,7 +167,9 @@ impl WhatsAppAgent {
             let mut bot = match bot_result {
                 Ok(b) => b,
                 Err(e) => {
-                    tracing::error!("WhatsApp: failed to build bot: {}", e);
+                    let msg = format!("Failed to build WhatsApp bot: {}", e);
+                    tracing::error!("WhatsApp: {}", msg);
+                    self.whatsapp_state.broadcast_error(&msg);
                     return;
                 }
             };
@@ -169,11 +177,15 @@ impl WhatsAppAgent {
             match bot.run().await {
                 Ok(handle) => {
                     if let Err(e) = handle.await {
-                        tracing::error!("WhatsApp agent task error: {:?}", e);
+                        let msg = format!("WhatsApp agent crashed: {:?}", e);
+                        tracing::error!("{}", msg);
+                        self.whatsapp_state.broadcast_error(&msg);
                     }
                 }
                 Err(e) => {
-                    tracing::error!("WhatsApp agent error: {}", e);
+                    let msg = format!("WhatsApp agent failed to start: {}", e);
+                    tracing::error!("{}", msg);
+                    self.whatsapp_state.broadcast_error(&msg);
                 }
             }
         })

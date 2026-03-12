@@ -1337,6 +1337,14 @@ impl App {
                                     let _ = qr_sender.send(TuiEvent::WhatsAppQrCode(qr));
                                 }
                             });
+                            // Forward agent errors to the TUI
+                            let err_sender = sender.clone();
+                            let mut error_rx = handle.error_rx;
+                            tokio::spawn(async move {
+                                if let Ok(err) = error_rx.recv().await {
+                                    let _ = err_sender.send(TuiEvent::WhatsAppError(err));
+                                }
+                            });
                             // Wait for connection (2 minute timeout)
                             let mut connected_rx = handle.connected_rx;
                             match tokio::time::timeout(
@@ -1348,9 +1356,18 @@ impl App {
                                 Ok(Ok(())) => {
                                     let _ = sender.send(TuiEvent::WhatsAppConnected);
                                 }
-                                _ => {
+                                Ok(Err(e)) => {
+                                    // Broadcast channel closed — agent crashed or failed to start
+                                    let msg = format!(
+                                        "WhatsApp agent stopped unexpectedly: {}. Check logs at ~/.opencrabs/logs/",
+                                        e
+                                    );
+                                    tracing::error!("{}", msg);
+                                    let _ = sender.send(TuiEvent::WhatsAppError(msg));
+                                }
+                                Err(_) => {
                                     let _ = sender.send(TuiEvent::WhatsAppError(
-                                        "Connection timed out (2 minutes)".into(),
+                                        "QR scan timed out (2 minutes). Press R to retry.".into(),
                                     ));
                                 }
                             }
