@@ -12,7 +12,7 @@ documentation = "https://docs.opencrabs.com"
 keywords = ["ai", "terminal", "assistant", "llm", "cli"]
 categories = ["command-line-utilities", "development-tools"]
 readme = "README.md"
-# exclude = ["src/screenshots/"]
+# exclude = ["src/assets/"]
 
 [dependencies]
 # Async Runtime
