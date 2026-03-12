@@ -564,7 +564,7 @@ Required for `/rebuild`, adding custom tools, or modifying the agent.
 - **Linux (Fedora/RHEL):** `sudo dnf install gcc gcc-c++ make pkg-config openssl-devel cmake`
 - **Linux (Arch):** `sudo pacman -S base-devel pkg-config openssl cmake`
 
-> **One-liner setup:** `bash <(curl -sL https://raw.githubusercontent.com/adolfousier/opencrabs/main/scripts/setup.sh)` — detects your platform, installs all dependencies, and sets up Rust nightly.
+> **One-liner setup:** `bash <(curl -sL https://raw.githubusercontent.com/adolfousier/opencrabs/main/src/scripts/setup.sh)` — detects your platform, installs all dependencies, and sets up Rust nightly.
 
 ```bash
 # Clone
@@ -1425,7 +1425,7 @@ Tell OpenCrabs in natural language: *"Create a /deploy command that runs deploy.
 name = "/deploy"
 description = "Deploy to staging server"
 action = "prompt"
-prompt = "Run the deployment script at ./scripts/deploy.sh for the staging environment."
+prompt = "Run the deployment script at ./src/scripts/deploy.sh for the staging environment."
 ```
 
 Commands appear in autocomplete alongside built-in commands. After each agent response, `commands.toml` is automatically reloaded — no restart needed. Legacy `commands.json` files are auto-migrated on first load.
@@ -1625,7 +1625,9 @@ opencrabs/
 │   ├── migrations/       # SQLite migrations
 │   ├── tests/            # 1,362 tests (see TESTING.md)
 │   ├── benches/          # Criterion benchmarks
-│   └── docs/             # Documentation + screenshots
+│   ├── assets/           # Icons, screenshots, visual assets
+│   ├── scripts/          # Build and setup scripts
+│   └── docs/             # Documentation templates
 ├── Cargo.toml
 ├── config.toml.example
 ├── keys.toml.example
@@ -1729,7 +1731,7 @@ Benchmarked with `cargo bench --bench memory` on release builds:
 
 ## 🐛 Platform Notes
 
-> **Automated setup:** Run `scripts/setup.sh` to detect your platform and install everything automatically.
+> **Automated setup:** Run `src/scripts/setup.sh` to detect your platform and install everything automatically.
 
 ### Linux
 
