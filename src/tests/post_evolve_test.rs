@@ -40,10 +40,7 @@ fn evolve_message_contains_versions() {
     // Verify the message format includes both versions
     let old = "0.2.73";
     let new = "0.2.74";
-    let msg = format!(
-        "YOU JUST EVOLVED from v{} to v{}!",
-        old, new
-    );
+    let msg = format!("YOU JUST EVOLVED from v{} to v{}!", old, new);
     assert!(msg.contains("v0.2.73"));
     assert!(msg.contains("v0.2.74"));
     assert!(msg.contains("EVOLVED"));
