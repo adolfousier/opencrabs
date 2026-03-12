@@ -216,6 +216,38 @@ Three similar lines of code is fine. Don't create a `GenericHandlerFactoryBuilde
 
 ---
 
+## Problem Solving
+
+### Never Give Up
+
+**If a solution doesn't work, try another approach.** Then another. Then search the web. Read docs. Read source code. Read issues. There is always a fix — find it.
+
+- **Don't settle for the first approach.** If it's ugly, fragile, or hacky — step back and think harder.
+- **Use every resource available.** Web search, official docs, GitHub issues, source code of dependencies. The answer exists somewhere.
+- **Try different angles.** If the direct approach fails, come at it sideways. Rethink the problem. Question your assumptions.
+- **Never declare something impossible** without exhausting alternatives. "I can't" means "I haven't tried enough approaches yet."
+
+### Never Suppress Errors
+
+**`#[allow(lint)]` is not a fix. It's duct tape over a wound.**
+
+- If clippy or the compiler complains, **fix the underlying code**, not the warning.
+- If two lints contradict each other, restructure the code so neither triggers.
+- `let _ = result;` is hiding a bug. Handle the error or propagate it.
+- `#[allow(dead_code)]` means you have code that shouldn't exist. Delete it.
+
+### Dead Code Dies
+
+**If code is unused, delete it. Period.**
+
+- Don't comment it out "for later." Git remembers. You won't need it.
+- Don't add `#[allow(dead_code)]` to keep it around. If nothing calls it, it's dead weight.
+- Don't re-export unused items just to silence warnings. Remove the item.
+- Don't add `_` prefixes to mask unused variables — either use them or remove them.
+- **The codebase should compile clean with zero warnings.** Every warning is a conversation you're avoiding.
+
+---
+
 ## Hard Rules (Non-Negotiable)
 
 1. **No 5,000-line files.** Ever. For any reason. Split or die.
@@ -223,8 +255,10 @@ Three similar lines of code is fine. Don't create a `GenericHandlerFactoryBuilde
 3. **No code without tests.** If you built it, prove it works.
 4. **No build artifacts in the repo.** `.gitignore` exists. Use it.
 5. **No hardcoded secrets.** Not even "temporarily."
-6. **No ignoring compiler warnings.** Fix them or justify them with `#[allow()]` + comment.
+6. **No suppressing warnings.** Fix the code, not the lint. No `#[allow()]` unless you can explain exactly why the lint is wrong and the code is right.
 7. **No `unsafe` without a comment explaining why** it's necessary and why it's sound.
 8. **Run the full test suite before declaring anything done.**
 9. **Clean up after builds.** Source is permanent. Binaries are disposable.
 10. **Rust first.** Always. Unless you can't. And you probably can.
+11. **No dead code.** If it's unused, delete it. Git has history. You don't need commented-out code.
+12. **Never give up on a problem.** Research, web search, try different approaches. The fix exists.

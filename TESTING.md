@@ -91,7 +91,13 @@ cargo test --all-features
 | Tests — Custom Provider | 27 | `src/tests/custom_provider_test.rs` |
 | Tests — Context Window | 14 | `src/tests/context_window_test.rs` |
 | Tests — Onboarding Field Nav | 46 | `src/tests/onboarding_field_nav_test.rs` |
-| **Total** | **1,286** | |
+| Tests — Provider Sync | 10 | `src/tests/provider_sync_test.rs` |
+| Tests — Brain Templates | 8 | `src/tests/brain_templates_test.rs` |
+| Tests — Collapse Build Output | 9 | `src/tests/collapse_build_output_test.rs` |
+| Tests — Reasoning Lines | 6 | `src/tests/reasoning_lines_test.rs` |
+| Tests — AltGr Input | 8 | `src/tests/altgr_input_test.rs` |
+| Tests — System Continuation | 6 | `src/tests/system_continuation_test.rs` |
+| **Total** | **1,362** | |
 
 ---
 

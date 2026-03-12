@@ -5,6 +5,33 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.72] - 2026-03-12
+
+### Added
+- **Collapse cargo build output** — Tool call details now collapse long `Compiling`/`Downloading`/`Fresh` blocks into single summary lines (e.g. "Compiled 100 crates")
+- **Queued message preview** — Follow-up messages typed between tool calls now appear immediately in chat instead of waiting for tool completion
+- **Mouse scroll wheel support** — Enable mouse capture for scroll wheel navigation in the TUI
+- **CODE.md and SECURITY.md brain templates** — New brain templates seeded on install for coding standards and security patterns
+- **Test coverage** — 1,362 tests (up from 1,286). New: provider navigation sync (8), brain templates (8), build output collapse (9), reasoning lines (6), AltGr input (8), system continuation (6), onboarding input helpers (23)
+
+### Fixed
+- **GitHub Copilot missing from provider resolution** — Copilot was added to TUI/config but not wired into `active_provider_and_model` candidates, so enabling it in config.toml silently fell through to the default provider
+- **Provider navigation order with custom providers** — Custom providers (nvidia, opus, etc.) appeared between static providers visually but navigation jumped to wrong positions because internal index 6 ("+ New Custom") was between static and existing custom providers
+- **Channel setup screens cropped on small terminals** — Channel list and all setup forms (Telegram, Discord, WhatsApp, Slack, Trello) now track focused field and scroll to keep it visible
+- **Coming-soon channels cluttering the list** — Removed Signal, Google Chat, iMessage placeholders that couldn't be configured
+- **Onboarding channel paste duplicating input** — Pasting a key appended to existing sentinel text instead of replacing it. Now uses cursor-aware paste with proper sentinel clearing
+- **Windows non-US keyboard layouts** — Accept `/` and other characters that arrive via AltGr (Ctrl+Alt) on international keyboard layouts
+- **Reasoning display losing newlines** — Preserve literal `\n` in reasoning/thinking streaming responses
+- **Session model name desync** — Always sync display model name when switching sessions
+- **Rebuild wake-up noise** — Hide internal rebuild wake-up message from chat history
+
+### Docs
+- Expanded README with full tool system documentation, CLI integrations, and companion tools
+- Windows Defender troubleshooting section
+- **CODE.md brain template updated** — Added problem-solving principles (never suppress errors, never give up on solutions, delete dead code)
+
+> **Note for existing users:** This release adds new brain templates (CODE.md, SECURITY.md) and updates existing ones. If you installed OpenCrabs before v0.2.69, you may be missing these files. Ask your crab to check your brain templates and update them: *"Check my brain templates and update them if any are missing or outdated."*
+
 ## [0.2.71] - 2026-03-11
 
 ### Fixed
@@ -1480,6 +1507,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.71]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.71
+[0.2.70]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.70
+[0.2.69]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.69
+[0.2.68]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.68
+[0.2.67]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.67
+[0.2.66]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.66
+[0.2.65]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.65
+[0.2.64]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.64
+[0.2.63]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.63
+[0.2.62]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.62
+[0.2.61]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.61
+[0.2.60]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.60
+[0.2.59]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.59
+[0.2.72]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.72
 [0.2.71]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.71
 [0.2.70]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.70
 [0.2.69]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.69
