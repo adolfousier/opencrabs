@@ -588,16 +588,33 @@ impl App {
         self.reload_plan();
     }
 
-    /// Reload the plan document from disk (read-only — never deletes the file).
-    /// The plan file is the agent tool's IPC storage; it must not be deleted while
-    /// the agent is still writing to it (create → add_task → finalize → execute).
-    /// The render layer only shows the widget when status == InProgress.
-    /// File cleanup is handled by send_message after the agent exchange completes.
+    /// Reload the plan document from disk.
+    ///
+    /// Stale plans (terminal status, or InProgress but not actively processing)
+    /// are discarded automatically so they don't linger across restarts.
     pub(crate) fn reload_plan(&mut self) {
         self.plan_document = self.plan_file_path.as_ref().and_then(|path| {
             let content = std::fs::read_to_string(path).ok()?;
             serde_json::from_str::<crate::tui::plan::PlanDocument>(&content).ok()
         });
+
+        // Clean up stale plans that shouldn't be displayed
+        if let Some(ref plan) = self.plan_document {
+            use crate::tui::plan::PlanStatus;
+            let should_discard = match plan.status {
+                PlanStatus::Completed | PlanStatus::Rejected | PlanStatus::Cancelled => true,
+                PlanStatus::InProgress => {
+                    // If the agent isn't actively processing, this plan is stale
+                    // (left over from a previous run or a failed tool call)
+                    !self.is_processing
+                }
+                _ => false,
+            };
+            if should_discard {
+                self.discard_plan_file();
+                self.plan_document = None;
+            }
+        }
     }
 
     /// Clear the in-memory plan and delete the backing file.
