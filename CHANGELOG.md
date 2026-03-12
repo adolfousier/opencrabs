@@ -5,6 +5,13 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.74] - 2026-03-12
+
+### Added
+- **Windows binary icon** — Embedded crab logo as application icon in Windows executables via `winresource` build script
+- **Provider name normalization** — Channel commands now match provider names case-insensitively and resolve display names to config IDs (e.g. "GitHub Copilot" → "github-copilot"). Added GitHub Copilot to provider list — thanks @mariodian (#44)
+- **Search tools documented in brain** — `brave_search` and `exa_search` now listed in TOOLS.md brain template so the LLM knows they exist when configured. Existing users: ask your Crabs to update its brain files
+
 ## [0.2.73] - 2026-03-12
 
 ### Added
@@ -1525,6 +1532,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.74]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.74
 [0.2.73]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.73
 [0.2.72]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.72
 [0.2.71]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.71
