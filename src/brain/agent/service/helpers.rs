@@ -414,4 +414,61 @@ impl AgentService {
             other => other.to_string(),
         }
     }
+
+    /// Normalize hallucinated tool names from providers.
+    ///
+    /// Some models (e.g. MiniMax) send tool names like `"Plan: complete_task"`
+    /// instead of `tool="plan"` with `operation="complete_task"` in the input.
+    /// This recovers the intended call so it doesn't fail with "Tool not found".
+    pub(super) fn normalize_tool_call(
+        name: String,
+        mut input: serde_json::Value,
+    ) -> (String, serde_json::Value) {
+        // "Plan: <op>" or "plan: <op>" → tool="plan", inject operation into input
+        if let Some(op) = name
+            .strip_prefix("Plan: ")
+            .or_else(|| name.strip_prefix("plan: "))
+            .or_else(|| name.strip_prefix("Plan:"))
+            .or_else(|| name.strip_prefix("plan:"))
+        {
+            let op = op.trim().replace(' ', "_");
+            if !op.is_empty() {
+                if let Some(obj) = input.as_object_mut() {
+                    obj.entry("operation")
+                        .or_insert_with(|| serde_json::Value::String(op));
+                }
+                tracing::info!(
+                    "[TOOL_NORM] Normalized '{}' → tool='plan', input={:?}",
+                    name,
+                    input
+                );
+                return ("plan".to_string(), input);
+            }
+        }
+
+        // Generic fallback: if name contains ": " and isn't a registered tool,
+        // try the part before ": " as the tool name (lowercased)
+        if name.contains(": ") {
+            let parts: Vec<&str> = name.splitn(2, ": ").collect();
+            if parts.len() == 2 {
+                let candidate = parts[0].to_lowercase().replace(' ', "_");
+                let suffix = parts[1].trim().replace(' ', "_");
+                if !suffix.is_empty() {
+                    if let Some(obj) = input.as_object_mut() {
+                        obj.entry("operation")
+                            .or_insert_with(|| serde_json::Value::String(suffix));
+                    }
+                    tracing::info!(
+                        "[TOOL_NORM] Normalized '{}' → tool='{}', input={:?}",
+                        name,
+                        candidate,
+                        input
+                    );
+                    return (candidate, input);
+                }
+            }
+        }
+
+        (name, input)
+    }
 }

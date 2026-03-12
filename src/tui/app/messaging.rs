@@ -1556,6 +1556,38 @@ impl App {
             }
         }
 
+        // Refresh plan widget: reload from disk, then clear if the exchange is done.
+        // This catches plans that completed (status=Completed) or got stuck mid-execution
+        // due to tool errors (status still InProgress but agent has moved on).
+        self.reload_plan();
+        if let Some(ref plan) = self.plan_document {
+            use crate::tui::plan::PlanStatus;
+            match plan.status {
+                PlanStatus::Completed | PlanStatus::Rejected | PlanStatus::Cancelled => {
+                    self.discard_plan_file();
+                    self.plan_document = None;
+                }
+                PlanStatus::InProgress => {
+                    // Agent finished responding but plan is still "in progress" —
+                    // either all tasks completed (tool wrote status wrong) or a tool
+                    // call failed silently. Either way, clear the stale widget.
+                    let all_done = plan.tasks.iter().all(|t| {
+                        matches!(
+                            t.status,
+                            crate::tui::plan::TaskStatus::Completed
+                                | crate::tui::plan::TaskStatus::Skipped
+                                | crate::tui::plan::TaskStatus::Failed
+                        )
+                    });
+                    if all_done {
+                        self.discard_plan_file();
+                        self.plan_document = None;
+                    }
+                }
+                _ => {}
+            }
+        }
+
         // Auto-scroll to bottom
         self.scroll_offset = 0;
 

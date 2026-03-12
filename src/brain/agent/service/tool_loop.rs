@@ -674,7 +674,12 @@ impl AgentService {
                             );
                         }
 
-                        tool_uses.push((id.clone(), name.clone(), input.clone()));
+                        // Normalize hallucinated tool names: some providers send
+                        // "Plan: complete_task" instead of tool="plan" + operation="complete_task".
+                        let (norm_name, norm_input) =
+                            Self::normalize_tool_call(name.clone(), input.clone());
+
+                        tool_uses.push((id.clone(), norm_name, norm_input));
                     }
                     _ => {
                         tracing::debug!("Block {}: Other content block", i);

@@ -4,6 +4,7 @@ mod context_tracking;
 mod model_selection;
 mod parallel_sessions;
 mod streaming_usage;
+mod tool_normalization;
 
 use super::*;
 use crate::brain::provider::{
