@@ -5,6 +5,24 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.73] - 2026-03-12
+
+### Added
+- **Tool name normalization** — Providers that hallucinate tool names (e.g. MiniMax sending `"Plan: complete_task"` instead of `tool="plan"`) are now auto-corrected, preventing silent "Tool not found" failures
+- **Test coverage** — 1,373 tests (up from 1,362). New: tool normalization (10), path traversal (2), custom brain file acceptance (1)
+
+### Fixed
+- **File tools restricted to working directory** — `read_file`, `write_file`, and `edit_file` now work with any absolute path on the system. Security is enforced by the approval mechanism, not a directory jail
+- **Brain file allowlist too restrictive** — `load_brain_file` now accepts any `.md` file in `~/.opencrabs/`, not just a hardcoded list. User-created files like VOICE.md were silently rejected
+- **`load_brain_file("all")` missed user files** — The "all" mode now scans the brain directory for user-created `.md` files in addition to built-in contextual files
+- **Plan widget stuck after failed tool call** — If a plan tool call failed silently (e.g. hallucinated tool name), the plan widget stayed on screen indefinitely. Now auto-clears when the response completes and all tasks are done or the agent stops processing
+- **Plan widget persists across restarts** — Stale InProgress plan files from previous runs no longer resurrect the plan widget on session load
+
+### Changed
+- GitHub Actions updated to Node.js 24 (`FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true`) ahead of June 2026 forced migration
+
+> **⚠️ Note:** Any `.md` file placed in `~/.opencrabs/` root can now be loaded into brain context via `load_brain_file("all")` or by name. Avoid storing sensitive or non-brain files as `.md` in that directory.
+
 ## [0.2.72] - 2026-03-12
 
 ### Added
@@ -1507,19 +1525,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
-[0.2.71]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.71
-[0.2.70]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.70
-[0.2.69]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.69
-[0.2.68]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.68
-[0.2.67]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.67
-[0.2.66]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.66
-[0.2.65]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.65
-[0.2.64]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.64
-[0.2.63]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.63
-[0.2.62]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.62
-[0.2.61]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.61
-[0.2.60]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.60
-[0.2.59]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.59
+[0.2.73]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.73
 [0.2.72]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.72
 [0.2.71]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.71
 [0.2.70]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.70
