@@ -25,15 +25,21 @@ pub fn sync_provider_from_config(agent: &AgentService) {
     let agent_provider = agent.provider_name();
     let agent_model = agent.provider_model();
 
-    // Only swap if something changed
-    if cfg_provider != agent_provider || cfg_model != agent_model {
+    let cfg_provider_norm = normalize_provider_name(&cfg_provider);
+    let agent_provider_norm = normalize_provider_name(&agent_provider);
+    let same_provider = provider_names_match(&cfg_provider_norm, &agent_provider_norm);
+
+    // Only swap if provider/model changed after normalizing aliases
+    if !same_provider || cfg_model != agent_model {
         match crate::brain::provider::create_provider(&config) {
             Ok(new_provider) => {
                 tracing::info!(
-                    "Channel agent synced: {} / {} → {} / {}",
+                    "Channel agent synced: {} ({}) / {} → {} ({}) / {}",
                     agent_provider,
+                    agent_provider_norm,
                     agent_model,
                     cfg_provider,
+                    cfg_provider_norm,
                     cfg_model,
                 );
                 agent.swap_provider(new_provider);
@@ -43,6 +49,33 @@ pub fn sync_provider_from_config(agent: &AgentService) {
             }
         }
     }
+}
+
+/// Normalize provider names/aliases to stable IDs used by config.
+fn normalize_provider_name(name: &str) -> String {
+    let lowered = name.trim().to_lowercase();
+    match lowered.as_str() {
+        "anthropic" => "anthropic".to_string(),
+        "openai" => "openai".to_string(),
+        "openrouter" => "openrouter".to_string(),
+        "minimax" => "minimax".to_string(),
+        "gemini" | "google gemini" => "gemini".to_string(),
+        "github" | "github copilot" => "github".to_string(),
+        n if n.starts_with("custom:") => n.to_string(),
+        n if n.starts_with("custom(") && n.ends_with(')') => {
+            let inner = &n["custom(".len()..n.len() - 1];
+            format!("custom:{}", inner)
+        }
+        other => other.to_string(),
+    }
+}
+
+/// Compare normalized provider names, handling custom runtime names (`deepseek`).
+fn provider_names_match(config_provider: &str, runtime_provider: &str) -> bool {
+    config_provider == runtime_provider
+        || config_provider
+            .strip_prefix("custom:")
+            .is_some_and(|name| name == runtime_provider)
 }
 
 /// Result of matching a channel message against known commands.
@@ -433,6 +466,14 @@ fn configured_providers() -> Vec<(String, String)> {
     }
     if config
         .providers
+        .github
+        .as_ref()
+        .is_some_and(|p| p.api_key.is_some())
+    {
+        result.push(("github".to_string(), "GitHub Copilot".to_string()));
+    }
+    if config
+        .providers
         .openrouter
         .as_ref()
         .is_some_and(|p| p.api_key.is_some())
@@ -557,6 +598,7 @@ fn provider_config_models(config: &crate::config::Config, name: &str) -> Vec<Str
     let cfg = match name {
         "anthropic" => config.providers.anthropic.as_ref(),
         "openai" => config.providers.openai.as_ref(),
+        "github" => config.providers.github.as_ref(),
         "openrouter" => config.providers.openrouter.as_ref(),
         "minimax" => config.providers.minimax.as_ref(),
         "gemini" => config.providers.gemini.as_ref(),
@@ -577,6 +619,7 @@ pub fn provider_display_name(name: &str) -> &str {
     match name {
         "anthropic" => "Anthropic",
         "openai" => "OpenAI",
+        "github" => "GitHub Copilot",
         "openrouter" => "OpenRouter",
         "minimax" => "MiniMax",
         "gemini" => "Gemini",
@@ -606,6 +649,7 @@ pub async fn switch_model(
     for s in [
         "providers.anthropic",
         "providers.openai",
+        "providers.github",
         "providers.gemini",
         "providers.openrouter",
         "providers.minimax",
@@ -671,6 +715,7 @@ pub(crate) fn provider_section(provider_name: &str) -> Option<String> {
     match provider_name.to_lowercase().as_str() {
         "anthropic" => Some("providers.anthropic".to_string()),
         "openai" => Some("providers.openai".to_string()),
+        "github" | "github copilot" => Some("providers.github".to_string()),
         "gemini" | "google" => Some("providers.gemini".to_string()),
         "openrouter" => Some("providers.openrouter".to_string()),
         "minimax" => Some("providers.minimax".to_string()),
@@ -764,9 +809,18 @@ mod tests {
     fn provider_display_name_known() {
         assert_eq!(provider_display_name("anthropic"), "Anthropic");
         assert_eq!(provider_display_name("openai"), "OpenAI");
+        assert_eq!(provider_display_name("github"), "GitHub Copilot");
         assert_eq!(provider_display_name("openrouter"), "OpenRouter");
         assert_eq!(provider_display_name("minimax"), "MiniMax");
         assert_eq!(provider_display_name("gemini"), "Gemini");
+    }
+
+    #[test]
+    fn provider_aliases_normalize_and_match() {
+        assert_eq!(normalize_provider_name("GitHub Copilot"), "github");
+        assert_eq!(normalize_provider_name("Google Gemini"), "gemini");
+        assert_eq!(normalize_provider_name("custom(DeepSeek)"), "custom:deepseek");
+        assert!(provider_names_match("custom:deepseek", "deepseek"));
     }
 
     #[test]
