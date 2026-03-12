@@ -15,6 +15,10 @@ fn provider_section_known_providers() {
         Some("providers.openai".to_string())
     );
     assert_eq!(
+        provider_section("github"),
+        Some("providers.github".to_string())
+    );
+    assert_eq!(
         provider_section("gemini"),
         Some("providers.gemini".to_string())
     );
@@ -67,6 +71,10 @@ fn provider_section_case_insensitive() {
     assert_eq!(
         provider_section("OPENAI"),
         Some("providers.openai".to_string())
+    );
+    assert_eq!(
+        provider_section("GitHub Copilot"),
+        Some("providers.github".to_string())
     );
     assert_eq!(
         provider_section("MiniMax"),
