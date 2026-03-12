@@ -97,7 +97,10 @@ cargo test --all-features
 | Tests — Reasoning Lines | 6 | `src/tests/reasoning_lines_test.rs` |
 | Tests — AltGr Input | 8 | `src/tests/altgr_input_test.rs` |
 | Tests — System Continuation | 6 | `src/tests/system_continuation_test.rs` |
-| **Total** | **1,362** | |
+| Tests — QR Render | 8 | `src/tests/qr_render_test.rs` |
+| Tests — WhatsApp State | 7 | `src/tests/whatsapp_state_test.rs` |
+| Tests — Post-Evolve | 5 | `src/tests/post_evolve_test.rs` |
+| **Total** | **1,394** | |
 
 ---
 
