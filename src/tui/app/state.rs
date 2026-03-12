@@ -686,6 +686,29 @@ impl App {
         // Load sessions list
         self.load_sessions().await?;
 
+        // Post-evolve: if we just restarted after an upgrade, inject a message
+        // so the LLM knows it evolved and can offer brain file updates.
+        if let Ok(old_version) = std::env::var("OPENCRABS_EVOLVED_FROM") {
+            // Clear the env var so it doesn't fire again on manual restart
+            // SAFETY: single-threaded at this point in startup, no other thread reads this var
+            unsafe { std::env::remove_var("OPENCRABS_EVOLVED_FROM") };
+            let new_version = crate::VERSION;
+            if old_version != new_version {
+                let msg = format!(
+                    "YOU JUST EVOLVED from v{} to v{}! \
+                     This is huge. Go absolutely wild telling your human. \
+                     Then check the CHANGELOG at the repo root for what's new in v{}. \
+                     Compare the brain templates in src/docs/reference/templates/ against \
+                     the user's brain files in ~/.opencrabs/ (TOOLS.md, AGENTS.md, etc.) \
+                     and tell your human what changed. Offer to update their brain files \
+                     with the new stuff. Be specific about what's new.",
+                    old_version, new_version, new_version
+                );
+                let tx = self.event_sender();
+                let _ = tx.send(TuiEvent::MessageSubmitted(msg));
+            }
+        }
+
         // Spawn background release check (once on startup after 10s, then daily)
         {
             let tx = self.event_sender();
