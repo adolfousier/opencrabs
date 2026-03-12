@@ -33,6 +33,8 @@ Use these **exact parameter names** when calling tools:
 | `bash` | `command` | `timeout` |
 | `execute_code` | `language`, `code` | — |
 | `web_search` | `query` | `n` |
+| `brave_search` | `query` | `max_results` |
+| `exa_search` | `query` | `max_results`, `search_type` |
 | `http_request` | `method`, `url` | `headers`, `body` |
 | `session_search` | `operation` | `query`, `n`, `session_id` |
 | `task_manager` | `operation` | `title`, `description`, `task_id`, `status` |
@@ -52,6 +54,11 @@ Use these **exact parameter names** when calling tools:
 | `rebuild` | — | — |
 
 > **Note:** `grep` and `glob` use `pattern` (not `query`). `bash` uses `command` (not `cmd`). File tools use `path` (not `file` or `file_path`).
+> **Search tools:** Multiple web search tools are available. Defaults work out of the box; optional tools appear when the user configures API keys:
+> - `web_search` — Default search (DuckDuckGo). Always available, no API key needed.
+> - `exa_search` — EXA AI neural/semantic search. Available by default via free MCP endpoint (no key needed). Optional: set `EXA_API_KEY` in keys.toml for direct API access with higher rate limits. `search_type` can be `"auto"`, `"neural"`, or `"keyword"`.
+> - `brave_search` — **Optional.** Brave Search API with privacy focus. Available only when the user sets `[search.brave] enabled = true` in config and provides `BRAVE_API_KEY` in keys.toml. If this tool is in your tool list, prefer it for general web searches.
+> When the user asks you to search the web, **check which search tools are available in your tool list**. If `brave_search` or `exa_search` are present, prefer them over `web_search` — they provide better results.
 > **Incoming images/files:** When a user sends an image or file from any channel (Telegram, Discord, Slack, WhatsApp), it is downloaded to a temp file and included in the message as `<<IMG:/path/to/file>>`. The file exists at that path — you can read it, pass it to `analyze_image`, attach it to tool calls, or reference it in `bash` commands. The image is also sent to the model as vision content if the provider supports it. Do NOT ask the user to re-send or provide a URL — you already have the file.
 > **`generate_image`:** Generate an image from a text prompt using Google Gemini. Returns the saved file path. Automatically sends as a native image on all channels — just include `<<IMG:path>>` in your reply or the channel handler sends it for you. Requires `[image.generation] enabled = true` in config. Run `/onboard:image` to set up.
 > **`analyze_image`:** Analyze an image file (local path) or URL. Uses Google Gemini vision when configured (`[image.vision] enabled = true`), otherwise uses the provider's `vision_model` if set. Use when the current model doesn't support vision, the image is a saved file, or the user sends an image. Returns a text description.
