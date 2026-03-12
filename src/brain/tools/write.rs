@@ -111,17 +111,15 @@ impl Tool for WriteTool {
             fs::create_dir_all(parent).await.map_err(ToolError::Io)?;
         }
 
-        // Validate path is safe and within working directory (prevents path traversal)
+        // Resolve path (relative paths resolve against working directory)
         let path = match validate_path_safety(&input.path, &context.working_directory) {
             Ok(p) => p,
-            Err(ToolError::PermissionDenied(msg)) => {
-                return Ok(ToolResult::error(format!("Access denied: {}", msg)));
-            }
             Err(ToolError::InvalidInput(msg))
                 if msg.contains("Parent directory does not exist") =>
             {
-                // For write operations, we want to give a helpful error about create_dirs
-                if let Some(parent) = path.parent() {
+                // For write operations, give a helpful error about create_dirs
+                let resolved = std::path::PathBuf::from(&input.path);
+                if let Some(parent) = resolved.parent() {
                     return Ok(ToolResult::error(format!(
                         "Parent directory does not exist: {}. Use create_dirs: true to create it.",
                         parent.display()
