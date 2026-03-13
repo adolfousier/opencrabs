@@ -170,22 +170,14 @@ impl AgentService {
                                 }
 
                                 // Check for repeated substring in window
-                                if text_window.len() >= REPEAT_MIN_MATCH * 2 {
-                                    let half = text_window.len() / 2;
-                                    let second_half = &text_window[half..];
-                                    // Find the longest prefix of second_half that appears in first half
-                                    let check_len = REPEAT_MIN_MATCH.min(second_half.len());
-                                    if let Some(needle) = second_half.get(..check_len)
-                                        && text_window[..half].contains(needle)
-                                    {
-                                        tracing::warn!(
-                                            "🔁 Repetition detected in streaming response after {} bytes. \
-                                             Provider appears to be looping. Terminating stream.",
-                                            total_text_len,
-                                        );
-                                        stop_reason = Some(StopReason::EndTurn);
-                                        break;
-                                    }
+                                if detect_text_repetition(&text_window, REPEAT_MIN_MATCH) {
+                                    tracing::warn!(
+                                        "🔁 Repetition detected in streaming response after {} bytes. \
+                                         Provider appears to be looping. Terminating stream.",
+                                        total_text_len,
+                                    );
+                                    stop_reason = Some(StopReason::EndTurn);
+                                    break;
                                 }
 
                                 // Hard cap on response size
@@ -517,5 +509,24 @@ impl AgentService {
         }
 
         (name, input)
+    }
+}
+
+/// Detect repetition in a streaming text window.
+///
+/// Returns `true` if a substring of `min_match` bytes from the second half
+/// of `window` also appears in the first half, indicating the provider is
+/// looping the same content.
+pub fn detect_text_repetition(window: &str, min_match: usize) -> bool {
+    if min_match == 0 || window.len() < min_match * 2 {
+        return false;
+    }
+    let half = window.len() / 2;
+    let second_half = &window[half..];
+    let check_len = min_match.min(second_half.len());
+    if let Some(needle) = second_half.get(..check_len) {
+        window[..half].contains(needle)
+    } else {
+        false
     }
 }

@@ -14,6 +14,7 @@ mod types;
 mod tests;
 
 pub use builder::AgentService;
+pub use helpers::detect_text_repetition;
 pub use types::{
     AgentResponse, AgentStreamResponse, ApprovalCallback, MessageQueueCallback, ProgressCallback,
     ProgressEvent, SudoCallback, ToolApprovalInfo,
