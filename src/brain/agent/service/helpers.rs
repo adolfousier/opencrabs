@@ -53,6 +53,16 @@ impl AgentService {
         let mut input_tokens = 0u32;
         let mut output_tokens = 0u32;
 
+        // --- Text repetition detection ---
+        // Some providers (e.g. MiniMax) loop the same content indefinitely without
+        // sending a stop signal. We keep a sliding window of recent text chunks and
+        // detect when a long enough substring repeats, indicating a stuck loop.
+        let mut total_text_len: usize = 0;
+        let mut text_window = String::new(); // rolling window of recent text
+        const REPEAT_WINDOW: usize = 2048; // bytes to keep in window
+        const REPEAT_MIN_MATCH: usize = 200; // minimum repeated substring to trigger
+        const MAX_RESPONSE_TEXT: usize = 128_000; // ~32k tokens safety cap
+
         // Track partial content blocks by index
         // Text blocks: accumulate text deltas
         // ToolUse blocks: accumulate JSON deltas
@@ -149,6 +159,43 @@ impl AgentService {
                                     block_states[index].block
                                 {
                                     t.push_str(&text);
+                                }
+
+                                // --- Repetition & size detection ---
+                                total_text_len += text.len();
+                                text_window.push_str(&text);
+                                if text_window.len() > REPEAT_WINDOW {
+                                    let drain = text_window.len() - REPEAT_WINDOW;
+                                    text_window.drain(..drain);
+                                }
+
+                                // Check for repeated substring in window
+                                if text_window.len() >= REPEAT_MIN_MATCH * 2 {
+                                    let half = text_window.len() / 2;
+                                    let second_half = &text_window[half..];
+                                    // Find the longest prefix of second_half that appears in first half
+                                    let check_len = REPEAT_MIN_MATCH.min(second_half.len());
+                                    if let Some(needle) = second_half.get(..check_len)
+                                        && text_window[..half].contains(needle)
+                                    {
+                                        tracing::warn!(
+                                            "🔁 Repetition detected in streaming response after {} bytes. \
+                                             Provider appears to be looping. Terminating stream.",
+                                            total_text_len,
+                                        );
+                                        stop_reason = Some(StopReason::EndTurn);
+                                        break;
+                                    }
+                                }
+
+                                // Hard cap on response size
+                                if total_text_len > MAX_RESPONSE_TEXT {
+                                    tracing::warn!(
+                                        "📏 Response exceeded {} byte safety cap. Terminating stream.",
+                                        MAX_RESPONSE_TEXT,
+                                    );
+                                    stop_reason = Some(StopReason::MaxTokens);
+                                    break;
                                 }
                             }
                             ContentDelta::InputJsonDelta { partial_json } => {

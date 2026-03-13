@@ -65,6 +65,7 @@ src/workspace/
 
 
 # Local
+whatsapp-rust/
 src/tasks/
 tasks/
 ~/
