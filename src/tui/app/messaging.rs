@@ -1392,7 +1392,8 @@ impl App {
                         } else if raw.contains("Repetition detected") {
                             "Provider got stuck in a loop repeating the same content. \
                              The stream was terminated automatically. Try rephrasing your request \
-                             or switching models.".to_string()
+                             or switching models."
+                                .to_string()
                         } else {
                             raw
                         };
