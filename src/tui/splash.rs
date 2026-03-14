@@ -68,7 +68,7 @@ fn render_splash_content(f: &mut Frame, area: Rect, provider_name: &str, model_n
     splash_text.extend(vec![
         Line::from(""),
         Line::from(Span::styled(
-            "The autonomous AI agent. Single Rust binary. Every channel.",
+            "The autonomous AI agent. Self-improving. Every channel.",
             Style::default()
                 .fg(Color::Rgb(215, 100, 20))
                 .add_modifier(Modifier::BOLD | Modifier::ITALIC),
@@ -108,7 +108,7 @@ fn render_splash_content(f: &mut Frame, area: Rect, provider_name: &str, model_n
         ]),
         Line::from(""),
         Line::from(Span::styled(
-            "autonomous · self-improving · multi-channel · Rust-native",
+            "single Rust binary · multi-channel · self-improving",
             Style::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::ITALIC),
