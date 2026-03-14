@@ -173,6 +173,7 @@ Images are passed to the active model's vision pipeline if it supports multimoda
 | **Full Terminal Access** | 30+ built-in tools (file I/O, glob, grep, web search, code execution, image gen/analysis, memory search, cron jobs) plus **any CLI tool on your system** via `bash` — GitHub CLI, Docker, SSH, Python, Node, ffmpeg, curl, and everything else just work |
 | **Per-Session Isolation** | Each session is an independent agent with its own provider, model, context, and tool state. Sessions can run tasks in parallel against different providers — ask Claude a question in one session while Kimi works on code in another |
 | **Self-Sustaining** | Agent can modify its own source, build, test, and hot-restart via Unix `exec()` |
+| **Self-Improving** | Learns from experience — saves reusable workflows as custom commands, writes lessons learned to memory, updates its own brain files. All local, no data leaves your machine |
 | **Natural Language Commands** | Tell OpenCrabs to create slash commands — it writes them to `commands.toml` autonomously via the `config_manager` tool |
 | **Live Settings** | Agent can read/write `config.toml` at runtime; Settings TUI screen (press `S`) shows current config; approval policy persists across restarts. Default: auto-approve (use `/approve` to change) |
 | **Web Search** | DuckDuckGo (built-in, no key needed) + EXA AI (neural, free via MCP) by default; Brave Search optional (key in `keys.toml`) |
@@ -1469,6 +1470,25 @@ rebuild tool      # Agent-triggered: build → ProgressEvent::RestartReady → r
 **Modules:**
 - `src/brain/self_update.rs` — `SelfUpdater` struct with `auto_detect()`, `build()`, `test()`, `restart()`
 - `src/brain/tools/rebuild.rs` — `RebuildTool` (agent-callable, emits `ProgressEvent::RestartReady`)
+
+### Self-Improving Agent
+
+OpenCrabs learns from experience through three local mechanisms — no data ever leaves your machine:
+
+**1. Procedural memory — custom commands from experience**
+When the agent completes a complex workflow, overcomes errors, or follows user corrections, it can save that workflow as a reusable slash command via `config_manager add_command`. Next session, the command appears in autocomplete and the agent knows it exists.
+
+**2. Episodic memory — lessons learned**
+The agent writes important knowledge to `~/.opencrabs/` brain files as it works:
+- `MEMORY.md` — infrastructure details, troubleshooting patterns, architecture decisions
+- `USER.md` — your preferences, communication style, project context
+- `memory/YYYY-MM-DD.md` — daily logs of integrations, fixes, and decisions
+- Custom files (e.g., `DEPLOY.md`) — domain-specific knowledge
+
+**3. Cross-session recall — hybrid search**
+The `memory_search` and `session_search` tools use hybrid FTS5 + vector semantic search (Reciprocal Rank Fusion) to find relevant context from past sessions and memory files. Local embeddings via `embeddinggemma-300M` — no API calls needed.
+
+**Key difference from cloud-based "self-improving" agents:** Everything stays local. Your conversations are not training data for someone else's model. Your memory files, commands, and brain files belong to you.
 
 ---
 
