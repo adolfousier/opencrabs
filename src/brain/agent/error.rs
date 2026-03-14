@@ -38,6 +38,10 @@ pub enum AgentError {
     #[error("Maximum tool iterations exceeded: {0}")]
     MaxIterationsExceeded(usize),
 
+    /// Operation cancelled by user (e.g. /stop)
+    #[error("Cancelled")]
+    Cancelled,
+
     /// Internal error
     #[error("Internal error: {0}")]
     Internal(String),

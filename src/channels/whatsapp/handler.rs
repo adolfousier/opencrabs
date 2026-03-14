@@ -1019,6 +1019,9 @@ pub(crate) async fn handle_message(
                 }
             }
         }
+        Err(ref e) if matches!(e, crate::brain::agent::AgentError::Cancelled) => {
+            tracing::info!("WhatsApp: agent call cancelled for session {}", session_id);
+        }
         Err(e) => {
             tracing::error!("WhatsApp: agent error: {}", e);
             let error_msg = waproto::whatsapp::Message {
