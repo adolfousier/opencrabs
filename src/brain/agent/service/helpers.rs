@@ -61,7 +61,6 @@ impl AgentService {
         let mut text_window = String::new(); // rolling window of recent text
         const REPEAT_WINDOW: usize = 2048; // bytes to keep in window
         const REPEAT_MIN_MATCH: usize = 200; // minimum repeated substring to trigger
-        const MAX_RESPONSE_TEXT: usize = 128_000; // ~32k tokens safety cap
 
         // Track partial content blocks by index
         // Text blocks: accumulate text deltas
@@ -177,16 +176,6 @@ impl AgentService {
                                         total_text_len,
                                     );
                                     stop_reason = Some(StopReason::EndTurn);
-                                    break;
-                                }
-
-                                // Hard cap on response size
-                                if total_text_len > MAX_RESPONSE_TEXT {
-                                    tracing::warn!(
-                                        "📏 Response exceeded {} byte safety cap. Terminating stream.",
-                                        MAX_RESPONSE_TEXT,
-                                    );
-                                    stop_reason = Some(StopReason::MaxTokens);
                                     break;
                                 }
                             }
