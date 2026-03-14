@@ -11,7 +11,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Padding, Paragraph},
+    widgets::{Block, Borders, Clear, Padding, Paragraph},
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -529,5 +529,9 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         )
         .scroll(((actual_scroll_offset.min(u16::MAX as usize)) as u16, 0));
 
+    // Clear the area first to prevent stale buffer content from bleeding through.
+    // Ratatui's Paragraph only writes cells where it has text; cells beyond line
+    // ends or below the last line retain old content from the double-buffer.
+    f.render_widget(Clear, area);
     f.render_widget(chat, area);
 }
