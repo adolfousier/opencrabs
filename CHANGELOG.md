@@ -5,11 +5,27 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.77] - 2026-03-14
+
+### Added
+- **XML tool-call fallback** — Providers that emit tool calls as XML text (e.g. MiniMax `<tool_call><invoke name="...">`) are now parsed and executed. XML blocks are stripped from persisted content so raw markup doesn't appear in chat history
+- **Self-improving agent instructions** — BOOT.md brain template now includes self-improving directives. Splash screen and taglines updated
+- **TUI render clear tests** — 4 tests for ratatui buffer clearing behavior
+- **Test coverage** — 1,420 tests (up from 1,406)
+
+### Fixed
+- **TUI garbled characters on scroll** — Splash screen logo line overflowed the fixed-width ASCII box by 10 characters (73 vs 63 inner width), writing stale chars into ratatui's double buffer that bled through when scrolling. Fixed logo text to fit within box. Added `Clear` widget before Paragraph render to wipe the entire chat area each frame, preventing any stale buffer content from bleeding through during navigation
+- **Removed unauthorized 128KB stream response cap** — Hard limit on streaming text was removed. Repetition detection (2KB sliding window + 200-byte substring matching), stream idle timeout (60s), user cancellation (`/stop`), and provider-side `max_tokens` are sufficient to handle runaway streams without arbitrarily truncating legitimate long responses
+
+### Changed
+- **Splash taglines refined** — Removed duplicated terms, rearranged for clarity
+
+> **Existing users:** After updating, ask your Crabs to check for brain template diffs and update your brain files (e.g. "check for brain template updates and apply them")
+
 ## [0.2.76] - 2026-03-13
 
 ### Added
 - **Streaming text repetition detection** — Detects when providers (e.g. MiniMax) loop the same content indefinitely during streaming. Uses a 2KB sliding window with 200-byte substring matching to catch loops early and terminate the stream cleanly
-- **Response size safety cap** — Hard limit of 128KB (~32k tokens) on streaming text to prevent runaway responses
 - **Human-readable error messages** — Cryptic provider errors like "error decoding response body" are now translated to actionable messages suggesting retry or model switch
 - **Stream loop detection tests** — 12 tests covering repetition detection, false positive prevention, edge cases, and error message translation
 - **Test coverage** — 1,406 tests (up from 1,394)
@@ -1560,6 +1576,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.77]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.77
 [0.2.76]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.76
 [0.2.75]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.75
 [0.2.74]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.74
