@@ -7,9 +7,9 @@
 
 # 🦀 OpenCrabs
 
-**The autonomous AI agent. Single Rust binary. Every channel.**
+**The autonomous, self-improving AI agent. Single Rust binary. Every channel.**
 
-> Autonomous multi-channel AI agent built in Rust. Inspired by [Open Claw](https://github.com/openclaw/openclaw).
+> Autonomous, self-improving multi-channel AI agent built in Rust. Inspired by [Open Claw](https://github.com/openclaw/openclaw).
 
 ```
     ___                    ___           _
@@ -18,7 +18,7 @@
    \___/| .__/\___|_||_|  \___|_| \__,_|_.__//__/
         |_|
 
- 🦀 The autonomous AI agent. Single Rust binary. Every channel.
+ 🦀 The autonomous, self-improving AI agent. Single Rust binary. Every channel.
 
 ```
 
@@ -1488,7 +1488,7 @@ The agent writes important knowledge to `~/.opencrabs/` brain files as it works:
 **3. Cross-session recall — hybrid search**
 The `memory_search` and `session_search` tools use hybrid FTS5 + vector semantic search (Reciprocal Rank Fusion) to find relevant context from past sessions and memory files. Local embeddings via `embeddinggemma-300M` — no API calls needed.
 
-**Key difference from cloud-based "self-improving" agents:** Everything stays local. Your conversations are not training data for someone else's model. Your memory files, commands, and brain files belong to you.
+**Key difference from cloud-based "self-improving" agents:** Your memory files, commands, and brain files are 100% local and belong to you. With local models (LM Studio, Ollama), everything stays on your machine. With cloud providers (Anthropic, MiniMax, OpenRouter), conversations go through their APIs — but these providers are privacy-first by default per their ToS, and you can opt out of logging and training data in their settings. Either way, your self-improvement data (skills, memory, commands) never leaves your machine.
 
 ---
 

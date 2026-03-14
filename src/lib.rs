@@ -1,6 +1,6 @@
 //! # OpenCrabs
 //!
-//! The autonomous AI agent. Single Rust binary. Every channel.
+//! The autonomous, self-improving AI agent. Single Rust binary. Every channel.
 //!
 //! OpenCrabs is a high-performance AI orchestration agent with a modern TUI,
 //! multi-channel messaging (Telegram, Discord, Slack, WhatsApp), and an
