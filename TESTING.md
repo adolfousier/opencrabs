@@ -102,7 +102,8 @@ cargo test --all-features
 | Tests — Post-Evolve | 5 | `src/tests/post_evolve_test.rs` |
 | Tests — Stream Loop Detection | 12 | `src/tests/stream_loop_test.rs` |
 | Tests — XML Tool Fallback | 10 | `src/tests/xml_tool_fallback_test.rs` |
-| **Total** | **1,416** | |
+| Tests — TUI Render Clear | 4 | `src/tests/tui_render_clear_test.rs` |
+| **Total** | **1,420** | |
 
 ---
 
