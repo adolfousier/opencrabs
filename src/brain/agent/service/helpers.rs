@@ -510,6 +510,68 @@ impl AgentService {
 
         (name, input)
     }
+
+    /// Extract tool calls from XML `<tool_call>` blocks embedded in text content.
+    ///
+    /// Some providers (e.g. MiniMax) emit tool calls as XML instead of the
+    /// structured `tool_calls` field. This parses patterns like:
+    /// ```xml
+    /// <tool_call>
+    /// <invoke name="tool_name">
+    /// <parameter name="key">value</parameter>
+    /// </invoke>
+    /// </tool_call>
+    /// ```
+    /// Returns `None` if no valid tool calls are found.
+    pub(crate) fn extract_xml_tool_calls(text: &str) -> Option<Vec<(String, serde_json::Value)>> {
+        use regex::Regex;
+        use std::sync::LazyLock;
+
+        // Match <tool_call>...<invoke name="X">...</invoke>...</tool_call>
+        static TOOL_CALL_RE: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(
+                r#"(?s)<tool_call>\s*<invoke\s+name="([^"]+)">\s*(.*?)\s*</invoke>\s*</tool_call>"#,
+            )
+            .unwrap()
+        });
+        // Match <parameter name="X">value</parameter>
+        static PARAM_RE: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r#"(?s)<parameter\s+name="([^"]+)">(.*?)</parameter>"#).unwrap()
+        });
+
+        let mut results = Vec::new();
+        for cap in TOOL_CALL_RE.captures_iter(text) {
+            let tool_name = cap[1].to_string();
+            let body = &cap[2];
+
+            let mut params = serde_json::Map::new();
+            for pcap in PARAM_RE.captures_iter(body) {
+                let key = pcap[1].to_string();
+                let value = pcap[2].trim().to_string();
+                params.insert(key, serde_json::Value::String(value));
+            }
+
+            results.push((tool_name, serde_json::Value::Object(params)));
+        }
+
+        if results.is_empty() {
+            None
+        } else {
+            Some(results)
+        }
+    }
+
+    /// Strip `<tool_call>...</tool_call>` blocks from text so raw XML
+    /// doesn't get persisted to DB or shown to the user.
+    pub(crate) fn strip_xml_tool_calls(text: &str) -> String {
+        use regex::Regex;
+        use std::sync::LazyLock;
+
+        static TOOL_CALL_BLOCK_RE: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r#"(?s)<tool_call>.*?</tool_call>"#).unwrap());
+
+        TOOL_CALL_BLOCK_RE.replace_all(text, "").trim().to_string()
+    }
 }
 
 /// Detect repetition in a streaming text window.

@@ -687,6 +687,30 @@ impl AgentService {
                 }
             }
 
+            // ── XML tool-call fallback ──────────────────────────────────
+            // Some providers (e.g. MiniMax) emit tool calls as XML
+            // `<tool_call><invoke name="..."><parameter name="...">` inside
+            // the text content instead of the structured `tool_calls` field.
+            // Extract them so the tool loop can execute them normally.
+            if tool_uses.is_empty()
+                && iteration_text.contains("<tool_call>")
+                && let Some(extracted) = Self::extract_xml_tool_calls(&iteration_text)
+            {
+                for (name, input) in extracted {
+                    let synthetic_id = format!("xml_fallback_{}", uuid::Uuid::new_v4().simple());
+                    tracing::info!(
+                        "[TOOL_XML_FALLBACK] Extracted tool from XML in text: name={}, id={}",
+                        name,
+                        synthetic_id
+                    );
+                    let (norm_name, norm_input) = Self::normalize_tool_call(name, input);
+                    tool_uses.push((synthetic_id, norm_name, norm_input));
+                }
+                // Strip the XML tool_call blocks from iteration_text so raw XML
+                // doesn't get persisted or shown to the user
+                iteration_text = Self::strip_xml_tool_calls(&iteration_text);
+            }
+
             // Persist reasoning content to DB (before iteration text)
             if let Some(ref reasoning) = reasoning_text
                 && !reasoning.trim().is_empty()
