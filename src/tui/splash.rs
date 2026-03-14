@@ -108,7 +108,7 @@ fn render_splash_content(f: &mut Frame, area: Rect, provider_name: &str, model_n
         ]),
         Line::from(""),
         Line::from(Span::styled(
-            "single Rust binary · multi-channel · self-improving",
+            "single binary · local-first · every provider",
             Style::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::ITALIC),
