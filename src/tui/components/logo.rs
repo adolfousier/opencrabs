@@ -19,7 +19,7 @@ pub const LOGO: &str = r#"
    ║  (      ,'                             `-,    \               ║
    ║   `-_, '                                  `-,_/               ║
    ║                                                               ║
-   ║   The autonomous AI agent. Single Rust binary. Every channel.  ║
+   ║ The autonomous, self-improving AI agent. Single binary. Every channel. ║
    ║                                                               ║
    ╚═══════════════════════════════════════════════════════════════╝
 "#;
