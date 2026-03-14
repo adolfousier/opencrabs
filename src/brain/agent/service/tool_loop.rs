@@ -687,6 +687,15 @@ impl AgentService {
                 }
             }
 
+            // ── Strip echoed markup ──────────────────────────────────────
+            // The LLM sometimes echoes back <!-- tools-v2: ... --> or
+            // <!-- reasoning -->...<!-- /reasoning --> blocks from its
+            // conversation context. Strip them so they don't leak into
+            // Telegram/channel output or the TUI.
+            if iteration_text.contains("<!-- tools") {
+                iteration_text = Self::strip_tools_v2_markers(&iteration_text);
+            }
+
             // ── XML tool-call fallback ──────────────────────────────────
             // Some providers (e.g. MiniMax) emit tool calls as XML
             // `<tool_call><invoke name="..."><parameter name="...">` inside
