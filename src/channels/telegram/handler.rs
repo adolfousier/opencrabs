@@ -1188,6 +1188,13 @@ pub(crate) async fn handle_message(
                 }
             }
         }
+        Err(ref e) if matches!(e, crate::brain::agent::AgentError::Cancelled) => {
+            tracing::info!("Telegram: agent call cancelled for session {}", session_id);
+            // Silently clean up — user already received "Operation cancelled." from /stop
+            if let Some(mid) = streaming_msg_id {
+                let _ = bot.delete_message(msg.chat.id, mid).await;
+            }
+        }
         Err(e) => {
             tracing::error!("Telegram: agent error: {}", e);
             // If a streaming message was started, edit it to show the error

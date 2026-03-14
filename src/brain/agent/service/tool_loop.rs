@@ -1309,6 +1309,13 @@ impl AgentService {
                 }
             }
             None => {
+                // If the cancel token is set and was triggered, this is a user-initiated
+                // cancellation — return Cancelled instead of a noisy Internal error.
+                if let Some(ref token) = cancel_token
+                    && token.is_cancelled()
+                {
+                    return Err(AgentError::Cancelled);
+                }
                 return Err(AgentError::Internal(
                     "Tool loop ended without final response".to_string(),
                 ));

@@ -1025,6 +1025,9 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                 }
             }
         }
+        Err(ref e) if matches!(e, crate::brain::agent::AgentError::Cancelled) => {
+            tracing::info!("Slack: agent call cancelled for session {}", session_id);
+        }
         Err(e) => {
             tracing::error!("Slack: agent error: {}", e);
             let token = SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
