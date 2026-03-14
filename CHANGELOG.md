@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Crash on multi-byte UTF-8 in repetition detection** — `detect_text_repetition` panicked when slicing the sliding window at a byte offset inside multi-byte characters like `❌` (3 bytes) or `—` (em-dash, 3 bytes). Now advances to the nearest valid char boundary before slicing. Same fix applied to the window drain logic
+- **`<!-- tools-v2: -->` markers leaking into Telegram/channel output** — LLM echoes back tool result markers from conversation context. The streaming filter handles them during SSE parsing, but split chunks could let them through. Now stripped from `iteration_text` in the tool loop before emission to channels
 - **Test coverage** — 1,423 tests (up from 1,420). Added 3 UTF-8 regression tests for repetition detection
 
 ## [0.2.77] - 2026-03-14

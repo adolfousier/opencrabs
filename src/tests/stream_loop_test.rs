@@ -112,3 +112,32 @@ fn single_char_repeated_detected() {
     let window = "A".repeat(500);
     assert!(detect_text_repetition(&window, 200));
 }
+
+#[test]
+fn no_panic_on_multibyte_utf8() {
+    // Regression: slicing at window.len()/2 panicked on multi-byte chars
+    // ❌ is 3 bytes, — (em-dash) is 3 bytes
+    let window = "Already replied ❌ within 48h — @gyroscape ❌ within 48h — @RJMcGirr \
+                  Already replied ❌ within 48h — @gyroscape ❌ within 48h — @RJMcGirr \
+                  Already replied ❌ within 48h — @gyroscape ❌ within 48h — @RJMcGirr ";
+    // Must not panic — just verify it runs
+    detect_text_repetition(window, 50);
+}
+
+#[test]
+fn no_panic_on_emoji_heavy_text() {
+    // Window full of 4-byte emoji — midpoint likely lands inside a char
+    let emoji_block = "🦀🥐🔁📏💭";
+    let window: String = emoji_block.repeat(30);
+    detect_text_repetition(&window, 50);
+}
+
+#[test]
+fn detects_loop_with_multibyte_content() {
+    let block = "Release notes — version 0.2.77 ❌ failed checks. \
+                 Please retry the build with —all-features flag. \
+                 Status: ❌ failed. See logs for details below. \
+                 The em-dash — and cross ❌ are multi-byte UTF-8. ";
+    let window = format!("{}{}", block, block);
+    assert!(detect_text_repetition(&window, 100));
+}

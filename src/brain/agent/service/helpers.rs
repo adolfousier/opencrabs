@@ -164,7 +164,13 @@ impl AgentService {
                                 total_text_len += text.len();
                                 text_window.push_str(&text);
                                 if text_window.len() > REPEAT_WINDOW {
-                                    let drain = text_window.len() - REPEAT_WINDOW;
+                                    let mut drain = text_window.len() - REPEAT_WINDOW;
+                                    // Advance to a valid char boundary
+                                    while !text_window.is_char_boundary(drain)
+                                        && drain < text_window.len()
+                                    {
+                                        drain += 1;
+                                    }
                                     text_window.drain(..drain);
                                 }
 
@@ -561,6 +567,22 @@ impl AgentService {
 
         TOOL_CALL_BLOCK_RE.replace_all(text, "").trim().to_string()
     }
+
+    /// Strip `<!-- tools-v2: ... -->` and `<!-- tools: ... -->` markers from text.
+    ///
+    /// The LLM sometimes echoes these back from conversation context.
+    /// The streaming filter in `custom_openai_compatible.rs` handles them
+    /// during streaming, but if the open tag is split across chunks it can
+    /// slip through. This catches any that survive.
+    pub(crate) fn strip_tools_v2_markers(text: &str) -> String {
+        use regex::Regex;
+        use std::sync::LazyLock;
+
+        static TOOLS_MARKER_RE: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r#"(?s)<!-- tools(?:-v2)?:.*?-->"#).unwrap());
+
+        TOOLS_MARKER_RE.replace_all(text, "").trim().to_string()
+    }
 }
 
 /// Detect repetition in a streaming text window.
@@ -572,9 +594,17 @@ pub fn detect_text_repetition(window: &str, min_match: usize) -> bool {
     if min_match == 0 || window.len() < min_match * 2 {
         return false;
     }
-    let half = window.len() / 2;
+    // Find a valid char boundary at or after the midpoint
+    let mut half = window.len() / 2;
+    while !window.is_char_boundary(half) && half < window.len() {
+        half += 1;
+    }
     let second_half = &window[half..];
-    let check_len = min_match.min(second_half.len());
+    let mut check_len = min_match.min(second_half.len());
+    // Ensure check_len lands on a char boundary within second_half
+    while !second_half.is_char_boundary(check_len) && check_len < second_half.len() {
+        check_len += 1;
+    }
     if let Some(needle) = second_half.get(..check_len) {
         window[..half].contains(needle)
     } else {
