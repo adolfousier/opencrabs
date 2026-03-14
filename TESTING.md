@@ -101,7 +101,8 @@ cargo test --all-features
 | Tests — WhatsApp State | 7 | `src/tests/whatsapp_state_test.rs` |
 | Tests — Post-Evolve | 5 | `src/tests/post_evolve_test.rs` |
 | Tests — Stream Loop Detection | 12 | `src/tests/stream_loop_test.rs` |
-| **Total** | **1,406** | |
+| Tests — XML Tool Fallback | 10 | `src/tests/xml_tool_fallback_test.rs` |
+| **Total** | **1,416** | |
 
 ---
 
