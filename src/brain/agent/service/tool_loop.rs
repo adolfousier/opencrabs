@@ -696,27 +696,14 @@ impl AgentService {
                 iteration_text = Self::strip_tools_v2_markers(&iteration_text);
             }
 
-            // ── XML tool-call fallback ──────────────────────────────────
-            // Some providers (e.g. MiniMax) emit tool calls as XML
-            // `<tool_call><invoke name="..."><parameter name="...">` inside
-            // the text content instead of the structured `tool_calls` field.
-            // Extract them so the tool loop can execute them normally.
-            if tool_uses.is_empty()
-                && iteration_text.contains("<tool_call>")
-                && let Some(extracted) = Self::extract_xml_tool_calls(&iteration_text)
-            {
-                for (name, input) in extracted {
-                    let synthetic_id = format!("xml_fallback_{}", uuid::Uuid::new_v4().simple());
-                    tracing::info!(
-                        "[TOOL_XML_FALLBACK] Extracted tool from XML in text: name={}, id={}",
-                        name,
-                        synthetic_id
-                    );
-                    let (norm_name, norm_input) = Self::normalize_tool_call(name, input);
-                    tool_uses.push((synthetic_id, norm_name, norm_input));
-                }
-                // Strip the XML tool_call blocks from iteration_text so raw XML
-                // doesn't get persisted or shown to the user
+            // ── XML tool-call stripping ──────────────────────────────────
+            // Some providers (e.g. MiniMax) occasionally emit tool calls as
+            // XML text instead of structured tool_calls. We used to try
+            // extracting and executing these, but the synthetic IDs caused
+            // providers to reject tool results ("tool id not found"),
+            // triggering infinite retry loops. Just strip the XML and let
+            // the model respond with text instead.
+            if iteration_text.contains("<tool_call>") {
                 iteration_text = Self::strip_xml_tool_calls(&iteration_text);
             }
 
