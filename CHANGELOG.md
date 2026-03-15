@@ -5,6 +5,12 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.79] - 2026-03-15
+
+### Fixed
+- **Infinite retry loop from XML tool-call fallback** — The XML fallback (added in 0.2.77) created synthetic tool IDs that providers like MiniMax rejected with "tool id not found", triggering unstoppable retry loops that couldn't be cancelled. Removed the XML fallback entirely; XML tool_call blocks are now stripped from output
+- **`/stop` only killed latest agent call** — `/stop` now cancels all in-flight agent calls instead of only the most recent one
+
 ## [0.2.78] - 2026-03-14
 
 ### Fixed
@@ -1583,6 +1589,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.79]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.79
 [0.2.78]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.78
 [0.2.77]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.77
 [0.2.76]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.76
