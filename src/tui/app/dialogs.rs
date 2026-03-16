@@ -408,17 +408,31 @@ impl App {
             self.model_selector_showing_providers = self.model_selector_focused_field == 0;
         } else if self.model_selector_focused_field == 0 {
             // Provider selection (focused)
+            // Navigate using display order (matches render): 0-5, then existing customs 7+, then 6 ("+New")
+            let num_customs = self.model_selector_custom_names.len();
+            let display_order: Vec<usize> = (0..6)
+                .chain(7..7 + num_customs)
+                .chain(std::iter::once(6))
+                .collect();
             let provider_changed = match event.code {
                 crossterm::event::KeyCode::Up => {
-                    self.model_selector_provider_selected =
-                        self.model_selector_provider_selected.saturating_sub(1);
+                    let pos = display_order
+                        .iter()
+                        .position(|&i| i == self.model_selector_provider_selected)
+                        .unwrap_or(0);
+                    if pos > 0 {
+                        self.model_selector_provider_selected = display_order[pos - 1];
+                    }
                     true
                 }
                 crossterm::event::KeyCode::Down => {
-                    // 7 static providers (0-6) + existing custom providers (7+)
-                    let max_idx = PROVIDERS.len() - 1 + self.model_selector_custom_names.len();
-                    self.model_selector_provider_selected =
-                        (self.model_selector_provider_selected + 1).min(max_idx);
+                    let pos = display_order
+                        .iter()
+                        .position(|&i| i == self.model_selector_provider_selected)
+                        .unwrap_or(0);
+                    if pos + 1 < display_order.len() {
+                        self.model_selector_provider_selected = display_order[pos + 1];
+                    }
                     true
                 }
                 _ => false,
