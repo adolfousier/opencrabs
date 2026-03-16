@@ -1488,9 +1488,7 @@ impl App {
 
         // Clear any unconsumed queued message (tool loop may have already drained it)
         if self.message_queue.lock().await.take().is_some() {
-            tracing::info!(
-                "[TUI] Discarding unconsumed queued message at response complete"
-            );
+            tracing::info!("[TUI] Discarding unconsumed queued message at response complete");
         }
         self.queued_message_preview = None;
 

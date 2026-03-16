@@ -5,6 +5,12 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.80] - 2026-03-16
+
+### Fixed
+- **`/model` provider navigation jumps out of order** — Up/Down keys now follow the visual display order (static providers → existing custom names → "+ New Custom") instead of raw index order, matching `/onboard:provider` behavior
+- **Queued messages stack as duplicate user bubbles** — Messages sent while the agent is processing no longer appear as dimmed duplicates in chat. They stay in the input area preview until the tool loop consumes them, then appear naturally in the conversation flow
+
 ## [0.2.79] - 2026-03-15
 
 ### Fixed
@@ -1589,6 +1595,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.80]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.80
 [0.2.79]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.79
 [0.2.78]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.78
 [0.2.77]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.77
