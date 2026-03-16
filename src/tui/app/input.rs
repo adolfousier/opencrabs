@@ -805,16 +805,6 @@ impl App {
             // Removes from the queue so the user can modify and re-send.
             let content = self.queued_message_preview.take().unwrap();
             *self.message_queue.lock().await = None;
-            // Remove the queued message from chat display
-            if let Some(pos) = self
-                .messages
-                .iter()
-                .rposition(|m| m.role == "user" && m.details.as_deref() == Some("queued"))
-            {
-                let msg_id = self.messages[pos].id;
-                self.messages.remove(pos);
-                self.render_cache.retain(|k, _| k.0 != msg_id);
-            }
             self.input_buffer = content;
             self.cursor_position = self.input_buffer.len();
         } else if keys::is_up(&event)

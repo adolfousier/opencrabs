@@ -1269,24 +1269,11 @@ impl App {
                 session.id
             );
 
-            // Show immediately in chat as a dimmed "queued" user message
+            // Show preview in input area (dimmed, with Up-to-edit hint).
+            // Don't add to self.messages yet — it will appear in the chat flow
+            // naturally when the tool loop injects it and the next IntermediateText
+            // or response arrives.
             self.queued_message_preview = Some(content.clone());
-            self.messages.push(DisplayMessage {
-                id: Uuid::new_v4(),
-                role: "user".to_string(),
-                content: Self::humanize_image_markers(&content),
-                timestamp: chrono::Utc::now(),
-                token_count: None,
-                cost: None,
-                approval: None,
-                approve_menu: None,
-                details: Some("queued".to_string()),
-                expanded: false,
-                tool_group: None,
-            });
-            if self.auto_scroll {
-                self.scroll_offset = 0;
-            }
 
             // Queue for injection between tool calls
             *self.message_queue.lock().await = Some(content);
@@ -1499,24 +1486,13 @@ impl App {
             });
         }
 
-        // Clear queued message from the queue (already shown in chat at queue time)
+        // Clear any unconsumed queued message (tool loop may have already drained it)
         if self.message_queue.lock().await.take().is_some() {
-            self.queued_message_preview = None;
-            // Remove "queued" styling so the message renders normally
-            if let Some(msg) = self
-                .messages
-                .iter_mut()
-                .rev()
-                .find(|m| m.role == "user" && m.details.as_deref() == Some("queued"))
-            {
-                msg.details = None;
-                let msg_id = msg.id;
-                self.render_cache.retain(|k, _| k.0 != msg_id);
-            }
             tracing::info!(
-                "[TUI] Cleared queued message at response complete (already displayed in chat)"
+                "[TUI] Discarding unconsumed queued message at response complete"
             );
         }
+        self.queued_message_preview = None;
 
         // Reload user commands (agent may have written new ones to commands.json)
         self.reload_user_commands();

@@ -1227,22 +1227,12 @@ impl App {
                     });
                 }
 
-                // Clear queued message from the queue (already shown in chat at queue time)
+                // If a queued message was consumed by the tool loop, clear the
+                // input preview — the message now lives in DB and will appear
+                // naturally in the chat flow via IntermediateText.
                 if self.message_queue.lock().await.take().is_some() {
                     self.queued_message_preview = None;
-                    // Remove "queued" styling so the message renders normally
-                    if let Some(msg) = self
-                        .messages
-                        .iter_mut()
-                        .rev()
-                        .find(|m| m.role == "user" && m.details.as_deref() == Some("queued"))
-                    {
-                        msg.details = None;
-                        // Invalidate render cache for this message
-                        let msg_id = msg.id;
-                        self.render_cache.retain(|k, _| k.0 != msg_id);
-                    }
-                    tracing::info!("[TUI] Cleared queued message (already displayed in chat)");
+                    tracing::info!("[TUI] Cleared queued message preview (consumed by tool loop)");
                 }
 
                 // Then add the new intermediate text as a separate assistant message
