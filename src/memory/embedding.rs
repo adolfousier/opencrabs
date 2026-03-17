@@ -126,8 +126,36 @@ pub(super) fn backfill_embeddings(store: &Mutex<Store>) {
     let now = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
     let mut stored = 0usize;
 
-    for (i, (hash, _path, body)) in needing.iter().enumerate() {
-        tracing::debug!("Embedding progress: {}/{}", i, count);
+    // llama-cpp segfaults on very large documents. Cap at 32KB — anything
+    // bigger was likely a session_search index doc that slipped through before
+    // the 64KB cap was added.
+    const MAX_EMBED_BYTES: usize = 32_000;
+
+    for (i, (hash, path, body)) in needing.iter().enumerate() {
+        tracing::info!(
+            "Embedding {}/{}: path={}, body_len={}, hash={}",
+            i + 1,
+            count,
+            path,
+            body.len(),
+            hash
+        );
+
+        if body.len() > MAX_EMBED_BYTES {
+            tracing::warn!(
+                "Skipping embedding for '{}' — body too large ({} bytes, max {}). \
+                 Inserting zero-vector placeholder so it won't retry.",
+                path,
+                body.len(),
+                MAX_EMBED_BYTES
+            );
+            // Insert a zero-length placeholder embedding so this doc is no longer
+            // returned by get_hashes_needing_embedding on every startup.
+            if let Ok(s) = store.lock() {
+                let _ = s.insert_embedding(hash, 0, 0, &[], "skipped-too-large", &now);
+            }
+            continue;
+        }
 
         let title = Store::extract_title(body);
 
