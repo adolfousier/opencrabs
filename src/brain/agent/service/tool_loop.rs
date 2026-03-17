@@ -965,12 +965,18 @@ impl AgentService {
                                     service_context: tool_context.service_context.clone(),
                                 };
 
-                                // Execute the tool with approved context
-                                match self
-                                    .tool_registry
-                                    .execute(&tool_name, tool_input, &approved_tool_context)
-                                    .await
-                                {
+                                // Execute the tool with approved context, racing against cancel
+                                let exec_result = tokio::select! {
+                                    biased;
+                                    _ = async {
+                                        if let Some(ref t) = cancel_token { t.cancelled().await } else { std::future::pending().await }
+                                    } => {
+                                        tracing::warn!("🛑 Tool '{}' cancelled mid-execution", tool_name);
+                                        break;
+                                    }
+                                    r = self.tool_registry.execute(&tool_name, tool_input, &approved_tool_context) => r,
+                                };
+                                match exec_result {
                                     Ok(result) => {
                                         let success = result.success;
                                         let content = if result.success {
@@ -1079,11 +1085,17 @@ impl AgentService {
                 // so the registry's own approval check doesn't block it)
                 let mut approved_context = tool_context.clone();
                 approved_context.auto_approve = true;
-                match self
-                    .tool_registry
-                    .execute(&tool_name, tool_input, &approved_context)
-                    .await
-                {
+                let exec_result = tokio::select! {
+                    biased;
+                    _ = async {
+                        if let Some(ref t) = cancel_token { t.cancelled().await } else { std::future::pending().await }
+                    } => {
+                        tracing::warn!("🛑 Tool '{}' cancelled mid-execution", tool_name);
+                        break;
+                    }
+                    r = self.tool_registry.execute(&tool_name, tool_input, &approved_context) => r,
+                };
+                match exec_result {
                     Ok(result) => {
                         let success = result.success;
                         let content = if result.success {
