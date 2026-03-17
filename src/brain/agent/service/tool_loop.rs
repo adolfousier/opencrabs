@@ -584,7 +584,9 @@ impl AgentService {
             } else if real_message_tokens > 0 && real_message_tokens < min_sane {
                 tracing::warn!(
                     "Token calibration skipped: api_input={}, tool_overhead={}, result={} (below sanity threshold)",
-                    api_input, tool_overhead, real_message_tokens,
+                    api_input,
+                    tool_overhead,
+                    real_message_tokens,
                 );
             }
             // Fire real-time token count update after every API response
