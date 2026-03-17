@@ -252,6 +252,10 @@ impl SessionSearchTool {
                 title_str, date, session.id
             );
 
+            // Cap total body size to 64KB to prevent segfaults in native
+            // embedding code (llama-cpp / qmd) when indexing very large sessions.
+            const MAX_BODY_BYTES: usize = 64 * 1024;
+
             for msg in &messages {
                 let role = if msg.role == "user" {
                     "[user]"
@@ -265,7 +269,12 @@ impl SessionSearchTool {
                 } else {
                     msg.content.clone()
                 };
-                body.push_str(&format!("{} {}\n\n", role, content));
+                let chunk = format!("{} {}\n\n", role, content);
+                if body.len() + chunk.len() > MAX_BODY_BYTES {
+                    body.push_str("... (truncated for indexing)\n");
+                    break;
+                }
+                body.push_str(&chunk);
             }
 
             tracing::debug!("[session_search] Built body: {} bytes", body.len());
