@@ -186,6 +186,17 @@ Build artifacts are temporary. Don't commit them. Don't leave them. The repo sho
 
 ---
 
+## Rust
+
+- **Do NOT use unwraps or anything that can panic in Rust code, handle errors.** Obviously in tests unwraps and panics are fine!
+- In Rust code prefer using `crate::` to `super::`; don't use `super::`. If you see a lingering `super::` from someone else clean it up.
+- Avoid `pub use` on imports unless you are re-exposing a dependency so downstream consumers do not have to depend on it directly.
+- Skip global state via `lazy_static!`, `Once`, or similar; prefer passing explicit context structs for any shared state.
+- **No mock tests.** Unit tests and e2e tests hit real implementations (real DB, real structs). Mocks hide bugs — if the mock passes but prod breaks, the test was worthless.
+- All tests live in `src/tests/` as dedicated `*_test.rs` files — not inline, not scattered.
+
+---
+
 ## Architecture Principles
 
 ### Read Before Writing
