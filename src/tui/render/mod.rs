@@ -87,13 +87,14 @@ pub fn render(f: &mut Frame, app: &mut App) {
         .map(|p| (p.tasks.len() + 2).min(8) as u16)
         .unwrap_or(0);
 
-    // Sticky "OpenCrabs is thinking..." row: visible only during the brief
-    // window between submitting a prompt and the first streaming token/tool.
+    // Sticky "OpenCrabs is thinking..." row: visible whenever processing
+    // but no streaming text/reasoning is actively arriving.
+    // Stays visible during tool execution and between API calls so the
+    // user always knows the agent is still working.
     let thinking_height: u16 = if !app.has_pending_approval()
         && app.is_processing
         && app.streaming_response.is_none()
         && app.streaming_reasoning.is_none()
-        && app.active_tool_group.is_none()
     {
         1
     } else {
