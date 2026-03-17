@@ -1227,14 +1227,6 @@ impl App {
                     });
                 }
 
-                // If a queued message was consumed by the tool loop, clear the
-                // input preview — the message now lives in DB and will appear
-                // naturally in the chat flow via IntermediateText.
-                if self.message_queue.lock().await.take().is_some() {
-                    self.queued_message_preview = None;
-                    tracing::info!("[TUI] Cleared queued message preview (consumed by tool loop)");
-                }
-
                 // Then add the new intermediate text as a separate assistant message
                 self.messages.push(DisplayMessage {
                     id: Uuid::new_v4(),
@@ -1249,6 +1241,59 @@ impl App {
                     expanded: false,
                     tool_group: None,
                 });
+
+                if self.auto_scroll {
+                    self.scroll_offset = 0;
+                }
+            }
+            TuiEvent::QueuedUserMessage { session_id, text }
+                if self.is_current_session(session_id) =>
+            {
+                tracing::info!(
+                    "[TUI] QueuedUserMessage inline: len={} active_group={}",
+                    text.len(),
+                    self.active_tool_group.is_some()
+                );
+
+                // Flush any active tool group so the user message appears after it
+                if let Some(group) = self.active_tool_group.take() {
+                    let count = group.calls.len();
+                    self.messages.push(DisplayMessage {
+                        id: Uuid::new_v4(),
+                        role: "tool".to_string(),
+                        content: format!(
+                            "{} tool call{} completed",
+                            count,
+                            if count == 1 { "" } else { "s" }
+                        ),
+                        timestamp: chrono::Utc::now(),
+                        token_count: None,
+                        cost: None,
+                        approval: None,
+                        approve_menu: None,
+                        details: None,
+                        expanded: false,
+                        tool_group: Some(group),
+                    });
+                }
+
+                // Add the queued user message inline in the chat flow
+                self.messages.push(DisplayMessage {
+                    id: Uuid::new_v4(),
+                    role: "user".to_string(),
+                    content: text,
+                    timestamp: chrono::Utc::now(),
+                    token_count: None,
+                    cost: None,
+                    approval: None,
+                    approve_menu: None,
+                    details: None,
+                    expanded: false,
+                    tool_group: None,
+                });
+
+                // Clear the preview — message is now in the chat
+                self.queued_message_preview = None;
 
                 if self.auto_scroll {
                     self.scroll_offset = 0;
@@ -1441,6 +1486,7 @@ impl App {
             TuiEvent::ToolCallStarted { .. }
             | TuiEvent::ToolCallCompleted { .. }
             | TuiEvent::IntermediateText { .. }
+            | TuiEvent::QueuedUserMessage { .. }
             | TuiEvent::CompactionSummary { .. }
             | TuiEvent::TokenCountUpdated { .. }
             | TuiEvent::StreamingOutputTokens { .. } => {}

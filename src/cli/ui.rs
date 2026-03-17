@@ -419,6 +419,9 @@ async fn cmd_chat_inner(
                 ProgressEvent::ReasoningChunk { text } => {
                     progress_sender.send(TuiEvent::ReasoningChunk { session_id, text })
                 }
+                ProgressEvent::QueuedUserMessage { text } => {
+                    progress_sender.send(TuiEvent::QueuedUserMessage { session_id, text })
+                }
             };
             if let Err(e) = result {
                 tracing::error!("Progress event channel closed: {}", e);

@@ -54,6 +54,10 @@ pub enum ProgressEvent {
         text: String,
         reasoning: Option<String>,
     },
+    /// A queued user message was injected between tool iterations
+    QueuedUserMessage {
+        text: String,
+    },
     /// Real-time streaming chunk from the LLM (word-by-word)
     StreamingChunk {
         text: String,

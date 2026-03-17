@@ -1268,6 +1268,17 @@ impl AgentService {
                 && let Some(queued_msg) = queue_cb().await
             {
                 tracing::info!("Injecting queued user message between tool iterations");
+
+                // Notify TUI so the user message appears inline in the chat flow
+                if let Some(ref cb) = progress_callback {
+                    cb(
+                        session_id,
+                        ProgressEvent::QueuedUserMessage {
+                            text: queued_msg.clone(),
+                        },
+                    );
+                }
+
                 let injected = Message::user(queued_msg.clone());
                 context.add_message(injected);
 

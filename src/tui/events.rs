@@ -148,6 +148,9 @@ pub enum TuiEvent {
     /// Reasoning/thinking content chunk from providers like MiniMax (display-only)
     ReasoningChunk { session_id: Uuid, text: String },
 
+    /// A queued user message was injected into the tool loop between iterations
+    QueuedUserMessage { session_id: Uuid, text: String },
+
     /// Whisper model download progress (0.0–1.0)
     WhisperDownloadProgress(f64),
     /// Whisper model download completed (Ok or Err message)
