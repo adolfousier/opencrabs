@@ -648,8 +648,17 @@ async fn cmd_chat_inner(
                 // Clear the table so these don't resume again if THIS run also crashes
                 let _ = pending_repo.clear_all().await;
                 let agent = app.agent_service().clone();
+                // Dedup by session_id — only resume each session once
+                let mut seen = std::collections::HashSet::new();
                 for req in requests {
                     if let Ok(session_id) = uuid::Uuid::parse_str(&req.session_id) {
+                        if !seen.insert(session_id) {
+                            tracing::debug!(
+                                "Skipping duplicate resume for session {}",
+                                &req.session_id[..8.min(req.session_id.len())]
+                            );
+                            continue;
+                        }
                         let agent = agent.clone();
                         tracing::info!(
                             "Resuming session {} (channel: {})",
