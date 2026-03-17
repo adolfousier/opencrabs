@@ -1160,6 +1160,15 @@ OpenCrabs includes 30+ built-in tools. The AI can use these during conversation:
 | `evolve` | Download latest release binary from GitHub and hot-restart (no Rust toolchain needed) |
 | `rebuild` | Build from source (`cargo build --release`) and hot-restart |
 
+#### Multi-Agent Orchestration
+| Tool | Description |
+|------|-------------|
+| `spawn_agent` | Spawn a child agent to handle a sub-task autonomously in the background |
+| `wait_agent` | Wait for a spawned sub-agent to complete and return its output (configurable timeout) |
+| `send_input` | Send follow-up input/instructions to a running sub-agent |
+| `close_agent` | Terminate a running sub-agent and clean up resources |
+| `resume_agent` | Resume a completed or failed sub-agent with a new prompt (preserves prior context) |
+
 ### System CLI Tools
 
 OpenCrabs can leverage **any CLI tool installed on your system** via `bash`. Common integrations:

@@ -52,7 +52,13 @@ Use these **exact parameter names** when calling tools:
 | `slack_send` | `action` | `message`, `channel_id`, `thread_ts`, `message_ts`, `emoji`, `user_id`, `topic`, `blocks`, `limit`, `file_path`, `caption` |
 | `evolve` | — | `check_only` |
 | `rebuild` | — | — |
+| `spawn_agent` | `prompt` | `label` |
+| `wait_agent` | `agent_id` | `timeout_secs` |
+| `send_input` | `agent_id`, `text` | — |
+| `close_agent` | `agent_id` | `remove` |
+| `resume_agent` | `agent_id`, `prompt` | — |
 
+> **Sub-agent tools:** Use `spawn_agent` to delegate independent sub-tasks to child agents that run in parallel. Each child gets its own session and essential tools (read, write, edit, bash, glob, grep, ls, web_search) with auto-approve. Use `wait_agent` to collect results, `send_input` for follow-up instructions, `close_agent` to cancel, and `resume_agent` to continue a completed agent with new work. Children cannot spawn their own sub-agents (no recursive spawning).
 > **Note:** `grep` and `glob` use `pattern` (not `query`). `bash` uses `command` (not `cmd`). File tools use `path` (not `file` or `file_path`).
 > **Search tools:** Multiple web search tools are available. Defaults work out of the box; optional tools appear when the user configures API keys:
 > - `web_search` — Default search (DuckDuckGo). Always available, no API key needed.
