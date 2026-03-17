@@ -331,8 +331,9 @@ impl AgentService {
             )
         };
 
-        // Compact the context: keep last 4 message pairs (8 messages)
-        context.compact_with_summary(summary_with_context, 8);
+        // Compact the context: keep recent messages within 80% of max_tokens
+        let keep_budget = (context.max_tokens as f64 * 0.80) as usize;
+        context.compact_with_summary(summary_with_context, keep_budget);
 
         tracing::info!(
             "Context compacted: now at {:.0}% ({} tokens)",

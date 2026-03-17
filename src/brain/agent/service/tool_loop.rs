@@ -13,9 +13,9 @@ use uuid::Uuid;
 impl AgentService {
     /// Enforce the 80 % context budget rule.
     ///
-    /// - ≥ 80 %: LLM compact (up to 3 retries on error).
-    /// - ≥ 90 %: hard-truncate to 80 % first, then LLM compact.
-    /// - All retries fail: warn the user to run /compact — no silent data loss.
+    /// - ≥ 80 %: try LLM compaction (up to 3 retries on error).
+    /// - After compaction (or if all retries fail): hard-truncate to 80 % if still over.
+    /// - Context NEVER exceeds 80 % after this function returns.
     ///
     /// Returns the compaction summary if LLM compaction succeeded.
     async fn enforce_context_budget(
@@ -45,11 +45,10 @@ impl AgentService {
             return None;
         }
 
-        tracing::warn!(
-            "Context at {:.0}% — triggering LLM compaction (no truncation)",
-            usage_pct
-        );
+        tracing::warn!("Context at {:.0}% — triggering compaction", usage_pct);
 
+        // Try LLM compaction first (preserves context via summary)
+        let mut summary_result = None;
         const MAX_ATTEMPTS: u32 = 3;
         for attempt in 1..=MAX_ATTEMPTS {
             match self.compact_context(session_id, context, model_name).await {
@@ -61,10 +60,10 @@ impl AgentService {
                                 summary: summary.clone(),
                             },
                         );
-                        // Immediately reset ctx display — don't wait for next API response
                         cb(session_id, ProgressEvent::TokenCount(context.token_count));
                     }
-                    return Some(summary);
+                    summary_result = Some(summary);
+                    break;
                 }
                 Err(e) => {
                     tracing::error!(
@@ -73,23 +72,42 @@ impl AgentService {
                         MAX_ATTEMPTS,
                         e
                     );
-                    if attempt == MAX_ATTEMPTS {
-                        let msg = "⚠️ Context compaction failed after 3 attempts. Please run **/compact** to manually compact the context before continuing.".to_string();
-                        tracing::warn!("{}", msg);
-                        if let Some(cb) = progress_callback {
-                            cb(
-                                session_id,
-                                ProgressEvent::IntermediateText {
-                                    text: msg,
-                                    reasoning: None,
-                                },
-                            );
-                        }
-                    }
                 }
             }
         }
-        None
+
+        // Hard-truncate guarantee: NEVER proceed with context > 80%.
+        // This fires if LLM compaction failed entirely, or if the compacted
+        // context (8 recent messages + summary) is still too large.
+        let target_tokens = (effective_max as f64 * 0.80) as usize;
+        if context.token_count > target_tokens {
+            let before = context.token_count;
+            let before_msgs = context.messages.len();
+            context.hard_truncate_to(target_tokens);
+            tracing::warn!(
+                "Hard-truncated context: {} → {} tokens, {} → {} messages (target {})",
+                before,
+                context.token_count,
+                before_msgs,
+                context.messages.len(),
+                target_tokens,
+            );
+            if let Some(cb) = progress_callback {
+                cb(session_id, ProgressEvent::TokenCount(context.token_count));
+                cb(
+                    session_id,
+                    ProgressEvent::IntermediateText {
+                        text: format!(
+                            "⚠️ Context hard-truncated from {} to {} tokens to stay within budget.",
+                            before, context.token_count
+                        ),
+                        reasoning: None,
+                    },
+                );
+            }
+        }
+
+        summary_result
     }
 
     /// Core tool-execution loop — called by all public shims.

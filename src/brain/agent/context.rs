@@ -216,13 +216,37 @@ impl AgentContext {
 
     /// Hard-truncate old messages until token count is at or below `target_tokens`.
     /// Keeps at least 2 messages (the most recent pair) to maintain conversation validity.
+    pub fn hard_truncate_to(&mut self, target_tokens: usize) {
+        while self.token_count > target_tokens && self.messages.len() > 2 {
+            let tokens = self.estimate_message_tokens(&self.messages[0]);
+            self.token_count = self.token_count.saturating_sub(tokens);
+            self.messages.remove(0);
+        }
+        self.drop_leading_orphan_tool_results();
+    }
+
     /// Compact the context by replacing old messages with a summary.
     ///
-    /// Keeps the last `keep_recent` messages and prepends a system-role
-    /// summary of everything that was trimmed.
-    pub fn compact_with_summary(&mut self, summary: String, keep_recent: usize) {
-        // Keep at most keep_recent messages from the end
-        let mut keep_start = self.messages.len().saturating_sub(keep_recent);
+    /// Keeps the most recent messages that fit within the token budget
+    /// and prepends a summary of everything that was trimmed.
+    /// `keep_token_budget` is the max tokens for kept messages (excluding the summary).
+    pub fn compact_with_summary(&mut self, summary: String, keep_token_budget: usize) {
+        // Walk backwards from end, keeping messages until we hit the budget
+        let summary_tokens = Self::estimate_tokens(&summary) + 50; // +50 for the marker text
+        let available = keep_token_budget.saturating_sub(summary_tokens);
+        let mut running = 0usize;
+        let mut keep_count = 0usize;
+        for msg in self.messages.iter().rev() {
+            let t = self.estimate_message_tokens(msg);
+            if running + t > available {
+                break;
+            }
+            running += t;
+            keep_count += 1;
+        }
+        // Keep at least 2 messages (most recent pair) if possible
+        keep_count = keep_count.max(2.min(self.messages.len()));
+        let mut keep_start = self.messages.len().saturating_sub(keep_count);
 
         // Advance past any leading orphaned tool_result messages in the kept slice.
         // If the assistant(tool_use) that precedes them is being dropped, they'd be invalid.
@@ -367,11 +391,9 @@ mod tests {
         }
         assert_eq!(context.messages.len(), 10);
 
-        // Compact keeping last 3
-        context.compact_with_summary("Summary of old messages".to_string(), 3);
-
-        // Should have: 1 summary + 3 kept = 4 messages
-        assert_eq!(context.messages.len(), 4);
+        // Use 80% of max_tokens as budget — should keep all short messages
+        let budget = (10000.0 * 0.80) as usize;
+        context.compact_with_summary("Summary of old messages".to_string(), budget);
 
         // First message should be the compaction summary
         if let Some(ContentBlock::Text { text }) = context.messages[0].content.first() {
@@ -381,8 +403,9 @@ mod tests {
             panic!("First message should be a text compaction summary");
         }
 
-        // Last 3 messages should be the original last 3
-        if let Some(ContentBlock::Text { text }) = context.messages[3].content.first() {
+        // Last kept message should be Message 9
+        if let Some(ContentBlock::Text { text }) = context.messages.last().unwrap().content.first()
+        {
             assert!(text.contains("Message 9"));
         } else {
             panic!("Last message should be Message 9");
@@ -403,8 +426,8 @@ mod tests {
         let tokens_before = context.token_count;
         assert!(tokens_before > 0);
 
-        // Compact keeping 2
-        context.compact_with_summary("Brief summary".to_string(), 2);
+        // Very small budget — should drop most messages
+        context.compact_with_summary("Brief summary".to_string(), 500);
 
         // Token count should be recalculated and less than before
         assert!(context.token_count < tokens_before);
@@ -416,11 +439,11 @@ mod tests {
         let session_id = Uuid::new_v4();
         let mut context = AgentContext::new(session_id, 10000);
 
-        // Add only 2 messages but request keep_recent=5
+        // Add only 2 messages — large budget should keep them all
         context.add_message(Message::user("Hello".to_string()));
         context.add_message(Message::user("World".to_string()));
 
-        context.compact_with_summary("Summary".to_string(), 5);
+        context.compact_with_summary("Summary".to_string(), 8000);
 
         // Should have: 1 summary + 2 original = 3
         assert_eq!(context.messages.len(), 3);
@@ -436,7 +459,7 @@ mod tests {
             context.add_message(Message::user(format!("Msg {}", i)));
         }
 
-        context.compact_with_summary("Summary".to_string(), 2);
+        context.compact_with_summary("Summary".to_string(), 500);
 
         // Token count should include system brain tokens
         let brain_tokens = AgentContext::estimate_tokens("You are an AI assistant");
@@ -449,7 +472,7 @@ mod tests {
         let mut context = AgentContext::new(session_id, 10000);
 
         // No messages, compact should still work
-        context.compact_with_summary("Summary of nothing".to_string(), 3);
+        context.compact_with_summary("Summary of nothing".to_string(), 8000);
 
         // Should have just the summary message
         assert_eq!(context.messages.len(), 1);
