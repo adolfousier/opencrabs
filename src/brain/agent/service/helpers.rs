@@ -518,20 +518,32 @@ impl AgentService {
         TOOL_CALL_BLOCK_RE.replace_all(text, "").trim().to_string()
     }
 
-    /// Strip `<!-- tools-v2: ... -->` and `<!-- tools: ... -->` markers from text.
+    /// Strip ALL HTML comments from text.
     ///
-    /// The LLM sometimes echoes these back from conversation context.
-    /// The streaming filter in `custom_openai_compatible.rs` handles them
-    /// during streaming, but if the open tag is split across chunks it can
-    /// slip through. This catches any that survive.
-    pub(crate) fn strip_tools_v2_markers(text: &str) -> String {
+    /// LLMs echo or hallucinate various HTML comment markers from context:
+    /// `<!-- tools-v2: ... -->`, `<!-- lens -->`, `<!-- /tools-v2>`, etc.
+    /// Rather than playing whack-a-mole with each pattern, strip everything
+    /// between `<!--` and `-->` (or end of string for malformed tags).
+    pub(crate) fn strip_html_comments(text: &str) -> String {
         use regex::Regex;
         use std::sync::LazyLock;
 
-        static TOOLS_MARKER_RE: LazyLock<Regex> =
-            LazyLock::new(|| Regex::new(r#"(?s)<!-- tools(?:-v2)?:.*?-->"#).unwrap());
+        // Match <!-- ... --> (proper) or <!-- ... (unclosed, to end of string)
+        static HTML_COMMENT_RE: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r#"(?s)<!--.*?(?:-->|$)"#).unwrap());
 
-        TOOLS_MARKER_RE.replace_all(text, "").trim().to_string()
+        let result = HTML_COMMENT_RE.replace_all(text, "");
+        // Collapse any runs of 3+ newlines left by stripping
+        let collapsed = result
+            .lines()
+            .collect::<Vec<_>>()
+            .join("\n");
+        let trimmed = collapsed.trim().to_string();
+        // Collapse multiple blank lines
+        use std::sync::LazyLock as LL;
+        static MULTI_BLANK: LL<Regex> =
+            LL::new(|| Regex::new(r"\n{3,}").unwrap());
+        MULTI_BLANK.replace_all(&trimmed, "\n\n").to_string()
     }
 }
 
