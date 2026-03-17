@@ -563,7 +563,14 @@ impl AgentService {
             let api_input = response.usage.input_tokens as usize;
             let tool_overhead = self.actual_tool_schema_tokens();
             let real_message_tokens = api_input.saturating_sub(tool_overhead);
-            if real_message_tokens > 0 {
+            // Sanity: real_message_tokens must be at least 100 — anything lower
+            // means the provider reported garbage input_tokens or the tool_overhead
+            // estimate is wildly off. Also reject calibrations that would drop the
+            // count by more than 80 % (likely a provider bug, not real drift).
+            let min_sane = 100;
+            let max_drop_ratio = 0.2; // don't drop below 20% of current estimate
+            let min_after_drop = (context.token_count as f64 * max_drop_ratio) as usize;
+            if real_message_tokens >= min_sane && real_message_tokens >= min_after_drop {
                 let drift = (context.token_count as f64 - real_message_tokens as f64).abs();
                 if drift > 5000.0 {
                     tracing::info!(
@@ -574,6 +581,11 @@ impl AgentService {
                     );
                     context.token_count = real_message_tokens;
                 }
+            } else if real_message_tokens > 0 && real_message_tokens < min_sane {
+                tracing::warn!(
+                    "Token calibration skipped: api_input={}, tool_overhead={}, result={} (below sanity threshold)",
+                    api_input, tool_overhead, real_message_tokens,
+                );
             }
             // Fire real-time token count update after every API response
             if let Some(ref cb) = progress_callback {
