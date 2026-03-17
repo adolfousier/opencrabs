@@ -202,6 +202,25 @@ async fn cmd_chat_inner(
         tracing::info!("Registered analyze_image tool (provider vision model)");
     }
 
+    // Phase 5: Multi-agent orchestration
+    let subagent_manager = Arc::new(crate::brain::tools::subagent::SubAgentManager::new());
+    tool_registry.register(Arc::new(
+        crate::brain::tools::subagent::SpawnAgentTool::new(subagent_manager.clone()),
+    ));
+    tool_registry.register(Arc::new(crate::brain::tools::subagent::WaitAgentTool::new(
+        subagent_manager.clone(),
+    )));
+    tool_registry.register(Arc::new(crate::brain::tools::subagent::SendInputTool::new(
+        subagent_manager.clone(),
+    )));
+    tool_registry.register(Arc::new(
+        crate::brain::tools::subagent::CloseAgentTool::new(subagent_manager.clone()),
+    ));
+    tool_registry.register(Arc::new(
+        crate::brain::tools::subagent::ResumeAgentTool::new(subagent_manager.clone()),
+    ));
+    tracing::info!("Registered 5 sub-agent orchestration tools");
+
     // Index existing memory files and warm up embedding engine in the background.
     // Delay startup to avoid concurrent FFI access with resumed agent tasks
     // and channel connections — llama-cpp GGML can segfault under contention.

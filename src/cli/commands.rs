@@ -312,6 +312,24 @@ pub(crate) async fn cmd_run(
         tool_registry.register(Arc::new(BraveSearchTool::new(brave_key)));
     }
 
+    // Phase 5: Multi-agent orchestration
+    let subagent_manager = Arc::new(crate::brain::tools::subagent::SubAgentManager::new());
+    tool_registry.register(Arc::new(
+        crate::brain::tools::subagent::SpawnAgentTool::new(subagent_manager.clone()),
+    ));
+    tool_registry.register(Arc::new(crate::brain::tools::subagent::WaitAgentTool::new(
+        subagent_manager.clone(),
+    )));
+    tool_registry.register(Arc::new(crate::brain::tools::subagent::SendInputTool::new(
+        subagent_manager.clone(),
+    )));
+    tool_registry.register(Arc::new(
+        crate::brain::tools::subagent::CloseAgentTool::new(subagent_manager.clone()),
+    ));
+    tool_registry.register(Arc::new(
+        crate::brain::tools::subagent::ResumeAgentTool::new(subagent_manager.clone()),
+    ));
+
     // Build dynamic system brain from workspace files
     let brain_path = BrainLoader::resolve_path();
     let brain_loader = BrainLoader::new(brain_path.clone());
