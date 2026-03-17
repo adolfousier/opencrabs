@@ -720,12 +720,12 @@ impl AgentService {
             }
 
             // ── Strip echoed markup ──────────────────────────────────────
-            // The LLM sometimes echoes back <!-- tools-v2: ... --> or
-            // <!-- reasoning -->...<!-- /reasoning --> blocks from its
-            // conversation context. Strip them so they don't leak into
-            // Telegram/channel output or the TUI.
-            if iteration_text.contains("<!-- tools") {
-                iteration_text = Self::strip_tools_v2_markers(&iteration_text);
+            // The LLM echoes or invents HTML comment markers from context:
+            // <!-- tools-v2: ... -->, <!-- lens -->, <!-- /tools-v2>, etc.
+            // Strip ALL HTML comments from iteration text to prevent any
+            // from leaking into Telegram/channel output or the TUI.
+            if iteration_text.contains("<!--") {
+                iteration_text = Self::strip_html_comments(&iteration_text);
             }
 
             // ── XML tool-call stripping ──────────────────────────────────
