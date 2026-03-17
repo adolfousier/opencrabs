@@ -583,12 +583,16 @@ impl App {
                 if let Some(pending_at) = self.escape_pending_at {
                     if pending_at.elapsed() < std::time::Duration::from_secs(3) {
                         // Second Escape within 3 seconds — abort
+                        // Cancel the active cancel token
                         if let Some(token) = &self.cancel_token {
                             token.cancel();
                         }
+                        // Also cancel any stashed session token (e.g. from session switch)
                         if let Some(ref session) = self.current_session {
+                            if let Some(stashed) = self.session_cancel_tokens.remove(&session.id) {
+                                stashed.cancel();
+                            }
                             self.processing_sessions.remove(&session.id);
-                            self.session_cancel_tokens.remove(&session.id);
                         }
                         self.is_processing = false;
                         self.processing_started_at = None;
