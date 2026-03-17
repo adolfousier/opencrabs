@@ -30,10 +30,18 @@ const DEFAULT_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
 /// Each entry in STRIP_CLOSE_TAGS is a list of accepted close tags (first match wins).
 /// MiniMax closes `<!-- reasoning -->` with `</think>` instead of `<!-- /reasoning -->`.
 /// Order matters: more specific patterns must come before the generic `<!--` catch-all.
-const STRIP_OPEN_TAGS: &[&str] = &["<think>", "<!-- reasoning -->", "<!--"];
+const STRIP_OPEN_TAGS: &[&str] = &[
+    "<think>",
+    "<!-- reasoning -->",
+    "<tool_code>",
+    "<tool_call>",
+    "<!--",
+];
 const STRIP_CLOSE_TAGS: &[&[&str]] = &[
     &["</think>"],
     &["<!-- /reasoning -->", "</think>"], // Kimi uses <!-- /reasoning -->, MiniMax uses </think>
+    &["</tool_code>"],
+    &["</tool_call>"],
     &["-->"],
 ];
 
