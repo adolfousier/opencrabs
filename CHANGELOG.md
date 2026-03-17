@@ -5,6 +5,17 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.81] - 2026-03-17
+
+### Fixed
+- **Context blows past 200K limit** — `enforce_context_budget` now guarantees context never exceeds 80% of `max_tokens`. If LLM compaction fails 3x, a hard-truncation fallback drops oldest messages until under budget. Compaction uses token-budget-based retention instead of fixed message count
+- **Segfault on startup from large embeddings** — `embed_document` in llama-cpp-2 segfaulted on documents >32KB. Session index bodies now capped at 64KB, embedding skips documents >32KB with a placeholder so they don't retry every startup
+- **Duplicate agent spawns on resume** — Same `session_id` appearing multiple times in `pending_requests` caused 4 concurrent agent tasks instead of 2. Fixed with HashSet dedup
+- **Thinking indicator vanishes during tool execution** — Removed `active_tool_group.is_none()` condition so the "thinking..." bar stays visible between tool calls and API responses
+- **Escape/cancel doesn't abort running tools** — Tool execution now races against the cancel token via `tokio::select!`. Double-escape also cancels stashed background session tokens
+- **Queued messages dumped at bottom of chat** — Messages sent while processing now appear inline in the conversation at the exact point the tool loop consumed them, via a new `QueuedUserMessage` event pipeline
+- **"1 tok" bogus context display** — Token calibration now rejects results below 100 tokens or drops >80% of the current estimate, preventing providers that report incorrect `input_tokens` from clobbering the counter
+
 ## [0.2.80] - 2026-03-16
 
 ### Fixed
@@ -1595,6 +1606,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.81]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.81
 [0.2.80]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.80
 [0.2.79]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.79
 [0.2.78]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.78
