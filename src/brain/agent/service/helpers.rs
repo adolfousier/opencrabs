@@ -516,7 +516,7 @@ impl AgentService {
 
         // Match all known XML tool-call patterns from various providers
         static TOOL_CALL_BLOCK_RE: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(r#"(?s)(<tool_call>.*?</tool_call>|<tool_code>.*?(?:</tool_code>|$)|<StartToolCall>.*?(?:</StartToolCall>|$)|<minimax:tool_call>.*?(?:</minimax:tool_call>|$)|<invoke\b.*?(?:</invoke>|$)|<parameter\b[^>]*>.*?(?:</parameter>|$))"#).unwrap()
+            Regex::new(r#"(?s)(<tool_call>.*?</tool_call>|<tool_code>.*?(?:</tool_code>|$)|<StartToolCall>.*?(?:</StartToolCall>|$)|<minimax:tool_call>.*?(?:</minimax:tool_call>|$)|<invoke\b.*?(?:</invoke>|$)|<param(?:eter)?\b[^>]*>.*?(?:</param(?:eter)?>|$))"#).unwrap()
         });
 
         let result = TOOL_CALL_BLOCK_RE.replace_all(text, "");
