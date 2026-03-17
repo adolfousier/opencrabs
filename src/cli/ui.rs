@@ -202,8 +202,11 @@ async fn cmd_chat_inner(
         tracing::info!("Registered analyze_image tool (provider vision model)");
     }
 
-    // Index existing memory files and warm up embedding engine in the background
+    // Index existing memory files and warm up embedding engine in the background.
+    // Delay startup to avoid concurrent FFI access with resumed agent tasks
+    // and channel connections — llama-cpp GGML can segfault under contention.
     tokio::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
         match crate::memory::get_store() {
             Ok(store) => match crate::memory::reindex(store).await {
                 Ok(n) => tracing::info!("Startup memory reindex: {n} files"),
