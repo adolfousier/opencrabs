@@ -735,7 +735,12 @@ impl AgentService {
             // providers to reject tool results ("tool id not found"),
             // triggering infinite retry loops. Just strip the XML and let
             // the model respond with text instead.
-            if iteration_text.contains("<tool_call>") {
+            if iteration_text.contains("<tool_call>")
+                || iteration_text.contains("<StartToolCall>")
+                || iteration_text.contains("<minimax:tool_call>")
+                || iteration_text.contains("<invoke")
+                || iteration_text.contains("<parameter")
+            {
                 iteration_text = Self::strip_xml_tool_calls(&iteration_text);
             }
 

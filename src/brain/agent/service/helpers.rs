@@ -506,16 +506,21 @@ impl AgentService {
         (name, input)
     }
 
-    /// Strip `<tool_call>...</tool_call>` blocks from text so raw XML
+    /// Strip XML tool-call blocks from text so raw XML
     /// doesn't get persisted to DB or shown to the user.
+    /// Catches `<tool_call>`, `<StartToolCall>`, `<minimax:tool_call>`,
+    /// and any `<parameter>` blocks MiniMax hallucinates.
     pub(crate) fn strip_xml_tool_calls(text: &str) -> String {
         use regex::Regex;
         use std::sync::LazyLock;
 
-        static TOOL_CALL_BLOCK_RE: LazyLock<Regex> =
-            LazyLock::new(|| Regex::new(r#"(?s)<tool_call>.*?</tool_call>"#).unwrap());
+        // Match all known XML tool-call patterns from various providers
+        static TOOL_CALL_BLOCK_RE: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r#"(?s)(<tool_call>.*?</tool_call>|<StartToolCall>.*?(?:</StartToolCall>|$)|<minimax:tool_call>.*?(?:</minimax:tool_call>|$)|<invoke\b.*?(?:</invoke>|$)|<parameter\b[^>]*>.*?(?:</parameter>|$))"#).unwrap()
+        });
 
-        TOOL_CALL_BLOCK_RE.replace_all(text, "").trim().to_string()
+        let result = TOOL_CALL_BLOCK_RE.replace_all(text, "");
+        result.trim().to_string()
     }
 
     /// Strip ALL HTML comments from text.
@@ -534,15 +539,11 @@ impl AgentService {
 
         let result = HTML_COMMENT_RE.replace_all(text, "");
         // Collapse any runs of 3+ newlines left by stripping
-        let collapsed = result
-            .lines()
-            .collect::<Vec<_>>()
-            .join("\n");
+        let collapsed = result.lines().collect::<Vec<_>>().join("\n");
         let trimmed = collapsed.trim().to_string();
         // Collapse multiple blank lines
         use std::sync::LazyLock as LL;
-        static MULTI_BLANK: LL<Regex> =
-            LL::new(|| Regex::new(r"\n{3,}").unwrap());
+        static MULTI_BLANK: LL<Regex> = LL::new(|| Regex::new(r"\n{3,}").unwrap());
         MULTI_BLANK.replace_all(&trimmed, "\n\n").to_string()
     }
 }

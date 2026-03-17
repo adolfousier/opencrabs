@@ -24,11 +24,13 @@ const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// Open/close tag pairs to strip from streaming/non-streaming content.
-/// Covers DeepSeek-style `<think>` and Kimi-style `<!-- reasoning -->` blocks,
-/// plus Kimi's hallucinated `<!-- tools-v2: ... -->` tool-call markup.
+/// Covers DeepSeek-style `<think>` and Kimi-style `<!-- reasoning -->` blocks.
+/// The generic `<!--` entry catches ALL HTML comments (tools-v2, lens, /tools-v2,
+/// and any future hallucinated markers) so they never reach the TUI during streaming.
 /// Each entry in STRIP_CLOSE_TAGS is a list of accepted close tags (first match wins).
 /// MiniMax closes `<!-- reasoning -->` with `</think>` instead of `<!-- /reasoning -->`.
-const STRIP_OPEN_TAGS: &[&str] = &["<think>", "<!-- reasoning -->", "<!-- tools-v2:"];
+/// Order matters: more specific patterns must come before the generic `<!--` catch-all.
+const STRIP_OPEN_TAGS: &[&str] = &["<think>", "<!-- reasoning -->", "<!--"];
 const STRIP_CLOSE_TAGS: &[&[&str]] = &[
     &["</think>"],
     &["<!-- /reasoning -->", "</think>"], // Kimi uses <!-- /reasoning -->, MiniMax uses </think>
