@@ -188,7 +188,8 @@ mod compaction_e2e {
     use uuid::Uuid;
 
     /// Simulate the full compaction flow: build context, snapshot, inject, compact.
-    fn simulate_compaction(messages: Vec<Message>, keep_recent: usize) -> AgentContext {
+    /// `keep_budget` is a token budget (80% of max_tokens in production).
+    fn simulate_compaction(messages: Vec<Message>, keep_budget: usize) -> AgentContext {
         let session_id = Uuid::new_v4();
         let mut context = AgentContext::new(session_id, 100_000);
         for msg in messages {
@@ -209,7 +210,7 @@ mod compaction_e2e {
             )
         };
 
-        context.compact_with_summary(summary_with_context, keep_recent);
+        context.compact_with_summary(summary_with_context, keep_budget);
         context
     }
 
@@ -221,7 +222,8 @@ mod compaction_e2e {
             Message::user("Check main.rs"),
             Message::assistant("Found the issue"),
         ];
-        let context = simulate_compaction(msgs, 2);
+        // Large budget — keeps all messages
+        let context = simulate_compaction(msgs, 80_000);
 
         // First message should be the compaction summary with snapshot
         let first = &context.messages[0];
@@ -241,13 +243,15 @@ mod compaction_e2e {
         let msgs: Vec<Message> = (0..10)
             .map(|i| Message::user(format!("message_{}", i)))
             .collect();
-        let context = simulate_compaction(msgs, 3);
+        // Large budget — keeps all short messages + summary
+        let context = simulate_compaction(msgs, 80_000);
 
-        // Should have: 1 summary + 3 kept = 4 messages
-        assert_eq!(context.messages.len(), 4);
+        // All 10 messages + 1 summary = 11
+        assert_eq!(context.messages.len(), 11);
 
         // Last message should be message_9
-        if let Some(ContentBlock::Text { text }) = context.messages[3].content.first() {
+        if let Some(ContentBlock::Text { text }) = context.messages.last().unwrap().content.first()
+        {
             assert!(text.contains("message_9"));
         } else {
             panic!("Last message should be message_9");
@@ -276,7 +280,7 @@ mod compaction_e2e {
             },
             Message::assistant("Build complete, deploying now"),
         ];
-        let context = simulate_compaction(msgs, 2);
+        let context = simulate_compaction(msgs, 80_000);
 
         // Summary should contain the tool call info from snapshot
         if let Some(ContentBlock::Text { text }) = context.messages[0].content.first() {
@@ -291,7 +295,7 @@ mod compaction_e2e {
 
     #[test]
     fn compaction_with_no_messages_still_works() {
-        let context = simulate_compaction(vec![], 4);
+        let context = simulate_compaction(vec![], 80_000);
         // Should have just the summary (no snapshot since no messages)
         assert_eq!(context.messages.len(), 1);
         if let Some(ContentBlock::Text { text }) = context.messages[0].content.first() {
@@ -314,9 +318,8 @@ mod compaction_e2e {
         }
         let tokens_before = context.token_count;
 
-        let snapshot = AgentService::format_recent_messages(&context.messages, 8);
-        let summary = format!("Summary\n\n## Recent Message Pairs\n{}", snapshot);
-        context.compact_with_summary(summary, 4);
+        // Small budget with short summary to force dropping most messages
+        context.compact_with_summary("Brief summary".to_string(), 500);
 
         // Tokens should be much less after compaction
         assert!(context.token_count < tokens_before);
@@ -327,7 +330,8 @@ mod compaction_e2e {
     fn compaction_snapshot_truncates_large_messages() {
         let huge_text = "z".repeat(1000);
         let msgs = vec![Message::user(huge_text.clone())];
-        let context = simulate_compaction(msgs, 0);
+        // Small budget to force truncation
+        let context = simulate_compaction(msgs, 200);
 
         // The snapshot in the summary should have the truncated version
         if let Some(ContentBlock::Text { text }) = context.messages[0].content.first() {
