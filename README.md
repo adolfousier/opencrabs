@@ -2095,3 +2095,7 @@ cargo test
 ---
 
 **Built with Rust 🦀 by [Adolfo Usier](https://github.com/adolfousier)**
+
+---
+
+[Latest Release](https://github.com/adolfousier/opencrabs/releases/tag/v0.2.81)

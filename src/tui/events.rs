@@ -6,6 +6,7 @@ use crate::brain::agent::AgentResponse;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde_json::Value;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 /// Events that can occur in the TUI
@@ -164,6 +165,13 @@ pub enum TuiEvent {
     /// A remote channel (Telegram, WhatsApp, Discord, Slack) completed an agent
     /// response — the TUI should refresh if it's the current session.
     SessionUpdated(Uuid),
+
+    /// A pending request was resumed on startup — TUI must track the cancel token
+    /// so double-Escape can abort it.
+    PendingResumed {
+        session_id: Uuid,
+        cancel_token: CancellationToken,
+    },
 }
 
 /// Sudo password request from the bash tool

@@ -1504,6 +1504,22 @@ impl App {
                 }
             }
 
+            TuiEvent::PendingResumed {
+                session_id,
+                cancel_token,
+            } => {
+                // A pending request was resumed on startup — wire the cancel token
+                // so double-Escape can abort it.
+                self.processing_sessions.insert(session_id);
+                if self.is_current_session(session_id) {
+                    self.is_processing = true;
+                    self.processing_started_at = Some(std::time::Instant::now());
+                    self.cancel_token = Some(cancel_token);
+                } else {
+                    self.session_cancel_tokens.insert(session_id, cancel_token);
+                }
+            }
+
             TuiEvent::OnboardingModelsFetched(models) => {
                 if let Some(ref mut wizard) = self.onboarding {
                     wizard.models_fetching = false;

@@ -5,16 +5,29 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.82] - 2026-03-17
+
+### Added
+- **5 sub-agent orchestration tools** — Agents can now spawn independent sub-agents that connect to agentverse and report back. Five new tools: `spawn`, `wait`, `send_input`, `close`, `resume`. Sub-agents run in isolated sessions with their own context
+
+### Fixed
+- **Strip `<param>` tags** — Broaden tool artifact stripping to also remove `<param>` XML blocks
+- **Strip `<tool_code>` and `<tool_call>` blocks** — XML tool-call markers now stripped from streaming and iteration text
+- **Strip all HTML comments** — HTML comment stripping broadened to prevent marker leaks in LLM output
+
+### Testing
+- **11 new tests** for strip_html_comments tool artifact stripping
+
 ## [0.2.81] - 2026-03-17
 
 ### Fixed
-- **Context blows past 200K limit** — `enforce_context_budget` now guarantees context never exceeds 80% of `max_tokens`. If LLM compaction fails 3x, a hard-truncation fallback drops oldest messages until under budget. Compaction uses token-budget-based retention instead of fixed message count
-- **Segfault on startup from large embeddings** — `embed_document` in llama-cpp-2 segfaulted on documents >32KB. Session index bodies now capped at 64KB, embedding skips documents >32KB with a placeholder so they don't retry every startup
-- **Duplicate agent spawns on resume** — Same `session_id` appearing multiple times in `pending_requests` caused 4 concurrent agent tasks instead of 2. Fixed with HashSet dedup
-- **Thinking indicator vanishes during tool execution** — Removed `active_tool_group.is_none()` condition so the "thinking..." bar stays visible between tool calls and API responses
-- **Escape/cancel doesn't abort running tools** — Tool execution now races against the cancel token via `tokio::select!`. Double-escape also cancels stashed background session tokens
-- **Queued messages dumped at bottom of chat** — Messages sent while processing now appear inline in the conversation at the exact point the tool loop consumed them, via a new `QueuedUserMessage` event pipeline
-- **"1 tok" bogus context display** — Token calibration now rejects results below 100 tokens or drops >80% of the current estimate, preventing providers that report incorrect `input_tokens` from clobbering the counter
+- **Context blows past 200K limit** — `enforce_context_budget` now guarantees context never exceeds 80% of `max_tokens`. Hard-truncation fallback drops oldest messages
+- **Segfault on large embeddings** — Documents >32KB now skipped with placeholder to prevent llama-cpp-2 segfault
+- **Duplicate agent spawns on resume** — HashSet dedup prevents 4 concurrent tasks instead of 2
+- **Thinking indicator vanishes during tools** — Removed `active_tool_group.is_none()` condition
+- **Escape/cancel doesn't abort running tools** — Tool execution now races against cancel token via `tokio::select!`
+- **Queued messages appear inline** — Messages now appear in conversation flow at exact point consumed
+- **"1 tok" bogus context display** — Token calibration rejects results below 100 tokens
 
 ## [0.2.80] - 2026-03-16
 

@@ -662,6 +662,7 @@ async fn cmd_chat_inner(
     // Rows only exist if the process died mid-request (normal completions delete them).
     // Instead of replaying the original message, we send a continuation prompt so the
     // agent reads context and picks up naturally — no loops, no leaking restart signals.
+    let resume_event_sender = app.event_sender();
     {
         let pending_repo = crate::db::PendingRequestRepository::new(db.pool().clone());
         match pending_repo.get_interrupted().await {
@@ -685,10 +686,19 @@ async fn cmd_chat_inner(
                             continue;
                         }
                         let agent = agent.clone();
+                        let ev_tx = resume_event_sender.clone();
                         tracing::info!(
                             "Resuming session {} (channel: {})",
                             &req.session_id[..8.min(req.session_id.len())],
                             req.channel
+                        );
+                        // Create a cancel token so the TUI can abort via double-Escape
+                        let token = tokio_util::sync::CancellationToken::new();
+                        let _ = resume_event_sender.send(
+                            crate::tui::events::TuiEvent::PendingResumed {
+                                session_id,
+                                cancel_token: token.clone(),
+                            },
                         );
                         tokio::spawn(async move {
                             let prompt = "[System: A restart just occurred while you were \
@@ -697,19 +707,38 @@ async fn cmd_chat_inner(
                                 any interruption — just pick up seamlessly.]"
                                 .to_string();
                             match agent
-                                .send_message_with_tools(session_id, prompt, None)
+                                .send_message_with_tools_and_mode(
+                                    session_id,
+                                    prompt,
+                                    None,
+                                    Some(token),
+                                )
                                 .await
                             {
-                                Ok(r) => tracing::info!(
-                                    "Resume completed for session {}: {} chars",
-                                    session_id,
-                                    r.content.len()
-                                ),
-                                Err(e) => tracing::error!(
-                                    "Resume failed for session {}: {}",
-                                    session_id,
-                                    e
-                                ),
+                                Ok(response) => {
+                                    tracing::info!(
+                                        "Resume completed for session {}: {} chars",
+                                        session_id,
+                                        response.content.len()
+                                    );
+                                    let _ = ev_tx.send(
+                                        crate::tui::events::TuiEvent::ResponseComplete {
+                                            session_id,
+                                            response,
+                                        },
+                                    );
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        "Resume failed for session {}: {}",
+                                        session_id,
+                                        e
+                                    );
+                                    let _ = ev_tx.send(crate::tui::events::TuiEvent::Error {
+                                        session_id,
+                                        message: e.to_string(),
+                                    });
+                                }
                             }
                         });
                     }
