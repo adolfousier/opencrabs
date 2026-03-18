@@ -366,12 +366,8 @@ async fn cmd_chat_inner(
     // Create progress callback that sends tool events to TUI
     let progress_sender = app.event_sender();
 
-    // Accumulators for real-time token count during streaming.
-    // last_ctx_tokens: last confirmed context size from the API (set by TokenCount event).
-    // streaming_out: output tokens accumulated from the current streaming response,
-    //   counted via tiktoken per chunk. Reset when a new TokenCount event arrives.
+    // Last confirmed context size from the API (set by TokenCount event).
     let last_ctx_tokens = Arc::new(std::sync::atomic::AtomicU32::new(0));
-    let streaming_out = Arc::new(std::sync::atomic::AtomicU32::new(0));
 
     let progress_callback: crate::brain::agent::ProgressCallback =
         Arc::new(move |session_id, event| {
@@ -408,13 +404,11 @@ async fn cmd_chat_inner(
                 }
                 ProgressEvent::StreamingChunk { text } => {
                     // Count output tokens in this chunk via tiktoken for per-response display.
+                    // Send per-chunk count — the TUI accumulates and controls reset timing.
                     let chunk_tokens = crate::brain::tokenizer::count_tokens(&text) as u32;
-                    let out = streaming_out
-                        .fetch_add(chunk_tokens, std::sync::atomic::Ordering::Relaxed)
-                        + chunk_tokens;
                     let _ = progress_sender.send(TuiEvent::StreamingOutputTokens {
                         session_id,
-                        tokens: out,
+                        tokens: chunk_tokens,
                     });
                     progress_sender.send(TuiEvent::ResponseChunk { session_id, text })
                 }
@@ -430,9 +424,8 @@ async fn cmd_chat_inner(
                     progress_sender.send(TuiEvent::RestartReady(status))
                 }
                 ProgressEvent::TokenCount(count) => {
-                    // Real count from the API — update baseline and reset streaming accumulator.
+                    // Real count from the API — update baseline.
                     last_ctx_tokens.store(count as u32, std::sync::atomic::Ordering::Relaxed);
-                    streaming_out.store(0, std::sync::atomic::Ordering::Relaxed);
                     progress_sender.send(TuiEvent::TokenCountUpdated { session_id, count })
                 }
                 ProgressEvent::ReasoningChunk { text } => {

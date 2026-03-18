@@ -1480,7 +1480,7 @@ impl App {
             TuiEvent::StreamingOutputTokens { session_id, tokens }
                 if self.is_current_session(session_id) =>
             {
-                self.streaming_output_tokens = tokens;
+                self.streaming_output_tokens += tokens;
             }
             // Silently ignore events for background sessions (already handled above for ResponseComplete/Error)
             TuiEvent::ToolCallStarted { .. }
