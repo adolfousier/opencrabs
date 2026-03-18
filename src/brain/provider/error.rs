@@ -10,7 +10,7 @@ pub enum ProviderError {
     HttpError(#[from] reqwest::Error),
 
     /// API returned an error
-    #[error("API error ({status}): {message}")]
+    #[error("API error ({status}){}: {message}", error_type.as_ref().map(|t| format!(" [{}]", t)).unwrap_or_default())]
     ApiError {
         status: u16,
         message: String,

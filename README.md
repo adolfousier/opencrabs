@@ -195,7 +195,7 @@ Images are passed to the active model's vision pipeline if it supports multimoda
 api_key = "sk-ant-api03-YOUR_KEY"
 ```
 
-OAuth tokens (`sk-ant-oat` prefix) are auto-detected — uses `Authorization: Bearer` with `anthropic-beta: oauth-2025-04-20` header automatically.
+> **OAuth tokens no longer supported.** Anthropic disabled OAuth (`sk-ant-oat`) for third-party apps as of Feb 2026. Only console API keys (`sk-ant-api03-*`) work. See [anthropics/claude-code#28091](https://github.com/anthropics/claude-code/issues/28091).
 
 **Features:** Streaming, tools, cost tracking, automatic retry with backoff
 
@@ -759,7 +759,7 @@ OpenCrabs uses `~/.opencrabs/keys.toml` as the **single source** for all API key
 
 # LLM Providers
 [providers.anthropic]
-api_key = "sk-ant-api03-YOUR_KEY"    # or OAuth: "sk-ant-oat01-..."
+api_key = "sk-ant-api03-YOUR_KEY"
 
 [providers.openai]
 api_key = "sk-YOUR_KEY"
@@ -821,7 +821,7 @@ api_key = "your-openai-key"
 # Set tts_mode = "local" and local_tts_voice in config.toml
 ```
 
-OAuth tokens (`sk-ant-oat` prefix) are auto-detected — OpenCrabs uses `Authorization: Bearer` with the `anthropic-beta: oauth-2025-04-20` header automatically.
+> **Note:** Anthropic OAuth tokens (`sk-ant-oat`) are no longer supported for third-party apps as of Feb 2026 ([anthropics/claude-code#28091](https://github.com/anthropics/claude-code/issues/28091)). Use console API keys (`sk-ant-api03-*`) instead.
 
 > **Trello note:** `app_token` holds the Trello **API Key** and `token` holds the Trello **API Token** — `app_token` is the app-level credential and `token` is the user-level credential. Board IDs are configured via `board_ids` in `config.toml`.
 

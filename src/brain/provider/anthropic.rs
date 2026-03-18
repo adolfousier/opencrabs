@@ -152,7 +152,16 @@ impl AnthropicProvider {
         });
 
         // Try to parse error body
-        if let Ok(error_body) = response.json::<AnthropicError>().await {
+        let body_bytes = response.bytes().await.unwrap_or_default();
+        tracing::debug!(
+            "Anthropic error response ({}): {}",
+            status,
+            String::from_utf8_lossy(&body_bytes)
+                .chars()
+                .take(500)
+                .collect::<String>()
+        );
+        if let Ok(error_body) = serde_json::from_slice::<AnthropicError>(&body_bytes) {
             let message = if status == 429 {
                 // Enhance rate limit error message
                 if let Some(secs) = retry_after {
