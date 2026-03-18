@@ -402,7 +402,7 @@ fn try_create_minimax(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         minimax_config,
     );
 
-    // MiniMax M2.5 doesn't support vision — inject MiniMax-Text-01 into config
+    // MiniMax M2.7/M2.5 doesn't support vision — inject MiniMax-Text-01 into config
     // so existing users get it automatically and can change it later
     if minimax_config.vision_model.is_none() {
         provider = provider.with_vision_model("MiniMax-Text-01".to_string());
@@ -648,7 +648,7 @@ mod tests {
                     enabled: true,
                     api_key: Some("test-key".to_string()),
                     base_url: Some("https://api.minimax.io/v1".to_string()),
-                    default_model: Some("MiniMax-M2.5".to_string()),
+                    default_model: Some("MiniMax-M2.7".to_string()),
                     models: vec![],
                     vision_model: None,
                     ..Default::default()

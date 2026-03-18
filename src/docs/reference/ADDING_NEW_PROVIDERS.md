@@ -145,8 +145,8 @@ These providers DO NOT have `/models` endpoints:
 [providers.minimax]
 enabled = true
 base_url = "https://api.minimax.io/v1"
-default_model = "MiniMax-M2.5"
-models = ["MiniMax-M2.5", "MiniMax-M2.1", "MiniMax-Text-01"]
+default_model = "MiniMax-M2.7"
+models = ["MiniMax-M2.7", "MiniMax-M2.5", "MiniMax-M2.1", "MiniMax-Text-01"]
 ```
 
 And in keys.toml:
@@ -205,8 +205,8 @@ api_key = "sk-or-v1-..."
 enabled = true
 api_key = "your-key"
 base_url = "https://api.minimax.io/v1"
-default_model = "MiniMax-M2.5"
-models = ["MiniMax-M2.5", "MiniMax-M2.1", "MiniMax-Text-01"]
+default_model = "MiniMax-M2.7"
+models = ["MiniMax-M2.7", "MiniMax-M2.5", "MiniMax-M2.1", "MiniMax-Text-01"]
 ```
 
 ## Fallback Provider

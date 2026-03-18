@@ -22,7 +22,7 @@
 [providers.custom.lm_studio]
 enabled = true
 base_url = "http://localhost:1234/v1/chat/completions"  # LM Studio default
-models = ["kimi-k2.5", "glm-5", "MiniMax-M2.5", "qwen3-coder", "gpt-oss-120b", "llama-4-70B", "mistral-Large-3", "qwen3-coder-next"]
+models = ["kimi-k2.5", "glm-5", "MiniMax-M2.7", "qwen3-coder", "gpt-oss-120b", "llama-4-70B", "mistral-Large-3", "qwen3-coder-next"]
 
 # ⭐ IMPORTANT: Set this to match the model name loaded in LM Studio!
 # Common examples:
@@ -91,8 +91,8 @@ default_model = "gemini-2.5-flash"
 [providers.minimax]
 enabled = false
 base_url = "https://api.minimax.io/v1"
-default_model = "MiniMax-M2.5"
-models = ["MiniMax-M2.5", "MiniMax-M2.1", "MiniMax-Text-01"]
+default_model = "MiniMax-M2.7"
+models = ["MiniMax-M2.7", "MiniMax-M2.5", "MiniMax-M2.1", "MiniMax-Text-01"]
 vision_model = "MiniMax-Text-01"  # Describes images for the chat model when it lacks vision
 
 # ========================================

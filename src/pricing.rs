@@ -235,6 +235,10 @@ entries = [
 
 [providers.minimax]
 entries = [
+  # MiniMax-M2.7 highspeed — $0.60/$2.40
+  { prefix = "minimax-m2.7-high",  input_per_m = 0.60, output_per_m = 2.40  },
+  # MiniMax-M2.7 standard — $0.30/$1.20
+  { prefix = "minimax-m2.7",       input_per_m = 0.30, output_per_m = 1.20  },
   # MiniMax-M2.5 highspeed — $0.60/$2.40
   { prefix = "minimax-m2.5-high",  input_per_m = 0.60, output_per_m = 2.40  },
   # MiniMax-M2.5 standard — $0.30/$1.20
@@ -309,7 +313,7 @@ mod tests {
     #[test]
     fn test_calculate_cost_minimax() {
         let cfg = PricingConfig::defaults();
-        let cost = cfg.calculate_cost("MiniMax-M2.5", 1_000_000, 1_000_000);
+        let cost = cfg.calculate_cost("MiniMax-M2.7", 1_000_000, 1_000_000);
         assert_eq!(cost, 1.50); // $0.30 + $1.20
     }
 

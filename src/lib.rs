@@ -12,7 +12,7 @@
 //! - **OpenAI** — GPT-4, GPT-5, o-series models
 //! - **Google Gemini** — Gemini 2.x family
 //! - **OpenRouter** — 300+ models via single API key
-//! - **MiniMax** — MiniMax-M2.5, Kimi, and Text models
+//! - **MiniMax** — MiniMax-M2.7, MiniMax-M2.5, Kimi, and Text models
 //! - **Custom** — any OpenAI-compatible endpoint (Ollama, LM Studio, vLLM, etc.)
 //!
 //! ## Features
