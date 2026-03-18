@@ -5,6 +5,11 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.83] - 2026-03-18
+
+### Changed
+- **MiniMax M2.7 as default model** — Updated default model from M2.5 to M2.7 across config, pricing, onboarding, docs, and tests. M2.5 remains available as an option
+
 ## [0.2.82] - 2026-03-18
 
 ### Added
@@ -1622,6 +1627,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.83]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.83
+[0.2.82]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.82
 [0.2.81]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.81
 [0.2.80]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.80
 [0.2.79]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.79

@@ -173,7 +173,11 @@ pub async fn fetch_provider_models(provider_index: usize, api_key: Option<&str>)
             }
         }
         // Return hardcoded defaults if no config
-        return vec!["MiniMax-M2.5".to_string(), "MiniMax-M2.1".to_string()];
+        return vec![
+            "MiniMax-M2.7".to_string(),
+            "MiniMax-M2.5".to_string(),
+            "MiniMax-M2.1".to_string(),
+        ];
     }
 
     let client = reqwest::Client::new();

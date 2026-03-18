@@ -340,12 +340,12 @@ mod vision_model {
         let toml_str = r#"
 enabled = true
 api_key = "test"
-default_model = "MiniMax-M2.5"
+default_model = "MiniMax-M2.7"
 vision_model = "MiniMax-Text-01"
 "#;
         let cfg: crate::config::ProviderConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(cfg.vision_model, Some("MiniMax-Text-01".into()));
-        assert_eq!(cfg.default_model, Some("MiniMax-M2.5".into()));
+        assert_eq!(cfg.default_model, Some("MiniMax-M2.7".into()));
     }
 
     #[test]
@@ -535,7 +535,7 @@ mod active_provider_vision {
                     enabled: true,
                     api_key: Some("minimax-key".into()),
                     base_url: Some("https://api.minimax.io/v1".into()),
-                    default_model: Some("MiniMax-M2.5".into()),
+                    default_model: Some("MiniMax-M2.7".into()),
                     models: vec![],
                     vision_model: Some("MiniMax-Text-01".into()),
                     ..Default::default()

@@ -783,7 +783,7 @@ pub struct ProviderConfig {
 
     /// Vision-capable model to use when the default model doesn't support images.
     /// When set and images are present, the provider swaps to this model for that
-    /// request only (e.g. `vision_model = "MiniMax-Text-01"` for MiniMax M2.5).
+    /// request only (e.g. `vision_model = "MiniMax-Text-01"` for MiniMax M2.7).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vision_model: Option<String>,
 

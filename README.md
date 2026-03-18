@@ -114,6 +114,7 @@ https://github.com/user-attachments/assets/7f45c5f8-acdf-48d5-b6a4-0e4811a9ee23
 | **Context Awareness** | Live context usage indicator showing actual token counts (e.g. `ctx: 45K/200K (23%)`); auto-compaction at 70% with tool overhead budgeting; accurate tiktoken-based counting calibrated against API actuals |
 | **3-Tier Memory** | (1) **Brain MEMORY.md** — user-curated durable memory loaded every turn, (2) **Daily Logs** — auto-compaction summaries at `~/.opencrabs/memory/YYYY-MM-DD.md`, (3) **Hybrid Memory Search** — FTS5 keyword search + local vector embeddings (embeddinggemma-300M, 768-dim) combined via Reciprocal Rank Fusion. Runs entirely local — no API key, no cost, works offline |
 | **Dynamic Brain System** | System brain assembled from workspace MD files (SOUL, IDENTITY, USER, AGENTS, TOOLS, MEMORY) — all editable live between turns |
+| **Multi-Agent Orchestration** | Spawn independent child agents for parallel task execution. Five tools: `spawn_agent`, `wait_agent`, `send_input`, `close_agent`, `resume_agent`. Children run in isolated sessions with auto-approve and essential tools — no recursive spawning |
 
 ### Multimodal Input
 | Feature | Description |
@@ -266,7 +267,7 @@ default_model = "gemini-2.5-flash"
 
 ### MiniMax
 
-**Models:** `MiniMax-M2.5`, `MiniMax-M2.1`, `MiniMax-Text-01`
+**Models:** `MiniMax-M2.7`, `MiniMax-M2.5`, `MiniMax-M2.1`, `MiniMax-Text-01`
 
 **Setup** — get your API key from [platform.minimax.io](https://platform.minimax.io). Add to `keys.toml`:
 
@@ -366,7 +367,7 @@ If your default model doesn't support vision but another model on the same provi
 
 ```toml
 [providers.minimax]
-default_model = "MiniMax-M2.5"
+default_model = "MiniMax-M2.7"
 vision_model = "MiniMax-Text-01"  # describes images for the chat model
 ```
 
