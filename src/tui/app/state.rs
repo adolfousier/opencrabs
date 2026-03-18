@@ -1155,7 +1155,7 @@ impl App {
                 session_id,
                 tool_name,
                 tool_input,
-            } if self.is_current_session(session_id) => {
+            } if self.is_current_session(session_id) && self.is_processing => {
                 tracing::info!(
                     "[TUI] ToolCallStarted: {} (active_group={}, msg_count={})",
                     tool_name,
@@ -1186,7 +1186,7 @@ impl App {
                 session_id,
                 text,
                 reasoning,
-            } if self.is_current_session(session_id) => {
+            } if self.is_current_session(session_id) && self.is_processing => {
                 tracing::info!(
                     "[TUI] IntermediateText: len={} active_group={} streaming={}",
                     text.len(),
@@ -1305,7 +1305,7 @@ impl App {
                 tool_input,
                 success,
                 summary,
-            } if self.is_current_session(session_id) => {
+            } if self.is_current_session(session_id) && self.is_processing => {
                 // Reset timer so "thinking..." counter restarts after each tool call
                 self.processing_started_at = Some(std::time::Instant::now());
                 let desc = Self::format_tool_description(&tool_name, &tool_input);
