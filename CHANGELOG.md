@@ -5,12 +5,15 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.82] - 2026-03-17
+## [0.2.82] - 2026-03-18
 
 ### Added
-- **5 sub-agent orchestration tools** — Agents can now spawn independent sub-agents that connect to agentverse and report back. Five new tools: `spawn`, `wait`, `send_input`, `close`, `resume`. Sub-agents run in isolated sessions with their own context
+- **5 sub-agent orchestration tools** — Agents can now spawn independent child agents for parallel task execution. Five new tools: `spawn_agent`, `wait_agent`, `send_input`, `close_agent`, `resume_agent`. Children run in isolated sessions with auto-approve and essential tools (no recursive spawning)
 
 ### Fixed
+- **"1 tok" streaming output counter** — Output token display reset to "1 tok" after each tool call because the callback accumulator was reset on every TokenCount event. Moved accumulation to TUI side so it persists across tool loop iterations
+- **Cancelled requests leave tool calls unstacked** — Late ToolCallStarted/Completed/IntermediateText events arriving after double-Escape cancel now dropped via `is_processing` guard, preventing orphaned tool entries in chat
+- **Pending request recovery missing cancel token** — Restarted tasks couldn't be cancelled because the recovery path passed no CancellationToken. Now wires token via new `PendingResumed` TUI event
 - **Strip `<param>` tags** — Broaden tool artifact stripping to also remove `<param>` XML blocks
 - **Strip `<tool_code>` and `<tool_call>` blocks** — XML tool-call markers now stripped from streaming and iteration text
 - **Strip all HTML comments** — HTML comment stripping broadened to prevent marker leaks in LLM output
