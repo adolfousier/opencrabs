@@ -77,7 +77,7 @@ impl Tool for CronManageTool {
                 },
                 "deliver_to": {
                     "type": "string",
-                    "description": "Channel to deliver results. Format: 'telegram:chat_id', 'discord:channel_id', 'slack:channel_id'"
+                    "description": "Where to deliver results. Format: 'telegram:chat_id', 'discord:channel_id', 'slack:channel_id', or an HTTP(S) URL for webhook delivery"
                 },
                 "job_id": {
                     "type": "string",

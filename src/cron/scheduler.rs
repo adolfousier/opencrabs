@@ -272,12 +272,19 @@ async fn execute_job(
 }
 
 /// Deliver a cron job result to the specified channel.
-/// Format: "telegram:chat_id", "discord:channel_id", "slack:channel_id"
+/// Format: "telegram:chat_id", "discord:channel_id", "slack:channel_id",
+/// or an HTTP(S) URL for generic webhook delivery.
 async fn deliver_result(deliver_to: &str, job_name: &str, content: &str) {
+    // HTTP(S) URL — generic webhook delivery
+    if deliver_to.starts_with("http://") || deliver_to.starts_with("https://") {
+        deliver_http(deliver_to, job_name, content).await;
+        return;
+    }
+
     let parts: Vec<&str> = deliver_to.splitn(2, ':').collect();
     if parts.len() != 2 {
         tracing::warn!(
-            "Invalid deliver_to format '{}' for job '{}' — expected 'channel:id'",
+            "Invalid deliver_to format '{}' for job '{}' — expected 'channel:id' or HTTP URL",
             deliver_to,
             job_name
         );
@@ -303,8 +310,6 @@ async fn deliver_result(deliver_to: &str, job_name: &str, content: &str) {
         "telegram" => {
             #[cfg(feature = "telegram")]
             {
-                // Use the Telegram Bot API directly for delivery
-                // The bot instance is shared via TelegramState, but for cron we use a simple HTTP call
                 tracing::info!("Delivering cron result to Telegram chat {target_id}");
                 deliver_telegram(target_id, &delivery_msg).await;
             }
@@ -315,8 +320,6 @@ async fn deliver_result(deliver_to: &str, job_name: &str, content: &str) {
         }
         "discord" => {
             tracing::info!("Delivering cron result to Discord channel {target_id}");
-            // Discord delivery requires the bot's HTTP client from DiscordState
-            // For now, log — will be wired when Discord state is accessible
             tracing::warn!("Discord cron delivery not yet wired — result logged only");
         }
         "slack" => {
@@ -325,6 +328,32 @@ async fn deliver_result(deliver_to: &str, job_name: &str, content: &str) {
         }
         other => {
             tracing::warn!("Unknown delivery channel '{other}' for job '{job_name}'");
+        }
+    }
+}
+
+/// Deliver cron result via HTTP POST to a generic webhook URL.
+async fn deliver_http(url: &str, job_name: &str, content: &str) {
+    let client = reqwest::Client::new();
+    let body = serde_json::json!({
+        "job_name": job_name,
+        "content": content,
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+    });
+
+    match client.post(url).json(&body).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            tracing::info!("Cron result for '{job_name}' delivered to {url}");
+        }
+        Ok(resp) => {
+            tracing::warn!(
+                "HTTP delivery to {url} failed ({}): {:?}",
+                resp.status(),
+                resp.text().await.unwrap_or_default()
+            );
+        }
+        Err(e) => {
+            tracing::error!("HTTP delivery to {url} error: {e}");
         }
     }
 }
