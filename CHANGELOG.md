@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.83] - 2026-03-18
 
-### Changed
+### Added
 - **MiniMax M2.7 as default model** — Updated default model from M2.5 to M2.7 across config, pricing, onboarding, docs, and tests. M2.5 remains available as an option
 
 ## [0.2.82] - 2026-03-18

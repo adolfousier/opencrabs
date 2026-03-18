@@ -35,6 +35,7 @@ const STRIP_OPEN_TAGS: &[&str] = &[
     "<!-- reasoning -->",
     "<tool_code>",
     "<tool_call>",
+    "<result>",
     "<!--",
 ];
 const STRIP_CLOSE_TAGS: &[&[&str]] = &[
@@ -42,6 +43,7 @@ const STRIP_CLOSE_TAGS: &[&[&str]] = &[
     &["<!-- /reasoning -->", "</think>"], // Kimi uses <!-- /reasoning -->, MiniMax uses </think>
     &["</tool_code>"],
     &["</tool_call>"],
+    &["</result>"],
     &["-->"],
 ];
 

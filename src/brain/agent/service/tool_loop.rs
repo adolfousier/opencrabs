@@ -741,6 +741,7 @@ impl AgentService {
                 || iteration_text.contains("<minimax:tool_call>")
                 || iteration_text.contains("<invoke")
                 || iteration_text.contains("<param")
+                || iteration_text.contains("<result>")
             {
                 iteration_text = Self::strip_xml_tool_calls(&iteration_text);
             }
