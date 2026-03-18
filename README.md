@@ -1751,7 +1751,7 @@ opencrabs/
 │   │   └── runner.rs     # TUI event loop
 │   ├── utils/            # Utilities (retry, etc.)
 │   ├── migrations/       # SQLite migrations
-│   ├── tests/            # 1,423 tests (see TESTING.md)
+│   ├── tests/            # 1,424 tests (see TESTING.md)
 │   ├── benches/          # Criterion benchmarks
 │   ├── assets/           # Icons, screenshots, visual assets
 │   ├── scripts/          # Build and setup scripts
@@ -1778,7 +1778,7 @@ cargo build --release
 # Small release build
 cargo build --profile release-small
 
-# Run tests (1,423 tests across 60+ modules)
+# Run tests (1,424 tests across 60+ modules)
 cargo test --all-features
 # See TESTING.md for full test coverage documentation
 
