@@ -242,6 +242,45 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Add streaming response if present (hide when approval is pending)
     if !has_pending_approval && let Some(ref response) = app.streaming_response {
+        // Render reasoning/thinking content above the response text (dimmed style)
+        if let Some(ref reasoning) = app.streaming_reasoning {
+            lines.push(Line::from(vec![
+                Span::styled("  ", Style::default()),
+                Span::styled(
+                    "Thinking...",
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::ITALIC | Modifier::BOLD),
+                ),
+            ]));
+            let reasoning_lines = reasoning_to_lines(reasoning);
+            let reasoning_style = Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC);
+            for line in reasoning_lines {
+                let mut padded_spans = vec![Span::styled("  ", Style::default())];
+                for span in line.spans {
+                    padded_spans.push(Span::styled(span.content.to_string(), reasoning_style));
+                }
+                let padded_line = Line::from(padded_spans);
+                for wrapped in wrap_line_with_padding(padded_line, content_width, "  ") {
+                    lines.push(wrapped);
+                }
+            }
+            lines.push(Line::from("")); // separator between reasoning and response
+        }
+
+        let streaming_lines = parse_markdown(response);
+        for line in streaming_lines {
+            let mut padded_spans = vec![Span::raw("  ")];
+            padded_spans.extend(line.spans);
+            let padded_line = Line::from(padded_spans);
+            for wrapped in wrap_line_with_padding(padded_line, content_width, "  ") {
+                lines.push(wrapped);
+            }
+        }
+
+        // Spinner at BOTTOM of streaming content so it's always visible
         let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         let frame = spinner_frames[app.animation_frame % spinner_frames.len()];
 
@@ -283,44 +322,6 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             spans.push(Span::styled(meta, Style::default().fg(Color::DarkGray)));
         }
         lines.push(Line::from(spans));
-
-        // Render reasoning/thinking content above the response text (dimmed style)
-        if let Some(ref reasoning) = app.streaming_reasoning {
-            lines.push(Line::from(vec![
-                Span::styled("  ", Style::default()),
-                Span::styled(
-                    "Thinking...",
-                    Style::default()
-                        .fg(Color::DarkGray)
-                        .add_modifier(Modifier::ITALIC | Modifier::BOLD),
-                ),
-            ]));
-            let reasoning_lines = reasoning_to_lines(reasoning);
-            let reasoning_style = Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::ITALIC);
-            for line in reasoning_lines {
-                let mut padded_spans = vec![Span::styled("  ", Style::default())];
-                for span in line.spans {
-                    padded_spans.push(Span::styled(span.content.to_string(), reasoning_style));
-                }
-                let padded_line = Line::from(padded_spans);
-                for wrapped in wrap_line_with_padding(padded_line, content_width, "  ") {
-                    lines.push(wrapped);
-                }
-            }
-            lines.push(Line::from("")); // separator between reasoning and response
-        }
-
-        let streaming_lines = parse_markdown(response);
-        for line in streaming_lines {
-            let mut padded_spans = vec![Span::raw("  ")];
-            padded_spans.extend(line.spans);
-            let padded_line = Line::from(padded_spans);
-            for wrapped in wrap_line_with_padding(padded_line, content_width, "  ") {
-                lines.push(wrapped);
-            }
-        }
     }
 
     // NOTE: "OpenCrabs is thinking..." spinner is rendered as a sticky layout
@@ -333,6 +334,31 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         && app.streaming_response.is_none()
         && let Some(ref reasoning) = app.streaming_reasoning
     {
+        lines.push(Line::from(vec![
+            Span::styled("  ", Style::default()),
+            Span::styled(
+                "Thinking...",
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC | Modifier::BOLD),
+            ),
+        ]));
+        let reasoning_lines = reasoning_to_lines(reasoning);
+        let reasoning_style = Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::ITALIC);
+        for rline in reasoning_lines {
+            let mut padded_spans = vec![Span::styled("  ", Style::default())];
+            for span in rline.spans {
+                padded_spans.push(Span::styled(span.content.to_string(), reasoning_style));
+            }
+            let padded_line = Line::from(padded_spans);
+            for wrapped in wrap_line_with_padding(padded_line, content_width, "  ") {
+                lines.push(wrapped);
+            }
+        }
+
+        // Spinner at BOTTOM of reasoning content so it's always visible
         let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         let frame = spinner_frames[app.animation_frame % spinner_frames.len()];
         let elapsed = app
@@ -372,29 +398,6 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             header_spans.push(Span::styled(meta, Style::default().fg(Color::DarkGray)));
         }
         lines.push(Line::from(header_spans));
-        lines.push(Line::from(vec![
-            Span::styled("  ", Style::default()),
-            Span::styled(
-                "Thinking...",
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::ITALIC | Modifier::BOLD),
-            ),
-        ]));
-        let reasoning_lines = reasoning_to_lines(reasoning);
-        let reasoning_style = Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::ITALIC);
-        for rline in reasoning_lines {
-            let mut padded_spans = vec![Span::styled("  ", Style::default())];
-            for span in rline.spans {
-                padded_spans.push(Span::styled(span.content.to_string(), reasoning_style));
-            }
-            let padded_line = Line::from(padded_spans);
-            for wrapped in wrap_line_with_padding(padded_line, content_width, "  ") {
-                lines.push(wrapped);
-            }
-        }
     }
 
     // Render active tool group (live, during processing) — below streaming text
