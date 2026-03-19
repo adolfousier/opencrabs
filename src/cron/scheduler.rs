@@ -251,7 +251,8 @@ async fn execute_job(
 
             // Deliver results to channel if configured
             if let Some(ref deliver_to) = job.deliver_to {
-                deliver_result(deliver_to, &job.name, &response.content).await;
+                let clean = crate::utils::sanitize::strip_llm_artifacts(&response.content);
+                deliver_result(deliver_to, &job.name, &clean).await;
             }
         }
         Err(e) => {

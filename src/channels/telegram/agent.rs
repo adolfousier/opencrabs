@@ -225,7 +225,8 @@ impl TelegramAgent {
                                         tokio::spawn(async move {
                                             match agent_clone.send_message(sid, prompt, None).await {
                                                 Ok(resp) => {
-                                                    let html = crate::channels::telegram::handler::md_to_html(&resp.content);
+                                                    let clean = crate::utils::sanitize::strip_llm_artifacts(&resp.content);
+                                                    let html = crate::channels::telegram::handler::md_to_html(&clean);
                                                     let _ = bot_clone.send_message(chat_id, html)
                                                         .parse_mode(teloxide::types::ParseMode::Html)
                                                         .await;

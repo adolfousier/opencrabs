@@ -69,10 +69,12 @@ impl StreamingState {
             } else {
                 &self.thinking
             };
-            parts.push(format!("💭 _{}_", redact_secrets(t.trim())));
+            let t = crate::utils::sanitize::strip_llm_artifacts(t.trim());
+            parts.push(format!("💭 _{}_", redact_secrets(&t)));
         }
         if !self.response.is_empty() {
-            parts.push(redact_secrets(&self.response));
+            let resp = crate::utils::sanitize::strip_llm_artifacts(&self.response);
+            parts.push(redact_secrets(&resp));
         }
         if parts.is_empty() {
             String::new()
@@ -924,6 +926,7 @@ pub(crate) async fn handle_message(
 
                         // ── Intermediate texts (agent commentary between tool rounds) ──
                         for text in s.pending_intermediate.drain(..) {
+                            let text = crate::utils::sanitize::strip_llm_artifacts(&text);
                             let html = markdown_to_telegram_html(&text);
                             if !html.is_empty() {
                                 let _ = bot
@@ -1119,6 +1122,8 @@ pub(crate) async fn handle_message(
         Ok(response) => {
             // Extract <<IMG:path>> markers — send each as a Telegram photo.
             let (text_only, img_paths) = crate::utils::extract_img_markers(&response.content);
+            // Strip LLM-hallucinated artifacts (<!-- tools-v2 -->, XML tool blocks)
+            let text_only = crate::utils::sanitize::strip_llm_artifacts(&text_only);
             let text_only = redact_secrets(&text_only);
 
             for img_path in img_paths {
