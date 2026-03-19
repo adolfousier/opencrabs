@@ -279,6 +279,34 @@ pub fn redact_secrets(text: &str) -> String {
     result
 }
 
+/// Strip LLM-hallucinated artifacts from text before external delivery.
+///
+/// Removes:
+/// - HTML comments (`<!-- tools-v2: ... -->`, `<!-- lens -->`, etc.)
+/// - XML tool-call blocks (`<tool_call>`, `<tool_code>`, `<minimax:tool_call>`, etc.)
+///
+/// Use this on any text sent to Telegram, HTTP webhooks, or other external channels.
+pub fn strip_llm_artifacts(text: &str) -> String {
+    use crate::brain::agent::service::AgentService;
+
+    let mut result = text.to_string();
+    if result.contains("<!--") {
+        result = AgentService::strip_html_comments(&result);
+    }
+    if result.contains("<tool_call>")
+        || result.contains("<tool_code>")
+        || result.contains("<StartToolCall>")
+        || result.contains("<minimax:tool_call>")
+        || result.contains("<invoke")
+        || result.contains("<param")
+        || result.contains("<result>")
+        || result.contains("<tool_use>")
+    {
+        result = AgentService::strip_xml_tool_calls(&result);
+    }
+    result
+}
+
 /// Redact values inside a headers object for known sensitive header names.
 fn redact_headers_object(value: &Value) -> Value {
     match value {
