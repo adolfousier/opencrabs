@@ -574,6 +574,7 @@ pub(crate) async fn handle_message(
         Ok(response) => {
             // Extract <<IMG:path>> markers — send each as a Discord file attachment.
             let (text_only, img_paths) = crate::utils::extract_img_markers(&response.content);
+            let text_only = crate::utils::sanitize::strip_llm_artifacts(&text_only);
             let text_only = redact_secrets(&text_only);
 
             for img_path in img_paths {
