@@ -523,6 +523,56 @@ impl AgentService {
         result.trim().to_string()
     }
 
+    /// Parse XML tool-call hallucinations into real `(id, name, input)` tuples.
+    ///
+    /// MiniMax M2.7 (and occasionally other providers) emit tool calls as XML
+    /// text in the `content` field instead of structured `tool_calls`. This
+    /// method extracts them so the tool loop can execute them normally.
+    ///
+    /// Supported formats:
+    /// ```text
+    /// <tool id="bash">
+    ///   <parameter name="command">ls -la</parameter>
+    /// </tool>
+    /// ```
+    /// Optionally wrapped in `<minimax:tool_call>...</minimax:tool_call>`.
+    pub(crate) fn parse_xml_tool_calls(text: &str) -> Vec<(String, String, serde_json::Value)> {
+        use regex::Regex;
+        use std::sync::LazyLock;
+
+        // Match <tool id="NAME"> ... </tool> blocks (may be nested inside <minimax:tool_call>)
+        static TOOL_BLOCK_RE: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r#"(?s)<tool\s+id="([^"]+)"[^>]*>(.*?)</(?:tool|invoke)>"#).unwrap()
+        });
+
+        // Match <parameter name="KEY">VALUE</parameter> inside a tool block
+        static PARAM_RE: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r#"(?s)<parameter\s+name="([^"]+)"[^>]*>(.*?)</parameter>"#).unwrap()
+        });
+
+        let mut results = Vec::new();
+
+        for tool_cap in TOOL_BLOCK_RE.captures_iter(text) {
+            let tool_name = tool_cap[1].to_string();
+            let tool_body = &tool_cap[2];
+
+            let mut params = serde_json::Map::new();
+            for param_cap in PARAM_RE.captures_iter(tool_body) {
+                let key = param_cap[1].to_string();
+                let value = param_cap[2].to_string();
+                params.insert(key, serde_json::Value::String(value));
+            }
+
+            // Always emit the tool call — even with empty params.
+            // The tool executor will return an error like "missing 'command'"
+            // which feeds back to the model so it can retry properly.
+            let id = format!("xml-halluc-{}", uuid::Uuid::new_v4());
+            results.push((id, tool_name, serde_json::Value::Object(params)));
+        }
+
+        results
+    }
+
     /// Strip ALL HTML comments from text.
     ///
     /// LLMs echo or hallucinate various HTML comment markers from context:
