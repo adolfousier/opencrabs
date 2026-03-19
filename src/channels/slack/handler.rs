@@ -976,6 +976,7 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         Ok(response) => {
             // Extract <<IMG:path>> markers — upload each as a Slack file.
             let (text_only, img_paths) = crate::utils::extract_img_markers(&response.content);
+            let text_only = crate::utils::sanitize::strip_llm_artifacts(&text_only);
             let text_only = redact_secrets(&text_only);
 
             let token = SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));

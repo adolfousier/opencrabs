@@ -909,6 +909,7 @@ pub(crate) async fn handle_message(
 
             // Extract <<IMG:path>> markers — send each as a real WhatsApp image message.
             let (text_content, img_paths) = crate::utils::extract_img_markers(&response.content);
+            let text_content = crate::utils::sanitize::strip_llm_artifacts(&text_content);
             let text_content = redact_secrets(&text_content);
 
             // Send images before text
