@@ -138,6 +138,8 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         let is_selected = app.selected_message_idx == Some(msg_idx);
         let msg_bg: Option<Color> = if is_selected {
             Some(Color::Rgb(40, 45, 55))
+        } else if is_user {
+            Some(Color::Rgb(30, 32, 38))
         } else {
             None
         };
