@@ -68,7 +68,9 @@ enum PlanOperation {
     /// Complete a task execution with results
     CompleteTask {
         task_order: usize,
+        #[serde(default = "default_true")]
         success: bool,
+        #[serde(default)]
         output: String,
         #[serde(default)]
         artifacts: Vec<String>,
@@ -86,18 +88,28 @@ enum PlanOperation {
     RecordToolCall {
         task_order: usize,
         tool_name: String,
+        #[serde(default)]
         input: serde_json::Value,
         output: Option<String>,
+        #[serde(default = "default_true")]
         success: bool,
     },
     /// Skip a task with reason
-    SkipTask { task_order: usize, reason: String },
+    SkipTask {
+        task_order: usize,
+        #[serde(default)]
+        reason: String,
+    },
     /// Get execution summary
     Summary,
 }
 
 fn default_complexity() -> u8 {
     3
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Validate plan file path for security
@@ -728,6 +740,17 @@ impl Tool for PlanTool {
                 for artifact in artifacts {
                     task.add_artifact(artifact);
                 }
+
+                // Use a default output message when the LLM omits the output field
+                let output = if output.is_empty() {
+                    if success {
+                        "Task completed.".to_string()
+                    } else {
+                        "Task failed.".to_string()
+                    }
+                } else {
+                    output
+                };
 
                 task.complete_execution(output.clone(), success);
 
