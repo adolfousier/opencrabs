@@ -138,8 +138,6 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         let is_selected = app.selected_message_idx == Some(msg_idx);
         let msg_bg: Option<Color> = if is_selected {
             Some(Color::Rgb(40, 45, 55))
-        } else if is_user {
-            Some(Color::Rgb(30, 32, 38))
         } else {
             None
         };
@@ -202,12 +200,14 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             } else {
                 "  ▸ Thinking (ctrl+o to expand)"
             };
-            lines.push(Line::from(vec![Span::styled(
+            // Thinking label — no visible background
+            let hint_span = Span::styled(
                 hint_text.to_string(),
                 Style::default()
                     .fg(Color::DarkGray)
                     .add_modifier(Modifier::ITALIC),
-            )]));
+            );
+            lines.push(Line::from(vec![hint_span]));
             if app.messages[msg_idx].expanded
                 && let Some(ref details) = app.messages[msg_idx].details
             {
