@@ -230,18 +230,20 @@ fn render_thinking_indicator(f: &mut Frame, app: &App, area: Rect) {
         ),
     ];
 
-    if elapsed > 0 {
+    if elapsed > 0 || app.streaming_output_tokens > 0 {
+        let mut meta = String::new();
+        if elapsed > 0 {
+            meta.push_str(&format!(" {}s", elapsed));
+        }
+        if app.streaming_output_tokens > 0 {
+            if elapsed > 0 {
+                meta.push_str(" ·");
+            }
+            meta.push_str(&format!(" {} tok", app.streaming_output_tokens));
+        }
         spans.push(Span::styled(
-            format!(" {}s", elapsed),
+            meta,
             Style::default().fg(Color::Rgb(100, 100, 100)),
-        ));
-    }
-
-    if let Some(tok) = app.last_input_tokens {
-        let label = utils::format_token_count_raw(tok as i32);
-        spans.push(Span::styled(
-            format!(" · {} ctx", label),
-            Style::default().fg(Color::Rgb(80, 80, 80)),
         ));
     }
 
