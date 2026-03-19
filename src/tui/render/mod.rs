@@ -87,28 +87,17 @@ pub fn render(f: &mut Frame, app: &mut App) {
         .map(|p| (p.tasks.len() + 2).min(8) as u16)
         .unwrap_or(0);
 
-    // Sticky "OpenCrabs is thinking..." row: visible whenever processing
-    // but no streaming text/reasoning is actively arriving.
-    // Stays visible during tool execution and between API calls so the
-    // user always knows the agent is still working.
-    let thinking_height: u16 = if !app.has_pending_approval()
-        && app.is_processing
-        && app.streaming_response.is_none()
-        && app.streaming_reasoning.is_none()
-    {
-        1
-    } else {
-        0
-    };
+    // "OpenCrabs is thinking..." spinner is now rendered inline in chat.rs
+    // (above the tool group) so it scrolls with content and stays above
+    // the tool processing indicator.
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(10),                 // [0] Chat messages
-            Constraint::Length(plan_height),     // [1] Plan checklist (0 when no plan)
-            Constraint::Length(thinking_height), // [2] Thinking indicator (0 or 1)
-            Constraint::Length(input_height),    // [3] Input (dynamic)
-            Constraint::Length(1),               // [4] Status bar
+            Constraint::Min(10),              // [0] Chat messages
+            Constraint::Length(plan_height),  // [1] Plan checklist (0 when no plan)
+            Constraint::Length(input_height), // [2] Input (dynamic)
+            Constraint::Length(1),            // [3] Status bar
         ])
         .split(f.area());
 
@@ -118,11 +107,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         x: chunks[0].x,
         y: chunks[0].y,
         width: chunks[0].width,
-        height: chunks[0].height
-            + chunks[1].height
-            + chunks[2].height
-            + chunks[3].height
-            + chunks[4].height,
+        height: chunks[0].height + chunks[1].height + chunks[2].height + chunks[3].height,
     };
 
     match app.mode {
@@ -134,15 +119,12 @@ pub fn render(f: &mut Frame, app: &mut App) {
             if plan_height > 0 {
                 render_plan_checklist(f, app, chunks[1]);
             }
-            if thinking_height > 0 {
-                render_thinking_indicator(f, app, chunks[2]);
-            }
-            render_input(f, app, chunks[3]);
-            render_status_bar(f, app, chunks[4]);
+            render_input(f, app, chunks[2]);
+            render_status_bar(f, app, chunks[3]);
             if app.slash_suggestions_active {
-                render_slash_autocomplete(f, app, chunks[3]);
+                render_slash_autocomplete(f, app, chunks[2]);
             } else if app.emoji_picker_active {
-                render_emoji_picker(f, app, chunks[3]);
+                render_emoji_picker(f, app, chunks[2]);
             }
         }
         AppMode::Sessions => {
@@ -171,11 +153,8 @@ pub fn render(f: &mut Frame, app: &mut App) {
             if plan_height > 0 {
                 render_plan_checklist(f, app, chunks[1]);
             }
-            if thinking_height > 0 {
-                render_thinking_indicator(f, app, chunks[2]);
-            }
-            render_input(f, app, chunks[3]);
-            render_status_bar(f, app, chunks[4]);
+            render_input(f, app, chunks[2]);
+            render_status_bar(f, app, chunks[3]);
             render_model_selector(f, app, f.area());
         }
         AppMode::UsageDialog => {
@@ -183,11 +162,8 @@ pub fn render(f: &mut Frame, app: &mut App) {
             if plan_height > 0 {
                 render_plan_checklist(f, app, chunks[1]);
             }
-            if thinking_height > 0 {
-                render_thinking_indicator(f, app, chunks[2]);
-            }
-            render_input(f, app, chunks[3]);
-            render_status_bar(f, app, chunks[4]);
+            render_input(f, app, chunks[2]);
+            render_status_bar(f, app, chunks[3]);
             render_usage_dialog(f, app, f.area());
         }
         AppMode::RestartPending => {
@@ -195,59 +171,11 @@ pub fn render(f: &mut Frame, app: &mut App) {
             if plan_height > 0 {
                 render_plan_checklist(f, app, chunks[1]);
             }
-            if thinking_height > 0 {
-                render_thinking_indicator(f, app, chunks[2]);
-            }
-            render_input(f, app, chunks[3]);
-            render_status_bar(f, app, chunks[4]);
+            render_input(f, app, chunks[2]);
+            render_status_bar(f, app, chunks[3]);
             render_restart_dialog(f, app, f.area());
         }
     }
-}
-
-/// Render the sticky "OpenCrabs is thinking..." spinner row.
-/// This sits between the chat area and the input box so it is always visible
-/// and never scrolls away with chat history.
-fn render_thinking_indicator(f: &mut Frame, app: &App, area: Rect) {
-    let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-    let frame = spinner_frames[app.animation_frame % spinner_frames.len()];
-
-    let elapsed = app
-        .processing_started_at
-        .map(|t| t.elapsed().as_secs())
-        .unwrap_or(0);
-
-    let mut spans = vec![
-        Span::styled(
-            format!("  {} ", frame),
-            Style::default()
-                .fg(Color::Rgb(120, 120, 120))
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            "OpenCrabs is thinking...",
-            Style::default().fg(Color::Rgb(215, 100, 20)),
-        ),
-    ];
-
-    if elapsed > 0 || app.streaming_output_tokens > 0 {
-        let mut meta = String::new();
-        if elapsed > 0 {
-            meta.push_str(&format!(" {}s", elapsed));
-        }
-        if app.streaming_output_tokens > 0 {
-            if elapsed > 0 {
-                meta.push_str(" ·");
-            }
-            meta.push_str(&format!(" {} tok", app.streaming_output_tokens));
-        }
-        spans.push(Span::styled(
-            meta,
-            Style::default().fg(Color::Rgb(100, 100, 100)),
-        ));
-    }
-
-    f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 /// Split 1 row off the top of an area for the app title bar.

@@ -324,9 +324,6 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         lines.push(Line::from(spans));
     }
 
-    // NOTE: "OpenCrabs is thinking..." spinner is rendered as a sticky layout
-    // chunk between chat and input (see render/mod.rs), not inline here.
-
     // Render standalone reasoning during thinking-only phase
     // (before first text token — Kimi K2.5, DeepSeek-R1, etc.)
     // streaming_response=None but reasoning is already streaming in
@@ -400,7 +397,52 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         lines.push(Line::from(header_spans));
     }
 
-    // Render active tool group (live, during processing) — below streaming text
+    // Inline "OpenCrabs is thinking..." spinner during tool execution / waiting
+    // (no streaming text or reasoning yet). Renders ABOVE the tool group so the
+    // user always sees the spinner on top of the processing indicator.
+    if !has_pending_approval
+        && app.is_processing
+        && app.streaming_response.is_none()
+        && app.streaming_reasoning.is_none()
+    {
+        let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        let frame = spinner_frames[app.animation_frame % spinner_frames.len()];
+        let elapsed = app
+            .processing_started_at
+            .map(|t| t.elapsed().as_secs())
+            .unwrap_or(0);
+        let mut spans = vec![
+            Span::styled(
+                format!("  {} ", frame),
+                Style::default()
+                    .fg(Color::Rgb(120, 120, 120))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "OpenCrabs is thinking...",
+                Style::default().fg(Color::Rgb(215, 100, 20)),
+            ),
+        ];
+        if elapsed > 0 || app.streaming_output_tokens > 0 {
+            let mut meta = String::new();
+            if elapsed > 0 {
+                meta.push_str(&format!(" {}s", elapsed));
+            }
+            if app.streaming_output_tokens > 0 {
+                if elapsed > 0 {
+                    meta.push_str(" ·");
+                }
+                meta.push_str(&format!(" {} tok", app.streaming_output_tokens));
+            }
+            spans.push(Span::styled(
+                meta,
+                Style::default().fg(Color::Rgb(100, 100, 100)),
+            ));
+        }
+        lines.push(Line::from(spans));
+    }
+
+    // Render active tool group (live, during processing) — below spinner
     // so it's always visible at the bottom with auto-scroll
     if let Some(ref group) = app.active_tool_group {
         render_tool_group(&mut lines, group, true, app.animation_frame);
