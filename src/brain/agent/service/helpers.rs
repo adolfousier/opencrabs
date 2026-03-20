@@ -527,9 +527,7 @@ impl AgentService {
     ///   <tool_call>{"tool_name":"bash","args":{"command":"..."}}</tool_call>
     ///   <tool_call>{"name":"bash","arguments":{"command":"..."}}</tool_call>
     ///   <tool_use>{"name":"bash","input":{"command":"..."}}</tool_use>
-    pub(crate) fn parse_xml_tool_calls(
-        text: &str,
-    ) -> Vec<(String, serde_json::Value)> {
+    pub(crate) fn parse_xml_tool_calls(text: &str) -> Vec<(String, serde_json::Value)> {
         use regex::Regex;
         use std::sync::LazyLock;
 

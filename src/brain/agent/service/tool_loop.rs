@@ -11,11 +11,15 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 impl AgentService {
-    /// Enforce the 80 % context budget rule.
+    /// Enforce the 65 % context budget rule.
     ///
-    /// - ≥ 80 %: try LLM compaction (up to 3 retries on error).
-    /// - After compaction (or if all retries fail): hard-truncate to 80 % if still over.
-    /// - Context NEVER exceeds 80 % after this function returns.
+    /// - ≥ 65 %: try LLM compaction (up to 3 retries on error).
+    /// - After compaction (or if all retries fail): hard-truncate to 65 % if still over.
+    /// - Context NEVER exceeds 65 % after this function returns.
+    ///
+    /// NOTE: 65 % (~130k of 200k) is chosen because MiniMax (and likely other
+    /// models) degrade on function-calling quality well before hitting their
+    /// theoretical context limit — tool calls stop around ~133k tokens.
     ///
     /// Returns the compaction summary if LLM compaction succeeded.
     async fn enforce_context_budget(
@@ -41,11 +45,11 @@ impl AgentService {
             usage_pct,
         );
 
-        if usage_pct <= 80.0 {
+        if usage_pct <= 65.0 {
             return None;
         }
 
-        tracing::warn!("Context at {:.0}% — triggering compaction", usage_pct);
+        tracing::warn!("Context at {:.0}% (>65%) — triggering compaction", usage_pct);
 
         // Try LLM compaction first (preserves context via summary)
         let mut summary_result = None;
@@ -76,10 +80,10 @@ impl AgentService {
             }
         }
 
-        // Hard-truncate guarantee: NEVER proceed with context > 80%.
+        // Hard-truncate guarantee: NEVER proceed with context > 65%.
         // This fires if LLM compaction failed entirely, or if the compacted
         // context (8 recent messages + summary) is still too large.
-        let target_tokens = (effective_max as f64 * 0.80) as usize;
+        let target_tokens = (effective_max as f64 * 0.65) as usize;
         if context.token_count > target_tokens {
             let before = context.token_count;
             let before_msgs = context.messages.len();
@@ -231,8 +235,7 @@ impl AgentService {
         // never persist to DB or appear in TUI chat history.
         let is_system_continuation = user_message.starts_with("[System:");
         if !is_system_continuation {
-            let safe_message =
-                crate::utils::sanitize::redact_secrets(&user_message);
+            let safe_message = crate::utils::sanitize::redact_secrets(&user_message);
             let _user_db_msg = message_service
                 .create_message(session_id, "user".to_string(), safe_message)
                 .await
