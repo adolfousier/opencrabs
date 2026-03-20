@@ -5,6 +5,26 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.84] - 2026-03-20
+
+### Added
+- **Cron HTTP webhook delivery** — Generic HTTP webhook URLs now supported as `deliver_to` targets in cron jobs, enabling integration with any HTTP endpoint (Slack incoming webhooks, custom APIs, notification services, etc.)
+
+### Fixed
+- **Streaming filter eating XML tags in prose** — The `STRIP_OPEN_TAGS` array in the streaming filter included tool-call XML tags (`<tool_call>`, `<tool_use>`, `<result>`, etc.). When MiniMax M2.7 mentioned these tags in prose (e.g. describing commit history), the filter entered `inside_think=true`, couldn't find a closing tag, and silently dropped all remaining text — truncating entire responses. XML tool-call tags removed from streaming `STRIP_OPEN_TAGS` (keep only `<think>`, `<!-- reasoning -->`, `<!--`)
+- **`<result>` tag hallucinations from MiniMax M2.7** — Strip `<result>` XML blocks echoed by MiniMax in response text
+- **`<tool_use>` hallucinated XML tags from MiniMax M2.7** — Strip `<tool_use>` wrapper blocks echoed by MiniMax
+- **XML tool-call hallucinations parsed as real tool calls** — `acd3477` introduced a parser that converts XML tool-call blocks into actual executable tool calls when MiniMax emits them as text
+- **LLM artifacts stripped from Telegram and cron delivery** — Hallucinated `<!-- tools-v2: -->`, `<!-- /tools-v2: -->`, `<think>`, `</think>`, and XML block markers now stripped before delivery to Telegram and cron webhook outputs
+- **LLM artifacts stripped from Discord, Slack, and WhatsApp** — Same artifact stripping extended across all remaining channels
+- **XML hallucination inline execution reverted** — Inline XML tool-call execution was poisoning context; reverted to pure stripping approach
+
+### Changed
+- **API error display includes error_type** — Error responses now include the raw `error_type` field and full Anthropic error body in logs for easier debugging
+
+### Fixed
+- **Plan `complete_task` fields made optional** — `success` and `output` fields on `complete_task` are now optional with defaults to prevent plan execution from getting stuck when the LLM omits these fields
+
 ## [0.2.83] - 2026-03-18
 
 ### Added
@@ -1627,6 +1647,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.84]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.84
 [0.2.83]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.83
 [0.2.82]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.82
 [0.2.81]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.81
