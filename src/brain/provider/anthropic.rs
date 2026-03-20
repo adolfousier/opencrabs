@@ -486,6 +486,10 @@ impl Provider for AnthropicProvider {
     fn calculate_cost(&self, model: &str, input_tokens: u32, output_tokens: u32) -> f64 {
         crate::pricing::PricingConfig::load().calculate_cost(model, input_tokens, output_tokens)
     }
+
+    fn is_proxied(&self) -> bool {
+        self.messages_url != ANTHROPIC_API_URL
+    }
 }
 
 // Anthropic-specific request format

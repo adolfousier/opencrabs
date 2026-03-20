@@ -193,6 +193,14 @@ impl AgentService {
             .map_err(|e| AgentError::Database(e.to_string()))?
             .ok_or(AgentError::SessionNotFound(session_id))?;
 
+        // When proxied, the CLI handles tool execution autonomously —
+        // we skip local tool execution and treat tool_use blocks as display-only.
+        let proxied = self
+            .provider
+            .read()
+            .expect("provider lock poisoned")
+            .is_proxied();
+
         // Load conversation context with budget-aware message trimming
         let message_service = MessageService::new(self.context.clone());
         let all_db_messages = message_service
@@ -796,6 +804,16 @@ impl AgentService {
                 let _ = message_service
                     .append_content(assistant_db_msg.id, &format!("{}\n\n", iteration_text))
                     .await;
+            }
+
+            // Proxied providers (cc-max-proxy) execute tools autonomously via CLI —
+            // skip local execution to avoid double-running tools.
+            if proxied && !tool_uses.is_empty() {
+                tracing::info!(
+                    "Proxied mode: skipping {} tool_use blocks (CLI handles execution)",
+                    tool_uses.len()
+                );
+                tool_uses.clear();
             }
 
             tracing::debug!("Found {} tool uses to execute", tool_uses.len());

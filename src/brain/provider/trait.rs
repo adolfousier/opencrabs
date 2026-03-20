@@ -38,6 +38,13 @@ pub trait Provider: Send + Sync {
         true // Most modern providers support tools
     }
 
+    /// Whether requests are routed through a local proxy (e.g. cc-max-proxy).
+    /// When true, the proxy's CLI handles tool execution autonomously —
+    /// the agent should NOT execute tool_use blocks from the response.
+    fn is_proxied(&self) -> bool {
+        false
+    }
+
     /// Check if this provider supports vision/image inputs
     fn supports_vision(&self) -> bool {
         false // Not all providers support vision
