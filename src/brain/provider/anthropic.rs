@@ -36,6 +36,7 @@ pub struct AnthropicProvider {
     api_key: String,
     client: Client,
     custom_default_model: Option<String>,
+    messages_url: String,
 }
 
 impl AnthropicProvider {
@@ -53,6 +54,7 @@ impl AnthropicProvider {
             api_key,
             client,
             custom_default_model: None,
+            messages_url: ANTHROPIC_API_URL.to_string(),
         }
     }
 
@@ -62,7 +64,24 @@ impl AnthropicProvider {
             api_key,
             client,
             custom_default_model: None,
+            messages_url: ANTHROPIC_API_URL.to_string(),
         }
+    }
+
+    /// Override the base URL (e.g. for a local proxy).
+    pub fn with_base_url(mut self, base_url: String) -> Self {
+        // Ensure the URL ends with /v1/messages
+        self.messages_url = if base_url.ends_with("/v1/messages") {
+            base_url
+        } else {
+            format!("{}/v1/messages", base_url.trim_end_matches('/'))
+        };
+        self
+    }
+
+    /// Returns true when requests go through a local proxy instead of the Anthropic API.
+    fn is_proxied(&self) -> bool {
+        self.messages_url != ANTHROPIC_API_URL
     }
 
     /// Set custom default model
@@ -109,6 +128,18 @@ impl AnthropicProvider {
             reqwest::header::CONTENT_TYPE,
             "application/json".parse().expect("valid content-type"),
         );
+        headers
+    }
+
+    /// Build request headers, including X-Working-Dir when proxied.
+    fn request_headers(&self, request: &LLMRequest) -> reqwest::header::HeaderMap {
+        let mut headers = self.headers();
+        if self.is_proxied()
+            && let Some(ref wd) = request.working_directory
+            && let Ok(val) = wd.parse()
+        {
+            headers.insert("x-working-dir", val);
+        }
         headers
     }
 
@@ -222,6 +253,7 @@ impl Provider for AnthropicProvider {
             request.max_tokens.unwrap_or(16384)
         );
 
+        let req_headers = self.request_headers(&request);
         let anthropic_request = self.to_anthropic_request(request);
         let retry_config = RetryConfig::default();
 
@@ -231,8 +263,8 @@ impl Provider for AnthropicProvider {
                 tracing::debug!("Sending request to Anthropic API");
                 let response = self
                     .client
-                    .post(ANTHROPIC_API_URL)
-                    .headers(self.headers())
+                    .post(&self.messages_url)
+                    .headers(req_headers.clone())
                     .json(&anthropic_request)
                     .send()
                     .await?;
@@ -278,6 +310,7 @@ impl Provider for AnthropicProvider {
             message_count
         );
 
+        let req_headers = self.request_headers(&request);
         let mut anthropic_request = self.to_anthropic_request(request);
         anthropic_request.stream = Some(true);
         let retry_config = RetryConfig::default();
@@ -287,8 +320,8 @@ impl Provider for AnthropicProvider {
             || async {
                 let response = self
                     .client
-                    .post(ANTHROPIC_API_URL)
-                    .headers(self.headers())
+                    .post(&self.messages_url)
+                    .headers(req_headers.clone())
                     .json(&anthropic_request)
                     .send()
                     .await?;

@@ -212,6 +212,7 @@ mod fallback_runtime {
             tools: None,
             stream: false,
             metadata: None,
+            working_directory: None,
         }
     }
 

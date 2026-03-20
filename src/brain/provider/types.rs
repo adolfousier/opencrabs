@@ -110,6 +110,9 @@ pub struct LLMRequest {
     /// Additional metadata
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, String>>,
+    /// Working directory for proxy-aware providers (not serialized to API)
+    #[serde(skip)]
+    pub working_directory: Option<String>,
 }
 
 impl LLMRequest {
@@ -124,6 +127,7 @@ impl LLMRequest {
             max_tokens: None,
             stream: false,
             metadata: None,
+            working_directory: None,
         }
     }
 

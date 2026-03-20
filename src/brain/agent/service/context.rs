@@ -67,11 +67,15 @@ impl AgentService {
         let request = LLMRequest::new(model_name.clone(), context.messages.clone())
             .with_max_tokens(self.max_tokens);
 
-        let request = if let Some(system) = context.system_brain {
+        let mut request = if let Some(system) = context.system_brain {
             request.with_system(system)
         } else {
             request
         };
+
+        // Pass working directory so proxy-aware providers can forward it
+        request.working_directory =
+            Some(self.get_working_directory().to_string_lossy().to_string());
 
         Ok((model_name, request, message_service, session_service))
     }
@@ -283,7 +287,7 @@ impl AgentService {
 
         summary_messages.push(Message::user(compaction_prompt));
 
-        let request = LLMRequest::new(model_name.to_string(), summary_messages)
+        let mut request = LLMRequest::new(model_name.to_string(), summary_messages)
             .with_max_tokens(self.max_tokens)
             .with_system("You are a continuation document generator. Your job is to create an exhaustive, \
              detailed knowledge transfer document from a conversation so that a fresh AI agent can \
@@ -291,6 +295,8 @@ impl AgentService {
              error, and pending task. The agent reading your output will have ZERO prior context — \
              your document is its entire memory. Be thorough to the point of being verbose. \
              Missing a single detail could cause the agent to repeat mistakes or violate user preferences.".to_string());
+        request.working_directory =
+            Some(self.get_working_directory().to_string_lossy().to_string());
 
         // Use streaming so the TUI shows the summary being written in real-time
         // instead of freezing silently for 2-5 minutes on large contexts

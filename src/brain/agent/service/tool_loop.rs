@@ -49,7 +49,10 @@ impl AgentService {
             return None;
         }
 
-        tracing::warn!("Context at {:.0}% (>65%) — triggering compaction", usage_pct);
+        tracing::warn!(
+            "Context at {:.0}% (>65%) — triggering compaction",
+            usage_pct
+        );
 
         // Try LLM compaction first (preserves context via summary)
         let mut summary_result = None;
@@ -445,6 +448,8 @@ impl AgentService {
             // Build LLM request with tools if available
             let mut request = LLMRequest::new(model_name.clone(), context.messages.clone())
                 .with_max_tokens(self.max_tokens);
+            request.working_directory =
+                Some(self.get_working_directory().to_string_lossy().to_string());
 
             if let Some(system) = &context.system_brain {
                 request = request.with_system(system.clone());
@@ -523,6 +528,8 @@ impl AgentService {
                     let mut retry_req =
                         LLMRequest::new(model_name.clone(), context.messages.clone())
                             .with_max_tokens(self.max_tokens);
+                    retry_req.working_directory =
+                        Some(self.get_working_directory().to_string_lossy().to_string());
                     if let Some(system) = &context.system_brain {
                         retry_req = retry_req.with_system(system.clone());
                     }
