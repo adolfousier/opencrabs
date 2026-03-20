@@ -25,6 +25,9 @@ const PARAM_ALIASES: &[(&str, &str, &str)] = &[
     ("edit_file", "file", "path"),
     ("edit_file", "file_path", "path"),
     ("edit_file", "filepath", "path"),
+    // edit_file: Claude Code sends old_string/new_string → old_text/new_text
+    ("edit_file", "old_string", "old_text"),
+    ("edit_file", "new_string", "new_text"),
     ("doc_parser", "file", "path"),
     ("doc_parser", "file_path", "path"),
     // write: "text", "body" → "content"
