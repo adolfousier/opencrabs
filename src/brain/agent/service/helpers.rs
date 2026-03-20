@@ -503,6 +503,36 @@ impl AgentService {
             }
         }
 
+        // Claude Code tool name mapping (capitalized → OpenCrabs lowercase)
+        // The cc-max-proxy returns Claude Code tool names which differ from ours.
+        let mapped = match name.as_str() {
+            "Bash" => Some("bash"),
+            "Read" => Some("read_file"),
+            "Write" => Some("write_file"),
+            "Edit" => Some("edit_file"),
+            "Glob" => Some("glob"),
+            "Grep" => Some("grep"),
+            "WebSearch" => Some("web_search"),
+            "WebFetch" => Some("http_request"),
+            "NotebookEdit" => Some("notebook_edit"),
+            _ => None,
+        };
+        if let Some(canonical) = mapped {
+            tracing::info!(
+                "[TOOL_NORM] Mapped Claude Code tool '{}' → '{}'",
+                name,
+                canonical
+            );
+            return (canonical.to_string(), input);
+        }
+
+        // Final fallback: lowercase the name (catches simple case mismatches)
+        let lowered = name.to_lowercase();
+        if lowered != name {
+            tracing::info!("[TOOL_NORM] Lowercased tool '{}' → '{}'", name, lowered);
+            return (lowered, input);
+        }
+
         (name, input)
     }
 
