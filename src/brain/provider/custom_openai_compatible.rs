@@ -344,24 +344,14 @@ impl OpenAIProvider {
                         text_parts.push(text);
                     }
                     ContentBlock::ToolUse { id, name, input } => {
-                        // Skip synthetic tool uses from XML hallucination recovery
-                        if !id.starts_with("xml-halluc-") {
-                            tool_uses.push((id, name, input));
-                        }
+                        tool_uses.push((id, name, input));
                     }
                     ContentBlock::ToolResult {
                         tool_use_id,
                         content,
                         ..
                     } => {
-                        // Skip synthetic tool results from XML hallucination recovery —
-                        // providers reject tool_call_ids they didn't generate.
-                        if tool_use_id.starts_with("xml-halluc-") {
-                            // Convert to plain text so the context isn't lost
-                            text_parts.push(format!("[Tool result: {}]", content));
-                        } else {
-                            tool_results.push((tool_use_id, content));
-                        }
+                        tool_results.push((tool_use_id, content));
                     }
                     ContentBlock::Image { source } => {
                         let url = match source {
