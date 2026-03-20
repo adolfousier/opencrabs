@@ -337,8 +337,9 @@ impl AgentService {
             )
         };
 
-        // Compact the context: keep recent messages within 80% of max_tokens
-        let keep_budget = (context.max_tokens as f64 * 0.80) as usize;
+        // Compact the context: keep recent messages within 55% of max_tokens
+        // (below the 65% budget threshold so hard-truncation never fires after compaction)
+        let keep_budget = (context.max_tokens as f64 * 0.55) as usize;
         context.compact_with_summary(summary_with_context, keep_budget);
 
         tracing::info!(

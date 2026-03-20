@@ -83,34 +83,31 @@ impl AgentService {
             }
         }
 
-        // Hard-truncate guarantee: NEVER proceed with context > 65%.
-        // This fires if LLM compaction failed entirely, or if the compacted
-        // context (8 recent messages + summary) is still too large.
+        // If still over budget after compaction, re-compact with tighter budget.
+        // Never hard-truncate — always use LLM compaction to preserve context.
         let target_tokens = (effective_max as f64 * 0.65) as usize;
         if context.token_count > target_tokens {
-            let before = context.token_count;
-            let before_msgs = context.messages.len();
-            context.hard_truncate_to(target_tokens);
             tracing::warn!(
-                "Hard-truncated context: {} → {} tokens, {} → {} messages (target {})",
-                before,
+                "Still at {} tokens after compaction (target {}), re-compacting",
                 context.token_count,
-                before_msgs,
-                context.messages.len(),
                 target_tokens,
             );
-            if let Some(cb) = progress_callback {
-                cb(session_id, ProgressEvent::TokenCount(context.token_count));
-                cb(
-                    session_id,
-                    ProgressEvent::IntermediateText {
-                        text: format!(
-                            "⚠️ Context hard-truncated from {} to {} tokens to stay within budget.",
-                            before, context.token_count
-                        ),
-                        reasoning: None,
-                    },
-                );
+            // Re-run compaction — the 55% keep_budget should get it under 65%
+            // on the second pass since there's less context now.
+            if let Ok(summary) = self
+                .compact_context(session_id, context, model_name)
+                .await
+            {
+                if let Some(cb) = progress_callback {
+                    cb(
+                        session_id,
+                        ProgressEvent::CompactionSummary {
+                            summary: summary.clone(),
+                        },
+                    );
+                    cb(session_id, ProgressEvent::TokenCount(context.token_count));
+                }
+                summary_result = Some(summary);
             }
         }
 
