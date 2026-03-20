@@ -138,6 +138,8 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         let is_selected = app.selected_message_idx == Some(msg_idx);
         let msg_bg: Option<Color> = if is_selected {
             Some(Color::Rgb(40, 45, 55))
+        } else if is_user {
+            Some(Color::Rgb(40, 44, 56))
         } else {
             None
         };
@@ -174,11 +176,20 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             let padded_line = Line::from(padded_spans);
             for wrapped in wrap_line_with_padding(padded_line, content_width, "  ") {
                 if let Some(bg) = msg_bg {
-                    // Apply bg to all spans and pad to full line width
+                    // Apply bg to all spans and pad to full line width.
+                    // Force white text on user messages so the dark bg
+                    // remains readable on light terminal themes.
                     let mut spans: Vec<Span> = wrapped
                         .spans
                         .into_iter()
-                        .map(|s| Span::styled(s.content, s.style.bg(bg)))
+                        .map(|s| {
+                            let style = if is_user {
+                                s.style.bg(bg).fg(Color::White)
+                            } else {
+                                s.style.bg(bg)
+                            };
+                            Span::styled(s.content, style)
+                        })
                         .collect();
                     let line_width: usize = spans.iter().map(|s| s.content.width()).sum();
                     let remaining = content_width.saturating_sub(line_width);
