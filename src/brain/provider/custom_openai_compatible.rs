@@ -431,7 +431,7 @@ impl OpenAIProvider {
         }
 
         // Convert tools to OpenAI format
-        let tools = request.tools.map(|tools| {
+        let tools: Option<Vec<OpenAITool>> = request.tools.map(|tools| {
             tools
                 .iter()
                 .map(|tool| OpenAITool {
@@ -455,6 +455,13 @@ impl OpenAIProvider {
             (request.max_tokens, None)
         };
 
+        // Set tool_choice to "auto" when tools are present so the model
+        // knows it is allowed to call them (MiniMax requires this explicitly).
+        let tool_choice = tools
+            .as_ref()
+            .filter(|t| !t.is_empty())
+            .map(|_| serde_json::json!("auto"));
+
         OpenAIRequest {
             model: request.model,
             messages,
@@ -464,6 +471,7 @@ impl OpenAIProvider {
             stream: Some(request.stream),
             stream_options: None,
             tools,
+            tool_choice,
         }
     }
 
@@ -1023,8 +1031,9 @@ impl Provider for OpenAIProvider {
                                         let finish_reason_str = chunk.choices.first()
                                             .and_then(|c| c.finish_reason.as_ref());
 
-                                        if let Some(reason) = finish_reason_str
-                                            && (reason == "tool_calls" || reason == "function_call") {
+                                        // Flush accumulated tool calls on any terminal finish_reason.
+                                        // Some providers (MiniMax) send "stop" even with tool_calls.
+                                        if finish_reason_str.is_some() && !st.tool_calls.is_empty() {
                                                 // Emit all accumulated tool calls
                                                 for (idx, accum) in st.tool_calls.drain() {
                                                     let input = serde_json::from_str(&accum.arguments)
@@ -1330,6 +1339,9 @@ struct OpenAIRequest {
     stream_options: Option<StreamOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<OpenAITool>>,
+    /// Tells the model whether/how to call tools. "auto" = model decides.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_choice: Option<serde_json::Value>,
 }
 
 impl OpenAIRequest {
