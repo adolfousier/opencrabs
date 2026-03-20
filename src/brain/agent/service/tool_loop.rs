@@ -227,10 +227,14 @@ impl AgentService {
         // Save user message to database (text only — images are ephemeral).
         // Skip DB persistence for internal system continuations (restart recovery)
         // — they go to context for the LLM but never appear in chat history.
+        // Redact secrets so Bearer tokens, API keys etc. from cron prompts
+        // never persist to DB or appear in TUI chat history.
         let is_system_continuation = user_message.starts_with("[System:");
         if !is_system_continuation {
+            let safe_message =
+                crate::utils::sanitize::redact_secrets(&user_message);
             let _user_db_msg = message_service
-                .create_message(session_id, "user".to_string(), user_message)
+                .create_message(session_id, "user".to_string(), safe_message)
                 .await
                 .map_err(|e| AgentError::Database(e.to_string()))?;
         }
