@@ -293,8 +293,13 @@ pub fn strip_llm_artifacts(text: &str) -> String {
     if result.contains("<!--") {
         result = AgentService::strip_html_comments(&result);
     }
+    // Only strip XML blocks that contain valid tool-call JSON — prose mentions
+    // like "we fixed the <tool_call> bug" must not be eaten.
     if AgentService::has_xml_tool_block(&result) {
-        result = AgentService::strip_xml_tool_calls(&result);
+        let parsed = AgentService::parse_xml_tool_calls(&result);
+        if !parsed.is_empty() {
+            result = AgentService::strip_xml_tool_calls(&result);
+        }
     }
     result
 }

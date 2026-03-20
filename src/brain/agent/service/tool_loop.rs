@@ -459,7 +459,7 @@ impl AgentService {
             }
 
             // Send to provider via streaming — retry once after emergency compaction if prompt is too long
-            let (response, reasoning_text) = match self
+            let (mut response, reasoning_text) = match self
                 .stream_complete(
                     session_id,
                     request,
@@ -732,18 +732,35 @@ impl AgentService {
                 iteration_text = Self::strip_html_comments(&iteration_text);
             }
 
-            // ── XML tool-call stripping ──────────────────────────────────
-            // Some providers (e.g. MiniMax) occasionally emit tool calls as
-            // XML text instead of structured tool_calls. We used to try
-            // extracting and executing these, but the synthetic IDs caused
-            // providers to reject tool results ("tool id not found"),
-            // triggering infinite retry loops. Just strip the XML and let
-            // the model respond with text instead.
+            // ── XML tool-call recovery ──────────────────────────────────
+            // MiniMax (and some other providers) sometimes emit tool calls as
+            // XML in the content instead of using the API's tool_calls field.
+            // Parse them into real tool_uses AND inject into response.content
+            // so the context has matching ToolUse blocks for ToolResult messages.
             //
-            // IMPORTANT: Only trigger when BOTH open AND close tags exist,
-            // so mentions like `<tool_use>` in prose don't cause stripping.
+            // CRITICAL: Only strip XML blocks that were SUCCESSFULLY parsed as
+            // valid tool calls. If the model is just talking ABOUT XML tags in
+            // prose (e.g. release notes), parsing finds no valid JSON inside
+            // the tags and we leave the text untouched.
             if Self::has_xml_tool_block(&iteration_text) {
-                iteration_text = Self::strip_xml_tool_calls(&iteration_text);
+                let parsed = Self::parse_xml_tool_calls(&iteration_text);
+                if !parsed.is_empty() {
+                    tracing::info!(
+                        "Recovered {} XML tool call(s) from content text",
+                        parsed.len()
+                    );
+                    for (name, input) in parsed {
+                        let synthetic_id = format!("xml-{}", uuid::Uuid::new_v4().simple());
+                        tool_uses.push((synthetic_id.clone(), name.clone(), input.clone()));
+                        response.content.push(ContentBlock::ToolUse {
+                            id: synthetic_id,
+                            name,
+                            input,
+                        });
+                    }
+                    // Only strip after successful parse — prose mentions are left alone
+                    iteration_text = Self::strip_xml_tool_calls(&iteration_text);
+                }
             }
 
             // Persist reasoning content to DB (before iteration text)

@@ -522,6 +522,59 @@ impl AgentService {
             || (text.contains("<tool_use>") && text.contains("</tool_use>"))
     }
 
+    /// Parse XML tool-call blocks into (name, input) pairs.
+    /// Handles multiple formats MiniMax uses:
+    ///   <tool_call>{"tool_name":"bash","args":{"command":"..."}}</tool_call>
+    ///   <tool_call>{"name":"bash","arguments":{"command":"..."}}</tool_call>
+    ///   <tool_use>{"name":"bash","input":{"command":"..."}}</tool_use>
+    pub(crate) fn parse_xml_tool_calls(
+        text: &str,
+    ) -> Vec<(String, serde_json::Value)> {
+        use regex::Regex;
+        use std::sync::LazyLock;
+
+        static XML_BLOCK_RE: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r#"(?s)<(?:tool_call|tool_code|tool_use|minimax:tool_call|StartToolCall)>(.*?)</(?:tool_call|tool_code|tool_use|minimax:tool_call|StartToolCall)>"#).unwrap()
+        });
+
+        let mut results = Vec::new();
+        for cap in XML_BLOCK_RE.captures_iter(text) {
+            let inner = cap[1].trim();
+            // Try parsing as JSON
+            if let Ok(obj) = serde_json::from_str::<serde_json::Value>(inner) {
+                // Extract tool name from various field names
+                let name = obj
+                    .get("tool_name")
+                    .or_else(|| obj.get("name"))
+                    .or_else(|| obj.get("function"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                if name.is_empty() {
+                    continue;
+                }
+
+                // Extract input/arguments from various field names
+                let input = obj
+                    .get("args")
+                    .or_else(|| obj.get("arguments"))
+                    .or_else(|| obj.get("input"))
+                    .or_else(|| obj.get("parameters"))
+                    .cloned()
+                    .unwrap_or(serde_json::json!({}));
+
+                tracing::info!(
+                    "[XML_TOOL_PARSE] Recovered tool call: name={}, input_keys={:?}",
+                    name,
+                    input.as_object().map(|o| o.keys().collect::<Vec<_>>())
+                );
+                results.push((name, input));
+            }
+        }
+        results
+    }
+
     pub(crate) fn strip_xml_tool_calls(text: &str) -> String {
         use regex::Regex;
         use std::sync::LazyLock;
