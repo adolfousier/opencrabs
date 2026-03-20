@@ -728,120 +728,22 @@ impl AgentService {
                 iteration_text = Self::strip_html_comments(&iteration_text);
             }
 
-            // ── XML tool-call hallucination recovery ─────────────────────
-            // Some providers (e.g. MiniMax) emit tool calls as XML text in
-            // `content` instead of structured `tool_calls`. Rather than nudging
-            // the model (which doesn't reliably self-correct), we parse the XML
-            // into real tool calls and execute them directly.
-            let has_xml_hallucination = iteration_text.contains("<tool_call>")
+            // ── XML tool-call stripping ──────────────────────────────────
+            // Some providers (e.g. MiniMax) occasionally emit tool calls as
+            // XML text instead of structured tool_calls. We used to try
+            // extracting and executing these, but the synthetic IDs caused
+            // providers to reject tool results ("tool id not found"),
+            // triggering infinite retry loops. Just strip the XML and let
+            // the model respond with text instead.
+            if iteration_text.contains("<tool_call>")
                 || iteration_text.contains("<tool_code>")
                 || iteration_text.contains("<StartToolCall>")
                 || iteration_text.contains("<minimax:tool_call>")
+                || iteration_text.contains("<invoke")
+                || iteration_text.contains("<param")
+                || iteration_text.contains("<result>")
                 || iteration_text.contains("<tool_use>")
-                || (iteration_text.contains("<tool id=")
-                    && (iteration_text.contains("</tool>")
-                        || iteration_text.contains("</invoke>")));
-
-            if has_xml_hallucination && tool_uses.is_empty() {
-                let parsed = Self::parse_xml_tool_calls(&iteration_text);
-                if !parsed.is_empty() {
-                    tracing::warn!(
-                        "🔧 XML tool-call hallucination detected — parsed {} tool call(s) \
-                         from XML text. Executing inline with plain-text context.",
-                        parsed.len(),
-                    );
-
-                    // Strip XML and add cleaned assistant text to context
-                    let clean_text = Self::strip_xml_tool_calls(&iteration_text);
-                    if !clean_text.trim().is_empty() {
-                        context.add_message(Message::assistant(clean_text));
-                    }
-
-                    // Execute each parsed tool and collect results as plain text
-                    let mut results_text = String::new();
-                    let mut xml_tool_ctx = tool_context.clone();
-                    xml_tool_ctx.auto_approve = true;
-
-                    for (_id, name, input) in &parsed {
-                        let (norm_name, norm_input) =
-                            Self::normalize_tool_call(name.clone(), input.clone());
-                        tracing::info!(
-                            "[TOOL_EXEC] 📥 Recovered XML tool call: name={}",
-                            norm_name,
-                        );
-
-                        // Emit progress events
-                        if let Some(ref cb) = progress_callback {
-                            cb(
-                                session_id,
-                                ProgressEvent::ToolStarted {
-                                    tool_name: norm_name.clone(),
-                                    tool_input: norm_input.clone(),
-                                },
-                            );
-                        }
-
-                        match self
-                            .tool_registry
-                            .execute(&norm_name, norm_input.clone(), &xml_tool_ctx)
-                            .await
-                        {
-                            Ok(result) => {
-                                let output = if result.success {
-                                    &result.output
-                                } else {
-                                    result.error.as_deref().unwrap_or("Tool failed")
-                                };
-                                tracing::info!(
-                                    "[TOOL_EXEC] {} Tool '{}' {}, output_len={}",
-                                    if result.success { "✅" } else { "❌" },
-                                    norm_name,
-                                    if result.success {
-                                        "succeeded"
-                                    } else {
-                                        "failed"
-                                    },
-                                    output.len(),
-                                );
-                                results_text.push_str(&format!(
-                                    "[Tool '{}' result: {}]\n",
-                                    norm_name,
-                                    output.chars().take(4000).collect::<String>(),
-                                ));
-                                if let Some(ref cb) = progress_callback {
-                                    cb(
-                                        session_id,
-                                        ProgressEvent::ToolCompleted {
-                                            tool_name: norm_name.clone(),
-                                            tool_input: norm_input,
-                                            success: result.success,
-                                            summary: output.chars().take(2000).collect(),
-                                        },
-                                    );
-                                }
-                            }
-                            Err(e) => {
-                                tracing::error!("[TOOL_EXEC] 💥 Tool '{}' error: {}", norm_name, e,);
-                                results_text
-                                    .push_str(&format!("[Tool '{}' error: {}]\n", norm_name, e,));
-                            }
-                        }
-                    }
-
-                    // Add tool results as a plain user message (no ToolResult block)
-                    // so the API never sees synthetic tool_use IDs it doesn't recognize.
-                    context.add_message(Message::user(results_text));
-
-                    // Strip XML from iteration_text for display
-                    iteration_text = Self::strip_xml_tool_calls(&iteration_text);
-
-                    // Continue the loop — model sees results and can act on them
-                    continue;
-                }
-                // No parseable tool calls — just strip XML
-                iteration_text = Self::strip_xml_tool_calls(&iteration_text);
-            } else if has_xml_hallucination {
-                // Real tool_calls exist alongside XML text — just strip the XML
+            {
                 iteration_text = Self::strip_xml_tool_calls(&iteration_text);
             }
 
