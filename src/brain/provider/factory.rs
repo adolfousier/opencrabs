@@ -547,8 +547,14 @@ fn try_create_anthropic(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         None => return Ok(None),
     };
 
+    let has_custom_url = anthropic_config.base_url.is_some();
+
     let api_key = match &anthropic_config.api_key {
         Some(key) => key.clone(),
+        None if has_custom_url => {
+            tracing::info!("Anthropic using proxy — no API key required");
+            String::new()
+        }
         None => {
             tracing::warn!("Anthropic enabled but API key missing — check keys.toml");
             return Ok(None);
