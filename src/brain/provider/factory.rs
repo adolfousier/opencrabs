@@ -557,6 +557,11 @@ fn try_create_anthropic(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
 
     let mut provider = AnthropicProvider::new(api_key);
 
+    if let Some(url) = &anthropic_config.base_url {
+        tracing::info!("Using custom Anthropic base URL: {}", url);
+        provider = provider.with_base_url(url.clone());
+    }
+
     if let Some(model) = &anthropic_config.default_model {
         tracing::info!("Using custom default model: {}", model);
         provider = provider.with_default_model(model.clone());
