@@ -182,6 +182,17 @@ pub fn parse_markdown(markdown: &str) -> Vec<Line<'static>> {
                 lines.push(Line::from(""));
             }
 
+            // Render HTML/inline-HTML as plain text so tags like <tool_use>
+            // mentioned in prose are not silently swallowed.
+            Event::Html(html) | Event::InlineHtml(html) => {
+                let html_str = html.to_string();
+                if in_code_block {
+                    code_content.push_str(&html_str);
+                } else {
+                    current_line.push(Span::styled(html_str, Style::default()));
+                }
+            }
+
             _ => {}
         }
     }

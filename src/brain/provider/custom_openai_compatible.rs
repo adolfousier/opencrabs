@@ -30,22 +30,16 @@ const DEFAULT_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
 /// Each entry in STRIP_CLOSE_TAGS is a list of accepted close tags (first match wins).
 /// MiniMax closes `<!-- reasoning -->` with `</think>` instead of `<!-- /reasoning -->`.
 /// Order matters: more specific patterns must come before the generic `<!--` catch-all.
-const STRIP_OPEN_TAGS: &[&str] = &[
-    "<think>",
-    "<!-- reasoning -->",
-    "<tool_code>",
-    "<tool_call>",
-    "<tool_use>",
-    "<result>",
-    "<!--",
-];
+/// NOTE: Only reasoning/markup blocks belong here — NOT XML tool-call tags.
+/// Tool-call XML (`<tool_call>`, `<tool_use>`, `<result>`, etc.) must NOT be
+/// stripped during streaming because the model may MENTION these tags in prose
+/// (e.g. "strip `<result>` tags"). Stripping them here eats the rest of the
+/// response when no closing tag arrives in the same chunk. Tool-call XML is
+/// handled post-response in tool_loop.rs where the full text is available.
+const STRIP_OPEN_TAGS: &[&str] = &["<think>", "<!-- reasoning -->", "<!--"];
 const STRIP_CLOSE_TAGS: &[&[&str]] = &[
     &["</think>"],
     &["<!-- /reasoning -->", "</think>"], // Kimi uses <!-- /reasoning -->, MiniMax uses </think>
-    &["</tool_code>"],
-    &["</tool_call>"],
-    &["</tool_use>"],
-    &["</result>"],
     &["-->"],
 ];
 

@@ -293,15 +293,7 @@ pub fn strip_llm_artifacts(text: &str) -> String {
     if result.contains("<!--") {
         result = AgentService::strip_html_comments(&result);
     }
-    if result.contains("<tool_call>")
-        || result.contains("<tool_code>")
-        || result.contains("<StartToolCall>")
-        || result.contains("<minimax:tool_call>")
-        || result.contains("<invoke")
-        || result.contains("<param")
-        || result.contains("<result>")
-        || result.contains("<tool_use>")
-    {
+    if AgentService::has_xml_tool_block(&result) {
         result = AgentService::strip_xml_tool_calls(&result);
     }
     result

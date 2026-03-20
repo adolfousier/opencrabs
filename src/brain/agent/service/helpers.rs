@@ -510,13 +510,26 @@ impl AgentService {
     /// doesn't get persisted to DB or shown to the user.
     /// Catches `<tool_call>`, `<tool_code>`, `<StartToolCall>`, `<minimax:tool_call>`,
     /// `<tool_use>`, `<result>`, and any `<parameter>` blocks providers hallucinate.
+    /// Check if text contains actual XML tool-call blocks (not just mentions).
+    /// Requires BOTH opening AND closing tags to exist so that prose mentions
+    /// like `` `<tool_use>` `` don't trigger false positives.
+    pub(crate) fn has_xml_tool_block(text: &str) -> bool {
+        (text.contains("<tool_call>") && text.contains("</tool_call>"))
+            || (text.contains("<tool_code>") && text.contains("</tool_code>"))
+            || (text.contains("<StartToolCall>") && text.contains("</StartToolCall>"))
+            || (text.contains("<minimax:tool_call>") && text.contains("</minimax:tool_call>"))
+            || (text.contains("<invoke") && text.contains("</invoke>"))
+            || (text.contains("<tool_use>") && text.contains("</tool_use>"))
+    }
+
     pub(crate) fn strip_xml_tool_calls(text: &str) -> String {
         use regex::Regex;
         use std::sync::LazyLock;
 
-        // Match all known XML tool-call patterns from various providers
+        // Match only properly closed XML tool-call blocks.
+        // NO |$ fallback — unclosed tags (prose mentions) must NOT match.
         static TOOL_CALL_BLOCK_RE: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(r#"(?s)(<tool_call>.*?</tool_call>|<tool_code>.*?(?:</tool_code>|$)|<StartToolCall>.*?(?:</StartToolCall>|$)|<minimax:tool_call>.*?(?:</minimax:tool_call>|$)|<invoke\b.*?(?:</invoke>|$)|<param(?:eter)?\b[^>]*>.*?(?:</param(?:eter)?>|$)|<tool_use>.*?(?:</tool_use>|$)|<result>.*?(?:</result>|$))"#).unwrap()
+            Regex::new(r#"(?s)(<tool_call>.*?</tool_call>|<tool_code>.*?</tool_code>|<StartToolCall>.*?</StartToolCall>|<minimax:tool_call>.*?</minimax:tool_call>|<invoke\b.*?</invoke>|<param(?:eter)?\b[^>]*>.*?</param(?:eter)?>|<tool_use>.*?</tool_use>|<result>.*?</result>)"#).unwrap()
         });
 
         let result = TOOL_CALL_BLOCK_RE.replace_all(text, "");
