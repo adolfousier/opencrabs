@@ -347,6 +347,9 @@ impl OpenAIProvider {
                     } => {
                         tool_results.push((tool_use_id, content));
                     }
+                    ContentBlock::Thinking { .. } => {
+                        // OpenAI-compatible providers don't support thinking blocks; skip.
+                    }
                     ContentBlock::Image { source } => {
                         let url = match source {
                             ImageSource::Base64 { media_type, data } => {

@@ -102,6 +102,9 @@ impl GeminiProvider {
                     ContentBlock::Text { text } => {
                         text_parts.push(serde_json::json!({"text": text}));
                     }
+                    ContentBlock::Thinking { .. } => {
+                        // Gemini doesn't use Anthropic-style thinking blocks; skip.
+                    }
                     ContentBlock::Image { source } => {
                         let inline_data = match source {
                             ImageSource::Base64 { media_type, data } => {

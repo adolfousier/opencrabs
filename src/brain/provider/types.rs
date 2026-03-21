@@ -73,6 +73,12 @@ pub enum ContentBlock {
         #[serde(skip_serializing_if = "Option::is_none")]
         is_error: Option<bool>,
     },
+    /// Thinking/reasoning content (extended thinking)
+    Thinking {
+        thinking: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signature: Option<String>,
+    },
 }
 
 /// Image source for image content blocks
