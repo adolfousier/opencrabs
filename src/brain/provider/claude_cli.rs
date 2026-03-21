@@ -1,0 +1,763 @@
+//! Claude CLI Provider — direct subprocess integration
+//!
+//! Spawns the `claude` CLI binary and reads its NDJSON stream output,
+//! converting it to standard `StreamEvent`s. No HTTP proxy needed.
+//!
+//! The CLI handles tool execution internally (multi-turn tool loops),
+//! so `is_proxied()` returns true and the agent skips local execution.
+
+use super::error::{ProviderError, Result};
+use super::r#trait::{Provider, ProviderStream};
+use super::types::*;
+use async_trait::async_trait;
+use futures::stream::StreamExt;
+use serde::Deserialize;
+use std::process::Stdio;
+use tokio::io::AsyncBufReadExt;
+use tokio::io::AsyncWriteExt;
+
+/// Claude CLI provider — talks directly to the `claude` binary.
+#[derive(Clone)]
+pub struct ClaudeCliProvider {
+    claude_path: String,
+    default_model: String,
+}
+
+impl ClaudeCliProvider {
+    /// Create a new provider, auto-detecting the claude binary.
+    pub fn new() -> Result<Self> {
+        let path = resolve_claude_path()?;
+        Ok(Self {
+            claude_path: path,
+            default_model: "sonnet".to_string(),
+        })
+    }
+
+    /// Override the default model (e.g. "opus", "haiku", "sonnet").
+    pub fn with_default_model(mut self, model: String) -> Self {
+        self.default_model = model;
+        self
+    }
+
+    /// Map full Anthropic model name to CLI shorthand.
+    fn map_model(model: &str) -> &str {
+        if model.contains("opus") {
+            "opus"
+        } else if model.contains("haiku") {
+            "haiku"
+        } else {
+            "sonnet"
+        }
+    }
+
+    /// Build a plain-text prompt from LLMRequest messages.
+    fn build_prompt(request: &LLMRequest) -> String {
+        let mut parts = Vec::new();
+
+        if let Some(ref system) = request.system
+            && !system.is_empty()
+        {
+            parts.push(system.clone());
+        }
+
+        for msg in &request.messages {
+            let role = match msg.role {
+                Role::User => "Human",
+                Role::Assistant => "Assistant",
+                Role::System => "System",
+            };
+            let content: String = msg
+                .content
+                .iter()
+                .filter_map(|b| match b {
+                    ContentBlock::Text { text } => Some(text.clone()),
+                    ContentBlock::ToolResult {
+                        tool_use_id,
+                        content,
+                        ..
+                    } => Some(format!("[tool_result for {}]: {}", tool_use_id, content)),
+                    ContentBlock::ToolUse { id, name, input } => {
+                        Some(format!("[tool_use {} ({}): {}]", name, id, input))
+                    }
+                    ContentBlock::Thinking { thinking, .. } => {
+                        if thinking.is_empty() {
+                            None
+                        } else {
+                            Some(format!("<thinking>{}</thinking>", thinking))
+                        }
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            if content.trim().is_empty() {
+                continue;
+            }
+            parts.push(format!("{}: {}", role, content));
+        }
+
+        parts.join("\n\n")
+    }
+}
+
+/// Resolve the claude CLI binary path.
+fn resolve_claude_path() -> Result<String> {
+    if let Ok(path) = std::env::var("CLAUDE_PATH") {
+        if std::path::Path::new(&path).exists() {
+            return Ok(path);
+        }
+        return Err(ProviderError::Internal(format!(
+            "CLAUDE_PATH set but not found: {}",
+            path
+        )));
+    }
+
+    for candidate in &["/opt/homebrew/bin/claude", "/usr/local/bin/claude"] {
+        if std::path::Path::new(candidate).exists() {
+            return Ok(candidate.to_string());
+        }
+    }
+
+    // Try PATH via `which`
+    if let Ok(output) = std::process::Command::new("which").arg("claude").output()
+        && output.status.success()
+    {
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !path.is_empty() {
+            return Ok(path);
+        }
+    }
+
+    Err(ProviderError::Internal(
+        "claude CLI not found — install it or set CLAUDE_PATH".to_string(),
+    ))
+}
+
+// ── CLI NDJSON types ──
+
+/// A parsed NDJSON message from claude CLI stdout.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum CliMessage {
+    System {
+        #[allow(dead_code)]
+        model: Option<String>,
+    },
+    Assistant {
+        message: CliAssistantMessage,
+    },
+    /// Real-time SSE event — contains a complete Anthropic SSE payload.
+    StreamEvent {
+        event: serde_json::Value,
+    },
+    /// User turn during multi-turn tool loops (tool_result).
+    User {
+        #[allow(dead_code)]
+        #[serde(default)]
+        message: serde_json::Value,
+    },
+    RateLimitEvent {},
+    Result {
+        stop_reason: Option<String>,
+        usage: Option<CliUsage>,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+struct CliAssistantMessage {
+    pub id: Option<String>,
+    pub model: Option<String>,
+    pub usage: Option<CliUsage>,
+    #[serde(default)]
+    pub content: Vec<CliContentBlock>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum CliContentBlock {
+    Text {
+        text: String,
+    },
+    ToolUse {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
+    Thinking {
+        thinking: String,
+    },
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CliUsage {
+    #[serde(default)]
+    pub input_tokens: u32,
+    #[serde(default)]
+    pub output_tokens: u32,
+}
+
+#[async_trait]
+impl Provider for ClaudeCliProvider {
+    async fn complete(&self, request: LLMRequest) -> Result<LLMResponse> {
+        // Collect streaming response into a single response
+        let mut stream = self.stream(request).await?;
+
+        let mut id = String::new();
+        let mut model = String::new();
+        let mut content = Vec::new();
+        let mut stop_reason = None;
+        let mut usage = TokenUsage {
+            input_tokens: 0,
+            output_tokens: 0,
+        };
+
+        // Simple accumulator — text blocks only
+        let mut text_buf = String::new();
+
+        while let Some(event) = stream.next().await {
+            match event? {
+                StreamEvent::MessageStart { message } => {
+                    id = message.id;
+                    model = message.model;
+                    usage.input_tokens = message.usage.input_tokens;
+                }
+                StreamEvent::ContentBlockDelta {
+                    delta: ContentDelta::TextDelta { text },
+                    ..
+                } => {
+                    text_buf.push_str(&text);
+                }
+                StreamEvent::MessageDelta { delta: d, usage: u } => {
+                    stop_reason = d.stop_reason;
+                    usage.output_tokens = u.output_tokens;
+                }
+                StreamEvent::MessageStop => break,
+                _ => {}
+            }
+        }
+
+        if !text_buf.is_empty() {
+            content.push(ContentBlock::Text { text: text_buf });
+        }
+
+        Ok(LLMResponse {
+            id,
+            model,
+            content,
+            stop_reason,
+            usage,
+        })
+    }
+
+    async fn stream(&self, request: LLMRequest) -> Result<ProviderStream> {
+        let prompt = Self::build_prompt(&request);
+        let model = Self::map_model(&request.model).to_string();
+
+        let cwd = request
+            .working_directory
+            .as_deref()
+            .map(std::path::PathBuf::from)
+            .filter(|p| p.is_dir())
+            .unwrap_or_else(|| dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/")));
+
+        tracing::info!(
+            "Spawning claude CLI: model={}, prompt_len={}, cwd={}",
+            model,
+            prompt.len(),
+            cwd.display()
+        );
+
+        let mut child = tokio::process::Command::new(&self.claude_path)
+            .env_remove("CLAUDECODE")
+            .env_remove("CLAUDE_CODE_ENTRYPOINT")
+            .arg("-p")
+            .arg("--output-format")
+            .arg("stream-json")
+            .arg("--verbose")
+            .arg("--include-partial-messages")
+            .arg("--no-session-persistence")
+            .arg("--dangerously-skip-permissions")
+            .arg("--permission-mode")
+            .arg("bypassPermissions")
+            .arg("--add-dir")
+            .arg("/")
+            .arg("--model")
+            .arg(&model)
+            .current_dir(&cwd)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| ProviderError::Internal(format!("failed to spawn claude CLI: {}", e)))?;
+
+        // Write prompt via stdin to avoid leaking in `ps aux`
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| ProviderError::Internal("failed to capture stdin".to_string()))?;
+        let prompt_bytes = prompt.into_bytes();
+        tokio::spawn(async move {
+            let _ = stdin.write_all(&prompt_bytes).await;
+            let _ = stdin.shutdown().await;
+        });
+
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| ProviderError::Internal("failed to capture stdout".to_string()))?;
+
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| ProviderError::Internal("failed to capture stderr".to_string()))?;
+
+        // Spawn stderr reader — log everything the CLI writes to stderr
+        tokio::spawn(async move {
+            let reader = tokio::io::BufReader::new(stderr);
+            let mut lines = reader.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let line = line.trim().to_string();
+                if !line.is_empty() {
+                    tracing::warn!("claude CLI stderr: {}", line);
+                }
+            }
+        });
+
+        // Channel-based stream: parse NDJSON lines → StreamEvent
+        let (tx, rx) = tokio::sync::mpsc::channel::<Result<StreamEvent>>(64);
+
+        tokio::spawn(async move {
+            let reader = tokio::io::BufReader::new(stdout);
+            let mut lines = reader.lines();
+
+            // Translation state — mirrors the proxy's TranslateState
+            let mut started = false;
+            let mut streaming_via_events = false;
+            let mut completed_blocks: usize = 0;
+            let mut current_block_started = false;
+            let mut current_block_chars: usize = 0;
+            let mut output_tokens: u32 = 0;
+            let mut line_count = 0u32;
+
+            loop {
+                let line_result = lines.next_line().await;
+                let line = match line_result {
+                    Ok(Some(line)) => line,
+                    Ok(None) => {
+                        tracing::info!(
+                            "CLI stdout EOF after {} lines (started={})",
+                            line_count,
+                            started
+                        );
+                        break;
+                    }
+                    Err(e) => {
+                        tracing::error!("CLI stdout read error after {} lines: {}", line_count, e);
+                        break;
+                    }
+                };
+                line_count += 1;
+                let line = line.trim().to_string();
+                if line.is_empty() {
+                    continue;
+                }
+
+                tracing::debug!("CLI stdout raw: {}", &line[..line.len().min(300)]);
+
+                let msg: CliMessage = match serde_json::from_str(&line) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        tracing::warn!(
+                            "Skipping unparseable CLI line: {} — {}",
+                            e,
+                            &line[..line.len().min(200)]
+                        );
+                        continue;
+                    }
+                };
+
+                match msg {
+                    CliMessage::System { .. } => {
+                        tracing::debug!("CLI → system");
+                    }
+
+                    CliMessage::StreamEvent { event } => {
+                        // Real-time SSE events from CLI — forward directly.
+                        // Suppress per-turn lifecycle (message_start after first, message_stop, message_delta).
+                        let event_type = event.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                        streaming_via_events = true;
+
+                        match event_type {
+                            "message_start" => {
+                                if !started {
+                                    started = true;
+                                    match serde_json::from_value::<StreamEvent>(event) {
+                                        Ok(se) => {
+                                            if tx.send(Ok(se)).await.is_err() {
+                                                break;
+                                            }
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!("Failed to parse message_start: {}", e);
+                                        }
+                                    }
+                                }
+                            }
+                            "message_stop" | "message_delta" => {
+                                // Suppress — Result handles final close
+                            }
+                            _ => match serde_json::from_value::<StreamEvent>(event.clone()) {
+                                Ok(se) => {
+                                    if tx.send(Ok(se)).await.is_err() {
+                                        break;
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::debug!(
+                                        "Skipping stream event '{}': {}",
+                                        event_type,
+                                        e
+                                    );
+                                }
+                            },
+                        }
+                    }
+
+                    CliMessage::Assistant { message } => {
+                        // With --include-partial-messages, each assistant line has the FULL
+                        // accumulated content so far. If streaming_via_events, these are
+                        // redundant — just grab usage.
+                        if streaming_via_events {
+                            if let Some(u) = &message.usage {
+                                output_tokens = u.output_tokens;
+                            }
+                            continue;
+                        }
+
+                        // Fallback path: no stream_events, use assistant messages for content.
+                        // Emit MessageStart once.
+                        if !started {
+                            started = true;
+                            let msg_id = message.id.unwrap_or_else(|| {
+                                format!("msg_{}", uuid::Uuid::new_v4().simple())
+                            });
+                            let msg_model = message.model.unwrap_or_else(|| model.to_string());
+                            let input_tokens =
+                                message.usage.as_ref().map(|u| u.input_tokens).unwrap_or(0);
+
+                            let _ = tx
+                                .send(Ok(StreamEvent::MessageStart {
+                                    message: StreamMessage {
+                                        id: msg_id,
+                                        model: msg_model,
+                                        role: Role::Assistant,
+                                        usage: TokenUsage {
+                                            input_tokens,
+                                            output_tokens: 0,
+                                        },
+                                    },
+                                }))
+                                .await;
+                        }
+
+                        // Diff content blocks against what we already emitted.
+                        let num_blocks = message.content.len();
+                        for (i, block) in message.content.iter().enumerate() {
+                            let is_last = i == num_blocks - 1;
+
+                            // Already fully emitted — skip
+                            if i < completed_blocks {
+                                continue;
+                            }
+
+                            // New block appeared after current — close the previous one
+                            if i > completed_blocks {
+                                if current_block_started {
+                                    let _ = tx
+                                        .send(Ok(StreamEvent::ContentBlockStop {
+                                            index: completed_blocks,
+                                        }))
+                                        .await;
+                                    completed_blocks += 1;
+                                    current_block_chars = 0;
+                                    current_block_started = false;
+                                }
+
+                                // Emit any intermediate blocks fully
+                                while completed_blocks < i {
+                                    emit_full_block(
+                                        &tx,
+                                        &message.content[completed_blocks],
+                                        completed_blocks,
+                                    )
+                                    .await;
+                                    completed_blocks += 1;
+                                }
+                            }
+
+                            let full_text = cli_block_text(block);
+
+                            // Start block if needed
+                            if !current_block_started {
+                                let empty = cli_empty_block(block);
+                                let _ = tx
+                                    .send(Ok(StreamEvent::ContentBlockStart {
+                                        index: i,
+                                        content_block: empty,
+                                    }))
+                                    .await;
+                                current_block_started = true;
+                                current_block_chars = 0;
+                            }
+
+                            // Emit delta for NEW characters only
+                            if full_text.len() > current_block_chars {
+                                let new_text = &full_text[current_block_chars..];
+                                if !new_text.is_empty() {
+                                    let delta = cli_block_delta(block, new_text);
+                                    let _ = tx
+                                        .send(Ok(StreamEvent::ContentBlockDelta {
+                                            index: i,
+                                            delta,
+                                        }))
+                                        .await;
+                                    current_block_chars = full_text.len();
+                                }
+                            }
+
+                            // If not the last block, it's complete — close it
+                            if !is_last {
+                                let _ = tx
+                                    .send(Ok(StreamEvent::ContentBlockStop { index: i }))
+                                    .await;
+                                completed_blocks += 1;
+                                current_block_chars = 0;
+                                current_block_started = false;
+                            }
+                        }
+
+                        if let Some(u) = &message.usage {
+                            output_tokens = u.output_tokens;
+                        }
+                    }
+
+                    CliMessage::Result { stop_reason, usage } => {
+                        // Close any open content block
+                        if current_block_started {
+                            let _ = tx
+                                .send(Ok(StreamEvent::ContentBlockStop {
+                                    index: completed_blocks,
+                                }))
+                                .await;
+                        }
+
+                        let reason = stop_reason.map(|r| match r.as_str() {
+                            "end_turn" => StopReason::EndTurn,
+                            "tool_use" => StopReason::ToolUse,
+                            "max_tokens" => StopReason::MaxTokens,
+                            _ => StopReason::EndTurn,
+                        });
+
+                        let final_output = usage
+                            .as_ref()
+                            .map(|u| u.output_tokens)
+                            .unwrap_or(output_tokens);
+                        let final_input = usage.as_ref().map(|u| u.input_tokens).unwrap_or(0);
+
+                        let _ = tx
+                            .send(Ok(StreamEvent::MessageDelta {
+                                delta: MessageDelta {
+                                    stop_reason: reason,
+                                    stop_sequence: None,
+                                },
+                                usage: TokenUsage {
+                                    input_tokens: final_input,
+                                    output_tokens: final_output,
+                                },
+                            }))
+                            .await;
+
+                        let _ = tx.send(Ok(StreamEvent::MessageStop)).await;
+                        break;
+                    }
+
+                    CliMessage::User { .. } => {
+                        tracing::debug!("CLI → user turn (tool_result)");
+                    }
+
+                    CliMessage::RateLimitEvent {} => {
+                        tracing::warn!("CLI → rate_limit_event");
+                    }
+                }
+            }
+
+            // Wait for process exit
+            let exit_status = child.wait().await;
+            match &exit_status {
+                Ok(status) if !status.success() => {
+                    tracing::warn!("claude CLI exited with status: {}", status);
+                    if !started {
+                        let _ = tx
+                            .send(Err(ProviderError::Internal(format!(
+                                "claude CLI exited with {} before producing any output",
+                                status
+                            ))))
+                            .await;
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Failed to wait on claude CLI: {}", e);
+                }
+                Ok(_) => {
+                    if !started {
+                        tracing::warn!(
+                            "claude CLI exited successfully but produced no stream events"
+                        );
+                    }
+                }
+            }
+        });
+
+        // Convert mpsc receiver to a Stream via unfold
+        let stream = futures::stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|item| (item, rx))
+        });
+        Ok(Box::pin(stream))
+    }
+
+    fn name(&self) -> &str {
+        "claude-cli"
+    }
+
+    fn default_model(&self) -> &str {
+        &self.default_model
+    }
+
+    fn supported_models(&self) -> Vec<String> {
+        vec![
+            "sonnet".to_string(),
+            "opus".to_string(),
+            "haiku".to_string(),
+            "claude-sonnet-4-6".to_string(),
+            "claude-opus-4-6".to_string(),
+            "claude-haiku-4-5-20251001".to_string(),
+        ]
+    }
+
+    fn context_window(&self, _model: &str) -> Option<u32> {
+        Some(200_000) // Claude models support 200k context
+    }
+
+    fn calculate_cost(&self, _model: &str, _input: u32, _output: u32) -> f64 {
+        0.0 // Max subscription — no per-token cost
+    }
+
+    fn supports_tools(&self) -> bool {
+        true // CLI handles tools internally
+    }
+
+    fn supports_vision(&self) -> bool {
+        false // CLI doesn't support image inputs via stdin
+    }
+
+    fn is_proxied(&self) -> bool {
+        true // CLI handles tool execution autonomously
+    }
+}
+
+// ── Helper functions for assistant message → StreamEvent translation ──
+
+/// Extract text content from a CLI content block.
+fn cli_block_text(block: &CliContentBlock) -> &str {
+    match block {
+        CliContentBlock::Text { text } => text.as_str(),
+        CliContentBlock::Thinking { thinking } => thinking.as_str(),
+        _ => "",
+    }
+}
+
+/// Create an empty ContentBlock for content_block_start.
+fn cli_empty_block(block: &CliContentBlock) -> ContentBlock {
+    match block {
+        CliContentBlock::Text { .. } => ContentBlock::Text {
+            text: String::new(),
+        },
+        CliContentBlock::Thinking { .. } => ContentBlock::Thinking {
+            thinking: String::new(),
+            signature: None,
+        },
+        CliContentBlock::ToolUse { id, name, .. } => ContentBlock::ToolUse {
+            id: id.clone(),
+            name: name.clone(),
+            input: serde_json::json!({}),
+        },
+        CliContentBlock::Unknown => ContentBlock::Text {
+            text: String::new(),
+        },
+    }
+}
+
+/// Create the appropriate ContentDelta for a block type.
+fn cli_block_delta(block: &CliContentBlock, new_text: &str) -> ContentDelta {
+    match block {
+        CliContentBlock::Thinking { .. } => ContentDelta::ThinkingDelta {
+            thinking: new_text.to_string(),
+        },
+        _ => ContentDelta::TextDelta {
+            text: new_text.to_string(),
+        },
+    }
+}
+
+/// Emit a complete block (start + delta + stop) in one shot.
+async fn emit_full_block(
+    tx: &tokio::sync::mpsc::Sender<super::error::Result<StreamEvent>>,
+    block: &CliContentBlock,
+    index: usize,
+) {
+    let empty = cli_empty_block(block);
+    let _ = tx
+        .send(Ok(StreamEvent::ContentBlockStart {
+            index,
+            content_block: empty,
+        }))
+        .await;
+
+    match block {
+        CliContentBlock::Text { text } => {
+            let _ = tx
+                .send(Ok(StreamEvent::ContentBlockDelta {
+                    index,
+                    delta: ContentDelta::TextDelta { text: text.clone() },
+                }))
+                .await;
+        }
+        CliContentBlock::Thinking { thinking } => {
+            let _ = tx
+                .send(Ok(StreamEvent::ContentBlockDelta {
+                    index,
+                    delta: ContentDelta::ThinkingDelta {
+                        thinking: thinking.clone(),
+                    },
+                }))
+                .await;
+        }
+        CliContentBlock::ToolUse { input, .. } => {
+            let input_str = serde_json::to_string(input).unwrap_or_default();
+            let _ = tx
+                .send(Ok(StreamEvent::ContentBlockDelta {
+                    index,
+                    delta: ContentDelta::InputJsonDelta {
+                        partial_json: input_str,
+                    },
+                }))
+                .await;
+        }
+        CliContentBlock::Unknown => {}
+    }
+
+    let _ = tx.send(Ok(StreamEvent::ContentBlockStop { index })).await;
+}

@@ -44,6 +44,15 @@ pub const PROVIDERS: &[ProviderInfo] = &[
         help_lines: &["Get key from platform.minimax.io"],
     },
     ProviderInfo {
+        name: "Claude CLI",
+        models: &["sonnet", "opus", "haiku"],
+        key_label: "",
+        help_lines: &[
+            "Uses local 'claude' CLI subprocess — no API key needed",
+            "Requires: npm install -g @anthropic-ai/claude-code",
+        ],
+    },
+    ProviderInfo {
         name: "Custom OpenAI-Compatible",
         models: &[],
         key_label: "API Key",

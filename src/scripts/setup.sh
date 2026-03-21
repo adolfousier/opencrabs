@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # OpenCrabs — build-from-source setup script
-# Detects platform, installs system dependencies, and ensures Rust nightly is ready.
+# Detects platform, installs system dependencies, and ensures Rust stable is ready.
 
 BOLD='\033[1m'
 GREEN='\033[0;32m'
@@ -111,7 +111,7 @@ case "${OS}" in
 esac
 
 # ---------------------------------------------------------------------------
-# 3. Install / verify Rust nightly
+# 3. Install / verify Rust stable
 # ---------------------------------------------------------------------------
 
 if ! command -v rustup &>/dev/null; then
@@ -124,12 +124,12 @@ else
     ok "rustup already installed"
 fi
 
-if ! rustup toolchain list | grep -q nightly; then
-    info "Installing Rust nightly toolchain..."
-    rustup toolchain install nightly
-    ok "Nightly toolchain installed"
+if ! rustup toolchain list | grep -q stable; then
+    info "Installing Rust stable toolchain..."
+    rustup toolchain install stable
+    ok "Stable toolchain installed"
 else
-    ok "Rust nightly already installed"
+    ok "Rust stable already installed"
 fi
 
 # ---------------------------------------------------------------------------

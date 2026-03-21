@@ -507,12 +507,12 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
         let prefix = if selected && focused { " > " } else { "   " };
         let marker = if selected { "[*]" } else { "[ ]" };
 
-        let label = if idx == 6 {
+        let label = if idx == 7 {
             "+ New Custom Provider".to_string()
         } else if idx < PROVIDERS.len() {
             PROVIDERS[idx].name.to_string()
         } else {
-            let custom_idx = idx - 7;
+            let custom_idx = idx - 8;
             wizard
                 .existing_custom_names
                 .get(custom_idx)
@@ -2390,7 +2390,7 @@ fn render_complete(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
 
     // Summary
     let provider = &PROVIDERS[wizard.selected_provider.min(PROVIDERS.len() - 1)];
-    let provider_label = if wizard.selected_provider >= 6 && !wizard.custom_provider_name.is_empty()
+    let provider_label = if wizard.selected_provider >= 7 && !wizard.custom_provider_name.is_empty()
     {
         wizard.custom_provider_name.clone()
     } else {

@@ -325,7 +325,6 @@ impl Tool for EvolveTool {
 
 impl EvolveTool {
     /// Update via `cargo install opencrabs --force`.
-    /// Tries stable toolchain first; falls back to nightly if stable fails.
     async fn evolve_via_cargo_install(
         &self,
         sid: uuid::Uuid,
@@ -345,7 +344,6 @@ impl EvolveTool {
             );
         }
 
-        // Try stable toolchain first
         let output = tokio::process::Command::new("cargo")
             .args(["install", "opencrabs", "--force"])
             .output()
@@ -354,44 +352,13 @@ impl EvolveTool {
                 super::error::ToolError::Execution(format!("Failed to spawn cargo: {}", e))
             })?;
 
-        let via = if output.status.success() {
-            "stable"
-        } else {
-            // Stable failed — try nightly as fallback
-            if let Some(ref cb) = self.progress {
-                cb(
-                    sid,
-                    ProgressEvent::IntermediateText {
-                        text: "Stable build failed, trying nightly toolchain...".to_string(),
-                        reasoning: None,
-                    },
-                );
-            }
-
-            let nightly = tokio::process::Command::new("cargo")
-                .args(["+nightly", "install", "opencrabs", "--force"])
-                .output()
-                .await
-                .map_err(|e| {
-                    super::error::ToolError::Execution(format!(
-                        "Failed to spawn cargo +nightly: {}",
-                        e
-                    ))
-                })?;
-
-            if nightly.status.success() {
-                "nightly"
-            } else {
-                let stable_err = String::from_utf8_lossy(&output.stderr);
-                let nightly_err = String::from_utf8_lossy(&nightly.stderr);
-                return Ok(ToolResult::error(format!(
-                    "cargo install failed on both stable and nightly.\n\
-                     Stable: {}\nNightly: {}",
-                    stable_err.chars().take(300).collect::<String>(),
-                    nightly_err.chars().take(300).collect::<String>()
-                )));
-            }
-        };
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Ok(ToolResult::error(format!(
+                "cargo install failed: {}",
+                stderr.chars().take(500).collect::<String>()
+            )));
+        }
 
         // Signal restart
         if let Some(ref cb) = self.progress {
@@ -399,16 +366,16 @@ impl EvolveTool {
                 sid,
                 ProgressEvent::RestartReady {
                     status: format!(
-                        "Evolved via cargo install ({}): v{} -> v{}. Restarting now.",
-                        via, current_version, latest_version
+                        "Evolved via cargo install: v{} -> v{}. Restarting now.",
+                        current_version, latest_version
                     ),
                 },
             );
         }
 
         Ok(ToolResult::success(format!(
-            "Evolved from v{} to v{} via cargo install ({}). Restarting into the new version.",
-            current_version, latest_version, via
+            "Evolved from v{} to v{} via cargo install. Restarting into the new version.",
+            current_version, latest_version
         )))
     }
 

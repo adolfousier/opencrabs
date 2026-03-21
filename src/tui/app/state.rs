@@ -1005,7 +1005,7 @@ impl App {
                         }
                     }
                 } else if self.mode == AppMode::ModelSelector {
-                    let is_custom = self.model_selector_provider_selected >= 6;
+                    let is_custom = self.model_selector_provider_selected >= 7;
                     match (self.model_selector_focused_field, is_custom) {
                         // Non-custom: field 1 = API key
                         (1, false) => {

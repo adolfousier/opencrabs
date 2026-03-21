@@ -85,6 +85,16 @@ enabled = false
 default_model = "gemini-2.5-flash"
 
 # ========================================
+# Claude CLI (Max Subscription — no API key needed)
+# ========================================
+# Spawns the local 'claude' CLI directly — uses your Claude Max subscription.
+# No proxy, no API key. Just install Claude Code CLI and authenticate it.
+# Install: npm install -g @anthropic-ai/claude-code
+[providers.claude_cli]
+enabled = false
+default_model = "sonnet"  # "sonnet", "opus", or "haiku"
+
+# ========================================
 # Minimax Provider (Chinese AI, OpenAI-compatible)
 # ========================================
 # Note: Minimax does NOT have a /models endpoint, so add models manually

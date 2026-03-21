@@ -452,7 +452,9 @@ fn test_supports_model_fetch() {
     assert!(wizard.supports_model_fetch());
     wizard.selected_provider = 5; // Minimax
     assert!(!wizard.supports_model_fetch());
-    wizard.selected_provider = 6; // Custom
+    wizard.selected_provider = 6; // Claude CLI
+    assert!(!wizard.supports_model_fetch());
+    wizard.selected_provider = 7; // Custom
     assert!(!wizard.supports_model_fetch());
 }
 
@@ -934,8 +936,8 @@ fn test_provider_display_order_no_customs() {
     let mut wizard = clean_wizard();
     wizard.existing_custom_names.clear();
     let order = wizard.provider_display_order();
-    // 0-5 static, then 6 ("+ New Custom") last
-    assert_eq!(order, vec![0, 1, 2, 3, 4, 5, 6]);
+    // 0-6 static, then 7 ("+ New Custom") last
+    assert_eq!(order, vec![0, 1, 2, 3, 4, 5, 6, 7]);
 }
 
 #[test]
@@ -943,8 +945,8 @@ fn test_provider_display_order_with_customs() {
     let mut wizard = clean_wizard();
     wizard.existing_custom_names = vec!["nvidia".into(), "opus".into(), "opusdistil".into()];
     let order = wizard.provider_display_order();
-    // 0-5 static, 7,8,9 existing customs, 6 ("+ New Custom") last
-    assert_eq!(order, vec![0, 1, 2, 3, 4, 5, 7, 8, 9, 6]);
+    // 0-6 static, 8,9,10 existing customs, 7 ("+ New Custom") last
+    assert_eq!(order, vec![0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 7]);
 }
 
 #[test]
@@ -953,13 +955,13 @@ fn test_provider_nav_down_from_last_static_goes_to_first_custom() {
     wizard.step = OnboardingStep::ProviderAuth;
     wizard.auth_field = AuthField::Provider;
     wizard.existing_custom_names = vec!["nvidia".into(), "opus".into()];
-    wizard.selected_provider = 5; // Minimax (last static)
+    wizard.selected_provider = 6; // Claude CLI (last static)
 
     wizard.handle_key(key(KeyCode::Down));
-    // Should go to nvidia (index 7), not "+ New Custom" (index 6)
+    // Should go to nvidia (index 8), not "+ New Custom" (index 7)
     assert_eq!(
-        wizard.selected_provider, 7,
-        "Down from Minimax should go to first custom provider, not +New Custom"
+        wizard.selected_provider, 8,
+        "Down from Claude CLI should go to first custom provider, not +New Custom"
     );
 }
 
@@ -969,12 +971,12 @@ fn test_provider_nav_down_through_customs_to_new() {
     wizard.step = OnboardingStep::ProviderAuth;
     wizard.auth_field = AuthField::Provider;
     wizard.existing_custom_names = vec!["nvidia".into()];
-    wizard.selected_provider = 7; // nvidia
+    wizard.selected_provider = 8; // nvidia
 
     wizard.handle_key(key(KeyCode::Down));
-    // Should go to "+ New Custom" (index 6) which is visually last
+    // Should go to "+ New Custom" (index 7) which is visually last — unchanged
     assert_eq!(
-        wizard.selected_provider, 6,
+        wizard.selected_provider, 7,
         "Down from last custom should go to +New Custom"
     );
 }
@@ -985,12 +987,12 @@ fn test_provider_nav_up_from_new_custom_goes_to_last_custom() {
     wizard.step = OnboardingStep::ProviderAuth;
     wizard.auth_field = AuthField::Provider;
     wizard.existing_custom_names = vec!["nvidia".into(), "opus".into()];
-    wizard.selected_provider = 6; // "+ New Custom"
+    wizard.selected_provider = 7; // "+ New Custom"
 
     wizard.handle_key(key(KeyCode::Up));
-    // Should go to opus (index 8), not Minimax (index 5)
+    // Should go to opus (index 9), not Claude CLI (index 6)
     assert_eq!(
-        wizard.selected_provider, 8,
+        wizard.selected_provider, 9,
         "Up from +New Custom should go to last custom provider"
     );
 }
@@ -1001,12 +1003,12 @@ fn test_provider_nav_up_from_first_custom_goes_to_last_static() {
     wizard.step = OnboardingStep::ProviderAuth;
     wizard.auth_field = AuthField::Provider;
     wizard.existing_custom_names = vec!["nvidia".into(), "opus".into()];
-    wizard.selected_provider = 7; // nvidia (first custom)
+    wizard.selected_provider = 8; // nvidia (first custom)
 
     wizard.handle_key(key(KeyCode::Up));
     assert_eq!(
-        wizard.selected_provider, 5,
-        "Up from first custom should go to Minimax"
+        wizard.selected_provider, 6,
+        "Up from first custom should go to Claude CLI"
     );
 }
 
@@ -1022,10 +1024,10 @@ fn test_provider_nav_clamps_at_top_and_bottom() {
     wizard.handle_key(key(KeyCode::Up));
     assert_eq!(wizard.selected_provider, 0);
 
-    // At bottom ("+ New Custom" = 6), Down stays
-    wizard.selected_provider = 6;
+    // At bottom ("+ New Custom" = 7), Down stays
+    wizard.selected_provider = 7;
     wizard.handle_key(key(KeyCode::Down));
-    assert_eq!(wizard.selected_provider, 6);
+    assert_eq!(wizard.selected_provider, 7);
 }
 
 #[test]

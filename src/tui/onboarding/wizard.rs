@@ -462,6 +462,21 @@ impl OnboardingWizard {
             {
                 wizard.custom_model = model.clone();
             }
+        } else if config
+            .providers
+            .claude_cli
+            .as_ref()
+            .is_some_and(|p| p.enabled)
+        {
+            wizard.selected_provider = 6; // Claude CLI
+            if let Some(model) = &config
+                .providers
+                .claude_cli
+                .as_ref()
+                .and_then(|p| p.default_model.clone())
+            {
+                wizard.custom_model = model.clone();
+            }
         }
 
         // Detect if we have an existing API key for the selected provider
@@ -599,7 +614,7 @@ impl OnboardingWizard {
 
     /// Get provider info for currently selected provider
     pub fn current_provider(&self) -> &ProviderInfo {
-        // Indices >= 7 are existing custom providers — map to the Custom entry (index 6)
+        // Indices >= 8 are existing custom providers — map to the Custom entry (index 7)
         &PROVIDERS[self.selected_provider.min(PROVIDERS.len() - 1)]
     }
 
@@ -608,13 +623,13 @@ impl OnboardingWizard {
         self.selected_provider >= PROVIDERS.len() - 1
     }
 
-    /// Visual display order: 0-5 (static), 7..7+N (existing customs), 6 ("+ New Custom" last).
+    /// Visual display order: 0-6 (static), 8..8+N (existing customs), 7 ("+ New Custom" last).
     /// Navigation must follow this order so Up/Down match what's on screen.
     pub fn provider_display_order(&self) -> Vec<usize> {
         let num_customs = self.existing_custom_names.len();
-        (0..6)
-            .chain(7..7 + num_customs)
-            .chain(std::iter::once(6))
+        (0..7)
+            .chain(8..8 + num_customs)
+            .chain(std::iter::once(7))
             .collect()
     }
 
@@ -623,17 +638,17 @@ impl OnboardingWizard {
         self.api_key_input == EXISTING_KEY_SENTINEL
     }
 
-    /// When navigating to an existing custom provider (index >= 7), load its config fields.
-    /// For index 6 (new custom), clear the fields.
+    /// When navigating to an existing custom provider (index >= 8), load its config fields.
+    /// For index 7 (new custom), clear the fields.
     pub fn load_custom_fields_if_existing(&mut self) {
-        if self.selected_provider == 6 {
+        if self.selected_provider == 7 {
             // "+ New Custom Provider" — clear fields
             self.custom_provider_name.clear();
             self.custom_base_url.clear();
             self.custom_model.clear();
             self.custom_context_window.clear();
-        } else if self.selected_provider >= 7 {
-            let custom_idx = self.selected_provider - 7;
+        } else if self.selected_provider >= 8 {
+            let custom_idx = self.selected_provider - 8;
             if let Some(cname) = self.existing_custom_names.get(custom_idx).cloned()
                 && let Ok(config) = crate::config::Config::load()
                 && let Some(c) = config.providers.custom_by_name(&cname)

@@ -562,21 +562,19 @@ The onboarding wizard handles everything on first run.
 ### Option 2: Install via Cargo
 
 ```bash
-# Requires nightly Rust (WhatsApp protocol uses portable_simd)
-rustup toolchain install nightly
-cargo +nightly install opencrabs
+cargo install opencrabs
 ```
 
 > **Linux (Debian/Ubuntu):** Install system deps first: `sudo apt-get install build-essential pkg-config clang libclang-dev libasound2-dev libssl-dev cmake`
 >
-> **Large build:** The build can use 8GB+ in `/tmp`. If you run out of space: `CARGO_TARGET_DIR=~/.cargo/target cargo +nightly install opencrabs`
+> **Large build:** The build can use 8GB+ in `/tmp`. If you run out of space: `CARGO_TARGET_DIR=~/.cargo/target cargo install opencrabs`
 
 ### Option 3: Build from Source (full control)
 
 Required for `/rebuild`, adding custom tools, or modifying the agent.
 
 **Prerequisites:**
-- **Rust nightly (2024 edition)** — [Install Rust](https://rustup.rs/), then `rustup toolchain install nightly`. The project includes a `rust-toolchain.toml` that selects nightly automatically
+- **Rust stable (1.91+)** — [Install Rust](https://rustup.rs/). The project includes a `rust-toolchain.toml` that selects the correct toolchain automatically
 - **An API key** from at least one supported provider
 - **SQLite** (bundled via sqlx)
 - **macOS:** Xcode CLI Tools + `brew install cmake pkg-config` (requires macOS 15+)
@@ -584,7 +582,7 @@ Required for `/rebuild`, adding custom tools, or modifying the agent.
 - **Linux (Fedora/RHEL):** `sudo dnf install gcc gcc-c++ make pkg-config openssl-devel cmake`
 - **Linux (Arch):** `sudo pacman -S base-devel pkg-config openssl cmake`
 
-> **One-liner setup:** `bash <(curl -sL https://raw.githubusercontent.com/adolfousier/opencrabs/main/src/scripts/setup.sh)` — detects your platform, installs all dependencies, and sets up Rust nightly.
+> **One-liner setup:** `bash <(curl -sL https://raw.githubusercontent.com/adolfousier/opencrabs/main/src/scripts/setup.sh)` — detects your platform, installs all dependencies, and sets up Rust.
 
 ```bash
 # Clone
@@ -722,11 +720,11 @@ Type `/onboard:voice` or `/onboard:image` in chat to jump directly to Voice or I
 
 #### Local STT (whisper.cpp)
 
-Run speech-to-text on-device with zero API cost. Included by default in prebuilt binaries and `cargo +nightly install opencrabs`.
+Run speech-to-text on-device with zero API cost. Included by default in prebuilt binaries and `cargo install opencrabs`.
 
 In `/onboard:voice`, select **Local** mode, pick a model size, and press Enter to download. Models are stored at `~/.local/share/opencrabs/models/whisper/`.
 
-> **Building from source:** Local STT requires CMake and a C++ compiler (for whisper.cpp). To exclude it: `cargo +nightly install opencrabs --no-default-features --features telegram,whatsapp,discord,slack,trello`
+> **Building from source:** Local STT requires CMake and a C++ compiler (for whisper.cpp). To exclude it: `cargo install opencrabs --no-default-features --features telegram,whatsapp,discord,slack,trello`
 
 | Model | Size | Quality |
 |-------|------|---------|

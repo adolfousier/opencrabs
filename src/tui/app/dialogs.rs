@@ -21,7 +21,7 @@ impl App {
         self.model_selector_has_existing_key = false;
 
         if let Ok(config) = crate::config::Config::load() {
-            // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=Custom
+            // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=Claude CLI, 7=Custom
             let has_key = match provider_idx {
                 0 => config
                     .providers
@@ -53,17 +53,18 @@ impl App {
                     .minimax
                     .as_ref()
                     .is_some_and(|p| p.api_key.as_ref().is_some_and(|k| !k.is_empty())),
-                6 => {
-                    // Index 6 = "+ New Custom Provider" — clear fields
+                6 => false, // Claude CLI — no API key needed
+                7 => {
+                    // Index 7 = "+ New Custom Provider" — clear fields
                     self.model_selector_custom_name.clear();
                     self.model_selector_base_url.clear();
                     self.model_selector_custom_model.clear();
                     self.model_selector_context_window.clear();
                     false
                 }
-                idx if idx >= 7 => {
-                    // Existing custom provider at index (idx - 7) in custom_names list
-                    let custom_idx = idx - 7;
+                idx if idx >= 8 => {
+                    // Existing custom provider at index (idx - 8) in custom_names list
+                    let custom_idx = idx - 8;
                     tracing::debug!(
                         "[detect_key] existing custom: idx={}, custom_idx={}, names_len={}",
                         idx,
@@ -401,18 +402,18 @@ impl App {
             // Tab cycles through fields:
             // - Normal providers: provider(0) -> api_key(1) -> model(2) -> provider(0)
             // - Custom provider: provider(0) -> base_url(1) -> api_key(2) -> model(3) -> provider(0)
-            let is_custom = self.model_selector_provider_selected >= 6; // Custom provider index
+            let is_custom = self.model_selector_provider_selected >= 7; // Custom provider index
             let max_field = if is_custom { 5 } else { 3 };
             self.model_selector_focused_field = (self.model_selector_focused_field + 1) % max_field;
             // If moving to provider, enable provider list; otherwise show model list
             self.model_selector_showing_providers = self.model_selector_focused_field == 0;
         } else if self.model_selector_focused_field == 0 {
             // Provider selection (focused)
-            // Navigate using display order (matches render): 0-5, then existing customs 7+, then 6 ("+New")
+            // Navigate using display order (matches render): 0-6, then existing customs 8+, then 7 ("+New")
             let num_customs = self.model_selector_custom_names.len();
-            let display_order: Vec<usize> = (0..6)
-                .chain(7..7 + num_customs)
-                .chain(std::iter::once(6))
+            let display_order: Vec<usize> = (0..7)
+                .chain(8..8 + num_customs)
+                .chain(std::iter::once(7))
                 .collect();
             let provider_changed = match event.code {
                 crossterm::event::KeyCode::Up => {
@@ -438,7 +439,7 @@ impl App {
                 _ => false,
             };
 
-            // If provider changed, detect existing key for the new provider
+            // If provider changed, detect existing key and refresh models
             if provider_changed {
                 tracing::debug!(
                     "[model_selector] provider navigated to idx={}, custom_names_len={}",
@@ -446,9 +447,19 @@ impl App {
                     self.model_selector_custom_names.len(),
                 );
                 self.detect_model_selector_key_for_provider();
+
+                // Re-fetch models for the new provider
+                let provider_idx = self.model_selector_provider_selected;
+                let sender = self.event_sender();
+                tokio::spawn(async move {
+                    let models = super::onboarding::fetch_provider_models(provider_idx, None).await;
+                    let _ = sender.send(TuiEvent::ModelSelectorModelsFetched(models));
+                });
+                self.model_selector_models.clear();
+                self.model_selector_selected = 0;
             }
         } else if self.model_selector_focused_field == 1
-            && self.model_selector_provider_selected >= 6
+            && self.model_selector_provider_selected >= 7
         {
             // Base URL input for Custom provider (field 1)
             match event.code {
@@ -463,7 +474,7 @@ impl App {
         } else if (self.model_selector_focused_field == 1
             && self.model_selector_provider_selected < 6)
             || (self.model_selector_focused_field == 2
-                && self.model_selector_provider_selected >= 6)
+                && self.model_selector_provider_selected >= 7)
         {
             // API key input (field 1 for non-Custom, field 2 for Custom)
             match event.code {
@@ -476,7 +487,7 @@ impl App {
                 _ => {}
             }
         } else if self.model_selector_focused_field == 3
-            && self.model_selector_provider_selected >= 6
+            && self.model_selector_provider_selected >= 7
         {
             // Custom provider: free-text model name input (field 3)
             match event.code {
@@ -489,7 +500,7 @@ impl App {
                 _ => {}
             }
         } else if self.model_selector_focused_field == 4
-            && self.model_selector_provider_selected >= 6
+            && self.model_selector_provider_selected >= 7
         {
             // Custom provider: name identifier input (field 4)
             match event.code {
@@ -504,7 +515,7 @@ impl App {
                 _ => {}
             }
         } else if self.model_selector_focused_field == 5
-            && self.model_selector_provider_selected >= 6
+            && self.model_selector_provider_selected >= 7
         {
             // Custom provider: context window input (field 5 — last before save)
             match event.code {
@@ -517,7 +528,7 @@ impl App {
                 _ => {}
             }
         } else if self.model_selector_focused_field == 2
-            && self.model_selector_provider_selected < 6
+            && self.model_selector_provider_selected < 7
         {
             // Non-custom: filter/search model list (field 2)
             match event.code {
@@ -577,7 +588,7 @@ impl App {
 
         // Enter to confirm - move to next field
         if keys::is_enter(&event) {
-            let is_custom = self.model_selector_provider_selected >= 6;
+            let is_custom = self.model_selector_provider_selected >= 7;
 
             tracing::debug!(
                 "[model_selector] Enter pressed: field={}, provider_idx={}, is_custom={}, custom_name='{}', base_url='{}'",
@@ -588,17 +599,20 @@ impl App {
                 self.model_selector_base_url,
             );
 
+            let is_claude_cli = self.model_selector_provider_selected == 6;
+
             if self.model_selector_focused_field == 0 {
                 // On provider field - save config, DON'T close dialog
-                // Map indices >= 7 back to 6 for save (custom provider)
-                let save_idx = self.model_selector_provider_selected.min(6);
+                // Map indices >= 8 back to 7 for save (custom provider)
+                let save_idx = self.model_selector_provider_selected.min(7);
                 if let Err(e) = self
                     .save_provider_selection_internal(save_idx, false, false)
                     .await
                 {
                     self.push_system_message(format!("Error: {}", e));
                 } else {
-                    self.model_selector_focused_field = 1;
+                    // Claude CLI has no API key — skip straight to model field
+                    self.model_selector_focused_field = if is_claude_cli { 2 } else { 1 };
                 }
             } else if self.model_selector_focused_field == 1 && is_custom {
                 // Custom provider: field 1 is base_url, move to field 2 (api_key)
@@ -607,8 +621,8 @@ impl App {
                 || (self.model_selector_focused_field == 2 && is_custom)
             {
                 // On API key field (field 1 for non-Custom, field 2 for Custom)
-                // Map >= 7 back to 6 for save (all custom providers use idx 6)
-                let provider_idx = self.model_selector_provider_selected.min(6);
+                // Map >= 8 back to 7 for save (all custom providers use idx 7)
+                let provider_idx = self.model_selector_provider_selected.min(7);
 
                 // User typed a new key, or kept existing (just hit Enter to move on)
                 let key_changed = !self.model_selector_api_key.is_empty();
@@ -669,11 +683,11 @@ impl App {
                 }
             } else if is_custom && self.model_selector_focused_field == 5 {
                 // Custom: on context window field — save
-                self.save_provider_selection(self.model_selector_provider_selected.min(6), false)
+                self.save_provider_selection(self.model_selector_provider_selected.min(7), false)
                     .await?;
             } else {
                 // Non-custom: on model field — save and close
-                self.save_provider_selection(self.model_selector_provider_selected.min(6), false)
+                self.save_provider_selection(self.model_selector_provider_selected.min(7), false)
                     .await?;
             }
         }
@@ -727,9 +741,12 @@ impl App {
         if let Some(ref mut p) = config.providers.minimax {
             p.enabled = false;
         }
+        if let Some(ref mut p) = config.providers.claude_cli {
+            p.enabled = false;
+        }
 
         // Get existing key from config if not changing
-        // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=Custom
+        // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=Claude CLI, 7=Custom
         let existing_key = match provider_idx {
             0 => config
                 .providers
@@ -773,7 +790,8 @@ impl App {
                 .and_then(|p| p.api_key.as_ref())
                 .filter(|k| !k.is_empty())
                 .cloned(),
-            6 => config
+            6 => None, // Claude CLI — no API key needed
+            7 => config
                 .providers
                 .active_custom()
                 .and_then(|(_, p)| p.api_key.as_ref())
@@ -797,7 +815,7 @@ impl App {
         );
 
         // Build provider config based on selection
-        // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=Custom
+        // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=Claude CLI, 7=Custom
         let default_model = provider.models.first().copied().unwrap_or("default");
         match provider_idx {
             0 => {
@@ -873,6 +891,18 @@ impl App {
                 });
             }
             6 => {
+                // Claude CLI (Max subscription) — no API key needed
+                config.providers.claude_cli = Some(ProviderConfig {
+                    enabled: true,
+                    api_key: None,
+                    base_url: None,
+                    default_model: Some(default_model.to_string()),
+                    models: vec![],
+                    vision_model: None,
+                    ..Default::default()
+                });
+            }
+            7 => {
                 // Custom OpenAI-compatible (named provider)
                 let custom_model = self.model_selector_custom_model.clone();
                 let custom_name = if !self.model_selector_custom_name.is_empty() {
@@ -909,7 +939,8 @@ impl App {
             3 => "providers.gemini",
             4 => "providers.openrouter",
             5 => "providers.minimax",
-            6 => {
+            6 => "providers.claude_cli",
+            7 => {
                 // Resolve custom provider name: UI field > config active > "default"
                 let cname = if !self.model_selector_custom_name.is_empty() {
                     self.model_selector_custom_name.clone()
@@ -933,6 +964,7 @@ impl App {
             "providers.gemini",
             "providers.openrouter",
             "providers.minimax",
+            "providers.claude_cli",
         ] {
             if s != section {
                 let _ = crate::config::Config::write_key(s, "enabled", "false");
@@ -974,7 +1006,7 @@ impl App {
                     "https://api.minimax.io/v1",
                 );
             }
-            6 if !self.model_selector_base_url.is_empty() => {
+            7 if !self.model_selector_base_url.is_empty() => {
                 let _ = crate::config::Config::write_key(
                     section,
                     "base_url",
@@ -992,7 +1024,7 @@ impl App {
         }
 
         // Refresh custom provider names list after saving (so new entries appear immediately)
-        if provider_idx == 6
+        if provider_idx == 7
             && let Ok(fresh) = crate::config::Config::load()
         {
             self.model_selector_custom_names = fresh
@@ -1012,11 +1044,11 @@ impl App {
                     .iter()
                     .position(|n| n == &self.model_selector_custom_name)
             {
-                self.model_selector_provider_selected = 7 + pos;
+                self.model_selector_provider_selected = 8 + pos;
                 tracing::debug!(
                     "[save_provider] mapped custom '{}' to idx={}",
                     self.model_selector_custom_name,
-                    7 + pos,
+                    8 + pos,
                 );
             }
         }
@@ -1032,7 +1064,7 @@ impl App {
 
         // Resolve the selected model BEFORE rebuilding the provider so the new
         // provider instance picks up the correct model from config on disk.
-        let is_custom = provider_idx == 6;
+        let is_custom = provider_idx == 7;
         let selected_model = if is_custom {
             self.model_selector_custom_model.clone()
         } else if !self.model_selector_models.is_empty() {
@@ -1066,7 +1098,7 @@ impl App {
 
         // Rebuild agent service with new provider (now sees the correct model)
         if let Err(e) = self.rebuild_agent_service().await {
-            if api_key.is_none() && provider_idx == 6 {
+            if api_key.is_none() && provider_idx == 7 {
                 self.push_system_message(format!(
                     "API key required for {}. Type it and press Enter.",
                     provider
@@ -1102,7 +1134,7 @@ impl App {
         // Only close dialog if explicitly requested
         if close_dialog {
             // Use user-configured name for custom providers (e.g. "nvidia"), fall back to generic
-            let provider_name = if provider_idx == 6 && !self.model_selector_custom_name.is_empty()
+            let provider_name = if provider_idx == 7 && !self.model_selector_custom_name.is_empty()
             {
                 self.model_selector_custom_name.clone()
             } else {
