@@ -128,25 +128,6 @@ impl AgentService {
                     index,
                     content_block,
                 } => {
-                    // Emit ToolStarted immediately so the TUI shows tool context
-                    // in real-time (especially important for proxied providers where
-                    // the CLI runs tools internally and we only see the stream).
-                    if let ContentBlock::ToolUse {
-                        ref name,
-                        ref input,
-                        ..
-                    } = content_block
-                        && let Some(cb) = effective_cb
-                    {
-                        cb(
-                            session_id,
-                            ProgressEvent::ToolStarted {
-                                tool_name: name.clone(),
-                                tool_input: input.clone(),
-                            },
-                        );
-                    }
-
                     // Ensure block_states has enough capacity
                     while block_states.len() <= index {
                         block_states.push(BlockState {
@@ -243,7 +224,8 @@ impl AgentService {
                         {
                             *input = parsed;
                         }
-                        // Emit ToolCompleted so the TUI updates in real-time
+                        // Emit ToolStarted + ToolCompleted with fully parsed input
+                        // so the TUI shows real tool context (command, file path, etc.)
                         if let ContentBlock::ToolUse {
                             ref name,
                             ref input,
@@ -253,11 +235,18 @@ impl AgentService {
                         {
                             cb(
                                 session_id,
+                                ProgressEvent::ToolStarted {
+                                    tool_name: name.clone(),
+                                    tool_input: input.clone(),
+                                },
+                            );
+                            cb(
+                                session_id,
                                 ProgressEvent::ToolCompleted {
                                     tool_name: name.clone(),
                                     tool_input: input.clone(),
                                     success: true,
-                                    summary: "streamed from provider".to_string(),
+                                    summary: String::new(),
                                 },
                             );
                         }
