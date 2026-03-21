@@ -619,6 +619,7 @@ impl App {
             "read_file" | "read" => {
                 let path = tool_input
                     .get("path")
+                    .or_else(|| tool_input.get("file_path"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
                 format!("Read {}", path)
@@ -626,6 +627,7 @@ impl App {
             "write_file" | "write" => {
                 let path = tool_input
                     .get("path")
+                    .or_else(|| tool_input.get("file_path"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
                 format!("Write {}", path)
@@ -633,6 +635,7 @@ impl App {
             "edit_file" | "edit" => {
                 let path = tool_input
                     .get("path")
+                    .or_else(|| tool_input.get("file_path"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
                 format!("Edit {}", path)
@@ -665,6 +668,13 @@ impl App {
                 } else {
                     format!("Grep '{}' in {}", pattern, path)
                 }
+            }
+            "lsp" => {
+                let op = tool_input
+                    .get("operation")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
+                format!("LSP {}", op)
             }
             "web_search" => {
                 let query = tool_input
@@ -1269,11 +1279,11 @@ impl App {
                 session.id
             );
 
-            // Show preview in input area (dimmed, with Up-to-edit hint).
-            // Don't add to self.messages yet — it will appear in the chat flow
-            // naturally when the tool loop injects it and the next IntermediateText
-            // or response arrives.
+            // Put queued text back in the input buffer so the user can see it
+            // and press Up to edit. It stays visible until actually injected.
             self.queued_message_preview = Some(content.clone());
+            self.input_buffer = content.clone();
+            self.cursor_position = self.input_buffer.len();
 
             // Queue for injection between tool calls
             *self.message_queue.lock().await = Some(content);

@@ -795,6 +795,53 @@ impl AgentService {
             tracing::debug!("Found {} tool uses to execute", tool_uses.len());
 
             if tool_uses.is_empty() {
+                // Before breaking, check for queued user messages.
+                // CLI providers suppress tool_use blocks (tools run internally),
+                // so the queue drain at the bottom of the loop never executes.
+                // Inject here so the queued message gets sent in the next iteration.
+                if let Some(ref queue_cb) = self.message_queue_callback
+                    && let Some(queued_msg) = queue_cb().await
+                {
+                    tracing::info!("Injecting queued user message (no tool_uses path)");
+                    if let Some(ref cb) = progress_callback {
+                        cb(
+                            session_id,
+                            ProgressEvent::QueuedUserMessage {
+                                text: queued_msg.clone(),
+                            },
+                        );
+                    }
+                    // Emit any intermediate text before continuing
+                    if !iteration_text.is_empty()
+                        && let Some(ref cb) = progress_callback
+                    {
+                        cb(
+                            session_id,
+                            ProgressEvent::IntermediateText {
+                                text: iteration_text,
+                                reasoning: reasoning_text,
+                            },
+                        );
+                    }
+                    // Add assistant response + queued user message to context
+                    let assistant_text = response
+                        .content
+                        .iter()
+                        .filter_map(|b| match b {
+                            ContentBlock::Text { text } => Some(text.as_str()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    context.add_message(Message::assistant(assistant_text));
+                    let injected = Message::user(queued_msg.clone());
+                    context.add_message(injected);
+                    let _ = message_service
+                        .create_message(session_id, "user".to_string(), queued_msg)
+                        .await;
+                    continue;
+                }
+
                 if iteration > 0 {
                     tracing::info!("Agent completed after {} tool iterations", iteration);
                     // Emit final text so TUI persists it as a permanent message

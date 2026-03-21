@@ -48,6 +48,17 @@ impl ClaudeCliProvider {
         }
     }
 
+    /// Normalize a model name to its full Anthropic ID for pricing/usage tracking.
+    /// CLI shorthands like "opus" → "claude-opus-4-6", already-full names pass through.
+    fn normalize_model(model: &str) -> String {
+        match model {
+            "opus" => "claude-opus-4-6".to_string(),
+            "sonnet" => "claude-sonnet-4-6".to_string(),
+            "haiku" => "claude-haiku-4-5-20251001".to_string(),
+            other => other.to_string(),
+        }
+    }
+
     /// Build a plain-text prompt from LLMRequest messages.
     fn build_prompt(request: &LLMRequest) -> String {
         let mut parts = Vec::new();
@@ -252,6 +263,7 @@ impl Provider for ClaudeCliProvider {
 
     async fn stream(&self, request: LLMRequest) -> Result<ProviderStream> {
         let prompt = Self::build_prompt(&request);
+        let original_model = Self::normalize_model(&request.model);
         let model = Self::map_model(&request.model).to_string();
 
         let cwd = request
@@ -277,8 +289,7 @@ impl Provider for ClaudeCliProvider {
             .arg("--verbose")
             .arg("--include-partial-messages")
             .arg("--no-session-persistence")
-            .arg("--tools")
-            .arg("")
+            .arg("--dangerously-skip-permissions")
             .arg("--model")
             .arg(&model)
             .current_dir(&cwd)
@@ -360,7 +371,7 @@ impl Provider for ClaudeCliProvider {
                     continue;
                 }
 
-                tracing::debug!("CLI stdout raw: {}", &line[..line.len().min(300)]);
+                tracing::debug!("CLI stdout raw: {}", &line[..line.floor_char_boundary(300)]);
 
                 let msg: CliMessage = match serde_json::from_str(&line) {
                     Ok(m) => m,
@@ -368,7 +379,7 @@ impl Provider for ClaudeCliProvider {
                         tracing::warn!(
                             "Skipping unparseable CLI line: {} — {}",
                             e,
-                            &line[..line.len().min(200)]
+                            &line[..line.floor_char_boundary(200)]
                         );
                         continue;
                     }
@@ -404,8 +415,32 @@ impl Provider for ClaudeCliProvider {
                             "message_stop" | "message_delta" => {
                                 // Suppress — Result handles final close
                             }
+                            // Suppress tool_use blocks — CLI executes tools internally,
+                            // OpenCrabs must not re-execute them in its own tool_loop.
+                            "content_block_start"
+                                if event
+                                    .get("content_block")
+                                    .and_then(|b| b.get("type"))
+                                    .and_then(|t| t.as_str())
+                                    == Some("tool_use") =>
+                            {
+                                tracing::debug!(
+                                    "CLI → suppressing tool_use content_block_start (CLI handles tools internally)"
+                                );
+                            }
+                            // Suppress input_json_delta — tool input streaming for suppressed tool_use blocks
+                            "content_block_delta"
+                                if event
+                                    .get("delta")
+                                    .and_then(|d| d.get("type"))
+                                    .and_then(|t| t.as_str())
+                                    == Some("input_json_delta") =>
+                            {
+                                // Skip — part of a tool_use block the CLI handles
+                            }
                             _ => match serde_json::from_value::<StreamEvent>(event.clone()) {
                                 Ok(se) => {
+                                    let se = normalize_stream_event(se);
                                     if tx.send(Ok(se)).await.is_err() {
                                         break;
                                     }
@@ -439,7 +474,7 @@ impl Provider for ClaudeCliProvider {
                             let msg_id = message.id.unwrap_or_else(|| {
                                 format!("msg_{}", uuid::Uuid::new_v4().simple())
                             });
-                            let msg_model = message.model.unwrap_or_else(|| model.to_string());
+                            let msg_model = message.model.unwrap_or_else(|| original_model.clone());
                             let input_tokens =
                                 message.usage.as_ref().map(|u| u.input_tokens).unwrap_or(0);
 
@@ -646,8 +681,8 @@ impl Provider for ClaudeCliProvider {
         Some(200_000) // Claude models support 200k context
     }
 
-    fn calculate_cost(&self, _model: &str, _input: u32, _output: u32) -> f64 {
-        0.0 // Max subscription — no per-token cost
+    fn calculate_cost(&self, model: &str, input_tokens: u32, output_tokens: u32) -> f64 {
+        crate::pricing::PricingConfig::load().calculate_cost(model, input_tokens, output_tokens)
     }
 
     fn supports_tools(&self) -> bool {
@@ -682,7 +717,7 @@ fn cli_empty_block(block: &CliContentBlock) -> ContentBlock {
         },
         CliContentBlock::ToolUse { id, name, .. } => ContentBlock::ToolUse {
             id: id.clone(),
-            name: name.clone(),
+            name: normalize_cli_tool_name(name),
             input: serde_json::json!({}),
         },
         CliContentBlock::Unknown => ContentBlock::Text {
@@ -751,4 +786,40 @@ async fn emit_full_block(
     }
 
     let _ = tx.send(Ok(StreamEvent::ContentBlockStop { index })).await;
+}
+
+/// Normalize Claude Code CLI tool names to OpenCrabs format.
+fn normalize_cli_tool_name(name: &str) -> String {
+    match name {
+        "Bash" => "bash".to_string(),
+        "Read" => "read_file".to_string(),
+        "Write" => "write_file".to_string(),
+        "Edit" => "edit_file".to_string(),
+        "Grep" => "grep".to_string(),
+        "Glob" => "glob".to_string(),
+        "LSP" => "lsp".to_string(),
+        "WebSearch" => "web_search".to_string(),
+        "WebFetch" => "http_request".to_string(),
+        "Agent" => "agent".to_string(),
+        "NotebookEdit" => "notebook_edit".to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// Normalize tool names in stream events from CLI to OpenCrabs format.
+fn normalize_stream_event(event: StreamEvent) -> StreamEvent {
+    match event {
+        StreamEvent::ContentBlockStart {
+            index,
+            content_block: ContentBlock::ToolUse { id, name, input },
+        } => StreamEvent::ContentBlockStart {
+            index,
+            content_block: ContentBlock::ToolUse {
+                id,
+                name: normalize_cli_tool_name(&name),
+                input,
+            },
+        },
+        other => other,
+    }
 }
