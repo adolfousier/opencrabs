@@ -6,10 +6,22 @@ use anyhow::Result;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+/// Find the byte offset in `text` where the cumulative display width reaches `target_col`.
+fn byte_offset_at_display_col(text: &str, target_col: usize) -> usize {
+    let mut width = 0usize;
+    for (idx, ch) in text.char_indices() {
+        if width >= target_col {
+            return idx;
+        }
+        width += unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+    }
+    text.len()
+}
+
 impl App {
-    /// Returns (line_start_byte, column_chars) for the cursor's current line.
-    /// `line_start_byte` is the byte offset where the current line begins.
-    /// `column_chars` is how many bytes into the line the cursor is.
+    /// Returns (line_start_byte, column_bytes) for the cursor's current logical line.
+    /// `line_start_byte` is the byte offset where the current line begins (after `\n`).
+    /// `column_bytes` is how many bytes into the line the cursor is.
     fn cursor_line_position(&self) -> (usize, usize) {
         let line_start = self.input_buffer[..self.cursor_position]
             .rfind('\n')
@@ -17,6 +29,79 @@ impl App {
             .unwrap_or(0);
         let col = self.cursor_position - line_start;
         (line_start, col)
+    }
+
+    /// Get the effective text width per visual line in the input box.
+    /// Accounts for borders (2) and prefix/padding (2).
+    fn input_visual_line_width() -> usize {
+        let term_width = crossterm::terminal::size()
+            .map(|(w, _)| w as usize)
+            .unwrap_or(80);
+        // input_content_width = term_width - 2 (borders)
+        // text area = input_content_width - 2 (prefix "❯ " or padding "  ")
+        term_width.saturating_sub(4).max(10)
+    }
+
+    /// Move cursor up one visual line within a logical line, accounting for soft wrapping.
+    /// Returns true if the cursor moved, false if already on the first visual line.
+    fn cursor_visual_up(&mut self) -> bool {
+        use unicode_width::UnicodeWidthStr;
+
+        let (line_start, _col_bytes) = self.cursor_line_position();
+        let text_before = &self.input_buffer[line_start..self.cursor_position];
+        let display_col = text_before.width();
+        let vw = Self::input_visual_line_width();
+
+        let visual_row = display_col / vw;
+        if visual_row == 0 {
+            // Already on first visual line of this logical line
+            return false;
+        }
+
+        // Target: same display column but one visual row up
+        let target_display_col = (visual_row - 1) * vw + (display_col % vw);
+        // Find byte offset at that display column within this logical line
+        let line_text = &self.input_buffer[line_start..];
+        let line_end = line_text.find('\n').unwrap_or(line_text.len());
+        let line_text = &line_text[..line_end];
+        self.cursor_position =
+            line_start + byte_offset_at_display_col(line_text, target_display_col);
+        true
+    }
+
+    /// Move cursor down one visual line within a logical line, accounting for soft wrapping.
+    /// Returns true if the cursor moved, false if already on the last visual line.
+    fn cursor_visual_down(&mut self) -> bool {
+        use unicode_width::UnicodeWidthStr;
+
+        let (line_start, _col_bytes) = self.cursor_line_position();
+        let text_before = &self.input_buffer[line_start..self.cursor_position];
+        let display_col = text_before.width();
+        let vw = Self::input_visual_line_width();
+
+        // Get full logical line
+        let line_text = &self.input_buffer[line_start..];
+        let line_end = line_text.find('\n').unwrap_or(line_text.len());
+        let line_text = &line_text[..line_end];
+        let total_width = line_text.width();
+
+        let visual_row = display_col / vw;
+        let max_visual_row = if total_width == 0 {
+            0
+        } else {
+            (total_width.saturating_sub(1)) / vw
+        };
+
+        if visual_row >= max_visual_row {
+            // Already on last visual line of this logical line
+            return false;
+        }
+
+        // Target: same display column but one visual row down
+        let target_display_col = ((visual_row + 1) * vw + (display_col % vw)).min(total_width);
+        self.cursor_position =
+            line_start + byte_offset_at_display_col(line_text, target_display_col);
+        true
     }
 
     /// Map terminal row to message index using the render-time line mapping
@@ -747,58 +832,72 @@ impl App {
             self.delete_last_word();
         } else if keys::is_up(&event)
             && !self.slash_suggestions_active
-            && self.input_buffer.contains('\n')
             && self.input_history_index.is_none()
             && self.cursor_position > 0
         {
-            // Arrow Up in multiline — move to previous line or start of input
-            let (line_start, col) = self.cursor_line_position();
-            if line_start == 0 {
-                // Already on first line — move to start of input
-                self.cursor_position = 0;
-            } else {
-                // Find the previous line
-                let prev_line_end = line_start - 1; // the \n before current line
-                let prev_line_start = self.input_buffer[..prev_line_end]
-                    .rfind('\n')
-                    .map(|i| i + 1)
-                    .unwrap_or(0);
-                let prev_line_len = prev_line_end - prev_line_start;
-                self.cursor_position = prev_line_start + col.min(prev_line_len);
+            // Arrow Up — try visual line first, then logical line, then start
+            if !self.cursor_visual_up() {
+                // Already on first visual line of this logical line
+                let line_start = self.cursor_line_position().0;
+                if line_start == 0 {
+                    // First logical line — move to start
+                    self.cursor_position = 0;
+                } else {
+                    // Move to previous logical line, try to land on its last visual row
+                    // at the same column offset
+                    use unicode_width::UnicodeWidthStr;
+                    let prev_line_end = line_start - 1;
+                    let prev_line_start = self.input_buffer[..prev_line_end]
+                        .rfind('\n')
+                        .map(|i| i + 1)
+                        .unwrap_or(0);
+                    let prev_line = &self.input_buffer[prev_line_start..prev_line_end];
+                    let prev_total_width = prev_line.width();
+                    let vw = Self::input_visual_line_width();
+                    let last_row = if prev_total_width == 0 {
+                        0
+                    } else {
+                        (prev_total_width.saturating_sub(1)) / vw
+                    };
+                    let current_col = self.input_buffer[line_start..self.cursor_position].width();
+                    let target_col = last_row * vw
+                        + (current_col % vw).min(prev_total_width.saturating_sub(last_row * vw));
+                    self.cursor_position =
+                        prev_line_start + byte_offset_at_display_col(prev_line, target_col);
+                }
             }
         } else if keys::is_down(&event)
             && !self.slash_suggestions_active
-            && self.input_buffer.contains('\n')
             && self.input_history_index.is_none()
             && self.cursor_position < self.input_buffer.len()
         {
-            // Arrow Down in multiline — move to next line or end of input
-            let (line_start, col) = self.cursor_line_position();
-            let line_end = self.input_buffer[line_start..]
-                .find('\n')
-                .map(|i| line_start + i)
-                .unwrap_or(self.input_buffer.len());
-            if line_end == self.input_buffer.len() {
-                // Already on last line — move to end of input
-                self.cursor_position = self.input_buffer.len();
-            } else {
-                // Find the next line
-                let next_line_start = line_end + 1;
-                let next_line_end = self.input_buffer[next_line_start..]
+            // Arrow Down — try visual line first, then logical line, then end
+            if !self.cursor_visual_down() {
+                // Already on last visual line of this logical line
+                let line_start = self.cursor_line_position().0;
+                let line_end = self.input_buffer[line_start..]
                     .find('\n')
-                    .map(|i| next_line_start + i)
+                    .map(|i| line_start + i)
                     .unwrap_or(self.input_buffer.len());
-                let next_line_len = next_line_end - next_line_start;
-                self.cursor_position = next_line_start + col.min(next_line_len);
+                if line_end == self.input_buffer.len() {
+                    // Last logical line — move to end
+                    self.cursor_position = self.input_buffer.len();
+                } else {
+                    // Move to next logical line, first visual row, same column offset
+                    use unicode_width::UnicodeWidthStr;
+                    let next_line_start = line_end + 1;
+                    let next_line_end = self.input_buffer[next_line_start..]
+                        .find('\n')
+                        .map(|i| next_line_start + i)
+                        .unwrap_or(self.input_buffer.len());
+                    let next_line = &self.input_buffer[next_line_start..next_line_end];
+                    let current_col = self.input_buffer[line_start..self.cursor_position].width();
+                    let vw = Self::input_visual_line_width();
+                    let target_col = (current_col % vw).min(next_line.width());
+                    self.cursor_position =
+                        next_line_start + byte_offset_at_display_col(next_line, target_col);
+                }
             }
-        } else if keys::is_up(&event)
-            && !self.slash_suggestions_active
-            && !self.input_buffer.contains('\n')
-            && self.input_history_index.is_none()
-            && self.cursor_position > 0
-        {
-            // Arrow Up on single-line — jump to start first, history on next press
-            self.cursor_position = 0;
         } else if keys::is_up(&event)
             && !self.slash_suggestions_active
             && self.input_buffer.is_empty()
@@ -842,14 +941,6 @@ impl App {
                 }
                 _ => {} // already at oldest
             }
-        } else if keys::is_down(&event)
-            && !self.slash_suggestions_active
-            && !self.input_buffer.contains('\n')
-            && self.input_history_index.is_none()
-            && self.cursor_position < self.input_buffer.len()
-        {
-            // Arrow Down on single-line — jump to end first
-            self.cursor_position = self.input_buffer.len();
         } else if keys::is_down(&event)
             && !self.slash_suggestions_active
             && self.input_history_index.is_some()
