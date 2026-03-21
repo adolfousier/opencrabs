@@ -68,8 +68,13 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
             let cursor_at_end_of_last_line =
                 cursor_pos >= buf.len() && line_idx == full_text.lines().count() - 1;
 
+            let is_queued = app.queued_message_preview.is_some();
             let prefix = if line_idx == 0 {
-                Span::styled("\u{276F} ", Style::default().fg(Color::Rgb(100, 100, 100)))
+                if is_queued {
+                    Span::styled("⏳", Style::default().fg(Color::Rgb(215, 100, 20)))
+                } else {
+                    Span::styled("\u{276F} ", Style::default().fg(Color::Rgb(100, 100, 100)))
+                }
             } else {
                 Span::raw("  ")
             };
