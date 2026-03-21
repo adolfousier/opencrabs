@@ -352,7 +352,7 @@ impl Tool for SlackSendTool {
                                     .map(|u| u.0.as_str())
                                     .unwrap_or("bot");
                                 let text = m.content.text.as_deref().unwrap_or("[no text]");
-                                let preview = &text[..text.len().min(80)];
+                                let preview = &text[..text.floor_char_boundary(80)];
                                 format!("[{}] {}: {}", m.origin.ts.0, user, preview)
                             })
                             .collect::<Vec<_>>()

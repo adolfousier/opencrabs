@@ -422,7 +422,7 @@ impl Tool for DiscordSendTool {
                                     "[{}] {}: {}",
                                     m.id,
                                     m.author.name,
-                                    &m.content[..m.content.len().min(80)]
+                                    &m.content[..m.content.floor_char_boundary(80)]
                                 )
                             })
                             .collect::<Vec<_>>()

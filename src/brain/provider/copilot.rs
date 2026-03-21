@@ -196,7 +196,7 @@ impl CopilotTokenManager {
             anyhow::bail!(
                 "Copilot token refresh failed ({}): {}",
                 status,
-                &body[..body.len().min(300)]
+                &body[..body.floor_char_boundary(300)]
             );
         }
 

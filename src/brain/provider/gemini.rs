@@ -443,7 +443,7 @@ impl Provider for GeminiProvider {
                                         tracing::warn!(
                                             "Gemini: failed to parse SSE JSON: {} | data: {}",
                                             e,
-                                            &json_str[..json_str.len().min(200)]
+                                            &json_str[..json_str.floor_char_boundary(200)]
                                         );
                                         continue;
                                     }
