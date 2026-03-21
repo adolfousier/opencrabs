@@ -271,6 +271,8 @@ pub enum ContentDelta {
     InputJsonDelta { partial_json: String },
     /// Reasoning/thinking content delta (display-only, not part of response text)
     ReasoningDelta { text: String },
+    /// Anthropic native thinking delta (extended thinking — same as reasoning but uses `thinking` field)
+    ThinkingDelta { thinking: String },
 }
 
 /// Message delta for final updates
