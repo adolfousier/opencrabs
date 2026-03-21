@@ -25,6 +25,6 @@ pub mod gemini;
 
 pub use anthropic::AnthropicProvider;
 pub use custom_openai_compatible::OpenAIProvider;
-pub use factory::create_provider;
+pub use factory::{create_provider, create_provider_by_name};
 pub use fallback::FallbackProvider;
 pub use gemini::GeminiProvider;

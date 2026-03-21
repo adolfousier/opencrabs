@@ -6,6 +6,7 @@
 //! user's current session, falls back to the initial session at startup.
 
 use crate::channels::ChannelFactory;
+use crate::config::Config;
 use crate::db::CronJobRepository;
 use crate::db::models::CronJob;
 use crate::services::{ServiceContext, SessionService};
@@ -157,6 +158,17 @@ async fn execute_job(
 ) -> anyhow::Result<()> {
     let session_svc = SessionService::new(ctx.clone());
 
+    // Resolve effective provider/model: job override > config default > system default
+    let config = Config::load().unwrap_or_default();
+    let effective_provider = job
+        .provider
+        .clone()
+        .or_else(|| config.cron.default_provider.clone());
+    let effective_model = job
+        .model
+        .clone()
+        .or_else(|| config.cron.default_model.clone());
+
     let session_id = if let Some(id) = target_session_id {
         // Verify session still exists
         if session_svc.get_session(id).await?.is_some() {
@@ -179,8 +191,8 @@ async fn execute_job(
                     let s = session_svc
                         .create_session_with_provider(
                             Some(format!("Cron: {}", job.name)),
-                            job.provider.clone(),
-                            job.model.clone(),
+                            effective_provider.clone(),
+                            effective_model.clone(),
                         )
                         .await?;
                     tracing::warn!(
@@ -208,8 +220,8 @@ async fn execute_job(
                 let s = session_svc
                     .create_session_with_provider(
                         Some(format!("Cron: {}", job.name)),
-                        job.provider.clone(),
-                        job.model.clone(),
+                        effective_provider.clone(),
+                        effective_model.clone(),
                     )
                     .await?;
                 tracing::warn!(
@@ -225,12 +237,33 @@ async fn execute_job(
     // Spawn agent service (inherits tools, brain, working dir from factory)
     let agent = factory.create_agent_service();
 
+    // Swap to cron-specific provider if configured
+    if let Some(ref provider_name) = effective_provider {
+        match crate::brain::provider::create_provider_by_name(&config, provider_name) {
+            Ok(provider) => {
+                tracing::info!(
+                    "Cron job '{}' — using provider '{}'",
+                    job.name,
+                    provider_name
+                );
+                agent.swap_provider(provider);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Cron job '{}' — failed to create provider '{}': {e}, using system default",
+                    job.name,
+                    provider_name
+                );
+            }
+        }
+    }
+
     // Execute with auto-approved tools (no interactive user)
     let result = agent
         .send_message_with_tools_and_callback(
             session_id,
             job.prompt.clone(),
-            job.model.clone(),
+            effective_model,
             None, // no cancel token
             Some(Arc::new(|_| {
                 // Auto-approve all tools for cron jobs

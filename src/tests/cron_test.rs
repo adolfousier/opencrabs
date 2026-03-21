@@ -942,3 +942,77 @@ mod session_resolution {
         assert_eq!(*shared.lock().await, Some(new_session));
     }
 }
+
+// --- Cron Config Default Provider Resolution Tests ---
+
+mod config_defaults {
+    use crate::config::CronConfig;
+
+    /// Simulate the provider resolution logic from execute_job:
+    /// job override > config default > None (system default)
+    fn resolve_provider(job_provider: Option<&str>, config: &CronConfig) -> Option<String> {
+        job_provider
+            .map(|s| s.to_string())
+            .or_else(|| config.default_provider.clone())
+    }
+
+    fn resolve_model(job_model: Option<&str>, config: &CronConfig) -> Option<String> {
+        job_model
+            .map(|s| s.to_string())
+            .or_else(|| config.default_model.clone())
+    }
+
+    #[test]
+    fn test_job_provider_takes_priority() {
+        let config = CronConfig {
+            default_provider: Some("minimax".to_string()),
+            default_model: Some("MiniMax-M2.7".to_string()),
+        };
+        // Job has explicit provider — config default ignored
+        assert_eq!(
+            resolve_provider(Some("anthropic"), &config),
+            Some("anthropic".to_string())
+        );
+    }
+
+    #[test]
+    fn test_config_default_used_when_job_has_none() {
+        let config = CronConfig {
+            default_provider: Some("minimax".to_string()),
+            default_model: Some("MiniMax-M2.7".to_string()),
+        };
+        // Job has no provider — falls back to config default
+        assert_eq!(resolve_provider(None, &config), Some("minimax".to_string()));
+        assert_eq!(
+            resolve_model(None, &config),
+            Some("MiniMax-M2.7".to_string())
+        );
+    }
+
+    #[test]
+    fn test_no_config_default_returns_none() {
+        let config = CronConfig::default();
+        // No job provider, no config default — returns None (system default)
+        assert_eq!(resolve_provider(None, &config), None);
+        assert_eq!(resolve_model(None, &config), None);
+    }
+
+    #[test]
+    fn test_job_model_overrides_config_default() {
+        let config = CronConfig {
+            default_provider: Some("minimax".to_string()),
+            default_model: Some("MiniMax-M2.7".to_string()),
+        };
+        assert_eq!(
+            resolve_model(Some("MiniMax-M2.5"), &config),
+            Some("MiniMax-M2.5".to_string())
+        );
+    }
+
+    #[test]
+    fn test_cron_config_default_is_empty() {
+        let config = CronConfig::default();
+        assert!(config.default_provider.is_none());
+        assert!(config.default_model.is_none());
+    }
+}
