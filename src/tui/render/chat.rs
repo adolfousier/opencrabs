@@ -293,6 +293,9 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             }
         }
 
+        // Blank line to separate content from status spinner
+        lines.push(Line::from(""));
+
         // Spinner at BOTTOM of streaming content so it's always visible
         let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         let frame = spinner_frames[app.animation_frame % spinner_frames.len()];
@@ -367,6 +370,9 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                 lines.push(wrapped);
             }
         }
+
+        // Blank line to separate reasoning from status spinner
+        lines.push(Line::from(""));
 
         // Spinner at BOTTOM of reasoning content so it's always visible
         let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
