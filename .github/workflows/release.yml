@@ -30,7 +30,7 @@ jobs:
 
       - name: Install Rust
         if: steps.check.outputs.published == 'false'
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Install ALSA dev
         if: steps.check.outputs.published == 'false'
@@ -87,7 +87,7 @@ jobs:
         run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 

@@ -135,6 +135,11 @@ pub fn is_first_time() -> bool {
             .as_ref()
             .is_some_and(|p| p.enabled)
         || config.providers.minimax.as_ref().is_some_and(|p| p.enabled)
+        || config
+            .providers
+            .claude_cli
+            .as_ref()
+            .is_some_and(|p| p.enabled)
         || config.providers.active_custom().is_some();
 
     tracing::debug!(
@@ -156,6 +161,15 @@ pub async fn fetch_provider_models(provider_index: usize, api_key: Option<&str>)
     #[derive(serde::Deserialize)]
     struct ModelsResponse {
         data: Vec<ModelEntry>,
+    }
+
+    // Claude CLI — models are fixed (sonnet/opus/haiku), no API needed
+    if provider_index == 6 {
+        return vec![
+            "sonnet".to_string(),
+            "opus".to_string(),
+            "haiku".to_string(),
+        ];
     }
 
     // Handle Minimax specially - no /models API, must use config

@@ -282,6 +282,7 @@ impl OnboardingWizard {
             "providers.gemini",
             "providers.openrouter",
             "providers.minimax",
+            "providers.claude_cli",
         ];
         for section in &all_provider_sections {
             let _ = Config::write_key(section, "enabled", "false");
@@ -305,7 +306,8 @@ impl OnboardingWizard {
             3 => "providers.gemini",
             4 => "providers.openrouter",
             5 => "providers.minimax",
-            6 => {
+            6 => "providers.claude_cli",
+            7 => {
                 custom_section = format!("providers.custom.{}", self.custom_provider_name);
                 &custom_section
             }
@@ -339,7 +341,7 @@ impl OnboardingWizard {
             5 => {
                 let _ = Config::write_key(section, "base_url", "https://api.minimax.io/v1");
             }
-            n if n >= 6 => {
+            n if n >= 7 => {
                 if !self.custom_base_url.is_empty() {
                     let _ = Config::write_key(section, "base_url", &self.custom_base_url);
                 }
@@ -356,7 +358,7 @@ impl OnboardingWizard {
 
         // Write models array for providers that have static model lists
         if !self.config_models.is_empty()
-            && (matches!(self.selected_provider, 2 | 5) || self.selected_provider >= 6)
+            && (matches!(self.selected_provider, 2 | 5) || self.selected_provider >= 7)
         {
             let _ = Config::write_array(section, "models", &self.config_models);
         }

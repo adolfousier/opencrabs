@@ -536,6 +536,10 @@ pub struct ProviderConfigs {
     #[serde(default)]
     pub gemini: Option<ProviderConfig>,
 
+    /// Claude CLI (Max subscription) — direct subprocess, no proxy needed
+    #[serde(default)]
+    pub claude_cli: Option<ProviderConfig>,
+
     /// AWS Bedrock configuration
     #[serde(default)]
     pub bedrock: Option<ProviderConfig>,
@@ -583,6 +587,16 @@ impl ProviderConfigs {
     /// Return `(provider_name, default_model)` for the currently active provider,
     /// using the same priority order as `factory::create_provider`.
     pub fn active_provider_and_model(&self) -> (String, String) {
+        // Claude CLI first — no API key needed, just enabled check
+        if let Some(c) = self.claude_cli.as_ref()
+            && c.enabled
+        {
+            let model = c
+                .default_model
+                .clone()
+                .unwrap_or_else(|| "sonnet".to_string());
+            return ("claude-cli".to_string(), model);
+        }
         let candidates: &[(&str, Option<&ProviderConfig>)] = &[
             ("minimax", self.minimax.as_ref()),
             ("openrouter", self.openrouter.as_ref()),
@@ -2213,6 +2227,20 @@ pub fn resolve_provider_from_config(config: &Config) -> (&str, &str) {
             .and_then(|p| p.default_model.as_deref())
             .unwrap_or("default");
         return ("Minimax", model);
+    }
+    if config
+        .providers
+        .claude_cli
+        .as_ref()
+        .is_some_and(|p| p.enabled)
+    {
+        let model = config
+            .providers
+            .claude_cli
+            .as_ref()
+            .and_then(|p| p.default_model.as_deref())
+            .unwrap_or("sonnet");
+        return ("Claude CLI", model);
     }
     if let Some((name, cfg)) = config.providers.active_custom() {
         let model = cfg.default_model.as_deref().unwrap_or("default");

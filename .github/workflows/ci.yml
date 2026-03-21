@@ -26,7 +26,7 @@ jobs:
       - name: Install Rust (from rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly
+          toolchain: stable
           components: rustfmt, clippy
 
       - name: Cache cargo registry
@@ -45,7 +45,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: target
-          key: ${{ runner.os }}-target-nightly-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-target-stable-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install CMake (macOS)
         if: runner.os == 'macOS'
@@ -83,7 +83,7 @@ jobs:
       - name: Install Rust (from rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly
+          toolchain: stable
           components: clippy
 
       - name: Install ALSA dev
@@ -101,7 +101,7 @@ jobs:
       - name: Install Rust (from rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly
+          toolchain: stable
           components: rustfmt
 
       - name: Check formatting
@@ -117,7 +117,7 @@ jobs:
       - name: Install Rust (from rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly
+          toolchain: stable
 
       - name: Install ALSA dev
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev

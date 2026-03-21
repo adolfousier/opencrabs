@@ -260,6 +260,8 @@ impl SlashCommandTool {
                 "providers.openrouter"
             } else if provider.minimax.as_ref().is_some_and(|p| p.enabled) {
                 "providers.minimax"
+            } else if provider.claude_cli.as_ref().is_some_and(|p| p.enabled) {
+                "providers.claude_cli"
             } else {
                 // Check custom providers
                 let custom = provider
@@ -305,6 +307,7 @@ impl SlashCommandTool {
             ("gemini", &config.providers.gemini),
             ("openrouter", &config.providers.openrouter),
             ("minimax", &config.providers.minimax),
+            ("claude-cli", &config.providers.claude_cli),
         ];
 
         for (name, provider_opt) in &providers_info {

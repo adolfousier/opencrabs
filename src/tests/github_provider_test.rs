@@ -40,7 +40,8 @@ fn provider_order_after_github_insertion() {
     assert_eq!(PROVIDERS[3].name, "Google Gemini");
     assert_eq!(PROVIDERS[4].name, "OpenRouter");
     assert_eq!(PROVIDERS[5].name, "Minimax");
-    assert_eq!(PROVIDERS[6].name, "Custom OpenAI-Compatible");
+    assert_eq!(PROVIDERS[6].name, "Claude CLI");
+    assert_eq!(PROVIDERS[7].name, "Custom OpenAI-Compatible");
 }
 
 // ── Config struct ───────────────────────────────────────────────

@@ -168,6 +168,14 @@ impl Store {
                 device_id        INTEGER NOT NULL,
                 PRIMARY KEY (jid, device_id)
             );
+            CREATE TABLE IF NOT EXISTS wa_sent_messages (
+                chat_jid    TEXT NOT NULL,
+                message_id  TEXT NOT NULL,
+                payload     BLOB NOT NULL,
+                created_at  INTEGER NOT NULL DEFAULT (unixepoch()),
+                device_id   INTEGER NOT NULL,
+                PRIMARY KEY (chat_jid, message_id, device_id)
+            );
         "#;
 
         self.pool
@@ -503,6 +511,22 @@ impl SignalStore for Store {
             .map_err(db_err)?;
         Ok(())
     }
+
+    async fn get_max_prekey_id(&self) -> Result<u32> {
+        let did = self.device_id;
+        self.pool
+            .get()
+            .await
+            .map_err(pool_err)?
+            .interact(move |conn| {
+                conn.prepare("SELECT COALESCE(MAX(id), 0) FROM wa_prekeys WHERE device_id = ?1")?
+                    .query_row(params![did], |row| row.get::<_, i64>(0))
+            })
+            .await
+            .map_err(interact_to_store_err)?
+            .map(|v| v as u32)
+            .map_err(db_err)
+    }
 }
 
 // ─── AppSyncStore ─────────────────────────────────────────────────────────────
@@ -681,6 +705,25 @@ impl AppSyncStore for Store {
             .map_err(interact_to_store_err)?
             .map_err(db_err)?;
         Ok(())
+    }
+
+    async fn get_latest_sync_key_id(&self) -> Result<Option<Vec<u8>>> {
+        let did = self.device_id;
+        self.pool
+            .get()
+            .await
+            .map_err(pool_err)?
+            .interact(move |conn| {
+                conn.prepare(
+                    "SELECT key_id FROM wa_app_state_keys WHERE device_id = ?1
+                     ORDER BY rowid DESC LIMIT 1",
+                )?
+                .query_row(params![did], |row| row.get::<_, Vec<u8>>(0))
+                .optional()
+            })
+            .await
+            .map_err(interact_to_store_err)?
+            .map_err(db_err)
     }
 }
 
@@ -1137,6 +1180,86 @@ impl ProtocolStore for Store {
             })
             .await
             .map_err(interact_to_store_err)?
+            .map_err(db_err)
+    }
+
+    async fn store_sent_message(
+        &self,
+        chat_jid: &str,
+        message_id: &str,
+        payload: &[u8],
+    ) -> Result<()> {
+        let cj = chat_jid.to_string();
+        let mid = message_id.to_string();
+        let data = payload.to_vec();
+        let did = self.device_id;
+        self.pool
+            .get()
+            .await
+            .map_err(pool_err)?
+            .interact(move |conn| {
+                conn.execute(
+                    "INSERT INTO wa_sent_messages (chat_jid, message_id, payload, device_id)
+                     VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT(chat_jid, message_id, device_id) DO UPDATE SET payload = excluded.payload",
+                    params![cj, mid, data, did],
+                )
+            })
+            .await
+            .map_err(interact_to_store_err)?
+            .map_err(db_err)?;
+        Ok(())
+    }
+
+    async fn take_sent_message(
+        &self,
+        chat_jid: &str,
+        message_id: &str,
+    ) -> Result<Option<Vec<u8>>> {
+        let cj = chat_jid.to_string();
+        let mid = message_id.to_string();
+        let did = self.device_id;
+        self.pool
+            .get()
+            .await
+            .map_err(pool_err)?
+            .interact(move |conn| {
+                let payload = conn
+                    .prepare(
+                        "SELECT payload FROM wa_sent_messages
+                         WHERE chat_jid = ?1 AND message_id = ?2 AND device_id = ?3",
+                    )?
+                    .query_row(params![&cj, &mid, did], |row| row.get::<_, Vec<u8>>(0))
+                    .optional()?;
+                if payload.is_some() {
+                    conn.execute(
+                        "DELETE FROM wa_sent_messages
+                         WHERE chat_jid = ?1 AND message_id = ?2 AND device_id = ?3",
+                        params![cj, mid, did],
+                    )?;
+                }
+                Ok::<_, rusqlite::Error>(payload)
+            })
+            .await
+            .map_err(interact_to_store_err)?
+            .map_err(db_err)
+    }
+
+    async fn delete_expired_sent_messages(&self, cutoff_timestamp: i64) -> Result<u32> {
+        let did = self.device_id;
+        self.pool
+            .get()
+            .await
+            .map_err(pool_err)?
+            .interact(move |conn| {
+                conn.execute(
+                    "DELETE FROM wa_sent_messages WHERE created_at < ?1 AND device_id = ?2",
+                    params![cutoff_timestamp, did],
+                )
+            })
+            .await
+            .map_err(interact_to_store_err)?
+            .map(|n| n as u32)
             .map_err(db_err)
     }
 }

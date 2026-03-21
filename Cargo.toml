@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.91"
 authors = ["Adolfo Usier <adolfo@meetneura.ai>"]
 license = "MIT"
-description = "The autonomous, self-improving AI agent. Single Rust binary. Every channel. Requires nightly (cargo +nightly install opencrabs)."
+description = "The autonomous, self-improving AI agent. Single Rust binary. Every channel. Install with: cargo install opencrabs"
 repository = "https://github.com/adolfousier/opencrabs"
 homepage = "https://opencrabs.com"
 documentation = "https://docs.opencrabs.com"
@@ -95,12 +95,12 @@ zeroize = { version = "1.8", features = ["derive"] }
 teloxide = { version = "0.13", features = ["macros"], optional = true }
 
 # WhatsApp
-whatsapp-rust = { version = "0.3", optional = true, default-features = false, features = ["tokio-transport", "ureq-client", "tokio-native"] }
-whatsapp-rust-tokio-transport = { version = "0.3", optional = true }
-whatsapp-rust-ureq-http-client = { version = "0.3", optional = true }
-wacore = { version = "0.3", optional = true }
-wacore-binary = { version = "0.3", optional = true }
-waproto = { version = "0.3", optional = true }
+whatsapp-rust = { version = "0.4.1", optional = true, default-features = false, features = ["tokio-transport", "ureq-client", "tokio-native", "tokio-runtime"] }
+whatsapp-rust-tokio-transport = { version = "0.4.1", optional = true }
+whatsapp-rust-ureq-http-client = { version = "0.4.1", optional = true }
+wacore = { version = "0.4.1", optional = true, default-features = false }
+wacore-binary = { version = "0.4.1", optional = true, default-features = false, features = ["serde"] }
+waproto = { version = "0.4.1", optional = true }
 qrcode = { version = "0.14", optional = true }
 rmp-serde = { version = "1", optional = true }
 

@@ -16,6 +16,7 @@ use uuid::Uuid;
 use super::store::Store;
 use wacore::types::events::Event;
 use whatsapp_rust::bot::Bot;
+use whatsapp_rust::TokioRuntime;
 use whatsapp_rust_tokio_transport::TokioWebSocketTransportFactory;
 use whatsapp_rust_ureq_http_client::UreqHttpClient;
 
@@ -107,6 +108,7 @@ impl WhatsAppAgent {
                 .with_backend(backend)
                 .with_transport_factory(TokioWebSocketTransportFactory::new())
                 .with_http_client(UreqHttpClient::new())
+                .with_runtime(TokioRuntime)
                 .on_event(move |event, client| {
                     let agent = agent.clone();
                     let session_svc = session_svc.clone();
@@ -177,9 +179,7 @@ impl WhatsAppAgent {
             match bot.run().await {
                 Ok(handle) => {
                     if let Err(e) = handle.await {
-                        let msg = format!("WhatsApp agent crashed: {:?}", e);
-                        tracing::error!("{}", msg);
-                        self.whatsapp_state.broadcast_error(&msg);
+                        tracing::warn!("WhatsApp bot handle cancelled: {:?}", e);
                     }
                 }
                 Err(e) => {

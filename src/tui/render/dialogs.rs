@@ -324,12 +324,12 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     lines.push(Line::from(""));
 
     // Provider list — 6 static providers, then existing custom names, then "+ New Custom" last.
-    // Internal indices: 0-5=static, 6="+New Custom", 7+=existing customs.
-    // Visual order: 0-5, then 7+, then 6 (so existing customs appear before the add button).
+    // Internal indices: 0-6=static, 7="+New Custom", 8+=existing customs.
+    // Visual order: 0-6, then 8+, then 7 (so existing customs appear before the add button).
     let num_customs = app.model_selector_custom_names.len();
-    let display_order: Vec<usize> = (0..6)
-        .chain(7..7 + num_customs)
-        .chain(std::iter::once(6))
+    let display_order: Vec<usize> = (0..7)
+        .chain(8..8 + num_customs)
+        .chain(std::iter::once(7))
         .collect();
     for &idx in &display_order {
         let selected = idx == provider_idx;
@@ -338,12 +338,12 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         let prefix = if selected && focused { " > " } else { "   " };
         let marker = if selected { "[*]" } else { "[ ]" };
 
-        let label = if idx == 6 {
+        let label = if idx == 7 {
             "+ New Custom Provider".to_string()
         } else if idx < PROVIDERS.len() {
             PROVIDERS[idx].name.to_string()
         } else {
-            let custom_idx = idx - 7;
+            let custom_idx = idx - 8;
             app.model_selector_custom_names
                 .get(custom_idx)
                 .cloned()
@@ -379,7 +379,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
 
     lines.push(Line::from(""));
 
-    let is_custom = provider_idx >= 6; // Custom provider index
+    let is_custom = provider_idx >= 7; // Custom provider index
 
     // For Custom provider: show Base URL field first (field 1), then API Key (field 2)
     // For others: show API Key only (field 1)
@@ -414,59 +414,72 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     }
 
     // API Key field (field 1 for non-Custom, field 2 for Custom)
-    let key_focused = (focused_field == 1 && !is_custom) || (focused_field == 2 && is_custom);
-    let key_label = selected_provider.key_label;
+    // Claude CLI (index 6) has no API key — skip entirely
+    let is_claude_cli = provider_idx == 6;
+    if !is_claude_cli {
+        let key_focused = (focused_field == 1 && !is_custom) || (focused_field == 2 && is_custom);
+        let key_label = selected_provider.key_label;
 
-    let has_existing_key = app.model_selector_has_existing_key;
-    let has_user_key = !app.model_selector_api_key.is_empty();
+        let has_existing_key = app.model_selector_has_existing_key;
+        let has_user_key = !app.model_selector_api_key.is_empty();
 
-    let (masked_key, key_hint) = if has_user_key {
-        // User typed a new key - show asterisks for what they typed
-        (
-            "*".repeat(app.model_selector_api_key.len().min(30)),
-            String::new(),
-        )
-    } else if has_existing_key {
-        // Key exists in config - show placeholder indicating it's configured
-        ("● configured".to_string(), String::new())
+        let (masked_key, key_hint) = if has_user_key {
+            // User typed a new key - show asterisks for what they typed
+            (
+                "*".repeat(app.model_selector_api_key.len().min(30)),
+                String::new(),
+            )
+        } else if has_existing_key {
+            // Key exists in config - show placeholder indicating it's configured
+            ("● configured".to_string(), String::new())
+        } else {
+            // Empty - show input hint
+            (
+                format!("enter your {} (optional)", key_label.to_lowercase()),
+                String::new(),
+            )
+        };
+        let cursor = if key_focused { "█" } else { "" };
+
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("  {}: ", key_label),
+                Style::default().fg(if key_focused {
+                    BRAND_BLUE
+                } else {
+                    Color::DarkGray
+                }),
+            ),
+            Span::styled(
+                format!("{}{}", masked_key, cursor),
+                Style::default().fg(if key_focused {
+                    Color::Reset
+                } else {
+                    Color::Cyan
+                }),
+            ),
+        ]));
+
+        if !key_hint.is_empty() && key_focused {
+            lines.push(Line::from(Span::styled(
+                format!("  {}", key_hint.trim()),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
+            )));
+        }
+
+        lines.push(Line::from(""));
     } else {
-        // Empty - show input hint
-        (
-            format!("enter your {} (optional)", key_label.to_lowercase()),
-            String::new(),
-        )
-    };
-    let cursor = if key_focused { "█" } else { "" };
-
-    lines.push(Line::from(vec![
-        Span::styled(
-            format!("  {}: ", key_label),
-            Style::default().fg(if key_focused {
-                BRAND_BLUE
-            } else {
-                Color::DarkGray
-            }),
-        ),
-        Span::styled(
-            format!("{}{}", masked_key, cursor),
-            Style::default().fg(if key_focused {
-                Color::Reset
-            } else {
-                Color::Cyan
-            }),
-        ),
-    ]));
-
-    if !key_hint.is_empty() && key_focused {
+        // Claude CLI: show "no API key needed" hint
         lines.push(Line::from(Span::styled(
-            format!("  {}", key_hint.trim()),
+            "  No API key needed — uses local claude CLI",
             Style::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::ITALIC),
         )));
+        lines.push(Line::from(""));
     }
-
-    lines.push(Line::from(""));
 
     // Model selection (field 2 for non-Custom, field 3 for Custom)
     let model_focused = (focused_field == 2 && !is_custom) || (focused_field == 3 && is_custom);
