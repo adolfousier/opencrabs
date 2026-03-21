@@ -128,6 +128,25 @@ impl AgentService {
                     index,
                     content_block,
                 } => {
+                    // Emit ToolStarted immediately so the TUI shows tool context
+                    // in real-time (especially important for proxied providers where
+                    // the CLI runs tools internally and we only see the stream).
+                    if let ContentBlock::ToolUse {
+                        ref name,
+                        ref input,
+                        ..
+                    } = content_block
+                        && let Some(cb) = effective_cb
+                    {
+                        cb(
+                            session_id,
+                            ProgressEvent::ToolStarted {
+                                tool_name: name.clone(),
+                                tool_input: input.clone(),
+                            },
+                        );
+                    }
+
                     // Ensure block_states has enough capacity
                     while block_states.len() <= index {
                         block_states.push(BlockState {
@@ -223,6 +242,24 @@ impl AgentService {
                             && let Ok(parsed) = serde_json::from_str(&state.json_buf)
                         {
                             *input = parsed;
+                        }
+                        // Emit ToolCompleted so the TUI updates in real-time
+                        if let ContentBlock::ToolUse {
+                            ref name,
+                            ref input,
+                            ..
+                        } = state.block
+                            && let Some(cb) = effective_cb
+                        {
+                            cb(
+                                session_id,
+                                ProgressEvent::ToolCompleted {
+                                    tool_name: name.clone(),
+                                    tool_input: input.clone(),
+                                    success: true,
+                                    summary: "streamed from provider".to_string(),
+                                },
+                            );
                         }
                     }
                 }

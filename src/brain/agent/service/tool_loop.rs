@@ -807,32 +807,13 @@ impl AgentService {
 
             // Proxied providers (cc-max-proxy) execute tools autonomously via CLI —
             // skip local execution to avoid double-running tools.
-            // Emit ToolStarted + ToolCompleted so the TUI still shows what the CLI did.
+            // ToolStarted/ToolCompleted events are already emitted during streaming
+            // (in stream_complete), so just clear the tool_uses here.
             if proxied && !tool_uses.is_empty() {
                 tracing::info!(
                     "Proxied mode: skipping {} tool_use blocks (CLI handles execution)",
                     tool_uses.len()
                 );
-                if let Some(ref cb) = progress_callback {
-                    for (_, tool_name, tool_input) in &tool_uses {
-                        cb(
-                            session_id,
-                            ProgressEvent::ToolStarted {
-                                tool_name: tool_name.clone(),
-                                tool_input: tool_input.clone(),
-                            },
-                        );
-                        cb(
-                            session_id,
-                            ProgressEvent::ToolCompleted {
-                                tool_name: tool_name.clone(),
-                                tool_input: tool_input.clone(),
-                                success: true,
-                                summary: "executed by CLI".to_string(),
-                            },
-                        );
-                    }
-                }
                 tool_uses.clear();
             }
 
