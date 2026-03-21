@@ -1015,6 +1015,12 @@ model = "gemini-3.1-flash-image-preview"
 [image.vision]
 enabled = true
 model = "gemini-3.1-flash-image-preview"
+
+# ── Cron Defaults ────────────────────────────────────────────────────────────
+
+[cron]
+default_provider = "minimax"      # Provider for cron jobs that don't specify one
+default_model = "MiniMax-M2.7"    # Model for cron jobs that don't specify one
 ```
 
 > API keys go in `keys.toml`, not here. See [API Keys (keys.toml)](#-api-keys-keystoml).
@@ -1558,11 +1564,19 @@ The agent can also create, list, and manage cron jobs autonomously via the `cron
 | `--cron` | required | Standard cron expression (e.g. `"0 9 * * *"`) |
 | `--tz` | `UTC` | Timezone for the schedule |
 | `--prompt` | required | The instruction to execute |
-| `--provider` | current | Override provider (e.g. `anthropic`, `gemini`) |
-| `--model` | current | Override model |
+| `--provider` | `[cron]` default or current | Override provider (e.g. `anthropic`, `gemini`, `minimax`) |
+| `--model` | `[cron]` default or current | Override model |
 | `--thinking` | `off` | Thinking mode: `off`, `on`, `budget` |
 | `--auto-approve` | `true` | Auto-approve tool calls (isolated sessions) |
 | `--deliver` | none | Channel to deliver results (e.g. `telegram:123456`, `discord:789`, `slack:C0123`) |
+
+**Provider priority:** per-job `--provider` > `[cron] default_provider` in config.toml > session's active provider. Set a global default for cron jobs to route them to a cheaper provider while keeping your interactive session on a premium one:
+
+```toml
+[cron]
+default_provider = "minimax"
+default_model = "MiniMax-M2.7"
+```
 
 ### Heartbeats — Proactive Background Checks
 

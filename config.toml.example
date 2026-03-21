@@ -131,6 +131,16 @@ model = "gpt-4o-mini-tts" # TTS model
 # Get key from: aistudio.google.com
 # Use /onboard:image to configure via wizard
 
+# ========================================
+# Cron Job Defaults
+# ========================================
+# Default provider/model for cron jobs that don't specify their own.
+# Priority: per-job --provider > [cron] default > session's active provider.
+# Useful for routing cron jobs to a cheaper provider.
+[cron]
+# default_provider = "minimax"
+# default_model = "MiniMax-M2.7"
+
 [image.generation]
 enabled = false
 model = "gemini-3.1-flash-image-preview"   # Gemini image-gen model ("Nano Banana")

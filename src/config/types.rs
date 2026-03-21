@@ -45,6 +45,10 @@ pub struct Config {
     /// Image generation and vision configuration
     #[serde(default)]
     pub image: ImageConfig,
+
+    /// Cron job defaults
+    #[serde(default)]
+    pub cron: CronConfig,
 }
 
 /// A2A (Agent-to-Agent) protocol gateway configuration.
@@ -464,6 +468,29 @@ impl Default for AgentConfig {
             max_tokens: default_max_tokens(),
         }
     }
+}
+
+/// Cron job default settings.
+///
+/// When a cron job has no `provider` or `model` set, these defaults are used
+/// instead of the system's active provider. Useful for routing cron jobs to
+/// cheaper providers while keeping the interactive session on a premium one.
+///
+/// Example in config.toml:
+/// ```toml
+/// [cron]
+/// default_provider = "minimax"
+/// default_model = "MiniMax-M2.7"
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CronConfig {
+    /// Default provider for cron jobs without an explicit provider
+    #[serde(default)]
+    pub default_provider: Option<String>,
+
+    /// Default model for cron jobs without an explicit model
+    #[serde(default)]
+    pub default_model: Option<String>,
 }
 
 /// Debug configuration options
@@ -1251,6 +1278,7 @@ impl Default for Config {
             agent: AgentConfig::default(),
             a2a: A2aConfig::default(),
             image: ImageConfig::default(),
+            cron: CronConfig::default(),
         }
     }
 }
@@ -1595,6 +1623,7 @@ impl Config {
             agent: overlay.agent,
             a2a: overlay.a2a,
             image: overlay.image,
+            cron: overlay.cron,
         }
     }
 
