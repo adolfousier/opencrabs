@@ -412,6 +412,16 @@ impl AgentService {
                     ContentBlock::Image { .. } => {
                         lines.push(format!("{}: [image]", role_label));
                     }
+                    ContentBlock::Thinking { thinking, .. } => {
+                        if !thinking.is_empty() {
+                            let display = if thinking.len() > 300 {
+                                format!("{}… [truncated]", &thinking[..300])
+                            } else {
+                                thinking.clone()
+                            };
+                            lines.push(format!("{}: [thinking: {}]", role_label, display));
+                        }
+                    }
                 }
             }
         }

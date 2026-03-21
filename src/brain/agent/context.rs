@@ -133,6 +133,9 @@ impl AgentContext {
                     // Images use a fixed token count (approximate)
                     tokens += 1000;
                 }
+                ContentBlock::Thinking { thinking, .. } => {
+                    tokens += Self::estimate_tokens(thinking);
+                }
             }
         }
 
@@ -163,6 +166,9 @@ impl AgentContext {
                 }
                 ContentBlock::Image { .. } => {
                     tokens += 1000;
+                }
+                ContentBlock::Thinking { thinking, .. } => {
+                    tokens += Self::estimate_tokens(thinking);
                 }
             }
         }

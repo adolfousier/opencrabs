@@ -340,9 +340,6 @@ impl Provider for AnthropicProvider {
         // TCP chunks can split SSE events, so we buffer partial lines.
         let byte_stream = response.bytes_stream();
         let buffer = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
-        let skipped_indices = std::sync::Arc::new(std::sync::Mutex::new(
-            std::collections::HashSet::<u64>::new(),
-        ));
 
         let event_stream = byte_stream
             .map(
@@ -352,9 +349,6 @@ impl Provider for AnthropicProvider {
                         Ok(chunk) => {
                             let text = String::from_utf8_lossy(&chunk);
                             let mut buf = buffer.lock().expect("SSE buffer lock poisoned");
-                            let mut skipped_indices = skipped_indices
-                                .lock()
-                                .expect("skipped_indices lock poisoned");
                             buf.push_str(&text);
 
                             let mut events = Vec::new();
@@ -367,35 +361,6 @@ impl Provider for AnthropicProvider {
                                 if let Some(json_str) = line.strip_prefix("data: ") {
                                     if json_str == "[DONE]" {
                                         continue;
-                                    }
-                                    // Skip unsupported content block types (e.g. thinking/signature)
-                                    // and any subsequent delta/stop events for those block indices.
-                                    if let Ok(raw) =
-                                        serde_json::from_str::<serde_json::Value>(json_str)
-                                    {
-                                        // Track thinking block indices to skip their deltas/stops
-                                        let block_type = raw
-                                            .get("content_block")
-                                            .and_then(|b| b.get("type"))
-                                            .and_then(|t| t.as_str());
-                                        if matches!(block_type, Some("thinking" | "signature")) {
-                                            if let Some(idx) =
-                                                raw.get("index").and_then(|i| i.as_u64())
-                                            {
-                                                skipped_indices.insert(idx);
-                                            }
-                                            tracing::debug!(
-                                                "Skipping unsupported content_block type: {:?}",
-                                                block_type
-                                            );
-                                            continue;
-                                        }
-                                        // Skip deltas/stops for previously skipped block indices
-                                        if let Some(idx) = raw.get("index").and_then(|i| i.as_u64())
-                                            && skipped_indices.contains(&idx)
-                                        {
-                                            continue;
-                                        }
                                     }
                                     match serde_json::from_str::<StreamEvent>(json_str) {
                                         Ok(event) => events.push(Ok(event)),
