@@ -81,7 +81,13 @@ impl AnthropicProvider {
 
     /// Returns true when requests go through a local proxy instead of the Anthropic API.
     fn is_proxied(&self) -> bool {
-        self.messages_url != ANTHROPIC_API_URL
+        let proxied = self.messages_url != ANTHROPIC_API_URL;
+        tracing::debug!(
+            "AnthropicProvider::is_proxied() = {} (url={})",
+            proxied,
+            self.messages_url
+        );
+        proxied
     }
 
     /// Set custom default model
@@ -488,7 +494,7 @@ impl Provider for AnthropicProvider {
     }
 
     fn is_proxied(&self) -> bool {
-        self.messages_url != ANTHROPIC_API_URL
+        self.is_proxied()
     }
 }
 

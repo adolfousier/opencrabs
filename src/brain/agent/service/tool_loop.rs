@@ -194,6 +194,11 @@ impl AgentService {
             .read()
             .expect("provider lock poisoned")
             .is_proxied();
+        tracing::info!(
+            "Provider '{}' is_proxied={}",
+            self.provider.read().expect("provider lock poisoned").name(),
+            proxied
+        );
 
         // Load conversation context with budget-aware message trimming
         let message_service = MessageService::new(self.context.clone());

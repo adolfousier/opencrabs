@@ -113,4 +113,8 @@ impl Provider for FallbackProvider {
         self.primary
             .calculate_cost(model, input_tokens, output_tokens)
     }
+
+    fn is_proxied(&self) -> bool {
+        self.primary.is_proxied()
+    }
 }
