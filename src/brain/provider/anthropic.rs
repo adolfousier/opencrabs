@@ -36,7 +36,6 @@ pub struct AnthropicProvider {
     api_key: String,
     client: Client,
     custom_default_model: Option<String>,
-    messages_url: String,
 }
 
 impl AnthropicProvider {
@@ -54,7 +53,6 @@ impl AnthropicProvider {
             api_key,
             client,
             custom_default_model: None,
-            messages_url: ANTHROPIC_API_URL.to_string(),
         }
     }
 
@@ -64,30 +62,7 @@ impl AnthropicProvider {
             api_key,
             client,
             custom_default_model: None,
-            messages_url: ANTHROPIC_API_URL.to_string(),
         }
-    }
-
-    /// Override the base URL (e.g. for a local proxy).
-    pub fn with_base_url(mut self, base_url: String) -> Self {
-        // Ensure the URL ends with /v1/messages
-        self.messages_url = if base_url.ends_with("/v1/messages") {
-            base_url
-        } else {
-            format!("{}/v1/messages", base_url.trim_end_matches('/'))
-        };
-        self
-    }
-
-    /// Returns true when requests go through a local proxy instead of the Anthropic API.
-    fn is_proxied(&self) -> bool {
-        let proxied = self.messages_url != ANTHROPIC_API_URL;
-        tracing::debug!(
-            "AnthropicProvider::is_proxied() = {} (url={})",
-            proxied,
-            self.messages_url
-        );
-        proxied
     }
 
     /// Set custom default model
@@ -137,16 +112,9 @@ impl AnthropicProvider {
         headers
     }
 
-    /// Build request headers, including X-Working-Dir when proxied.
-    fn request_headers(&self, request: &LLMRequest) -> reqwest::header::HeaderMap {
-        let mut headers = self.headers();
-        if self.is_proxied()
-            && let Some(ref wd) = request.working_directory
-            && let Ok(val) = wd.parse()
-        {
-            headers.insert("x-working-dir", val);
-        }
-        headers
+    /// Build request headers.
+    fn request_headers(&self, _request: &LLMRequest) -> reqwest::header::HeaderMap {
+        self.headers()
     }
 
     /// Convert our generic request to Anthropic-specific format
@@ -269,7 +237,7 @@ impl Provider for AnthropicProvider {
                 tracing::debug!("Sending request to Anthropic API");
                 let response = self
                     .client
-                    .post(&self.messages_url)
+                    .post(ANTHROPIC_API_URL)
                     .headers(req_headers.clone())
                     .json(&anthropic_request)
                     .send()
@@ -326,7 +294,7 @@ impl Provider for AnthropicProvider {
             || async {
                 let response = self
                     .client
-                    .post(&self.messages_url)
+                    .post(ANTHROPIC_API_URL)
                     .headers(req_headers.clone())
                     .json(&anthropic_request)
                     .send()
@@ -491,10 +459,6 @@ impl Provider for AnthropicProvider {
 
     fn calculate_cost(&self, model: &str, input_tokens: u32, output_tokens: u32) -> f64 {
         crate::pricing::PricingConfig::load().calculate_cost(model, input_tokens, output_tokens)
-    }
-
-    fn is_proxied(&self) -> bool {
-        self.is_proxied()
     }
 }
 

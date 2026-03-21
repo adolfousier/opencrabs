@@ -109,7 +109,7 @@ https://github.com/user-attachments/assets/7f45c5f8-acdf-48d5-b6a4-0e4811a9ee23
 | **Fallback Providers** | Configure a chain of fallback providers — if the primary fails, each fallback is tried in sequence automatically. Any configured provider can be a fallback. Config: `[providers.fallback] providers = ["openrouter", "anthropic"]` |
 | **Per-Provider Vision** | Set `vision_model` per provider — the LLM calls `analyze_image` as a tool, which uses the vision model on the same provider API to describe images. The chat model stays the same and gets vision capability via tool call. Gemini vision takes priority when configured. Auto-configured for known providers (e.g. MiniMax) on first run |
 | **Real-time Streaming** | Character-by-character response streaming with animated spinner showing model name and live text |
-| **Claude Max Proxy** | Use your Claude Max subscription via [cc-max-proxy](https://github.com/adolfousier/cc-max-proxy) — routes API calls through the `claude` CLI. No API key, no per-token costs. Set `base_url` in config and go |
+| **Claude CLI** | Use your Claude Max subscription directly via the `claude` CLI — no API key, no per-token costs. Just install Claude Code, authenticate, and select Claude CLI as your provider |
 | **Local LLM Support** | Run with LM Studio, Ollama, or any OpenAI-compatible endpoint — 100% private, zero-cost |
 | **Cost Tracking** | Per-message token count and cost displayed in header; `/usage` shows all-time breakdown grouped by model with real costs + estimates for historical sessions |
 | **Context Awareness** | Live context usage indicator showing actual token counts (e.g. `ctx: 45K/200K (23%)`); auto-compaction at 70% with tool overhead budgeting; accurate tiktoken-based counting calibrated against API actuals |
@@ -200,22 +200,19 @@ api_key = "sk-ant-api03-YOUR_KEY"
 
 **Features:** Streaming, tools, cost tracking, automatic retry with backoff
 
-#### Proxy via Claude Code CLI (Claude Max subscription)
+#### Claude CLI (Claude Max subscription)
 
-Use your Claude Max subscription instead of per-token API costs. [cc-max-proxy](https://github.com/adolfousier/cc-max-proxy) routes Anthropic API calls through the `claude` CLI on your machine — no API key needed.
+Use your Claude Max subscription instead of per-token API costs. OpenCrabs spawns the local `claude` CLI as a text completion backend — no proxy, no API key needed.
 
 **Setup:**
 1. Install [Claude Code CLI](https://github.com/anthropics/claude-code) and authenticate (`claude login`)
-2. Install the proxy: `cargo install cc-max-proxy`
-3. Start the proxy: `cc-max-proxy`
-4. Add to `config.toml`:
+2. Enable in `config.toml`:
 ```toml
-[providers.anthropic]
+[providers.claude_cli]
 enabled = true
-base_url = "http://127.0.0.1:3456"
 ```
 
-No `api_key` needed in `keys.toml` when proxied. OpenCrabs auto-detects proxy mode, skips API key validation, sends the working directory via `X-Working-Dir` header for project context, and delegates tool execution to the CLI.
+OpenCrabs handles all tools, memory, and context locally — the CLI is just the LLM backend.
 
 ### OpenAI
 
@@ -775,7 +772,7 @@ OpenCrabs uses `~/.opencrabs/keys.toml` as the **single source** for all API key
 
 # LLM Providers
 [providers.anthropic]
-api_key = "sk-ant-api03-YOUR_KEY"  # Not needed when using cc-max-proxy (base_url)
+api_key = "sk-ant-api03-YOUR_KEY"
 
 [providers.openai]
 api_key = "sk-YOUR_KEY"
@@ -995,7 +992,6 @@ board_ids = ["your-board-id"]    # From the board URL
 [providers.anthropic]
 enabled = true
 default_model = "claude-sonnet-4-6"
-# base_url = "http://127.0.0.1:3456"  # Uncomment to proxy via cc-max-proxy (Claude Max subscription, no API key needed)
 
 [providers.gemini]
 enabled = false

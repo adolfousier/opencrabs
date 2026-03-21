@@ -1,10 +1,8 @@
 //! Claude CLI Provider — direct subprocess integration
 //!
-//! Spawns the `claude` CLI binary and reads its NDJSON stream output,
-//! converting it to standard `StreamEvent`s. No HTTP proxy needed.
-//!
-//! The CLI handles tool execution internally (multi-turn tool loops),
-//! so `is_proxied()` returns true and the agent skips local execution.
+//! Spawns the `claude` CLI binary as a text completion backend and reads
+//! its NDJSON stream output, converting it to standard `StreamEvent`s.
+//! OpenCrabs handles all tools, memory, and context locally.
 
 use super::error::{ProviderError, Result};
 use super::r#trait::{Provider, ProviderStream};
@@ -279,11 +277,8 @@ impl Provider for ClaudeCliProvider {
             .arg("--verbose")
             .arg("--include-partial-messages")
             .arg("--no-session-persistence")
-            .arg("--dangerously-skip-permissions")
-            .arg("--permission-mode")
-            .arg("bypassPermissions")
-            .arg("--add-dir")
-            .arg("/")
+            .arg("--tools")
+            .arg("")
             .arg("--model")
             .arg(&model)
             .current_dir(&cwd)
@@ -661,10 +656,6 @@ impl Provider for ClaudeCliProvider {
 
     fn supports_vision(&self) -> bool {
         false // CLI doesn't support image inputs via stdin
-    }
-
-    fn is_proxied(&self) -> bool {
-        true // CLI handles tool execution autonomously
     }
 }
 

@@ -15,8 +15,8 @@ use uuid::Uuid;
 
 use super::store::Store;
 use wacore::types::events::Event;
-use whatsapp_rust::bot::Bot;
 use whatsapp_rust::TokioRuntime;
+use whatsapp_rust::bot::Bot;
 use whatsapp_rust_tokio_transport::TokioWebSocketTransportFactory;
 use whatsapp_rust_ureq_http_client::UreqHttpClient;
 

@@ -1211,11 +1211,7 @@ impl ProtocolStore for Store {
         Ok(())
     }
 
-    async fn take_sent_message(
-        &self,
-        chat_jid: &str,
-        message_id: &str,
-    ) -> Result<Option<Vec<u8>>> {
+    async fn take_sent_message(&self, chat_jid: &str, message_id: &str) -> Result<Option<Vec<u8>>> {
         let cj = chat_jid.to_string();
         let mid = message_id.to_string();
         let did = self.device_id;
