@@ -5,6 +5,27 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.85] - 2026-03-21
+
+### Added
+- **Claude Code proxy mode** — Full proxy pipeline for running OpenCrabs behind Claude Code (cc-max-proxy). Skip local tool execution when proxied (CLI handles tools autonomously), skip API key requirement when custom `base_url` is set, pass `X-Working-Dir` header to proxy, normalize Claude Code tool names for compatibility
+- **Native extended thinking support** — `Thinking` variant in `ContentBlock` for native extended thinking content blocks from Anthropic models
+- **Cron default provider/model config** — New `[cron]` config section to set default `provider` and `model` for cron jobs independently from interactive sessions
+
+### Fixed
+- **FallbackProvider delegates `is_proxied()`** — `FallbackProvider` now correctly delegates `is_proxied()` to its primary provider instead of always returning `false`
+- **Anthropic `thinking_delta` SSE parsing** — Handle `thinking_delta` events in the Anthropic SSE stream parser instead of ignoring them
+- **Tool events emitted in proxied mode** — `ToolStarted`/`ToolCompleted` events now fire in proxied mode so the TUI displays tool activity
+- **Streaming spinner spacing** — Added spacing between streaming content and the status spinner line
+- **Thinking blocks skipped in SSE parser** — Skip thinking blocks in Anthropic SSE parser and suppress noisy log output
+- **Context management: re-compact instead of hard-truncate** — Removed hard-truncation that blindly dropped messages; now re-compacts context instead, preserving conversation continuity
+- **Context budget lowered to 65%** — Prevents MiniMax tool-call degradation that occurred at higher context utilization
+- **XML tool-call recovery** — Recover XML tool calls from model output instead of silently dropping them
+- **Secret redaction in DB persistence** — Redact secrets from user messages before writing to the database
+
+### Docs
+- **cc-max-proxy setup instructions** — Added setup guide and feature documentation for the Claude Code proxy integration
+
 ## [0.2.84] - 2026-03-20
 
 ### Added
@@ -1647,6 +1668,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.85]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.85
 [0.2.84]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.84
 [0.2.83]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.83
 [0.2.82]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.82
