@@ -149,8 +149,10 @@ fn init_debug_logging(config: LogConfig) -> Result<LoggerGuard, Box<dyn std::err
         .add_directive(config.log_level.into())
         .add_directive("rusqlite=warn".parse()?)
         .add_directive("hyper=warn".parse()?)
+        .add_directive("h2=warn".parse()?)
         .add_directive("reqwest=warn".parse()?)
         .add_directive("tower=warn".parse()?)
+        .add_directive("slack_morphism=warn".parse()?)
         // whatsapp-rust logs TODO stubs for unimplemented upstream handlers — suppress
         .add_directive("whatsapp_rust::client=error".parse()?)
         .add_directive("whatsapp_rust=warn".parse()?);

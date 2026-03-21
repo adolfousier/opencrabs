@@ -94,10 +94,7 @@ impl AgentService {
             );
             // Re-run compaction — the 55% keep_budget should get it under 65%
             // on the second pass since there's less context now.
-            if let Ok(summary) = self
-                .compact_context(session_id, context, model_name)
-                .await
-            {
+            if let Ok(summary) = self.compact_context(session_id, context, model_name).await {
                 if let Some(cb) = progress_callback {
                     cb(
                         session_id,
