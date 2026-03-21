@@ -199,6 +199,18 @@ impl AgentService {
                                 // Accumulate for persistence
                                 reasoning_buf.push_str(&text);
                             }
+                            ContentDelta::ThinkingDelta { thinking } => {
+                                // Anthropic native thinking_delta — same as reasoning
+                                if let Some(cb) = effective_cb {
+                                    cb(
+                                        session_id,
+                                        ProgressEvent::ReasoningChunk {
+                                            text: thinking.clone(),
+                                        },
+                                    );
+                                }
+                                reasoning_buf.push_str(&thinking);
+                            }
                         }
                     }
                 }
