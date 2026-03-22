@@ -2,6 +2,8 @@
 //!
 //! Wraps a primary provider with an ordered list of fallbacks.
 //! When the primary fails, each fallback is tried in sequence.
+//! The fallback automatically remaps the model to the fallback provider's
+//! default when the original model isn't supported.
 
 use super::error::Result;
 use super::r#trait::{Provider, ProviderStream};
@@ -19,6 +21,23 @@ impl FallbackProvider {
     pub fn new(primary: Arc<dyn Provider>, fallbacks: Vec<Arc<dyn Provider>>) -> Self {
         Self { primary, fallbacks }
     }
+
+    /// Build a request for a fallback provider, remapping the model if needed.
+    fn remap_request_for_fallback(fb: &dyn Provider, request: &LLMRequest) -> LLMRequest {
+        let mut fb_request = request.clone();
+        let supported = fb.supported_models();
+        if !supported.is_empty() && !supported.iter().any(|m| m == &fb_request.model) {
+            let new_model = fb.default_model().to_string();
+            tracing::info!(
+                "Fallback '{}': model '{}' not supported — remapping to '{}'",
+                fb.name(),
+                fb_request.model,
+                new_model
+            );
+            fb_request.model = new_model;
+        }
+        fb_request
+    }
 }
 
 #[async_trait]
@@ -33,7 +52,8 @@ impl Provider for FallbackProvider {
                     e
                 );
                 for fb in &self.fallbacks {
-                    match fb.complete(request.clone()).await {
+                    let fb_request = Self::remap_request_for_fallback(fb.as_ref(), &request);
+                    match fb.complete(fb_request).await {
                         Ok(resp) => {
                             tracing::info!("Fallback provider '{}' succeeded", fb.name());
                             return Ok(resp);
@@ -58,7 +78,8 @@ impl Provider for FallbackProvider {
                     e
                 );
                 for fb in &self.fallbacks {
-                    match fb.stream(request.clone()).await {
+                    let fb_request = Self::remap_request_for_fallback(fb.as_ref(), &request);
+                    match fb.stream(fb_request).await {
                         Ok(stream) => {
                             tracing::info!("Fallback provider '{}' stream succeeded", fb.name());
                             return Ok(stream);
