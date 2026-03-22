@@ -105,7 +105,7 @@ https://github.com/user-attachments/assets/7f45c5f8-acdf-48d5-b6a4-0e4811a9ee23
 ### AI & Providers
 | Feature | Description |
 |---------|-------------|
-| **Multi-Provider** | Anthropic Claude, OpenAI, GitHub Copilot (uses your Copilot subscription), OpenRouter (400+ models), MiniMax, Google Gemini, z.ai GLM (General API + Coding API), and any OpenAI-compatible API (Ollama, LM Studio, LocalAI). Model lists fetched live from provider APIs — new models available instantly. Each session remembers its provider + model and restores it on switch |
+| **Multi-Provider** | Anthropic Claude, OpenAI, GitHub Copilot (uses your Copilot subscription), OpenRouter (400+ models), MiniMax, Google Gemini, z.ai GLM (General API + Coding API), Claude CLI, OpenCode CLI, and any OpenAI-compatible API (Ollama, LM Studio, LocalAI). Model lists fetched live from provider APIs — new models available instantly. Each session remembers its provider + model and restores it on switch |
 | **Fallback Providers** | Configure a chain of fallback providers — if the primary fails, each fallback is tried in sequence automatically. Any configured provider can be a fallback. Config: `[providers.fallback] providers = ["openrouter", "anthropic"]` |
 | **Per-Provider Vision** | Set `vision_model` per provider — the LLM calls `analyze_image` as a tool, which uses the vision model on the same provider API to describe images. The chat model stays the same and gets vision capability via tool call. Gemini vision takes priority when configured. Auto-configured for known providers (e.g. MiniMax) on first run |
 | **Real-time Streaming** | Character-by-character response streaming with animated spinner showing model name and live text |
@@ -185,6 +185,19 @@ Images are passed to the active model's vision pipeline if it supports multimoda
 ---
 
 ## 🌐 Supported AI Providers
+
+| Provider | Auth | Models | Streaming | Tools | Notes |
+|----------|------|--------|-----------|-------|-------|
+| [Anthropic Claude](#anthropic-claude) | API key | Claude Opus 4.6, Sonnet 4.5, Haiku 4.5+ | ✅ | ✅ | Cost tracking, automatic retry |
+| [OpenAI](#openai) | API key | GPT-5 Turbo, GPT-5 | ✅ | ✅ | |
+| [GitHub Copilot](#github-copilot) | OAuth | GPT-4o, Claude Sonnet 4+ | ✅ | ✅ | Uses your Copilot subscription — no API charges |
+| [OpenRouter](#openrouter--400-models-one-key) | API key | 400+ models | ✅ | ✅ | Free models available (DeepSeek-R1, Llama 3.3, etc.) |
+| [Google Gemini](#google-gemini) | API key | Gemini 2.5 Flash, 2.0, 1.5 Pro | ✅ | ✅ | 1M+ context, vision, image generation |
+| [MiniMax](#minimax) | API key | M2.7, M2.5, M2.1, Text-01 | ✅ | ✅ | Competitive pricing, auto-configured vision |
+| [z.ai GLM](#zai-glm) | API key | GLM-4.5 through GLM-5 Turbo | ✅ | ✅ | General API + Coding API endpoints |
+| [Claude CLI](#claude-code-cli) | CLI auth | Via `claude` binary | ✅ | ✅ | Uses your Claude Code subscription |
+| [OpenCode CLI](#opencode-cli) | None | Free models (Mimo, etc.) | ✅ | ✅ | Free — no API key or subscription needed |
+| [Custom](#custom-openai-compatible) | Optional | Any | ✅ | ✅ | Ollama, LM Studio, Groq, NVIDIA, any OpenAI-compatible API |
 
 ### Anthropic Claude
 
@@ -320,6 +333,23 @@ Both use the same API key and model names. The endpoint type can be toggled in t
 
 **Features:** Streaming, tools, OpenAI-compatible API, live model list from `/models` endpoint
 
+### OpenCode CLI
+
+Use the [OpenCode](https://github.com/opencode-ai/opencode) CLI as a free LLM backend — no API key or subscription needed. OpenCrabs spawns the local `opencode` binary for completions.
+
+**Setup:**
+1. Install [OpenCode CLI](https://github.com/opencode-ai/opencode) (`go install github.com/opencode-ai/opencode@latest` or download from releases)
+2. Enable in `config.toml`:
+```toml
+[providers.opencode_cli]
+enabled = true
+default_model = "opencode/mimo-v2-pro-free"
+```
+
+Models are fetched live from `opencode models`. Free models like `mimo-v2-pro-free` work without any authentication.
+
+**Features:** Streaming, tools, extended thinking support, NDJSON event protocol
+
 ### Custom (OpenAI-Compatible)
 
 **Use for:** Ollama, LM Studio, LocalAI, Groq, or any OpenAI-compatible API.
@@ -387,7 +417,7 @@ default_model = "moonshotai/kimi-k2.5"
 api_key = "nvapi-..."
 ```
 
-**Provider priority:** MiniMax > OpenRouter > Anthropic > OpenAI > GitHub Copilot > Gemini > z.ai GLM > Custom. The first provider with `enabled = true` is used on new sessions. Each provider has its own API key in `keys.toml` — no sharing or confusion.
+**Provider priority:** MiniMax > OpenRouter > Anthropic > OpenAI > GitHub Copilot > Gemini > z.ai GLM > Claude CLI > OpenCode CLI > Custom. The first provider with `enabled = true` is used on new sessions. Each provider has its own API key in `keys.toml` — no sharing or confusion.
 
 **Per-session provider:** Each session remembers which provider and model it was using. Switch to Claude in one session, Kimi in another — when you `/sessions` switch between them, the provider restores automatically. No need to `/models` every time. New sessions inherit the current provider.
 
