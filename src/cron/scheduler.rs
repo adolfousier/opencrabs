@@ -1,9 +1,9 @@
 //! Cron Scheduler
 //!
 //! Background task that checks the `cron_jobs` table every 60 seconds,
-//! executes due jobs in the user's active session, and delivers results
-//! to the configured channel. Never spawns new sessions — follows the
-//! user's current session, falls back to the initial session at startup.
+//! executes due jobs in a dedicated "Cron" session, and delivers results
+//! to the configured channel. Cron jobs are fully isolated from the TUI —
+//! they never share or mutate the user's active session.
 
 use crate::channels::ChannelFactory;
 use crate::config::Config;
@@ -17,17 +17,19 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+/// Name used for the shared cron session.
+const CRON_SESSION_NAME: &str = "Cron";
+
 /// Background cron scheduler that polls the database and executes due jobs.
 pub struct CronScheduler {
     repo: CronJobRepository,
     factory: Arc<ChannelFactory>,
     service_context: ServiceContext,
-    /// Shared reference to the user's currently active session in the TUI.
-    /// For repeating crons, we follow the user to their current session.
-    /// Falls back to `initial_session_id` if the user has no active session.
+    /// Dedicated session for all cron jobs — isolated from TUI sessions.
+    cron_session_id: Option<Uuid>,
+    /// Kept for API compatibility but no longer used for session resolution.
+    #[allow(dead_code)]
     shared_session_id: Arc<Mutex<Option<Uuid>>>,
-    /// The session that was active when the scheduler was spawned.
-    initial_session_id: Option<Uuid>,
 }
 
 impl CronScheduler {
@@ -41,8 +43,8 @@ impl CronScheduler {
             repo,
             factory,
             service_context,
+            cron_session_id: None,
             shared_session_id,
-            initial_session_id: None,
         }
     }
 
@@ -50,12 +52,19 @@ impl CronScheduler {
     /// Polls every 60 seconds for due jobs.
     pub fn spawn(mut self) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
-            // Capture the session that was active when the scheduler started
-            self.initial_session_id = *self.shared_session_id.lock().await;
-            tracing::info!(
-                "Cron scheduler started — polling every 60s, initial session: {:?}",
-                self.initial_session_id
-            );
+            // Find or create the dedicated cron session
+            match self.resolve_or_create_cron_session().await {
+                Ok(id) => {
+                    self.cron_session_id = Some(id);
+                    tracing::info!(
+                        "Cron scheduler started — polling every 60s, cron session: {}",
+                        id
+                    );
+                }
+                Err(e) => {
+                    tracing::error!("Cron scheduler failed to create session: {e}");
+                }
+            }
             loop {
                 if let Err(e) = self.tick().await {
                     tracing::error!("Cron scheduler tick error: {e}");
@@ -65,20 +74,43 @@ impl CronScheduler {
         })
     }
 
-    /// Resolve which session cron jobs should run in.
-    /// Priority: user's current active session > initial session at scheduler start.
-    async fn resolve_session_id(&self) -> Option<Uuid> {
-        let current = *self.shared_session_id.lock().await;
-        current.or(self.initial_session_id)
+    /// Find an existing "Cron" session or create one.
+    async fn resolve_or_create_cron_session(&self) -> anyhow::Result<Uuid> {
+        use crate::db::repository::SessionListOptions;
+        let session_svc = SessionService::new(self.service_context.clone());
+        // Look for an existing session named "Cron"
+        let sessions = session_svc
+            .list_sessions(SessionListOptions {
+                include_archived: false,
+                limit: None,
+                offset: 0,
+            })
+            .await?;
+        if let Some(existing) = sessions.iter().find(|s| {
+            s.title
+                .as_deref()
+                .is_some_and(|n| n == CRON_SESSION_NAME)
+        }) {
+            return Ok(existing.id);
+        }
+        // Create a new dedicated cron session
+        let config = Config::load().unwrap_or_default();
+        let provider = config.cron.default_provider.clone();
+        let model = config.cron.default_model.clone();
+        let session = session_svc
+            .create_session_with_provider(
+                Some(CRON_SESSION_NAME.to_string()),
+                provider,
+                model,
+            )
+            .await?;
+        Ok(session.id)
     }
 
     /// One scheduler tick: check all enabled jobs and execute any that are due.
     async fn tick(&self) -> anyhow::Result<()> {
         let jobs = self.repo.list_enabled().await?;
         let now = Utc::now();
-
-        // Resolve session once per tick — all jobs in this tick share it
-        let session_id = self.resolve_session_id().await;
 
         for job in &jobs {
             if self.is_due(job, now) {
@@ -92,11 +124,15 @@ impl CronScheduler {
                     .await?;
 
                 // Execute in background so we don't block other jobs
+                let Some(cron_sid) = self.cron_session_id else {
+                    tracing::error!("Cron job '{}' — no cron session available, skipping", job.name);
+                    continue;
+                };
                 let job = job.clone();
                 let factory = self.factory.clone();
                 let ctx = self.service_context.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = execute_job(&job, &factory, &ctx, session_id).await {
+                    if let Err(e) = execute_job(&job, &factory, &ctx, cron_sid).await {
                         tracing::error!("Cron job '{}' failed: {e}", job.name);
                     }
                 });
@@ -148,16 +184,14 @@ impl CronScheduler {
     }
 }
 
-/// Execute a single cron job in the user's current session.
-/// Falls back to creating a session only if no active session exists.
+/// Execute a single cron job in the shared cron session.
+/// Isolated from TUI — never touches the user's active session.
 async fn execute_job(
     job: &CronJob,
     factory: &ChannelFactory,
-    ctx: &ServiceContext,
-    target_session_id: Option<Uuid>,
+    _ctx: &ServiceContext,
+    cron_session_id: Uuid,
 ) -> anyhow::Result<()> {
-    let session_svc = SessionService::new(ctx.clone());
-
     // Resolve effective provider/model: job override > config default > system default
     let config = Config::load().unwrap_or_default();
     let effective_provider = job
@@ -169,70 +203,12 @@ async fn execute_job(
         .clone()
         .or_else(|| config.cron.default_model.clone());
 
-    let session_id = if let Some(id) = target_session_id {
-        // Verify session still exists
-        if session_svc.get_session(id).await?.is_some() {
-            tracing::info!("Cron job '{}' — using active session {}", job.name, id);
-            id
-        } else {
-            // Session was deleted — fall back to most recent
-            let fallback = session_svc.get_most_recent_session().await?;
-            match fallback {
-                Some(s) => {
-                    tracing::info!(
-                        "Cron job '{}' — target session gone, using most recent {}",
-                        job.name,
-                        s.id
-                    );
-                    s.id
-                }
-                None => {
-                    // No sessions at all — create one as last resort
-                    let s = session_svc
-                        .create_session_with_provider(
-                            Some(format!("Cron: {}", job.name)),
-                            effective_provider.clone(),
-                            effective_model.clone(),
-                        )
-                        .await?;
-                    tracing::warn!(
-                        "Cron job '{}' — no sessions found, created fallback {}",
-                        job.name,
-                        s.id
-                    );
-                    s.id
-                }
-            }
-        }
-    } else {
-        // No shared session yet (app just started?) — try most recent
-        let fallback = session_svc.get_most_recent_session().await?;
-        match fallback {
-            Some(s) => {
-                tracing::info!(
-                    "Cron job '{}' — no active session, using most recent {}",
-                    job.name,
-                    s.id
-                );
-                s.id
-            }
-            None => {
-                let s = session_svc
-                    .create_session_with_provider(
-                        Some(format!("Cron: {}", job.name)),
-                        effective_provider.clone(),
-                        effective_model.clone(),
-                    )
-                    .await?;
-                tracing::warn!(
-                    "Cron job '{}' — no sessions found, created fallback {}",
-                    job.name,
-                    s.id
-                );
-                s.id
-            }
-        }
-    };
+    let session_id = cron_session_id;
+    tracing::info!(
+        "Cron job '{}' — using cron session {}",
+        job.name,
+        session_id
+    );
 
     // Spawn agent service (inherits tools, brain, working dir from factory)
     let agent = factory.create_agent_service();
