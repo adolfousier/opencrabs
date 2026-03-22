@@ -738,6 +738,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let mut help_spans: Vec<Span> = Vec::new();
+    help_spans.push(Span::raw("   "));
     for (key, action) in help_text {
         help_spans.push(Span::styled(
             key,
