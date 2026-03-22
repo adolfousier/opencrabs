@@ -518,7 +518,9 @@ impl Provider for OpenCodeCliProvider {
                         tracing::debug!("opencode CLI tool_use (handled by opencode internally)");
                     }
                     CliEvent::ToolResult { .. } => {
-                        tracing::debug!("opencode CLI tool_result (handled by opencode internally)");
+                        tracing::debug!(
+                            "opencode CLI tool_result (handled by opencode internally)"
+                        );
                     }
                     CliEvent::Unknown => {}
                 }

@@ -404,7 +404,15 @@ fn try_create_openrouter(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
 
     tracing::info!("Using OpenRouter at: {}", base_url);
     let provider = configure_openai_compatible(
-        OpenAIProvider::with_base_url(api_key.clone(), base_url).with_name("openrouter"),
+        OpenAIProvider::with_base_url(api_key.clone(), base_url)
+            .with_name("openrouter")
+            .with_extra_headers(vec![
+                ("X-Title".to_string(), "Open Crabs".to_string()),
+                (
+                    "HTTP-Referer".to_string(),
+                    "https://opencrabs.com".to_string(),
+                ),
+            ]),
         openrouter_config,
     );
     Ok(Some(Arc::new(provider)))

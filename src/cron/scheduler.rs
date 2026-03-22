@@ -86,11 +86,10 @@ impl CronScheduler {
                 offset: 0,
             })
             .await?;
-        if let Some(existing) = sessions.iter().find(|s| {
-            s.title
-                .as_deref()
-                .is_some_and(|n| n == CRON_SESSION_NAME)
-        }) {
+        if let Some(existing) = sessions
+            .iter()
+            .find(|s| s.title.as_deref().is_some_and(|n| n == CRON_SESSION_NAME))
+        {
             return Ok(existing.id);
         }
         // Create a new dedicated cron session
@@ -98,11 +97,7 @@ impl CronScheduler {
         let provider = config.cron.default_provider.clone();
         let model = config.cron.default_model.clone();
         let session = session_svc
-            .create_session_with_provider(
-                Some(CRON_SESSION_NAME.to_string()),
-                provider,
-                model,
-            )
+            .create_session_with_provider(Some(CRON_SESSION_NAME.to_string()), provider, model)
             .await?;
         Ok(session.id)
     }
@@ -125,7 +120,10 @@ impl CronScheduler {
 
                 // Execute in background so we don't block other jobs
                 let Some(cron_sid) = self.cron_session_id else {
-                    tracing::error!("Cron job '{}' — no cron session available, skipping", job.name);
+                    tracing::error!(
+                        "Cron job '{}' — no cron session available, skipping",
+                        job.name
+                    );
                     continue;
                 };
                 let job = job.clone();
