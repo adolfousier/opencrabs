@@ -238,6 +238,20 @@ impl OnboardingWizard {
                         String::new(),
                         String::new(),
                     )
+                } else if config
+                    .providers
+                    .claude_cli
+                    .as_ref()
+                    .is_some_and(|p| p.enabled)
+                {
+                    (7, String::new(), String::new(), String::new())
+                } else if config
+                    .providers
+                    .opencode_cli
+                    .as_ref()
+                    .is_some_and(|p| p.enabled)
+                {
+                    (8, String::new(), String::new(), String::new())
                 } else if let Some((name, c)) = config.providers.active_custom().or_else(|| {
                     config
                         .providers
@@ -472,16 +486,41 @@ impl OnboardingWizard {
             {
                 wizard.custom_model = model.clone();
             }
+        } else if config.providers.zhipu.as_ref().is_some_and(|p| p.enabled) {
+            wizard.selected_provider = 6; // z.ai GLM
+            if let Some(model) = &config
+                .providers
+                .zhipu
+                .as_ref()
+                .and_then(|p| p.default_model.clone())
+            {
+                wizard.custom_model = model.clone();
+            }
         } else if config
             .providers
             .claude_cli
             .as_ref()
             .is_some_and(|p| p.enabled)
         {
-            wizard.selected_provider = 6; // Claude CLI
+            wizard.selected_provider = 7; // Claude CLI
             if let Some(model) = &config
                 .providers
                 .claude_cli
+                .as_ref()
+                .and_then(|p| p.default_model.clone())
+            {
+                wizard.custom_model = model.clone();
+            }
+        } else if config
+            .providers
+            .opencode_cli
+            .as_ref()
+            .is_some_and(|p| p.enabled)
+        {
+            wizard.selected_provider = 8; // OpenCode CLI
+            if let Some(model) = &config
+                .providers
+                .opencode_cli
                 .as_ref()
                 .and_then(|p| p.default_model.clone())
             {
