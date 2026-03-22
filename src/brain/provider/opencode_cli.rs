@@ -145,6 +145,14 @@ enum CliEvent {
     Reasoning {
         part: ReasoningPart,
     },
+    ToolUse {
+        #[allow(dead_code)]
+        part: serde_json::Value,
+    },
+    ToolResult {
+        #[allow(dead_code)]
+        part: serde_json::Value,
+    },
     StepFinish {
         part: StepFinishPart,
     },
@@ -449,32 +457,45 @@ impl Provider for OpenCodeCliProvider {
                     }
 
                     CliEvent::StepFinish { part } => {
-                        let reason = part.reason.map(|r| match r.as_str() {
-                            "stop" | "end_turn" => StopReason::EndTurn,
-                            "tool_use" => StopReason::ToolUse,
-                            "max_tokens" => StopReason::MaxTokens,
-                            _ => StopReason::EndTurn,
-                        });
+                        let is_final = part
+                            .reason
+                            .as_deref()
+                            .is_none_or(|r| r != "tool-calls" && r != "tool_use");
 
-                        let (input_tokens, output_tokens) = part
-                            .tokens
-                            .map(|t| (t.input, t.output + t.reasoning))
-                            .unwrap_or((0, 0));
+                        if is_final {
+                            let reason = part.reason.map(|r| match r.as_str() {
+                                "stop" | "end_turn" => StopReason::EndTurn,
+                                "max_tokens" => StopReason::MaxTokens,
+                                _ => StopReason::EndTurn,
+                            });
 
-                        let _ = tx
-                            .send(Ok(StreamEvent::MessageDelta {
-                                delta: MessageDelta {
-                                    stop_reason: reason,
-                                    stop_sequence: None,
-                                },
-                                usage: TokenUsage {
-                                    input_tokens,
-                                    output_tokens,
-                                },
-                            }))
-                            .await;
-                        let _ = tx.send(Ok(StreamEvent::MessageStop)).await;
-                        break;
+                            let (input_tokens, output_tokens) = part
+                                .tokens
+                                .map(|t| (t.input, t.output + t.reasoning))
+                                .unwrap_or((0, 0));
+
+                            let _ = tx
+                                .send(Ok(StreamEvent::MessageDelta {
+                                    delta: MessageDelta {
+                                        stop_reason: reason,
+                                        stop_sequence: None,
+                                    },
+                                    usage: TokenUsage {
+                                        input_tokens,
+                                        output_tokens,
+                                    },
+                                }))
+                                .await;
+                            let _ = tx.send(Ok(StreamEvent::MessageStop)).await;
+                            break;
+                        } else {
+                            // Mid-loop step (tool-calls) — opencode will continue
+                            // with tool execution and more steps. Don't break.
+                            tracing::debug!(
+                                "opencode CLI mid-loop step_finish (reason={}), continuing",
+                                part.reason.as_deref().unwrap_or("none")
+                            );
+                        }
                     }
 
                     CliEvent::Error { error } => {
@@ -493,6 +514,12 @@ impl Provider for OpenCodeCliProvider {
                         break;
                     }
 
+                    CliEvent::ToolUse { .. } => {
+                        tracing::debug!("opencode CLI tool_use (handled by opencode internally)");
+                    }
+                    CliEvent::ToolResult { .. } => {
+                        tracing::debug!("opencode CLI tool_result (handled by opencode internally)");
+                    }
                     CliEvent::Unknown => {}
                 }
             }
