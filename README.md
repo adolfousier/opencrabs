@@ -105,11 +105,11 @@ https://github.com/user-attachments/assets/7f45c5f8-acdf-48d5-b6a4-0e4811a9ee23
 ### AI & Providers
 | Feature | Description |
 |---------|-------------|
-| **Multi-Provider** | Anthropic Claude, OpenAI, GitHub Copilot (uses your Copilot subscription), OpenRouter (400+ models), MiniMax, Google Gemini, and any OpenAI-compatible API (Ollama, LM Studio, LocalAI). Model lists fetched live from provider APIs — new models available instantly. Each session remembers its provider + model and restores it on switch |
+| **Multi-Provider** | Anthropic Claude, OpenAI, GitHub Copilot (uses your Copilot subscription), OpenRouter (400+ models), MiniMax, Google Gemini, z.ai GLM (General API + Coding API), and any OpenAI-compatible API (Ollama, LM Studio, LocalAI). Model lists fetched live from provider APIs — new models available instantly. Each session remembers its provider + model and restores it on switch |
 | **Fallback Providers** | Configure a chain of fallback providers — if the primary fails, each fallback is tried in sequence automatically. Any configured provider can be a fallback. Config: `[providers.fallback] providers = ["openrouter", "anthropic"]` |
 | **Per-Provider Vision** | Set `vision_model` per provider — the LLM calls `analyze_image` as a tool, which uses the vision model on the same provider API to describe images. The chat model stays the same and gets vision capability via tool call. Gemini vision takes priority when configured. Auto-configured for known providers (e.g. MiniMax) on first run |
 | **Real-time Streaming** | Character-by-character response streaming with animated spinner showing model name and live text |
-| **Claude CLI** | Use your Claude Max subscription directly via the `claude` CLI — no API key, no per-token costs. Just install Claude Code, authenticate, and select Claude CLI as your provider |
+| **Claude CLI** | Use your Claude Code CLI directly via the `claude` CLI — no additional setup. Just install Claude Code, authenticate, and select Claude CLI as your provider |
 | **Local LLM Support** | Run with LM Studio, Ollama, or any OpenAI-compatible endpoint — 100% private, zero-cost |
 | **Cost Tracking** | Per-message token count and cost displayed in header; `/usage` shows all-time breakdown grouped by model with real costs + estimates for historical sessions |
 | **Context Awareness** | Live context usage indicator showing actual token counts (e.g. `ctx: 45K/200K (23%)`); auto-compaction at 70% with tool overhead budgeting; accurate tiktoken-based counting calibrated against API actuals |
@@ -200,9 +200,9 @@ api_key = "sk-ant-api03-YOUR_KEY"
 
 **Features:** Streaming, tools, cost tracking, automatic retry with backoff
 
-#### Claude CLI (Claude Max subscription)
+#### Claude Code CLI 
 
-Use your Claude Max subscription instead of per-token API costs. OpenCrabs spawns the local `claude` CLI as a text completion backend — no proxy, no API key needed.
+Use your Claude Code CLI. OpenCrabs spawns the local `claude` CLI for completion.
 
 **Setup:**
 1. Install [Claude Code CLI](https://github.com/anthropics/claude-code) and authenticate (`claude login`)
@@ -293,6 +293,33 @@ api_key = "your-api-key"
 
 MiniMax is an OpenAI-compatible provider with competitive pricing. It does not expose a `/models` endpoint, so the model list comes from `config.toml` (pre-configured with available models).
 
+### z.ai GLM
+
+**Models:** `glm-4.5`, `glm-4.5-air`, `glm-4.6`, `glm-4.7`, `glm-5`, `glm-5-turbo` — fetched live from the z.ai API
+
+**Setup** — get your API key from [open.bigmodel.cn](https://open.bigmodel.cn). Add to `keys.toml`:
+
+```toml
+[providers.zhipu]
+api_key = "your-api-key"
+```
+
+Enable and choose endpoint type in `config.toml`:
+```toml
+[providers.zhipu]
+enabled = true
+default_model = "glm-4.7"
+endpoint_type = "api"  # "api" (General API) or "coding" (Coding API)
+```
+
+z.ai GLM (Zhipu AI) offers two endpoint types selectable during onboarding or via `/models`:
+- **General API** (`api`) — standard chat completions at `open.bigmodel.cn/api/paas/v4`
+- **Coding API** (`coding`) — code-optimized endpoint at `codeapi.bigmodel.cn/api/paas/v4`
+
+Both use the same API key and model names. The endpoint type can be toggled in the onboarding wizard or `/models` dialog.
+
+**Features:** Streaming, tools, OpenAI-compatible API, live model list from `/models` endpoint
+
 ### Custom (OpenAI-Compatible)
 
 **Use for:** Ollama, LM Studio, LocalAI, Groq, or any OpenAI-compatible API.
@@ -360,7 +387,7 @@ default_model = "moonshotai/kimi-k2.5"
 api_key = "nvapi-..."
 ```
 
-**Provider priority:** MiniMax > OpenRouter > Anthropic > OpenAI > GitHub Copilot > Gemini > Custom. The first provider with `enabled = true` is used on new sessions. Each provider has its own API key in `keys.toml` — no sharing or confusion.
+**Provider priority:** MiniMax > OpenRouter > Anthropic > OpenAI > GitHub Copilot > Gemini > z.ai GLM > Custom. The first provider with `enabled = true` is used on new sessions. Each provider has its own API key in `keys.toml` — no sharing or confusion.
 
 **Per-session provider:** Each session remembers which provider and model it was using. Switch to Claude in one session, Kimi in another — when you `/sessions` switch between them, the provider restores automatically. No need to `/models` every time. New sessions inherit the current provider.
 
@@ -701,7 +728,7 @@ First-time users are guided through a 9-step setup wizard that appears automatic
 | Step | Title | What It Does |
 |------|-------|-------------|
 | 1 | **Mode Selection** | QuickStart (sensible defaults) vs Advanced (full control) |
-| 2 | **Model & Auth** | Pick provider (Anthropic, OpenAI, GitHub Copilot, Gemini, OpenRouter, Minimax, Custom) → enter token/key or sign in via OAuth → model list fetched live from API → select model. Auto-detects existing keys from `keys.toml` |
+| 2 | **Model & Auth** | Pick provider (Anthropic, OpenAI, GitHub Copilot, Gemini, OpenRouter, Minimax, z.ai GLM, Custom) → enter token/key or sign in via OAuth → model list fetched live from API → select model. Auto-detects existing keys from `keys.toml` |
 | 3 | **Workspace** | Set brain workspace path (default `~/.opencrabs/`) → seed template files (SOUL.md, IDENTITY.md, etc.) |
 | 4 | **Gateway** | Configure HTTP API gateway: port, bind address, auth mode |
 | 5 | **Channels** | Toggle messaging integrations (Telegram, Discord, WhatsApp, Slack, Trello) |
@@ -785,6 +812,9 @@ api_key = "sk-or-YOUR_KEY"
 
 [providers.minimax]
 api_key = "your-minimax-key"
+
+[providers.zhipu]
+api_key = "your-zhipu-key"               # Get from open.bigmodel.cn
 
 [providers.gemini]
 api_key = "AIza..."                  # Get from aistudio.google.com
@@ -1047,6 +1077,11 @@ enabled = false
 [providers.openai]
 enabled = false
 default_model = "gpt-5-nano"
+
+[providers.zhipu]
+enabled = false
+default_model = "glm-4.7"
+endpoint_type = "coding"                 # "api" (General) or "coding" (Coding API)
 
 # ── Image ─────────────────────────────────────────────────────────────────────
 
@@ -1799,7 +1834,7 @@ opencrabs/
 │   ├── app/              # Application lifecycle
 │   ├── brain/            # Intelligence layer — LLM providers, agent, tools, brain system
 │   │   ├── agent/        # Agent service + context management
-│   │   ├── provider/     # Provider implementations (Anthropic, GitHub Copilot, OpenAI-Compatible: OpenRouter, Minimax, Custom)
+│   │   ├── provider/     # Provider implementations (Anthropic, GitHub Copilot, OpenAI-Compatible: OpenRouter, Minimax, z.ai GLM, Custom)
 │   │   ├── tools/        # Tool system (read, write, bash, glob, grep, memory_search, etc.)
 │   │   ├── tokenizer.rs  # Token counting (tiktoken-based)
 │   │   ├── prompt_builder.rs  # BrainLoader — assembles system brain from workspace files
