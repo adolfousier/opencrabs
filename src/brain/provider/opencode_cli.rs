@@ -115,9 +115,7 @@ fn resolve_opencode_path() -> Result<String> {
     }
 
     // Try PATH via `which`
-    if let Ok(output) = std::process::Command::new("which")
-        .arg("opencode")
-        .output()
+    if let Ok(output) = std::process::Command::new("which").arg("opencode").output()
         && output.status.success()
     {
         let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -257,9 +255,7 @@ impl Provider for OpenCodeCliProvider {
             .as_deref()
             .map(std::path::PathBuf::from)
             .filter(|p| p.is_dir())
-            .unwrap_or_else(|| {
-                dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/"))
-            });
+            .unwrap_or_else(|| dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/")));
 
         tracing::info!(
             "Spawning opencode CLI: model={}, prompt_len={}, cwd={}",
@@ -352,8 +348,7 @@ impl Provider for OpenCodeCliProvider {
                     CliEvent::StepStart { .. } => {
                         if !started {
                             started = true;
-                            let msg_id =
-                                format!("msg_{}", uuid::Uuid::new_v4().simple());
+                            let msg_id = format!("msg_{}", uuid::Uuid::new_v4().simple());
                             let _ = tx
                                 .send(Ok(StreamEvent::MessageStart {
                                     message: StreamMessage {
@@ -373,8 +368,7 @@ impl Provider for OpenCodeCliProvider {
                     CliEvent::Reasoning { part } => {
                         if !started {
                             started = true;
-                            let msg_id =
-                                format!("msg_{}", uuid::Uuid::new_v4().simple());
+                            let msg_id = format!("msg_{}", uuid::Uuid::new_v4().simple());
                             let _ = tx
                                 .send(Ok(StreamEvent::MessageStart {
                                     message: StreamMessage {
@@ -409,9 +403,7 @@ impl Provider for OpenCodeCliProvider {
                             }))
                             .await;
                         let _ = tx
-                            .send(Ok(StreamEvent::ContentBlockStop {
-                                index: block_index,
-                            }))
+                            .send(Ok(StreamEvent::ContentBlockStop { index: block_index }))
                             .await;
                         block_index += 1;
                     }
@@ -419,8 +411,7 @@ impl Provider for OpenCodeCliProvider {
                     CliEvent::Text { part } => {
                         if !started {
                             started = true;
-                            let msg_id =
-                                format!("msg_{}", uuid::Uuid::new_v4().simple());
+                            let msg_id = format!("msg_{}", uuid::Uuid::new_v4().simple());
                             let _ = tx
                                 .send(Ok(StreamEvent::MessageStart {
                                     message: StreamMessage {
@@ -452,9 +443,7 @@ impl Provider for OpenCodeCliProvider {
                             }))
                             .await;
                         let _ = tx
-                            .send(Ok(StreamEvent::ContentBlockStop {
-                                index: block_index,
-                            }))
+                            .send(Ok(StreamEvent::ContentBlockStop { index: block_index }))
                             .await;
                         block_index += 1;
                     }

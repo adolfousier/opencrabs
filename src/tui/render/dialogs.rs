@@ -521,7 +521,11 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(""));
     } else {
         // CLI provider: show "no API key needed" hint
-        let cli_name = if provider_idx == 8 { "opencode" } else { "claude" };
+        let cli_name = if provider_idx == 8 {
+            "opencode"
+        } else {
+            "claude"
+        };
         lines.push(Line::from(Span::styled(
             format!("  No API key needed — uses local {} CLI", cli_name),
             Style::default()

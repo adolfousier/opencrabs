@@ -330,9 +330,9 @@ async fn fetch_opencode_models() -> Vec<String> {
         "/usr/local/bin/opencode".to_string(),
     ];
 
-    let binary = candidates.iter().find(|p| {
-        !p.is_empty() && std::path::Path::new(p).exists()
-    });
+    let binary = candidates
+        .iter()
+        .find(|p| !p.is_empty() && std::path::Path::new(p).exists());
 
     let Some(binary) = binary else {
         // Try `which` as fallback
