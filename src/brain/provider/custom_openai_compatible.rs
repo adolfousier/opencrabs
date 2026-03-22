@@ -989,6 +989,22 @@ impl Provider for OpenAIProvider {
                                     continue;
                                 }
 
+                                // Check for z.ai/provider-specific inline errors (HTTP 200 with error in body)
+                                if let Ok(raw) = serde_json::from_str::<serde_json::Value>(json_str)
+                                    && let Some(status_msg) = raw.pointer("/base_resp/status_msg").and_then(|v| v.as_str())
+                                {
+                                    let status_code = raw.pointer("/base_resp/status_code").and_then(|v| v.as_u64()).unwrap_or(0);
+                                    if status_code != 0 {
+                                        tracing::error!("[STREAM_ERROR] Provider returned inline error: code={}, msg={}", status_code, status_msg);
+                                        events.push(Err(ProviderError::ApiError {
+                                            status: status_code as u16,
+                                            message: status_msg.to_string(),
+                                            error_type: Some("provider_error".to_string()),
+                                        }));
+                                        continue;
+                                    }
+                                }
+
                                 match serde_json::from_str::<OpenAIStreamChunk>(json_str) {
                                     Ok(chunk) => {
                                         // Emit MessageStart on first chunk with id
