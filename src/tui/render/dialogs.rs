@@ -325,12 +325,12 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
 
     // Provider list — static providers sorted alphabetically, then custom names, then "+ New Custom" last.
     let num_customs = app.model_selector_custom_names.len();
-    let mut static_indices: Vec<usize> = (0..8).collect();
+    let mut static_indices: Vec<usize> = (0..9).collect();
     static_indices.sort_by_key(|&i| PROVIDERS[i].name.to_ascii_lowercase());
     let display_order: Vec<usize> = static_indices
         .into_iter()
-        .chain(9..9 + num_customs)
-        .chain(std::iter::once(8))
+        .chain(10..10 + num_customs)
+        .chain(std::iter::once(9))
         .collect();
     for &idx in &display_order {
         let selected = idx == provider_idx;
@@ -339,12 +339,12 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         let prefix = if selected && focused { " > " } else { "   " };
         let marker = if selected { "[*]" } else { "[ ]" };
 
-        let label = if idx == 8 {
+        let label = if idx == 9 {
             "+ New Custom Provider".to_string()
         } else if idx < PROVIDERS.len() {
             PROVIDERS[idx].name.to_string()
         } else {
-            let custom_idx = idx - 9;
+            let custom_idx = idx - 10;
             app.model_selector_custom_names
                 .get(custom_idx)
                 .cloned()
@@ -380,7 +380,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
 
     lines.push(Line::from(""));
 
-    let is_custom = provider_idx >= 8; // Custom provider index
+    let is_custom = provider_idx >= 9; // Custom provider index
 
     // For Custom provider: show Base URL field first (field 1), then API Key (field 2)
     // For others: show API Key only (field 1)
@@ -461,9 +461,9 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     }
 
     // API Key field (field 1 for non-Custom, field 2 for Custom; field 2 for zhipu since field 1 = endpoint type)
-    // Claude CLI (index 7) has no API key — skip entirely
-    let is_claude_cli = provider_idx == 7;
-    if !is_claude_cli {
+    // CLI providers (7=Claude CLI, 8=OpenCode CLI) have no API key — skip entirely
+    let is_cli_provider = matches!(provider_idx, 7 | 8);
+    if !is_cli_provider {
         let is_zhipu = provider_idx == 6;
         let key_focused = (focused_field == 1 && !is_custom && !is_zhipu)
             || (focused_field == 2 && (is_custom || is_zhipu));
@@ -520,9 +520,10 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
 
         lines.push(Line::from(""));
     } else {
-        // Claude CLI: show "no API key needed" hint
+        // CLI provider: show "no API key needed" hint
+        let cli_name = if provider_idx == 8 { "opencode" } else { "claude" };
         lines.push(Line::from(Span::styled(
-            "  No API key needed — uses local claude CLI",
+            format!("  No API key needed — uses local {} CLI", cli_name),
             Style::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::ITALIC),

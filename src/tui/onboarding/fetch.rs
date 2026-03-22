@@ -141,6 +141,11 @@ pub fn is_first_time() -> bool {
             .claude_cli
             .as_ref()
             .is_some_and(|p| p.enabled)
+        || config
+            .providers
+            .opencode_cli
+            .as_ref()
+            .is_some_and(|p| p.enabled)
         || config.providers.active_custom().is_some();
 
     tracing::debug!(
@@ -175,6 +180,11 @@ pub async fn fetch_provider_models(
             "opus".to_string(),
             "haiku".to_string(),
         ];
+    }
+
+    // OpenCode CLI — fetch models via `opencode models` command
+    if provider_index == 8 {
+        return fetch_opencode_models().await;
     }
 
     // Handle Minimax specially - no /models API, must use config
@@ -305,4 +315,61 @@ pub async fn fetch_provider_models(
         },
         _ => Vec::new(),
     }
+}
+
+/// Fetch available models from the opencode CLI binary.
+async fn fetch_opencode_models() -> Vec<String> {
+    // Resolve binary path
+    let home = dirs::home_dir().unwrap_or_default();
+    let candidates = [
+        std::env::var("OPENCODE_PATH").unwrap_or_default(),
+        home.join(".opencode/bin/opencode")
+            .to_string_lossy()
+            .to_string(),
+        "/opt/homebrew/bin/opencode".to_string(),
+        "/usr/local/bin/opencode".to_string(),
+    ];
+
+    let binary = candidates.iter().find(|p| {
+        !p.is_empty() && std::path::Path::new(p).exists()
+    });
+
+    let Some(binary) = binary else {
+        // Try `which` as fallback
+        if let Ok(output) = tokio::process::Command::new("which")
+            .arg("opencode")
+            .output()
+            .await
+            && output.status.success()
+        {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return run_opencode_models(&path).await;
+            }
+        }
+        return Vec::new();
+    };
+
+    run_opencode_models(binary).await
+}
+
+async fn run_opencode_models(binary: &str) -> Vec<String> {
+    let output = match tokio::process::Command::new(binary)
+        .arg("models")
+        .output()
+        .await
+    {
+        Ok(o) if o.status.success() => o,
+        _ => return Vec::new(),
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut models: Vec<String> = stdout
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty() && !l.starts_with('{'))
+        .map(|l| l.to_string())
+        .collect();
+    models.sort();
+    models
 }

@@ -351,18 +351,18 @@ fn no_active_custom_when_none() {
 fn wizard_is_custom_for_new_and_existing() {
     use crate::tui::onboarding::OnboardingWizard;
     let mut wizard = OnboardingWizard::new();
-    // Index 8 = "+ New Custom Provider"
-    wizard.selected_provider = 8;
-    assert!(wizard.is_custom_provider());
-    // Index 9+ = existing custom providers
+    // Index 9 = "+ New Custom Provider"
     wizard.selected_provider = 9;
     assert!(wizard.is_custom_provider());
+    // Index 10+ = existing custom providers
     wizard.selected_provider = 10;
     assert!(wizard.is_custom_provider());
-    // Index < 8 = not custom
+    wizard.selected_provider = 11;
+    assert!(wizard.is_custom_provider());
+    // Index < 9 = not custom
     wizard.selected_provider = 0;
     assert!(!wizard.is_custom_provider());
-    wizard.selected_provider = 7;
+    wizard.selected_provider = 8;
     assert!(!wizard.is_custom_provider());
 }
 
@@ -370,11 +370,11 @@ fn wizard_is_custom_for_new_and_existing() {
 fn wizard_current_provider_clamps_for_existing_custom() {
     use crate::tui::onboarding::{OnboardingWizard, PROVIDERS};
     let mut wizard = OnboardingWizard::new();
-    // Index 9 should map to the Custom entry (index 8) in PROVIDERS
-    wizard.selected_provider = 9;
-    assert_eq!(wizard.current_provider().name, PROVIDERS[8].name);
+    // Index 10 should map to the Custom entry (index 9) in PROVIDERS
+    wizard.selected_provider = 10;
+    assert_eq!(wizard.current_provider().name, PROVIDERS[9].name);
     wizard.selected_provider = 99;
-    assert_eq!(wizard.current_provider().name, PROVIDERS[8].name);
+    assert_eq!(wizard.current_provider().name, PROVIDERS[9].name);
 }
 
 #[test]
@@ -384,7 +384,7 @@ fn wizard_load_custom_fields_clears_for_new() {
     wizard.custom_provider_name = "leftover".to_string();
     wizard.custom_base_url = "http://old-url".to_string();
     wizard.custom_model = "old-model".to_string();
-    wizard.selected_provider = 8;
+    wizard.selected_provider = 9;
     wizard.load_custom_fields_if_existing();
     assert!(wizard.custom_provider_name.is_empty());
     assert!(wizard.custom_base_url.is_empty());
