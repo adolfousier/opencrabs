@@ -137,6 +137,21 @@ impl AgentService {
                             json_buf: String::new(),
                         });
                     }
+                    // Separate thinking blocks from different rounds with a blank line
+                    if matches!(content_block, ContentBlock::Thinking { .. })
+                        && !reasoning_buf.is_empty()
+                    {
+                        reasoning_buf.push_str("\n\n");
+                        // Also emit separator to TUI so streaming display stays in sync
+                        if let Some(cb) = effective_cb {
+                            cb(
+                                session_id,
+                                ProgressEvent::ReasoningChunk {
+                                    text: "\n\n".to_string(),
+                                },
+                            );
+                        }
+                    }
                     block_states[index] = BlockState {
                         block: content_block,
                         json_buf: String::new(),

@@ -73,9 +73,7 @@ impl OpenCodeCliProvider {
                             Some(format!("<thinking>{}</thinking>", thinking))
                         }
                     }
-                    ContentBlock::Image { source } => {
-                        Some(materialize_image(source))
-                    }
+                    ContentBlock::Image { source } => Some(materialize_image(source)),
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
