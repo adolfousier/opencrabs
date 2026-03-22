@@ -18,8 +18,20 @@ type ProviderAttempt<'a> = (
 /// Create a provider based on config.toml
 /// No hardcoded priority - providers are enabled/disabled in config
 pub fn create_provider(config: &Config) -> Result<Arc<dyn Provider>> {
+    let (provider, warning) = create_provider_with_warning(config)?;
+    if let Some(msg) = &warning {
+        tracing::warn!("{}", msg);
+    }
+    Ok(provider)
+}
+
+/// Like `create_provider` but returns a warning message when a fallback was used.
+/// The caller (TUI) should surface this to the user instead of printing to stderr.
+pub fn create_provider_with_warning(
+    config: &Config,
+) -> Result<(Arc<dyn Provider>, Option<String>)> {
     // Try the enabled provider. If it fails, warn and try others before giving up.
-    // Priority order: Claude CLI > Anthropic > OpenAI > GitHub > Gemini > OpenRouter > Minimax > Custom
+    // Priority order: Claude CLI > Anthropic > OpenAI > GitHub > Gemini > OpenRouter > Minimax > zhipu > Custom
     let enabled_attempts: Vec<ProviderAttempt<'_>> = vec![
         ("Claude CLI", Box::new(|| try_create_claude_cli(config))),
         ("Anthropic", Box::new(|| try_create_anthropic(config))),
@@ -28,6 +40,7 @@ pub fn create_provider(config: &Config) -> Result<Arc<dyn Provider>> {
         ("Google Gemini", Box::new(|| try_create_gemini(config))),
         ("OpenRouter", Box::new(|| try_create_openrouter(config))),
         ("Minimax", Box::new(|| try_create_minimax(config))),
+        ("z.ai GLM", Box::new(|| try_create_zhipu(config))),
         ("Custom", Box::new(|| try_create_custom(config))),
     ];
 
@@ -52,11 +65,13 @@ pub fn create_provider(config: &Config) -> Result<Arc<dyn Provider>> {
             .as_ref()
             .is_some_and(|p| p.enabled),
         config.providers.minimax.as_ref().is_some_and(|p| p.enabled),
+        config.providers.zhipu.as_ref().is_some_and(|p| p.enabled),
         config.providers.active_custom().is_some(),
     ];
 
     let mut primary: Option<Arc<dyn Provider>> = None;
     let mut failed_name: Option<&str> = None;
+    let mut warning: Option<String> = None;
 
     for (i, (name, create_fn)) in enabled_attempts.into_iter().enumerate() {
         if !is_enabled[i] {
@@ -66,15 +81,12 @@ pub fn create_provider(config: &Config) -> Result<Arc<dyn Provider>> {
         match create_fn() {
             Ok(Some(provider)) => {
                 if let Some(failed) = failed_name {
-                    tracing::warn!(
-                        "{} failed to initialize — fell back to {}. Use /onboard:provider to reconfigure.",
-                        failed,
-                        name
-                    );
-                    eprintln!(
-                        "Warning: {} failed — using {} instead. Run /onboard:provider to fix.",
+                    let msg = format!(
+                        "{} failed to initialize — fell back to {}. Run /onboard:provider to reconfigure.",
                         failed, name
                     );
+                    tracing::warn!("{}", msg);
+                    warning = Some(msg);
                 }
                 tracing::info!("Using enabled provider: {}", name);
                 primary = Some(provider);
@@ -110,19 +122,18 @@ pub fn create_provider(config: &Config) -> Result<Arc<dyn Provider>> {
             ("Google Gemini", Box::new(|| try_create_gemini(config))),
             ("OpenRouter", Box::new(|| try_create_openrouter(config))),
             ("Minimax", Box::new(|| try_create_minimax(config))),
+            ("z.ai GLM", Box::new(|| try_create_zhipu(config))),
             ("Custom", Box::new(|| try_create_custom(config))),
         ];
 
         for (name, create_fn) in fallback_attempts {
             if let Ok(Some(provider)) = create_fn() {
-                tracing::warn!(
-                    "Recovered using {} as fallback. Use /onboard:provider to set your preferred provider.",
+                let msg = format!(
+                    "Fell back to {}. Run /onboard:provider to reconfigure.",
                     name
                 );
-                eprintln!(
-                    "Warning: fell back to {}. Run /onboard:provider to reconfigure.",
-                    name
-                );
+                tracing::warn!("{}", msg);
+                warning = Some(msg);
                 primary = Some(provider);
                 break;
             }
@@ -154,26 +165,26 @@ pub fn create_provider(config: &Config) -> Result<Arc<dyn Provider>> {
     match primary {
         Some(provider) => {
             if fallback_providers.is_empty() {
-                Ok(provider)
+                Ok((provider, warning))
             } else {
                 tracing::info!(
                     "Wrapping primary provider with {} fallback(s)",
                     fallback_providers.len()
                 );
-                Ok(Arc::new(super::FallbackProvider::new(
-                    provider,
-                    fallback_providers,
-                )))
+                Ok((
+                    Arc::new(super::FallbackProvider::new(provider, fallback_providers)),
+                    warning,
+                ))
             }
         }
         None => {
             // No primary — try fallbacks as primary candidates
             if let Some(first) = fallback_providers.into_iter().next() {
                 tracing::warn!("No primary provider enabled, using first fallback");
-                Ok(first)
+                Ok((first, warning))
             } else {
                 tracing::info!("No provider configured, using placeholder provider");
-                Ok(Arc::new(super::PlaceholderProvider))
+                Ok((Arc::new(super::PlaceholderProvider), warning))
             }
         }
     }
@@ -192,6 +203,8 @@ pub fn create_provider_by_name(config: &Config, name: &str) -> Result<Arc<dyn Pr
             .ok_or_else(|| anyhow::anyhow!("OpenAI not configured (missing API key)")),
         "minimax" => try_create_minimax(config)?
             .ok_or_else(|| anyhow::anyhow!("Minimax not configured (missing API key)")),
+        "zhipu" => try_create_zhipu(config)?
+            .ok_or_else(|| anyhow::anyhow!("z.ai GLM not configured (missing API key)")),
         "openrouter" => try_create_openrouter(config)?
             .ok_or_else(|| anyhow::anyhow!("OpenRouter not configured (missing API key)")),
         "github" => try_create_github(config)?
@@ -272,6 +285,10 @@ fn create_fallback(config: &Config, fallback_type: &str) -> Result<Arc<dyn Provi
         "minimax" => {
             tracing::info!("Using fallback: Minimax");
             try_create_minimax(config)?.ok_or_else(|| anyhow::anyhow!("Minimax not configured"))
+        }
+        "zhipu" => {
+            tracing::info!("Using fallback: z.ai GLM");
+            try_create_zhipu(config)?.ok_or_else(|| anyhow::anyhow!("z.ai GLM not configured"))
         }
         "anthropic" => {
             tracing::info!("Using fallback: Anthropic");
@@ -431,6 +448,39 @@ fn try_create_minimax(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         }
     }
 
+    Ok(Some(Arc::new(provider)))
+}
+
+/// Try to create z.ai GLM provider if configured
+/// Supports two endpoint types: "api" (general) or "coding" (coding-specific)
+fn try_create_zhipu(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
+    let zhipu_config = match &config.providers.zhipu {
+        Some(cfg) => cfg,
+        None => return Ok(None),
+    };
+
+    let Some(api_key) = &zhipu_config.api_key else {
+        tracing::warn!("z.ai GLM enabled but API key missing — check keys.toml");
+        return Ok(None);
+    };
+
+    // Determine base URL based on endpoint_type
+    // API endpoint: https://api.z.ai/api/paas/v4
+    // Coding endpoint: https://api.z.ai/api/coding/paas/v4
+    let base_url = match zhipu_config.endpoint_type.as_deref() {
+        Some("coding") => "https://api.z.ai/api/coding/paas/v4/chat/completions",
+        _ => "https://api.z.ai/api/paas/v4/chat/completions",
+    };
+
+    tracing::info!(
+        "Using z.ai GLM at: {} (endpoint_type: {:?})",
+        base_url,
+        zhipu_config.endpoint_type
+    );
+    let provider = configure_openai_compatible(
+        OpenAIProvider::with_base_url(api_key.clone(), base_url.to_string()).with_name("zhipu"),
+        zhipu_config,
+    );
     Ok(Some(Arc::new(provider)))
 }
 
@@ -610,6 +660,7 @@ pub fn active_provider_vision(config: &Config) -> Option<(String, String, String
     // Check providers in priority order (same as create_provider)
     let candidates: Vec<&ProviderConfig> = [
         config.providers.minimax.as_ref(),
+        config.providers.zhipu.as_ref(),
         config.providers.openrouter.as_ref(),
         config.providers.anthropic.as_ref(),
         config.providers.openai.as_ref(),

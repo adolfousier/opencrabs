@@ -274,6 +274,15 @@ impl OnboardingWizard {
                 AuthField::CustomModel => {
                     self.custom_model.push_str(clean);
                 }
+                AuthField::ZhipuEndpointType => {
+                    // User pasted on endpoint type — they meant to paste API key
+                    self.auth_field = AuthField::ApiKey;
+                    if self.has_existing_key() {
+                        self.api_key_input.clear();
+                    }
+                    self.api_key_input.push_str(clean);
+                    self.api_key_cursor = self.api_key_input.len();
+                }
                 _ => {}
             },
             _ => {}
@@ -365,6 +374,9 @@ impl OnboardingWizard {
                         return WizardAction::GitHubDeviceFlow;
                     } else if self.is_custom_provider() {
                         self.auth_field = AuthField::CustomName;
+                    } else if self.selected_provider == 6 {
+                        // z.ai GLM: endpoint type first, then API key
+                        self.auth_field = AuthField::ZhipuEndpointType;
                     } else {
                         self.auth_field = AuthField::ApiKey;
                     }
@@ -410,7 +422,11 @@ impl OnboardingWizard {
                     }
                 }
                 KeyCode::BackTab | KeyCode::Up => {
-                    self.auth_field = AuthField::Provider;
+                    if self.selected_provider == 6 {
+                        self.auth_field = AuthField::ZhipuEndpointType;
+                    } else {
+                        self.auth_field = AuthField::Provider;
+                    }
                 }
                 _ => {}
             },
@@ -531,6 +547,20 @@ impl OnboardingWizard {
                 }
                 KeyCode::BackTab | KeyCode::Up => {
                     self.auth_field = AuthField::CustomApiKey;
+                }
+                _ => {}
+            },
+            AuthField::ZhipuEndpointType => match event.code {
+                KeyCode::Up | KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('k') => {
+                    // Toggle between 0 (api) and 1 (coding)
+                    self.zhipu_endpoint_type = 1 - self.zhipu_endpoint_type;
+                }
+                KeyCode::Enter | KeyCode::Tab => {
+                    // Endpoint type selected → now enter API key
+                    self.auth_field = AuthField::ApiKey;
+                }
+                KeyCode::BackTab => {
+                    self.auth_field = AuthField::Provider;
                 }
                 _ => {}
             },

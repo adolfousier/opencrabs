@@ -737,6 +737,28 @@ impl Tool for PlanTool {
                         ToolError::InvalidInput(format!("Task #{} not found.", task_order))
                     })?;
 
+                // Guard: prevent re-completing an already-completed task (model confusion).
+                // Tell the model which task is actually in progress so it can self-correct.
+                if task.status == crate::tui::plan::TaskStatus::Completed {
+                    let in_progress = current_plan
+                        .tasks
+                        .iter()
+                        .find(|t| t.status == crate::tui::plan::TaskStatus::InProgress)
+                        .map(|t| {
+                            format!(
+                                "Task #{} ('{}') is currently in progress.",
+                                t.order, t.title
+                            )
+                        });
+                    let hint = in_progress.unwrap_or_else(|| {
+                        "No task is currently in progress. Use 'next_task' to advance.".to_string()
+                    });
+                    return Err(ToolError::InvalidInput(format!(
+                        "Task #{} is already completed. {}",
+                        task_order, hint
+                    )));
+                }
+
                 for artifact in artifacts {
                     task.add_artifact(artifact);
                 }

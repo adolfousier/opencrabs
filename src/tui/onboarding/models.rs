@@ -25,10 +25,19 @@ impl OnboardingWizard {
                     }
                 }
                 6 => {
+                    // z.ai GLM — models fetched from API, no static config
+                    if let Some(p) = &config.providers.zhipu
+                        && !p.models.is_empty()
+                    {
+                        self.config_models = p.models.clone();
+                        return;
+                    }
+                }
+                7 => {
                     // Claude CLI — static model list, no config models
                     return;
                 }
-                7 => {
+                n if n >= 8 => {
                     if let Some((_name, p)) = config.providers.active_custom()
                         && !p.models.is_empty()
                     {
@@ -86,10 +95,10 @@ impl OnboardingWizard {
 
     /// Whether the current provider supports live model fetching
     pub fn supports_model_fetch(&self) -> bool {
-        matches!(self.selected_provider, 0 | 1 | 2 | 4) // Anthropic, OpenAI, GitHub Copilot, OpenRouter (not Claude CLI=6)
+        matches!(self.selected_provider, 0 | 1 | 2 | 4 | 6) // Anthropic, OpenAI, GitHub Copilot, OpenRouter, z.ai GLM (not Claude CLI=7)
     }
 
-    /// Load default models from embedded config.toml.example for GitHub, MiniMax, and Custom
+    /// Load default models from embedded config.toml.example for GitHub, MiniMax, zhipu, and Custom
     pub(crate) fn load_default_models(provider_index: usize) -> Vec<String> {
         // Parse the embedded config.toml.example to extract default models for a specific provider
         let config_content = include_str!("../../../config.toml.example");
@@ -123,7 +132,19 @@ impl OnboardingWizard {
                         }
                     }
                 }
-                7 => {
+                6 => {
+                    // z.ai GLM — models fetched from API, fallback to config
+                    if let Some(zhipu) = providers.get("zhipu")
+                        && let Some(models_arr) = zhipu.get("models").and_then(|m| m.as_array())
+                    {
+                        for model in models_arr {
+                            if let Some(model_str) = model.as_str() {
+                                models.push(model_str.to_string());
+                            }
+                        }
+                    }
+                }
+                n if n >= 8 => {
                     // Custom providers only
                     if let Some(custom) = providers.get("custom")
                         && let Some(custom_table) = custom.as_table()

@@ -323,13 +323,13 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(""));
 
-    // Provider list — 6 static providers, then existing custom names, then "+ New Custom" last.
-    // Internal indices: 0-6=static, 7="+New Custom", 8+=existing customs.
-    // Visual order: 0-6, then 8+, then 7 (so existing customs appear before the add button).
+    // Provider list — 8 static providers, then existing custom names, then "+ New Custom" last.
+    // Internal indices: 0-7=static, 8="+New Custom", 9+=existing customs.
+    // Visual order: 0-7, then 9+, then 8 (so existing customs appear before the add button).
     let num_customs = app.model_selector_custom_names.len();
-    let display_order: Vec<usize> = (0..7)
-        .chain(8..8 + num_customs)
-        .chain(std::iter::once(7))
+    let display_order: Vec<usize> = (0..8)
+        .chain(9..9 + num_customs)
+        .chain(std::iter::once(8))
         .collect();
     for &idx in &display_order {
         let selected = idx == provider_idx;
@@ -338,12 +338,12 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         let prefix = if selected && focused { " > " } else { "   " };
         let marker = if selected { "[*]" } else { "[ ]" };
 
-        let label = if idx == 7 {
+        let label = if idx == 8 {
             "+ New Custom Provider".to_string()
         } else if idx < PROVIDERS.len() {
             PROVIDERS[idx].name.to_string()
         } else {
-            let custom_idx = idx - 8;
+            let custom_idx = idx - 9;
             app.model_selector_custom_names
                 .get(custom_idx)
                 .cloned()
@@ -379,7 +379,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
 
     lines.push(Line::from(""));
 
-    let is_custom = provider_idx >= 7; // Custom provider index
+    let is_custom = provider_idx >= 8; // Custom provider index
 
     // For Custom provider: show Base URL field first (field 1), then API Key (field 2)
     // For others: show API Key only (field 1)
@@ -413,11 +413,59 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(""));
     }
 
-    // API Key field (field 1 for non-Custom, field 2 for Custom)
-    // Claude CLI (index 6) has no API key — skip entirely
-    let is_claude_cli = provider_idx == 6;
+    // z.ai GLM endpoint type toggle (before API key)
+    if provider_idx == 6 {
+        let et_focused = focused_field == 1; // field 1 for zhipu = endpoint type
+        let api_marker = if app.model_selector_zhipu_endpoint_type == 0 {
+            "[*]"
+        } else {
+            "[ ]"
+        };
+        let coding_marker = if app.model_selector_zhipu_endpoint_type == 1 {
+            "[*]"
+        } else {
+            "[ ]"
+        };
+        lines.push(Line::from(Span::styled(
+            "  Endpoint Type:",
+            Style::default().fg(if et_focused {
+                BRAND_BLUE
+            } else {
+                Color::DarkGray
+            }),
+        )));
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("    {} General API  ", api_marker),
+                Style::default().fg(
+                    if et_focused && app.model_selector_zhipu_endpoint_type == 0 {
+                        Color::Reset
+                    } else {
+                        Color::DarkGray
+                    },
+                ),
+            ),
+            Span::styled(
+                format!("{} Coding API", coding_marker),
+                Style::default().fg(
+                    if et_focused && app.model_selector_zhipu_endpoint_type == 1 {
+                        Color::Reset
+                    } else {
+                        Color::DarkGray
+                    },
+                ),
+            ),
+        ]));
+        lines.push(Line::from(""));
+    }
+
+    // API Key field (field 1 for non-Custom, field 2 for Custom; field 2 for zhipu since field 1 = endpoint type)
+    // Claude CLI (index 7) has no API key — skip entirely
+    let is_claude_cli = provider_idx == 7;
     if !is_claude_cli {
-        let key_focused = (focused_field == 1 && !is_custom) || (focused_field == 2 && is_custom);
+        let is_zhipu = provider_idx == 6;
+        let key_focused = (focused_field == 1 && !is_custom && !is_zhipu)
+            || (focused_field == 2 && (is_custom || is_zhipu));
         let key_label = selected_provider.key_label;
 
         let has_existing_key = app.model_selector_has_existing_key;
@@ -481,8 +529,10 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(""));
     }
 
-    // Model selection (field 2 for non-Custom, field 3 for Custom)
-    let model_focused = (focused_field == 2 && !is_custom) || (focused_field == 3 && is_custom);
+    // Model selection (field 2 for non-Custom, field 3 for Custom/zhipu)
+    let is_zhipu_model = provider_idx == 6;
+    let model_focused = (focused_field == 2 && !is_custom && !is_zhipu_model)
+        || (focused_field == 3 && (is_custom || is_zhipu_model));
     const MAX_VISIBLE_MODELS: usize = 8;
 
     if is_custom {

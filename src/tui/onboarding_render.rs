@@ -496,9 +496,8 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
     let is_custom = wizard.is_custom_provider();
     let mut focused_line: usize = 0;
 
-    // Provider list — 6 static providers, then existing custom names, then "+ New Custom" last.
-    // Internal indices: 0-5=static, 6="+New Custom", 7+=existing customs.
-    // Visual order: 0-5, then 7+, then 6 (existing customs before add button).
+    // Provider list — 8 static providers (0-7), then existing custom names (9+), then "+ New Custom" (8) last.
+    // Visual order: 0-7, then 9+, then 8 (existing customs before add button).
     let display_order = wizard.provider_display_order();
     for &idx in &display_order {
         let selected = idx == wizard.selected_provider;
@@ -507,12 +506,12 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
         let prefix = if selected && focused { " > " } else { "   " };
         let marker = if selected { "[*]" } else { "[ ]" };
 
-        let label = if idx == 7 {
+        let label = if idx == 8 {
             "+ New Custom Provider".to_string()
         } else if idx < PROVIDERS.len() {
             PROVIDERS[idx].name.to_string()
         } else {
-            let custom_idx = idx - 8;
+            let custom_idx = idx - 9;
             wizard
                 .existing_custom_names
                 .get(custom_idx)
@@ -778,6 +777,48 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
             )));
         }
         lines.push(Line::from(""));
+
+        // z.ai GLM endpoint type toggle (api vs coding) — BEFORE API key
+        if wizard.selected_provider == 6 {
+            let et_focused = wizard.auth_field == AuthField::ZhipuEndpointType;
+            let api_marker = if wizard.zhipu_endpoint_type == 0 {
+                "[*]"
+            } else {
+                "[ ]"
+            };
+            let coding_marker = if wizard.zhipu_endpoint_type == 1 {
+                "[*]"
+            } else {
+                "[ ]"
+            };
+            lines.push(Line::from(Span::styled(
+                "  Endpoint Type:",
+                Style::default().fg(if et_focused {
+                    BRAND_BLUE
+                } else {
+                    Color::DarkGray
+                }),
+            )));
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("    {} General API  ", api_marker),
+                    Style::default().fg(if et_focused && wizard.zhipu_endpoint_type == 0 {
+                        Color::White
+                    } else {
+                        Color::DarkGray
+                    }),
+                ),
+                Span::styled(
+                    format!("{} Coding API", coding_marker),
+                    Style::default().fg(if et_focused && wizard.zhipu_endpoint_type == 1 {
+                        Color::White
+                    } else {
+                        Color::DarkGray
+                    }),
+                ),
+            ]));
+            lines.push(Line::from(""));
+        }
 
         let key_focused = wizard.auth_field == AuthField::ApiKey;
         let key_label = provider.key_label;
@@ -2390,7 +2431,7 @@ fn render_complete(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
 
     // Summary
     let provider = &PROVIDERS[wizard.selected_provider.min(PROVIDERS.len() - 1)];
-    let provider_label = if wizard.selected_provider >= 7 && !wizard.custom_provider_name.is_empty()
+    let provider_label = if wizard.selected_provider >= 8 && !wizard.custom_provider_name.is_empty()
     {
         wizard.custom_provider_name.clone()
     } else {

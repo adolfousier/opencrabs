@@ -25,6 +25,8 @@ pub struct OnboardingWizard {
     pub config_models: Vec<String>,
     /// Cached list of existing custom provider names (for provider list)
     pub existing_custom_names: Vec<String>,
+    /// z.ai GLM endpoint type: 0 = API, 1 = Coding
+    pub zhipu_endpoint_type: usize,
 
     /// Step 4: Workspace
     pub workspace_path: String,
@@ -229,6 +231,13 @@ impl OnboardingWizard {
                         String::new(),
                         String::new(),
                     )
+                } else if config.providers.zhipu.as_ref().is_some_and(|p| p.enabled) {
+                    (
+                        6,
+                        EXISTING_KEY_SENTINEL.to_string(),
+                        String::new(),
+                        String::new(),
+                    )
                 } else if let Some((name, c)) = config.providers.active_custom().or_else(|| {
                     config
                         .providers
@@ -241,13 +250,13 @@ impl OnboardingWizard {
                     let model = c.default_model.clone().unwrap_or_default();
                     custom_provider_name_init = Some(name.to_string());
                     // context_window is set after wizard construction below
-                    // Map to index 7+ for existing custom providers
+                    // Map to index 8+ for existing custom providers (shifted for z.ai GLM)
                     let idx = config
                         .providers
                         .custom
                         .as_ref()
-                        .and_then(|m| m.keys().position(|k| k == name).map(|pos| 7 + pos))
-                        .unwrap_or(6);
+                        .and_then(|m| m.keys().position(|k| k == name).map(|pos| 8 + pos))
+                        .unwrap_or(8);
                     (idx, EXISTING_KEY_SENTINEL.to_string(), base, model)
                 } else {
                     (0, String::new(), String::new(), String::new())
@@ -277,6 +286,7 @@ impl OnboardingWizard {
                 .and_then(|c| c.providers.custom.as_ref())
                 .map(|m| m.keys().cloned().collect())
                 .unwrap_or_default(),
+            zhipu_endpoint_type: 0, // default to API mode
 
             workspace_path: default_workspace.to_string_lossy().to_string(),
             seed_templates: true,
@@ -614,22 +624,30 @@ impl OnboardingWizard {
 
     /// Get provider info for currently selected provider
     pub fn current_provider(&self) -> &ProviderInfo {
-        // Indices >= 8 are existing custom providers — map to the Custom entry (index 7)
-        &PROVIDERS[self.selected_provider.min(PROVIDERS.len() - 1)]
+        // Indices 0-7 are static providers (direct mapping)
+        // Index 8 is "+ New Custom Provider"
+        // Indices 9+ are existing custom providers — map to Custom entry (index 8)
+        let idx = if self.selected_provider >= 8 {
+            8 // Custom OpenAI-Compatible
+        } else {
+            self.selected_provider
+        };
+        &PROVIDERS[idx.min(PROVIDERS.len() - 1)]
     }
 
     /// Check if the current provider is a custom option (new or existing)
     pub fn is_custom_provider(&self) -> bool {
-        self.selected_provider >= PROVIDERS.len() - 1
+        self.selected_provider >= 8
     }
 
-    /// Visual display order: 0-6 (static), 8..8+N (existing customs), 7 ("+ New Custom" last).
+    /// Visual display order: 0-6 (static providers), 8 (z.ai GLM), 9..9+N (existing customs), 7 ("+ New Custom" last).
     /// Navigation must follow this order so Up/Down match what's on screen.
+    /// Note: After adding z.ai GLM, indices are: 0-5 (Anthropic..Minimax), 6 (z.ai GLM), 7 (Claude CLI), 8 (Custom)
     pub fn provider_display_order(&self) -> Vec<usize> {
         let num_customs = self.existing_custom_names.len();
-        (0..7)
-            .chain(8..8 + num_customs)
-            .chain(std::iter::once(7))
+        (0..8) // 0-7: static providers including z.ai GLM
+            .chain(9..9 + num_customs) // existing custom providers (shifted by 1)
+            .chain(std::iter::once(8)) // 8: "+ New Custom Provider"
             .collect()
     }
 
@@ -638,17 +656,28 @@ impl OnboardingWizard {
         self.api_key_input == EXISTING_KEY_SENTINEL
     }
 
-    /// When navigating to an existing custom provider (index >= 8), load its config fields.
-    /// For index 7 (new custom), clear the fields.
+    /// When navigating to an existing custom provider (index >= 9), load its config fields.
+    /// For index 8 (new custom), clear the fields.
+    /// For index 6 (z.ai GLM), load endpoint_type.
     pub fn load_custom_fields_if_existing(&mut self) {
-        if self.selected_provider == 7 {
+        // z.ai GLM selected — load endpoint_type
+        if self.selected_provider == 6
+            && let Ok(config) = crate::config::Config::load()
+            && let Some(zhipu) = &config.providers.zhipu
+        {
+            self.zhipu_endpoint_type = match zhipu.endpoint_type.as_deref() {
+                Some("coding") => 1,
+                _ => 0,
+            };
+        }
+        if self.selected_provider == 8 {
             // "+ New Custom Provider" — clear fields
             self.custom_provider_name.clear();
             self.custom_base_url.clear();
             self.custom_model.clear();
             self.custom_context_window.clear();
-        } else if self.selected_provider >= 8 {
-            let custom_idx = self.selected_provider - 8;
+        } else if self.selected_provider >= 9 {
+            let custom_idx = self.selected_provider - 9;
             if let Some(cname) = self.existing_custom_names.get(custom_idx).cloned()
                 && let Ok(config) = crate::config::Config::load()
                 && let Some(c) = config.providers.custom_by_name(&cname)

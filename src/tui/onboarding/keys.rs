@@ -24,7 +24,12 @@ impl OnboardingWizard {
                 3 => has_nonempty_key(config.providers.gemini.as_ref()),
                 4 => has_nonempty_key(config.providers.openrouter.as_ref()),
                 5 => has_nonempty_key(config.providers.minimax.as_ref()),
-                6 => {
+                6 => has_nonempty_key(config.providers.zhipu.as_ref()),
+                7 => {
+                    // Claude CLI — no API key needed
+                    false
+                }
+                8 => {
                     // Custom provider - also load base_url, model, and name
                     // Try enabled first, fall back to first entry in custom map
                     let found = config.providers.active_custom().or_else(|| {

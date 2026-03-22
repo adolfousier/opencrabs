@@ -44,6 +44,12 @@ pub const PROVIDERS: &[ProviderInfo] = &[
         help_lines: &["Get key from platform.minimax.io"],
     },
     ProviderInfo {
+        name: "z.ai GLM",
+        models: &[], // Fetched from API
+        key_label: "API Key",
+        help_lines: &["Get key from open.bigmodel.cn"],
+    },
+    ProviderInfo {
         name: "Claude CLI",
         models: &["sonnet", "opus", "haiku"],
         key_label: "",
@@ -230,6 +236,7 @@ pub enum AuthField {
     CustomApiKey,
     CustomModel,
     CustomContextWindow,
+    ZhipuEndpointType,
 }
 
 /// Which field is focused in DiscordSetup step

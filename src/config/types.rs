@@ -524,6 +524,10 @@ pub struct ProviderConfigs {
     #[serde(default)]
     pub minimax: Option<ProviderConfig>,
 
+    /// z.ai GLM configuration (supports API and Coding endpoints)
+    #[serde(default)]
+    pub zhipu: Option<ProviderConfig>,
+
     /// Named custom OpenAI-compatible providers (e.g. [providers.custom.ollama])
     #[serde(default, deserialize_with = "deserialize_custom_providers")]
     pub custom: Option<BTreeMap<String, ProviderConfig>>,
@@ -599,6 +603,7 @@ impl ProviderConfigs {
         }
         let candidates: &[(&str, Option<&ProviderConfig>)] = &[
             ("minimax", self.minimax.as_ref()),
+            ("zhipu", self.zhipu.as_ref()),
             ("openrouter", self.openrouter.as_ref()),
             ("anthropic", self.anthropic.as_ref()),
             ("openai", self.openai.as_ref()),
@@ -833,6 +838,10 @@ pub struct ProviderConfig {
     /// Essential for custom/local providers whose models aren't recognized by name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window: Option<u32>,
+
+    /// Endpoint type for providers with multiple API modes (e.g. zhipu: "api" or "coding")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endpoint_type: Option<String>,
 
     /// TTS voice name (e.g. "echo") — only used by TTS providers
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1144,11 +1153,23 @@ fn merge_provider_keys(mut base: ProviderConfigs, keys: ProviderConfigs) -> Prov
         let entry = base.github.get_or_insert_with(ProviderConfig::default);
         entry.api_key = Some(key);
     }
-    if let Some(custom_keys) = keys.custom {
-        let base_customs = base.custom.get_or_insert_with(BTreeMap::new);
+    // Merge zhipu
+    if let Some(k) = keys.zhipu
+        && let Some(key) = k.api_key
+        && is_real_key(&key)
+    {
+        let entry = base.zhipu.get_or_insert_with(ProviderConfig::default);
+        entry.api_key = Some(key);
+    }
+    if let Some(custom_keys) = keys.custom
+        && let Some(ref mut base_customs) = base.custom
+    {
+        // Only merge keys for custom providers that already exist in config.toml
+        // Never create new config entries from keys.toml alone
         for (name, key_cfg) in custom_keys {
             if let Some(key) = key_cfg.api_key
                 && is_real_key(&key)
+                && base_customs.contains_key(&name)
             {
                 let entry = base_customs.entry(name).or_default();
                 entry.api_key = Some(key);
@@ -2227,6 +2248,15 @@ pub fn resolve_provider_from_config(config: &Config) -> (&str, &str) {
             .and_then(|p| p.default_model.as_deref())
             .unwrap_or("default");
         return ("Minimax", model);
+    }
+    if config.providers.zhipu.as_ref().is_some_and(|p| p.enabled) {
+        let model = config
+            .providers
+            .zhipu
+            .as_ref()
+            .and_then(|p| p.default_model.as_deref())
+            .unwrap_or("default");
+        return ("z.ai GLM", model);
     }
     if config
         .providers

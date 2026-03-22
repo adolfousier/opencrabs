@@ -282,6 +282,7 @@ impl OnboardingWizard {
             "providers.gemini",
             "providers.openrouter",
             "providers.minimax",
+            "providers.zhipu",
             "providers.claude_cli",
         ];
         for section in &all_provider_sections {
@@ -306,8 +307,9 @@ impl OnboardingWizard {
             3 => "providers.gemini",
             4 => "providers.openrouter",
             5 => "providers.minimax",
-            6 => "providers.claude_cli",
-            7 => {
+            6 => "providers.zhipu",
+            7 => "providers.claude_cli",
+            8 => {
                 custom_section = format!("providers.custom.{}", self.custom_provider_name);
                 &custom_section
             }
@@ -341,7 +343,16 @@ impl OnboardingWizard {
             5 => {
                 let _ = Config::write_key(section, "base_url", "https://api.minimax.io/v1");
             }
-            n if n >= 7 => {
+            6 => {
+                // z.ai GLM — write endpoint_type (base_url computed dynamically in factory)
+                let endpoint_type = if self.zhipu_endpoint_type == 1 {
+                    "coding"
+                } else {
+                    "api"
+                };
+                let _ = Config::write_key(section, "endpoint_type", endpoint_type);
+            }
+            n if n >= 8 => {
                 if !self.custom_base_url.is_empty() {
                     let _ = Config::write_key(section, "base_url", &self.custom_base_url);
                 }
@@ -358,7 +369,7 @@ impl OnboardingWizard {
 
         // Write models array for providers that have static model lists
         if !self.config_models.is_empty()
-            && (matches!(self.selected_provider, 2 | 5) || self.selected_provider >= 7)
+            && (matches!(self.selected_provider, 2 | 5 | 6) || self.selected_provider >= 8)
         {
             let _ = Config::write_array(section, "models", &self.config_models);
         }

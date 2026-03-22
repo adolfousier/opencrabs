@@ -335,6 +335,8 @@ pub struct App {
     /// Focused field: 0=provider, 1=api_key, 2=model
     pub model_selector_focused_field: usize,
     pub model_selector_filter: String,
+    /// z.ai GLM endpoint type: 0=api, 1=coding
+    pub model_selector_zhipu_endpoint_type: u8,
 
     /// Input history (arrow up/down to cycle through past messages)
     pub(crate) input_history: Vec<String>,
@@ -514,6 +516,7 @@ impl App {
             model_selector_custom_names: Vec::new(),
             model_selector_focused_field: 0,
             model_selector_filter: String::new(),
+            model_selector_zhipu_endpoint_type: 0,
             input_history: Self::load_history(),
             input_history_index: None,
             input_history_stash: String::new(),
@@ -755,8 +758,6 @@ impl App {
 
     /// Rebuild agent service with a new provider
     pub(crate) async fn rebuild_agent_service(&mut self) -> Result<()> {
-        use crate::brain::provider::create_provider;
-
         // Load config - API keys are stored in keys.toml and merged with config
         let config = crate::config::Config::load()
             .map_err(|e| anyhow::anyhow!("Failed to load config: {}", e))?;
@@ -793,6 +794,12 @@ impl App {
                 .as_ref()
                 .filter(|p| p.enabled)
                 .map(|_| "minimax"),
+            config
+                .providers
+                .zhipu
+                .as_ref()
+                .filter(|p| p.enabled)
+                .map(|_| "zhipu"),
             config.providers.active_custom().map(|_| "custom"),
         ]
         .into_iter()
@@ -805,8 +812,9 @@ impl App {
         );
 
         // Create new provider from config
-        let provider = create_provider(&config)
-            .map_err(|e| anyhow::anyhow!("Failed to create provider: {}", e))?;
+        let (provider, provider_warning) =
+            crate::brain::provider::create_provider_with_warning(&config)
+                .map_err(|e| anyhow::anyhow!("Failed to create provider: {}", e))?;
 
         // Get existing context from current agent service
         let context = self.agent_service.context().clone();
@@ -899,6 +907,11 @@ impl App {
         // Update app state
         self.default_model_name = new_agent_service.provider_model();
         self.agent_service = new_agent_service;
+
+        // Surface fallback warning as TUI system message
+        if let Some(warning) = provider_warning {
+            self.push_system_message(warning);
+        }
 
         Ok(())
     }
@@ -998,6 +1011,7 @@ impl App {
                                 let models = super::onboarding::fetch_provider_models(
                                     provider_idx,
                                     Some(&api_key),
+                                    None,
                                 )
                                 .await;
                                 let _ = sender.send(TuiEvent::OnboardingModelsFetched(models));
@@ -1005,10 +1019,60 @@ impl App {
                         }
                     }
                 } else if self.mode == AppMode::ModelSelector {
-                    let is_custom = self.model_selector_provider_selected >= 7;
-                    match (self.model_selector_focused_field, is_custom) {
-                        // Non-custom: field 1 = API key
-                        (1, false) => {
+                    let is_custom = self.model_selector_provider_selected >= 8;
+                    let is_zhipu = self.model_selector_provider_selected == 6;
+                    match (self.model_selector_focused_field, is_custom, is_zhipu) {
+                        // Zhipu: field 1 = endpoint type — paste auto-advances to API key
+                        (1, false, true) => {
+                            self.model_selector_focused_field = 2;
+                            self.model_selector_api_key.push_str(&text);
+                            let provider_idx = self.model_selector_provider_selected;
+                            let api_key = self.model_selector_api_key.clone();
+                            let zhipu_et = Some(
+                                if self.model_selector_zhipu_endpoint_type == 1 {
+                                    "coding"
+                                } else {
+                                    "api"
+                                }
+                                .to_string(),
+                            );
+                            let sender = self.event_sender();
+                            tokio::spawn(async move {
+                                let models = super::onboarding::fetch_provider_models(
+                                    provider_idx,
+                                    Some(&api_key),
+                                    zhipu_et.as_deref(),
+                                )
+                                .await;
+                                let _ = sender.send(TuiEvent::ModelSelectorModelsFetched(models));
+                            });
+                        }
+                        // Zhipu: field 2 = API key
+                        (2, false, true) => {
+                            self.model_selector_api_key.push_str(&text);
+                            let provider_idx = self.model_selector_provider_selected;
+                            let api_key = self.model_selector_api_key.clone();
+                            let zhipu_et = Some(
+                                if self.model_selector_zhipu_endpoint_type == 1 {
+                                    "coding"
+                                } else {
+                                    "api"
+                                }
+                                .to_string(),
+                            );
+                            let sender = self.event_sender();
+                            tokio::spawn(async move {
+                                let models = super::onboarding::fetch_provider_models(
+                                    provider_idx,
+                                    Some(&api_key),
+                                    zhipu_et.as_deref(),
+                                )
+                                .await;
+                                let _ = sender.send(TuiEvent::ModelSelectorModelsFetched(models));
+                            });
+                        }
+                        // Non-custom non-zhipu: field 1 = API key
+                        (1, false, false) => {
                             self.model_selector_api_key.push_str(&text);
                             // Trigger model fetch after pasting key
                             let provider_idx = self.model_selector_provider_selected;
@@ -1018,19 +1082,20 @@ impl App {
                                 let models = super::onboarding::fetch_provider_models(
                                     provider_idx,
                                     Some(&api_key),
+                                    None,
                                 )
                                 .await;
                                 let _ = sender.send(TuiEvent::ModelSelectorModelsFetched(models));
                             });
                         }
                         // Custom: field 1 = base URL, field 2 = API key, field 3 = model
-                        (1, true) => {
+                        (1, true, _) => {
                             self.model_selector_base_url.push_str(&text);
                         }
-                        (2, true) => {
+                        (2, true, _) => {
                             self.model_selector_api_key.push_str(&text);
                         }
-                        (3, true) => {
+                        (3, true, _) => {
                             self.model_selector_custom_model.push_str(&text);
                         }
                         _ => {}
@@ -1574,7 +1639,7 @@ impl App {
                     let sender = self.event_sender();
                     tokio::spawn(async move {
                         let models =
-                            super::onboarding::fetch_provider_models(2, Some(&token)).await;
+                            super::onboarding::fetch_provider_models(2, Some(&token), None).await;
                         let _ = sender.send(TuiEvent::OnboardingModelsFetched(models));
                     });
                 }

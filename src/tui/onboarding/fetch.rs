@@ -135,6 +135,7 @@ pub fn is_first_time() -> bool {
             .as_ref()
             .is_some_and(|p| p.enabled)
         || config.providers.minimax.as_ref().is_some_and(|p| p.enabled)
+        || config.providers.zhipu.as_ref().is_some_and(|p| p.enabled)
         || config
             .providers
             .claude_cli
@@ -153,7 +154,11 @@ pub fn is_first_time() -> bool {
 /// Fetch models from provider API. No API key needed for most providers.
 /// If api_key is provided, includes it (some endpoints filter by access level).
 /// Returns empty vec on failure (callers fall back to static list).
-pub async fn fetch_provider_models(provider_index: usize, api_key: Option<&str>) -> Vec<String> {
+pub async fn fetch_provider_models(
+    provider_index: usize,
+    api_key: Option<&str>,
+    zhipu_endpoint_type: Option<&str>,
+) -> Vec<String> {
     #[derive(serde::Deserialize)]
     struct ModelEntry {
         id: String,
@@ -164,7 +169,7 @@ pub async fn fetch_provider_models(provider_index: usize, api_key: Option<&str>)
     }
 
     // Claude CLI — models are fixed (sonnet/opus/haiku), no API needed
-    if provider_index == 6 {
+    if provider_index == 7 {
         return vec![
             "sonnet".to_string(),
             "opus".to_string(),
@@ -253,6 +258,32 @@ pub async fn fetch_provider_models(provider_index: usize, api_key: Option<&str>)
         4 => {
             // OpenRouter — /api/v1/models
             let mut req = client.get("https://openrouter.ai/api/v1/models");
+            if let Some(key) = api_key
+                && !key.is_empty()
+            {
+                req = req.header("Authorization", format!("Bearer {}", key));
+            }
+            req.send().await
+        }
+        6 => {
+            // z.ai GLM — /api/paas/v4/models or /api/coding/paas/v4/models
+            // Use passed endpoint_type (from wizard state), fall back to config, then default "api"
+            let endpoint_type = zhipu_endpoint_type
+                .map(|s| s.to_string())
+                .or_else(|| {
+                    crate::config::Config::load()
+                        .ok()
+                        .and_then(|c| c.providers.zhipu.clone())
+                        .and_then(|p| p.endpoint_type)
+                })
+                .unwrap_or_else(|| "api".to_string());
+
+            let base = match endpoint_type.as_str() {
+                "coding" => "https://api.z.ai/api/coding/paas/v4/models",
+                _ => "https://api.z.ai/api/paas/v4/models",
+            };
+
+            let mut req = client.get(base);
             if let Some(key) = api_key
                 && !key.is_empty()
             {
