@@ -1292,8 +1292,12 @@ impl App {
                     tool_group: None,
                 });
 
-                // Clear the preview — message is now in the chat
+                // Clear the preview and input buffer — message is now in the chat
                 self.queued_message_preview = None;
+                if !self.input_buffer.is_empty() {
+                    self.input_buffer.clear();
+                    self.cursor_position = 0;
+                }
 
                 if self.auto_scroll {
                     self.scroll_offset = 0;
