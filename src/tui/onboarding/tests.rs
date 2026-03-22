@@ -264,7 +264,7 @@ fn test_handle_key_provider_navigation() {
     assert_eq!(wizard.selected_provider, 0);
 
     wizard.handle_key(key(KeyCode::Down));
-    assert_eq!(wizard.selected_provider, 1);
+    assert_eq!(wizard.selected_provider, 7); // Claude CLI (next alphabetically after Anthropic)
 
     wizard.handle_key(key(KeyCode::Up));
     assert_eq!(wizard.selected_provider, 0);
@@ -939,8 +939,8 @@ fn test_provider_display_order_no_customs() {
     let mut wizard = clean_wizard();
     wizard.existing_custom_names.clear();
     let order = wizard.provider_display_order();
-    // 0-7 static, then 8 ("+ New Custom") last
-    assert_eq!(order, vec![0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    // Static providers sorted alphabetically, then 8 ("+ New Custom") last
+    assert_eq!(order, vec![0, 7, 2, 3, 5, 1, 4, 6, 8]);
 }
 
 #[test]
@@ -948,8 +948,8 @@ fn test_provider_display_order_with_customs() {
     let mut wizard = clean_wizard();
     wizard.existing_custom_names = vec!["nvidia".into(), "opus".into(), "opusdistil".into()];
     let order = wizard.provider_display_order();
-    // 0-7 static, 9,10,11 existing customs, 8 ("+ New Custom") last
-    assert_eq!(order, vec![0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 8]);
+    // Static providers sorted alphabetically, 9,10,11 existing customs, 8 ("+ New Custom") last
+    assert_eq!(order, vec![0, 7, 2, 3, 5, 1, 4, 6, 9, 10, 11, 8]);
 }
 
 #[test]
@@ -958,13 +958,13 @@ fn test_provider_nav_down_from_last_static_goes_to_first_custom() {
     wizard.step = OnboardingStep::ProviderAuth;
     wizard.auth_field = AuthField::Provider;
     wizard.existing_custom_names = vec!["nvidia".into(), "opus".into()];
-    wizard.selected_provider = 7; // Claude CLI (last static)
+    wizard.selected_provider = 6; // z.ai GLM (last static alphabetically)
 
     wizard.handle_key(key(KeyCode::Down));
     // Should go to nvidia (index 9), not "+ New Custom" (index 8)
     assert_eq!(
         wizard.selected_provider, 9,
-        "Down from Claude CLI should go to first custom provider, not +New Custom"
+        "Down from z.ai GLM should go to first custom provider, not +New Custom"
     );
 }
 
@@ -1010,8 +1010,8 @@ fn test_provider_nav_up_from_first_custom_goes_to_last_static() {
 
     wizard.handle_key(key(KeyCode::Up));
     assert_eq!(
-        wizard.selected_provider, 7,
-        "Up from first custom should go to Claude CLI"
+        wizard.selected_provider, 6,
+        "Up from first custom should go to z.ai GLM (last static alphabetically)"
     );
 }
 

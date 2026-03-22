@@ -451,9 +451,12 @@ impl App {
             self.model_selector_showing_providers = self.model_selector_focused_field == 0;
         } else if self.model_selector_focused_field == 0 {
             // Provider selection (focused)
-            // Navigate using display order (matches render): 0-7, then existing customs 9+, then 8 ("+New")
+            // Navigate using display order: static providers sorted alphabetically, then customs, then "+New"
             let num_customs = self.model_selector_custom_names.len();
-            let display_order: Vec<usize> = (0..8)
+            let mut static_indices: Vec<usize> = (0..8).collect();
+            static_indices.sort_by_key(|&i| PROVIDERS[i].name.to_ascii_lowercase());
+            let display_order: Vec<usize> = static_indices
+                .into_iter()
                 .chain(9..9 + num_customs)
                 .chain(std::iter::once(8))
                 .collect();

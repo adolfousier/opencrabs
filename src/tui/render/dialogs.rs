@@ -323,11 +323,12 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(""));
 
-    // Provider list — 8 static providers, then existing custom names, then "+ New Custom" last.
-    // Internal indices: 0-7=static, 8="+New Custom", 9+=existing customs.
-    // Visual order: 0-7, then 9+, then 8 (so existing customs appear before the add button).
+    // Provider list — static providers sorted alphabetically, then custom names, then "+ New Custom" last.
     let num_customs = app.model_selector_custom_names.len();
-    let display_order: Vec<usize> = (0..8)
+    let mut static_indices: Vec<usize> = (0..8).collect();
+    static_indices.sort_by_key(|&i| PROVIDERS[i].name.to_ascii_lowercase());
+    let display_order: Vec<usize> = static_indices
+        .into_iter()
         .chain(9..9 + num_customs)
         .chain(std::iter::once(8))
         .collect();

@@ -640,14 +640,18 @@ impl OnboardingWizard {
         self.selected_provider >= 8
     }
 
-    /// Visual display order: 0-6 (static providers), 8 (z.ai GLM), 9..9+N (existing customs), 7 ("+ New Custom" last).
-    /// Navigation must follow this order so Up/Down match what's on screen.
-    /// Note: After adding z.ai GLM, indices are: 0-5 (Anthropic..Minimax), 6 (z.ai GLM), 7 (Claude CLI), 8 (Custom)
+    /// Visual display order: static providers (0-7) sorted alphabetically by name,
+    /// then existing custom providers (9+) already alphabetical from BTreeMap,
+    /// then "+ New Custom Provider" (8) always last.
     pub fn provider_display_order(&self) -> Vec<usize> {
+        use crate::tui::onboarding::types::PROVIDERS;
         let num_customs = self.existing_custom_names.len();
-        (0..8) // 0-7: static providers including z.ai GLM
-            .chain(9..9 + num_customs) // existing custom providers (shifted by 1)
-            .chain(std::iter::once(8)) // 8: "+ New Custom Provider"
+        let mut static_indices: Vec<usize> = (0..8).collect();
+        static_indices.sort_by_key(|&i| PROVIDERS[i].name.to_ascii_lowercase());
+        static_indices
+            .into_iter()
+            .chain(9..9 + num_customs)
+            .chain(std::iter::once(8))
             .collect()
     }
 
