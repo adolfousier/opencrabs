@@ -177,42 +177,105 @@ fn redact_value(value: &Value, parent_key: Option<&str>) -> Value {
 // ---------------------------------------------------------------------------
 
 /// Known API key prefixes with their minimum total length.
-/// Format: (prefix, min_length_after_prefix)
+/// Format: (prefix, min_suffix_len) — token must have at least this many chars
+/// after the prefix to be considered a real key (avoids false positives on
+/// short strings that happen to start with a prefix).
+///
+/// When adding new prefixes: prefer longer, more specific prefixes first
+/// (e.g. `sk-proj-` before `sk-`). The scanner checks all prefixes, so order
+/// only affects which prefix is shown in `[prefix][REDACTED]` output.
 const KEY_PREFIXES: &[(&str, usize)] = &[
-    ("sk-proj-", 20),    // OpenAI project keys
-    ("sk-ant-", 20),     // Anthropic keys
-    ("sk-or-v1-", 20),   // OpenRouter keys
-    ("sk-cp-", 20),      // MiniMax keys
-    ("sk-", 20),         // Generic OpenAI-style keys
-    ("xoxb-", 15),       // Slack bot tokens
-    ("xoxp-", 15),       // Slack user tokens
-    ("xapp-", 15),       // Slack app tokens
-    ("xoxs-", 15),       // Slack session tokens
-    ("gsk_", 15),        // Groq keys
-    ("nvapi-", 15),      // NVIDIA keys
-    ("AIzaSy", 20),      // Google AI keys
-    ("ATTA", 30),        // Trello tokens
-    ("ghp_", 15),        // GitHub personal tokens
-    ("gho_", 15),        // GitHub OAuth tokens
-    ("github_pat_", 15), // GitHub fine-grained tokens
-    ("glpat-", 15),      // GitLab personal tokens
-    ("hf_", 15),         // HuggingFace tokens
-    ("r8_", 20),         // Replicate tokens
-    ("whsec_", 15),      // Webhook secrets
+    // --- AI / LLM providers ---
+    ("sk-proj-", 20),      // OpenAI project keys
+    ("sk-ant-api03-", 20), // Anthropic API keys (full prefix)
+    ("sk-ant-", 20),       // Anthropic API keys (short prefix)
+    ("sk-or-v1-", 20),     // OpenRouter keys
+    ("sk-cp-", 20),        // MiniMax keys
+    ("sk-", 20),           // Generic OpenAI-style keys (DeepSeek, etc.)
+    ("gsk_", 15),          // Groq keys
+    ("nvapi-", 15),        // NVIDIA NIM keys
+    ("AIzaSy", 20),        // Google AI / Firebase keys
+    ("ya29.", 20),         // Google OAuth access tokens
+    ("pplx-", 20),         // Perplexity keys
+    ("hf_", 15),           // HuggingFace tokens
+    ("r8_", 20),           // Replicate tokens
+    // --- Cloud providers ---
+    ("AKIA", 12), // AWS access key IDs (exactly 20 chars total)
+    ("ASIA", 12), // AWS STS temporary credentials
+    ("ABIA", 12), // AWS STS (another variant)
+    ("ACCA", 12), // AWS CloudFront
+    // --- Azure ---
+    // Azure keys are 32-char base64 but headers are caught by SENSITIVE_KEYS.
+    // Connection strings have a known prefix:
+    ("DefaultEndpointsProtocol=", 10), // Azure Storage connection strings
+    // --- Payments ---
+    ("sk_live_", 15), // Stripe secret keys (live)
+    ("sk_test_", 15), // Stripe secret keys (test)
+    ("pk_live_", 15), // Stripe publishable keys (live)
+    ("pk_test_", 15), // Stripe publishable keys (test)
+    ("rk_live_", 15), // Stripe restricted keys (live)
+    ("rk_test_", 15), // Stripe restricted keys (test)
+    ("sq0atp-", 15),  // Square access tokens
+    ("sq0csp-", 15),  // Square application secrets
+    // --- Git / DevOps ---
+    ("ghp_", 15),            // GitHub personal tokens
+    ("gho_", 15),            // GitHub OAuth tokens
+    ("ghu_", 15),            // GitHub user-to-server tokens
+    ("ghs_", 15),            // GitHub server-to-server tokens
+    ("github_pat_", 15),     // GitHub fine-grained tokens
+    ("glpat-", 15),          // GitLab personal tokens
+    ("gloas-", 15),          // GitLab OAuth tokens
+    ("npm_", 15),            // npm registry tokens
+    ("pypi-AgEIcHlwaS", 10), // PyPI tokens
+    // --- Communication ---
+    ("xoxb-", 15),    // Slack bot tokens
+    ("xoxp-", 15),    // Slack user tokens
+    ("xapp-", 15),    // Slack app tokens
+    ("xoxs-", 15),    // Slack session tokens
+    ("SG.", 20),      // SendGrid API keys
+    ("xkeysib-", 15), // Brevo (Sendinblue) keys
+    // --- E-commerce / SaaS ---
+    ("shpat_", 15),   // Shopify admin tokens
+    ("shpca_", 15),   // Shopify custom app tokens
+    ("shppa_", 15),   // Shopify partner tokens
+    ("shpss_", 15),   // Shopify shared secret
+    ("ntn_", 15),     // Notion API tokens
+    ("lin_api_", 15), // Linear API keys
+    ("aio_", 15),     // Airtable tokens
+    ("phc_", 15),     // PostHog keys
+    // --- Infrastructure / Monitoring ---
+    ("sntrys_", 15),         // Sentry auth tokens
+    ("dop_v1_", 15),         // DigitalOcean tokens
+    ("tskey-", 15),          // Tailscale keys
+    ("tvly-", 15),           // Tavily web search keys
+    ("hvs.", 15),            // HashiCorp Vault service tokens
+    ("vault:v1:", 10),       // HashiCorp Vault transit-encrypted
+    ("AGE-SECRET-KEY-", 10), // age encryption keys
+    // --- Social / Meta ---
+    ("EAA", 30),  // Facebook/Meta long-lived tokens
+    ("ATTA", 30), // Trello tokens
+    // --- Auth / Crypto ---
+    ("eyJ", 30),    // JWT tokens (base64 of `{"`)
+    ("whsec_", 15), // Webhook signing secrets
 ];
 
 /// Regex for long hex strings that look like API tokens (32+ hex chars).
-static HEX_TOKEN_RE: Lazy<Regex> = Lazy::new(|| {
-    // Match 32+ contiguous hex chars that aren't part of a longer word.
-    // Exclude common non-secret hex like UUIDs (which are 32 hex but have dashes).
-    Regex::new(r"\b[0-9a-fA-F]{40,}\b").unwrap()
-});
+/// Lowered from 40 to 32 to catch Azure keys, custom service tokens, etc.
+/// UUIDs are safe — they contain dashes so won't match contiguous hex.
+static HEX_TOKEN_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\b[0-9a-fA-F]{32,}\b").unwrap());
+
+/// Regex for mixed alphanumeric tokens (28+ chars containing both letters and digits).
+/// Catches opaque tokens like custom service keys that have no prefix.
+/// Won't match pure words, pure numbers, or structured strings with separators.
+static MIXED_ALNUM_TOKEN_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\b[a-zA-Z0-9]{28,}\b").unwrap());
 
 /// Redact API keys and tokens from free-form text (thinking, responses, etc.).
 ///
 /// Catches:
 /// - Known provider key prefixes (`sk-proj-...`, `xoxb-...`, `AIzaSy...`, etc.)
-/// - Long hex token strings (40+ chars — Trello tokens, X auth_tokens, etc.)
+/// - Long hex token strings (32+ chars — Azure keys, custom tokens, etc.)
+/// - Mixed alphanumeric tokens (28+ chars with both letters and digits)
 /// - Bearer/Authorization inline patterns
 ///
 /// Preserves the prefix so the user can see *what kind* of key was redacted.
@@ -250,12 +313,29 @@ pub fn redact_secrets(text: &str) -> String {
         }
     }
 
-    // 2. Redact long hex tokens (40+ chars — catches Trello, X auth_tokens, etc.)
+    // 2. Redact long hex tokens (32+ chars — catches Azure keys, custom service tokens, etc.)
     result = HEX_TOKEN_RE
         .replace_all(&result, "[REDACTED_TOKEN]")
         .into_owned();
 
-    // 3. Redact inline "Bearer <token>" patterns
+    // 3. Redact mixed alphanumeric tokens (28+ chars with both letters AND digits).
+    //    Catches opaque keys like custom service tokens with no prefix.
+    //    Only redacts if the match contains both digits and letters (avoids
+    //    false positives on long words like "acknowledgement" or pure numbers).
+    result = MIXED_ALNUM_TOKEN_RE
+        .replace_all(&result, |caps: &regex::Captures| {
+            let token = caps.get(0).unwrap().as_str();
+            let has_digit = token.chars().any(|c| c.is_ascii_digit());
+            let has_alpha = token.chars().any(|c| c.is_ascii_alphabetic());
+            if has_digit && has_alpha {
+                "[REDACTED_TOKEN]".to_string()
+            } else {
+                token.to_string()
+            }
+        })
+        .into_owned();
+
+    // 4. Redact inline "Bearer <token>" patterns
     let lower = result.to_lowercase();
     for pattern in &["bearer ", "authorization: bearer "] {
         let mut search_from = 0;
@@ -443,5 +523,90 @@ mod tests {
         let out = redact_secrets(text);
         assert!(out.contains("sk-proj-[REDACTED]"), "got: {out}");
         assert!(out.contains("gsk_[REDACTED]"), "got: {out}");
+    }
+
+    // --- New pattern tests ---
+
+    #[test]
+    fn redact_secrets_stripe_live_key() {
+        let text = "stripe key: sk_live_51HG7sE2kGuICQhPh0iF9K2N3qT";
+        let out = redact_secrets(text);
+        assert!(out.contains("sk_live_[REDACTED]"), "got: {out}");
+        assert!(!out.contains("51HG7"), "secret leaked: {out}");
+    }
+
+    #[test]
+    fn redact_secrets_aws_access_key() {
+        let text = "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE";
+        let out = redact_secrets(text);
+        assert!(out.contains("AKIA[REDACTED]"), "got: {out}");
+        assert!(!out.contains("IOSFODNN"), "secret leaked: {out}");
+    }
+
+    #[test]
+    fn redact_secrets_sendgrid_key() {
+        let text = "SENDGRID_API_KEY=SG.abc123def456ghi789jkl012mno345pqr678stu901vwx234yz";
+        let out = redact_secrets(text);
+        assert!(out.contains("SG.[REDACTED]"), "got: {out}");
+    }
+
+    #[test]
+    fn redact_secrets_jwt_token() {
+        let text = "token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N";
+        let out = redact_secrets(text);
+        assert!(out.contains("eyJ[REDACTED]"), "got: {out}");
+    }
+
+    #[test]
+    fn redact_secrets_mixed_alnum_opaque_token() {
+        // Simulates tokens like agentverse keys — no prefix, mixed letters+digits, 32 chars
+        let text = "key: 38947394723jkhkrjkhdfiuo83489732 done";
+        let out = redact_secrets(text);
+        assert!(
+            out.contains("[REDACTED_TOKEN]"),
+            "opaque mixed-alnum token not caught: {out}"
+        );
+        assert!(!out.contains("38947394723"), "secret leaked: {out}");
+    }
+
+    #[test]
+    fn redact_secrets_hex_32_chars() {
+        // 32-char hex token (e.g. Azure API key)
+        let text = "api-key: a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4 end";
+        let out = redact_secrets(text);
+        assert!(
+            out.contains("[REDACTED_TOKEN]"),
+            "32-char hex not caught: {out}"
+        );
+    }
+
+    #[test]
+    fn redact_secrets_preserves_short_alnum() {
+        // Short alphanumeric strings should NOT be redacted
+        let text = "model claude3opus version 12345 session abc123";
+        let out = redact_secrets(text);
+        assert_eq!(out, text, "short strings should be preserved");
+    }
+
+    #[test]
+    fn redact_secrets_preserves_pure_alpha_long() {
+        // Long pure-alpha strings (English words) should NOT be redacted
+        let text = "the acknowledgementofresponsibility was important";
+        let out = redact_secrets(text);
+        assert_eq!(out, text, "pure-alpha long string should be preserved");
+    }
+
+    #[test]
+    fn redact_secrets_shopify_token() {
+        let text = "token: shpat_abc123def456ghi789jkl012mno";
+        let out = redact_secrets(text);
+        assert!(out.contains("shpat_[REDACTED]"), "got: {out}");
+    }
+
+    #[test]
+    fn redact_secrets_digital_ocean_token() {
+        let text = "DO_TOKEN=dop_v1_abc123def456ghi789jkl012mno345";
+        let out = redact_secrets(text);
+        assert!(out.contains("dop_v1_[REDACTED]"), "got: {out}");
     }
 }

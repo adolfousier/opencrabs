@@ -47,12 +47,43 @@ const STRIP_CLOSE_TAGS: &[&[&str]] = &[
 ///
 /// Tracks state across chunks via `inside_think`. Returns the portion of `text`
 /// that is outside any stripped block. Handles tags split across chunk boundaries.
-fn filter_think_tags(text: &str, inside_think: &mut bool, active_close_tag: &mut usize) -> String {
+/// Maximum bytes to consume inside a `<!-- ... -->` block before assuming the
+/// closing tag will never arrive.  When exceeded we abandon filtering and pass
+/// content through — the model likely hallucinated an open tag (e.g.
+/// `<!-- tools-v2:`) without ever sending `-->`.
+const THINK_BLOCK_MAX_BYTES: usize = 400;
+
+fn filter_think_tags(
+    text: &str,
+    inside_think: &mut bool,
+    active_close_tag: &mut usize,
+    bytes_consumed: &mut usize,
+) -> String {
     let mut result = String::new();
     let mut remaining = text;
 
     loop {
         if *inside_think {
+            // Safety valve: if we've consumed too many bytes without finding the
+            // closing tag, the model probably hallucinated an unclosed open tag
+            // (e.g. `<!-- tools-v2: ...` with no `-->`).
+            // Discard the accumulated garbage (it's inside an HTML comment) and
+            // stop filtering — future chunks will pass through normally.
+            *bytes_consumed += remaining.len();
+            if *bytes_consumed > THINK_BLOCK_MAX_BYTES {
+                tracing::warn!(
+                    "⚠️ Abandoned think-tag filter after {} bytes without close tag \
+                     (tag_idx={}) — discarding buffered content, future chunks pass through",
+                    *bytes_consumed,
+                    *active_close_tag,
+                );
+                // Don't push remaining — it's inside the unclosed comment block.
+                // Just exit the think state so subsequent chunks pass through.
+                *inside_think = false;
+                *bytes_consumed = 0;
+                break;
+            }
+
             // Find the earliest matching close tag among the candidates for this block.
             let close_candidates = STRIP_CLOSE_TAGS[*active_close_tag];
             let earliest_close = close_candidates
@@ -63,6 +94,7 @@ fn filter_think_tags(text: &str, inside_think: &mut bool, active_close_tag: &mut
             if let Some((end, close)) = earliest_close {
                 remaining = &remaining[end + close.len()..];
                 *inside_think = false;
+                *bytes_consumed = 0;
             } else {
                 break;
             }
@@ -82,6 +114,7 @@ fn filter_think_tags(text: &str, inside_think: &mut bool, active_close_tag: &mut
                 remaining = &remaining[pos + STRIP_OPEN_TAGS[tag_idx].len()..];
                 *inside_think = true;
                 *active_close_tag = tag_idx;
+                *bytes_consumed = 0;
             } else {
                 result.push_str(remaining);
                 break;
@@ -874,6 +907,11 @@ impl Provider for OpenAIProvider {
             inside_think: bool,
             /// Index into STRIP_CLOSE_TAGS for the currently active block
             active_close_tag: usize,
+            /// Bytes consumed while inside_think is true (no close tag found).
+            /// If this exceeds the threshold, we abandon filtering and pass
+            /// content through — the model likely hallucinated an open tag
+            /// without a matching close (e.g. `<!-- tools-v2: ...` with no `-->`).
+            think_bytes_consumed: usize,
             /// Stashed stop_reason from finish_reason chunk, emitted with
             /// the final usage-only chunk (MiniMax/OpenAI include_usage flow).
             pending_stop_reason: Option<crate::brain::provider::types::StopReason>,
@@ -886,6 +924,7 @@ impl Provider for OpenAIProvider {
             tool_calls: std::collections::HashMap::new(),
             inside_think: false,
             active_close_tag: 0,
+            think_bytes_consumed: 0,
             pending_stop_reason: None,
         }));
 
@@ -1064,10 +1103,12 @@ impl Provider for OpenAIProvider {
 
                                         // Emit text content, filtering <think>...</think> reasoning blocks
                                         if let Some(ref c) = content {
-                                            let (mut inside, mut close_idx) = (st.inside_think, st.active_close_tag);
-                                            let filtered = filter_think_tags(c, &mut inside, &mut close_idx);
+                                            let (mut inside, mut close_idx, mut consumed) =
+                                                (st.inside_think, st.active_close_tag, st.think_bytes_consumed);
+                                            let filtered = filter_think_tags(c, &mut inside, &mut close_idx, &mut consumed);
                                             st.inside_think = inside;
                                             st.active_close_tag = close_idx;
+                                            st.think_bytes_consumed = consumed;
 
                                             if !filtered.is_empty() {
                                                 if !st.emitted_content_start {

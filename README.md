@@ -842,6 +842,54 @@ api_key = "your-openai-key"
 
 ---
 
+## 🔐 Secret Sanitization & Redaction
+
+OpenCrabs automatically redacts API keys and tokens from all outputs — conversation history, TUI display, tool approval dialogs, and external channel delivery (Telegram, Discord, Slack, WhatsApp). Secrets never persist to the database or appear in logs.
+
+### How It Works
+
+**Three layers of defense:**
+
+1. **Prefix-based detection** — Keys with recognized prefixes are caught instantly (`sk-proj-...` → `sk-proj-[REDACTED]`)
+2. **Hex token detection** — Contiguous hex strings of 32+ chars are redacted
+3. **Mixed alphanumeric detection** — Opaque tokens of 28+ chars containing both letters and digits are caught as a safety net
+
+**Structural redaction** also applies to:
+- JSON fields named `authorization`, `api_key`, `token`, `secret`, `password`, etc.
+- Inline patterns in bash commands (`bearer ...`, `x-api-key: ...`, `api_key=...`)
+- URL passwords (`https://user:PASSWORD@host` → `https://user:[REDACTED]@host`)
+
+### Supported Key Prefixes
+
+OpenCrabs recognizes **60+ industry-standard key formats** out of the box:
+
+| Category | Prefixes |
+|----------|----------|
+| **AI / LLM** | `sk-proj-` (OpenAI), `sk-ant-` (Anthropic), `sk-or-v1-` (OpenRouter), `sk-` (generic), `gsk_` (Groq), `nvapi-` (NVIDIA), `AIzaSy` (Google), `pplx-` (Perplexity), `hf_` (HuggingFace), `r8_` (Replicate) |
+| **Cloud** | `AKIA` / `ASIA` (AWS), `DefaultEndpointsProtocol=` (Azure), `ya29.` (Google OAuth) |
+| **Payments** | `sk_live_` / `sk_test_` / `pk_live_` / `pk_test_` / `rk_live_` / `rk_test_` (Stripe), `sq0atp-` / `sq0csp-` (Square) |
+| **Git / DevOps** | `ghp_` / `gho_` / `ghu_` / `ghs_` / `github_pat_` (GitHub), `glpat-` / `gloas-` (GitLab), `npm_` (npm), `pypi-AgEIcHlwaS` (PyPI) |
+| **Communication** | `xoxb-` / `xoxp-` / `xapp-` / `xoxs-` (Slack), `SG.` (SendGrid), `xkeysib-` (Brevo) |
+| **SaaS** | `shpat_` / `shpca_` / `shppa_` / `shpss_` (Shopify), `ntn_` (Notion), `lin_api_` (Linear), `aio_` (Airtable), `phc_` (PostHog) |
+| **Infrastructure** | `sntrys_` (Sentry), `dop_v1_` (DigitalOcean), `tskey-` (Tailscale), `tvly-` (Tavily), `hvs.` / `vault:v1:` (HashiCorp Vault) |
+| **Auth / Crypto** | `eyJ` (JWT), `whsec_` (webhooks), `EAA` (Facebook/Meta), `ATTA` (Trello), `AGE-SECRET-KEY-` (age encryption) |
+
+### Best Practice: Use Prefixed Keys
+
+If you build or configure services that integrate with OpenCrabs, **use industry-standard key prefixes**. Keys with recognized prefixes are caught by the first and most reliable layer of redaction. Opaque tokens (random alphanumeric strings with no prefix) rely on the generic safety-net regex, which has a higher threshold to avoid false positives.
+
+**Good:** `av_38947394723jkhkrjkhdfiuo83489732` — prefix makes it instantly recognizable
+**Risky:** `38947394723jkhkrjkhdfiuo83489732` — still caught by mixed-alnum regex, but no prefix context in `[REDACTED]` output
+
+### Memory Safety
+
+API keys stored via `SecretString` are:
+- **Zeroized on drop** — memory is overwritten when the value goes out of scope (not left for GC)
+- **Never serialized** — `Debug`, `Display`, and `Serialize` all output `[REDACTED]`
+- **Never logged** — `expose_secret()` is the only way to access the raw value
+
+---
+
 ## 🏠 Using Local LLMs
 
 OpenCrabs works with any OpenAI-compatible local inference server for **100% private, zero-cost** operation.
