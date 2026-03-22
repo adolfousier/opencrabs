@@ -820,58 +820,61 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
             lines.push(Line::from(""));
         }
 
-        let key_focused = wizard.auth_field == AuthField::ApiKey;
-        let key_label = provider.key_label;
-        let (masked_key, key_hint) = if wizard.has_existing_key() {
-            (
-                "**************************".to_string(),
-                " (already configured, type to replace)".to_string(),
-            )
-        } else if wizard.api_key_input.is_empty() {
-            (
-                format!("enter your {}", key_label.to_lowercase()),
-                String::new(),
-            )
-        } else {
-            (
-                "*".repeat(wizard.api_key_input.len().min(30)),
-                String::new(),
-            )
-        };
-        let cursor = if key_focused && !wizard.has_existing_key() {
-            "█"
-        } else {
-            ""
-        };
+        // CLI providers (Claude CLI, OpenCode CLI) have no API key — skip the field
+        if !matches!(wizard.selected_provider, 7 | 8) {
+            let key_focused = wizard.auth_field == AuthField::ApiKey;
+            let key_label = provider.key_label;
+            let (masked_key, key_hint) = if wizard.has_existing_key() {
+                (
+                    "**************************".to_string(),
+                    " (already configured, type to replace)".to_string(),
+                )
+            } else if wizard.api_key_input.is_empty() {
+                (
+                    format!("enter your {}", key_label.to_lowercase()),
+                    String::new(),
+                )
+            } else {
+                (
+                    "*".repeat(wizard.api_key_input.len().min(30)),
+                    String::new(),
+                )
+            };
+            let cursor = if key_focused && !wizard.has_existing_key() {
+                "█"
+            } else {
+                ""
+            };
 
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("  {}: ", key_label),
-                Style::default().fg(if key_focused {
-                    BRAND_BLUE
-                } else {
-                    Color::DarkGray
-                }),
-            ),
-            Span::styled(
-                format!("{}{}", masked_key, cursor),
-                Style::default().fg(if wizard.has_existing_key() {
-                    Color::Cyan
-                } else if key_focused {
-                    Color::White
-                } else {
-                    Color::DarkGray
-                }),
-            ),
-        ]));
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("  {}: ", key_label),
+                    Style::default().fg(if key_focused {
+                        BRAND_BLUE
+                    } else {
+                        Color::DarkGray
+                    }),
+                ),
+                Span::styled(
+                    format!("{}{}", masked_key, cursor),
+                    Style::default().fg(if wizard.has_existing_key() {
+                        Color::Cyan
+                    } else if key_focused {
+                        Color::White
+                    } else {
+                        Color::DarkGray
+                    }),
+                ),
+            ]));
 
-        if !key_hint.is_empty() && key_focused {
-            lines.push(Line::from(Span::styled(
-                format!("  {}", key_hint.trim()),
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::ITALIC),
-            )));
+            if !key_hint.is_empty() && key_focused {
+                lines.push(Line::from(Span::styled(
+                    format!("  {}", key_hint.trim()),
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::ITALIC),
+                )));
+            }
         }
     }
 
