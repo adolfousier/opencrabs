@@ -59,6 +59,15 @@ pub const PROVIDERS: &[ProviderInfo] = &[
         ],
     },
     ProviderInfo {
+        name: "OpenCode CLI",
+        models: &[],
+        key_label: "",
+        help_lines: &[
+            "Uses local 'opencode' CLI subprocess — free models, no API key needed",
+            "Requires: curl -fsSL https://opencode.ai/install | bash",
+        ],
+    },
+    ProviderInfo {
         name: "Custom OpenAI-Compatible",
         models: &[],
         key_label: "API Key",

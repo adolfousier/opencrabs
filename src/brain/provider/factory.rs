@@ -5,6 +5,7 @@
 use super::{
     Provider, anthropic::AnthropicProvider, claude_cli::ClaudeCliProvider,
     custom_openai_compatible::OpenAIProvider, gemini::GeminiProvider,
+    opencode_cli::OpenCodeCliProvider,
 };
 use crate::config::{Config, ProviderConfig};
 use anyhow::Result;
@@ -31,9 +32,10 @@ pub fn create_provider_with_warning(
     config: &Config,
 ) -> Result<(Arc<dyn Provider>, Option<String>)> {
     // Try the enabled provider. If it fails, warn and try others before giving up.
-    // Priority order: Claude CLI > Anthropic > OpenAI > GitHub > Gemini > OpenRouter > Minimax > zhipu > Custom
+    // Priority order: Claude CLI > OpenCode CLI > Anthropic > OpenAI > GitHub > Gemini > OpenRouter > Minimax > zhipu > Custom
     let enabled_attempts: Vec<ProviderAttempt<'_>> = vec![
         ("Claude CLI", Box::new(|| try_create_claude_cli(config))),
+        ("OpenCode CLI", Box::new(|| try_create_opencode_cli(config))),
         ("Anthropic", Box::new(|| try_create_anthropic(config))),
         ("OpenAI", Box::new(|| try_create_openai(config))),
         ("GitHub Copilot", Box::new(|| try_create_github(config))),
@@ -49,6 +51,11 @@ pub fn create_provider_with_warning(
         config
             .providers
             .claude_cli
+            .as_ref()
+            .is_some_and(|p| p.enabled),
+        config
+            .providers
+            .opencode_cli
             .as_ref()
             .is_some_and(|p| p.enabled),
         config
@@ -116,6 +123,7 @@ pub fn create_provider_with_warning(
     if primary.is_none() && failed_name.is_some() {
         let fallback_attempts: Vec<ProviderAttempt<'_>> = vec![
             ("Claude CLI", Box::new(|| try_create_claude_cli(config))),
+            ("OpenCode CLI", Box::new(|| try_create_opencode_cli(config))),
             ("Anthropic", Box::new(|| try_create_anthropic(config))),
             ("OpenAI", Box::new(|| try_create_openai(config))),
             ("GitHub Copilot", Box::new(|| try_create_github(config))),
@@ -197,6 +205,8 @@ pub fn create_provider_by_name(config: &Config, name: &str) -> Result<Arc<dyn Pr
     match name {
         "claude-cli" | "claude_cli" => try_create_claude_cli(config)?
             .ok_or_else(|| anyhow::anyhow!("Claude CLI not configured or binary not found")),
+        "opencode" | "opencode-cli" | "opencode_cli" => try_create_opencode_cli(config)?
+            .ok_or_else(|| anyhow::anyhow!("OpenCode CLI not configured or binary not found")),
         "anthropic" => try_create_anthropic(config)?
             .ok_or_else(|| anyhow::anyhow!("Anthropic not configured (missing API key)")),
         "openai" => try_create_openai(config)?
@@ -276,6 +286,11 @@ fn create_fallback(config: &Config, fallback_type: &str) -> Result<Arc<dyn Provi
             tracing::info!("Using fallback: Claude CLI");
             try_create_claude_cli(config)?
                 .ok_or_else(|| anyhow::anyhow!("Claude CLI not available"))
+        }
+        "opencode" | "opencode-cli" | "opencode_cli" => {
+            tracing::info!("Using fallback: OpenCode CLI");
+            try_create_opencode_cli(config)?
+                .ok_or_else(|| anyhow::anyhow!("OpenCode CLI not available"))
         }
         "openrouter" => {
             tracing::info!("Using fallback: OpenRouter");
@@ -621,6 +636,28 @@ fn try_create_claude_cli(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         }
         Err(e) => {
             tracing::warn!("Claude CLI enabled but binary not found: {}", e);
+            Ok(None)
+        }
+    }
+}
+
+/// Try to create OpenCode CLI provider if configured and binary is available.
+fn try_create_opencode_cli(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
+    let cli_config = match &config.providers.opencode_cli {
+        Some(cfg) if cfg.enabled => cfg,
+        _ => return Ok(None),
+    };
+
+    match OpenCodeCliProvider::new() {
+        Ok(mut provider) => {
+            if let Some(model) = &cli_config.default_model {
+                provider = provider.with_default_model(model.clone());
+            }
+            tracing::info!("Using OpenCode CLI provider (free models, no API key needed)");
+            Ok(Some(Arc::new(provider)))
+        }
+        Err(e) => {
+            tracing::warn!("OpenCode CLI enabled but binary not found: {}", e);
             Ok(None)
         }
     }

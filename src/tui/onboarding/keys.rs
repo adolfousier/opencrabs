@@ -30,6 +30,10 @@ impl OnboardingWizard {
                     false
                 }
                 8 => {
+                    // OpenCode CLI — no API key needed
+                    false
+                }
+                9 => {
                     // Custom provider - also load base_url, model, and name
                     // Try enabled first, fall back to first entry in custom map
                     let found = config.providers.active_custom().or_else(|| {

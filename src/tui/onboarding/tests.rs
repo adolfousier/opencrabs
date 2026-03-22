@@ -456,7 +456,9 @@ fn test_supports_model_fetch() {
     assert!(wizard.supports_model_fetch());
     wizard.selected_provider = 7; // Claude CLI
     assert!(!wizard.supports_model_fetch());
-    wizard.selected_provider = 8; // Custom
+    wizard.selected_provider = 8; // OpenCode CLI (supports fetch)
+    assert!(wizard.supports_model_fetch());
+    wizard.selected_provider = 9; // Custom
     assert!(!wizard.supports_model_fetch());
 }
 
@@ -939,8 +941,10 @@ fn test_provider_display_order_no_customs() {
     let mut wizard = clean_wizard();
     wizard.existing_custom_names.clear();
     let order = wizard.provider_display_order();
-    // Static providers sorted alphabetically, then 8 ("+ New Custom") last
-    assert_eq!(order, vec![0, 7, 2, 3, 5, 1, 4, 6, 8]);
+    // Static providers (0-8) sorted alphabetically, then 9 ("+ New Custom") last
+    // Alphabetical: Anthropic(0), Claude CLI(7), GitHub Copilot(2), Google Gemini(3),
+    //               Minimax(5), OpenAI(1), OpenCode CLI(8), OpenRouter(4), z.ai GLM(6)
+    assert_eq!(order, vec![0, 7, 2, 3, 5, 1, 8, 4, 6, 9]);
 }
 
 #[test]
@@ -948,8 +952,8 @@ fn test_provider_display_order_with_customs() {
     let mut wizard = clean_wizard();
     wizard.existing_custom_names = vec!["nvidia".into(), "opus".into(), "opusdistil".into()];
     let order = wizard.provider_display_order();
-    // Static providers sorted alphabetically, 9,10,11 existing customs, 8 ("+ New Custom") last
-    assert_eq!(order, vec![0, 7, 2, 3, 5, 1, 4, 6, 9, 10, 11, 8]);
+    // Static providers sorted alphabetically, 10,11,12 existing customs, 9 ("+ New Custom") last
+    assert_eq!(order, vec![0, 7, 2, 3, 5, 1, 8, 4, 6, 10, 11, 12, 9]);
 }
 
 #[test]
@@ -961,9 +965,9 @@ fn test_provider_nav_down_from_last_static_goes_to_first_custom() {
     wizard.selected_provider = 6; // z.ai GLM (last static alphabetically)
 
     wizard.handle_key(key(KeyCode::Down));
-    // Should go to nvidia (index 9), not "+ New Custom" (index 8)
+    // Should go to nvidia (index 10), not "+ New Custom" (index 9)
     assert_eq!(
-        wizard.selected_provider, 9,
+        wizard.selected_provider, 10,
         "Down from z.ai GLM should go to first custom provider, not +New Custom"
     );
 }
@@ -974,12 +978,12 @@ fn test_provider_nav_down_through_customs_to_new() {
     wizard.step = OnboardingStep::ProviderAuth;
     wizard.auth_field = AuthField::Provider;
     wizard.existing_custom_names = vec!["nvidia".into()];
-    wizard.selected_provider = 9; // nvidia
+    wizard.selected_provider = 10; // nvidia
 
     wizard.handle_key(key(KeyCode::Down));
-    // Should go to "+ New Custom" (index 8) which is visually last
+    // Should go to "+ New Custom" (index 9) which is visually last
     assert_eq!(
-        wizard.selected_provider, 8,
+        wizard.selected_provider, 9,
         "Down from last custom should go to +New Custom"
     );
 }
@@ -990,12 +994,12 @@ fn test_provider_nav_up_from_new_custom_goes_to_last_custom() {
     wizard.step = OnboardingStep::ProviderAuth;
     wizard.auth_field = AuthField::Provider;
     wizard.existing_custom_names = vec!["nvidia".into(), "opus".into()];
-    wizard.selected_provider = 8; // "+ New Custom"
+    wizard.selected_provider = 9; // "+ New Custom"
 
     wizard.handle_key(key(KeyCode::Up));
-    // Should go to opus (index 10), not Claude CLI (index 7)
+    // Should go to opus (index 11), not z.ai GLM (index 6)
     assert_eq!(
-        wizard.selected_provider, 10,
+        wizard.selected_provider, 11,
         "Up from +New Custom should go to last custom provider"
     );
 }
@@ -1006,7 +1010,7 @@ fn test_provider_nav_up_from_first_custom_goes_to_last_static() {
     wizard.step = OnboardingStep::ProviderAuth;
     wizard.auth_field = AuthField::Provider;
     wizard.existing_custom_names = vec!["nvidia".into(), "opus".into()];
-    wizard.selected_provider = 9; // nvidia (first custom)
+    wizard.selected_provider = 10; // nvidia (first custom)
 
     wizard.handle_key(key(KeyCode::Up));
     assert_eq!(
@@ -1027,10 +1031,10 @@ fn test_provider_nav_clamps_at_top_and_bottom() {
     wizard.handle_key(key(KeyCode::Up));
     assert_eq!(wizard.selected_provider, 0);
 
-    // At bottom ("+ New Custom" = 8), Down stays
-    wizard.selected_provider = 8;
+    // At bottom ("+ New Custom" = 9), Down stays
+    wizard.selected_provider = 9;
     wizard.handle_key(key(KeyCode::Down));
-    assert_eq!(wizard.selected_provider, 8);
+    assert_eq!(wizard.selected_provider, 9);
 }
 
 #[test]

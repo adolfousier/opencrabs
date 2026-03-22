@@ -1019,7 +1019,7 @@ impl App {
                         }
                     }
                 } else if self.mode == AppMode::ModelSelector {
-                    let is_custom = self.model_selector_provider_selected >= 8;
+                    let is_custom = self.model_selector_provider_selected >= 9;
                     let is_zhipu = self.model_selector_provider_selected == 6;
                     match (self.model_selector_focused_field, is_custom, is_zhipu) {
                         // Zhipu: field 1 = endpoint type — paste auto-advances to API key

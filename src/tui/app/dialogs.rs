@@ -21,7 +21,7 @@ impl App {
         self.model_selector_has_existing_key = false;
 
         if let Ok(config) = crate::config::Config::load() {
-            // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=z.ai GLM, 7=Claude CLI, 8=Custom
+            // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=z.ai GLM, 7=Claude CLI, 8=OpenCode CLI, 9=Custom
             let has_key = match provider_idx {
                 0 => config
                     .providers
@@ -59,17 +59,18 @@ impl App {
                     .as_ref()
                     .is_some_and(|p| p.api_key.as_ref().is_some_and(|k| !k.is_empty())),
                 7 => false, // Claude CLI — no API key needed
-                8 => {
-                    // Index 8 = "+ New Custom Provider" — clear fields
+                8 => false, // OpenCode CLI — no API key needed
+                9 => {
+                    // Index 9 = "+ New Custom Provider" — clear fields
                     self.model_selector_custom_name.clear();
                     self.model_selector_base_url.clear();
                     self.model_selector_custom_model.clear();
                     self.model_selector_context_window.clear();
                     false
                 }
-                idx if idx >= 9 => {
-                    // Existing custom provider at index (idx - 9) in custom_names list
-                    let custom_idx = idx - 9;
+                idx if idx >= 10 => {
+                    // Existing custom provider at index (idx - 10) in custom_names list
+                    let custom_idx = idx - 10;
                     tracing::debug!(
                         "[detect_key] existing custom: idx={}, custom_idx={}, names_len={}",
                         idx,
@@ -191,6 +192,8 @@ impl App {
                         .as_ref()
                         .and_then(|p| p.api_key.clone()),
                 ),
+                "claude-cli" | "claude_cli" => (7, None),
+                "opencode" | "opencode-cli" | "opencode_cli" => (8, None),
                 cname => {
                     // Any other name is a custom provider (e.g. "nvidia", "ollama")
                     let api_key = config
@@ -212,15 +215,15 @@ impl App {
                         .model_selector_custom_names
                         .iter()
                         .position(|n| n == cname)
-                        .map(|pos| 9 + pos)
-                        .unwrap_or(8);
+                        .map(|pos| 10 + pos)
+                        .unwrap_or(9);
                     (idx, api_key)
                 }
             }
         });
 
         // Determine which provider is enabled
-        // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=z.ai GLM, 7=Claude CLI, 8=Custom
+        // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=z.ai GLM, 7=Claude CLI, 8=OpenCode CLI, 9=Custom
         let (provider_idx, api_key) = if let Some(resolved) = from_session {
             tracing::debug!("[open_model_selector] From session: {:?}", session_provider);
             resolved
@@ -272,7 +275,7 @@ impl App {
                         base_url
                     );
                     (
-                        8,
+                        9,
                         config
                             .providers
                             .openai
@@ -346,6 +349,22 @@ impl App {
                     .as_ref()
                     .and_then(|p| p.api_key.clone()),
             )
+        } else if config
+            .providers
+            .claude_cli
+            .as_ref()
+            .is_some_and(|p| p.enabled)
+        {
+            tracing::debug!("[open_model_selector] Claude CLI enabled");
+            (7, None)
+        } else if config
+            .providers
+            .opencode_cli
+            .as_ref()
+            .is_some_and(|p| p.enabled)
+        {
+            tracing::debug!("[open_model_selector] OpenCode CLI enabled");
+            (8, None)
         } else if let Some((name, custom_cfg)) = config.providers.active_custom() {
             tracing::debug!("[open_model_selector] Custom provider '{}' enabled", name);
             if let Some(base_url) = &custom_cfg.base_url {
@@ -364,8 +383,8 @@ impl App {
                 .model_selector_custom_names
                 .iter()
                 .position(|n| n == name)
-                .map(|pos| 9 + pos)
-                .unwrap_or(8);
+                .map(|pos| 10 + pos)
+                .unwrap_or(9);
             (idx, custom_cfg.api_key.clone())
         } else {
             tracing::debug!("[open_model_selector] No provider enabled, defaulting to Anthropic");
@@ -438,7 +457,7 @@ impl App {
             // - Normal providers: provider(0) -> api_key(1) -> model(2) -> provider(0)
             // - Zhipu: provider(0) -> endpoint_type(1) -> api_key(2) -> model(3) -> provider(0)
             // - Custom provider: provider(0) -> base_url(1) -> api_key(2) -> model(3) -> provider(0)
-            let is_custom = self.model_selector_provider_selected >= 8; // Custom provider index
+            let is_custom = self.model_selector_provider_selected >= 9; // Custom provider index
             let max_field = if is_custom {
                 5
             } else if is_zhipu {
@@ -453,12 +472,12 @@ impl App {
             // Provider selection (focused)
             // Navigate using display order: static providers sorted alphabetically, then customs, then "+New"
             let num_customs = self.model_selector_custom_names.len();
-            let mut static_indices: Vec<usize> = (0..8).collect();
+            let mut static_indices: Vec<usize> = (0..9).collect();
             static_indices.sort_by_key(|&i| PROVIDERS[i].name.to_ascii_lowercase());
             let display_order: Vec<usize> = static_indices
                 .into_iter()
-                .chain(9..9 + num_customs)
-                .chain(std::iter::once(8))
+                .chain(10..10 + num_customs)
+                .chain(std::iter::once(9))
                 .collect();
             let provider_changed = match event.code {
                 crossterm::event::KeyCode::Up => {
@@ -514,7 +533,7 @@ impl App {
                 _ => {}
             }
         } else if self.model_selector_focused_field == 1
-            && self.model_selector_provider_selected >= 8
+            && self.model_selector_provider_selected >= 9
         {
             // Base URL input for Custom provider (field 1)
             match event.code {
@@ -531,7 +550,7 @@ impl App {
             && !is_zhipu)
             || (self.model_selector_focused_field == 2 && is_zhipu)
             || (self.model_selector_focused_field == 2
-                && self.model_selector_provider_selected >= 8)
+                && self.model_selector_provider_selected >= 9)
         {
             // API key input (field 1 for non-Custom non-zhipu, field 2 for zhipu/Custom)
             match event.code {
@@ -544,7 +563,7 @@ impl App {
                 _ => {}
             }
         } else if self.model_selector_focused_field == 3
-            && self.model_selector_provider_selected >= 8
+            && self.model_selector_provider_selected >= 9
         {
             // Custom provider: free-text model name input (field 3)
             match event.code {
@@ -557,7 +576,7 @@ impl App {
                 _ => {}
             }
         } else if self.model_selector_focused_field == 4
-            && self.model_selector_provider_selected >= 8
+            && self.model_selector_provider_selected >= 9
         {
             // Custom provider: name identifier input (field 4)
             match event.code {
@@ -572,7 +591,7 @@ impl App {
                 _ => {}
             }
         } else if self.model_selector_focused_field == 5
-            && self.model_selector_provider_selected >= 8
+            && self.model_selector_provider_selected >= 9
         {
             // Custom provider: context window input (field 5 — last before save)
             match event.code {
@@ -647,7 +666,7 @@ impl App {
 
         // Enter to confirm - move to next field
         if keys::is_enter(&event) {
-            let is_custom = self.model_selector_provider_selected >= 8;
+            let is_custom = self.model_selector_provider_selected >= 9;
 
             tracing::debug!(
                 "[model_selector] Enter pressed: field={}, provider_idx={}, is_custom={}, custom_name='{}', base_url='{}'",
@@ -658,20 +677,20 @@ impl App {
                 self.model_selector_base_url,
             );
 
-            let is_claude_cli = self.model_selector_provider_selected == 7;
+            let is_cli_provider = matches!(self.model_selector_provider_selected, 7 | 8);
 
             if self.model_selector_focused_field == 0 {
                 // On provider field - save config, DON'T close dialog
-                // Map indices >= 9 back to 8 for save (custom provider)
-                let save_idx = self.model_selector_provider_selected.min(8);
+                // Map indices >= 10 back to 9 for save (custom provider)
+                let save_idx = self.model_selector_provider_selected.min(9);
                 if let Err(e) = self
                     .save_provider_selection_internal(save_idx, false, false)
                     .await
                 {
                     self.push_system_message(format!("Error: {}", e));
                 } else {
-                    // Claude CLI has no API key — skip straight to model field
-                    self.model_selector_focused_field = if is_claude_cli { 2 } else { 1 };
+                    // CLI providers have no API key — skip straight to model field
+                    self.model_selector_focused_field = if is_cli_provider { 2 } else { 1 };
                 }
             } else if self.model_selector_focused_field == 1 && is_zhipu {
                 // z.ai GLM: field 1 is endpoint type, move to field 2 (api_key)
@@ -683,8 +702,8 @@ impl App {
                 || (self.model_selector_focused_field == 2 && (is_custom || is_zhipu))
             {
                 // On API key field (field 1 for non-Custom non-zhipu, field 2 for zhipu/Custom)
-                // Map >= 9 back to 8 for save (all custom providers use idx 8)
-                let provider_idx = self.model_selector_provider_selected.min(8);
+                // Map >= 10 back to 9 for save (all custom providers use idx 9)
+                let provider_idx = self.model_selector_provider_selected.min(9);
 
                 // User typed a new key, or kept existing (just hit Enter to move on)
                 let key_changed = !self.model_selector_api_key.is_empty();
@@ -757,11 +776,11 @@ impl App {
                 }
             } else if is_custom && self.model_selector_focused_field == 5 {
                 // Custom: on context window field — save
-                self.save_provider_selection(self.model_selector_provider_selected.min(8), false)
+                self.save_provider_selection(self.model_selector_provider_selected.min(9), false)
                     .await?;
             } else {
                 // Non-custom: on model field — save and close
-                self.save_provider_selection(self.model_selector_provider_selected.min(8), false)
+                self.save_provider_selection(self.model_selector_provider_selected.min(9), false)
                     .await?;
             }
         }
@@ -821,9 +840,12 @@ impl App {
         if let Some(ref mut p) = config.providers.claude_cli {
             p.enabled = false;
         }
+        if let Some(ref mut p) = config.providers.opencode_cli {
+            p.enabled = false;
+        }
 
         // Get existing key from config if not changing
-        // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=z.ai GLM, 7=Claude CLI, 8=Custom
+        // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=z.ai GLM, 7=Claude CLI, 8=OpenCode CLI, 9=Custom
         let existing_key = match provider_idx {
             0 => config
                 .providers
@@ -875,7 +897,8 @@ impl App {
                 .filter(|k| !k.is_empty())
                 .cloned(),
             7 => None, // Claude CLI — no API key needed
-            8 => config
+            8 => None, // OpenCode CLI — no API key needed
+            9 => config
                 .providers
                 .active_custom()
                 .and_then(|(_, p)| p.api_key.as_ref())
@@ -899,7 +922,7 @@ impl App {
         );
 
         // Build provider config based on selection
-        // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=z.ai GLM, 7=Claude CLI, 8=Custom
+        // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=z.ai GLM, 7=Claude CLI, 8=OpenCode CLI, 9=Custom
         let default_model = provider.models.first().copied().unwrap_or("default");
         match provider_idx {
             0 => {
@@ -1008,6 +1031,18 @@ impl App {
                 });
             }
             8 => {
+                // OpenCode CLI — no API key needed
+                config.providers.opencode_cli = Some(ProviderConfig {
+                    enabled: true,
+                    api_key: None,
+                    base_url: None,
+                    default_model: Some(default_model.to_string()),
+                    models: vec![],
+                    vision_model: None,
+                    ..Default::default()
+                });
+            }
+            9 => {
                 // Custom OpenAI-compatible (named provider)
                 let custom_model = self.model_selector_custom_model.clone();
                 let custom_name = self.model_selector_custom_name.clone();
@@ -1042,7 +1077,8 @@ impl App {
             5 => "providers.minimax",
             6 => "providers.zhipu",
             7 => "providers.claude_cli",
-            8 => {
+            8 => "providers.opencode_cli",
+            9 => {
                 // Resolve custom provider name: UI field > config active > "default"
                 let cname = if !self.model_selector_custom_name.is_empty() {
                     self.model_selector_custom_name.clone()
@@ -1068,6 +1104,7 @@ impl App {
             "providers.minimax",
             "providers.zhipu",
             "providers.claude_cli",
+            "providers.opencode_cli",
         ] {
             if s != section {
                 let _ = crate::config::Config::write_key(s, "enabled", "false");
@@ -1118,7 +1155,7 @@ impl App {
                 };
                 let _ = crate::config::Config::write_key(section, "endpoint_type", endpoint_type);
             }
-            8 if !self.model_selector_base_url.is_empty() => {
+            9 if !self.model_selector_base_url.is_empty() => {
                 let _ = crate::config::Config::write_key(
                     section,
                     "base_url",
@@ -1136,7 +1173,7 @@ impl App {
         }
 
         // Refresh custom provider names list after saving (so new entries appear immediately)
-        if provider_idx == 8
+        if provider_idx == 9
             && let Ok(fresh) = crate::config::Config::load()
         {
             self.model_selector_custom_names = fresh
@@ -1156,11 +1193,11 @@ impl App {
                     .iter()
                     .position(|n| n == &self.model_selector_custom_name)
             {
-                self.model_selector_provider_selected = 9 + pos;
+                self.model_selector_provider_selected = 10 + pos;
                 tracing::debug!(
                     "[save_provider] mapped custom '{}' to idx={}",
                     self.model_selector_custom_name,
-                    9 + pos,
+                    10 + pos,
                 );
             }
         }
@@ -1176,7 +1213,7 @@ impl App {
 
         // Resolve the selected model BEFORE rebuilding the provider so the new
         // provider instance picks up the correct model from config on disk.
-        let is_custom = provider_idx == 8;
+        let is_custom = provider_idx == 9;
         let selected_model = if is_custom {
             self.model_selector_custom_model.clone()
         } else if !self.model_selector_models.is_empty() {
@@ -1210,7 +1247,7 @@ impl App {
 
         // Rebuild agent service with new provider (now sees the correct model)
         if let Err(e) = self.rebuild_agent_service().await {
-            if api_key.is_none() && provider_idx == 8 {
+            if api_key.is_none() && provider_idx == 9 {
                 self.push_system_message(format!(
                     "API key required for {}. Type it and press Enter.",
                     provider
@@ -1246,7 +1283,7 @@ impl App {
         // Only close dialog if explicitly requested
         if close_dialog {
             // Use user-configured name for custom providers (e.g. "nvidia"), fall back to generic
-            let provider_name = if provider_idx == 8 && !self.model_selector_custom_name.is_empty()
+            let provider_name = if provider_idx == 9 && !self.model_selector_custom_name.is_empty()
             {
                 self.model_selector_custom_name.clone()
             } else {

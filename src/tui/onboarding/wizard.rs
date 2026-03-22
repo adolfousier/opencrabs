@@ -250,13 +250,13 @@ impl OnboardingWizard {
                     let model = c.default_model.clone().unwrap_or_default();
                     custom_provider_name_init = Some(name.to_string());
                     // context_window is set after wizard construction below
-                    // Map to index 8+ for existing custom providers (shifted for z.ai GLM)
+                    // Map to index 10+ for existing custom providers
                     let idx = config
                         .providers
                         .custom
                         .as_ref()
-                        .and_then(|m| m.keys().position(|k| k == name).map(|pos| 8 + pos))
-                        .unwrap_or(8);
+                        .and_then(|m| m.keys().position(|k| k == name).map(|pos| 10 + pos))
+                        .unwrap_or(9);
                     (idx, EXISTING_KEY_SENTINEL.to_string(), base, model)
                 } else {
                     (0, String::new(), String::new(), String::new())
@@ -624,11 +624,11 @@ impl OnboardingWizard {
 
     /// Get provider info for currently selected provider
     pub fn current_provider(&self) -> &ProviderInfo {
-        // Indices 0-7 are static providers (direct mapping)
-        // Index 8 is "+ New Custom Provider"
-        // Indices 9+ are existing custom providers — map to Custom entry (index 8)
-        let idx = if self.selected_provider >= 8 {
-            8 // Custom OpenAI-Compatible
+        // Indices 0-8 are static providers (direct mapping)
+        // Index 9 is "+ New Custom Provider"
+        // Indices 10+ are existing custom providers — map to Custom entry (index 9)
+        let idx = if self.selected_provider >= 9 {
+            9 // Custom OpenAI-Compatible
         } else {
             self.selected_provider
         };
@@ -637,21 +637,21 @@ impl OnboardingWizard {
 
     /// Check if the current provider is a custom option (new or existing)
     pub fn is_custom_provider(&self) -> bool {
-        self.selected_provider >= 8
+        self.selected_provider >= 9
     }
 
-    /// Visual display order: static providers (0-7) sorted alphabetically by name,
-    /// then existing custom providers (9+) already alphabetical from BTreeMap,
-    /// then "+ New Custom Provider" (8) always last.
+    /// Visual display order: static providers (0-8) sorted alphabetically by name,
+    /// then existing custom providers (10+) already alphabetical from BTreeMap,
+    /// then "+ New Custom Provider" (9) always last.
     pub fn provider_display_order(&self) -> Vec<usize> {
         use crate::tui::onboarding::types::PROVIDERS;
         let num_customs = self.existing_custom_names.len();
-        let mut static_indices: Vec<usize> = (0..8).collect();
+        let mut static_indices: Vec<usize> = (0..9).collect();
         static_indices.sort_by_key(|&i| PROVIDERS[i].name.to_ascii_lowercase());
         static_indices
             .into_iter()
-            .chain(9..9 + num_customs)
-            .chain(std::iter::once(8))
+            .chain(10..10 + num_customs)
+            .chain(std::iter::once(9))
             .collect()
     }
 
@@ -660,8 +660,8 @@ impl OnboardingWizard {
         self.api_key_input == EXISTING_KEY_SENTINEL
     }
 
-    /// When navigating to an existing custom provider (index >= 9), load its config fields.
-    /// For index 8 (new custom), clear the fields.
+    /// When navigating to an existing custom provider (index >= 10), load its config fields.
+    /// For index 9 (new custom), clear the fields.
     /// For index 6 (z.ai GLM), load endpoint_type.
     pub fn load_custom_fields_if_existing(&mut self) {
         // z.ai GLM selected — load endpoint_type
@@ -674,14 +674,14 @@ impl OnboardingWizard {
                 _ => 0,
             };
         }
-        if self.selected_provider == 8 {
+        if self.selected_provider == 9 {
             // "+ New Custom Provider" — clear fields
             self.custom_provider_name.clear();
             self.custom_base_url.clear();
             self.custom_model.clear();
             self.custom_context_window.clear();
-        } else if self.selected_provider >= 9 {
-            let custom_idx = self.selected_provider - 9;
+        } else if self.selected_provider >= 10 {
+            let custom_idx = self.selected_provider - 10;
             if let Some(cname) = self.existing_custom_names.get(custom_idx).cloned()
                 && let Ok(config) = crate::config::Config::load()
                 && let Some(c) = config.providers.custom_by_name(&cname)

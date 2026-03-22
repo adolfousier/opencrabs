@@ -37,7 +37,11 @@ impl OnboardingWizard {
                     // Claude CLI — static model list, no config models
                     return;
                 }
-                n if n >= 8 => {
+                8 => {
+                    // OpenCode CLI — models fetched from CLI, no config models
+                    return;
+                }
+                n if n >= 9 => {
                     if let Some((_name, p)) = config.providers.active_custom()
                         && !p.models.is_empty()
                     {
@@ -95,7 +99,7 @@ impl OnboardingWizard {
 
     /// Whether the current provider supports live model fetching
     pub fn supports_model_fetch(&self) -> bool {
-        matches!(self.selected_provider, 0 | 1 | 2 | 4 | 6) // Anthropic, OpenAI, GitHub Copilot, OpenRouter, z.ai GLM (not Claude CLI=7)
+        matches!(self.selected_provider, 0 | 1 | 2 | 4 | 6 | 8) // Anthropic, OpenAI, GitHub Copilot, OpenRouter, z.ai GLM, OpenCode CLI
     }
 
     /// Load default models from embedded config.toml.example for GitHub, MiniMax, zhipu, and Custom
@@ -144,7 +148,7 @@ impl OnboardingWizard {
                         }
                     }
                 }
-                n if n >= 8 => {
+                n if n >= 9 => {
                     // Custom providers only
                     if let Some(custom) = providers.get("custom")
                         && let Some(custom_table) = custom.as_table()

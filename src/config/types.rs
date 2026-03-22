@@ -544,6 +544,10 @@ pub struct ProviderConfigs {
     #[serde(default)]
     pub claude_cli: Option<ProviderConfig>,
 
+    /// OpenCode CLI — direct subprocess, access to opencode's free models
+    #[serde(default)]
+    pub opencode_cli: Option<ProviderConfig>,
+
     /// AWS Bedrock configuration
     #[serde(default)]
     pub bedrock: Option<ProviderConfig>,
@@ -591,7 +595,7 @@ impl ProviderConfigs {
     /// Return `(provider_name, default_model)` for the currently active provider,
     /// using the same priority order as `factory::create_provider`.
     pub fn active_provider_and_model(&self) -> (String, String) {
-        // Claude CLI first — no API key needed, just enabled check
+        // CLI providers first — no API key needed, just enabled check
         if let Some(c) = self.claude_cli.as_ref()
             && c.enabled
         {
@@ -600,6 +604,15 @@ impl ProviderConfigs {
                 .clone()
                 .unwrap_or_else(|| "sonnet".to_string());
             return ("claude-cli".to_string(), model);
+        }
+        if let Some(c) = self.opencode_cli.as_ref()
+            && c.enabled
+        {
+            let model = c
+                .default_model
+                .clone()
+                .unwrap_or_else(|| "opencode/gpt-5-nano".to_string());
+            return ("opencode".to_string(), model);
         }
         let candidates: &[(&str, Option<&ProviderConfig>)] = &[
             ("minimax", self.minimax.as_ref()),
