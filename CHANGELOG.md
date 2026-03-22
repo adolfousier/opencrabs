@@ -5,16 +5,22 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.85] - 2026-03-21
+## [0.2.85] - 2026-03-22
 
 ### Added
-- **Claude Code CLI provider** — New `claude-cli` provider that routes requests through the Claude Code CLI on your machine, allowing OpenCrabs to use Claude without a direct API key
+- **OpenCode CLI provider** — New `opencode-cli` provider that spawns the local `opencode` binary for free LLM completions — no API key or subscription needed. Includes NDJSON streaming, extended thinking support, and live model fetching via `opencode models`
+- **z.ai GLM provider** — New built-in provider for Zhipu AI (z.ai) with two endpoint types: General API and Coding API. Live model fetching, streaming, and tool support. Configurable via onboarding wizard or `/models`
+- **Alphabetical provider sorting** — Provider lists in `/models` and `/onboard:provider` dialogs are now sorted alphabetically for easier navigation
+- **Visual line navigation** — Up/Down arrow keys navigate wrapped lines visually in the input editor instead of jumping by logical lines. Queued message indicator shows when a message is waiting
 - **Native extended thinking support** — `Thinking` variant in `ContentBlock` for native extended thinking content blocks from Anthropic models
 - **Cron default provider/model config** — New `[cron]` config section to set default `provider` and `model` for cron jobs independently from interactive sessions
 - **Real-time tool streaming events** — Emit `ToolStarted`/`ToolCompleted` events during streaming for real-time TUI tool visibility
+- **AI providers README table** — All built-in providers listed in a summary table with auth type, models, and features at a glance
 - **wacore 0.4.1 + stable Rust** — Upgraded wacore/whatsapp-rust crates from 0.3 to 0.4.1. Implemented 5 new trait methods (`get_max_prekey_id`, `get_latest_sync_key_id`, `store_sent_message`, `take_sent_message`, `delete_expired_sent_messages`). Added `wa_sent_messages` migration table. Disabled simd feature to drop nightly requirement. `cargo install opencrabs` now works on stable Rust
 
 ### Fixed
+- **CLI provider onboarding skips API key** — CLI providers (OpenCode CLI) go directly from provider selection to model selection, matching the `/models` dialog behavior
+- **`/models` filter/navigate for CLI providers** — Typing to filter and Up/Down navigation now work for CLI provider model lists
 - **Anthropic `thinking_delta` SSE parsing** — Handle `thinking_delta` events in the Anthropic SSE stream parser instead of ignoring them
 - **Streaming spinner spacing** — Added spacing between streaming content and the status spinner line
 - **Thinking blocks skipped in SSE parser** — Skip thinking blocks in Anthropic SSE parser and suppress noisy log output
@@ -23,6 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **XML tool-call recovery** — Recover XML tool calls from model output instead of silently dropping them
 - **Secret redaction in DB persistence** — Redact secrets from user messages before writing to the database
 - **Tool events emitted at ContentBlockStop** — Tool events now fire at `ContentBlockStop` with fully parsed input JSON instead of at `ContentBlockStart` with empty input, fixing TUI tool display timing
+- **UTF-8 boundary panic** — Use `floor_char_boundary()` to prevent panics on string truncation at multi-byte character boundaries
+- **Input buffer cleared on queued message injection** — Prevents stale input from leaking into the next prompt
+- **z.ai inline API errors surfaced** — API error responses from z.ai now displayed in the TUI instead of silently dropping the stream
+
+### Testing
+- **21 OpenCode CLI provider tests** — Unit, config, factory, and end-to-end tests covering provider creation, model resolution, and actual CLI completions
 
 ## [0.2.84] - 2026-03-20
 
