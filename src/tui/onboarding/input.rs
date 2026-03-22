@@ -374,6 +374,14 @@ impl OnboardingWizard {
                         return WizardAction::GitHubDeviceFlow;
                     } else if self.is_custom_provider() {
                         self.auth_field = AuthField::CustomName;
+                    } else if matches!(self.selected_provider, 7 | 8) {
+                        // CLI providers (Claude CLI, OpenCode CLI): no API key — skip to model
+                        self.auth_field = AuthField::Model;
+                        self.fetched_models.clear();
+                        self.selected_model = 0;
+                        if self.supports_model_fetch() {
+                            return WizardAction::FetchModels;
+                        }
                     } else if self.selected_provider == 6 {
                         // z.ai GLM: endpoint type first, then API key
                         self.auth_field = AuthField::ZhipuEndpointType;
@@ -446,7 +454,12 @@ impl OnboardingWizard {
                 }
                 KeyCode::Backspace => {
                     if self.model_filter.is_empty() {
-                        self.auth_field = AuthField::ApiKey;
+                        // CLI providers have no API key — go back to Provider
+                        if matches!(self.selected_provider, 7 | 8) {
+                            self.auth_field = AuthField::Provider;
+                        } else {
+                            self.auth_field = AuthField::ApiKey;
+                        }
                     } else {
                         self.model_filter.pop();
                         self.selected_model = 0;
@@ -456,7 +469,11 @@ impl OnboardingWizard {
                     self.next_step();
                 }
                 KeyCode::BackTab => {
-                    self.auth_field = AuthField::ApiKey;
+                    if matches!(self.selected_provider, 7 | 8) {
+                        self.auth_field = AuthField::Provider;
+                    } else {
+                        self.auth_field = AuthField::ApiKey;
+                    }
                     self.model_filter.clear();
                     self.selected_model = 0;
                 }
