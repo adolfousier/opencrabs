@@ -97,6 +97,19 @@ impl OnboardingWizard {
         }
     }
 
+    /// Resolve `selected_model` index from a model name string.
+    /// Call after models are loaded (config, fetched, or static) to sync the
+    /// index with the configured default_model.
+    pub fn resolve_selected_model_index(&mut self) {
+        if self.custom_model.is_empty() {
+            return;
+        }
+        let all = self.all_model_names();
+        if let Some(idx) = all.iter().position(|m| *m == self.custom_model) {
+            self.selected_model = idx;
+        }
+    }
+
     /// Whether the current provider supports live model fetching
     pub fn supports_model_fetch(&self) -> bool {
         matches!(self.selected_provider, 0 | 1 | 2 | 4 | 6 | 8) // Anthropic, OpenAI, GitHub Copilot, OpenRouter, z.ai GLM, OpenCode CLI
