@@ -43,6 +43,13 @@ pub trait Provider: Send + Sync {
         false // Not all providers support vision
     }
 
+    /// Whether the CLI subprocess handles tool execution internally.
+    /// When true, the tool_loop emits ToolStarted/ToolCompleted progress
+    /// events for display but does NOT execute tools itself.
+    fn cli_handles_tools(&self) -> bool {
+        false
+    }
+
     /// Get the provider name
     fn name(&self) -> &str;
 

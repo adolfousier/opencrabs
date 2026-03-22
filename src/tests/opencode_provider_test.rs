@@ -110,12 +110,12 @@ fn opencode_provider_does_not_support_tools() {
 }
 
 #[test]
-fn opencode_provider_does_not_support_vision() {
+fn opencode_provider_supports_vision() {
     if OpenCodeCliProvider::new().is_err() {
         return;
     }
     let provider = OpenCodeCliProvider::new().unwrap();
-    assert!(!provider.supports_vision());
+    assert!(provider.supports_vision());
 }
 
 #[test]
