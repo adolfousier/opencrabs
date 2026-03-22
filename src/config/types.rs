@@ -2285,6 +2285,20 @@ pub fn resolve_provider_from_config(config: &Config) -> (&str, &str) {
             .unwrap_or("sonnet");
         return ("Claude CLI", model);
     }
+    if config
+        .providers
+        .opencode_cli
+        .as_ref()
+        .is_some_and(|p| p.enabled)
+    {
+        let model = config
+            .providers
+            .opencode_cli
+            .as_ref()
+            .and_then(|p| p.default_model.as_deref())
+            .unwrap_or("opencode/gpt-5-nano");
+        return ("OpenCode CLI", model);
+    }
     if let Some((name, cfg)) = config.providers.active_custom() {
         let model = cfg.default_model.as_deref().unwrap_or("default");
         return (name, model);
