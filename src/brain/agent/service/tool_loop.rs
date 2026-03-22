@@ -796,6 +796,7 @@ impl AgentService {
 
             // CLI providers handle tools internally — emit progress events for
             // TUI display (expandable tool groups) but don't execute them.
+            // Break immediately after — the CLI already completed its full run.
             let cli_tools = self
                 .provider
                 .read()
@@ -835,15 +836,8 @@ impl AgentService {
                     && let Some(queued_msg) = queue_cb().await
                 {
                     tracing::info!("Injecting queued user message (no tool_uses path)");
-                    if let Some(ref cb) = progress_callback {
-                        cb(
-                            session_id,
-                            ProgressEvent::QueuedUserMessage {
-                                text: queued_msg.clone(),
-                            },
-                        );
-                    }
-                    // Emit any intermediate text before continuing
+                    // Emit assistant's intermediate text FIRST so it appears
+                    // before the queued user message in the TUI
                     if !iteration_text.is_empty()
                         && let Some(ref cb) = progress_callback
                     {
@@ -852,6 +846,15 @@ impl AgentService {
                             ProgressEvent::IntermediateText {
                                 text: iteration_text,
                                 reasoning: reasoning_text,
+                            },
+                        );
+                    }
+                    // THEN show the queued user message
+                    if let Some(ref cb) = progress_callback {
+                        cb(
+                            session_id,
+                            ProgressEvent::QueuedUserMessage {
+                                text: queued_msg.clone(),
                             },
                         );
                     }
