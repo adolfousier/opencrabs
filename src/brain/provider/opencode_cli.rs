@@ -73,7 +73,9 @@ impl OpenCodeCliProvider {
                             Some(format!("<thinking>{}</thinking>", thinking))
                         }
                     }
-                    _ => None,
+                    ContentBlock::Image { source } => {
+                        Some(materialize_image(source))
+                    }
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
@@ -85,6 +87,38 @@ impl OpenCodeCliProvider {
         }
 
         parts.join("\n\n")
+    }
+}
+
+/// Save a base64 image to a temp file and return a prompt reference,
+/// or return the URL directly for URL-based images.
+fn materialize_image(source: &ImageSource) -> String {
+    match source {
+        ImageSource::Base64 { media_type, data } => {
+            let ext = match media_type.as_str() {
+                "image/png" => "png",
+                "image/jpeg" => "jpeg",
+                "image/gif" => "gif",
+                "image/webp" => "webp",
+                _ => "png",
+            };
+            let tmp = std::env::temp_dir().join(format!(
+                "opencrabs_img_{}.{}",
+                uuid::Uuid::new_v4(),
+                ext
+            ));
+            use base64::Engine;
+            if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data)
+                && std::fs::write(&tmp, &bytes).is_ok()
+            {
+                tracing::info!("CLI image materialized to {}", tmp.display());
+                return format!("[Attached image: {}]", tmp.display());
+            }
+            "[Attached image: failed to decode]".to_string()
+        }
+        ImageSource::Url { url } => {
+            format!("[Attached image URL: {}]", url)
+        }
     }
 }
 
@@ -591,6 +625,6 @@ impl Provider for OpenCodeCliProvider {
     }
 
     fn supports_vision(&self) -> bool {
-        false
+        true // Images saved to temp files and referenced in prompt
     }
 }
