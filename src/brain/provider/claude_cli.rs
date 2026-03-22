@@ -447,9 +447,9 @@ impl Provider for ClaudeCliProvider {
                             "message_stop" | "message_delta" => {
                                 // Suppress — Result handles final close
                             }
-                            // CLI executes tools internally — convert tool_use events
-                            // to text so the TUI displays them without the tool_loop
-                            // re-executing them.
+                            // Forward tool_use blocks as real stream events — the tool_loop
+                            // will see cli_handles_tools() and emit ProgressEvents for TUI
+                            // display without re-executing them.
                             "content_block_start"
                                 if event
                                     .get("content_block")
@@ -457,24 +457,21 @@ impl Provider for ClaudeCliProvider {
                                     .and_then(|t| t.as_str())
                                     == Some("tool_use") =>
                             {
-                                let tool_name = event
-                                    .get("content_block")
-                                    .and_then(|b| b.get("name"))
-                                    .and_then(|n| n.as_str())
-                                    .unwrap_or("unknown");
-                                let idx = event.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
-                                // Start a text block that shows the tool call
-                                let se = StreamEvent::ContentBlockStart {
-                                    index: idx,
-                                    content_block: ContentBlock::Text {
-                                        text: format!("\n🔧 **{}** ", tool_name),
-                                    },
-                                };
-                                if tx.send(Ok(se)).await.is_err() {
-                                    break;
+                                match serde_json::from_value::<StreamEvent>(event.clone()) {
+                                    Ok(se) => {
+                                        if tx.send(Ok(se)).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::debug!(
+                                            "Skipping tool_use content_block_start: {}",
+                                            e
+                                        );
+                                    }
                                 }
                             }
-                            // Convert input_json_delta to text_delta so tool params are visible
+                            // Forward input_json_delta for tool_use blocks
                             "content_block_delta"
                                 if event
                                     .get("delta")
@@ -482,21 +479,14 @@ impl Provider for ClaudeCliProvider {
                                     .and_then(|t| t.as_str())
                                     == Some("input_json_delta") =>
                             {
-                                let partial = event
-                                    .get("delta")
-                                    .and_then(|d| d.get("partial_json"))
-                                    .and_then(|p| p.as_str())
-                                    .unwrap_or("");
-                                if !partial.is_empty() {
-                                    let idx = event.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
-                                    let se = StreamEvent::ContentBlockDelta {
-                                        index: idx,
-                                        delta: ContentDelta::TextDelta {
-                                            text: partial.to_string(),
-                                        },
-                                    };
-                                    if tx.send(Ok(se)).await.is_err() {
-                                        break;
+                                match serde_json::from_value::<StreamEvent>(event.clone()) {
+                                    Ok(se) => {
+                                        if tx.send(Ok(se)).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::debug!("Skipping input_json_delta: {}", e);
                                     }
                                 }
                             }
@@ -676,40 +666,8 @@ impl Provider for ClaudeCliProvider {
                         break;
                     }
 
-                    CliMessage::User { message } => {
+                    CliMessage::User { .. } => {
                         tracing::debug!("CLI → user turn (tool_result)");
-                        // Emit tool results as text so they appear in the TUI
-                        if let Some(content) = message.get("content").and_then(|c| c.as_array()) {
-                            for item in content {
-                                if item.get("type").and_then(|t| t.as_str()) == Some("tool_result") {
-                                    let result_text = item
-                                        .get("content")
-                                        .and_then(|c| c.as_str())
-                                        .unwrap_or("");
-                                    if !result_text.is_empty() {
-                                        // Truncate long tool results for display
-                                        let display = if result_text.len() > 500 {
-                                            format!("{}…", &result_text[..result_text.floor_char_boundary(500)])
-                                        } else {
-                                            result_text.to_string()
-                                        };
-                                        completed_blocks += 1;
-                                        let se = StreamEvent::ContentBlockStart {
-                                            index: completed_blocks,
-                                            content_block: ContentBlock::Text {
-                                                text: format!("\n✅ `{}`\n", display),
-                                            },
-                                        };
-                                        if tx.send(Ok(se)).await.is_err() {
-                                            break;
-                                        }
-                                        let _ = tx.send(Ok(StreamEvent::ContentBlockStop {
-                                            index: completed_blocks,
-                                        })).await;
-                                    }
-                                }
-                            }
-                        }
                     }
 
                     CliMessage::RateLimitEvent {} => {
@@ -785,6 +743,10 @@ impl Provider for ClaudeCliProvider {
 
     fn supports_vision(&self) -> bool {
         true // Images saved to temp files and referenced in prompt
+    }
+
+    fn cli_handles_tools(&self) -> bool {
+        true // CLI executes tools internally — display only, don't re-execute
     }
 }
 

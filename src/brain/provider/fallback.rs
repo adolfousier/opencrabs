@@ -110,6 +110,10 @@ impl Provider for FallbackProvider {
         self.primary.supports_vision()
     }
 
+    fn cli_handles_tools(&self) -> bool {
+        self.primary.cli_handles_tools()
+    }
+
     fn name(&self) -> &str {
         self.primary.name()
     }

@@ -794,9 +794,41 @@ impl AgentService {
 
             tracing::debug!("Found {} tool uses to execute", tool_uses.len());
 
+            // CLI providers handle tools internally — emit progress events for
+            // TUI display (expandable tool groups) but don't execute them.
+            let cli_tools = self
+                .provider
+                .read()
+                .map(|p| p.cli_handles_tools())
+                .unwrap_or(false);
+            if cli_tools && !tool_uses.is_empty() {
+                for (_, tool_name, tool_input) in &tool_uses {
+                    if let Some(ref cb) = progress_callback {
+                        cb(
+                            session_id,
+                            ProgressEvent::ToolStarted {
+                                tool_name: tool_name.clone(),
+                                tool_input: tool_input.clone(),
+                            },
+                        );
+                        cb(
+                            session_id,
+                            ProgressEvent::ToolCompleted {
+                                tool_name: tool_name.clone(),
+                                tool_input: tool_input.clone(),
+                                success: true,
+                                summary: "(executed by CLI)".to_string(),
+                            },
+                        );
+                    }
+                }
+                // Clear tool_uses so we don't try to execute them below
+                tool_uses.clear();
+            }
+
             if tool_uses.is_empty() {
                 // Before breaking, check for queued user messages.
-                // CLI providers suppress tool_use blocks (tools run internally),
+                // CLI providers may forward tool_use blocks for display only,
                 // so the queue drain at the bottom of the loop never executes.
                 // Inject here so the queued message gets sent in the next iteration.
                 if let Some(ref queue_cb) = self.message_queue_callback

@@ -413,7 +413,11 @@ fn test_openrouter_provider_index() {
 #[test]
 fn test_model_count_uses_fetched_when_available() {
     let mut wizard = OnboardingWizard::new();
-    // Static fallback is empty - models fetched from API
+    // Clear any models loaded from existing config
+    wizard.config_models.clear();
+    wizard.fetched_models.clear();
+    // Anthropic (0) has no static models — fetched from API
+    wizard.selected_provider = 0;
     assert_eq!(wizard.model_count(), 0);
 
     // After fetching
