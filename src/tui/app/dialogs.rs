@@ -604,7 +604,7 @@ impl App {
                 _ => {}
             }
         } else if (self.model_selector_focused_field == 2
-            && self.model_selector_provider_selected < 8
+            && self.model_selector_provider_selected < 9
             && !is_zhipu)
             || (self.model_selector_focused_field == 3 && is_zhipu)
         {

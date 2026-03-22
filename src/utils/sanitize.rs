@@ -529,10 +529,10 @@ mod tests {
 
     #[test]
     fn redact_secrets_stripe_live_key() {
-        let text = "stripe key: sk_live_51HG7sE2kGuICQhPh0iF9K2N3qT";
+        let text = "stripe key: sk_live_FAKE00TEST00KEY00EXAMPLE00VAL";
         let out = redact_secrets(text);
         assert!(out.contains("sk_live_[REDACTED]"), "got: {out}");
-        assert!(!out.contains("51HG7"), "secret leaked: {out}");
+        assert!(!out.contains("FAKE00TEST"), "secret leaked: {out}");
     }
 
     #[test]

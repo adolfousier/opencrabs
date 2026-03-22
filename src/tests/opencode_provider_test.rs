@@ -8,15 +8,15 @@
 //!
 //! E2E tests skip gracefully if the opencode binary is not installed.
 
-use crate::brain::provider::opencode_cli::OpenCodeCliProvider;
 use crate::brain::provider::Provider;
+use crate::brain::provider::opencode_cli::OpenCodeCliProvider;
 use crate::brain::provider::types::*;
-use crate::brain::tools::{Tool, ToolExecutionContext};
 use crate::brain::tools::bash::BashTool;
 use crate::brain::tools::glob::GlobTool;
 use crate::brain::tools::grep::GrepTool;
 use crate::brain::tools::read::ReadTool;
 use crate::brain::tools::write::WriteTool;
+use crate::brain::tools::{Tool, ToolExecutionContext};
 use crate::config::{Config, ProviderConfig};
 use uuid::Uuid;
 
@@ -27,10 +27,15 @@ fn try_provider() -> Option<OpenCodeCliProvider> {
 
 /// Helper: build a minimal LLMRequest for a single user message.
 fn simple_request(model: &str, prompt: &str) -> LLMRequest {
-    LLMRequest::new(model, vec![Message {
-        role: Role::User,
-        content: vec![ContentBlock::Text { text: prompt.to_string() }],
-    }])
+    LLMRequest::new(
+        model,
+        vec![Message {
+            role: Role::User,
+            content: vec![ContentBlock::Text {
+                text: prompt.to_string(),
+            }],
+        }],
+    )
 }
 
 /// Helper: extract all text from an LLMResponse.
@@ -206,11 +211,17 @@ fn factory_creates_opencode_by_alt_names() {
 
 #[tokio::test]
 async fn e2e_opencode_simple_completion() {
-    let Some(provider) = try_provider() else { return };
+    let Some(provider) = try_provider() else {
+        return;
+    };
     let request = simple_request("opencode/gpt-5-nano", "Reply with exactly: HELLO_OPENCRABS");
 
     let response = provider.complete(request).await;
-    assert!(response.is_ok(), "completion should succeed: {:?}", response.err());
+    assert!(
+        response.is_ok(),
+        "completion should succeed: {:?}",
+        response.err()
+    );
     let response = response.unwrap();
     assert!(!response.content.is_empty(), "response should have content");
 
@@ -226,7 +237,10 @@ async fn e2e_opencode_simple_completion() {
 async fn e2e_opencode_streaming() {
     use futures::StreamExt;
 
-    let provider = { let Some(p) = try_provider() else { return }; p };
+    let provider = {
+        let Some(p) = try_provider() else { return };
+        p
+    };
     let request = simple_request("opencode/gpt-5-nano", "Say hello in one word.");
 
     let stream = provider.stream(request).await;
@@ -262,7 +276,10 @@ async fn e2e_opencode_streaming() {
 
 #[tokio::test]
 async fn e2e_opencode_with_bash_tool() {
-    let provider = { let Some(p) = try_provider() else { return }; p };
+    let provider = {
+        let Some(p) = try_provider() else { return };
+        p
+    };
 
     let mut request = simple_request(
         "opencode/gpt-5-nano",
@@ -270,9 +287,16 @@ async fn e2e_opencode_with_bash_tool() {
     );
     request.system = Some("You are a helpful assistant. Reply concisely.".to_string());
 
-    let response = provider.complete(request).await.expect("completion should work");
+    let response = provider
+        .complete(request)
+        .await
+        .expect("completion should work");
     let llm_text = extract_text(&response);
-    assert!(llm_text.contains('4'), "LLM should answer 4, got: {}", llm_text);
+    assert!(
+        llm_text.contains('4'),
+        "LLM should answer 4, got: {}",
+        llm_text
+    );
 
     // Verify with bash tool
     let bash = BashTool;
@@ -291,7 +315,10 @@ async fn e2e_opencode_with_write_and_read_tools() {
     let test_file = tmp_dir.path().join("opencode_test.txt");
 
     // Use provider to generate content
-    let provider = { let Some(p) = try_provider() else { return }; p };
+    let provider = {
+        let Some(p) = try_provider() else { return };
+        p
+    };
     let request = simple_request(
         "opencode/gpt-5-nano",
         "Write exactly this text and nothing else: OpenCrabs integration test OK",
@@ -316,7 +343,11 @@ async fn e2e_opencode_with_write_and_read_tools() {
         )
         .await
         .expect("write tool should work");
-    assert!(write_result.success, "write should succeed: {}", write_result.output);
+    assert!(
+        write_result.success,
+        "write should succeed: {}",
+        write_result.output
+    );
 
     // Read back with ReadTool
     let read_tool = ReadTool;
@@ -375,7 +406,11 @@ async fn e2e_opencode_with_glob_and_grep_tools() {
         .await
         .expect("glob should work");
     assert!(glob_result.success);
-    assert!(glob_result.output.contains("alpha.txt"), "glob should find alpha.txt: {}", glob_result.output);
+    assert!(
+        glob_result.output.contains("alpha.txt"),
+        "glob should find alpha.txt: {}",
+        glob_result.output
+    );
 
     // GrepTool: search for "opencrabs"
     let grep_tool = GrepTool;
@@ -390,11 +425,20 @@ async fn e2e_opencode_with_glob_and_grep_tools() {
         .await
         .expect("grep should work");
     assert!(grep_result.success);
-    assert!(grep_result.output.contains("alpha.txt"), "grep should find alpha.txt");
-    assert!(grep_result.output.contains("beta.rs"), "grep should find beta.rs");
+    assert!(
+        grep_result.output.contains("alpha.txt"),
+        "grep should find alpha.txt"
+    );
+    assert!(
+        grep_result.output.contains("beta.rs"),
+        "grep should find beta.rs"
+    );
 
     // Use provider to interpret the results
-    let provider = { let Some(p) = try_provider() else { return }; p };
+    let provider = {
+        let Some(p) = try_provider() else { return };
+        p
+    };
     let request = simple_request(
         "opencode/gpt-5-nano",
         &format!(
@@ -412,7 +456,10 @@ async fn e2e_opencode_with_glob_and_grep_tools() {
 
 #[tokio::test]
 async fn e2e_opencode_multi_turn() {
-    let provider = { let Some(p) = try_provider() else { return }; p };
+    let provider = {
+        let Some(p) = try_provider() else { return };
+        p
+    };
 
     // Turn 1: set a fact
     let mut request1 = simple_request(
@@ -421,7 +468,10 @@ async fn e2e_opencode_multi_turn() {
     );
     request1.system = Some("You are a helpful assistant with good memory.".to_string());
 
-    let resp1 = provider.complete(request1).await.expect("turn 1 should work");
+    let resp1 = provider
+        .complete(request1)
+        .await
+        .expect("turn 1 should work");
 
     // Turn 2: ask for the fact back via message history
     let request2 = LLMRequest {
@@ -447,7 +497,10 @@ async fn e2e_opencode_multi_turn() {
         ..LLMRequest::new("opencode/gpt-5-nano", vec![])
     };
 
-    let resp2 = provider.complete(request2).await.expect("turn 2 should work");
+    let resp2 = provider
+        .complete(request2)
+        .await
+        .expect("turn 2 should work");
     let text = extract_text(&resp2);
     assert!(
         text.contains("CRAB42"),
@@ -466,7 +519,10 @@ async fn memory_search_tool_returns_result_for_query() {
     let ctx = ToolExecutionContext::new(Uuid::new_v4());
 
     let result = tool
-        .execute(serde_json::json!({ "query": "opencode provider test" }), &ctx)
+        .execute(
+            serde_json::json!({ "query": "opencode provider test" }),
+            &ctx,
+        )
         .await
         .expect("memory search should not panic");
     // Success regardless of whether memories exist
