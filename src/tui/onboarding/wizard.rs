@@ -531,6 +531,7 @@ impl OnboardingWizard {
         // Detect if we have an existing API key for the selected provider
         wizard.detect_existing_key();
         wizard.reload_config_models();
+        wizard.resolve_selected_model_index();
 
         // Load channel toggles (indices match CHANNEL_NAMES order)
         wizard.channel_toggles[0].1 = config.channels.telegram.enabled; // Telegram

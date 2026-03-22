@@ -1594,7 +1594,7 @@ impl App {
                     wizard.models_fetching = false;
                     if !models.is_empty() {
                         wizard.fetched_models = models;
-                        wizard.selected_model = 0;
+                        wizard.resolve_selected_model_index();
                     }
                 }
             }
