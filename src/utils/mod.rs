@@ -67,17 +67,47 @@ pub fn tool_context_hint(name: &str, input: &serde_json::Value) -> String {
             .get("operation")
             .and_then(|v| v.as_str())
             .map(String::from),
-        // Fallback: first string value, or first scalar stringified
+        // Fallback: build "action: detail" from common field patterns
         _ => safe.as_object().and_then(|m| {
-            m.values()
-                .find_map(|v| v.as_str().map(String::from))
-                .or_else(|| {
-                    m.values().find_map(|v| match v {
+            // Try action/operation + a descriptive field (name, prompt, query, path, etc.)
+            let action = m
+                .get("action")
+                .or_else(|| m.get("operation"))
+                .and_then(|v| v.as_str());
+            let detail_keys = [
+                "name", "prompt", "query", "path", "file_path", "pattern",
+                "description", "title", "url", "command", "id", "job_id",
+            ];
+            let detail = detail_keys
+                .iter()
+                .find_map(|k| m.get(*k).and_then(|v| v.as_str()));
+
+            match (action, detail) {
+                (Some(act), Some(det)) => Some(format!("{}: {}", act, det)),
+                (None, Some(det)) => Some(det.to_string()),
+                (Some(act), None) => {
+                    // Action-only tools like "list" — find any other string field
+                    let other = m
+                        .iter()
+                        .find(|(k, v)| {
+                            *k != "action" && *k != "operation" && v.is_string()
+                        })
+                        .and_then(|(_, v)| v.as_str());
+                    match other {
+                        Some(o) => Some(format!("{}: {}", act, o)),
+                        None => Some(act.to_string()),
+                    }
+                }
+                (None, None) => m
+                    .values()
+                    .find_map(|v| match v {
+                        serde_json::Value::String(s) if !s.is_empty() => {
+                            Some(s.clone())
+                        }
                         serde_json::Value::Number(n) => Some(n.to_string()),
-                        serde_json::Value::Bool(b) => Some(b.to_string()),
                         _ => None,
-                    })
-                })
+                    }),
+            }
         }),
     };
     match hint {
