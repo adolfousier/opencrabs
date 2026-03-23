@@ -5,6 +5,29 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.86] - 2026-03-23
+
+### Added
+- **Tool call context in all channels** — Slack and Discord now show real-time tool call progress with context (e.g. `✅ grep ("pattern")`), matching Telegram's behavior. Each tool call gets its own message that updates on completion
+- **Smart tool context hints** — Tool descriptions show meaningful context: `cron_manage ("delete 'daily-report'")` instead of bare `cron_manage`. Handles action+target patterns for cron_manage, plan, task_manager, with smart fallback for unknown tools
+
+### Fixed
+- **Claude CLI 60s idle timeout** — CLI streams were killed after 60s of tool execution silence. Now sends Ping keepalives during tool execution and offsets content block indices across tool rounds to prevent collisions
+- **OpenCode CLI idle timeout** — Same keepalive fix applied to OpenCode CLI provider for ToolUse, ToolResult, and mid-loop StepFinish events
+- **Claude CLI tool calls invisible in TUI** — Tool calls, parameters, and Ctrl+O expansion were completely hidden. Now forwards tool_use content_block_start and input_json_delta as real StreamEvents, with cli_handles_tools() preventing re-execution
+- **Queued message display ordering** — Queued messages appeared on top instead of after the assistant response, creating consecutive user/assistant messages. Swapped IntermediateText before QueuedUserMessage
+- **Thinking text missing paragraph breaks** — Thinking blocks from different tool rounds were concatenated without separators. Now inserts `\n\n` between rounds
+- **Provider wizard reverting to wrong provider** — Wrong index mapping in `new()` and `from_config()` for Claude CLI and OpenCode CLI providers
+- **Selected model reverting to Sonnet** — `selected_model` index was never resolved from config after fetching models
+- **Agent description in collapsed tool view** — Collapsed tool calls showed "Processing: Agent" instead of "Processing: Agent: Research heyiolo Supabase usage"
+- **CLI-normalized tool names** — `format_tool_description` now matches both "Agent" and "agent" for CLI-normalized names
+- **Telegram tool completion context lost** — Completion line showed just `✅ tool_name` without the context hint. Now single-line format preserves context
+- **Help text padding in provider dialog** — Bottom commands aligned with provider list
+- **Images dropped by CLI providers** — `materialize_image()` saves base64 images to temp files for Claude CLI and OpenCode CLI
+- **Fallback provider model remapping** — Fallback provider now remaps model to its default when the primary's model is unsupported
+- **OpenCode CLI stream break on tool-calls** — Don't break stream on `step_finish` with reason `tool-calls`
+- **Cron session isolation** — Dedicated shared "Cron" session prevents cron jobs from polluting TUI session context
+
 ## [0.2.85] - 2026-03-22
 
 ### Added
@@ -1678,6 +1701,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.86]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.86
 [0.2.85]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.85
 [0.2.84]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.84
 [0.2.83]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.83
