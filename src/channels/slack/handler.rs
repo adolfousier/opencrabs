@@ -958,6 +958,79 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         .store_cancel_token(session_id, cancel_token.clone())
         .await;
 
+    // Build progress callback — sends tool call status as Slack messages
+    let progress_cb: crate::brain::agent::ProgressCallback = {
+        use crate::brain::agent::ProgressEvent;
+
+        struct ToolEntry {
+            msg_ts: Option<SlackTs>,
+            name: String,
+            context: String,
+        }
+
+        let tools: Arc<Mutex<Vec<ToolEntry>>> = Arc::new(Mutex::new(Vec::new()));
+        let bot_token_cb = state.bot_token.clone();
+        let channel_cb = SlackChannelId::new(channel_id.clone());
+        let client_cb = client.clone();
+
+        Arc::new(move |_session_id, event| {
+            let tools = tools.clone();
+            let token = SlackApiToken::new(SlackApiTokenValue::from(bot_token_cb.clone()));
+            let channel = channel_cb.clone();
+            let client = client_cb.clone();
+
+            match event {
+                ProgressEvent::ToolStarted {
+                    tool_name,
+                    tool_input,
+                } => {
+                    let ctx = crate::utils::tool_context_hint(&tool_name, &tool_input);
+                    tokio::spawn(async move {
+                        let session = client.open_session(&token);
+                        let text = format!("⚙️ *{}*{}", tool_name, ctx);
+                        let req = SlackApiChatPostMessageRequest::new(
+                            channel,
+                            SlackMessageContent::new().with_text(text),
+                        );
+                        if let Ok(resp) = session.chat_post_message(&req).await {
+                            let mut t = tools.lock().await;
+                            t.push(ToolEntry {
+                                msg_ts: Some(resp.ts),
+                                name: tool_name,
+                                context: ctx,
+                            });
+                        }
+                    });
+                }
+                ProgressEvent::ToolCompleted {
+                    tool_name, success, ..
+                } => {
+                    tokio::spawn(async move {
+                        let session = client.open_session(&token);
+                        let mut t = tools.lock().await;
+                        if let Some(entry) = t
+                            .iter_mut()
+                            .rev()
+                            .find(|e| e.name == tool_name && e.msg_ts.is_some())
+                        {
+                            let icon = if success { "✅" } else { "❌" };
+                            let text = format!("{} *{}*{}", icon, entry.name, entry.context);
+                            if let Some(ts) = entry.msg_ts.take() {
+                                let upd = SlackApiChatUpdateRequest::new(
+                                    channel,
+                                    SlackMessageContent::new().with_text(text),
+                                    ts,
+                                );
+                                let _ = session.chat_update(&upd).await;
+                            }
+                        }
+                    });
+                }
+                _ => {}
+            }
+        })
+    };
+
     let result = state
         .agent
         .send_message_with_tools_and_callback(
@@ -966,7 +1039,7 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
             None,
             Some(cancel_token),
             Some(approval_cb),
-            None,
+            Some(progress_cb),
         )
         .await;
 
