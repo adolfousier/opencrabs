@@ -527,6 +527,10 @@ impl Provider for OpenCodeCliProvider {
                                 "opencode CLI mid-loop step_finish (reason={}), continuing",
                                 part.reason.as_deref().unwrap_or("none")
                             );
+                            // Keep the stream alive during tool execution
+                            if tx.send(Ok(StreamEvent::Ping)).await.is_err() {
+                                break;
+                            }
                         }
                     }
 
@@ -548,11 +552,19 @@ impl Provider for OpenCodeCliProvider {
 
                     CliEvent::ToolUse { .. } => {
                         tracing::debug!("opencode CLI tool_use (handled by opencode internally)");
+                        // Keep the stream alive during tool execution (can take >60s)
+                        if tx.send(Ok(StreamEvent::Ping)).await.is_err() {
+                            break;
+                        }
                     }
                     CliEvent::ToolResult { .. } => {
                         tracing::debug!(
                             "opencode CLI tool_result (handled by opencode internally)"
                         );
+                        // Keep the stream alive during tool execution
+                        if tx.send(Ok(StreamEvent::Ping)).await.is_err() {
+                            break;
+                        }
                     }
                     CliEvent::Unknown => {}
                 }
