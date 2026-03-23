@@ -902,11 +902,11 @@ pub(crate) async fn handle_message(
 
                         // ── Individual tool messages (each tool = its own message) ──
                         for tool in s.tool_msgs.iter_mut().filter(|t| t.dirty) {
-                            let line1 = format!("⚙️ **{}**{}", tool.name, tool.context);
+                            let label = format!("**{}**{}", tool.name, tool.context);
                             let text = match tool.completed {
-                                None => line1,
-                                Some(true) => format!("{}\n✅ **{}**", line1, tool.name),
-                                Some(false) => format!("{}\n❌ **{}**", line1, tool.name),
+                                None => format!("⚙️ {}", label),
+                                Some(true) => format!("✅ {}", label),
+                                Some(false) => format!("❌ {}", label),
                             };
                             let html = markdown_to_telegram_html(&text);
                             if let Some(mid) = tool.msg_id {
@@ -1268,10 +1268,30 @@ fn tool_context(name: &str, input: &serde_json::Value) -> String {
             .get("action")
             .and_then(|v| v.as_str())
             .map(String::from),
-        // Fallback: first string value in the object
-        _ => safe
-            .as_object()
-            .and_then(|m| m.values().find_map(|v| v.as_str().map(String::from))),
+        "agent" | "Agent" => safe
+            .get("description")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        "plan" => safe
+            .get("operation")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        "task_manager" => safe
+            .get("operation")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        // Fallback: first string value, or first scalar stringified
+        _ => safe.as_object().and_then(|m| {
+            m.values()
+                .find_map(|v| v.as_str().map(String::from))
+                .or_else(|| {
+                    m.values().find_map(|v| match v {
+                        serde_json::Value::Number(n) => Some(n.to_string()),
+                        serde_json::Value::Bool(b) => Some(b.to_string()),
+                        _ => None,
+                    })
+                })
+        }),
     };
     match hint {
         Some(h) if !h.is_empty() => {
