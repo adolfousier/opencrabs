@@ -379,6 +379,11 @@ impl Provider for ClaudeCliProvider {
             let mut current_block_chars: usize = 0;
             let mut output_tokens: u32 = 0;
             let mut line_count = 0u32;
+            // Track block index offset across tool rounds — each CLI turn
+            // restarts content block indices at 0, so we offset them to prevent
+            // collision in stream_complete()'s block_states array.
+            let mut block_index_offset: usize = 0;
+            let mut max_block_index_this_round: usize = 0;
 
             loop {
                 let line_result = lines.next_line().await;
@@ -444,8 +449,34 @@ impl Provider for ClaudeCliProvider {
                                     }
                                 }
                             }
-                            "message_stop" | "message_delta" => {
-                                // Suppress — Result handles final close
+                            "message_delta" => {
+                                // Suppress — Result handles final close.
+                                // But advance block index offset if this ends a tool_use round,
+                                // so the next round's blocks don't collide.
+                                let is_tool_round = event
+                                    .get("delta")
+                                    .and_then(|d| d.get("stop_reason"))
+                                    .and_then(|r| r.as_str())
+                                    == Some("tool_use");
+                                if is_tool_round {
+                                    block_index_offset += max_block_index_this_round;
+                                    max_block_index_this_round = 0;
+                                    tracing::debug!(
+                                        "CLI tool round ended, block_index_offset={}",
+                                        block_index_offset
+                                    );
+                                }
+                                // Send Ping to prevent idle timeout during tool execution
+                                if tx.send(Ok(StreamEvent::Ping)).await.is_err() {
+                                    break;
+                                }
+                            }
+                            "message_stop" => {
+                                // Suppress — Result handles final close.
+                                // Send Ping to prevent idle timeout.
+                                if tx.send(Ok(StreamEvent::Ping)).await.is_err() {
+                                    break;
+                                }
                             }
                             // Forward tool_use blocks as real stream events — the tool_loop
                             // will see cli_handles_tools() and emit ProgressEvents for TUI
@@ -459,6 +490,12 @@ impl Provider for ClaudeCliProvider {
                             {
                                 match serde_json::from_value::<StreamEvent>(event.clone()) {
                                     Ok(se) => {
+                                        // Track max block index for offset calculation
+                                        if let StreamEvent::ContentBlockStart { index, .. } = &se {
+                                            max_block_index_this_round =
+                                                max_block_index_this_round.max(index + 1);
+                                        }
+                                        let se = offset_block_index(se, block_index_offset);
                                         if tx.send(Ok(se)).await.is_err() {
                                             break;
                                         }
@@ -481,6 +518,7 @@ impl Provider for ClaudeCliProvider {
                             {
                                 match serde_json::from_value::<StreamEvent>(event.clone()) {
                                     Ok(se) => {
+                                        let se = offset_block_index(se, block_index_offset);
                                         if tx.send(Ok(se)).await.is_err() {
                                             break;
                                         }
@@ -492,6 +530,17 @@ impl Provider for ClaudeCliProvider {
                             }
                             _ => match serde_json::from_value::<StreamEvent>(event.clone()) {
                                 Ok(se) => {
+                                    // Track max block index for offset calculation
+                                    match &se {
+                                        StreamEvent::ContentBlockStart { index, .. }
+                                        | StreamEvent::ContentBlockDelta { index, .. }
+                                        | StreamEvent::ContentBlockStop { index } => {
+                                            max_block_index_this_round =
+                                                max_block_index_this_round.max(index + 1);
+                                        }
+                                        _ => {}
+                                    }
+                                    let se = offset_block_index(se, block_index_offset);
                                     let se = normalize_stream_event(se);
                                     if tx.send(Ok(se)).await.is_err() {
                                         break;
@@ -668,10 +717,19 @@ impl Provider for ClaudeCliProvider {
 
                     CliMessage::User { .. } => {
                         tracing::debug!("CLI → user turn (tool_result)");
+                        // Keep the stream alive — tool results arrive during internal
+                        // tool execution which can take >60s for complex tasks.
+                        if tx.send(Ok(StreamEvent::Ping)).await.is_err() {
+                            break;
+                        }
                     }
 
                     CliMessage::RateLimitEvent {} => {
                         tracing::warn!("CLI → rate_limit_event");
+                        // Keep the stream alive during rate-limit pauses
+                        if tx.send(Ok(StreamEvent::Ping)).await.is_err() {
+                            break;
+                        }
                     }
                 }
             }
@@ -859,6 +917,32 @@ fn normalize_cli_tool_name(name: &str) -> String {
         "Agent" => "agent".to_string(),
         "NotebookEdit" => "notebook_edit".to_string(),
         other => other.to_string(),
+    }
+}
+
+/// Offset content block indices in a StreamEvent by the given amount.
+/// This prevents collisions when multiple CLI tool rounds produce blocks
+/// with indices restarting at 0.
+fn offset_block_index(event: StreamEvent, offset: usize) -> StreamEvent {
+    if offset == 0 {
+        return event;
+    }
+    match event {
+        StreamEvent::ContentBlockStart {
+            index,
+            content_block,
+        } => StreamEvent::ContentBlockStart {
+            index: index + offset,
+            content_block,
+        },
+        StreamEvent::ContentBlockDelta { index, delta } => StreamEvent::ContentBlockDelta {
+            index: index + offset,
+            delta,
+        },
+        StreamEvent::ContentBlockStop { index } => StreamEvent::ContentBlockStop {
+            index: index + offset,
+        },
+        other => other,
     }
 }
 
