@@ -788,7 +788,7 @@ impl App {
                 }
             }
             "session_context" => "Session context".to_string(),
-            "Agent" => {
+            "Agent" | "agent" => {
                 let desc = tool_input
                     .get("description")
                     .and_then(|v| v.as_str())
