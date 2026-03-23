@@ -557,6 +557,70 @@ pub(crate) async fn handle_message(
         .store_cancel_token(session_id, cancel_token.clone())
         .await;
 
+    // Build progress callback — sends tool call status as Discord messages
+    let progress_cb: crate::brain::agent::ProgressCallback = {
+        use crate::brain::agent::ProgressEvent;
+        use serenity::builder::EditMessage;
+        use serenity::model::id::MessageId;
+
+        struct ToolEntry {
+            msg_id: Option<MessageId>,
+            name: String,
+            context: String,
+        }
+
+        let tools: Arc<Mutex<Vec<ToolEntry>>> = Arc::new(Mutex::new(Vec::new()));
+        let http = ctx.http.clone();
+        let channel = msg.channel_id;
+
+        Arc::new(move |_session_id, event| {
+            let tools = tools.clone();
+            let http = http.clone();
+
+            match event {
+                ProgressEvent::ToolStarted {
+                    tool_name,
+                    tool_input,
+                } => {
+                    let ctx_hint = crate::utils::tool_context_hint(&tool_name, &tool_input);
+                    tokio::spawn(async move {
+                        let text = format!("⚙️ **{}**{}", tool_name, ctx_hint);
+                        if let Ok(sent) = channel.say(&http, &text).await {
+                            let mut t = tools.lock().await;
+                            t.push(ToolEntry {
+                                msg_id: Some(sent.id),
+                                name: tool_name,
+                                context: ctx_hint,
+                            });
+                        }
+                    });
+                }
+                ProgressEvent::ToolCompleted {
+                    tool_name, success, ..
+                } => {
+                    tokio::spawn(async move {
+                        let mut t = tools.lock().await;
+                        if let Some(entry) = t
+                            .iter_mut()
+                            .rev()
+                            .find(|e| e.name == tool_name && e.msg_id.is_some())
+                        {
+                            let icon = if success { "✅" } else { "❌" };
+                            let text =
+                                format!("{} **{}**{}", icon, entry.name, entry.context);
+                            if let Some(mid) = entry.msg_id.take() {
+                                let _ = channel
+                                    .edit_message(&http, mid, EditMessage::new().content(text))
+                                    .await;
+                            }
+                        }
+                    });
+                }
+                _ => {}
+            }
+        })
+    };
+
     let result = agent
         .send_message_with_tools_and_callback(
             session_id,
@@ -564,7 +628,7 @@ pub(crate) async fn handle_message(
             None,
             Some(cancel_token),
             Some(approval_cb),
-            None,
+            Some(progress_cb),
         )
         .await;
 
