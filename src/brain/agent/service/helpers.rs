@@ -1,5 +1,5 @@
 use super::builder::AgentService;
-use super::types::{ProgressCallback, ProgressEvent};
+use super::types::{MessageQueueCallback, ProgressCallback, ProgressEvent};
 use crate::brain::provider::{
     ContentBlock, ImageSource, LLMRequest, LLMResponse, Message, Role, StopReason,
 };
@@ -23,12 +23,19 @@ impl AgentService {
     ///
     /// `override_cb` takes precedence over the service-level `self.progress_callback`
     /// so per-call callbacks (e.g. Telegram) receive real-time streaming chunks.
+    ///
+    /// `queue_cb` + `queued_out`: CLI providers only. When a queued user message
+    /// is consumed mid-stream at a tool boundary, it is written to `queued_out`
+    /// so the caller can inject it into context after the stream ends.
+    #[allow(clippy::too_many_arguments)]
     pub(super) async fn stream_complete(
         &self,
         session_id: Uuid,
         request: LLMRequest,
         cancel_token: Option<&CancellationToken>,
         override_cb: Option<&ProgressCallback>,
+        queue_cb: Option<&MessageQueueCallback>,
+        queued_out: Option<&tokio::sync::Mutex<Option<String>>>,
     ) -> std::result::Result<(LLMResponse, Option<String>), crate::brain::provider::ProviderError>
     {
         use crate::brain::provider::{ContentDelta, StreamEvent, TokenUsage};
@@ -264,6 +271,28 @@ impl AgentService {
                                     summary: String::new(),
                                 },
                             );
+
+                            // CLI only: check if user queued a message during
+                            // tool execution. Consume it and break the stream
+                            // so tool_loop can inject it into context.
+                            if let Some(qcb) = queue_cb
+                                && let Some(queued) = qcb().await
+                            {
+                                tracing::info!(
+                                    "Queued user message at CLI tool boundary — breaking stream"
+                                );
+                                cb(
+                                    session_id,
+                                    ProgressEvent::QueuedUserMessage {
+                                        text: queued.clone(),
+                                    },
+                                );
+                                if let Some(buf) = queued_out {
+                                    *buf.lock().await = Some(queued);
+                                }
+                                stop_reason = Some(StopReason::EndTurn);
+                                break;
+                            }
                         }
                     }
                 }

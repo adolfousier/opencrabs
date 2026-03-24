@@ -222,7 +222,7 @@ async fn test_deferred_usage_captures_real_tokens() {
 
     let request = LLMRequest::new("mock-model".to_string(), vec![Message::user("Hello")]);
     let (response, _) = agent_service
-        .stream_complete(Uuid::nil(), request, None, None)
+        .stream_complete(Uuid::nil(), request, None, None, None, None)
         .await
         .unwrap();
 
@@ -244,7 +244,7 @@ async fn test_inline_usage_still_works() {
 
     let request = LLMRequest::new("mock-model".to_string(), vec![Message::user("Hello")]);
     let (response, _) = agent_service
-        .stream_complete(Uuid::nil(), request, None, None)
+        .stream_complete(Uuid::nil(), request, None, None, None, None)
         .await
         .unwrap();
 
@@ -267,7 +267,7 @@ async fn test_deferred_usage_zero_start_overridden_by_real() {
 
     let request = LLMRequest::new("mock-model".to_string(), vec![Message::user("Hello")]);
     let (response, _) = agent_service
-        .stream_complete(Uuid::nil(), request, None, None)
+        .stream_complete(Uuid::nil(), request, None, None, None, None)
         .await
         .unwrap();
 
@@ -492,7 +492,7 @@ async fn test_deferred_usage_content_preserved() {
 
     let request = LLMRequest::new("mock-model".to_string(), vec![Message::user("Hello")]);
     let (response, _) = agent_service
-        .stream_complete(Uuid::nil(), request, None, None)
+        .stream_complete(Uuid::nil(), request, None, None, None, None)
         .await
         .unwrap();
 

@@ -460,6 +460,15 @@ impl AgentService {
                 tracing::warn!("No tools registered in tool registry!");
             }
 
+            // CLI providers: pass queue callback so stream_complete can check
+            // for queued user messages at tool boundaries mid-stream.
+            let is_cli_provider = self
+                .provider
+                .read()
+                .map(|p| p.cli_handles_tools())
+                .unwrap_or(false);
+            let queued_buf = tokio::sync::Mutex::new(None);
+
             // Send to provider via streaming — retry once after emergency compaction if prompt is too long
             let (mut response, reasoning_text) = match self
                 .stream_complete(
@@ -467,6 +476,8 @@ impl AgentService {
                     request,
                     cancel_token.as_ref(),
                     progress_callback.as_ref(),
+                    if is_cli_provider { self.message_queue_callback.as_ref() } else { None },
+                    if is_cli_provider { Some(&queued_buf) } else { None },
                 )
                 .await
             {
@@ -535,6 +546,8 @@ impl AgentService {
                         retry_req,
                         cancel_token.as_ref(),
                         progress_callback.as_ref(),
+                        if is_cli_provider { self.message_queue_callback.as_ref() } else { None },
+                        if is_cli_provider { Some(&queued_buf) } else { None },
                     )
                     .await
                     .map_err(AgentError::Provider)?
@@ -797,12 +810,7 @@ impl AgentService {
             // CLI providers handle tools internally — emit progress events for
             // TUI display (expandable tool groups) but don't execute them.
             // Break immediately after — the CLI already completed its full run.
-            let cli_tools = self
-                .provider
-                .read()
-                .map(|p| p.cli_handles_tools())
-                .unwrap_or(false);
-            if cli_tools && !tool_uses.is_empty() {
+            if is_cli_provider && !tool_uses.is_empty() {
                 // Walk response.content in order to preserve text→tools→text
                 // interleaving. CLI providers return all rounds in one response,
                 // so without this the TUI would show one text blob then all tools.
@@ -889,14 +897,20 @@ impl AgentService {
             }
 
             if tool_uses.is_empty() {
-                // Before breaking, check for queued user messages.
-                // CLI providers may forward tool_use blocks for display only,
-                // so the queue drain at the bottom of the loop never executes.
-                // Inject here so the queued message gets sent in the next iteration.
-                if let Some(ref queue_cb) = self.message_queue_callback
-                    && let Some(queued_msg) = queue_cb().await
-                {
-                    tracing::info!("Injecting queued user message (no tool_uses path)");
+                // Check queued messages — stream_complete may have consumed
+                // one mid-stream (stored in queued_buf), or check the queue now.
+                let (queued_msg, from_buf) = {
+                    let buffered = queued_buf.lock().await.take();
+                    if buffered.is_some() {
+                        (buffered, true)
+                    } else if let Some(ref queue_cb) = self.message_queue_callback {
+                        (queue_cb().await, false)
+                    } else {
+                        (None, false)
+                    }
+                };
+                if let Some(queued_msg) = queued_msg {
+                    tracing::info!("Injecting queued user message (from_buf={})", from_buf);
                     // Emit assistant's intermediate text FIRST so it appears
                     // before the queued user message in the TUI
                     if !iteration_text.is_empty()
@@ -910,8 +924,8 @@ impl AgentService {
                             },
                         );
                     }
-                    // THEN show the queued user message
-                    if let Some(ref cb) = progress_callback {
+                    // Only emit QueuedUserMessage if stream_complete didn't already
+                    if !from_buf && let Some(ref cb) = progress_callback {
                         cb(
                             session_id,
                             ProgressEvent::QueuedUserMessage {
