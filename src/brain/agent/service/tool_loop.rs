@@ -827,69 +827,9 @@ impl AgentService {
             // TUI display (expandable tool groups) but don't execute them.
             // Break immediately after — the CLI already completed its full run.
             if is_cli_provider && !tool_uses.is_empty() {
-                // Walk response.content in order to preserve text→tools→text
-                // interleaving. CLI providers return all rounds in one response,
-                // so without this the TUI would show one text blob then all tools.
-                if let Some(ref cb) = progress_callback {
-                    let mut pending_text = String::new();
-                    for block in &response.content {
-                        match block {
-                            ContentBlock::Text { text } if !text.trim().is_empty() => {
-                                if !pending_text.is_empty() {
-                                    pending_text.push_str("\n\n");
-                                }
-                                pending_text.push_str(text);
-                            }
-                            ContentBlock::ToolUse { name, input, .. } => {
-                                // Flush accumulated text before this tool group
-                                if !pending_text.is_empty() {
-                                    cb(
-                                        session_id,
-                                        ProgressEvent::IntermediateText {
-                                            text: pending_text.clone(),
-                                            // Pass Some("") so TUI's .or_else() short-circuits
-                                            // and doesn't grab the massive streaming_reasoning.
-                                            // CLI reasoning stays in streaming_reasoning for
-                                            // complete_response to handle properly.
-                                            reasoning: Some(String::new()),
-                                        },
-                                    );
-                                    pending_text.clear();
-                                }
-                                let norm_name = name.to_lowercase();
-                                cb(
-                                    session_id,
-                                    ProgressEvent::ToolStarted {
-                                        tool_name: norm_name.clone(),
-                                        tool_input: input.clone(),
-                                    },
-                                );
-                                cb(
-                                    session_id,
-                                    ProgressEvent::ToolCompleted {
-                                        tool_name: norm_name,
-                                        tool_input: input.clone(),
-                                        success: true,
-                                        summary: "(executed by CLI)".to_string(),
-                                    },
-                                );
-                            }
-                            _ => {}
-                        }
-                    }
-                    // Flush trailing text after the last tool
-                    if !pending_text.is_empty() {
-                        cb(
-                            session_id,
-                            ProgressEvent::IntermediateText {
-                                text: pending_text,
-                                reasoning: Some(String::new()),
-                            },
-                        );
-                    }
-                }
-                // CLI interleaving already emitted all text — clear so
-                // the shared path below doesn't re-emit it
+                // Text/tool interleaving and ToolStarted/ToolCompleted events
+                // are already emitted during streaming by helpers.rs.
+                // Here we only handle DB persistence and cleanup.
                 iteration_text.clear();
 
                 // Persist tool markers to DB so tool groups survive

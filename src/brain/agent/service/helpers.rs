@@ -83,6 +83,10 @@ impl AgentService {
         // Reasoning still accumulates in reasoning_buf for DB persistence.
         let is_cli = queue_cb.is_some();
         let mut seen_tool = false;
+        // CLI: track unflushed text so we can emit IntermediateText at tool
+        // boundaries, giving the TUI real-time text→tools→text interleaving
+        // during streaming instead of one massive wall after stream ends.
+        let mut cli_unflushed_text = String::new();
 
         // Maximum idle time between SSE events before treating as a dropped connection.
         // NVIDIA/Kimi and some other providers occasionally hang silently without sending
@@ -183,6 +187,10 @@ impl AgentService {
                                         ProgressEvent::StreamingChunk { text: text.clone() },
                                     );
                                 }
+                                // CLI: track unflushed text for tool-boundary flushing
+                                if is_cli {
+                                    cli_unflushed_text.push_str(&text);
+                                }
                                 // Accumulate into block
                                 if let ContentBlock::Text { text: ref mut t } =
                                     block_states[index].block
@@ -262,8 +270,26 @@ impl AgentService {
                         if matches!(state.block, ContentBlock::ToolUse { .. }) {
                             seen_tool = true;
                         }
+                        // CLI: flush accumulated text as IntermediateText before
+                        // emitting tool events, so TUI shows text→tools sequentially
+                        // during streaming instead of one wall after stream ends.
+                        if is_cli
+                            && matches!(state.block, ContentBlock::ToolUse { .. })
+                            && !cli_unflushed_text.is_empty()
+                            && let Some(cb) = effective_cb
+                        {
+                            cb(
+                                session_id,
+                                ProgressEvent::IntermediateText {
+                                    text: cli_unflushed_text.clone(),
+                                    reasoning: Some(String::new()),
+                                },
+                            );
+                            cli_unflushed_text.clear();
+                        }
                         // Emit ToolStarted + ToolCompleted with fully parsed input
                         // so the TUI shows real tool context (command, file path, etc.)
+                        // CLI: lowercase names so format_tool_summary matches ("Bash" → "bash")
                         if let ContentBlock::ToolUse {
                             ref name,
                             ref input,
@@ -271,17 +297,18 @@ impl AgentService {
                         } = state.block
                             && let Some(cb) = effective_cb
                         {
+                            let emit_name = if is_cli { name.to_lowercase() } else { name.clone() };
                             cb(
                                 session_id,
                                 ProgressEvent::ToolStarted {
-                                    tool_name: name.clone(),
+                                    tool_name: emit_name.clone(),
                                     tool_input: input.clone(),
                                 },
                             );
                             cb(
                                 session_id,
                                 ProgressEvent::ToolCompleted {
-                                    tool_name: name.clone(),
+                                    tool_name: emit_name,
                                     tool_input: input.clone(),
                                     success: true,
                                     summary: String::new(),
@@ -332,6 +359,20 @@ impl AgentService {
                     return Err(crate::brain::provider::ProviderError::StreamError(error));
                 }
             }
+        }
+
+        // CLI: flush any trailing text after the last tool
+        if is_cli
+            && !cli_unflushed_text.is_empty()
+            && let Some(cb) = effective_cb
+        {
+            cb(
+                    session_id,
+                    ProgressEvent::IntermediateText {
+                        text: cli_unflushed_text,
+                        reasoning: Some(String::new()),
+                    },
+                );
         }
 
         // Detect premature stream termination — if we accumulated blocks but never
