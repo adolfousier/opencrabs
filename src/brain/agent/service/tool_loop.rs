@@ -805,17 +805,19 @@ impl AgentService {
             if cli_tools && !tool_uses.is_empty() {
                 for (_, tool_name, tool_input) in &tool_uses {
                     if let Some(ref cb) = progress_callback {
+                        // Lowercase so format_tool_summary matches ("Bash" → "bash")
+                        let norm_name = tool_name.to_lowercase();
                         cb(
                             session_id,
                             ProgressEvent::ToolStarted {
-                                tool_name: tool_name.clone(),
+                                tool_name: norm_name.clone(),
                                 tool_input: tool_input.clone(),
                             },
                         );
                         cb(
                             session_id,
                             ProgressEvent::ToolCompleted {
-                                tool_name: tool_name.clone(),
+                                tool_name: norm_name,
                                 tool_input: tool_input.clone(),
                                 success: true,
                                 summary: "(executed by CLI)".to_string(),
