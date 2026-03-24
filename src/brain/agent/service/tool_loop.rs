@@ -476,8 +476,16 @@ impl AgentService {
                     request,
                     cancel_token.as_ref(),
                     progress_callback.as_ref(),
-                    if is_cli_provider { self.message_queue_callback.as_ref() } else { None },
-                    if is_cli_provider { Some(&queued_buf) } else { None },
+                    if is_cli_provider {
+                        self.message_queue_callback.as_ref()
+                    } else {
+                        None
+                    },
+                    if is_cli_provider {
+                        Some(&queued_buf)
+                    } else {
+                        None
+                    },
                 )
                 .await
             {
@@ -546,8 +554,16 @@ impl AgentService {
                         retry_req,
                         cancel_token.as_ref(),
                         progress_callback.as_ref(),
-                        if is_cli_provider { self.message_queue_callback.as_ref() } else { None },
-                        if is_cli_provider { Some(&queued_buf) } else { None },
+                        if is_cli_provider {
+                            self.message_queue_callback.as_ref()
+                        } else {
+                            None
+                        },
+                        if is_cli_provider {
+                            Some(&queued_buf)
+                        } else {
+                            None
+                        },
                     )
                     .await
                     .map_err(AgentError::Provider)?
@@ -831,7 +847,11 @@ impl AgentService {
                                         session_id,
                                         ProgressEvent::IntermediateText {
                                             text: pending_text.clone(),
-                                            reasoning: None,
+                                            // Pass Some("") so TUI's .or_else() short-circuits
+                                            // and doesn't grab the massive streaming_reasoning.
+                                            // CLI reasoning stays in streaming_reasoning for
+                                            // complete_response to handle properly.
+                                            reasoning: Some(String::new()),
                                         },
                                     );
                                     pending_text.clear();
@@ -863,7 +883,7 @@ impl AgentService {
                             session_id,
                             ProgressEvent::IntermediateText {
                                 text: pending_text,
-                                reasoning: None,
+                                reasoning: Some(String::new()),
                             },
                         );
                     }
