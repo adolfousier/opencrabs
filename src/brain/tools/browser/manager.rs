@@ -31,7 +31,12 @@ impl Default for BrowserManager {
 
 impl BrowserManager {
     pub fn new() -> Self {
-        Self::with_headless(true)
+        // Auto-detect: use headed mode only if a display is available
+        let headless = !Self::has_display();
+        if headless {
+            tracing::info!("No display detected — browser will run headless");
+        }
+        Self::with_headless(headless)
     }
 
     /// Create a browser manager with explicit headless/headed mode.
@@ -46,12 +51,30 @@ impl BrowserManager {
         }
     }
 
+    /// Detect whether a display server is available (X11, Wayland, or macOS/Windows).
+    fn has_display() -> bool {
+        if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
+            // macOS and Windows always have a display (unless headless server, rare)
+            true
+        } else {
+            // Linux/Unix: check for DISPLAY (X11) or WAYLAND_DISPLAY
+            std::env::var("DISPLAY").is_ok() || std::env::var("WAYLAND_DISPLAY").is_ok()
+        }
+    }
+
     /// Switch between headless and headed mode. Shuts down the current browser
     /// if the mode changes — the next page request will relaunch in the new mode.
     pub async fn set_headless(&self, headless: bool) -> bool {
         let mut inner = self.inner.lock().await;
         if inner.headless == headless {
             return false; // no change
+        }
+        // Prevent headed mode on headless environments (VPS without display)
+        if !headless && !Self::has_display() {
+            tracing::warn!(
+                "Cannot switch to headed mode — no display detected. Staying headless."
+            );
+            return false;
         }
         inner.headless = headless;
         // Tear down existing browser so it relaunches in the new mode
@@ -86,6 +109,28 @@ impl BrowserManager {
         if !inner.headless {
             builder = builder.with_head();
         }
+        if let Some(path) = find_chrome_executable() {
+            builder = builder.chrome_executable(path);
+        }
+
+        // Persistent profile — cookies, logins, and site preferences survive restarts
+        let profile_dir = crate::config::opencrabs_home().join("chrome-profile");
+        if !profile_dir.exists() {
+            let _ = std::fs::create_dir_all(&profile_dir);
+        }
+        builder = builder.user_data_dir(profile_dir);
+
+        // Stealth flags — reduce bot detection fingerprinting
+        builder = builder
+            .arg("--disable-blink-features=AutomationControlled")
+            .arg("--disable-features=AutomationControlled")
+            .arg("--disable-infobars")
+            .arg("--disable-background-timer-throttling")
+            .arg("--disable-backgrounding-occluded-windows")
+            .arg("--disable-renderer-backgrounding")
+            .arg("--disable-ipc-flooding-protection")
+            .arg("--lang=en-US,en");
+
         let config = builder
             .build()
             .map_err(|e| anyhow::anyhow!("BrowserConfig error: {e}"))?;
@@ -129,8 +174,54 @@ impl BrowserManager {
             .await
             .map_err(|e| anyhow::anyhow!("Failed to create page: {e}"))?;
 
+        // Inject stealth patches before any navigation
+        Self::inject_stealth(&page).await;
+
         inner.pages.insert(session_name, page.clone());
         Ok(page)
+    }
+
+    /// Inject stealth JS to reduce bot detection fingerprinting.
+    async fn inject_stealth(page: &Page) {
+        let stealth_js = r#"
+            // Hide navigator.webdriver
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+
+            // Fake chrome.runtime (present in real Chrome, missing in automation)
+            if (!window.chrome) { window.chrome = {}; }
+            if (!window.chrome.runtime) {
+                window.chrome.runtime = {
+                    connect: function() {},
+                    sendMessage: function() {},
+                    id: undefined
+                };
+            }
+
+            // Fake plugins array (headless has 0 plugins)
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => [
+                    { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
+                    { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
+                    { name: 'Native Client', filename: 'internal-nacl-plugin' }
+                ]
+            });
+
+            // Fake languages
+            Object.defineProperty(navigator, 'languages', {
+                get: () => ['en-US', 'en']
+            });
+
+            // Remove automation-related properties from navigator
+            const originalQuery = window.navigator.permissions.query;
+            window.navigator.permissions.query = (parameters) =>
+                parameters.name === 'notifications'
+                    ? Promise.resolve({ state: Notification.permission })
+                    : originalQuery(parameters);
+        "#;
+
+        if let Err(e) = page.evaluate(stealth_js).await {
+            tracing::warn!("Stealth JS injection failed: {e}");
+        }
     }
 
     /// Close a named page session.
@@ -155,6 +246,43 @@ impl BrowserManager {
         }
         tracing::info!("Browser shut down");
     }
+}
+
+/// Locate the Chrome/Chromium executable on the current platform.
+fn find_chrome_executable() -> Option<std::path::PathBuf> {
+    let candidates: &[&str] = if cfg!(target_os = "macos") {
+        &[
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        ]
+    } else if cfg!(target_os = "windows") {
+        &[
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        ]
+    } else {
+        // Linux — usually in PATH, but check common locations
+        &[
+            "/usr/bin/google-chrome-stable",
+            "/usr/bin/google-chrome",
+            "/usr/bin/chromium-browser",
+            "/usr/bin/chromium",
+        ]
+    };
+
+    for path in candidates {
+        let p = std::path::PathBuf::from(path);
+        if p.exists() {
+            tracing::debug!("Found Chrome at {}", p.display());
+            return Some(p);
+        }
+    }
+
+    // Fall back to PATH lookup
+    which::which("google-chrome")
+        .or_else(|_| which::which("chromium"))
+        .or_else(|_| which::which("chrome"))
+        .ok()
 }
 
 #[cfg(test)]
