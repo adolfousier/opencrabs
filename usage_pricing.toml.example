@@ -92,3 +92,13 @@ entries = [
   { prefix = "codestral",          input_per_m = 0.20,  output_per_m = 0.60  },
   { prefix = "mistral",            input_per_m = 0.25,  output_per_m = 0.25  },
 ]
+
+[providers.opencode]
+entries = [
+  { prefix = "mimo-v2-pro",         input_per_m = 1.0,   output_per_m = 3.0   },
+  { prefix = "mimo-v2-omni",        input_per_m = 0.40,  output_per_m = 2.0   },
+  { prefix = "nemotron-3-super",    input_per_m = 0.10,  output_per_m = 0.50  },
+  { prefix = "big-pickle",          input_per_m = 0.0,   output_per_m = 0.0   },
+  { prefix = "opencode-zen",        input_per_m = 0.0,   output_per_m = 0.0   },
+  { prefix = "opencode-go",         input_per_m = 0.0,   output_per_m = 0.0   },
+]

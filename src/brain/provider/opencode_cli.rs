@@ -619,6 +619,8 @@ impl Provider for OpenCodeCliProvider {
             "opencode/mimo-v2-pro-free".to_string(),
             "opencode/minimax-m2.5-free".to_string(),
             "opencode/nemotron-3-super-free".to_string(),
+            "opencode/opencode-zen".to_string(),
+            "opencode/opencode-go".to_string(),
         ]
     }
 

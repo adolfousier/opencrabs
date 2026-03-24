@@ -284,6 +284,22 @@ entries = [
   { prefix = "llama-3.1-70b",      input_per_m = 0.52, output_per_m = 0.75  },
   { prefix = "llama-3.1-8b",       input_per_m = 0.07, output_per_m = 0.07  },
 ]
+
+[providers.opencode]
+entries = [
+  # MiMo V2 Pro — $1.00/$3.00
+  { prefix = "mimo-v2-pro",         input_per_m = 1.0,  output_per_m = 3.0   },
+  # MiMo V2 Omni — $0.40/$2.00
+  { prefix = "mimo-v2-omni",        input_per_m = 0.40, output_per_m = 2.0   },
+  # Nemotron 3 Super — $0.10/$0.50
+  { prefix = "nemotron-3-super",    input_per_m = 0.10, output_per_m = 0.50  },
+  # Big Pickle (free)
+  { prefix = "big-pickle",          input_per_m = 0.0,  output_per_m = 0.0   },
+  # OpenCode Zen (free)
+  { prefix = "opencode-zen",        input_per_m = 0.0,  output_per_m = 0.0   },
+  # OpenCode Go (free)
+  { prefix = "opencode-go",         input_per_m = 0.0,  output_per_m = 0.0   },
+]
 "#;
 
 #[cfg(test)]
@@ -367,6 +383,35 @@ mod tests {
         let cfg = PricingConfig::defaults();
         let cost = cfg.calculate_cost("gpt-5", 1_000_000, 1_000_000);
         assert_eq!(cost, 11.25); // $1.25 + $10.0
+    }
+
+    #[test]
+    fn test_calculate_cost_opencode_mimo_pro() {
+        let cfg = PricingConfig::defaults();
+        let cost = cfg.calculate_cost("opencode/mimo-v2-pro-free", 1_000_000, 1_000_000);
+        assert_eq!(cost, 4.0); // $1.0 + $3.0
+    }
+
+    #[test]
+    fn test_calculate_cost_opencode_mimo_omni() {
+        let cfg = PricingConfig::defaults();
+        let cost = cfg.calculate_cost("opencode/mimo-v2-omni-free", 1_000_000, 1_000_000);
+        assert_eq!(cost, 2.40); // $0.40 + $2.0
+    }
+
+    #[test]
+    fn test_calculate_cost_opencode_nemotron() {
+        let cfg = PricingConfig::defaults();
+        let cost = cfg.calculate_cost("opencode/nemotron-3-super-free", 1_000_000, 1_000_000);
+        assert_eq!(cost, 0.60); // $0.10 + $0.50
+    }
+
+    #[test]
+    fn test_calculate_cost_opencode_free_models() {
+        let cfg = PricingConfig::defaults();
+        assert_eq!(cfg.calculate_cost("opencode/big-pickle", 1_000_000, 1_000_000), 0.0);
+        assert_eq!(cfg.calculate_cost("opencode/opencode-zen", 1_000_000, 1_000_000), 0.0);
+        assert_eq!(cfg.calculate_cost("opencode/opencode-go", 1_000_000, 1_000_000), 0.0);
     }
 
     #[test]
