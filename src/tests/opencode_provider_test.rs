@@ -548,7 +548,7 @@ fn tool_registry_has_core_tools() {
     use crate::brain::tools::registry::ToolRegistry;
     use std::sync::Arc;
 
-    let mut registry = ToolRegistry::new();
+    let registry = ToolRegistry::new();
     registry.register(Arc::new(BashTool));
     registry.register(Arc::new(ReadTool));
     registry.register(Arc::new(WriteTool));

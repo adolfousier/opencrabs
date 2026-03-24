@@ -159,7 +159,7 @@ async fn test_tool_loop_context_grows_with_results() {
     db.run_migrations().await.unwrap();
     let context = ServiceContext::new(db.pool().clone());
 
-    let mut registry = ToolRegistry::new();
+    let registry = ToolRegistry::new();
     registry.register(Arc::new(MockTool));
 
     let agent_service = AgentService::new(provider, context.clone())
@@ -202,7 +202,7 @@ fn test_base_context_tokens_uses_real_tool_schemas() {
         let service_no_tools = AgentService::new(provider.clone(), context.clone())
             .with_system_brain("Brain.".to_string());
 
-        let mut registry = ToolRegistry::new();
+        let registry = ToolRegistry::new();
         registry.register(Arc::new(MockTool));
         let service_with_tools = AgentService::new(provider, context)
             .with_system_brain("Brain.".to_string())

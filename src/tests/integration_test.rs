@@ -116,7 +116,7 @@ async fn create_test_agent(
     let provider = Arc::new(MockProvider::new(responses));
     let service_context = ServiceContext::new(db.pool().clone());
 
-    let mut tool_registry = ToolRegistry::new();
+    let tool_registry = ToolRegistry::new();
     tool_registry.register(Arc::new(ReadTool));
     tool_registry.register(Arc::new(WriteTool));
     tool_registry.register(Arc::new(BashTool));

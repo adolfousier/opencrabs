@@ -108,13 +108,13 @@ async fn test_cancel_one_session_other_continues() {
     let context = ServiceContext::new(pool);
 
     let provider = Arc::new(MockProviderWithTools::new());
-    let mut registry = ToolRegistry::new();
+    let registry = ToolRegistry::new();
     registry.register(Arc::new(MockTool));
 
     let svc_a = Arc::new(
         AgentService::new(Arc::new(MockProviderWithTools::new()), context.clone())
             .with_tool_registry(Arc::new({
-                let mut r = ToolRegistry::new();
+                let r = ToolRegistry::new();
                 r.register(Arc::new(MockTool));
                 r
             }))

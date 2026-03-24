@@ -237,7 +237,7 @@ mod tests {
 
     #[test]
     fn test_register_tool() {
-        let mut registry = ToolRegistry::new();
+        let registry = ToolRegistry::new();
         let tool = Arc::new(MockTool {
             name: "test_tool".to_string(),
             requires_approval: false,
@@ -251,7 +251,7 @@ mod tests {
 
     #[test]
     fn test_list_tools() {
-        let mut registry = ToolRegistry::new();
+        let registry = ToolRegistry::new();
 
         registry.register(Arc::new(MockTool {
             name: "tool1".to_string(),
@@ -270,7 +270,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_tool() {
-        let mut registry = ToolRegistry::new();
+        let registry = ToolRegistry::new();
         let tool = Arc::new(MockTool {
             name: "test_tool".to_string(),
             requires_approval: false,
@@ -304,7 +304,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_requires_approval() {
-        let mut registry = ToolRegistry::new();
+        let registry = ToolRegistry::new();
         let tool = Arc::new(MockTool {
             name: "dangerous_tool".to_string(),
             requires_approval: true,
@@ -326,7 +326,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_with_auto_approve() {
-        let mut registry = ToolRegistry::new();
+        let registry = ToolRegistry::new();
         let tool = Arc::new(MockTool {
             name: "dangerous_tool".to_string(),
             requires_approval: true,

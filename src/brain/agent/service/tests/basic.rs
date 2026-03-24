@@ -43,7 +43,7 @@ async fn test_send_message_with_tool_execution() {
     let context = ServiceContext::new(pool);
     let provider = Arc::new(MockProviderWithTools::new());
 
-    let mut registry = ToolRegistry::new();
+    let registry = ToolRegistry::new();
     registry.register(Arc::new(MockTool));
 
     let agent_service = AgentService::new(provider, context.clone())
@@ -77,7 +77,7 @@ async fn test_message_queue_injection_between_tool_calls() {
     let context = ServiceContext::new(pool);
     let provider = Arc::new(MockProviderWithTools::new());
 
-    let mut registry = ToolRegistry::new();
+    let registry = ToolRegistry::new();
     registry.register(Arc::new(MockTool));
 
     let queue: Arc<tokio::sync::Mutex<Option<String>>> =
@@ -141,7 +141,7 @@ async fn test_message_queue_empty_no_injection() {
     let context = ServiceContext::new(pool);
     let provider = Arc::new(MockProviderWithTools::new());
 
-    let mut registry = ToolRegistry::new();
+    let registry = ToolRegistry::new();
     registry.register(Arc::new(MockTool));
 
     let queue: Arc<tokio::sync::Mutex<Option<String>>> = Arc::new(tokio::sync::Mutex::new(None));
@@ -297,7 +297,7 @@ async fn test_context_tokens_is_last_iteration_not_accumulated() {
     let context = ServiceContext::new(db.pool().clone());
     let provider = Arc::new(MockProviderWithTools::new());
 
-    let mut registry = ToolRegistry::new();
+    let registry = ToolRegistry::new();
     registry.register(Arc::new(MockTool));
 
     let agent_service = AgentService::new(provider, context.clone())
