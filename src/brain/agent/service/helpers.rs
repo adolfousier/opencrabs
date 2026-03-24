@@ -78,6 +78,11 @@ impl AgentService {
         }
         let mut block_states: Vec<BlockState> = Vec::new();
         let mut reasoning_buf = String::new();
+        // CLI: after the first tool completes, stop forwarding reasoning
+        // chunks to TUI so thinking doesn't bloat across 100+ tool iterations.
+        // Reasoning still accumulates in reasoning_buf for DB persistence.
+        let is_cli = queue_cb.is_some();
+        let mut seen_tool = false;
 
         // Maximum idle time between SSE events before treating as a dropped connection.
         // NVIDIA/Kimi and some other providers occasionally hang silently without sending
@@ -150,7 +155,10 @@ impl AgentService {
                     {
                         reasoning_buf.push_str("\n\n");
                         // Also emit separator to TUI so streaming display stays in sync
-                        if let Some(cb) = effective_cb {
+                        // (skip for CLI after first tool — prevents thinking bloat)
+                        if !(is_cli && seen_tool)
+                            && let Some(cb) = effective_cb
+                        {
                             cb(
                                 session_id,
                                 ProgressEvent::ReasoningChunk {
@@ -211,19 +219,23 @@ impl AgentService {
                                 block_states[index].json_buf.push_str(&partial_json);
                             }
                             ContentDelta::ReasoningDelta { text } => {
-                                // Forward reasoning content to TUI / per-call callback
-                                if let Some(cb) = effective_cb {
+                                // Forward reasoning to TUI (skip for CLI after first tool)
+                                if !(is_cli && seen_tool)
+                                    && let Some(cb) = effective_cb
+                                {
                                     cb(
                                         session_id,
                                         ProgressEvent::ReasoningChunk { text: text.clone() },
                                     );
                                 }
-                                // Accumulate for persistence
+                                // Always accumulate for DB persistence
                                 reasoning_buf.push_str(&text);
                             }
                             ContentDelta::ThinkingDelta { thinking } => {
                                 // Anthropic native thinking_delta — same as reasoning
-                                if let Some(cb) = effective_cb {
+                                if !(is_cli && seen_tool)
+                                    && let Some(cb) = effective_cb
+                                {
                                     cb(
                                         session_id,
                                         ProgressEvent::ReasoningChunk {
@@ -245,6 +257,10 @@ impl AgentService {
                             && let Ok(parsed) = serde_json::from_str(&state.json_buf)
                         {
                             *input = parsed;
+                        }
+                        // Mark that we've seen a tool (CLI: stops reasoning forwarding)
+                        if matches!(state.block, ContentBlock::ToolUse { .. }) {
+                            seen_tool = true;
                         }
                         // Emit ToolStarted + ToolCompleted with fully parsed input
                         // so the TUI shows real tool context (command, file path, etc.)
@@ -279,14 +295,11 @@ impl AgentService {
                                 && let Some(queued) = qcb().await
                             {
                                 tracing::info!(
-                                    "Queued user message at CLI tool boundary — breaking stream"
+                                    "Queued user message at CLI tool boundary — storing for tool_loop"
                                 );
-                                cb(
-                                    session_id,
-                                    ProgressEvent::QueuedUserMessage {
-                                        text: queued.clone(),
-                                    },
-                                );
+                                // Only store — don't emit QueuedUserMessage here.
+                                // tool_loop emits it AFTER CLI interleaving so it
+                                // appears in the correct position (after all tools).
                                 if let Some(buf) = queued_out {
                                     *buf.lock().await = Some(queued);
                                 }
