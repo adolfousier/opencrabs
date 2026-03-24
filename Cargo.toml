@@ -121,6 +121,9 @@ symphonia = { version = "0.5", features = ["ogg", "vorbis", "wav", "pcm"], optio
 symphonia-adapter-libopus = { version = "0.2", optional = true }
 opusic-sys = { version = "0.5", optional = true, default-features = false }
 
+# Browser Automation (CDP via chromey — fork of chromiumoxide)
+chromey = { version = "2.42", optional = true, default-features = false }
+
 # Misc
 unicode-width = "0.2"
 
@@ -173,6 +176,7 @@ discord = ["serenity"]
 slack = ["slack-morphism", "rustls"]
 local-stt = ["rwhisper", "rodio", "hound", "rubato", "symphonia", "symphonia-adapter-libopus"]
 local-tts = ["opusic-sys", "rubato"]
+browser = ["chromey"]
 
 [profile.dev]
 opt-level = 0

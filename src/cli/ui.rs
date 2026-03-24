@@ -647,6 +647,34 @@ async fn cmd_chat_inner(
         ),
     ));
 
+    // Browser automation tools (headless Chrome via CDP)
+    #[cfg(feature = "browser")]
+    {
+        let browser_manager = Arc::new(crate::brain::tools::browser::BrowserManager::new());
+        shared_tool_registry.register(Arc::new(
+            crate::brain::tools::browser::BrowserNavigateTool::new(browser_manager.clone()),
+        ));
+        shared_tool_registry.register(Arc::new(
+            crate::brain::tools::browser::BrowserScreenshotTool::new(browser_manager.clone()),
+        ));
+        shared_tool_registry.register(Arc::new(
+            crate::brain::tools::browser::BrowserClickTool::new(browser_manager.clone()),
+        ));
+        shared_tool_registry.register(Arc::new(
+            crate::brain::tools::browser::BrowserTypeTool::new(browser_manager.clone()),
+        ));
+        shared_tool_registry.register(Arc::new(
+            crate::brain::tools::browser::BrowserEvalTool::new(browser_manager.clone()),
+        ));
+        shared_tool_registry.register(Arc::new(
+            crate::brain::tools::browser::BrowserContentTool::new(browser_manager.clone()),
+        ));
+        shared_tool_registry.register(Arc::new(
+            crate::brain::tools::browser::BrowserWaitTool::new(browser_manager),
+        ));
+        tracing::info!("Browser automation tools registered (7 tools)");
+    }
+
     // Now that the registry is Arc'd, give it to the channel factory
     channel_factory.set_tool_registry(shared_tool_registry.clone());
 

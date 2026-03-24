@@ -51,6 +51,10 @@ pub mod subagent;
 pub mod dynamic;
 pub mod tool_manage;
 
+// Browser automation — headless Chrome via CDP
+#[cfg(feature = "browser")]
+pub mod browser;
+
 // Tool implementations - Phase 4: Channel Integrations
 #[cfg(feature = "discord")]
 pub mod discord_connect;
