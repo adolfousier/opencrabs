@@ -1005,3 +1005,47 @@ fn normalize_stream_event(event: StreamEvent) -> StreamEvent {
         other => other,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cli_usage_total_input_includes_cache_tokens() {
+        let usage = CliUsage {
+            input_tokens: 1,
+            output_tokens: 200,
+            cache_creation_input_tokens: 351,
+            cache_read_input_tokens: 165_793,
+        };
+        assert_eq!(usage.total_input(), 166_145);
+    }
+
+    #[test]
+    fn test_cli_usage_total_input_no_cache() {
+        let usage = CliUsage {
+            input_tokens: 5000,
+            output_tokens: 100,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+        };
+        assert_eq!(usage.total_input(), 5000);
+    }
+
+    #[test]
+    fn test_cli_usage_deserializes_cache_fields() {
+        let json = r#"{"input_tokens":1,"output_tokens":128,"cache_creation_input_tokens":326,"cache_read_input_tokens":161868}"#;
+        let usage: CliUsage = serde_json::from_str(json).unwrap();
+        assert_eq!(usage.input_tokens, 1);
+        assert_eq!(usage.cache_creation_input_tokens, 326);
+        assert_eq!(usage.cache_read_input_tokens, 161_868);
+        assert_eq!(usage.total_input(), 162_195);
+    }
+
+    #[test]
+    fn test_cli_usage_missing_cache_fields_default_to_zero() {
+        let json = r#"{"input_tokens":5000,"output_tokens":100}"#;
+        let usage: CliUsage = serde_json::from_str(json).unwrap();
+        assert_eq!(usage.total_input(), 5000);
+    }
+}
