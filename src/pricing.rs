@@ -409,9 +409,18 @@ mod tests {
     #[test]
     fn test_calculate_cost_opencode_free_models() {
         let cfg = PricingConfig::defaults();
-        assert_eq!(cfg.calculate_cost("opencode/big-pickle", 1_000_000, 1_000_000), 0.0);
-        assert_eq!(cfg.calculate_cost("opencode/opencode-zen", 1_000_000, 1_000_000), 0.0);
-        assert_eq!(cfg.calculate_cost("opencode/opencode-go", 1_000_000, 1_000_000), 0.0);
+        assert_eq!(
+            cfg.calculate_cost("opencode/big-pickle", 1_000_000, 1_000_000),
+            0.0
+        );
+        assert_eq!(
+            cfg.calculate_cost("opencode/opencode-zen", 1_000_000, 1_000_000),
+            0.0
+        );
+        assert_eq!(
+            cfg.calculate_cost("opencode/opencode-go", 1_000_000, 1_000_000),
+            0.0
+        );
     }
 
     #[test]

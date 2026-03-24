@@ -100,7 +100,7 @@ async fn cmd_chat_inner(
 
     // Create tool registry
     tracing::debug!("Setting up tool registry");
-    let mut tool_registry = ToolRegistry::new();
+    let tool_registry = ToolRegistry::new();
     // Phase 1: Essential file operations
     tool_registry.register(Arc::new(ReadTool));
     tool_registry.register(Arc::new(WriteTool));
@@ -627,6 +627,25 @@ async fn cmd_chat_inner(
     // Create agent service with approval callback, progress callback, and message queue
     tracing::debug!("Creating agent service with approval, progress, and message queue callbacks");
     let shared_tool_registry = Arc::new(tool_registry);
+
+    // Load dynamic tools from ~/.opencrabs/tools.toml
+    let tools_toml_path = crate::brain::tools::dynamic::DynamicToolLoader::default_path()
+        .unwrap_or_else(|| std::path::PathBuf::from("tools.toml"));
+    let dynamic_count = crate::brain::tools::dynamic::DynamicToolLoader::load(
+        &tools_toml_path,
+        &shared_tool_registry,
+    );
+    if dynamic_count > 0 {
+        tracing::info!("Loaded {dynamic_count} dynamic tool(s) from tools.toml");
+    }
+
+    // Register tool_manage — agent can add/remove/reload dynamic tools at runtime
+    shared_tool_registry.register(Arc::new(
+        crate::brain::tools::tool_manage::ToolManageTool::new(
+            shared_tool_registry.clone(),
+            tools_toml_path,
+        ),
+    ));
 
     // Now that the registry is Arc'd, give it to the channel factory
     channel_factory.set_tool_registry(shared_tool_registry.clone());

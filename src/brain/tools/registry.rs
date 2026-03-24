@@ -6,7 +6,7 @@ use super::error::{Result, ToolError};
 use super::r#trait::{Tool, ToolExecutionContext, ToolResult};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 /// Per-tool parameter aliases that LLMs commonly confuse.
 /// Format: (tool_name, wrong_param, correct_param).
@@ -65,44 +65,54 @@ fn normalize_tool_input(tool_name: &str, mut input: Value) -> Value {
     input
 }
 
-/// Registry of available tools
+/// Registry of available tools.
+///
+/// Thread-safe via internal `RwLock` — all methods take `&self`, allowing
+/// runtime registration/removal through a shared `Arc<ToolRegistry>`.
 pub struct ToolRegistry {
-    tools: HashMap<String, Arc<dyn Tool>>,
+    tools: RwLock<HashMap<String, Arc<dyn Tool>>>,
 }
 
 impl ToolRegistry {
     /// Create a new empty tool registry
     pub fn new() -> Self {
         Self {
-            tools: HashMap::new(),
+            tools: RwLock::new(HashMap::new()),
         }
     }
 
-    /// Register a tool
-    pub fn register(&mut self, tool: Arc<dyn Tool>) {
+    /// Register a tool (takes `&self` — safe through shared `Arc`)
+    pub fn register(&self, tool: Arc<dyn Tool>) {
         let name = tool.name().to_string();
         tracing::debug!("Registered tool: {}", name);
-        self.tools.insert(name, tool);
+        self.tools.write().unwrap().insert(name, tool);
+    }
+
+    /// Unregister a tool by name. Returns true if it existed.
+    pub fn unregister(&self, name: &str) -> bool {
+        self.tools.write().unwrap().remove(name).is_some()
     }
 
     /// Get a tool by name
     pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
-        self.tools.get(name).cloned()
+        self.tools.read().unwrap().get(name).cloned()
     }
 
     /// Check if a tool is registered
     pub fn has_tool(&self, name: &str) -> bool {
-        self.tools.contains_key(name)
+        self.tools.read().unwrap().contains_key(name)
     }
 
     /// List all registered tool names
     pub fn list_tools(&self) -> Vec<String> {
-        self.tools.keys().cloned().collect()
+        self.tools.read().unwrap().keys().cloned().collect()
     }
 
     /// Get tool definitions in LLM format
     pub fn get_tool_definitions(&self) -> Vec<crate::brain::provider::Tool> {
         self.tools
+            .read()
+            .unwrap()
             .values()
             .map(|tool| crate::brain::provider::Tool {
                 name: tool.name().to_string(),
@@ -156,7 +166,7 @@ impl ToolRegistry {
 
     /// Get the number of registered tools
     pub fn count(&self) -> usize {
-        self.tools.len()
+        self.tools.read().unwrap().len()
     }
 }
 

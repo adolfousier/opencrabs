@@ -100,7 +100,7 @@ impl Tool for SpawnAgentTool {
                 .map_err(|e| ToolError::Execution(format!("Failed to create provider: {}", e)))?;
 
             // Build tool registry for child (same tools as parent, minus spawn to prevent recursion)
-            let mut child_registry = crate::brain::tools::ToolRegistry::new();
+            let child_registry = crate::brain::tools::ToolRegistry::new();
 
             // Register essential tools for the child
             child_registry.register(Arc::new(crate::brain::tools::read::ReadTool));

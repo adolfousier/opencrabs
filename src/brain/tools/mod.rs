@@ -47,6 +47,10 @@ pub mod write_opencrabs_file;
 // Tool implementations - Phase 5: Multi-Agent Orchestration
 pub mod subagent;
 
+// Dynamic tools — runtime-defined via tools.toml
+pub mod dynamic;
+pub mod tool_manage;
+
 // Tool implementations - Phase 4: Channel Integrations
 #[cfg(feature = "discord")]
 pub mod discord_connect;

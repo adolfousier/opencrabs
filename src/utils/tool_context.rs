@@ -53,7 +53,10 @@ pub fn tool_context_hint(name: &str, input: &serde_json::Value) -> String {
             }
         }
         "plan" => {
-            let op = safe.get("operation").and_then(|v| v.as_str()).unwrap_or("?");
+            let op = safe
+                .get("operation")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
             let title = safe
                 .get("title")
                 .or_else(|| safe.get("name"))
@@ -64,7 +67,10 @@ pub fn tool_context_hint(name: &str, input: &serde_json::Value) -> String {
             }
         }
         "task_manager" => {
-            let op = safe.get("operation").and_then(|v| v.as_str()).unwrap_or("?");
+            let op = safe
+                .get("operation")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
             let title = safe.get("title").and_then(|v| v.as_str());
             match title {
                 Some(t) => Some(format!("{}: {}", op, t)),
@@ -82,8 +88,18 @@ pub fn tool_context_hint(name: &str, input: &serde_json::Value) -> String {
                 .or_else(|| m.get("operation"))
                 .and_then(|v| v.as_str());
             let detail_keys = [
-                "name", "prompt", "query", "path", "file_path", "pattern",
-                "description", "title", "url", "command", "id", "job_id",
+                "name",
+                "prompt",
+                "query",
+                "path",
+                "file_path",
+                "pattern",
+                "description",
+                "title",
+                "url",
+                "command",
+                "id",
+                "job_id",
             ];
             let detail = detail_keys
                 .iter()

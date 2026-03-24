@@ -297,7 +297,11 @@ impl AgentService {
                         } = state.block
                             && let Some(cb) = effective_cb
                         {
-                            let emit_name = if is_cli { name.to_lowercase() } else { name.clone() };
+                            let emit_name = if is_cli {
+                                name.to_lowercase()
+                            } else {
+                                name.clone()
+                            };
                             cb(
                                 session_id,
                                 ProgressEvent::ToolStarted {
@@ -367,12 +371,12 @@ impl AgentService {
             && let Some(cb) = effective_cb
         {
             cb(
-                    session_id,
-                    ProgressEvent::IntermediateText {
-                        text: cli_unflushed_text,
-                        reasoning: Some(String::new()),
-                    },
-                );
+                session_id,
+                ProgressEvent::IntermediateText {
+                    text: cli_unflushed_text,
+                    reasoning: Some(String::new()),
+                },
+            );
         }
 
         // Detect premature stream termination — if we accumulated blocks but never

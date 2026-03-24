@@ -123,7 +123,7 @@ impl Tool for ResumeAgentTool {
             let provider = crate::brain::provider::create_provider(&config)
                 .map_err(|e| ToolError::Execution(format!("Failed to create provider: {}", e)))?;
 
-            let mut child_registry = crate::brain::tools::ToolRegistry::new();
+            let child_registry = crate::brain::tools::ToolRegistry::new();
             child_registry.register(Arc::new(crate::brain::tools::read::ReadTool));
             child_registry.register(Arc::new(crate::brain::tools::write::WriteTool));
             child_registry.register(Arc::new(crate::brain::tools::edit::EditTool));

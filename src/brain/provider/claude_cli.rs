@@ -454,14 +454,17 @@ impl Provider for ClaudeCliProvider {
                                     // Capture cache tokens from message_start usage
                                     if let Some(msg) = event.get("message")
                                         && let Some(u) = msg.get("usage")
-                                        && let Ok(cli_u) = serde_json::from_value::<CliUsage>(u.clone())
+                                        && let Ok(cli_u) =
+                                            serde_json::from_value::<CliUsage>(u.clone())
                                     {
                                         input_tokens = cli_u.total_input();
                                     }
                                     match serde_json::from_value::<StreamEvent>(event) {
                                         Ok(mut se) => {
                                             // Patch input_tokens to include cache tokens
-                                            if let StreamEvent::MessageStart { ref mut message } = se {
+                                            if let StreamEvent::MessageStart { ref mut message } =
+                                                se
+                                            {
                                                 message.usage.input_tokens = input_tokens;
                                             }
                                             if tx.send(Ok(se)).await.is_err() {
@@ -493,12 +496,17 @@ impl Provider for ClaudeCliProvider {
                                 // Accumulate token usage from each round's message_delta.
                                 // CLI reports cache_read/creation tokens here, not in Result.
                                 if let Some(u) = event.get("usage") {
-                                    let round_output = u.get("output_tokens")
-                                        .and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                                    let round_output = u
+                                        .get("output_tokens")
+                                        .and_then(|v| v.as_u64())
+                                        .unwrap_or(0)
+                                        as u32;
                                     output_tokens += round_output;
                                     // Take the max input (includes cache) — each round reports
                                     // the running total of cache_read_input_tokens.
-                                    if let Ok(round_usage) = serde_json::from_value::<CliUsage>(u.clone()) {
+                                    if let Ok(round_usage) =
+                                        serde_json::from_value::<CliUsage>(u.clone())
+                                    {
                                         let round_input = round_usage.total_input();
                                         if round_input > input_tokens {
                                             input_tokens = round_input;

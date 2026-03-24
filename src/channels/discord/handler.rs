@@ -606,8 +606,7 @@ pub(crate) async fn handle_message(
                             .find(|e| e.name == tool_name && e.msg_id.is_some())
                         {
                             let icon = if success { "✅" } else { "❌" };
-                            let text =
-                                format!("{} **{}**{}", icon, entry.name, entry.context);
+                            let text = format!("{} **{}**{}", icon, entry.name, entry.context);
                             if let Some(mid) = entry.msg_id.take() {
                                 let _ = channel
                                     .edit_message(&http, mid, EditMessage::new().content(text))

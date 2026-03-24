@@ -264,7 +264,7 @@ pub(crate) async fn cmd_run(
     let provider = crate::brain::provider::create_provider(config)?;
 
     // Create tool registry
-    let mut tool_registry = ToolRegistry::new();
+    let tool_registry = ToolRegistry::new();
     // Phase 1: Essential file operations
     tool_registry.register(Arc::new(ReadTool));
     tool_registry.register(Arc::new(WriteTool));
