@@ -944,8 +944,8 @@ impl AgentService {
                             },
                         );
                     }
-                    // Only emit QueuedUserMessage if stream_complete didn't already
-                    if !from_buf && let Some(ref cb) = progress_callback {
+                    // Emit QueuedUserMessage — always here, never in stream_complete
+                    if let Some(ref cb) = progress_callback {
                         cb(
                             session_id,
                             ProgressEvent::QueuedUserMessage {
