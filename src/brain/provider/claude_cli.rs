@@ -238,6 +238,19 @@ struct CliUsage {
     pub input_tokens: u32,
     #[serde(default)]
     pub output_tokens: u32,
+    #[serde(default)]
+    pub cache_creation_input_tokens: u32,
+    #[serde(default)]
+    pub cache_read_input_tokens: u32,
+}
+
+impl CliUsage {
+    /// Total input tokens including cache reads/writes.
+    /// Claude CLI reports input_tokens=1 when caching, with the real
+    /// count split across cache_creation and cache_read fields.
+    fn total_input(&self) -> u32 {
+        self.input_tokens + self.cache_creation_input_tokens + self.cache_read_input_tokens
+    }
 }
 
 #[async_trait]
@@ -377,6 +390,7 @@ impl Provider for ClaudeCliProvider {
             let mut completed_blocks: usize = 0;
             let mut current_block_started = false;
             let mut current_block_chars: usize = 0;
+            let mut input_tokens: u32 = 0;
             let mut output_tokens: u32 = 0;
             let mut line_count = 0u32;
             // Track block index offset across tool rounds — each CLI turn
@@ -437,8 +451,19 @@ impl Provider for ClaudeCliProvider {
                             "message_start" => {
                                 if !started {
                                     started = true;
+                                    // Capture cache tokens from message_start usage
+                                    if let Some(msg) = event.get("message")
+                                        && let Some(u) = msg.get("usage")
+                                        && let Ok(cli_u) = serde_json::from_value::<CliUsage>(u.clone())
+                                    {
+                                        input_tokens = cli_u.total_input();
+                                    }
                                     match serde_json::from_value::<StreamEvent>(event) {
-                                        Ok(se) => {
+                                        Ok(mut se) => {
+                                            // Patch input_tokens to include cache tokens
+                                            if let StreamEvent::MessageStart { ref mut message } = se {
+                                                message.usage.input_tokens = input_tokens;
+                                            }
                                             if tx.send(Ok(se)).await.is_err() {
                                                 break;
                                             }
@@ -450,9 +475,8 @@ impl Provider for ClaudeCliProvider {
                                 }
                             }
                             "message_delta" => {
-                                // Suppress — Result handles final close.
-                                // But advance block index offset if this ends a tool_use round,
-                                // so the next round's blocks don't collide.
+                                // Suppress event — Result handles final close.
+                                // But capture usage (cache tokens) and track tool rounds.
                                 let is_tool_round = event
                                     .get("delta")
                                     .and_then(|d| d.get("stop_reason"))
@@ -465,6 +489,21 @@ impl Provider for ClaudeCliProvider {
                                         "CLI tool round ended, block_index_offset={}",
                                         block_index_offset
                                     );
+                                }
+                                // Accumulate token usage from each round's message_delta.
+                                // CLI reports cache_read/creation tokens here, not in Result.
+                                if let Some(u) = event.get("usage") {
+                                    let round_output = u.get("output_tokens")
+                                        .and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                                    output_tokens += round_output;
+                                    // Take the max input (includes cache) — each round reports
+                                    // the running total of cache_read_input_tokens.
+                                    if let Ok(round_usage) = serde_json::from_value::<CliUsage>(u.clone()) {
+                                        let round_input = round_usage.total_input();
+                                        if round_input > input_tokens {
+                                            input_tokens = round_input;
+                                        }
+                                    }
                                 }
                                 // Send Ping to prevent idle timeout during tool execution
                                 if tx.send(Ok(StreamEvent::Ping)).await.is_err() {
@@ -577,7 +616,7 @@ impl Provider for ClaudeCliProvider {
                             });
                             let msg_model = message.model.unwrap_or_else(|| original_model.clone());
                             let input_tokens =
-                                message.usage.as_ref().map(|u| u.input_tokens).unwrap_or(0);
+                                message.usage.as_ref().map(|u| u.total_input()).unwrap_or(0);
 
                             let _ = tx
                                 .send(Ok(StreamEvent::MessageStart {
@@ -696,7 +735,10 @@ impl Provider for ClaudeCliProvider {
                             .as_ref()
                             .map(|u| u.output_tokens)
                             .unwrap_or(output_tokens);
-                        let final_input = usage.as_ref().map(|u| u.input_tokens).unwrap_or(0);
+                        let final_input = usage
+                            .as_ref()
+                            .map(|u| u.total_input())
+                            .unwrap_or(input_tokens);
 
                         let _ = tx
                             .send(Ok(StreamEvent::MessageDelta {
