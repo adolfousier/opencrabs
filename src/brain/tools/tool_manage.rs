@@ -308,7 +308,7 @@ mod tests {
 
     fn setup() -> (Arc<ToolRegistry>, PathBuf, ToolManageTool) {
         let dir = TempDir::new().unwrap();
-        let tools_path = dir.into_path().join("tools.toml");
+        let tools_path = dir.keep().join("tools.toml");
         let registry = Arc::new(ToolRegistry::new());
         let tool = ToolManageTool::new(registry.clone(), tools_path.clone());
         (registry, tools_path, tool)
