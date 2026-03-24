@@ -20,6 +20,7 @@ struct ManagerInner {
     browser: Option<Browser>,
     pages: HashMap<String, Page>,
     _handler_handle: Option<tokio::task::JoinHandle<()>>,
+    headless: bool,
 }
 
 impl Default for BrowserManager {
@@ -30,13 +31,45 @@ impl Default for BrowserManager {
 
 impl BrowserManager {
     pub fn new() -> Self {
+        Self::with_headless(true)
+    }
+
+    /// Create a browser manager with explicit headless/headed mode.
+    pub fn with_headless(headless: bool) -> Self {
         Self {
             inner: Arc::new(Mutex::new(ManagerInner {
                 browser: None,
                 pages: HashMap::new(),
                 _handler_handle: None,
+                headless,
             })),
         }
+    }
+
+    /// Switch between headless and headed mode. Shuts down the current browser
+    /// if the mode changes — the next page request will relaunch in the new mode.
+    pub async fn set_headless(&self, headless: bool) -> bool {
+        let mut inner = self.inner.lock().await;
+        if inner.headless == headless {
+            return false; // no change
+        }
+        inner.headless = headless;
+        // Tear down existing browser so it relaunches in the new mode
+        inner.pages.clear();
+        inner.browser.take();
+        if let Some(handle) = inner._handler_handle.take() {
+            handle.abort();
+        }
+        tracing::info!(
+            "Browser mode switched to {}",
+            if headless { "headless" } else { "headed" }
+        );
+        true
+    }
+
+    /// Returns the current headless mode.
+    pub async fn is_headless(&self) -> bool {
+        self.inner.lock().await.headless
     }
 
     /// Ensure the browser is launched. No-op if already running.
@@ -46,10 +79,14 @@ impl BrowserManager {
             return Ok(());
         }
 
-        tracing::info!("Launching headless Chrome via CDP...");
-        let config = BrowserConfig::builder()
-            .no_sandbox()
-            .window_size(1280, 720)
+        let mode = if inner.headless { "headless" } else { "headed" };
+        tracing::info!("Launching {mode} Chrome via CDP...");
+        let mut builder = BrowserConfig::builder();
+        builder = builder.no_sandbox().window_size(1280, 720);
+        if !inner.headless {
+            builder = builder.with_head();
+        }
+        let config = builder
             .build()
             .map_err(|e| anyhow::anyhow!("BrowserConfig error: {e}"))?;
 
@@ -68,7 +105,7 @@ impl BrowserManager {
 
         inner.browser = Some(browser);
         inner._handler_handle = Some(handle);
-        tracing::info!("Headless Chrome launched successfully");
+        tracing::info!("{mode} Chrome launched successfully");
         Ok(())
     }
 
@@ -128,6 +165,43 @@ mod tests {
     fn test_manager_new() {
         let mgr = BrowserManager::new();
         let _ = mgr.clone();
+    }
+
+    #[test]
+    fn test_manager_with_headless() {
+        let mgr = BrowserManager::with_headless(false);
+        let _ = mgr.clone();
+    }
+
+    #[tokio::test]
+    async fn test_is_headless_default() {
+        let mgr = BrowserManager::new();
+        assert!(mgr.is_headless().await);
+    }
+
+    #[tokio::test]
+    async fn test_is_headless_false() {
+        let mgr = BrowserManager::with_headless(false);
+        assert!(!mgr.is_headless().await);
+    }
+
+    #[tokio::test]
+    async fn test_set_headless_no_change() {
+        let mgr = BrowserManager::new();
+        // Already headless — no change
+        assert!(!mgr.set_headless(true).await);
+    }
+
+    #[tokio::test]
+    async fn test_set_headless_switch() {
+        let mgr = BrowserManager::new();
+        assert!(mgr.is_headless().await);
+        // Switch to headed
+        assert!(mgr.set_headless(false).await);
+        assert!(!mgr.is_headless().await);
+        // Switch back
+        assert!(mgr.set_headless(true).await);
+        assert!(mgr.is_headless().await);
     }
 
     #[tokio::test]
