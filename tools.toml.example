@@ -1,0 +1,147 @@
+# OpenCrabs Dynamic Tools
+# Copy to ~/.opencrabs/tools.toml and customize.
+#
+# These are runtime-defined tools the agent can call autonomously.
+# Unlike commands.toml (user-triggered slash commands), these appear
+# in the LLM's tool list and the agent decides when to use them.
+#
+# Changes are hot-reloaded — no restart needed.
+# The agent can also manage tools via the `tool_manage` meta-tool.
+
+# --- HTTP Tools ---
+
+[[tools]]
+name = "health_check"
+description = "Check if a service endpoint is healthy"
+executor = "http"
+method = "GET"
+url = "https://{{host}}/health"
+timeout_secs = 10
+requires_approval = false
+enabled = true
+
+[[tools.params]]
+name = "host"
+type = "string"
+description = "Hostname or IP to check (e.g. api.example.com)"
+required = true
+
+[[tools]]
+name = "github_api"
+description = "Query the GitHub REST API"
+executor = "http"
+method = "GET"
+url = "https://api.github.com/{{endpoint}}"
+headers = { "Authorization" = "Bearer {{token}}", "Accept" = "application/vnd.github+json" }
+timeout_secs = 15
+requires_approval = true
+enabled = true
+
+[[tools.params]]
+name = "endpoint"
+type = "string"
+description = "API path (e.g. repos/owner/repo/issues)"
+required = true
+
+[[tools.params]]
+name = "token"
+type = "string"
+description = "GitHub personal access token"
+required = true
+
+[[tools]]
+name = "webhook_notify"
+description = "Send a notification to a webhook URL"
+executor = "http"
+method = "POST"
+url = "{{webhook_url}}"
+headers = { "Content-Type" = "application/json" }
+timeout_secs = 10
+requires_approval = true
+enabled = false
+
+[[tools.params]]
+name = "webhook_url"
+type = "string"
+description = "Full webhook URL"
+required = true
+
+# --- Shell Tools ---
+
+[[tools]]
+name = "disk_usage"
+description = "Show disk usage for a directory"
+executor = "shell"
+command = "du -sh {{path}} 2>/dev/null || echo 'Path not found'"
+timeout_secs = 10
+requires_approval = false
+enabled = true
+
+[[tools.params]]
+name = "path"
+type = "string"
+description = "Directory path to check"
+required = true
+
+[[tools]]
+name = "docker_status"
+description = "List running Docker containers"
+executor = "shell"
+command = "docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
+timeout_secs = 10
+requires_approval = false
+enabled = true
+
+[[tools]]
+name = "git_log_summary"
+description = "Show recent git commits in a repository"
+executor = "shell"
+command = "cd {{repo_path}} && git log --oneline -{{count}}"
+timeout_secs = 10
+requires_approval = false
+enabled = true
+
+[[tools.params]]
+name = "repo_path"
+type = "string"
+description = "Path to the git repository"
+required = true
+
+[[tools.params]]
+name = "count"
+type = "string"
+description = "Number of commits to show"
+required = false
+
+[[tools]]
+name = "deploy_staging"
+description = "Deploy a branch to the staging environment"
+executor = "shell"
+command = "cd ~/project && ./deploy.sh {{branch}} staging"
+timeout_secs = 120
+requires_approval = true
+enabled = false
+
+[[tools.params]]
+name = "branch"
+type = "string"
+description = "Git branch to deploy"
+required = true
+
+# --- Field Reference ---
+#
+# name             (required)  Tool name — used by the agent to call it
+# description      (required)  What the tool does — shown to the LLM
+# executor         (required)  "http" or "shell"
+# enabled          (optional)  true/false, default: true
+# requires_approval (optional) true/false, default: true
+# timeout_secs     (optional)  Execution timeout, default: 30
+# params           (optional)  Parameter definitions (name, type, description, required)
+#
+# HTTP-specific:
+#   method         "GET", "POST", "PUT", "DELETE", etc.
+#   url            URL with {{param}} template variables
+#   headers        Key-value map, supports {{param}} substitution
+#
+# Shell-specific:
+#   command         Shell command with {{param}} template variables

@@ -60,6 +60,8 @@ OpenCrabs runs as a **single binary on your terminal** — no server, no gateway
 - Your messages to the LLM provider API (Anthropic, OpenAI, GitHub Copilot, etc.)
 - Web search queries (optional tool)
 - GitHub API via `gh` CLI (optional tool)
+- Browser navigation to URLs (optional, `browser` feature — headless Chrome via CDP)
+- Dynamic tool HTTP requests (only when you define HTTP tools in `tools.toml`)
 
 ---
 
@@ -75,6 +77,7 @@ OpenCrabs runs as a **single binary on your terminal** — no server, no gateway
 - [API Keys (keys.toml)](#-api-keys-keystoml)
 - [Configuration (config.toml)](#-configuration-configtoml)
 - [Commands (commands.toml)](#-commands-commandstoml)
+- [Dynamic Tools (tools.toml)](#-dynamic-tools-toolstoml)
 - [Using Local LLMs](#-using-local-llms)
 - [Configuration](#-configuration)
 - [Tool System](#-tool-system)
@@ -176,6 +179,8 @@ Images are passed to the active model's vision pipeline if it supports multimoda
 | **Per-Session Isolation** | Each session is an independent agent with its own provider, model, context, and tool state. Sessions can run tasks in parallel against different providers — ask Claude a question in one session while Kimi works on code in another |
 | **Self-Sustaining** | Agent can modify its own source, build, test, and hot-restart via Unix `exec()` |
 | **Self-Improving** | Learns from experience — saves reusable workflows as custom commands, writes lessons learned to memory, updates its own brain files. All local, no data leaves your machine |
+| **Dynamic Tools** | Define custom tools at runtime via `~/.opencrabs/tools.toml` — the agent can call them autonomously like built-in tools. HTTP and shell executors, template parameters (`{{param}}`), enable/disable without restart. The `tool_manage` meta-tool lets the agent create, remove, and reload tools on the fly |
+| **Browser Automation** | Native headless Chrome control via CDP (Chrome DevTools Protocol). 7 browser tools: navigate, click, type, screenshot, eval JS, extract content, wait for elements. Lazy-initialized singleton — Chrome launches on first use. Feature-gated under `browser` (`cargo build --features browser`) |
 | **Natural Language Commands** | Tell OpenCrabs to create slash commands — it writes them to `commands.toml` autonomously via the `config_manager` tool |
 | **Live Settings** | Agent can read/write `config.toml` at runtime; Settings TUI screen (press `S`) shows current config; approval policy persists across restarts. Default: auto-approve (use `/approve` to change) |
 | **Web Search** | DuckDuckGo (built-in, no key needed) + EXA AI (neural, free via MCP) by default; Brave Search optional (key in `keys.toml`) |
@@ -1047,6 +1052,7 @@ OpenCrabs uses three config files — all **hot-reloaded at runtime** (no restar
 | `~/.opencrabs/config.toml` | Provider settings, models, channels, allowed users | No — safe to commit |
 | `~/.opencrabs/keys.toml` | API keys, bot tokens | **Yes** — `chmod 600`, never commit |
 | `~/.opencrabs/commands.toml` | User-defined slash commands | No |
+| `~/.opencrabs/tools.toml` | Runtime-defined agent tools (HTTP, shell) | No |
 
 Changes to any of these files are picked up automatically within ~300ms while OpenCrabs is running. The active LLM provider, channel allowlists, approval policy, and slash command autocomplete all update without restart.
 
@@ -1163,6 +1169,86 @@ prompt = 'Run `RUSTFLAGS="-C target-cpu=native" cargo build --release` in /srv/r
 Commands appear instantly in autocomplete (type `/`) after saving — no restart needed. The `action` field supports:
 - `"prompt"` — sends the prompt text to the agent for execution
 - `"system"` — displays the text inline as a system message
+
+---
+
+## 🔌 Dynamic Tools (tools.toml)
+
+Runtime-defined tools that the agent can call autonomously — no rebuild, no restart. Unlike slash commands (`commands.toml`) which are user-triggered shortcuts, dynamic tools appear in the LLM's tool list and the agent decides when to use them.
+
+```toml
+# ~/.opencrabs/tools.toml
+
+[[tools]]
+name = "health_check"
+description = "Check if a service is healthy"
+executor = "http"
+method = "GET"
+url = "https://{{host}}/health"
+headers = { "Authorization" = "Bearer {{token}}" }
+timeout_secs = 10
+requires_approval = false
+
+[[tools.params]]
+name = "host"
+type = "string"
+description = "Hostname to check"
+required = true
+
+[[tools.params]]
+name = "token"
+type = "string"
+description = "API bearer token"
+required = true
+
+[[tools]]
+name = "deploy_staging"
+description = "Deploy the current branch to staging"
+executor = "shell"
+command = "cd ~/project && ./deploy.sh {{branch}} staging"
+timeout_secs = 120
+requires_approval = true
+
+[[tools.params]]
+name = "branch"
+type = "string"
+description = "Git branch to deploy"
+required = true
+```
+
+**Executor types:**
+
+| Executor | Fields | Description |
+|----------|--------|-------------|
+| `http` | `method`, `url`, `headers` | Makes an HTTP request. Template variables (`{{param}}`) are substituted in the URL, headers, and body |
+| `shell` | `command` | Runs a shell command. Template variables substituted in the command string |
+
+**Fields:**
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `name` | Yes | | Tool name (used by the agent to call it) |
+| `description` | Yes | | What the tool does (shown to the LLM) |
+| `executor` | Yes | | `http` or `shell` |
+| `enabled` | No | `true` | Whether the tool is active |
+| `requires_approval` | No | `true` | Whether the user must approve each call |
+| `timeout_secs` | No | `30` | Execution timeout in seconds |
+| `params` | No | `[]` | Parameter definitions with name, type, description, required |
+
+**Management via agent:** The `tool_manage` meta-tool lets the agent create, remove, enable/disable, and reload tools at runtime. Tell it *"add a tool that checks my server health"* and it writes the definition to `tools.toml` automatically.
+
+**Commands vs Tools:**
+
+| | Commands (`commands.toml`) | Tools (`tools.toml`) |
+|---|---|---|
+| **Triggered by** | User types `/command` | Agent decides autonomously |
+| **Appears in** | Autocomplete menu | LLM tool list |
+| **Use case** | Shortcuts, workflows | Integrations, automations |
+| **Action** | Sends a prompt to the agent | Executes HTTP request or shell command directly |
+
+See [`tools.toml.example`](tools.toml.example) for a complete reference.
+
+---
 
 ### Example: Hybrid Setup (Local + Cloud)
 
@@ -1290,8 +1376,20 @@ OpenCrabs includes 30+ built-in tools. The AI can use these during conversation:
 | `session_context` | Access session information |
 | `cron_manage` | Schedule recurring jobs — create, list, enable/disable, delete. Deliver results to any channel |
 | `a2a_send` | Send tasks to remote A2A-compatible agents via JSON-RPC 2.0 |
+| `tool_manage` | Manage runtime tools — list, add, remove, enable, disable, reload (`tools.toml`) |
 | `evolve` | Download latest release binary from GitHub and hot-restart (no Rust toolchain needed) |
 | `rebuild` | Build from source (`cargo build --release`) and hot-restart |
+
+#### Browser Automation (feature: `browser`)
+| Tool | Description |
+|------|-------------|
+| `browser_navigate` | Navigate to a URL, returns page title and final URL after redirects |
+| `browser_click` | Click an element by CSS selector |
+| `browser_type` | Type text into an element (by CSS selector or focused element) |
+| `browser_screenshot` | Capture page screenshot (full page or element), returns base64 PNG |
+| `browser_eval` | Execute JavaScript in page context and return the result |
+| `browser_content` | Get page HTML or text-only content, optionally scoped by CSS selector |
+| `browser_wait` | Wait for a CSS selector to appear (polls every 200ms, default 10s timeout) |
 
 #### Multi-Agent Orchestration
 | Tool | Description |
@@ -1487,6 +1585,7 @@ The brain reads markdown files from `~/.opencrabs/`:
 ├── config.toml                # App configuration (provider, model, approval policy)
 ├── keys.toml                  # API keys (provider, channel, STT/TTS)
 ├── commands.toml              # User-defined slash commands
+├── tools.toml                 # Runtime-defined agent tools (HTTP, shell)
 ├── opencrabs.db               # SQLite — sessions, messages, plans
 └── memory/                    # Daily memory logs (auto-compaction summaries)
     └── YYYY-MM-DD.md          # One per day, multiple compactions stack
