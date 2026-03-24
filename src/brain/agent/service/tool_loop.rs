@@ -803,28 +803,87 @@ impl AgentService {
                 .map(|p| p.cli_handles_tools())
                 .unwrap_or(false);
             if cli_tools && !tool_uses.is_empty() {
-                for (_, tool_name, tool_input) in &tool_uses {
-                    if let Some(ref cb) = progress_callback {
-                        // Lowercase so format_tool_summary matches ("Bash" → "bash")
-                        let norm_name = tool_name.to_lowercase();
+                // Walk response.content in order to preserve text→tools→text
+                // interleaving. CLI providers return all rounds in one response,
+                // so without this the TUI would show one text blob then all tools.
+                if let Some(ref cb) = progress_callback {
+                    let mut pending_text = String::new();
+                    for block in &response.content {
+                        match block {
+                            ContentBlock::Text { text } if !text.trim().is_empty() => {
+                                if !pending_text.is_empty() {
+                                    pending_text.push_str("\n\n");
+                                }
+                                pending_text.push_str(text);
+                            }
+                            ContentBlock::ToolUse { name, input, .. } => {
+                                // Flush accumulated text before this tool group
+                                if !pending_text.is_empty() {
+                                    cb(
+                                        session_id,
+                                        ProgressEvent::IntermediateText {
+                                            text: pending_text.clone(),
+                                            reasoning: None,
+                                        },
+                                    );
+                                    pending_text.clear();
+                                }
+                                let norm_name = name.to_lowercase();
+                                cb(
+                                    session_id,
+                                    ProgressEvent::ToolStarted {
+                                        tool_name: norm_name.clone(),
+                                        tool_input: input.clone(),
+                                    },
+                                );
+                                cb(
+                                    session_id,
+                                    ProgressEvent::ToolCompleted {
+                                        tool_name: norm_name,
+                                        tool_input: input.clone(),
+                                        success: true,
+                                        summary: "(executed by CLI)".to_string(),
+                                    },
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
+                    // Flush trailing text after the last tool
+                    if !pending_text.is_empty() {
                         cb(
                             session_id,
-                            ProgressEvent::ToolStarted {
-                                tool_name: norm_name.clone(),
-                                tool_input: tool_input.clone(),
-                            },
-                        );
-                        cb(
-                            session_id,
-                            ProgressEvent::ToolCompleted {
-                                tool_name: norm_name,
-                                tool_input: tool_input.clone(),
-                                success: true,
-                                summary: "(executed by CLI)".to_string(),
+                            ProgressEvent::IntermediateText {
+                                text: pending_text,
+                                reasoning: None,
                             },
                         );
                     }
                 }
+                // CLI interleaving already emitted all text — clear so
+                // the shared path below doesn't re-emit it
+                iteration_text.clear();
+
+                // Persist tool markers to DB so tool groups survive
+                // session reload and cancel (double-escape)
+                let cli_tool_entries: Vec<serde_json::Value> = tool_uses
+                    .iter()
+                    .map(|(_, name, input)| {
+                        let desc = Self::format_tool_summary(&name.to_lowercase(), input);
+                        serde_json::json!({"d": desc, "s": true})
+                    })
+                    .collect();
+                if !cli_tool_entries.is_empty() {
+                    let marker = format!(
+                        "\n<!-- tools-v2: {} -->\n",
+                        serde_json::to_string(&cli_tool_entries).unwrap_or_default()
+                    );
+                    accumulated_text.push_str(&marker);
+                    let _ = message_service
+                        .append_content(assistant_db_msg.id, &marker)
+                        .await;
+                }
+
                 // Clear tool_uses so we don't try to execute them below
                 tool_uses.clear();
             }
