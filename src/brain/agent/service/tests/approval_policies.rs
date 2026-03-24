@@ -13,7 +13,7 @@ async fn test_auto_approve_skips_callback() {
     let callback_called_clone = Arc::clone(&callback_called);
 
     let provider = Arc::new(MockProviderWithTools::new());
-    let mut registry = ToolRegistry::new();
+    let registry = ToolRegistry::new();
     registry.register(Arc::new(MockTool));
 
     let approval_cb: ApprovalCallback = Arc::new(move |_info| {
@@ -59,7 +59,7 @@ async fn test_approval_required_calls_callback() {
     let callback_called_clone = Arc::clone(&callback_called);
 
     let provider = Arc::new(MockProviderWithNamedTool::new("approval_tool"));
-    let mut registry = ToolRegistry::new();
+    let registry = ToolRegistry::new();
     registry.register(Arc::new(MockToolRequiresApproval));
 
     let approval_cb: ApprovalCallback = Arc::new(move |_info| {
@@ -99,7 +99,7 @@ async fn test_approval_denied_sends_error_result() {
     let context = ServiceContext::new(pool);
 
     let provider = Arc::new(MockProviderWithNamedTool::new("approval_tool"));
-    let mut registry = ToolRegistry::new();
+    let registry = ToolRegistry::new();
     registry.register(Arc::new(MockToolRequiresApproval));
 
     // Always deny
@@ -149,7 +149,7 @@ async fn test_approval_callback_receives_session_id() {
     let captured_clone = Arc::clone(&captured_session_id);
 
     let provider = Arc::new(MockProviderWithNamedTool::new("approval_tool"));
-    let mut registry = ToolRegistry::new();
+    let registry = ToolRegistry::new();
     registry.register(Arc::new(MockToolRequiresApproval));
 
     let approval_cb: ApprovalCallback = Arc::new(move |info| {
@@ -187,7 +187,7 @@ async fn test_no_callback_denies_execution() {
     let context = ServiceContext::new(pool);
 
     let provider = Arc::new(MockProviderWithNamedTool::new("approval_tool"));
-    let mut registry = ToolRegistry::new();
+    let registry = ToolRegistry::new();
     registry.register(Arc::new(MockToolRequiresApproval));
 
     // No approval_callback set
@@ -224,7 +224,7 @@ async fn test_non_approval_tool_executes_directly() {
     let callback_called_clone = Arc::clone(&callback_called);
 
     let provider = Arc::new(MockProviderWithTools::new());
-    let mut registry = ToolRegistry::new();
+    let registry = ToolRegistry::new();
     registry.register(Arc::new(MockTool)); // requires_approval() -> false
 
     let approval_cb: ApprovalCallback = Arc::new(move |_info| {
@@ -275,7 +275,7 @@ async fn test_mixed_tools_approval_and_auto() {
         "test_tool",
     ));
 
-    let mut registry = ToolRegistry::new();
+    let registry = ToolRegistry::new();
     registry.register(Arc::new(MockToolRequiresApproval)); // requires approval
     registry.register(Arc::new(MockTool)); // no approval needed
 

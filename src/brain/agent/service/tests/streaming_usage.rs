@@ -456,7 +456,7 @@ async fn test_deferred_usage_with_tool_calls() {
     db.run_migrations().await.unwrap();
     let context = ServiceContext::new(db.pool().clone());
 
-    let mut registry = ToolRegistry::new();
+    let registry = ToolRegistry::new();
     registry.register(Arc::new(MockTool));
 
     let agent_service = AgentService::new(provider, context.clone())
