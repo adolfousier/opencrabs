@@ -24,8 +24,8 @@ impl Tool for BrowserNavigateTool {
     }
 
     fn description(&self) -> &str {
-        "Navigate to a URL in the headless browser. Returns the page title and final URL \
-         (after redirects)."
+        "Navigate to a URL in the browser. Returns the page title and final URL \
+         (after redirects). Supports both headless and headed (visible) mode."
     }
 
     fn input_schema(&self) -> Value {
@@ -35,6 +35,10 @@ impl Tool for BrowserNavigateTool {
                 "url": {
                     "type": "string",
                     "description": "URL to navigate to"
+                },
+                "headless": {
+                    "type": "boolean",
+                    "description": "Run in headless mode (no visible window). Defaults to true. Set to false to see the browser."
                 }
             },
             "required": ["url"]
@@ -54,6 +58,11 @@ impl Tool for BrowserNavigateTool {
             Some(u) if !u.is_empty() => u,
             _ => return Ok(ToolResult::error("'url' is required".into())),
         };
+
+        // Switch headless/headed mode if requested
+        if let Some(headless) = input["headless"].as_bool() {
+            self.manager.set_headless(headless).await;
+        }
 
         let page = match self.manager.get_or_create_page(None).await {
             Ok(p) => p,
