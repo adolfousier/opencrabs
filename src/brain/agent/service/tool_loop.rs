@@ -636,6 +636,37 @@ impl AgentService {
                 cb(session_id, ProgressEvent::TokenCount(context.token_count));
             }
 
+            // Post-calibration compaction check.
+            // CLI providers handle tools internally — their API input_tokens reflects
+            // the CLI's full internal context (dozens of tool turns) which can grow to
+            // 200k+ while our pre-call estimate stays at ~8k. The budget check at the
+            // top of the loop never catches this because we only run 1 iteration.
+            // After calibration corrects our count, enforce the budget immediately.
+            if let Some(ref summary) = self
+                .enforce_context_budget(session_id, &mut context, &model_name, &progress_callback)
+                .await
+            {
+                let compaction_marker = format!(
+                    "[CONTEXT COMPACTION — The conversation was automatically compacted \
+                     after token calibration revealed high context usage.]\n\n{}",
+                    summary
+                );
+                if let Err(e) = message_service
+                    .create_message(session_id, "user".to_string(), compaction_marker)
+                    .await
+                {
+                    tracing::error!(
+                        "Failed to persist post-calibration compaction marker: {}",
+                        e
+                    );
+                }
+                context.add_message(Message::user(
+                    "[SYSTEM: Context was auto-compacted after calibration. \
+                     Review the summary above and continue immediately.]"
+                        .to_string(),
+                ));
+            }
+
             // --- CANCEL CHECK BEFORE STREAM DROP RETRY ---
             // If the user cancelled during streaming, don't retry — save partial text and break.
             if response.stop_reason.is_none()
