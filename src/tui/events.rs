@@ -511,18 +511,14 @@ pub mod keys {
         key_matches(event, KeyCode::Char('x'), KeyModifiers::CONTROL)
     }
 
-    /// Ctrl+Tab — focus next pane
+    /// Alt+] — focus next pane
     pub fn is_focus_next_pane(event: &KeyEvent) -> bool {
-        event.code == KeyCode::Tab
-            && event.modifiers.contains(KeyModifiers::CONTROL)
-            && !event.modifiers.contains(KeyModifiers::SHIFT)
+        event.code == KeyCode::Char(']') && event.modifiers.contains(KeyModifiers::ALT)
     }
 
-    /// Ctrl+Shift+Tab — focus previous pane
+    /// Alt+[ — focus previous pane
     pub fn is_focus_prev_pane(event: &KeyEvent) -> bool {
-        event.code == KeyCode::Tab
-            && event.modifiers.contains(KeyModifiers::CONTROL)
-            && event.modifiers.contains(KeyModifiers::SHIFT)
+        event.code == KeyCode::Char('[') && event.modifiers.contains(KeyModifiers::ALT)
     }
 }
 
