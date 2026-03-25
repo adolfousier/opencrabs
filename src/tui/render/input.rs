@@ -411,7 +411,7 @@ pub(super) fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
         ("🔒 approve", Color::DarkGray)
     };
 
-    let spans = vec![
+    let mut spans = vec![
         Span::styled(
             session_text,
             Style::default().fg(orange).add_modifier(Modifier::BOLD),
@@ -423,6 +423,23 @@ pub(super) fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(sep_text, Style::default().fg(Color::DarkGray)),
         Span::styled(policy_text, Style::default().fg(policy_color)),
     ];
+
+    // Split pane indicator
+    if app.pane_manager.is_split() {
+        let pane_count = app.pane_manager.pane_count();
+        let focused_idx = app
+            .pane_manager
+            .pane_ids_in_order()
+            .iter()
+            .position(|id| *id == app.pane_manager.focused)
+            .map(|i| i + 1)
+            .unwrap_or(1);
+        spans.push(Span::styled("  ·  ", Style::default().fg(Color::DarkGray)));
+        spans.push(Span::styled(
+            format!("[{}/{}]", focused_idx, pane_count),
+            Style::default().fg(Color::Rgb(80, 200, 120)),
+        ));
+    }
 
     let line = Line::from(spans);
     let para = Paragraph::new(line).alignment(Alignment::Left);
