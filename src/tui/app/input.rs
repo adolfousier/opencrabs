@@ -1133,6 +1133,24 @@ impl App {
             // Create a new session and switch to it
             self.create_new_session().await?;
             self.switch_mode(AppMode::Chat).await?;
+        } else if event.code == KeyCode::Char('|') {
+            // Split horizontal (left | right) — open selected session in new pane
+            if let Some(session) = self.sessions.get(self.selected_session_index) {
+                let session_id = session.id;
+                self.pane_manager
+                    .split(crate::tui::pane::SplitDirection::Horizontal);
+                self.load_session(session_id).await?;
+                self.switch_mode(AppMode::Chat).await?;
+            }
+        } else if event.code == KeyCode::Char('_') {
+            // Split vertical (top / bottom) — open selected session in new pane
+            if let Some(session) = self.sessions.get(self.selected_session_index) {
+                let session_id = session.id;
+                self.pane_manager
+                    .split(crate::tui::pane::SplitDirection::Vertical);
+                self.load_session(session_id).await?;
+                self.switch_mode(AppMode::Chat).await?;
+            }
         } else if event.code == KeyCode::Char('d') || event.code == KeyCode::Char('D') {
             // Delete the selected session
             if let Some(session) = self.sessions.get(self.selected_session_index) {
