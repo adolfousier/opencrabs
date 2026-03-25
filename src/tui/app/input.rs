@@ -1115,7 +1115,12 @@ impl App {
                 (self.selected_session_index + 1).min(self.sessions.len().saturating_sub(1));
         } else if keys::is_enter(&event) {
             if let Some(session) = self.sessions.get(self.selected_session_index) {
-                self.load_session(session.id).await?;
+                let session_id = session.id;
+                self.load_session(session_id).await?;
+                // Assign session to the focused pane when in split mode
+                if let Some(pane) = self.pane_manager.focused_pane_mut() {
+                    pane.session_id = Some(session_id);
+                }
                 self.switch_mode(AppMode::Chat).await?;
             }
         } else if event.code == KeyCode::Char('r') || event.code == KeyCode::Char('R') {

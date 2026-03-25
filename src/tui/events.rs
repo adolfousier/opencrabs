@@ -505,6 +505,34 @@ pub mod keys {
     pub fn is_view_details(event: &KeyEvent) -> bool {
         matches!(event.code, KeyCode::Char('v') | KeyCode::Char('V')) && event.modifiers.is_empty()
     }
+
+    /// Ctrl+\ — split pane horizontally (left | right)
+    pub fn is_split_horizontal(event: &KeyEvent) -> bool {
+        key_matches(event, KeyCode::Char('\\'), KeyModifiers::CONTROL)
+    }
+
+    /// Ctrl+- — split pane vertically (top / bottom)
+    pub fn is_split_vertical(event: &KeyEvent) -> bool {
+        key_matches(event, KeyCode::Char('-'), KeyModifiers::CONTROL)
+    }
+
+    /// Ctrl+X — close focused pane
+    pub fn is_close_pane(event: &KeyEvent) -> bool {
+        key_matches(event, KeyCode::Char('x'), KeyModifiers::CONTROL)
+    }
+
+    /// Ctrl+Tab — focus next pane
+    pub fn is_focus_next_pane(event: &KeyEvent) -> bool {
+        event.code == KeyCode::Tab && event.modifiers.contains(KeyModifiers::CONTROL)
+            && !event.modifiers.contains(KeyModifiers::SHIFT)
+    }
+
+    /// Ctrl+Shift+Tab — focus previous pane
+    pub fn is_focus_prev_pane(event: &KeyEvent) -> bool {
+        event.code == KeyCode::Tab
+            && event.modifiers.contains(KeyModifiers::CONTROL)
+            && event.modifiers.contains(KeyModifiers::SHIFT)
+    }
 }
 
 #[cfg(test)]

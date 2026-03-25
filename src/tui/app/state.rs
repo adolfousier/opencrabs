@@ -1939,6 +1939,47 @@ impl App {
             return Ok(());
         }
 
+        // Split pane keybindings
+        if keys::is_split_horizontal(&event) {
+            self.pane_manager
+                .split(crate::tui::pane::SplitDirection::Horizontal);
+            self.switch_mode(AppMode::Sessions).await?;
+            return Ok(());
+        }
+        if keys::is_split_vertical(&event) {
+            self.pane_manager
+                .split(crate::tui::pane::SplitDirection::Vertical);
+            self.switch_mode(AppMode::Sessions).await?;
+            return Ok(());
+        }
+        if keys::is_close_pane(&event) && self.pane_manager.is_split() {
+            self.pane_manager.close_focused();
+            if let Some(pane) = self.pane_manager.focused_pane()
+                && let Some(session_id) = pane.session_id
+            {
+                self.load_session(session_id).await?;
+            }
+            return Ok(());
+        }
+        if keys::is_focus_next_pane(&event) && self.pane_manager.is_split() {
+            self.pane_manager.focus_next();
+            if let Some(pane) = self.pane_manager.focused_pane()
+                && let Some(session_id) = pane.session_id
+            {
+                self.load_session(session_id).await?;
+            }
+            return Ok(());
+        }
+        if keys::is_focus_prev_pane(&event) && self.pane_manager.is_split() {
+            self.pane_manager.focus_prev();
+            if let Some(pane) = self.pane_manager.focused_pane()
+                && let Some(session_id) = pane.session_id
+            {
+                self.load_session(session_id).await?;
+            }
+            return Ok(());
+        }
+
         // Mode-specific handling
         tracing::trace!("Current mode: {:?}", self.mode);
         match self.mode {
