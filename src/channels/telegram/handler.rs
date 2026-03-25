@@ -1030,6 +1030,10 @@ pub(crate) async fn handle_message(
                 ProgressEvent::IntermediateText { text, .. } => {
                     if let Ok(mut s) = st.try_lock() {
                         s.thinking.clear();
+                        // Clear accumulated streaming response — it's now captured
+                        // as an intermediate message. Without this, text from
+                        // consecutive tool rounds gets concatenated without spacing.
+                        s.response.clear();
                         s.pending_intermediate.push(text);
                     }
                 }
