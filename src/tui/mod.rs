@@ -7,6 +7,7 @@ pub mod error;
 pub mod events;
 pub mod onboarding;
 pub mod onboarding_render;
+pub mod pane;
 pub mod plan;
 pub mod prompt_analyzer;
 pub mod render;
