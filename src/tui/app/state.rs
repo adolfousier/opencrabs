@@ -8,6 +8,7 @@ use super::events::{
 };
 use super::onboarding::OnboardingWizard;
 use super::prompt_analyzer::PromptAnalyzer;
+use crate::tui::pane::PaneManager;
 use crate::brain::agent::AgentService;
 use crate::brain::provider::Provider;
 use crate::brain::{BrainLoader, CommandLoader, SelfUpdater, UserCommand};
@@ -429,6 +430,9 @@ pub struct App {
     /// Path to the plan JSON file for the current session
     pub plan_file_path: Option<std::path::PathBuf>,
 
+    /// Split pane manager — tracks pane layout, focus, and per-pane state
+    pub pane_manager: PaneManager,
+
     /// Shared WhatsApp state — single bot instance broadcasts QR/connected events.
     #[cfg(feature = "whatsapp")]
     pub(crate) whatsapp_state: Arc<crate::channels::whatsapp::WhatsAppState>,
@@ -555,6 +559,7 @@ impl App {
             sudo_input: String::new(),
             plan_document: None,
             plan_file_path: None,
+            pane_manager: PaneManager::new(),
             #[cfg(feature = "whatsapp")]
             whatsapp_state,
             session_service: SessionService::new(context.clone()),
