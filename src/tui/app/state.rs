@@ -8,12 +8,12 @@ use super::events::{
 };
 use super::onboarding::OnboardingWizard;
 use super::prompt_analyzer::PromptAnalyzer;
-use crate::tui::pane::PaneManager;
 use crate::brain::agent::AgentService;
 use crate::brain::provider::Provider;
 use crate::brain::{BrainLoader, CommandLoader, SelfUpdater, UserCommand};
 use crate::db::models::{Message, Session};
 use crate::services::{MessageService, ServiceContext, SessionService};
+use crate::tui::pane::PaneManager;
 use anyhow::Result;
 use ratatui::text::Line;
 use serde_json::Value;
@@ -1939,19 +1939,7 @@ impl App {
             return Ok(());
         }
 
-        // Split pane keybindings
-        if keys::is_split_horizontal(&event) {
-            self.pane_manager
-                .split(crate::tui::pane::SplitDirection::Horizontal);
-            self.switch_mode(AppMode::Sessions).await?;
-            return Ok(());
-        }
-        if keys::is_split_vertical(&event) {
-            self.pane_manager
-                .split(crate::tui::pane::SplitDirection::Vertical);
-            self.switch_mode(AppMode::Sessions).await?;
-            return Ok(());
-        }
+        // Split pane focus & close (global — work from Chat mode)
         if keys::is_close_pane(&event) && self.pane_manager.is_split() {
             self.pane_manager.close_focused();
             if let Some(pane) = self.pane_manager.focused_pane()

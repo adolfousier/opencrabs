@@ -51,6 +51,20 @@ pub(super) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
         ),
         Span::styled("Delete  ", Style::default().fg(Color::Reset)),
         Span::styled(
+            "[|] ",
+            Style::default()
+                .fg(Color::Rgb(80, 200, 120))
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Split H  ", Style::default().fg(Color::Reset)),
+        Span::styled(
+            "[_] ",
+            Style::default()
+                .fg(Color::Rgb(80, 200, 120))
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Split V  ", Style::default().fg(Color::Reset)),
+        Span::styled(
             "[Esc] ",
             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         ),
