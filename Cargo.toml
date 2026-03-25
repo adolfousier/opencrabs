@@ -109,6 +109,9 @@ serenity = { version = "0.12", default-features = false, features = ["client", "
 
 # Slack
 slack-morphism = { version = "2", features = ["hyper"], optional = true }
+# slack-morphism's "rustls-native-certs" maps to the wrong tokio-tungstenite
+# feature (loads certs but doesn't enable TLS). We force the correct one here.
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"], optional = true }
 rustls = { version = "0.23", features = ["ring"], optional = true }
 
 # Local STT (rwhisper — candle-based, pure Rust, no ggml conflict)
@@ -173,7 +176,7 @@ telegram = ["teloxide"]
 trello = []
 whatsapp = ["whatsapp-rust", "whatsapp-rust-tokio-transport", "whatsapp-rust-ureq-http-client", "wacore", "wacore-binary", "waproto", "dep:qrcode", "dep:rmp-serde"]
 discord = ["serenity"]
-slack = ["slack-morphism", "rustls"]
+slack = ["slack-morphism", "tokio-tungstenite", "rustls"]
 local-stt = ["rwhisper", "rodio", "hound", "rubato", "symphonia", "symphonia-adapter-libopus"]
 local-tts = ["opusic-sys", "rubato"]
 browser = ["chromey"]

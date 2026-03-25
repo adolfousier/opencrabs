@@ -46,7 +46,7 @@ pub async fn on_interaction(
                     tracing::info!("Slack: showing models for provider {}", provider_name);
                     if let Some(ref channel) = block_actions.channel {
                         let token =
-                            SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
+                            SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
                         let session = client.open_session(&token);
 
                         // Agent-handled providers (OpenRouter 300+ models, custom)
@@ -96,7 +96,7 @@ pub async fn on_interaction(
                                     )
                                 };
                                 let agent_clone = state.agent.clone();
-                                let bot_token = state.bot_token.clone();
+                                let bot_token = state.current_bot_token();
                                 let channel_id_clone = channel.id.clone();
                                 let client_clone = client.clone();
                                 tokio::spawn(async move {
@@ -191,7 +191,7 @@ pub async fn on_interaction(
                     };
                     if let Some(ref channel) = block_actions.channel {
                         let token =
-                            SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
+                            SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
                         let session = client.open_session(&token);
                         let request = SlackApiChatPostMessageRequest::new(
                             channel.id.clone(),
@@ -235,7 +235,7 @@ pub async fn on_interaction(
                                 .register_session_channel(new_id, channel.id.0.to_string())
                                 .await;
                             let token = SlackApiToken::new(SlackApiTokenValue::from(
-                                state.bot_token.clone(),
+                                state.current_bot_token(),
                             ));
                             let session = client.open_session(&token);
                             let display = match state.session_svc.get_session(new_id).await {
@@ -308,6 +308,20 @@ pub struct HandlerState {
     pub bot_user_id: Option<String>,
     pub config_rx: tokio::sync::watch::Receiver<Config>,
     pub channel_msg_repo: ChannelMessageRepository,
+}
+
+impl HandlerState {
+    /// Get the current bot token — prefers hot-reloaded config, falls back to startup token.
+    pub fn current_bot_token(&self) -> String {
+        self.config_rx
+            .borrow()
+            .channels
+            .slack
+            .token
+            .clone()
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| self.bot_token.clone())
+    }
 }
 
 /// Split a message into chunks that fit Slack's limit (conservative 3000 chars).
@@ -629,7 +643,7 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
             };
             let dl_bytes = match http
                 .get(&dl_url)
-                .header("Authorization", format!("Bearer {}", state.bot_token))
+                .header("Authorization", format!("Bearer {}", state.current_bot_token()))
                 .send()
                 .await
             {
@@ -715,7 +729,7 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         match commands::handle_command(&content, session_id, &state.agent, &state.session_svc).await
         {
             ChannelCommand::Help(body) | ChannelCommand::Usage(body) => {
-                let token = SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
+                let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
                 let session = client.open_session(&token);
                 let request = SlackApiChatPostMessageRequest::new(
                     SlackChannelId::new(channel_id),
@@ -725,7 +739,7 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                 return;
             }
             ChannelCommand::Models(resp) => {
-                let token = SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
+                let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
                 let session = client.open_session(&token);
                 let header = SlackBlock::Section(SlackSectionBlock::new().with_text(
                     SlackBlockText::MarkDown(SlackBlockMarkDownText::new(resp.text.clone())),
@@ -777,7 +791,7 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                             .register_session_channel(new_session.id, channel_id.clone())
                             .await;
                         let token =
-                            SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
+                            SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
                         let session = client.open_session(&token);
                         let request = SlackApiChatPostMessageRequest::new(
                             SlackChannelId::new(channel_id),
@@ -789,7 +803,7 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                     Err(e) => {
                         tracing::error!("Slack: failed to create session: {}", e);
                         let token =
-                            SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
+                            SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
                         let session = client.open_session(&token);
                         let request = SlackApiChatPostMessageRequest::new(
                             SlackChannelId::new(channel_id),
@@ -802,7 +816,7 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                 return;
             }
             ChannelCommand::Sessions(resp) => {
-                let token = SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
+                let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
                 let session = client.open_session(&token);
                 let header = SlackBlock::Section(SlackSectionBlock::new().with_text(
                     SlackBlockText::MarkDown(SlackBlockMarkDownText::new(resp.text.clone())),
@@ -841,7 +855,7 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                 } else {
                     "No operation in progress."
                 };
-                let token = SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
+                let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
                 let session = client.open_session(&token);
                 let request = SlackApiChatPostMessageRequest::new(
                     SlackChannelId::new(channel_id),
@@ -851,7 +865,7 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                 return;
             }
             ChannelCommand::Compact => {
-                let token = SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
+                let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
                 let session = client.open_session(&token);
                 let request = SlackApiChatPostMessageRequest::new(
                     SlackChannelId::new(channel_id.clone()),
@@ -867,7 +881,7 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                 // fall through to agent with the prompt as the message
             }
             ChannelCommand::UserSystem(text) => {
-                let token = SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
+                let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
                 let session = client.open_session(&token);
                 let request = SlackApiChatPostMessageRequest::new(
                     SlackChannelId::new(channel_id),
@@ -969,7 +983,7 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         }
 
         let tools: Arc<Mutex<Vec<ToolEntry>>> = Arc::new(Mutex::new(Vec::new()));
-        let bot_token_cb = state.bot_token.clone();
+        let bot_token_cb = state.current_bot_token();
         let channel_cb = SlackChannelId::new(channel_id.clone());
         let client_cb = client.clone();
 
@@ -1052,7 +1066,7 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
             let text_only = crate::utils::sanitize::strip_llm_artifacts(&text_only);
             let text_only = redact_secrets(&text_only);
 
-            let token = SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
+            let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
             let session = client.open_session(&token);
 
             for img_path in img_paths {
@@ -1104,7 +1118,7 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         }
         Err(e) => {
             tracing::error!("Slack: agent error: {}", e);
-            let token = SlackApiToken::new(SlackApiTokenValue::from(state.bot_token.clone()));
+            let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
             let session = client.open_session(&token);
             let error_msg = format!("Error: {}", e);
             let request = SlackApiChatPostMessageRequest::new(
