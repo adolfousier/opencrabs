@@ -6,6 +6,7 @@ mod chat;
 mod dialogs;
 mod help;
 mod input;
+mod panes;
 mod plan_widget;
 mod sessions;
 mod tools;
@@ -115,7 +116,11 @@ pub fn render(f: &mut Frame, app: &mut App) {
             // Handled by early returns above
         }
         AppMode::Chat => {
-            render_chat(f, app, chunks[0]);
+            if app.pane_manager.is_split() {
+                render_split_panes(f, app, chunks[0]);
+            } else {
+                render_chat(f, app, chunks[0]);
+            }
             if plan_height > 0 {
                 render_plan_checklist(f, app, chunks[1]);
             }
@@ -174,6 +179,29 @@ pub fn render(f: &mut Frame, app: &mut App) {
             render_input(f, app, chunks[2]);
             render_status_bar(f, app, chunks[3]);
             render_restart_dialog(f, app, f.area());
+        }
+    }
+}
+
+/// Render the chat area as split panes.
+fn render_split_panes(f: &mut Frame, app: &mut App, area: Rect) {
+    let tree = match &app.pane_manager.root {
+        Some(t) => t.clone(),
+        None => return render_chat(f, app, area),
+    };
+
+    let focused_id = app.pane_manager.focused;
+    let pane_rects = tree.layout(area);
+
+    for (pane_id, rect) in pane_rects {
+        if rect.width < 3 || rect.height < 3 {
+            continue; // too small to render
+        }
+        if pane_id == focused_id {
+            let inner = panes::focused_pane_border(f, app, rect);
+            render_chat(f, app, inner);
+        } else {
+            panes::render_inactive_pane(f, app, pane_id, rect);
         }
     }
 }
