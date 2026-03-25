@@ -89,6 +89,14 @@ impl App {
             self.session_cancel_tokens.insert(old_session.id, old_token);
         }
 
+        // Cache outgoing session's messages for inactive pane rendering
+        if self.pane_manager.is_split()
+            && let Some(ref old_session) = self.current_session
+        {
+            self.pane_message_cache
+                .insert(old_session.id, self.messages.clone());
+        }
+
         // Clear streaming state from previous session so it doesn't
         // bleed into the newly loaded session's chat view.
         self.streaming_response = None;
@@ -1600,6 +1608,14 @@ impl App {
 
         // Auto-scroll to bottom
         self.scroll_offset = 0;
+
+        // Update pane message cache so inactive panes reflect latest content
+        if self.pane_manager.is_split()
+            && let Some(ref session) = self.current_session
+        {
+            self.pane_message_cache
+                .insert(session.id, self.messages.clone());
+        }
 
         Ok(())
     }

@@ -432,6 +432,9 @@ pub struct App {
 
     /// Split pane manager — tracks pane layout, focus, and per-pane state
     pub pane_manager: PaneManager,
+    /// Cached messages for inactive panes (keyed by session_id).
+    /// Snapshotted when focus leaves a pane so it can be rendered read-only.
+    pub(crate) pane_message_cache: HashMap<Uuid, Vec<DisplayMessage>>,
 
     /// Shared WhatsApp state — single bot instance broadcasts QR/connected events.
     #[cfg(feature = "whatsapp")]
@@ -560,6 +563,7 @@ impl App {
             plan_document: None,
             plan_file_path: None,
             pane_manager: PaneManager::new(),
+            pane_message_cache: HashMap::new(),
             #[cfg(feature = "whatsapp")]
             whatsapp_state,
             session_service: SessionService::new(context.clone()),
