@@ -1598,9 +1598,10 @@ impl App {
                     #[cfg(feature = "whatsapp")]
                     let wa_state = self.whatsapp_state.clone();
                     let sender = self.event_sender();
+                    let agent = self.agent_service.clone();
                     tokio::spawn(async move {
                         #[cfg(feature = "whatsapp")]
-                        let result = test_whatsapp_connection(wa_state, &phone).await;
+                        let result = test_whatsapp_connection(wa_state, &phone, agent).await;
                         #[cfg(not(feature = "whatsapp"))]
                         let result: Result<(), String> =
                             Err("WhatsApp feature not enabled".to_string());
@@ -1630,8 +1631,9 @@ impl App {
                         wizard.telegram_user_id_input.clone()
                     };
                     let sender = self.event_sender();
+                    let agent = self.agent_service.clone();
                     tokio::spawn(async move {
-                        let result = test_telegram_connection(&token, &user_id_str).await;
+                        let result = test_telegram_connection(&token, &user_id_str, agent).await;
                         let _ = sender.send(TuiEvent::ChannelTestResult {
                             channel: "telegram".to_string(),
                             success: result.is_ok(),
@@ -1658,8 +1660,9 @@ impl App {
                         wizard.discord_channel_id_input.clone()
                     };
                     let sender = self.event_sender();
+                    let agent = self.agent_service.clone();
                     tokio::spawn(async move {
-                        let result = test_discord_connection(&token, &channel_id).await;
+                        let result = test_discord_connection(&token, &channel_id, agent).await;
                         let _ = sender.send(TuiEvent::ChannelTestResult {
                             channel: "discord".to_string(),
                             success: result.is_ok(),
@@ -1686,8 +1689,9 @@ impl App {
                         wizard.slack_channel_id_input.clone()
                     };
                     let sender = self.event_sender();
+                    let agent = self.agent_service.clone();
                     tokio::spawn(async move {
-                        let result = test_slack_connection(&token, &channel_id).await;
+                        let result = test_slack_connection(&token, &channel_id, agent).await;
                         let _ = sender.send(TuiEvent::ChannelTestResult {
                             channel: "slack".to_string(),
                             success: result.is_ok(),
@@ -2210,16 +2214,17 @@ pub(crate) async fn ensure_whispercrabs() -> Result<PathBuf> {
 
 /// Test Telegram connection by sending a message via the bot API.
 #[cfg(feature = "telegram")]
-async fn test_telegram_connection(token: &str, user_id_str: &str) -> Result<(), String> {
+async fn test_telegram_connection(token: &str, user_id_str: &str, agent: std::sync::Arc<crate::brain::agent::AgentService>) -> Result<(), String> {
     use teloxide::prelude::Requester;
 
     let user_id: i64 = user_id_str
         .parse()
         .map_err(|_| format!("Invalid user ID: {}", user_id_str))?;
     let bot = teloxide::Bot::new(token);
+    let greeting = crate::channels::generate_connection_greeting(&agent, "Telegram").await;
     bot.send_message(
         teloxide::types::ChatId(user_id),
-        "OpenCrabs connected! Your Telegram bot is ready.",
+        greeting,
     )
     .await
     .map_err(|e| format!("Telegram API error: {}", e))?;
@@ -2227,35 +2232,37 @@ async fn test_telegram_connection(token: &str, user_id_str: &str) -> Result<(), 
 }
 
 #[cfg(not(feature = "telegram"))]
-async fn test_telegram_connection(_token: &str, _user_id_str: &str) -> Result<(), String> {
+async fn test_telegram_connection(_token: &str, _user_id_str: &str, _agent: std::sync::Arc<crate::brain::agent::AgentService>) -> Result<(), String> {
     Err("Telegram feature not enabled".to_string())
 }
 
 /// Test Discord connection by sending a message to a channel.
 #[cfg(feature = "discord")]
-async fn test_discord_connection(token: &str, channel_id_str: &str) -> Result<(), String> {
+async fn test_discord_connection(token: &str, channel_id_str: &str, agent: std::sync::Arc<crate::brain::agent::AgentService>) -> Result<(), String> {
     let channel_id: u64 = channel_id_str
         .parse()
         .map_err(|_| format!("Invalid channel ID: {}", channel_id_str))?;
+    let greeting = crate::channels::generate_connection_greeting(&agent, "Discord").await;
     let http = serenity::http::Http::new(token);
     let channel = serenity::model::id::ChannelId::new(channel_id);
     channel
-        .say(&http, "OpenCrabs connected! Your Discord bot is ready.")
+        .say(&http, greeting)
         .await
         .map_err(|e| format!("Discord API error: {}", e))?;
     Ok(())
 }
 
 #[cfg(not(feature = "discord"))]
-async fn test_discord_connection(_token: &str, _channel_id_str: &str) -> Result<(), String> {
+async fn test_discord_connection(_token: &str, _channel_id_str: &str, _agent: std::sync::Arc<crate::brain::agent::AgentService>) -> Result<(), String> {
     Err("Discord feature not enabled".to_string())
 }
 
 /// Test Slack connection by posting a message to a channel.
 #[cfg(feature = "slack")]
-async fn test_slack_connection(token: &str, channel_id: &str) -> Result<(), String> {
+async fn test_slack_connection(token: &str, channel_id: &str, agent: std::sync::Arc<crate::brain::agent::AgentService>) -> Result<(), String> {
     use slack_morphism::prelude::*;
 
+    let greeting = crate::channels::generate_connection_greeting(&agent, "Slack").await;
     let client = SlackClient::new(
         SlackClientHyperConnector::new().map_err(|e| format!("Slack client error: {}", e))?,
     );
@@ -2263,8 +2270,7 @@ async fn test_slack_connection(token: &str, channel_id: &str) -> Result<(), Stri
     let session = client.open_session(&api_token);
     let request = SlackApiChatPostMessageRequest::new(
         SlackChannelId::new(channel_id.to_string()),
-        SlackMessageContent::new()
-            .with_text("OpenCrabs connected! Your Slack bot is ready.".to_string()),
+        SlackMessageContent::new().with_text(greeting),
     );
     session
         .chat_post_message(&request)
@@ -2274,7 +2280,7 @@ async fn test_slack_connection(token: &str, channel_id: &str) -> Result<(), Stri
 }
 
 #[cfg(not(feature = "slack"))]
-async fn test_slack_connection(_token: &str, _channel_id: &str) -> Result<(), String> {
+async fn test_slack_connection(_token: &str, _channel_id: &str, _agent: std::sync::Arc<crate::brain::agent::AgentService>) -> Result<(), String> {
     Err("Slack feature not enabled".to_string())
 }
 
@@ -2283,6 +2289,7 @@ async fn test_slack_connection(_token: &str, _channel_id: &str) -> Result<(), St
 async fn test_whatsapp_connection(
     wa_state: std::sync::Arc<crate::channels::whatsapp::WhatsAppState>,
     phone: &str,
+    agent: std::sync::Arc<crate::brain::agent::AgentService>,
 ) -> Result<(), String> {
     // Wait for the agent bot to be connected (up to 15 seconds)
     let client = {
@@ -2309,10 +2316,12 @@ async fn test_whatsapp_connection(
         .parse()
         .map_err(|e| format!("Invalid phone number format: {}", e))?;
 
+    let greeting = crate::channels::generate_connection_greeting(&agent, "WhatsApp").await;
     let wa_msg = waproto::whatsapp::Message {
         conversation: Some(format!(
-            "{}\n\nOpenCrabs connected! I'm living in your WhatsApp now. 🦀",
-            crate::channels::whatsapp::handler::MSG_HEADER
+            "{}\n\n{}",
+            crate::channels::whatsapp::handler::MSG_HEADER,
+            greeting
         )),
         ..Default::default()
     };

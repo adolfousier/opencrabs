@@ -365,8 +365,48 @@ pub async fn on_push_event(
             );
             handle_message(&msg, client).await;
         }
-        _ => {
-            tracing::debug!("Slack: unhandled event type");
+        SlackEventCallbackBody::AppMention(mention) => {
+            tracing::info!(
+                "Slack: app_mention from user={:?}, channel={:?}, text={:?}",
+                mention.user,
+                mention.channel,
+                mention
+                    .content
+                    .text
+                    .as_ref()
+                    .map(|t| crate::utils::truncate_str(t, 80)),
+            );
+            // Convert app_mention into a SlackMessageEvent so handle_message can process it
+            let msg = SlackMessageEvent {
+                origin: SlackMessageOrigin {
+                    ts: mention.origin.ts,
+                    channel: Some(mention.channel),
+                    channel_type: None,
+                    thread_ts: mention.origin.thread_ts,
+                    client_msg_id: None,
+                },
+                content: Some(mention.content),
+                sender: SlackMessageSender {
+                    user: Some(mention.user),
+                    bot_id: None,
+                    username: None,
+                    display_as_bot: None,
+                    user_profile: None,
+                    bot_profile: None,
+                },
+                subtype: None,
+                hidden: None,
+                message: None,
+                previous_message: None,
+                deleted_ts: None,
+            };
+            handle_message(&msg, client).await;
+        }
+        other => {
+            tracing::debug!(
+                "Slack: unhandled event type: {:?}",
+                std::any::type_name_of_val(&other)
+            );
         }
     }
     Ok(())
@@ -506,7 +546,11 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                     .as_ref()
                     .is_some_and(|bid| text.contains(&format!("<@{}>", bid)));
                 if !mentioned {
-                    tracing::debug!("Slack: respond_to=mention, bot not mentioned — ignoring");
+                    tracing::debug!(
+                        "Slack: respond_to=mention, bot not mentioned — ignoring (bot_user_id={:?}, text={:?})",
+                        state.bot_user_id,
+                        crate::utils::truncate_str(&text, 120),
+                    );
                     store_channel_msg(text.clone()).await;
                     return;
                 }
@@ -643,7 +687,10 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
             };
             let dl_bytes = match http
                 .get(&dl_url)
-                .header("Authorization", format!("Bearer {}", state.current_bot_token()))
+                .header(
+                    "Authorization",
+                    format!("Bearer {}", state.current_bot_token()),
+                )
                 .send()
                 .await
             {

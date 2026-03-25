@@ -21,5 +21,8 @@ pub mod trello;
 #[cfg(feature = "whatsapp")]
 pub mod whatsapp;
 
+mod greeting;
+
 pub use factory::ChannelFactory;
+pub use greeting::generate_connection_greeting;
 pub use manager::ChannelManager;
