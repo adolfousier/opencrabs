@@ -1116,11 +1116,17 @@ impl App {
         } else if keys::is_enter(&event) {
             if let Some(session) = self.sessions.get(self.selected_session_index) {
                 let session_id = session.id;
-                self.load_session(session_id).await?;
-                // Assign session to the focused pane when in split mode
-                if let Some(pane) = self.pane_manager.focused_pane_mut() {
-                    pane.session_id = Some(session_id);
+
+                // If this session is already in another pane, switch focus there
+                let existing_pane = self.pane_manager.panes.iter().find(|p| {
+                    p.session_id == Some(session_id) && p.id != self.pane_manager.focused
+                });
+                if let Some(pane) = existing_pane {
+                    let target_id = pane.id;
+                    self.pane_manager.focused = target_id;
                 }
+
+                self.load_session(session_id).await?;
                 self.switch_mode(AppMode::Chat).await?;
             }
         } else if event.code == KeyCode::Char('r') || event.code == KeyCode::Char('R') {
@@ -1134,23 +1140,29 @@ impl App {
             self.create_new_session().await?;
             self.switch_mode(AppMode::Chat).await?;
         } else if event.code == KeyCode::Char('|') {
-            // Split horizontal (left | right) — open selected session in new pane
-            if let Some(session) = self.sessions.get(self.selected_session_index) {
-                let session_id = session.id;
-                self.pane_manager
-                    .split(crate::tui::pane::SplitDirection::Horizontal);
-                self.load_session(session_id).await?;
-                self.switch_mode(AppMode::Chat).await?;
+            // Split horizontal (left | right)
+            // Ensure current session is pinned to the original pane before splitting
+            if let Some(ref session) = self.current_session {
+                let sid = session.id;
+                if let Some(pane) = self.pane_manager.focused_pane_mut() {
+                    pane.session_id = Some(sid);
+                }
             }
+            self.pane_manager
+                .split(crate::tui::pane::SplitDirection::Horizontal);
+            // Stay on sessions screen — user picks which session goes in the new pane.
+            // When they press Enter, load_session assigns it to the focused (new) pane.
         } else if event.code == KeyCode::Char('_') {
-            // Split vertical (top / bottom) — open selected session in new pane
-            if let Some(session) = self.sessions.get(self.selected_session_index) {
-                let session_id = session.id;
-                self.pane_manager
-                    .split(crate::tui::pane::SplitDirection::Vertical);
-                self.load_session(session_id).await?;
-                self.switch_mode(AppMode::Chat).await?;
+            // Split vertical (top / bottom)
+            if let Some(ref session) = self.current_session {
+                let sid = session.id;
+                if let Some(pane) = self.pane_manager.focused_pane_mut() {
+                    pane.session_id = Some(sid);
+                }
             }
+            self.pane_manager
+                .split(crate::tui::pane::SplitDirection::Vertical);
+            // Stay on sessions screen — user picks which session goes in the new pane.
         } else if event.code == KeyCode::Char('d') || event.code == KeyCode::Char('D') {
             // Delete the selected session
             if let Some(session) = self.sessions.get(self.selected_session_index) {

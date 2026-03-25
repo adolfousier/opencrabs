@@ -70,6 +70,20 @@ pub(super) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
         ),
         Span::styled("Back", Style::default().fg(Color::Reset)),
     ]));
+
+    // Show hint when a pane is waiting for session assignment (just split)
+    let has_unassigned = app
+        .pane_manager
+        .focused_pane()
+        .is_some_and(|p| p.session_id.is_none());
+    if has_unassigned {
+        lines.push(Line::from(Span::styled(
+            "  Select a session for the new pane (or N for new)",
+            Style::default()
+                .fg(Color::Rgb(80, 200, 120))
+                .add_modifier(Modifier::BOLD),
+        )));
+    }
     lines.push(Line::from(""));
 
     for (idx, session) in app.sessions.iter().enumerate() {
@@ -217,6 +231,21 @@ pub(super) fn render_sessions(f: &mut Frame, app: &App, area: Rect) {
                         .fg(Color::Rgb(120, 120, 120))
                         .add_modifier(Modifier::BOLD),
                 ));
+            }
+
+            // Pane indicator — show which pane this session is already in
+            if app.pane_manager.is_split() {
+                let pane_ids = app.pane_manager.pane_ids_in_order();
+                if let Some(pos) = pane_ids.iter().position(|pid| {
+                    app.pane_manager
+                        .get(*pid)
+                        .is_some_and(|p| p.session_id == Some(session.id))
+                }) {
+                    spans.push(Span::styled(
+                        format!(" [pane {}]", pos + 1),
+                        Style::default().fg(Color::Rgb(80, 200, 120)),
+                    ));
+                }
             }
 
             lines.push(Line::from(spans));
