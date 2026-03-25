@@ -217,6 +217,11 @@ impl App {
             .agent_service
             .context_window_for_model(&self.default_model_name);
 
+        // Keep focused pane in sync with loaded session
+        if let Some(pane) = self.pane_manager.focused_pane_mut() {
+            pane.session_id = Some(session_id);
+        }
+
         Ok(())
     }
 
