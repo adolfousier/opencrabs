@@ -1137,10 +1137,7 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
         let session = client.open_session(&token);
         if let Some(ts) = thinking_ts.lock().await.take() {
-            let del = SlackApiChatDeleteRequest::new(
-                SlackChannelId::new(channel_id.clone()),
-                ts,
-            );
+            let del = SlackApiChatDeleteRequest::new(SlackChannelId::new(channel_id.clone()), ts);
             let _ = session.chat_delete(&del).await;
         }
     }

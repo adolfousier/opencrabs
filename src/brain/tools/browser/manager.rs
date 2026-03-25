@@ -301,7 +301,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_is_headless_default() {
-        let mgr = BrowserManager::new();
+        let mgr = BrowserManager::with_headless(true);
         assert!(mgr.is_headless().await);
     }
 
@@ -313,14 +313,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_set_headless_no_change() {
-        let mgr = BrowserManager::new();
+        let mgr = BrowserManager::with_headless(true);
         // Already headless — no change
         assert!(!mgr.set_headless(true).await);
     }
 
     #[tokio::test]
     async fn test_set_headless_switch() {
-        let mgr = BrowserManager::new();
+        let mgr = BrowserManager::with_headless(true);
         assert!(mgr.is_headless().await);
         // Switch to headed
         assert!(mgr.set_headless(false).await);

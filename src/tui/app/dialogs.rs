@@ -2214,7 +2214,11 @@ pub(crate) async fn ensure_whispercrabs() -> Result<PathBuf> {
 
 /// Test Telegram connection by sending a message via the bot API.
 #[cfg(feature = "telegram")]
-async fn test_telegram_connection(token: &str, user_id_str: &str, agent: std::sync::Arc<crate::brain::agent::AgentService>) -> Result<(), String> {
+async fn test_telegram_connection(
+    token: &str,
+    user_id_str: &str,
+    agent: std::sync::Arc<crate::brain::agent::AgentService>,
+) -> Result<(), String> {
     use teloxide::prelude::Requester;
 
     let user_id: i64 = user_id_str
@@ -2222,23 +2226,28 @@ async fn test_telegram_connection(token: &str, user_id_str: &str, agent: std::sy
         .map_err(|_| format!("Invalid user ID: {}", user_id_str))?;
     let bot = teloxide::Bot::new(token);
     let greeting = crate::channels::generate_connection_greeting(&agent, "Telegram").await;
-    bot.send_message(
-        teloxide::types::ChatId(user_id),
-        greeting,
-    )
-    .await
-    .map_err(|e| format!("Telegram API error: {}", e))?;
+    bot.send_message(teloxide::types::ChatId(user_id), greeting)
+        .await
+        .map_err(|e| format!("Telegram API error: {}", e))?;
     Ok(())
 }
 
 #[cfg(not(feature = "telegram"))]
-async fn test_telegram_connection(_token: &str, _user_id_str: &str, _agent: std::sync::Arc<crate::brain::agent::AgentService>) -> Result<(), String> {
+async fn test_telegram_connection(
+    _token: &str,
+    _user_id_str: &str,
+    _agent: std::sync::Arc<crate::brain::agent::AgentService>,
+) -> Result<(), String> {
     Err("Telegram feature not enabled".to_string())
 }
 
 /// Test Discord connection by sending a message to a channel.
 #[cfg(feature = "discord")]
-async fn test_discord_connection(token: &str, channel_id_str: &str, agent: std::sync::Arc<crate::brain::agent::AgentService>) -> Result<(), String> {
+async fn test_discord_connection(
+    token: &str,
+    channel_id_str: &str,
+    agent: std::sync::Arc<crate::brain::agent::AgentService>,
+) -> Result<(), String> {
     let channel_id: u64 = channel_id_str
         .parse()
         .map_err(|_| format!("Invalid channel ID: {}", channel_id_str))?;
@@ -2253,13 +2262,21 @@ async fn test_discord_connection(token: &str, channel_id_str: &str, agent: std::
 }
 
 #[cfg(not(feature = "discord"))]
-async fn test_discord_connection(_token: &str, _channel_id_str: &str, _agent: std::sync::Arc<crate::brain::agent::AgentService>) -> Result<(), String> {
+async fn test_discord_connection(
+    _token: &str,
+    _channel_id_str: &str,
+    _agent: std::sync::Arc<crate::brain::agent::AgentService>,
+) -> Result<(), String> {
     Err("Discord feature not enabled".to_string())
 }
 
 /// Test Slack connection by posting a message to a channel.
 #[cfg(feature = "slack")]
-async fn test_slack_connection(token: &str, channel_id: &str, agent: std::sync::Arc<crate::brain::agent::AgentService>) -> Result<(), String> {
+async fn test_slack_connection(
+    token: &str,
+    channel_id: &str,
+    agent: std::sync::Arc<crate::brain::agent::AgentService>,
+) -> Result<(), String> {
     use slack_morphism::prelude::*;
 
     let greeting = crate::channels::generate_connection_greeting(&agent, "Slack").await;
@@ -2280,7 +2297,11 @@ async fn test_slack_connection(token: &str, channel_id: &str, agent: std::sync::
 }
 
 #[cfg(not(feature = "slack"))]
-async fn test_slack_connection(_token: &str, _channel_id: &str, _agent: std::sync::Arc<crate::brain::agent::AgentService>) -> Result<(), String> {
+async fn test_slack_connection(
+    _token: &str,
+    _channel_id: &str,
+    _agent: std::sync::Arc<crate::brain::agent::AgentService>,
+) -> Result<(), String> {
     Err("Slack feature not enabled".to_string())
 }
 

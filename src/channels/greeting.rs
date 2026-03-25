@@ -11,8 +11,7 @@ use crate::brain::provider::types::{ContentBlock, LLMRequest};
 /// Generate a personalized connection greeting via the LLM.
 pub async fn generate_connection_greeting(agent: &AgentService, channel_name: &str) -> String {
     let brain_path = crate::brain::BrainLoader::resolve_path();
-    let has_brain =
-        brain_path.join("persona.md").exists() || brain_path.join("system.md").exists();
+    let has_brain = brain_path.join("persona.md").exists() || brain_path.join("system.md").exists();
 
     let prompt = if has_brain {
         format!(
