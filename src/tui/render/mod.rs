@@ -30,7 +30,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::Paragraph,
+    widgets::{Clear, Paragraph},
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -133,6 +133,8 @@ pub fn render(f: &mut Frame, app: &mut App) {
             }
         }
         AppMode::Sessions => {
+            // Clear the full area first to prevent artifacts from split panes
+            f.render_widget(Clear, full_content_area);
             let (title_area, content_area) = split_title_area(full_content_area);
             render_app_title(f, title_area);
             render_sessions(f, app, content_area);
