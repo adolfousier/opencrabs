@@ -676,6 +676,10 @@ impl OnboardingWizard {
     }
 
     /// Check if the current provider is a custom option (new or existing)
+    pub fn is_cli_provider(&self) -> bool {
+        matches!(self.selected_provider, 7 | 8)
+    }
+
     pub fn is_custom_provider(&self) -> bool {
         self.selected_provider >= 9
     }
