@@ -71,13 +71,33 @@ impl SlackAgent {
             };
 
             // Store connected state for proactive messaging
+            // Use hot-reloaded token from config if available
+            let current_bot_token = self
+                .config_rx
+                .borrow()
+                .channels
+                .slack
+                .token
+                .clone()
+                .filter(|t| !t.is_empty())
+                .unwrap_or_else(|| bot_token.clone());
             self.slack_state
-                .set_connected(client.clone(), bot_token.clone(), None)
+                .set_connected(client.clone(), current_bot_token, None)
                 .await;
 
             // Fetch bot user ID via auth.test for @mention detection
+            // Use the hot-reloaded token from config (may have changed since startup)
             let bot_user_id = {
-                let token = SlackApiToken::new(SlackApiTokenValue::from(bot_token.clone()));
+                let current_token = self
+                    .config_rx
+                    .borrow()
+                    .channels
+                    .slack
+                    .token
+                    .clone()
+                    .filter(|t| !t.is_empty())
+                    .unwrap_or_else(|| bot_token.clone());
+                let token = SlackApiToken::new(SlackApiTokenValue::from(current_token));
                 let session = client.open_session(&token);
                 match session.auth_test().await {
                     Ok(resp) => {

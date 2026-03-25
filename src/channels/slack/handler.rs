@@ -541,10 +541,13 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                 return;
             }
             RespondTo::Mention => {
-                let mentioned = state
-                    .bot_user_id
-                    .as_ref()
-                    .is_some_and(|bid| text.contains(&format!("<@{}>", bid)));
+                let mentioned = if let Some(ref bid) = state.bot_user_id {
+                    text.contains(&format!("<@{}>", bid))
+                } else {
+                    // bot_user_id unknown (auth.test failed) — accept any <@U...> mention
+                    // since app_mention events guarantee the bot was tagged
+                    text.contains("<@U")
+                };
                 if !mentioned {
                     tracing::debug!(
                         "Slack: respond_to=mention, bot not mentioned — ignoring (bot_user_id={:?}, text={:?})",
@@ -569,7 +572,9 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         if let Some(ref bid) = state.bot_user_id {
             text.replace(&format!("<@{}>", bid), "").trim().to_string()
         } else {
-            text
+            // bot_user_id unknown — strip any <@U...> mention tag
+            let re = regex::Regex::new(r"<@U[A-Z0-9]+>").unwrap();
+            re.replace_all(&text, "").trim().to_string()
         }
     } else {
         text
