@@ -139,6 +139,13 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
         kv("D / Esc", "Deny", cyan),
         kv("V", "Toggle details", cyan),
         Line::from(""),
+        section_header("SPLIT PANES"),
+        kv("Ctrl+\\", "Split horizontal (L|R)", cyan),
+        kv("Ctrl+-", "Split vertical (T/B)", cyan),
+        kv("Ctrl+X", "Close focused pane", cyan),
+        kv("Ctrl+Tab", "Focus next pane", cyan),
+        kv("Ctrl+Shift+Tab", "Focus prev pane", cyan),
+        Line::from(""),
         section_header("FEATURES"),
         Line::from(vec![
             Span::styled(" ✓ ", Style::default().fg(Color::Cyan)),
