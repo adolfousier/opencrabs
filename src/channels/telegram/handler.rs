@@ -962,6 +962,10 @@ pub(crate) async fn handle_message(
                             }
                             s.dirty = false;
                         }
+
+                        // Re-send typing indicator after any bot message
+                        // (Telegram clears typing on every bot message)
+                        let _ = bot.send_chat_action(chat, ChatAction::Typing).await;
                     }
                 }
             }

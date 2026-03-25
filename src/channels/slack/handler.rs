@@ -1024,6 +1024,20 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         .store_cancel_token(session_id, cancel_token.clone())
         .await;
 
+    // Post a "thinking" placeholder so the user knows we're processing
+    let thinking_ts: Arc<Mutex<Option<SlackTs>>> = Arc::new(Mutex::new(None));
+    {
+        let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
+        let session = client.open_session(&token);
+        let req = SlackApiChatPostMessageRequest::new(
+            SlackChannelId::new(channel_id.clone()),
+            SlackMessageContent::new().with_text("_thinking..._".to_string()),
+        );
+        if let Ok(resp) = session.chat_post_message(&req).await {
+            *thinking_ts.lock().await = Some(resp.ts);
+        }
+    }
+
     // Build progress callback — sends tool call status as Slack messages
     let progress_cb: crate::brain::agent::ProgressCallback = {
         use crate::brain::agent::ProgressEvent;
@@ -1038,6 +1052,7 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         let bot_token_cb = state.current_bot_token();
         let channel_cb = SlackChannelId::new(channel_id.clone());
         let client_cb = client.clone();
+        let thinking_ts_cb = thinking_ts.clone();
 
         Arc::new(move |_session_id, event| {
             let tools = tools.clone();
@@ -1050,9 +1065,15 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                     tool_name,
                     tool_input,
                 } => {
+                    let thinking_ts = thinking_ts_cb.clone();
                     let ctx = crate::utils::tool_context_hint(&tool_name, &tool_input);
                     tokio::spawn(async move {
                         let session = client.open_session(&token);
+                        // Delete the "thinking..." placeholder on first tool call
+                        if let Some(ts) = thinking_ts.lock().await.take() {
+                            let del = SlackApiChatDeleteRequest::new(channel.clone(), ts);
+                            let _ = session.chat_delete(&del).await;
+                        }
                         let text = format!("⚙️ *{}*{}", tool_name, ctx);
                         let req = SlackApiChatPostMessageRequest::new(
                             channel,
@@ -1110,6 +1131,19 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         .await;
 
     state.slack_state.remove_cancel_token(session_id).await;
+
+    // Delete the "thinking..." placeholder if it's still around
+    {
+        let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
+        let session = client.open_session(&token);
+        if let Some(ts) = thinking_ts.lock().await.take() {
+            let del = SlackApiChatDeleteRequest::new(
+                SlackChannelId::new(channel_id.clone()),
+                ts,
+            );
+            let _ = session.chat_delete(&del).await;
+        }
+    }
 
     match result {
         Ok(response) => {
