@@ -77,8 +77,13 @@ impl OnboardingWizard {
             self.image_api_key_input = fresh.image_api_key_input;
         }
 
+        let auth_label = if self.is_cli_provider() {
+            "CLI Binary Found"
+        } else {
+            "API Key Present"
+        };
         let mut checks = vec![
-            ("API Key Present".to_string(), HealthStatus::Pending),
+            (auth_label.to_string(), HealthStatus::Pending),
             ("Config File".to_string(), HealthStatus::Pending),
             ("Workspace Directory".to_string(), HealthStatus::Pending),
             ("Template Files".to_string(), HealthStatus::Pending),
@@ -123,8 +128,20 @@ impl OnboardingWizard {
 
     /// Execute all health checks
     fn run_health_checks(&mut self) {
-        // Check 1: API key present
-        self.health_results[0].1 = if !self.api_key_input.is_empty()
+        // Check 1: API key / CLI binary present
+        self.health_results[0].1 = if self.is_cli_provider() {
+            // CLI providers: check if the binary is installed
+            let binary = if self.selected_provider == 7 {
+                "claude"
+            } else {
+                "opencode"
+            };
+            if which::which(binary).is_ok() {
+                HealthStatus::Pass
+            } else {
+                HealthStatus::Fail(format!("'{}' CLI not found in PATH", binary))
+            }
+        } else if !self.api_key_input.is_empty()
             || (self.is_custom_provider() && !self.custom_base_url.is_empty())
         {
             HealthStatus::Pass

@@ -313,16 +313,14 @@ pub struct HandlerState {
 impl HandlerState {
     /// Get the current bot token — prefers hot-reloaded config, falls back to startup token.
     pub fn current_bot_token(&self) -> String {
-        let from_config = self.config_rx.borrow().channels.slack.token.clone();
-        let token = from_config
+        self.config_rx
+            .borrow()
+            .channels
+            .slack
+            .token
+            .clone()
             .filter(|t| !t.is_empty())
-            .unwrap_or_else(|| self.bot_token.clone());
-        tracing::debug!(
-            "Slack: current_bot_token prefix={:?}, from_config_present={}",
-            token.get(..10).unwrap_or(&token),
-            self.config_rx.borrow().channels.slack.token.is_some(),
-        );
-        token
+            .unwrap_or_else(|| self.bot_token.clone())
     }
 }
 
