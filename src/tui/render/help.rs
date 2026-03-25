@@ -142,9 +142,8 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
         section_header("SPLIT PANES (from Sessions)"),
         kv("| (in sessions)", "Split horizontal (L|R)", cyan),
         kv("_ (in sessions)", "Split vertical (T/B)", cyan),
-        kv("Ctrl+X", "Close focused pane", cyan),
-        kv("Alt+]", "Focus next pane", cyan),
-        kv("Alt+[", "Focus prev pane", cyan),
+        kv("Tab", "Cycle pane focus", cyan),
+        kv("Ctrl+X", "Close pane", cyan),
         Line::from(""),
         section_header("FEATURES"),
         Line::from(vec![

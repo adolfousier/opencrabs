@@ -1962,15 +1962,6 @@ impl App {
             }
             return Ok(());
         }
-        if keys::is_focus_prev_pane(&event) && self.pane_manager.is_split() {
-            self.pane_manager.focus_prev();
-            if let Some(pane) = self.pane_manager.focused_pane()
-                && let Some(session_id) = pane.session_id
-            {
-                self.load_session(session_id).await?;
-            }
-            return Ok(());
-        }
 
         // Mode-specific handling
         tracing::trace!("Current mode: {:?}", self.mode);

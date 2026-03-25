@@ -73,7 +73,7 @@ pub(super) fn render_inactive_pane(f: &mut Frame, app: &App, pane_id: PaneId, ar
 
     if lines.is_empty() {
         lines.push(Line::from(Span::styled(
-            "Alt+[ / Alt+] to switch focus",
+            "Tab to switch focus",
             Style::default().fg(Color::DarkGray),
         )));
     }

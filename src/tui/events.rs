@@ -511,14 +511,9 @@ pub mod keys {
         key_matches(event, KeyCode::Char('x'), KeyModifiers::CONTROL)
     }
 
-    /// Alt+] — focus next pane
+    /// Tab — cycle focus to next pane (only when split mode is active)
     pub fn is_focus_next_pane(event: &KeyEvent) -> bool {
-        event.code == KeyCode::Char(']') && event.modifiers.contains(KeyModifiers::ALT)
-    }
-
-    /// Alt+[ — focus previous pane
-    pub fn is_focus_prev_pane(event: &KeyEvent) -> bool {
-        event.code == KeyCode::Char('[') && event.modifiers.contains(KeyModifiers::ALT)
+        event.code == KeyCode::Tab && event.modifiers.is_empty()
     }
 }
 
