@@ -71,9 +71,7 @@ impl BrowserManager {
         }
         // Prevent headed mode on headless environments (VPS without display)
         if !headless && !Self::has_display() {
-            tracing::warn!(
-                "Cannot switch to headed mode — no display detected. Staying headless."
-            );
+            tracing::warn!("Cannot switch to headed mode — no display detected. Staying headless.");
             return false;
         }
         inner.headless = headless;
