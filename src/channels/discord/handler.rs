@@ -399,10 +399,10 @@ pub(crate) async fn handle_message(
                             } else {
                                 msg.channel_id.get()
                             };
-                            extra_sessions.lock().await.insert(
-                                key,
-                                (new_session.id, std::time::Instant::now()),
-                            );
+                            extra_sessions
+                                .lock()
+                                .await
+                                .insert(key, (new_session.id, std::time::Instant::now()));
                         }
                         discord_state
                             .register_session_channel(new_session.id, msg.channel_id.get())

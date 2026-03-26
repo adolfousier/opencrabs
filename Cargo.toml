@@ -23,6 +23,7 @@ async-trait = "0.1"
 
 # CLI Framework
 clap = { version = "4.5", features = ["derive", "env", "cargo"] }
+clap_complete = "4.6"
 
 # TUI
 ratatui = { version = "0.30", features = ["all-widgets"] }
