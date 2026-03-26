@@ -70,6 +70,7 @@ OpenCrabs runs as a **single binary on your terminal** — no server, no gateway
 - [Screenshots](#-screenshots)
 - [Why OpenCrabs?](#why-opencrabs)
 - [Core Features](#-core-features)
+- [CLI Commands](#cli)
 - [Supported AI Providers](#-supported-ai-providers)
 - [Agent-to-Agent (A2A) Protocol](#-agent-to-agent-a2a-protocol)
 - [Quick Start](#-quick-start)
@@ -187,6 +188,37 @@ Images are passed to the active model's vision pipeline if it supports multimoda
 | **Web Search** | DuckDuckGo (built-in, no key needed) + EXA AI (neural, free via MCP) by default; Brave Search optional (key in `keys.toml`) |
 | **Debug Logging** | `--debug` flag enables file logging; `DEBUG_LOGS_LOCATION` env var for custom log directory |
 | **Agent-to-Agent (A2A)** | HTTP gateway implementing A2A Protocol RC v1.0 — peer-to-peer agent communication via JSON-RPC 2.0. Supports `message/send`, `message/stream` (SSE), `tasks/get`, `tasks/cancel`. Built-in `a2a_send` tool lets the agent proactively call remote A2A agents. Optional Bearer token auth. Includes multi-agent debate (Bee Colony) with confidence-weighted consensus. Task persistence across restarts |
+
+### CLI
+| Command | Description |
+|---------|-------------|
+| `opencrabs` | Launch interactive TUI (default) |
+| `opencrabs chat` | Launch TUI with optional `--session <id>` to resume, `--onboard` to force wizard |
+| `opencrabs run <prompt>` | Execute a single prompt non-interactively. `--auto-approve` / `--yolo` for unattended. `--format text\|json\|markdown` |
+| `opencrabs agent` | Interactive CLI agent — multi-turn conversation in your terminal, no TUI. `-m <msg>` for single-message mode |
+| `opencrabs status` | System overview: version, provider, channels, database, brain, cron, dynamic tools |
+| `opencrabs doctor` | Full diagnostics: config, provider connectivity, database, brain, channels, CLI tools in PATH |
+| `opencrabs init` | Initialize configuration (`--force` to overwrite) |
+| `opencrabs config` | Show current configuration (`--show-secrets` to reveal keys) |
+| `opencrabs onboard` | Run the onboarding setup wizard |
+| `opencrabs channel list` | List all configured channels with enabled/disabled status |
+| `opencrabs channel doctor` | Run health checks on all enabled channels |
+| `opencrabs memory list` | List brain files and memory entries |
+| `opencrabs memory get <name>` | Show contents of a specific memory or brain file |
+| `opencrabs memory stats` | Memory statistics: file count, total size, entry count |
+| `opencrabs session list` | List all sessions with provider, model, token count (`--all` includes archived) |
+| `opencrabs session get <id>` | Show session details and recent messages |
+| `opencrabs db init` | Initialize database |
+| `opencrabs db stats` | Show database statistics |
+| `opencrabs db clear` | Clear all sessions and messages (`--force` to skip confirmation) |
+| `opencrabs cron add\|list\|remove\|enable\|disable\|test` | Manage scheduled cron jobs |
+| `opencrabs logs status\|view\|clean\|open` | Log management |
+| `opencrabs service install\|start\|stop\|restart\|status\|uninstall` | OS service management (launchd on macOS, systemd on Linux) |
+| `opencrabs daemon` | Run in headless daemon mode — channels only, no TUI |
+| `opencrabs completions <shell>` | Generate shell completions (bash, zsh, fish, powershell) |
+| `opencrabs version` | Print version and exit |
+
+Global flags: `--debug` (enable file logging), `--config <path>` (custom config file).
 
 ---
 
