@@ -313,6 +313,7 @@ impl Provider for OpenCodeCliProvider {
         // OpenCode manages its own session lifecycle — no persistence control needed.
         let mut cmd = tokio::process::Command::new(&self.opencode_path);
         cmd.arg("run")
+            .arg("--yolo")
             .arg("--format")
             .arg("json")
             .arg("--thinking")
