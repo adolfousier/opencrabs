@@ -312,8 +312,11 @@ impl Provider for OpenCodeCliProvider {
         // We don't pass --session (that's for continuing existing sessions).
         // OpenCode manages its own session lifecycle — no persistence control needed.
         let mut cmd = tokio::process::Command::new(&self.opencode_path);
-        cmd.arg("run")
-            .arg("--yolo")
+        // Allow all permissions so opencode doesn't auto-reject tool calls
+        // when running non-interactively (no TTY). Without this, permission
+        // rejections cause opencode to exit mid-stream.
+        cmd.env("OPENCODE_PERMISSION", r#"{"*":"allow","external_directory":"allow"}"#)
+            .arg("run")
             .arg("--format")
             .arg("json")
             .arg("--thinking")
@@ -360,6 +363,7 @@ impl Provider for OpenCodeCliProvider {
             let mut lines = reader.lines();
             let mut started = false;
             let mut block_index: usize = 0;
+            let mut last_tool_rejected = false;
 
             loop {
                 let line = match lines.next_line().await {
@@ -558,7 +562,24 @@ impl Provider for OpenCodeCliProvider {
                         break;
                     }
 
-                    CliEvent::ToolUse { .. } => {
+                    CliEvent::ToolUse { part } => {
+                        // Check if tool call was rejected (permission denied)
+                        let rejected = part
+                            .get("state")
+                            .and_then(|s| s.get("status"))
+                            .and_then(|s| s.as_str())
+                            == Some("error");
+                        if rejected {
+                            let err_msg = part
+                                .get("state")
+                                .and_then(|s| s.get("error"))
+                                .and_then(|s| s.as_str())
+                                .unwrap_or("tool rejected");
+                            tracing::warn!("opencode CLI tool_use rejected: {}", err_msg);
+                            last_tool_rejected = true;
+                        } else {
+                            last_tool_rejected = false;
+                        }
                         tracing::debug!("opencode CLI tool_use (handled by opencode internally)");
                         // Keep the stream alive during tool execution (can take >60s)
                         if tx.send(Ok(StreamEvent::Ping)).await.is_err() {
@@ -578,12 +599,55 @@ impl Provider for OpenCodeCliProvider {
                 }
             }
 
+            // If opencode exited after a tool rejection without producing
+            // a final response, send an error so the tool_loop doesn't retry.
+            if last_tool_rejected {
+                tracing::warn!(
+                    "opencode CLI exited after permission rejection — sending error response"
+                );
+                let err_msg = "OpenCode CLI exited because a tool call was rejected \
+                    (permission denied). The request could not be completed.";
+                // Send as text content + proper stop so tool_loop doesn't retry
+                let _ = tx
+                    .send(Ok(StreamEvent::ContentBlockStart {
+                        index: block_index,
+                        content_block: ContentBlock::Text {
+                            text: String::new(),
+                        },
+                    }))
+                    .await;
+                let _ = tx
+                    .send(Ok(StreamEvent::ContentBlockDelta {
+                        index: block_index,
+                        delta: ContentDelta::TextDelta {
+                            text: format!("⚠️ {}", err_msg),
+                        },
+                    }))
+                    .await;
+                let _ = tx
+                    .send(Ok(StreamEvent::ContentBlockStop { index: block_index }))
+                    .await;
+                let _ = tx
+                    .send(Ok(StreamEvent::MessageDelta {
+                        delta: MessageDelta {
+                            stop_reason: Some(StopReason::EndTurn),
+                            stop_sequence: None,
+                        },
+                        usage: TokenUsage {
+                            input_tokens: 0,
+                            output_tokens: 0,
+                        },
+                    }))
+                    .await;
+                let _ = tx.send(Ok(StreamEvent::MessageStop)).await;
+            }
+
             // Wait for process exit
             let exit_status = child.wait().await;
             match &exit_status {
                 Ok(status) if !status.success() => {
                     tracing::warn!("opencode CLI exited with status: {}", status);
-                    if !started {
+                    if !started && !last_tool_rejected {
                         let _ = tx
                             .send(Err(ProviderError::Internal(format!(
                                 "opencode CLI exited with {} before producing any output",
