@@ -719,14 +719,25 @@ impl AgentService {
                     iteration -= 1;
                     continue;
                 } else {
-                    tracing::error!(
-                        "🚨 Stream dropped {} times consecutively at iteration {}. \
-                         Proceeding with partial response to avoid infinite retry loop. \
-                         Content blocks: {}, stop_reason: None",
+                    let drop_msg = format!(
+                        "Provider stream dropped {} times consecutively. \
+                         The request could not be completed. \
+                         Check logs at ~/.opencrabs/logs/ for details.",
                         MAX_STREAM_RETRIES,
-                        iteration,
+                    );
+                    tracing::error!(
+                        "🚨 {} Content blocks: {}, stop_reason: None",
+                        drop_msg,
                         response.content.len(),
                     );
+                    // Inject error as visible text so user sees it in the TUI
+                    if response.content.iter().all(
+                        |b| !matches!(b, ContentBlock::Text { text } if !text.trim().is_empty()),
+                    ) {
+                        response.content.push(ContentBlock::Text {
+                            text: format!("⚠️ {}", drop_msg),
+                        });
+                    }
                     // Reset retry counter — we're accepting the partial response
                     stream_retry_count = 0;
                 }
