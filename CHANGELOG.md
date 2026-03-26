@@ -5,6 +5,46 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.87] - 2026-03-26
+
+### Added
+- **Full CLI command surface** — 20+ subcommands: `opencrabs status`, `doctor`, `agent` (interactive multi-turn CLI agent + single-message mode), `channel list/doctor`, `memory list/get/stats`, `session list/get`, `db init/stats/clear`, `cron add/list/remove/enable/disable/test`, `logs status/view/clean/open`, `service install/start/stop/restart/status/uninstall` (launchd on macOS, systemd on Linux), `completions` (bash/zsh/fish/powershell via `clap_complete`), `version`, `daemon`, `onboard`. Full CLI reference added to README
+- **Split panes** — tmux-style horizontal (`|`) and vertical (`_`) pane splitting in TUI. Each pane runs its own session with independent provider, model, and context. Run 10 sessions side by side, all processing in parallel. `Tab` to cycle focus, `Ctrl+X` to close pane. Pane focus indicator `[n/total]` in status bar. 21 tests covering layout, focus, and management
+- **Dynamic tool system** — Define custom tools at runtime via `~/.opencrabs/tools.toml`. HTTP and shell executors, template parameters (`{{param}}`), enable/disable without restart. The `tool_manage` meta-tool lets the agent create, remove, and reload tools on the fly. `DynamicToolRegistry` with `RwLock`-based concurrent access
+- **Native browser automation** — Headless Chrome control via CDP (Chrome DevTools Protocol). 7 browser tools: `navigate`, `click`, `type`, `screenshot`, `eval_js`, `extract_content`, `wait_for_element`. Lazy-initialized singleton, stealth mode, persistent profile, display auto-detection. Feature-gated under `browser` (`--features browser`)
+- **Multi-agent orchestration** — Spawn independent child agents for parallel task execution. 5 tools: `spawn_agent`, `wait_agent`, `send_input`, `close_agent`, `resume_agent`. Children run in isolated sessions with auto-approve and essential tools
+- **DB-persisted channel sessions** — All 5 channels (Telegram, Discord, Slack, WhatsApp, Trello) now persist channel/group sessions in SQLite by title via `find_session_by_title`. Sessions survive process restarts — no more lost context after daemon restart
+- **Slack user/channel name resolution** — User display names and channel names resolved via `users.info` and `conversations.info` API on each message. Agent sees "Adolfo Usier" instead of "U066SGWQZFG", stored messages have proper `sender_name` and `channel_name`
+- **Slack event dedup + fast ack** — `on_push_event` returns ack immediately via `tokio::spawn`, deduplicates by message timestamp. Eliminates Slack retry storms that caused duplicate processing with slow CLI providers
+- **LLM-generated channel greetings** — Channels send a personalized greeting on first connect via Slack `app_mention` handling
+- **OpenCode model pricing** — MiMo V2 Pro/Omni, Nemotron 3, Big Pickle, Zen, Go
+- **CLI reference in README** — Full CLI command table with descriptions and flags added to Core Features section + Table of Contents
+
+### Fixed
+- **Per-channel session isolation** — Owner DMs share TUI session, but groups/channels get isolated per-channel sessions keyed by `channel_id` (Telegram, Discord, Slack). Previously all messages shared the TUI session regardless of source
+- **In-memory session HashMap replaced with DB** — Channel sessions were stored in an in-memory `HashMap` that was lost on every restart, creating new sessions each time. Now uses SQLite `find_session_by_title` across all 5 channels
+- **Slack duplicate message processing** — Slack retried events when ack took >3s (common with CLI providers). Each retry was processed as a new message, causing cascading cancellations and repeated work. Fixed with timestamp dedup + background spawn
+- **Slack empty sender/channel names** — `store_channel_msg` was storing `String::new()` for sender name and `None` for channel name. Channel history showed blank names
+- **Streaming response text concatenation** — `IntermediateText` events were not clearing the streaming response buffer, causing text to concatenate across tool rounds
+- **Persistent typing indicators** — Telegram and Slack typing indicators now persist during long agent responses
+- **Onboarding API key requirement for CLI providers** — CLI providers (Claude CLI, OpenCode CLI) no longer require an API key during onboarding
+- **Slack mention detection with unknown bot_user_id** — Falls back to `<@U...>` pattern matching when `auth.test` fails
+- **Slack bot token hot-reload** — Bot token is re-read from config at runtime for `auth.test` and API calls
+- **Browser stealth mode** — Persistent profile directory, display auto-detection for headed mode
+- **CLI provider auto-compaction** — Trigger auto-compaction after token calibration for CLI providers
+- **Claude CLI token usage** — Cache creation and cache read tokens now included in usage calculation
+- **CLI text/tool interleaving** — Real-time streaming preserves text and tool call ordering; queued messages inject at tool boundaries
+- **CLI reasoning bloat** — Stop forwarding reasoning blocks after first tool call to prevent context explosion
+- **CLI tool name normalization** — Lowercase tool names from CLI providers now match TUI display
+
+### Changed
+- **CLI module refactored** — All types (`Cli`, `Commands`, subcommand enums) and `run()` moved from `mod.rs` to `args.rs`. Module file is now clean module declarations only
+
+### Testing
+- **21 split pane tests** — Layout, focus cycling, close, and management
+- **Claude CLI cache token tests** — Unit tests for cache token usage calculation
+- **Browser headless tests** — Test coverage for headless Chrome integration
+
 ## [0.2.86] - 2026-03-23
 
 ### Added
