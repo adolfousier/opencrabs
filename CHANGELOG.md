@@ -5,6 +5,17 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.89] - 2026-03-26
+
+### Fixed
+- **OpenCode CLI permission rejection** — Non-interactive spawns auto-rejected tool calls (no TTY). Now sets `OPENCODE_PERMISSION` env var to allow all permissions including external directories
+- **TUI provider mismatch after restart** — Loading a session overrode the config-enabled provider with the session's stale saved provider. Config is now authoritative — session metadata syncs to the active provider
+- **Silent empty responses on stream drop** — When the provider stream dropped repeatedly, the TUI showed an empty response. Now injects a visible error message so the user knows what happened
+- **OpenCode CLI tool calls not visible in TUI** — Tool call events were sent as invisible Ping instead of ContentBlock::ToolUse. Now emits proper stream events so helpers.rs fires ToolStarted/ToolCompleted progress events, restoring the expandable tool call groups
+- **OpenCode CLI filesystem access** — Existing sessions locked tool execution to their original directory, blocking access to ~/Downloads/ etc. Now spawns at ~/ with explicit `--dir` flag so the sandbox covers the full user home
+- **OpenCode CLI `cli_handles_tools` flag** — Was returning false, causing the tool_loop to attempt local re-execution of opencode's internal tool calls. Now correctly returns true
+- **Duplicate assistant message for CLI providers** — helpers.rs flushed text as IntermediateText at stream end, then tool_loop emitted the same text again when iteration > 0. Skips the second emission for CLI providers
+
 ## [0.2.88] - 2026-03-26
 
 ### Added
@@ -1764,6 +1775,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.89]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.89
 [0.2.88]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.88
 [0.2.87]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.87
 [0.2.86]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.86
