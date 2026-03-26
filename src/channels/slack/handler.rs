@@ -498,6 +498,58 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         }
     };
 
+    // Resolve user display name via Slack API (cached per conversation turn)
+    let user_name = {
+        let token =
+            SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
+        let session = client.open_session(&token);
+        match session
+            .users_info(&SlackApiUsersInfoRequest::new(SlackUserId::new(
+                user_id.clone(),
+            )))
+            .await
+        {
+            Ok(resp) => resp
+                .user
+                .profile
+                .as_ref()
+                .and_then(|p| {
+                    p.display_name
+                        .clone()
+                        .filter(|n| !n.is_empty())
+                        .or_else(|| p.real_name.clone())
+                })
+                .unwrap_or_else(|| user_id.clone()),
+            Err(e) => {
+                tracing::debug!("Slack: failed to resolve user name for {}: {}", user_id, e);
+                user_id.clone()
+            }
+        }
+    };
+
+    // Resolve channel name via Slack API
+    let channel_name = {
+        let token =
+            SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
+        let session = client.open_session(&token);
+        match session
+            .conversations_info(&SlackApiConversationsInfoRequest::new(
+                SlackChannelId::new(channel_id.clone()),
+            ))
+            .await
+        {
+            Ok(resp) => resp
+                .channel
+                .name
+                .map(|n| format!("#{n}"))
+                .unwrap_or_else(|| channel_id.clone()),
+            Err(e) => {
+                tracing::debug!("Slack: failed to resolve channel name for {}: {}", channel_id, e);
+                channel_id.clone()
+            }
+        }
+    };
+
     // Extract text (may be empty if user sent files only)
     let text = msg
         .content
@@ -525,6 +577,8 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         let repo = state.channel_msg_repo.clone();
         let ch_id = channel_id.clone();
         let uid = user_id.clone();
+        let uname = user_name.clone();
+        let ch_name = channel_name.clone();
         async move {
             if text.is_empty() {
                 return;
@@ -532,9 +586,9 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
             let cm = DbChannelMessage::new(
                 "slack".into(),
                 ch_id,
-                None, // Slack channel names require an API call; omit for now
+                Some(ch_name),
                 uid,
-                String::new(), // Slack user names require an API call
+                uname,
                 text,
                 "text".into(),
                 None,
@@ -1017,9 +1071,9 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
     // it's talking to and doesn't assume it's the owner.
     let agent_input = if !is_owner {
         if is_dm {
-            format!("[Slack DM from {user_id}]\n{content}")
+            format!("[Slack DM from {user_name} ({user_id})]\n{content}")
         } else {
-            format!("[Slack message from {user_id} in channel {channel_id}]\n{content}")
+            format!("[Slack message from {user_name} ({user_id}) in {channel_name}]\n{content}")
         }
     } else {
         content
