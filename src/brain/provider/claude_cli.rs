@@ -325,6 +325,13 @@ impl Provider for ClaudeCliProvider {
             cwd.display()
         );
 
+        // Use --session-id so each OpenCrabs session maps to a distinct CLI session.
+        // New session = new CLI context. Switching back = resumes that session's context.
+        let session_id_str = request
+            .session_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
         let mut child = tokio::process::Command::new(&self.claude_path)
             .env_remove("CLAUDECODE")
             .env_remove("CLAUDE_CODE_ENTRYPOINT")
@@ -333,7 +340,8 @@ impl Provider for ClaudeCliProvider {
             .arg("stream-json")
             .arg("--verbose")
             .arg("--include-partial-messages")
-            .arg("--no-session-persistence")
+            .arg("--session-id")
+            .arg(&session_id_str)
             .arg("--dangerously-skip-permissions")
             .arg("--model")
             .arg(&model)

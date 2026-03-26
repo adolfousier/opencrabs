@@ -444,6 +444,7 @@ impl AgentService {
                 .with_max_tokens(self.max_tokens);
             request.working_directory =
                 Some(self.get_working_directory().to_string_lossy().to_string());
+            request.session_id = Some(session_id);
 
             if let Some(system) = &context.system_brain {
                 request = request.with_system(system.clone());
@@ -543,6 +544,7 @@ impl AgentService {
                             .with_max_tokens(self.max_tokens);
                     retry_req.working_directory =
                         Some(self.get_working_directory().to_string_lossy().to_string());
+                    retry_req.session_id = Some(session_id);
                     if let Some(system) = &context.system_brain {
                         retry_req = retry_req.with_system(system.clone());
                     }

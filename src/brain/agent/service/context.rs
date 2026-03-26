@@ -76,6 +76,7 @@ impl AgentService {
         // Pass working directory so proxy-aware providers can forward it
         request.working_directory =
             Some(self.get_working_directory().to_string_lossy().to_string());
+        request.session_id = Some(session_id);
 
         Ok((model_name, request, message_service, session_service))
     }
@@ -297,6 +298,7 @@ impl AgentService {
              Missing a single detail could cause the agent to repeat mistakes or violate user preferences.".to_string());
         request.working_directory =
             Some(self.get_working_directory().to_string_lossy().to_string());
+        request.session_id = Some(session_id);
 
         // Use streaming so the TUI shows the summary being written in real-time
         // instead of freezing silently for 2-5 minutes on large contexts

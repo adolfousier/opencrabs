@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use uuid::Uuid;
 
 /// Role of a message in the conversation
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -119,6 +120,9 @@ pub struct LLMRequest {
     /// Working directory for proxy-aware providers (not serialized to API)
     #[serde(skip)]
     pub working_directory: Option<String>,
+    /// Session ID — used by CLI providers to isolate sessions via --session-id
+    #[serde(skip)]
+    pub session_id: Option<Uuid>,
 }
 
 impl LLMRequest {
@@ -134,6 +138,7 @@ impl LLMRequest {
             stream: false,
             metadata: None,
             working_directory: None,
+            session_id: None,
         }
     }
 
