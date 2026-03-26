@@ -598,8 +598,8 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
             .await;
     }
 
-    // Resolve session: owner shares TUI session, others get per-user sessions
-    let session_id = if is_owner {
+    // Resolve session: owner DM shares TUI session; channels/groups get per-channel sessions
+    let session_id = if is_owner && is_dm {
         let shared = state.shared_session.lock().await;
         match *shared {
             Some(id) => id,
@@ -635,17 +635,28 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
             }
         }
     } else {
+        // Non-DM-owner sessions: keyed by channel_id for channels (shared per channel),
+        // by user_id for DMs (separate per user).
+        let session_key = if is_dm {
+            user_id.clone()
+        } else {
+            channel_id.clone()
+        };
+        let session_title = if is_dm {
+            format!("Slack: {}", user_id)
+        } else {
+            format!("Slack: #{}", channel_id)
+        };
         let mut map = state.extra_sessions.lock().await;
-        if let Some((old_id, last_activity)) = map.get(&user_id).copied() {
+        if let Some((old_id, last_activity)) = map.get(&session_key).copied() {
             if idle_timeout_hours
                 .is_some_and(|h| last_activity.elapsed().as_secs() > (h * 3600.0) as u64)
             {
                 let _ = state.session_svc.archive_session(old_id).await;
-                map.remove(&user_id);
-                let title = format!("Slack: {}", user_id);
-                match state.session_svc.create_session(Some(title)).await {
+                map.remove(&session_key);
+                match state.session_svc.create_session(Some(session_title)).await {
                     Ok(session) => {
-                        map.insert(user_id.clone(), (session.id, std::time::Instant::now()));
+                        map.insert(session_key, (session.id, std::time::Instant::now()));
                         session.id
                     }
                     Err(e) => {
@@ -654,14 +665,13 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                     }
                 }
             } else {
-                map.insert(user_id.clone(), (old_id, std::time::Instant::now()));
+                map.insert(session_key, (old_id, std::time::Instant::now()));
                 old_id
             }
         } else {
-            let title = format!("Slack: {}", user_id);
-            match state.session_svc.create_session(Some(title)).await {
+            match state.session_svc.create_session(Some(session_title)).await {
                 Ok(session) => {
-                    map.insert(user_id.clone(), (session.id, std::time::Instant::now()));
+                    map.insert(session_key, (session.id, std::time::Instant::now()));
                     session.id
                 }
                 Err(e) => {
@@ -830,11 +840,16 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                     .await
                 {
                     Ok(new_session) => {
-                        if is_owner {
+                        if is_owner && is_dm {
                             *state.shared_session.lock().await = Some(new_session.id);
                         } else {
+                            let key = if is_dm {
+                                user_id.to_string()
+                            } else {
+                                channel_id.clone()
+                            };
                             state.extra_sessions.lock().await.insert(
-                                user_id.to_string(),
+                                key,
                                 (new_session.id, std::time::Instant::now()),
                             );
                         }

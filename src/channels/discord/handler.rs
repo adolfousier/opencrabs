@@ -262,8 +262,8 @@ pub(crate) async fn handle_message(
         discord_state.set_guild_id(guild_id.get()).await;
     }
 
-    // Resolve session: owner shares TUI session, others get per-user sessions
-    let session_id = if is_owner {
+    // Resolve session: owner DM shares TUI session; guild channels get per-channel sessions
+    let session_id = if is_owner && is_dm {
         let shared = shared_session.lock().await;
         match *shared {
             Some(id) => id,
@@ -295,18 +295,28 @@ pub(crate) async fn handle_message(
             }
         }
     } else {
+        // Non-DM-owner sessions: keyed by channel_id for guild channels (shared per channel),
+        // by user_id for DMs (separate per user).
+        let session_key = if is_dm {
+            msg.author.id.get()
+        } else {
+            msg.channel_id.get()
+        };
+        let session_title = if is_dm {
+            format!("Discord: {}", msg.author.name)
+        } else {
+            format!("Discord: #{}", msg.channel_id.get())
+        };
         let mut map = extra_sessions.lock().await;
-        let disc_user_id = msg.author.id.get();
-        if let Some((old_id, last_activity)) = map.get(&disc_user_id).copied() {
+        if let Some((old_id, last_activity)) = map.get(&session_key).copied() {
             if idle_timeout_hours
                 .is_some_and(|h| last_activity.elapsed().as_secs() > (h * 3600.0) as u64)
             {
                 let _ = session_svc.archive_session(old_id).await;
-                map.remove(&disc_user_id);
-                let title = format!("Discord: {}", msg.author.name);
-                match session_svc.create_session(Some(title)).await {
+                map.remove(&session_key);
+                match session_svc.create_session(Some(session_title)).await {
                     Ok(session) => {
-                        map.insert(disc_user_id, (session.id, std::time::Instant::now()));
+                        map.insert(session_key, (session.id, std::time::Instant::now()));
                         session.id
                     }
                     Err(e) => {
@@ -315,14 +325,13 @@ pub(crate) async fn handle_message(
                     }
                 }
             } else {
-                map.insert(disc_user_id, (old_id, std::time::Instant::now()));
+                map.insert(session_key, (old_id, std::time::Instant::now()));
                 old_id
             }
         } else {
-            let title = format!("Discord: {}", msg.author.name);
-            match session_svc.create_session(Some(title)).await {
+            match session_svc.create_session(Some(session_title)).await {
                 Ok(session) => {
-                    map.insert(disc_user_id, (session.id, std::time::Instant::now()));
+                    map.insert(session_key, (session.id, std::time::Instant::now()));
                     session.id
                 }
                 Err(e) => {
@@ -382,11 +391,16 @@ pub(crate) async fn handle_message(
             ChannelCommand::NewSession => {
                 match session_svc.create_session(Some("Chat".to_string())).await {
                     Ok(new_session) => {
-                        if is_owner {
+                        if is_owner && is_dm {
                             *shared_session.lock().await = Some(new_session.id);
                         } else {
+                            let key = if is_dm {
+                                msg.author.id.get()
+                            } else {
+                                msg.channel_id.get()
+                            };
                             extra_sessions.lock().await.insert(
-                                msg.author.id.get(),
+                                key,
                                 (new_session.id, std::time::Instant::now()),
                             );
                         }
