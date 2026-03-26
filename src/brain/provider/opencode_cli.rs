@@ -304,11 +304,18 @@ impl Provider for OpenCodeCliProvider {
             cwd.display()
         );
 
+        let session_id_str = request
+            .session_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
         let mut cmd = tokio::process::Command::new(&self.opencode_path);
         cmd.arg("run")
             .arg("--format")
             .arg("json")
             .arg("--thinking")
+            .arg("--session")
+            .arg(&session_id_str)
             .arg("--model")
             .arg(&model)
             .arg("--")
