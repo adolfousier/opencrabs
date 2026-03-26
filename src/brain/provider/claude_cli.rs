@@ -341,12 +341,11 @@ impl Provider for ClaudeCliProvider {
             cwd.display()
         );
 
-        // Use --session-id so each OpenCrabs session maps to a distinct CLI session.
-        // New session = new CLI context. Switching back = resumes that session's context.
-        let session_id_str = request
-            .session_id
-            .map(|id| id.to_string())
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        // Each CLI spawn gets a fresh session ID. We manage conversation context
+        // ourselves (context.rs), so we don't need the CLI to maintain session state.
+        // Reusing OpenCrabs session IDs caused "Session ID already in use" errors
+        // when concurrent requests (TUI + Telegram/Slack) shared the same session.
+        let session_id_str = uuid::Uuid::new_v4().to_string();
 
         let mut child = tokio::process::Command::new(&self.claude_path)
             .env_remove("CLAUDECODE")
