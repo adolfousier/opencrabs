@@ -238,6 +238,7 @@ struct CliUsage {
     pub input_tokens: u32,
     #[serde(default)]
     pub output_tokens: u32,
+    /// Cache tokens are the CLI's system prompt — tracked for billing but not context.
     #[serde(default)]
     pub cache_creation_input_tokens: u32,
     #[serde(default)]
@@ -245,10 +246,16 @@ struct CliUsage {
 }
 
 impl CliUsage {
-    /// Total input tokens including cache reads/writes.
-    /// Claude CLI reports input_tokens=1 when caching, with the real
-    /// count split across cache_creation and cache_read fields.
+    /// Non-cached input tokens only.
+    /// The CLI's cache_creation and cache_read tokens are its own system
+    /// prompt being cached by Anthropic — not conversation content we control.
+    /// Including them inflates our context tracking and misleads the TUI display.
     fn total_input(&self) -> u32 {
+        self.input_tokens
+    }
+
+    /// Full token count including cache (for cost/billing and debug logging).
+    fn total_with_cache(&self) -> u32 {
         self.input_tokens + self.cache_creation_input_tokens + self.cache_read_input_tokens
     }
 }
@@ -755,6 +762,15 @@ impl Provider for ClaudeCliProvider {
                             .as_ref()
                             .map(|u| u.total_input())
                             .unwrap_or(input_tokens);
+                        if let Some(ref u) = usage {
+                            tracing::debug!(
+                                "CLI session complete: input={}, cache_create={}, cache_read={}, total_with_cache={}",
+                                u.input_tokens,
+                                u.cache_creation_input_tokens,
+                                u.cache_read_input_tokens,
+                                u.total_with_cache()
+                            );
+                        }
 
                         let _ = tx
                             .send(Ok(StreamEvent::MessageDelta {
@@ -1027,14 +1043,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_cli_usage_total_input_includes_cache_tokens() {
+    fn test_cli_usage_total_input_excludes_cache_tokens() {
         let usage = CliUsage {
             input_tokens: 1,
             output_tokens: 200,
             cache_creation_input_tokens: 351,
             cache_read_input_tokens: 165_793,
         };
-        assert_eq!(usage.total_input(), 166_145);
+        // total_input() returns only non-cached tokens
+        assert_eq!(usage.total_input(), 1);
+        // total_with_cache() includes everything (for billing)
+        assert_eq!(usage.total_with_cache(), 166_145);
     }
 
     #[test]
@@ -1046,6 +1065,7 @@ mod tests {
             cache_read_input_tokens: 0,
         };
         assert_eq!(usage.total_input(), 5000);
+        assert_eq!(usage.total_with_cache(), 5000);
     }
 
     #[test]
@@ -1055,7 +1075,8 @@ mod tests {
         assert_eq!(usage.input_tokens, 1);
         assert_eq!(usage.cache_creation_input_tokens, 326);
         assert_eq!(usage.cache_read_input_tokens, 161_868);
-        assert_eq!(usage.total_input(), 162_195);
+        assert_eq!(usage.total_input(), 1);
+        assert_eq!(usage.total_with_cache(), 162_195);
     }
 
     #[test]
