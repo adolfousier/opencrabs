@@ -734,8 +734,7 @@ mod tests {
     fn test_detect_browser_finds_something() {
         // On dev machines there should be at least one Chromium browser
         let result = detect_browser();
-        if result.is_some() {
-            let info = result.unwrap();
+        if let Some(info) = result {
             assert!(!info.name.is_empty());
             assert!(info.path.exists());
             tracing::info!("Detected: {} at {}", info.name, info.path.display());

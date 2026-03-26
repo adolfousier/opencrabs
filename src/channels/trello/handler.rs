@@ -88,7 +88,11 @@ pub async fn process_comment(
                 match session_svc.create_session(Some(session_title)).await {
                     Ok(new_session) => new_session.id,
                     Err(e) => {
-                        tracing::error!("Trello: failed to create session for {}: {}", commenter_name, e);
+                        tracing::error!(
+                            "Trello: failed to create session for {}: {}",
+                            commenter_name,
+                            e
+                        );
                         return;
                     }
                 }
@@ -98,11 +102,19 @@ pub async fn process_comment(
         } else {
             match session_svc.create_session(Some(session_title)).await {
                 Ok(session) => {
-                    tracing::info!("Trello: created new session {} for {}", session.id, commenter_name);
+                    tracing::info!(
+                        "Trello: created new session {} for {}",
+                        session.id,
+                        commenter_name
+                    );
                     session.id
                 }
                 Err(e) => {
-                    tracing::error!("Trello: failed to create session for {}: {}", commenter_name, e);
+                    tracing::error!(
+                        "Trello: failed to create session for {}: {}",
+                        commenter_name,
+                        e
+                    );
                     return;
                 }
             }
