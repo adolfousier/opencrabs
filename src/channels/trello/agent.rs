@@ -8,7 +8,6 @@ use super::client::TrelloClient;
 use super::handler;
 use crate::brain::agent::AgentService;
 use crate::services::{ServiceContext, SessionService};
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -99,8 +98,6 @@ impl TrelloAgent {
 
             let session_svc = SessionService::new(self.service_context.clone());
             let idle_timeout_hours = self.idle_timeout_hours;
-            let extra_sessions: Arc<Mutex<HashMap<String, (Uuid, std::time::Instant)>>> =
-                Arc::new(Mutex::new(HashMap::new()));
 
             // Owner = first allowed_user (shares TUI session)
             let owner_member_id = self.allowed_users.first().cloned();
@@ -167,7 +164,6 @@ impl TrelloAgent {
                             self.agent_service.clone(),
                             session_svc.clone(),
                             self.shared_session_id.clone(),
-                            extra_sessions.clone(),
                             owner_member_id.as_deref(),
                             idle_timeout_hours,
                         )

@@ -6,7 +6,6 @@ use super::client::TrelloClient;
 use super::models::Action;
 use crate::brain::agent::AgentService;
 use crate::services::SessionService;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -19,7 +18,6 @@ pub async fn process_comment(
     agent: Arc<AgentService>,
     session_svc: SessionService,
     shared_session: Arc<Mutex<Option<Uuid>>>,
-    extra_sessions: Arc<Mutex<HashMap<String, (Uuid, std::time::Instant)>>>,
     owner_member_id: Option<&str>,
     idle_timeout_hours: Option<f64>,
 ) {
@@ -72,46 +70,39 @@ pub async fn process_comment(
             }
         }
     } else {
-        let mut map = extra_sessions.lock().await;
-        let key = commenter_id.as_str();
-        if let Some((old_id, last_activity)) = map.get(key).copied() {
-            if idle_timeout_hours
-                .is_some_and(|h| last_activity.elapsed().as_secs() > (h * 3600.0) as u64)
-            {
-                let _ = session_svc.archive_session(old_id).await;
-                map.remove(key);
-                let title = format!("Trello: {}", commenter_name);
-                match session_svc.create_session(Some(title)).await {
-                    Ok(s) => {
-                        map.insert(commenter_id.clone(), (s.id, std::time::Instant::now()));
-                        s.id
-                    }
+        // Non-owner sessions: persisted in DB by title — survives restarts.
+        let session_title = format!("Trello: {}", commenter_name);
+
+        let existing = session_svc
+            .find_session_by_title(&session_title)
+            .await
+            .ok()
+            .flatten();
+
+        if let Some(session) = existing {
+            if idle_timeout_hours.is_some_and(|h| {
+                let elapsed = (chrono::Utc::now() - session.updated_at).num_seconds();
+                elapsed > (h * 3600.0) as i64
+            }) {
+                let _ = session_svc.archive_session(session.id).await;
+                match session_svc.create_session(Some(session_title)).await {
+                    Ok(new_session) => new_session.id,
                     Err(e) => {
-                        tracing::error!(
-                            "Trello: failed to create session for {}: {}",
-                            commenter_name,
-                            e
-                        );
+                        tracing::error!("Trello: failed to create session for {}: {}", commenter_name, e);
                         return;
                     }
                 }
             } else {
-                map.insert(commenter_id.clone(), (old_id, std::time::Instant::now()));
-                old_id
+                session.id
             }
         } else {
-            let title = format!("Trello: {}", commenter_name);
-            match session_svc.create_session(Some(title)).await {
-                Ok(s) => {
-                    map.insert(commenter_id.clone(), (s.id, std::time::Instant::now()));
-                    s.id
+            match session_svc.create_session(Some(session_title)).await {
+                Ok(session) => {
+                    tracing::info!("Trello: created new session {} for {}", session.id, commenter_name);
+                    session.id
                 }
                 Err(e) => {
-                    tracing::error!(
-                        "Trello: failed to create session for {}: {}",
-                        commenter_name,
-                        e
-                    );
+                    tracing::error!("Trello: failed to create session for {}: {}", commenter_name, e);
                     return;
                 }
             }
