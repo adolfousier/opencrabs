@@ -60,7 +60,7 @@ OpenCrabs runs as a **single binary on your terminal** — no server, no gateway
 - Your messages to the LLM provider API (Anthropic, OpenAI, GitHub Copilot, etc.)
 - Web search queries (optional tool)
 - GitHub API via `gh` CLI (optional tool)
-- Browser navigation to URLs (optional, `browser` feature — headless Chrome via CDP)
+- Browser automation (optional, `browser` feature — auto-detects Chromium-based browsers via CDP, not Firefox)
 - Dynamic tool HTTP requests (only when you define HTTP tools in `tools.toml`)
 
 ---
@@ -182,7 +182,7 @@ Images are passed to the active model's vision pipeline if it supports multimoda
 | **Self-Sustaining** | Agent can modify its own source, build, test, and hot-restart via Unix `exec()` |
 | **Self-Improving** | Learns from experience — saves reusable workflows as custom commands, writes lessons learned to memory, updates its own brain files. All local, no data leaves your machine |
 | **Dynamic Tools** | Define custom tools at runtime via `~/.opencrabs/tools.toml` — the agent can call them autonomously like built-in tools. HTTP and shell executors, template parameters (`{{param}}`), enable/disable without restart. The `tool_manage` meta-tool lets the agent create, remove, and reload tools on the fly |
-| **Browser Automation** | Native headless Chrome control via CDP (Chrome DevTools Protocol). 7 browser tools: navigate, click, type, screenshot, eval JS, extract content, wait for elements. Lazy-initialized singleton — Chrome launches on first use. Feature-gated under `browser` (`cargo build --features browser`) |
+| **Browser Automation** | Native browser control via CDP (Chrome DevTools Protocol). Auto-detects your default Chromium-based browser (Chrome, Brave, Edge, Arc, Vivaldi, Opera, Chromium) and uses its profile — your logins, cookies, and extensions carry over. 7 browser tools: navigate, click, type, screenshot, eval JS, extract content, wait for elements. Headed or headless mode with display auto-detection. **Note:** Firefox is not supported (no CDP) — if Firefox is your default, OpenCrabs falls back to the first available Chromium browser. Feature-gated under `browser` (included by default) |
 | **Natural Language Commands** | Tell OpenCrabs to create slash commands — it writes them to `commands.toml` autonomously via the `config_manager` tool |
 | **Live Settings** | Agent can read/write `config.toml` at runtime; Settings TUI screen (press `S`) shows current config; approval policy persists across restarts. Default: auto-approve (use `/approve` to change) |
 | **Web Search** | DuckDuckGo (built-in, no key needed) + EXA AI (neural, free via MCP) by default; Brave Search optional (key in `keys.toml`) |
@@ -660,6 +660,29 @@ cargo install opencrabs
 > **Linux (Debian/Ubuntu):** Install system deps first: `sudo apt-get install build-essential pkg-config clang libclang-dev libasound2-dev libssl-dev cmake`
 >
 > **Large build:** The build can use 8GB+ in `/tmp`. If you run out of space: `CARGO_TARGET_DIR=~/.cargo/target cargo install opencrabs`
+
+#### Feature Flags
+
+All features are enabled by default. To customize, use `--no-default-features` and pick what you need:
+
+```bash
+# Install with only Telegram and Discord
+cargo install opencrabs --no-default-features --features "telegram,discord"
+
+# Everything except browser automation
+cargo install opencrabs --no-default-features --features "telegram,whatsapp,discord,slack,trello,local-stt,local-tts"
+```
+
+| Feature | Crate | Description |
+|---------|-------|-------------|
+| `telegram` | teloxide | Telegram bot channel |
+| `whatsapp` | whatsapp-rust | WhatsApp channel via multi-device API |
+| `discord` | serenity | Discord bot channel |
+| `slack` | slack-morphism | Slack bot channel (Socket Mode) |
+| `trello` | — | Trello webhook channel |
+| `local-stt` | rwhisper | On-device speech-to-text (requires CMake + C++ compiler) |
+| `local-tts` | opusic-sys | On-device text-to-speech |
+| `browser` | chromey | Browser automation via CDP (Chrome, Brave, Edge, Arc, Vivaldi, Opera — not Firefox) |
 
 ### Option 3: Build from Source (full control)
 
@@ -1414,6 +1437,9 @@ OpenCrabs includes 30+ built-in tools. The AI can use these during conversation:
 | `rebuild` | Build from source (`cargo build --release`) and hot-restart |
 
 #### Browser Automation (feature: `browser`)
+
+Auto-detects your default Chromium-based browser and uses its native profile (cookies, logins, extensions). Supports **Chrome, Brave, Edge, Arc, Vivaldi, Opera, and Chromium**. If your default browser is Firefox or another non-Chromium browser, OpenCrabs falls back to the first available Chromium browser on your system. If no Chromium browser is found, a fresh Chrome instance is launched.
+
 | Tool | Description |
 |------|-------------|
 | `browser_navigate` | Navigate to a URL, returns page title and final URL after redirects |
@@ -1423,6 +1449,8 @@ OpenCrabs includes 30+ built-in tools. The AI can use these during conversation:
 | `browser_eval` | Execute JavaScript in page context and return the result |
 | `browser_content` | Get page HTML or text-only content, optionally scoped by CSS selector |
 | `browser_wait` | Wait for a CSS selector to appear (polls every 200ms, default 10s timeout) |
+
+> **Why no Firefox?** Browser automation uses Chrome DevTools Protocol (CDP). Firefox dropped CDP support entirely — it now uses WebDriver BiDi, which is a different protocol. All Chromium-based browsers speak CDP natively.
 
 #### Multi-Agent Orchestration
 | Tool | Description |
