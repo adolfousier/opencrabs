@@ -1576,12 +1576,32 @@ impl App {
                     && !models.is_empty()
                     && provider_idx == self.ps.selected_provider
                 {
-                    let current_model = self
-                        .current_session
-                        .as_ref()
-                        .and_then(|s| s.model.as_deref())
-                        .unwrap_or(&self.default_model_name);
-                    let selected = models.iter().position(|m| m == current_model).unwrap_or(0);
+                    // Read the provider's saved default_model from config
+                    let saved_model =
+                        crate::config::Config::load()
+                            .ok()
+                            .and_then(|c| match provider_idx {
+                                0 => c.providers.anthropic.and_then(|p| p.default_model),
+                                1 => c.providers.openai.and_then(|p| p.default_model),
+                                2 => c.providers.github.and_then(|p| p.default_model),
+                                3 => c.providers.gemini.and_then(|p| p.default_model),
+                                4 => c.providers.openrouter.and_then(|p| p.default_model),
+                                5 => c.providers.minimax.and_then(|p| p.default_model),
+                                6 => c.providers.zhipu.and_then(|p| p.default_model),
+                                7 => c.providers.claude_cli.and_then(|p| p.default_model),
+                                8 => c.providers.opencode_cli.and_then(|p| p.default_model),
+                                idx if idx >= 10 => {
+                                    let ci = idx - 10;
+                                    self.ps.custom_names.get(ci).and_then(|name| {
+                                        c.providers
+                                            .custom_by_name(name)
+                                            .and_then(|p| p.default_model.clone())
+                                    })
+                                }
+                                _ => None,
+                            });
+                    let target = saved_model.as_deref().unwrap_or(&self.default_model_name);
+                    let selected = models.iter().position(|m| m == target).unwrap_or(0);
                     self.ps.models = models;
                     self.ps.selected_model = selected;
                     self.ps.model_filter.clear();

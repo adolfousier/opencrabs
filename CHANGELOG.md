@@ -5,6 +5,29 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.88] - 2026-03-26
+
+### Added
+- **Smart browser detection** — Auto-detect default Chromium-based browser (Chrome, Brave, Edge, Chromium) instead of hardcoded path. Feature flag docs and browser detection docs added to README
+
+### Fixed
+- **Slack/WhatsApp markdown formatting** — Messages were sent with raw markdown (`**bold**`, `~~strike~~`). New `markdown_to_mrkdwn` converter transforms to native format (`*bold*`, `~strike~`, `<url|text>`, `*Heading*`) before sending. Applied to handler response paths, streaming paths, and send tools for both Slack and WhatsApp. Discord uses standard markdown natively — no conversion needed
+- **Gemini model fetching** — Multiple root causes: `GeminiModel` struct missing `#[serde(rename_all = "camelCase")]` so `supportedGenerationMethods` never deserialized; provider index 3 (Gemini) missing from `supports_model_fetch()` match; `/models` dialog passed `None` API key when navigating between providers
+- **Model selector race condition** — Navigating between providers quickly caused stale async fetches to overwrite the current provider's model list (e.g. GPT models appearing under Claude CLI). `ModelSelectorModelsFetched` event now carries the provider index; handler discards results that don't match the currently selected provider
+- **Model selector dialog oversized** — Dialog grew to fill the entire terminal with empty space. Height now sizes to content and caps at 75% of terminal height
+- **API keys logged in plaintext** — Three locations were logging secret values: fetch entry logging, Gemini-specific logging, and `config/types.rs write_key()`. All removed — only `has_api_key=true/false` is logged now
+- **CLI session ID conflicts** — Fresh session IDs per spawn for both Claude CLI and OpenCode CLI to prevent lock conflicts
+- **CLI image routing** — CLI providers now route images through `analyze_image` instead of inline encoding
+- **CLI error surfacing** — Error results from CLI providers are now surfaced to the user. Added Slack required scopes documentation
+- **CLI cache token tracking** — Cache creation and cache read tokens excluded from context window tracking to prevent false compaction triggers
+
+### Changed
+- **Unified provider+model selection** — Extracted ~500 lines of duplicate provider/model selection logic from `/models` dialog and `/onboard` wizard into shared `ProviderSelectorState` module (`src/tui/provider_selector.rs`). Both consumers now embed this struct, eliminating sync drift between the two UIs
+
+### Testing
+- **21 Slack formatting tests** — Bold conversion, italic unchanged, strikethrough, inline code, code blocks, headings, links, mixed formatting, real-world plan messages, edge cases
+- **Onboarding test fixes** — Tests now set API key after reaching ProviderAuth step (detect_existing_key clears it on Workspace→ProviderAuth transition)
+
 ## [0.2.87] - 2026-03-26
 
 ### Added
@@ -1741,6 +1764,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.88]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.88
+[0.2.87]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.87
 [0.2.86]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.86
 [0.2.85]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.85
 [0.2.84]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.84

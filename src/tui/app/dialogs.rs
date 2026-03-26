@@ -849,9 +849,57 @@ impl App {
             api_key.is_some()
         );
 
-        // Build provider config based on selection
+        // Resolve default_model:
+        // - On final confirm (close_dialog=true): use the user's selected model
+        // - On provider switch (close_dialog=false): preserve existing config model
+        let default_model = if !close_dialog {
+            // Preserve whatever is already saved in config for this provider
+            crate::config::Config::load()
+                .ok()
+                .and_then(|c| match provider_idx {
+                    0 => c.providers.anthropic.and_then(|p| p.default_model),
+                    1 => c.providers.openai.and_then(|p| p.default_model),
+                    2 => c.providers.github.and_then(|p| p.default_model),
+                    3 => c.providers.gemini.and_then(|p| p.default_model),
+                    4 => c.providers.openrouter.and_then(|p| p.default_model),
+                    5 => c.providers.minimax.and_then(|p| p.default_model),
+                    6 => c.providers.zhipu.and_then(|p| p.default_model),
+                    7 => c.providers.claude_cli.and_then(|p| p.default_model),
+                    8 => c.providers.opencode_cli.and_then(|p| p.default_model),
+                    _ => None,
+                })
+                .unwrap_or_else(|| {
+                    provider
+                        .models
+                        .first()
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| "default".to_string())
+                })
+        } else if provider_idx >= 9 {
+            self.ps.custom_model.clone()
+        } else if !self.ps.models.is_empty() {
+            let filter = self.ps.model_filter.to_lowercase();
+            let filtered: Vec<_> = self
+                .ps
+                .models
+                .iter()
+                .filter(|m| m.to_lowercase().contains(&filter))
+                .collect();
+            filtered
+                .get(self.ps.selected_model)
+                .map(|m| m.to_string())
+                .or_else(|| self.ps.models.first().cloned())
+                .unwrap_or_else(|| self.default_model_name.clone())
+        } else if let Some(model) = provider.models.get(self.ps.selected_model) {
+            model.to_string()
+        } else {
+            provider
+                .models
+                .first()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "default".to_string())
+        };
         // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=z.ai GLM, 7=Claude CLI, 8=OpenCode CLI, 9=Custom
-        let default_model = provider.models.first().copied().unwrap_or("default");
         match provider_idx {
             0 => {
                 // Anthropic
@@ -1136,39 +1184,8 @@ impl App {
             tracing::warn!("Failed to save API key to keys.toml: {}", e);
         }
 
-        // Resolve the selected model BEFORE rebuilding the provider so the new
-        // provider instance picks up the correct model from config on disk.
-        let is_custom = provider_idx == 9;
-        let selected_model = if is_custom {
-            self.ps.custom_model.clone()
-        } else if !self.ps.models.is_empty() {
-            let filter = self.ps.model_filter.to_lowercase();
-            let filtered: Vec<_> = self
-                .ps
-                .models
-                .iter()
-                .filter(|m| m.to_lowercase().contains(&filter))
-                .collect();
-            if let Some(model) = filtered.get(self.ps.selected_model) {
-                model.to_string()
-            } else {
-                self.ps
-                    .models
-                    .first()
-                    .cloned()
-                    .unwrap_or_else(|| self.default_model_name.clone())
-            }
-        } else if let Some(model) = provider.models.get(self.ps.selected_model) {
-            model.to_string()
-        } else if let Some(model) = provider.models.first() {
-            model.to_string()
-        } else {
-            self.default_model_name.clone()
-        };
-
         // Write default_model to config BEFORE rebuild so the provider picks it up
-        if let Err(e) = crate::config::Config::write_key(section, "default_model", &selected_model)
-        {
+        if let Err(e) = crate::config::Config::write_key(section, "default_model", &default_model) {
             tracing::warn!("Failed to persist model to config: {}", e);
         }
 
@@ -1190,13 +1207,13 @@ impl App {
         }
 
         // Update app state
-        self.default_model_name = selected_model.clone();
+        self.default_model_name = default_model.clone();
 
         // Persist provider + model to current session DB record
         let agent_provider_name = self.agent_service.provider_name();
         if let Some(ref mut session) = self.current_session {
             session.provider_name = Some(agent_provider_name.clone());
-            session.model = Some(selected_model.clone());
+            session.model = Some(default_model.clone());
             let session_copy = session.clone();
             if let Err(e) = self.session_service.update_session(&session_copy).await {
                 tracing::warn!("Failed to persist provider to session: {}", e);
@@ -1224,7 +1241,7 @@ impl App {
 
             let change_msg = format!(
                 "[Model changed to {} (provider: {})]",
-                selected_model, provider_name
+                default_model, provider_name
             );
             self.push_system_message(change_msg.clone());
             self.pending_context.push(change_msg);
