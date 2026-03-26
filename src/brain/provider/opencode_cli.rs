@@ -308,17 +308,14 @@ impl Provider for OpenCodeCliProvider {
             cwd.display()
         );
 
-        // Fresh session per spawn — we manage context ourselves, and reusing
-        // session IDs causes lock conflicts on concurrent requests.
-        let session_id_str = uuid::Uuid::new_v4().to_string();
-
+        // Each `opencode run` creates a fresh session automatically.
+        // We don't pass --session (that's for continuing existing sessions).
+        // OpenCode manages its own session lifecycle — no persistence control needed.
         let mut cmd = tokio::process::Command::new(&self.opencode_path);
         cmd.arg("run")
             .arg("--format")
             .arg("json")
             .arg("--thinking")
-            .arg("--session")
-            .arg(&session_id_str)
             .arg("--model")
             .arg(&model)
             .arg("--")
