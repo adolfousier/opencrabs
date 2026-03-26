@@ -315,19 +315,22 @@ impl Provider for OpenCodeCliProvider {
         // Allow all permissions so opencode doesn't auto-reject tool calls
         // when running non-interactively (no TTY). Without this, permission
         // rejections cause opencode to exit mid-stream.
-        cmd.env("OPENCODE_PERMISSION", r#"{"*":"allow","external_directory":"allow"}"#)
-            .arg("run")
-            .arg("--format")
-            .arg("json")
-            .arg("--thinking")
-            .arg("--model")
-            .arg(&model)
-            .arg("--")
-            .arg(&prompt)
-            .current_dir(&cwd)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        cmd.env(
+            "OPENCODE_PERMISSION",
+            r#"{"*":"allow","external_directory":"allow"}"#,
+        )
+        .arg("run")
+        .arg("--format")
+        .arg("json")
+        .arg("--thinking")
+        .arg("--model")
+        .arg(&model)
+        .arg("--")
+        .arg(&prompt)
+        .current_dir(&cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
         let mut child = cmd
             .spawn()
@@ -580,11 +583,49 @@ impl Provider for OpenCodeCliProvider {
                         } else {
                             last_tool_rejected = false;
                         }
-                        tracing::debug!("opencode CLI tool_use (handled by opencode internally)");
-                        // Keep the stream alive during tool execution (can take >60s)
-                        if tx.send(Ok(StreamEvent::Ping)).await.is_err() {
-                            break;
-                        }
+
+                        // Extract tool name and input so helpers.rs can emit
+                        // ToolStarted/ToolCompleted progress events → TUI shows
+                        // expandable tool call groups.
+                        let tool_name = part
+                            .get("tool")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        let call_id = part
+                            .get("callID")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let tool_input = part
+                            .get("state")
+                            .and_then(|s| s.get("input"))
+                            .cloned()
+                            .or_else(|| part.get("input").cloned())
+                            .unwrap_or(serde_json::Value::Object(Default::default()));
+
+                        tracing::debug!(
+                            "opencode CLI tool_use: {} ({})",
+                            tool_name,
+                            call_id
+                        );
+
+                        // Emit as ContentBlock::ToolUse so the stream consumer
+                        // (helpers.rs) sees it and fires TUI progress events.
+                        let _ = tx
+                            .send(Ok(StreamEvent::ContentBlockStart {
+                                index: block_index,
+                                content_block: ContentBlock::ToolUse {
+                                    id: call_id,
+                                    name: tool_name,
+                                    input: tool_input,
+                                },
+                            }))
+                            .await;
+                        let _ = tx
+                            .send(Ok(StreamEvent::ContentBlockStop { index: block_index }))
+                            .await;
+                        block_index += 1;
                     }
                     CliEvent::ToolResult { .. } => {
                         tracing::debug!(
@@ -706,6 +747,10 @@ impl Provider for OpenCodeCliProvider {
 
     fn supports_tools(&self) -> bool {
         false // OpenCrabs handles tools — opencode is just the LLM pipe
+    }
+
+    fn cli_handles_tools(&self) -> bool {
+        true // opencode executes tools internally — tool_loop must NOT re-execute
     }
 
     fn supports_vision(&self) -> bool {
