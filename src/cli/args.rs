@@ -85,6 +85,49 @@ pub enum Commands {
         operation: LogCommands,
     },
 
+    /// Interactive CLI agent (no TUI) — multi-turn conversation in your terminal
+    Agent {
+        /// Single message mode (non-interactive)
+        #[arg(short, long)]
+        message: Option<String>,
+
+        /// Session ID to resume
+        #[arg(short, long)]
+        session: Option<String>,
+
+        /// Auto-approve all tool executions
+        #[arg(long, alias = "yolo")]
+        auto_approve: bool,
+
+        /// Output format (only for single-message mode)
+        #[arg(short, long, default_value = "text")]
+        format: OutputFormat,
+    },
+
+    /// Channel operations
+    Channel {
+        #[command(subcommand)]
+        operation: ChannelCommands,
+    },
+
+    /// Memory operations
+    Memory {
+        #[command(subcommand)]
+        operation: MemoryCommands,
+    },
+
+    /// Session management
+    Session {
+        #[command(subcommand)]
+        operation: SessionCommands,
+    },
+
+    /// OS service management (launchd/systemd)
+    Service {
+        #[command(subcommand)]
+        operation: ServiceCommands,
+    },
+
     /// Run in headless daemon mode — no TUI, channel bots only (Telegram, Discord, Slack, WhatsApp)
     /// Used by the systemd/LaunchAgent service installed during onboarding
     Daemon,
@@ -94,6 +137,16 @@ pub enum Commands {
         #[command(subcommand)]
         operation: CronCommands,
     },
+
+    /// Generate shell completions
+    Completions {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
+
+    /// Print version and exit
+    Version,
 }
 
 #[derive(Subcommand, Debug)]
@@ -199,6 +252,58 @@ pub enum CronCommands {
     },
 }
 
+#[derive(Subcommand, Debug)]
+pub enum ChannelCommands {
+    /// List configured channels and their status
+    List,
+    /// Run health checks on all enabled channels
+    Doctor,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum MemoryCommands {
+    /// List memory files in the brain directory
+    List,
+    /// Show a specific memory file
+    Get {
+        /// Memory file name (e.g. "MEMORY.md" or just "MEMORY")
+        name: String,
+    },
+    /// Show memory statistics
+    Stats,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SessionCommands {
+    /// List all sessions
+    List {
+        /// Include archived sessions
+        #[arg(short, long)]
+        all: bool,
+    },
+    /// Show session details
+    Get {
+        /// Session ID
+        id: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ServiceCommands {
+    /// Install as OS service (launchd on macOS, systemd on Linux)
+    Install,
+    /// Start the service
+    Start,
+    /// Stop the service
+    Stop,
+    /// Restart the service
+    Restart,
+    /// Show service status
+    Status,
+    /// Uninstall the service
+    Uninstall,
+}
+
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum OutputFormat {
     Text,
@@ -261,7 +366,39 @@ pub async fn run() -> Result<()> {
             auto_approve,
             format,
         }) => commands::cmd_run(&config, prompt, auto_approve, format).await,
+        Some(Commands::Agent {
+            message,
+            session: _,
+            auto_approve,
+            format,
+        }) => {
+            if let Some(msg) = message {
+                // Single message mode — same as `run`
+                commands::cmd_run(&config, msg, auto_approve, format).await
+            } else {
+                // Interactive CLI agent (no TUI)
+                commands::cmd_agent_interactive(&config, auto_approve).await
+            }
+        }
+        Some(Commands::Channel { operation }) => commands::cmd_channel(&config, operation).await,
+        Some(Commands::Memory { operation }) => commands::cmd_memory(operation).await,
+        Some(Commands::Session { operation }) => commands::cmd_session(&config, operation).await,
+        Some(Commands::Service { operation }) => commands::cmd_service(operation).await,
         Some(Commands::Daemon) => ui::cmd_daemon(&config).await,
         Some(Commands::Cron { operation }) => cron::cmd_cron(&config, operation).await,
+        Some(Commands::Completions { shell }) => {
+            use clap::CommandFactory;
+            clap_complete::generate(
+                shell,
+                &mut Cli::command(),
+                "opencrabs",
+                &mut std::io::stdout(),
+            );
+            Ok(())
+        }
+        Some(Commands::Version) => {
+            println!("opencrabs {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
     }
 }

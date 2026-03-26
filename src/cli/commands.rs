@@ -6,7 +6,10 @@ use std::sync::Arc;
 use crate::brain::BrainLoader;
 use crate::brain::prompt_builder::RuntimeInfo;
 
-use super::args::{DbCommands, LogCommands, OutputFormat};
+use super::args::{
+    ChannelCommands, DbCommands, LogCommands, MemoryCommands, OutputFormat, ServiceCommands,
+    SessionCommands,
+};
 
 /// Show system status
 pub(crate) async fn cmd_status(config: &crate::config::Config) -> Result<()> {
@@ -29,11 +32,20 @@ pub(crate) async fn cmd_status(config: &crate::config::Config) -> Result<()> {
 
     // Brain
     let brain_path = BrainLoader::resolve_path();
-    let brain_files: Vec<&str> = ["persona.md", "system.md", "IDENTITY.md", "USER.md", "MEMORY.md", "AGENTS.md", "TOOLS.md", "SOUL.md"]
-        .iter()
-        .filter(|f| brain_path.join(f).exists())
-        .copied()
-        .collect();
+    let brain_files: Vec<&str> = [
+        "persona.md",
+        "system.md",
+        "IDENTITY.md",
+        "USER.md",
+        "MEMORY.md",
+        "AGENTS.md",
+        "TOOLS.md",
+        "SOUL.md",
+    ]
+    .iter()
+    .filter(|f| brain_path.join(f).exists())
+    .copied()
+    .collect();
     if brain_files.is_empty() {
         println!("  Brain:     no files found at {}", brain_path.display());
     } else {
@@ -47,9 +59,7 @@ pub(crate) async fn cmd_status(config: &crate::config::Config) -> Result<()> {
     // Database
     let db_path = &config.database.path;
     if db_path.exists() {
-        let size = std::fs::metadata(db_path)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let size = std::fs::metadata(db_path).map(|m| m.len()).unwrap_or(0);
         let size_str = if size > 1_048_576 {
             format!("{:.1} MB", size as f64 / 1_048_576.0)
         } else {
@@ -149,12 +159,23 @@ pub(crate) async fn cmd_status(config: &crate::config::Config) -> Result<()> {
         .unwrap_or_default();
     if log_dir.exists() {
         let log_count = std::fs::read_dir(&log_dir)
-            .map(|rd| rd.filter_map(|e| e.ok()).filter(|e| {
-                e.path().extension().map(|ext| ext == "log").unwrap_or(false)
-            }).count())
+            .map(|rd| {
+                rd.filter_map(|e| e.ok())
+                    .filter(|e| {
+                        e.path()
+                            .extension()
+                            .map(|ext| ext == "log")
+                            .unwrap_or(false)
+                    })
+                    .count()
+            })
             .unwrap_or(0);
         if log_count > 0 {
-            println!("  Logs:      {} file(s) in {}", log_count, log_dir.display());
+            println!(
+                "  Logs:      {} file(s) in {}",
+                log_count,
+                log_dir.display()
+            );
         }
     }
 
@@ -174,8 +195,7 @@ pub(crate) async fn cmd_doctor(config: &crate::config::Config) -> Result<()> {
     let mut warn = 0u32;
 
     // 1. Config file
-    let config_path = dirs::config_dir()
-        .map(|d| d.join("opencrabs").join("config.toml"));
+    let config_path = dirs::config_dir().map(|d| d.join("opencrabs").join("config.toml"));
     if let Some(ref p) = config_path
         && p.exists()
     {
@@ -229,27 +249,46 @@ pub(crate) async fn cmd_doctor(config: &crate::config::Config) -> Result<()> {
             }
         }
     } else {
-        println!("  ❌ Database: not found at {} (run `opencrabs db init`)", db_path.display());
+        println!(
+            "  ❌ Database: not found at {} (run `opencrabs db init`)",
+            db_path.display()
+        );
         fail += 1;
     }
 
     // 5. Brain files
     let brain_path = BrainLoader::resolve_path();
     if brain_path.exists() {
-        let brain_files: Vec<&str> = ["persona.md", "system.md", "IDENTITY.md", "USER.md", "MEMORY.md"]
-            .iter()
-            .filter(|f| brain_path.join(f).exists())
-            .copied()
-            .collect();
+        let brain_files: Vec<&str> = [
+            "persona.md",
+            "system.md",
+            "IDENTITY.md",
+            "USER.md",
+            "MEMORY.md",
+        ]
+        .iter()
+        .filter(|f| brain_path.join(f).exists())
+        .copied()
+        .collect();
         if brain_files.is_empty() {
-            println!("  ⚠️  Brain: directory exists but no brain files found at {}", brain_path.display());
+            println!(
+                "  ⚠️  Brain: directory exists but no brain files found at {}",
+                brain_path.display()
+            );
             warn += 1;
         } else {
-            println!("  ✅ Brain: {} files ({})", brain_files.len(), brain_files.join(", "));
+            println!(
+                "  ✅ Brain: {} files ({})",
+                brain_files.len(),
+                brain_files.join(", ")
+            );
             pass += 1;
         }
     } else {
-        println!("  ⚠️  Brain: directory not found at {}", brain_path.display());
+        println!(
+            "  ⚠️  Brain: directory not found at {}",
+            brain_path.display()
+        );
         warn += 1;
     }
 
@@ -259,7 +298,13 @@ pub(crate) async fn cmd_doctor(config: &crate::config::Config) -> Result<()> {
 
     // Telegram
     if config.channels.telegram.enabled {
-        if config.channels.telegram.token.as_ref().is_some_and(|t| !t.is_empty()) {
+        if config
+            .channels
+            .telegram
+            .token
+            .as_ref()
+            .is_some_and(|t| !t.is_empty())
+        {
             println!("    ✅ Telegram: enabled, token set");
             pass += 1;
         } else {
@@ -272,7 +317,13 @@ pub(crate) async fn cmd_doctor(config: &crate::config::Config) -> Result<()> {
 
     // Discord
     if config.channels.discord.enabled {
-        if config.channels.discord.token.as_ref().is_some_and(|t| !t.is_empty()) {
+        if config
+            .channels
+            .discord
+            .token
+            .as_ref()
+            .is_some_and(|t| !t.is_empty())
+        {
             println!("    ✅ Discord: enabled, token set");
             pass += 1;
         } else {
@@ -285,8 +336,18 @@ pub(crate) async fn cmd_doctor(config: &crate::config::Config) -> Result<()> {
 
     // Slack
     if config.channels.slack.enabled {
-        let has_bot = config.channels.slack.token.as_ref().is_some_and(|t| !t.is_empty());
-        let has_app = config.channels.slack.app_token.as_ref().is_some_and(|t| !t.is_empty());
+        let has_bot = config
+            .channels
+            .slack
+            .token
+            .as_ref()
+            .is_some_and(|t| !t.is_empty());
+        let has_app = config
+            .channels
+            .slack
+            .app_token
+            .as_ref()
+            .is_some_and(|t| !t.is_empty());
         if has_bot && has_app {
             println!("    ✅ Slack: enabled, bot + app tokens set");
             pass += 1;
@@ -294,7 +355,10 @@ pub(crate) async fn cmd_doctor(config: &crate::config::Config) -> Result<()> {
             let missing: Vec<&str> = [
                 (!has_bot).then_some("bot token"),
                 (!has_app).then_some("app token"),
-            ].into_iter().flatten().collect();
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
             println!("    ❌ Slack: enabled but missing {}", missing.join(", "));
             fail += 1;
         }
@@ -312,8 +376,18 @@ pub(crate) async fn cmd_doctor(config: &crate::config::Config) -> Result<()> {
 
     // Trello
     if config.channels.trello.enabled {
-        let has_token = config.channels.trello.token.as_ref().is_some_and(|t| !t.is_empty());
-        let has_app_token = config.channels.trello.app_token.as_ref().is_some_and(|t| !t.is_empty());
+        let has_token = config
+            .channels
+            .trello
+            .token
+            .as_ref()
+            .is_some_and(|t| !t.is_empty());
+        let has_app_token = config
+            .channels
+            .trello
+            .app_token
+            .as_ref()
+            .is_some_and(|t| !t.is_empty());
         if has_token && has_app_token {
             println!("    ✅ Trello: enabled, token + app token set");
             pass += 1;
@@ -906,6 +980,803 @@ pub(crate) async fn cmd_logs(operation: LogCommands) -> Result<()> {
                     .arg(&log_dir)
                     .spawn()
                     .context("Failed to open directory")?;
+            }
+
+            Ok(())
+        }
+    }
+}
+
+/// Interactive CLI agent — multi-turn conversation without TUI
+pub(crate) async fn cmd_agent_interactive(
+    config: &crate::config::Config,
+    auto_approve: bool,
+) -> Result<()> {
+    use crate::{
+        brain::{
+            agent::AgentService,
+            tools::{
+                bash::BashTool, brave_search::BraveSearchTool, code_exec::CodeExecTool,
+                config_tool::ConfigTool, context::ContextTool, doc_parser::DocParserTool,
+                edit::EditTool, exa_search::ExaSearchTool, glob::GlobTool, grep::GrepTool,
+                http::HttpClientTool, ls::LsTool, memory_search::MemorySearchTool,
+                notebook::NotebookEditTool, plan_tool::PlanTool, read::ReadTool,
+                registry::ToolRegistry, session_search::SessionSearchTool,
+                slash_command::SlashCommandTool, task::TaskTool, web_search::WebSearchTool,
+                write::WriteTool,
+            },
+        },
+        db::Database,
+        services::{ServiceContext, SessionService},
+    };
+    use std::io::{self, BufRead, Write};
+
+    let _ = auto_approve; // TODO: wire into approval callback
+
+    let db = Database::connect(&config.database.path).await?;
+    db.run_migrations().await?;
+
+    let provider = crate::brain::provider::create_provider(config)?;
+
+    let tool_registry = ToolRegistry::new();
+    tool_registry.register(Arc::new(ReadTool));
+    tool_registry.register(Arc::new(WriteTool));
+    tool_registry.register(Arc::new(EditTool));
+    tool_registry.register(Arc::new(BashTool));
+    tool_registry.register(Arc::new(LsTool));
+    tool_registry.register(Arc::new(GlobTool));
+    tool_registry.register(Arc::new(GrepTool));
+    tool_registry.register(Arc::new(WebSearchTool));
+    tool_registry.register(Arc::new(CodeExecTool));
+    tool_registry.register(Arc::new(NotebookEditTool));
+    tool_registry.register(Arc::new(DocParserTool));
+    tool_registry.register(Arc::new(TaskTool));
+    tool_registry.register(Arc::new(ContextTool));
+    tool_registry.register(Arc::new(HttpClientTool));
+    tool_registry.register(Arc::new(PlanTool));
+    tool_registry.register(Arc::new(MemorySearchTool));
+    tool_registry.register(Arc::new(SessionSearchTool::new(db.pool().clone())));
+    tool_registry.register(Arc::new(ConfigTool));
+    tool_registry.register(Arc::new(SlashCommandTool));
+    let exa_key = config
+        .providers
+        .web_search
+        .as_ref()
+        .and_then(|ws| ws.exa.as_ref())
+        .and_then(|p| p.api_key.clone())
+        .filter(|k| !k.is_empty());
+    tool_registry.register(Arc::new(ExaSearchTool::new(exa_key)));
+    if let Some(brave_cfg) = config
+        .providers
+        .web_search
+        .as_ref()
+        .and_then(|ws| ws.brave.as_ref())
+        && brave_cfg.enabled
+        && let Some(brave_key) = brave_cfg.api_key.clone()
+    {
+        tool_registry.register(Arc::new(BraveSearchTool::new(brave_key)));
+    }
+
+    let subagent_manager = Arc::new(crate::brain::tools::subagent::SubAgentManager::new());
+    tool_registry.register(Arc::new(
+        crate::brain::tools::subagent::SpawnAgentTool::new(subagent_manager.clone()),
+    ));
+    tool_registry.register(Arc::new(crate::brain::tools::subagent::WaitAgentTool::new(
+        subagent_manager.clone(),
+    )));
+    tool_registry.register(Arc::new(crate::brain::tools::subagent::SendInputTool::new(
+        subagent_manager.clone(),
+    )));
+    tool_registry.register(Arc::new(
+        crate::brain::tools::subagent::CloseAgentTool::new(subagent_manager.clone()),
+    ));
+    tool_registry.register(Arc::new(
+        crate::brain::tools::subagent::ResumeAgentTool::new(subagent_manager.clone()),
+    ));
+
+    let brain_path = BrainLoader::resolve_path();
+    let brain_loader = BrainLoader::new(brain_path);
+    let runtime_info = RuntimeInfo {
+        model: Some(provider.default_model().to_string()),
+        provider: Some(provider.name().to_string()),
+        working_directory: Some(
+            std::env::current_dir()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
+        ),
+    };
+    let system_brain = brain_loader.build_system_brain(Some(&runtime_info), None);
+
+    let service_context = ServiceContext::new(db.pool().clone());
+    let agent_service = AgentService::new(provider.clone(), service_context.clone())
+        .with_tool_registry(Arc::new(tool_registry))
+        .with_system_brain(system_brain);
+
+    let session_service = SessionService::new(service_context);
+    let session = session_service
+        .create_session(Some("CLI Agent".to_string()))
+        .await?;
+
+    println!(
+        "🦀 OpenCrabs Agent — {} ({})",
+        provider.name(),
+        provider.default_model()
+    );
+    println!("Type /exit or Ctrl+D to quit\n");
+
+    let stdin = io::stdin();
+    let mut reader = stdin.lock();
+
+    loop {
+        print!("❯ ");
+        io::stdout().flush()?;
+
+        let mut input = String::new();
+        if reader.read_line(&mut input)? == 0 {
+            println!();
+            break;
+        }
+
+        let input = input.trim();
+        if input.is_empty() {
+            continue;
+        }
+        if input == "/exit" || input == "/quit" || input == "/q" {
+            break;
+        }
+
+        match agent_service
+            .send_message(session.id, input.to_string(), None)
+            .await
+        {
+            Ok(response) => {
+                println!("\n{}\n", response.content);
+                println!(
+                    "  tokens: {} | cost: ${:.6}\n",
+                    response.usage.input_tokens + response.usage.output_tokens,
+                    response.cost
+                );
+            }
+            Err(e) => {
+                eprintln!("\n  error: {e}\n");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Channel operations
+pub(crate) async fn cmd_channel(
+    config: &crate::config::Config,
+    operation: ChannelCommands,
+) -> Result<()> {
+    match operation {
+        ChannelCommands::List => {
+            println!("🦀 Configured Channels\n");
+
+            let channels: Vec<(&str, bool, &str)> = vec![
+                (
+                    "Telegram",
+                    config.channels.telegram.enabled,
+                    if config
+                        .channels
+                        .telegram
+                        .token
+                        .as_ref()
+                        .is_some_and(|t| !t.is_empty())
+                    {
+                        "token set"
+                    } else {
+                        "no token"
+                    },
+                ),
+                (
+                    "Discord",
+                    config.channels.discord.enabled,
+                    if config
+                        .channels
+                        .discord
+                        .token
+                        .as_ref()
+                        .is_some_and(|t| !t.is_empty())
+                    {
+                        "token set"
+                    } else {
+                        "no token"
+                    },
+                ),
+                (
+                    "Slack",
+                    config.channels.slack.enabled,
+                    if config
+                        .channels
+                        .slack
+                        .token
+                        .as_ref()
+                        .is_some_and(|t| !t.is_empty())
+                        && config
+                            .channels
+                            .slack
+                            .app_token
+                            .as_ref()
+                            .is_some_and(|t| !t.is_empty())
+                    {
+                        "bot + app tokens set"
+                    } else {
+                        "missing tokens"
+                    },
+                ),
+                (
+                    "WhatsApp",
+                    config.channels.whatsapp.enabled,
+                    "pairs at runtime",
+                ),
+                (
+                    "Trello",
+                    config.channels.trello.enabled,
+                    if config
+                        .channels
+                        .trello
+                        .token
+                        .as_ref()
+                        .is_some_and(|t| !t.is_empty())
+                    {
+                        "token set"
+                    } else {
+                        "no token"
+                    },
+                ),
+            ];
+
+            for (name, enabled, detail) in channels {
+                let status = if enabled { "✅" } else { "⬚ " };
+                let state = if enabled { "enabled" } else { "disabled" };
+                println!("  {status} {name:<12} {state:<10} ({detail})");
+            }
+            println!();
+            Ok(())
+        }
+        ChannelCommands::Doctor => {
+            println!("🦀 Channel Health Check\n");
+            cmd_doctor_channels(config);
+            println!();
+            Ok(())
+        }
+    }
+}
+
+/// Shared channel diagnostics
+fn cmd_doctor_channels(config: &crate::config::Config) {
+    if config.channels.telegram.enabled {
+        if config
+            .channels
+            .telegram
+            .token
+            .as_ref()
+            .is_some_and(|t| !t.is_empty())
+        {
+            println!("  ✅ Telegram: enabled, token set");
+        } else {
+            println!("  ❌ Telegram: enabled but no bot token");
+        }
+    } else {
+        println!("  ⬚  Telegram: disabled");
+    }
+
+    if config.channels.discord.enabled {
+        if config
+            .channels
+            .discord
+            .token
+            .as_ref()
+            .is_some_and(|t| !t.is_empty())
+        {
+            println!("  ✅ Discord: enabled, token set");
+        } else {
+            println!("  ❌ Discord: enabled but no bot token");
+        }
+    } else {
+        println!("  ⬚  Discord: disabled");
+    }
+
+    if config.channels.slack.enabled {
+        let has_bot = config
+            .channels
+            .slack
+            .token
+            .as_ref()
+            .is_some_and(|t| !t.is_empty());
+        let has_app = config
+            .channels
+            .slack
+            .app_token
+            .as_ref()
+            .is_some_and(|t| !t.is_empty());
+        if has_bot && has_app {
+            println!("  ✅ Slack: enabled, bot + app tokens set");
+        } else {
+            let missing: Vec<&str> = [
+                (!has_bot).then_some("bot token"),
+                (!has_app).then_some("app token"),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+            println!("  ❌ Slack: enabled but missing {}", missing.join(", "));
+        }
+    } else {
+        println!("  ⬚  Slack: disabled");
+    }
+
+    if config.channels.whatsapp.enabled {
+        println!("  ✅ WhatsApp: enabled (pairs at runtime)");
+    } else {
+        println!("  ⬚  WhatsApp: disabled");
+    }
+
+    if config.channels.trello.enabled {
+        let has_token = config
+            .channels
+            .trello
+            .token
+            .as_ref()
+            .is_some_and(|t| !t.is_empty());
+        let has_app_token = config
+            .channels
+            .trello
+            .app_token
+            .as_ref()
+            .is_some_and(|t| !t.is_empty());
+        if has_token && has_app_token {
+            println!("  ✅ Trello: enabled, token + app token set");
+        } else {
+            println!("  ❌ Trello: enabled but missing credentials");
+        }
+    } else {
+        println!("  ⬚  Trello: disabled");
+    }
+}
+
+/// Memory operations
+pub(crate) async fn cmd_memory(operation: MemoryCommands) -> Result<()> {
+    let brain_path = BrainLoader::resolve_path();
+
+    match operation {
+        MemoryCommands::List => {
+            println!("🦀 Memory Files\n");
+
+            let brain_files = [
+                "MEMORY.md",
+                "IDENTITY.md",
+                "USER.md",
+                "AGENTS.md",
+                "TOOLS.md",
+                "SOUL.md",
+                "persona.md",
+                "system.md",
+            ];
+
+            println!("  Brain files:");
+            for name in &brain_files {
+                let path = brain_path.join(name);
+                if path.exists() {
+                    let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                    println!("    ✅ {name:<16} ({size} bytes)");
+                }
+            }
+
+            let memory_dir = brain_path.join("memory");
+            if memory_dir.exists() {
+                let mut count = 0;
+                let mut total_size = 0u64;
+                if let Ok(entries) = std::fs::read_dir(&memory_dir) {
+                    for entry in entries.flatten() {
+                        if entry
+                            .path()
+                            .extension()
+                            .is_some_and(|e| e == "md" || e == "txt")
+                        {
+                            count += 1;
+                            total_size += entry.metadata().map(|m| m.len()).unwrap_or(0);
+                        }
+                    }
+                }
+                if count > 0 {
+                    println!(
+                        "\n  Memory directory: {count} file(s), {:.1} KB",
+                        total_size as f64 / 1024.0
+                    );
+                    println!("    {}", memory_dir.display());
+                }
+            }
+
+            println!();
+            Ok(())
+        }
+        MemoryCommands::Get { name } => {
+            let name = if name.ends_with(".md") {
+                name
+            } else {
+                format!("{name}.md")
+            };
+
+            let path = brain_path.join(&name);
+            let path = if path.exists() {
+                path
+            } else {
+                let alt = brain_path.join("memory").join(&name);
+                if alt.exists() {
+                    alt
+                } else {
+                    anyhow::bail!("Memory file not found: {name}");
+                }
+            };
+
+            let content = std::fs::read_to_string(&path)
+                .with_context(|| format!("Failed to read {}", path.display()))?;
+            println!("{content}");
+            Ok(())
+        }
+        MemoryCommands::Stats => {
+            println!("🦀 Memory Statistics\n");
+
+            let brain_files: Vec<_> = [
+                "MEMORY.md",
+                "IDENTITY.md",
+                "USER.md",
+                "AGENTS.md",
+                "TOOLS.md",
+                "SOUL.md",
+            ]
+            .iter()
+            .filter(|f| brain_path.join(f).exists())
+            .collect();
+
+            let brain_size: u64 = brain_files
+                .iter()
+                .map(|f| {
+                    std::fs::metadata(brain_path.join(f))
+                        .map(|m| m.len())
+                        .unwrap_or(0)
+                })
+                .sum();
+            println!(
+                "  Brain files:    {} ({:.1} KB)",
+                brain_files.len(),
+                brain_size as f64 / 1024.0
+            );
+
+            let memory_dir = brain_path.join("memory");
+            if memory_dir.exists() {
+                let (count, size) = std::fs::read_dir(&memory_dir)
+                    .map(|rd| {
+                        rd.flatten().fold((0u32, 0u64), |(c, s), e| {
+                            (c + 1, s + e.metadata().map(|m| m.len()).unwrap_or(0))
+                        })
+                    })
+                    .unwrap_or((0, 0));
+                println!("  Memory entries: {count} ({:.1} KB)", size as f64 / 1024.0);
+            }
+
+            println!("  Brain path:     {}", brain_path.display());
+            println!();
+            Ok(())
+        }
+    }
+}
+
+/// Session management
+pub(crate) async fn cmd_session(
+    config: &crate::config::Config,
+    operation: SessionCommands,
+) -> Result<()> {
+    use crate::{
+        db::Database,
+        services::{ServiceContext, SessionService},
+    };
+
+    let db = Database::connect(&config.database.path).await?;
+    db.run_migrations().await?;
+    let service_context = ServiceContext::new(db.pool().clone());
+    let session_svc = SessionService::new(service_context);
+
+    match operation {
+        SessionCommands::List { all } => {
+            use crate::db::repository::SessionListOptions;
+
+            println!("🦀 Sessions\n");
+            let options = SessionListOptions {
+                include_archived: all,
+                ..Default::default()
+            };
+            let sessions = session_svc.list_sessions(options).await?;
+
+            if sessions.is_empty() {
+                println!("  No sessions found");
+            } else {
+                for s in &sessions {
+                    let title = s.title.as_deref().unwrap_or("untitled");
+                    let provider = s.provider_name.as_deref().unwrap_or("-");
+                    let model = s.model.as_deref().unwrap_or("-");
+                    let tokens = s.token_count;
+                    let archived = if s.archived_at.is_some() {
+                        " [archived]"
+                    } else {
+                        ""
+                    };
+                    println!(
+                        "  {} {:<30} {}/{} ({}tok){archived}",
+                        &s.id.to_string()[..8],
+                        title,
+                        provider,
+                        model,
+                        tokens,
+                    );
+                }
+                println!("\n  {} session(s)", sessions.len());
+            }
+            println!();
+            Ok(())
+        }
+        SessionCommands::Get { id } => {
+            let uuid = uuid::Uuid::parse_str(&id).context("Invalid session ID")?;
+            match session_svc.get_session(uuid).await? {
+                Some(s) => {
+                    println!("🦀 Session {}\n", s.id);
+                    println!("  Title:    {}", s.title.as_deref().unwrap_or("untitled"));
+                    println!("  Provider: {}", s.provider_name.as_deref().unwrap_or("-"));
+                    println!("  Model:    {}", s.model.as_deref().unwrap_or("-"));
+                    println!("  Tokens:   {}", s.token_count);
+                    println!("  Cost:     ${:.6}", s.total_cost);
+                    println!("  Archived: {}", s.archived_at.is_some());
+                    println!("  Created:  {}", s.created_at);
+                    println!("  Updated:  {}", s.updated_at);
+                    println!();
+                }
+                None => println!("Session not found: {id}"),
+            }
+            Ok(())
+        }
+    }
+}
+
+/// OS service management
+pub(crate) async fn cmd_service(operation: ServiceCommands) -> Result<()> {
+    let binary = std::env::current_exe().context("Could not determine binary path")?;
+    let binary_str = binary.display().to_string();
+
+    match operation {
+        ServiceCommands::Install => {
+            #[cfg(target_os = "macos")]
+            {
+                let plist_name = "com.opencrabs.daemon";
+                let plist_path = dirs::home_dir()
+                    .context("No home dir")?
+                    .join("Library/LaunchAgents")
+                    .join(format!("{plist_name}.plist"));
+
+                let plist = format!(
+                    r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{plist_name}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{binary_str}</string>
+        <string>daemon</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/opencrabs-daemon.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/opencrabs-daemon.err.log</string>
+</dict>
+</plist>"#
+                );
+
+                if let Some(parent) = plist_path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(&plist_path, plist)?;
+                println!("✅ Installed LaunchAgent: {}", plist_path.display());
+                println!("   Run: opencrabs service start");
+            }
+
+            #[cfg(target_os = "linux")]
+            {
+                let unit_path = dirs::home_dir()
+                    .context("No home dir")?
+                    .join(".config/systemd/user/opencrabs.service");
+
+                let unit = format!(
+                    r#"[Unit]
+Description=OpenCrabs Daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart={binary_str} daemon
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+"#
+                );
+
+                if let Some(parent) = unit_path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(&unit_path, unit)?;
+                std::process::Command::new("systemctl")
+                    .args(["--user", "daemon-reload"])
+                    .status()?;
+                println!("✅ Installed systemd user unit: {}", unit_path.display());
+                println!("   Run: opencrabs service start");
+            }
+
+            #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+            {
+                let _ = binary_str;
+                anyhow::bail!("Service install not supported on this platform");
+            }
+
+            Ok(())
+        }
+        ServiceCommands::Start => {
+            #[cfg(target_os = "macos")]
+            {
+                std::process::Command::new("launchctl")
+                    .args(["load", "-w"])
+                    .arg(
+                        dirs::home_dir()
+                            .context("No home dir")?
+                            .join("Library/LaunchAgents/com.opencrabs.daemon.plist"),
+                    )
+                    .status()?;
+                println!("✅ Started OpenCrabs daemon");
+            }
+
+            #[cfg(target_os = "linux")]
+            {
+                std::process::Command::new("systemctl")
+                    .args(["--user", "start", "opencrabs"])
+                    .status()?;
+                println!("✅ Started OpenCrabs daemon");
+            }
+
+            Ok(())
+        }
+        ServiceCommands::Stop => {
+            #[cfg(target_os = "macos")]
+            {
+                std::process::Command::new("launchctl")
+                    .args(["unload"])
+                    .arg(
+                        dirs::home_dir()
+                            .context("No home dir")?
+                            .join("Library/LaunchAgents/com.opencrabs.daemon.plist"),
+                    )
+                    .status()?;
+                println!("✅ Stopped OpenCrabs daemon");
+            }
+
+            #[cfg(target_os = "linux")]
+            {
+                std::process::Command::new("systemctl")
+                    .args(["--user", "stop", "opencrabs"])
+                    .status()?;
+                println!("✅ Stopped OpenCrabs daemon");
+            }
+
+            Ok(())
+        }
+        ServiceCommands::Restart => {
+            // Inline stop + start to avoid recursive async
+            #[cfg(target_os = "macos")]
+            {
+                let plist = dirs::home_dir()
+                    .context("No home dir")?
+                    .join("Library/LaunchAgents/com.opencrabs.daemon.plist");
+                let _ = std::process::Command::new("launchctl")
+                    .args(["unload"])
+                    .arg(&plist)
+                    .status();
+                std::process::Command::new("launchctl")
+                    .args(["load", "-w"])
+                    .arg(&plist)
+                    .status()?;
+                println!("✅ Restarted OpenCrabs daemon");
+            }
+            #[cfg(target_os = "linux")]
+            {
+                std::process::Command::new("systemctl")
+                    .args(["--user", "restart", "opencrabs"])
+                    .status()?;
+                println!("✅ Restarted OpenCrabs daemon");
+            }
+            Ok(())
+        }
+        ServiceCommands::Status => {
+            #[cfg(target_os = "macos")]
+            {
+                let output = std::process::Command::new("launchctl")
+                    .args(["list", "com.opencrabs.daemon"])
+                    .output()?;
+                if output.status.success() {
+                    println!("✅ OpenCrabs daemon is running");
+                    println!("{}", String::from_utf8_lossy(&output.stdout));
+                } else {
+                    println!("⬚  OpenCrabs daemon is not running");
+                }
+            }
+
+            #[cfg(target_os = "linux")]
+            {
+                let output = std::process::Command::new("systemctl")
+                    .args(["--user", "status", "opencrabs"])
+                    .output()?;
+                println!("{}", String::from_utf8_lossy(&output.stdout));
+            }
+
+            Ok(())
+        }
+        ServiceCommands::Uninstall => {
+            // Stop first (ignore errors)
+            #[cfg(target_os = "macos")]
+            {
+                let plist = dirs::home_dir()
+                    .context("No home dir")?
+                    .join("Library/LaunchAgents/com.opencrabs.daemon.plist");
+                let _ = std::process::Command::new("launchctl")
+                    .args(["unload"])
+                    .arg(&plist)
+                    .status();
+            }
+            #[cfg(target_os = "linux")]
+            {
+                let _ = std::process::Command::new("systemctl")
+                    .args(["--user", "stop", "opencrabs"])
+                    .status();
+            }
+
+            #[cfg(target_os = "macos")]
+            {
+                let plist_path = dirs::home_dir()
+                    .context("No home dir")?
+                    .join("Library/LaunchAgents/com.opencrabs.daemon.plist");
+                if plist_path.exists() {
+                    std::fs::remove_file(&plist_path)?;
+                    println!("✅ Removed LaunchAgent: {}", plist_path.display());
+                } else {
+                    println!("⬚  LaunchAgent not found");
+                }
+            }
+
+            #[cfg(target_os = "linux")]
+            {
+                std::process::Command::new("systemctl")
+                    .args(["--user", "disable", "opencrabs"])
+                    .status()?;
+                let unit_path = dirs::home_dir()
+                    .context("No home dir")?
+                    .join(".config/systemd/user/opencrabs.service");
+                if unit_path.exists() {
+                    std::fs::remove_file(&unit_path)?;
+                    std::process::Command::new("systemctl")
+                        .args(["--user", "daemon-reload"])
+                        .status()?;
+                    println!("✅ Removed systemd unit: {}", unit_path.display());
+                } else {
+                    println!("⬚  Systemd unit not found");
+                }
             }
 
             Ok(())

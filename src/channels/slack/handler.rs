@@ -848,10 +848,11 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                             } else {
                                 channel_id.clone()
                             };
-                            state.extra_sessions.lock().await.insert(
-                                key,
-                                (new_session.id, std::time::Instant::now()),
-                            );
+                            state
+                                .extra_sessions
+                                .lock()
+                                .await
+                                .insert(key, (new_session.id, std::time::Instant::now()));
                         }
                         state
                             .slack_state
