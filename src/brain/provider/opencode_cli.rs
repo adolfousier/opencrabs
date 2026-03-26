@@ -294,12 +294,10 @@ impl Provider for OpenCodeCliProvider {
         let prompt = Self::build_prompt(&request);
         let model = request.model.clone();
 
-        let cwd = request
-            .working_directory
-            .as_deref()
-            .map(std::path::PathBuf::from)
-            .filter(|p| p.is_dir())
-            .unwrap_or_else(|| dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/")));
+        // Always spawn at user home — macOS TCC scopes file access based on
+        // the process's working directory context. Spawning at ~/ ensures the
+        // child inherits the terminal's Full Disk Access grant for ~/Downloads/ etc.
+        let cwd = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/"));
 
         tracing::info!(
             "Spawning opencode CLI: model={}, prompt_len={}, cwd={}",
@@ -309,8 +307,9 @@ impl Provider for OpenCodeCliProvider {
         );
 
         // Each `opencode run` creates a fresh session automatically.
-        // We don't pass --session (that's for continuing existing sessions).
-        // OpenCode manages its own session lifecycle — no persistence control needed.
+        // We don't pass --session/--continue (that's for continuing existing sessions).
+        // Force --dir to user home so opencode's tool sandbox can access ~/Downloads/ etc.
+        // Without this, opencode may resume an existing session locked to a different dir.
         let mut cmd = tokio::process::Command::new(&self.opencode_path);
         // Allow all permissions so opencode doesn't auto-reject tool calls
         // when running non-interactively (no TTY). Without this, permission
@@ -323,6 +322,8 @@ impl Provider for OpenCodeCliProvider {
         .arg("--format")
         .arg("json")
         .arg("--thinking")
+        .arg("--dir")
+        .arg(cwd.to_string_lossy().as_ref())
         .arg("--model")
         .arg(&model)
         .arg("--")
@@ -604,11 +605,7 @@ impl Provider for OpenCodeCliProvider {
                             .or_else(|| part.get("input").cloned())
                             .unwrap_or(serde_json::Value::Object(Default::default()));
 
-                        tracing::debug!(
-                            "opencode CLI tool_use: {} ({})",
-                            tool_name,
-                            call_id
-                        );
+                        tracing::debug!("opencode CLI tool_use: {} ({})", tool_name, call_id);
 
                         // Emit as ContentBlock::ToolUse so the stream consumer
                         // (helpers.rs) sees it and fires TUI progress events.
