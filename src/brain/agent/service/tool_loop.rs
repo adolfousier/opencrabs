@@ -958,8 +958,11 @@ impl AgentService {
 
                 if iteration > 0 {
                     tracing::info!("Agent completed after {} tool iterations", iteration);
-                    // Emit final text so TUI persists it as a permanent message
-                    if !iteration_text.is_empty()
+                    // Emit final text so TUI persists it as a permanent message.
+                    // CLI providers: helpers.rs already flushed cli_unflushed_text
+                    // as IntermediateText at stream end — skip to avoid duplication.
+                    if !is_cli_provider
+                        && !iteration_text.is_empty()
                         && let Some(ref cb) = progress_callback
                     {
                         cb(
