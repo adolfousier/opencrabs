@@ -551,11 +551,7 @@ pub(crate) async fn handle_message(
         } else {
             match session_svc.create_session(Some(session_title)).await {
                 Ok(session) => {
-                    tracing::info!(
-                        "WhatsApp: created new session {} for {}",
-                        session.id,
-                        phone
-                    );
+                    tracing::info!("WhatsApp: created new session {} for {}", session.id, phone);
                     session.id
                 }
                 Err(e) => {
@@ -593,8 +589,7 @@ pub(crate) async fn handle_message(
             ChannelCommand::NewSession => {
                 let session_title = format!("WhatsApp: {}", phone);
                 if !is_owner
-                    && let Ok(Some(old)) =
-                        session_svc.find_session_by_title(&session_title).await
+                    && let Ok(Some(old)) = session_svc.find_session_by_title(&session_title).await
                 {
                     let _ = session_svc.archive_session(old.id).await;
                 }

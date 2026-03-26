@@ -213,6 +213,7 @@ mod fallback_runtime {
             stream: false,
             metadata: None,
             working_directory: None,
+            session_id: None,
         }
     }
 
