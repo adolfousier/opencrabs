@@ -50,6 +50,25 @@ impl SessionRepository {
             .context("Failed to find session")
     }
 
+    /// Find most recent non-archived session by exact title.
+    pub async fn find_by_title(&self, title: &str) -> Result<Option<Session>> {
+        let t = title.to_string();
+        self.pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.prepare_cached(
+                    "SELECT * FROM sessions WHERE title = ?1 AND archived_at IS NULL ORDER BY updated_at DESC LIMIT 1",
+                )?
+                .query_row(params![t], Session::from_row)
+                .optional()
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to find session by title")
+    }
+
     /// Create a new session
     pub async fn create(&self, session: &Session) -> Result<()> {
         let s = session.clone();

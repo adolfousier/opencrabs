@@ -205,6 +205,12 @@ impl SessionService {
         Ok(())
     }
 
+    /// Find most recent non-archived session by exact title (used for persistent channel sessions).
+    pub async fn find_session_by_title(&self, title: &str) -> Result<Option<Session>> {
+        let repo = SessionRepository::new(self.context.pool());
+        repo.find_by_title(title).await
+    }
+
     /// Get the most recent active session
     pub async fn get_most_recent_session(&self) -> Result<Option<Session>> {
         let repo = SessionRepository::new(self.context.pool());
