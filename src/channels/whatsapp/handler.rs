@@ -12,7 +12,7 @@ use crate::db::models::ChannelMessage as DbChannelMessage;
 use crate::services::SessionService;
 use crate::utils::sanitize::redact_secrets;
 use crate::utils::truncate_str;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -252,7 +252,6 @@ pub(crate) async fn handle_message(
     client: Arc<Client>,
     agent: Arc<AgentService>,
     session_svc: SessionService,
-    extra_sessions: Arc<Mutex<HashMap<String, (Uuid, std::time::Instant)>>>,
     shared_session: Arc<Mutex<Option<Uuid>>>,
     wa_state: Arc<WhatsAppState>,
     config_rx: tokio::sync::watch::Receiver<Config>,
@@ -524,33 +523,39 @@ pub(crate) async fn handle_message(
             }
         }
     } else {
-        let mut map = extra_sessions.lock().await;
-        if let Some((old_id, last_activity)) = map.get(&phone).copied() {
-            if idle_timeout_hours
-                .is_some_and(|h| last_activity.elapsed().as_secs() > (h * 3600.0) as u64)
-            {
-                let _ = session_svc.archive_session(old_id).await;
-                map.remove(&phone);
-                let title = format!("WhatsApp: {}", phone);
-                match session_svc.create_session(Some(title)).await {
-                    Ok(session) => {
-                        map.insert(phone.clone(), (session.id, std::time::Instant::now()));
-                        session.id
-                    }
+        // Non-owner sessions: persisted in DB by title — survives restarts.
+        let session_title = format!("WhatsApp: {}", phone);
+
+        let existing = session_svc
+            .find_session_by_title(&session_title)
+            .await
+            .ok()
+            .flatten();
+
+        if let Some(session) = existing {
+            if idle_timeout_hours.is_some_and(|h| {
+                let elapsed = (chrono::Utc::now() - session.updated_at).num_seconds();
+                elapsed > (h * 3600.0) as i64
+            }) {
+                let _ = session_svc.archive_session(session.id).await;
+                match session_svc.create_session(Some(session_title)).await {
+                    Ok(new_session) => new_session.id,
                     Err(e) => {
                         tracing::error!("WhatsApp: failed to create session: {}", e);
                         return;
                     }
                 }
             } else {
-                map.insert(phone.clone(), (old_id, std::time::Instant::now()));
-                old_id
+                session.id
             }
         } else {
-            let title = format!("WhatsApp: {}", phone);
-            match session_svc.create_session(Some(title)).await {
+            match session_svc.create_session(Some(session_title)).await {
                 Ok(session) => {
-                    map.insert(phone.clone(), (session.id, std::time::Instant::now()));
+                    tracing::info!(
+                        "WhatsApp: created new session {} for {}",
+                        session.id,
+                        phone
+                    );
                     session.id
                 }
                 Err(e) => {
@@ -586,15 +591,17 @@ pub(crate) async fn handle_message(
                 return;
             }
             ChannelCommand::NewSession => {
-                match session_svc.create_session(Some("Chat".to_string())).await {
+                let session_title = format!("WhatsApp: {}", phone);
+                if !is_owner
+                    && let Ok(Some(old)) =
+                        session_svc.find_session_by_title(&session_title).await
+                {
+                    let _ = session_svc.archive_session(old.id).await;
+                }
+                match session_svc.create_session(Some(session_title)).await {
                     Ok(new_session) => {
                         if is_owner {
                             *shared_session.lock().await = Some(new_session.id);
-                        } else {
-                            extra_sessions.lock().await.insert(
-                                phone.to_string(),
-                                (new_session.id, std::time::Instant::now()),
-                            );
                         }
                         let reply = waproto::whatsapp::Message {
                             conversation: Some("✅ New session started.".to_string()),
