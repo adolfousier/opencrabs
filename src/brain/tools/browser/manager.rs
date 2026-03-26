@@ -52,7 +52,7 @@ impl BrowserManager {
     }
 
     /// Detect whether a display server is available (X11, Wayland, or macOS/Windows).
-    fn has_display() -> bool {
+    pub(crate) fn has_display() -> bool {
         if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
             // macOS and Windows always have a display (unless headless server, rare)
             true
@@ -322,12 +322,19 @@ mod tests {
     async fn test_set_headless_switch() {
         let mgr = BrowserManager::with_headless(true);
         assert!(mgr.is_headless().await);
-        // Switch to headed
-        assert!(mgr.set_headless(false).await);
-        assert!(!mgr.is_headless().await);
-        // Switch back
-        assert!(mgr.set_headless(true).await);
-        assert!(mgr.is_headless().await);
+
+        if BrowserManager::has_display() {
+            // Has display — switching to headed should succeed
+            assert!(mgr.set_headless(false).await);
+            assert!(!mgr.is_headless().await);
+            // Switch back
+            assert!(mgr.set_headless(true).await);
+            assert!(mgr.is_headless().await);
+        } else {
+            // No display — switching to headed should be rejected, stays headless
+            assert!(!mgr.set_headless(false).await);
+            assert!(mgr.is_headless().await);
+        }
     }
 
     #[tokio::test]

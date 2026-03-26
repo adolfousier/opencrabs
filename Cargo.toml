@@ -170,7 +170,7 @@ rwhisper = { version = "0.4", optional = true, features = ["metal", "accelerate"
 winresource = "0.1"
 
 [features]
-default = ["telegram", "whatsapp", "discord", "slack", "trello", "local-stt", "local-tts"]
+default = ["telegram", "whatsapp", "discord", "slack", "trello", "local-stt", "local-tts", "browser"]
 # Profiling feature enables pprof on Unix only (no-op on Windows)
 profiling = []
 telegram = ["teloxide"]
