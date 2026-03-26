@@ -126,6 +126,7 @@ impl SlackAgent {
                 bot_user_id,
                 config_rx: self.config_rx,
                 channel_msg_repo: self.channel_msg_repo,
+                seen_ts: tokio::sync::Mutex::new(std::collections::HashSet::new()),
             };
             handler::HANDLER_STATE
                 .set(Arc::new(handler_state))

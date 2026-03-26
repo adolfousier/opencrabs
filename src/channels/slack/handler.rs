@@ -308,6 +308,9 @@ pub struct HandlerState {
     pub bot_user_id: Option<String>,
     pub config_rx: tokio::sync::watch::Receiver<Config>,
     pub channel_msg_repo: ChannelMessageRepository,
+    /// Dedup: recently seen message timestamps (Slack retries if ack is slow).
+    /// Entries are pruned when they exceed 200.
+    pub seen_ts: Mutex<HashSet<String>>,
 }
 
 impl HandlerState {
@@ -349,6 +352,10 @@ pub fn split_message(text: &str, max_len: usize) -> Vec<&str> {
 }
 
 /// Socket Mode push event callback (function pointer — required by slack-morphism).
+///
+/// Returns immediately so Slack gets the ack within 3 s (prevents retries).
+/// Actual processing is spawned as a background task.
+/// Deduplicates by message timestamp to drop Slack retries.
 pub async fn on_push_event(
     event: SlackPushEventCallback,
     client: Arc<SlackHyperClient>,
@@ -357,15 +364,25 @@ pub async fn on_push_event(
     tracing::debug!("Slack: received push event");
     match event.event {
         SlackEventCallbackBody::Message(msg) => {
+            let ts = msg.origin.ts.to_string();
+            if !dedup_ts(&ts).await {
+                return Ok(());
+            }
             tracing::debug!(
                 "Slack: message event from user={:?}, channel={:?}, bot_id={:?}",
                 msg.sender.user,
                 msg.origin.channel,
                 msg.sender.bot_id
             );
-            handle_message(&msg, client).await;
+            tokio::spawn(async move {
+                handle_message(&msg, client).await;
+            });
         }
         SlackEventCallbackBody::AppMention(mention) => {
+            let ts = mention.origin.ts.to_string();
+            if !dedup_ts(&ts).await {
+                return Ok(());
+            }
             tracing::info!(
                 "Slack: app_mention from user={:?}, channel={:?}, text={:?}",
                 mention.user,
@@ -400,7 +417,9 @@ pub async fn on_push_event(
                 previous_message: None,
                 deleted_ts: None,
             };
-            handle_message(&msg, client).await;
+            tokio::spawn(async move {
+                handle_message(&msg, client).await;
+            });
         }
         other => {
             tracing::debug!(
@@ -410,6 +429,26 @@ pub async fn on_push_event(
         }
     }
     Ok(())
+}
+
+/// Returns `true` if this is the first time we see this timestamp (proceed).
+/// Returns `false` if it's a duplicate (skip).
+async fn dedup_ts(ts: &str) -> bool {
+    let state = match HANDLER_STATE.get() {
+        Some(s) => s,
+        None => return true,
+    };
+    let mut seen = state.seen_ts.lock().await;
+    if !seen.insert(ts.to_string()) {
+        tracing::debug!("Slack: dropping duplicate event ts={}", ts);
+        return false;
+    }
+    // Prune if too large to avoid unbounded growth
+    if seen.len() > 200 {
+        seen.clear();
+        seen.insert(ts.to_string());
+    }
+    true
 }
 
 /// Socket Mode error handler.
@@ -637,41 +676,46 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
     } else {
         // Non-DM-owner sessions: keyed by channel_id for channels (shared per channel),
         // by user_id for DMs (separate per user).
-        let session_key = if is_dm {
-            user_id.clone()
-        } else {
-            channel_id.clone()
-        };
+        // Persisted in DB by title — survives restarts.
         let session_title = if is_dm {
             format!("Slack: {}", user_id)
         } else {
             format!("Slack: #{}", channel_id)
         };
-        let mut map = state.extra_sessions.lock().await;
-        if let Some((old_id, last_activity)) = map.get(&session_key).copied() {
-            if idle_timeout_hours
-                .is_some_and(|h| last_activity.elapsed().as_secs() > (h * 3600.0) as u64)
-            {
-                let _ = state.session_svc.archive_session(old_id).await;
-                map.remove(&session_key);
+
+        // Look up existing session from DB
+        let existing = state
+            .session_svc
+            .find_session_by_title(&session_title)
+            .await
+            .ok()
+            .flatten();
+
+        if let Some(session) = existing {
+            // Check idle timeout
+            if idle_timeout_hours.is_some_and(|h| {
+                let elapsed = (chrono::Utc::now() - session.updated_at).num_seconds();
+                elapsed > (h * 3600.0) as i64
+            }) {
+                let _ = state.session_svc.archive_session(session.id).await;
                 match state.session_svc.create_session(Some(session_title)).await {
-                    Ok(session) => {
-                        map.insert(session_key, (session.id, std::time::Instant::now()));
-                        session.id
-                    }
+                    Ok(new_session) => new_session.id,
                     Err(e) => {
                         tracing::error!("Slack: failed to create session: {}", e);
                         return;
                     }
                 }
             } else {
-                map.insert(session_key, (old_id, std::time::Instant::now()));
-                old_id
+                session.id
             }
         } else {
             match state.session_svc.create_session(Some(session_title)).await {
                 Ok(session) => {
-                    map.insert(session_key, (session.id, std::time::Instant::now()));
+                    tracing::info!(
+                        "Slack: created new channel session {} for {}",
+                        session.id,
+                        if is_dm { &user_id } else { &channel_id }
+                    );
                     session.id
                 }
                 Err(e) => {
@@ -834,25 +878,23 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                 return;
             }
             ChannelCommand::NewSession => {
-                match state
+                // Archive the current channel session before creating a new one
+                let session_title = if is_dm {
+                    format!("Slack: {}", user_id)
+                } else {
+                    format!("Slack: #{}", channel_id)
+                };
+                if let Ok(Some(old)) = state
                     .session_svc
-                    .create_session(Some("Chat".to_string()))
+                    .find_session_by_title(&session_title)
                     .await
                 {
+                    let _ = state.session_svc.archive_session(old.id).await;
+                }
+                match state.session_svc.create_session(Some(session_title)).await {
                     Ok(new_session) => {
                         if is_owner && is_dm {
                             *state.shared_session.lock().await = Some(new_session.id);
-                        } else {
-                            let key = if is_dm {
-                                user_id.to_string()
-                            } else {
-                                channel_id.clone()
-                            };
-                            state
-                                .extra_sessions
-                                .lock()
-                                .await
-                                .insert(key, (new_session.id, std::time::Instant::now()));
                         }
                         state
                             .slack_state
