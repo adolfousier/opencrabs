@@ -179,6 +179,7 @@ impl Tool for SlackSendTool {
             // ── send ─────────────────────────────────────────────────────────
             "send" => {
                 let text = pget!(get_str(&input, "message")).to_string();
+                let text = crate::utils::slack_fmt::markdown_to_mrkdwn(&text);
                 let channel_id = pget!(channel_or_err(channel_id_opt));
                 let chunks = crate::channels::slack::handler::split_message(&text, 3000);
                 for chunk in chunks {
@@ -198,6 +199,7 @@ impl Tool for SlackSendTool {
             // ── reply (in thread) ────────────────────────────────────────────
             "reply" => {
                 let text = pget!(get_str(&input, "message")).to_string();
+                let text = crate::utils::slack_fmt::markdown_to_mrkdwn(&text);
                 let channel_id = pget!(channel_or_err(channel_id_opt));
                 let thread_ts_str = pget!(get_str(&input, "thread_ts")).to_string();
                 let request = SlackApiChatPostMessageRequest::new(

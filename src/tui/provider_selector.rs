@@ -12,7 +12,7 @@ pub const EXISTING_KEY_SENTINEL: &str = "__EXISTING_KEY__";
 /// Provider definitions (index → info).
 /// 0=Anthropic, 1=OpenAI, 2=GitHub Copilot, 3=Gemini, 4=OpenRouter,
 /// 5=Minimax, 6=z.ai GLM, 7=Claude CLI, 8=OpenCode CLI, 9=Custom
-pub use crate::tui::onboarding::{ProviderInfo, PROVIDERS};
+pub use crate::tui::onboarding::{PROVIDERS, ProviderInfo};
 
 /// Shared state for provider + model selection.
 /// Both `/models` dialog and `/onboard` wizard embed this struct.
@@ -194,12 +194,13 @@ impl ProviderSelectorState {
     pub fn load_custom_fields(&mut self) {
         if self.selected_provider == 6
             && let Ok(config) = crate::config::Config::load()
-                && let Some(zhipu) = &config.providers.zhipu {
-                    self.zhipu_endpoint_type = match zhipu.endpoint_type.as_deref() {
-                        Some("coding") => 1,
-                        _ => 0,
-                    };
-                }
+            && let Some(zhipu) = &config.providers.zhipu
+        {
+            self.zhipu_endpoint_type = match zhipu.endpoint_type.as_deref() {
+                Some("coding") => 1,
+                _ => 0,
+            };
+        }
         if self.selected_provider == 9 {
             self.custom_name.clear();
             self.base_url.clear();
@@ -209,18 +210,19 @@ impl ProviderSelectorState {
             let custom_idx = self.selected_provider - 10;
             if let Some(cname) = self.custom_names.get(custom_idx).cloned()
                 && let Ok(config) = crate::config::Config::load()
-                    && let Some(c) = config.providers.custom_by_name(&cname) {
-                        self.custom_name = cname;
-                        self.base_url = c.base_url.clone().unwrap_or_default();
-                        self.custom_model = c.default_model.clone().unwrap_or_default();
-                        self.context_window = c
-                            .context_window
-                            .map(|cw| cw.to_string())
-                            .unwrap_or_default();
-                        if c.api_key.as_ref().is_some_and(|k| !k.is_empty()) {
-                            self.api_key_input = EXISTING_KEY_SENTINEL.to_string();
-                        }
-                    }
+                && let Some(c) = config.providers.custom_by_name(&cname)
+            {
+                self.custom_name = cname;
+                self.base_url = c.base_url.clone().unwrap_or_default();
+                self.custom_model = c.default_model.clone().unwrap_or_default();
+                self.context_window = c
+                    .context_window
+                    .map(|cw| cw.to_string())
+                    .unwrap_or_default();
+                if c.api_key.as_ref().is_some_and(|k| !k.is_empty()) {
+                    self.api_key_input = EXISTING_KEY_SENTINEL.to_string();
+                }
+            }
         }
     }
 

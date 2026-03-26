@@ -1262,6 +1262,7 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
             let (text_only, img_paths) = crate::utils::extract_img_markers(&response.content);
             let text_only = crate::utils::sanitize::strip_llm_artifacts(&text_only);
             let text_only = redact_secrets(&text_only);
+            let text_only = crate::utils::slack_fmt::markdown_to_mrkdwn(&text_only);
 
             let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
             let session = client.open_session(&token);

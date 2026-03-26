@@ -8,9 +8,9 @@ pub mod events;
 pub mod onboarding;
 pub mod onboarding_render;
 pub mod pane;
-pub mod provider_selector;
 pub mod plan;
 pub mod prompt_analyzer;
+pub mod provider_selector;
 pub mod render;
 pub mod runner;
 

@@ -513,7 +513,8 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
         } else {
             let custom_idx = idx - 10;
             wizard
-                .ps.custom_names
+                .ps
+                .custom_names
                 .get(custom_idx)
                 .cloned()
                 .unwrap_or_else(|| "custom".to_string())
@@ -2452,8 +2453,7 @@ fn render_complete(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
 
     // Summary
     let provider = &PROVIDERS[wizard.ps.selected_provider.min(PROVIDERS.len() - 1)];
-    let provider_label = if wizard.ps.selected_provider >= 9 && !wizard.ps.custom_name.is_empty()
-    {
+    let provider_label = if wizard.ps.selected_provider >= 9 && !wizard.ps.custom_name.is_empty() {
         wizard.ps.custom_name.clone()
     } else {
         provider.name.to_string()

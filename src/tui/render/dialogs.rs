@@ -285,7 +285,8 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     // Get models from fetched list, filtered by search text
     let filter = app.ps.model_filter.to_lowercase();
     let display_models: Vec<&str> = app
-        .ps.models
+        .ps
+        .models
         .iter()
         .filter(|m| filter.is_empty() || m.to_lowercase().contains(&filter))
         .map(|s| s.as_ref())
@@ -299,7 +300,13 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         .unwrap_or_else(|| app.provider_model());
 
     let custom_extra = app.ps.custom_names.len() as u16;
-    let dialog_height = (model_count as u16 + custom_extra + 24).min(area.height.saturating_sub(4));
+    // 9 static providers + custom_extra + "+ New Custom" + API key line + filter + models + footer + padding
+    let provider_lines = 9 + custom_extra + 1; // static + customs + new custom
+    let content_lines = provider_lines + 4 + model_count as u16 + 4; // providers + key/filter chrome + models + footer
+    let max_height = (area.height * 3 / 4).max(20); // cap at 75% of terminal
+    let dialog_height = content_lines
+        .min(max_height)
+        .min(area.height.saturating_sub(4));
     let dialog_width = 64u16.min(area.width.saturating_sub(4));
 
     let v_chunks = Layout::default()
@@ -345,7 +352,8 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
             PROVIDERS[idx].name.to_string()
         } else {
             let custom_idx = idx - 10;
-            app.ps.custom_names
+            app.ps
+                .custom_names
                 .get(custom_idx)
                 .cloned()
                 .unwrap_or_else(|| "custom".to_string())
@@ -438,23 +446,19 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(vec![
             Span::styled(
                 format!("    {} General API  ", api_marker),
-                Style::default().fg(
-                    if et_focused && app.ps.zhipu_endpoint_type == 0 {
-                        Color::Reset
-                    } else {
-                        Color::DarkGray
-                    },
-                ),
+                Style::default().fg(if et_focused && app.ps.zhipu_endpoint_type == 0 {
+                    Color::Reset
+                } else {
+                    Color::DarkGray
+                }),
             ),
             Span::styled(
                 format!("{} Coding API", coding_marker),
-                Style::default().fg(
-                    if et_focused && app.ps.zhipu_endpoint_type == 1 {
-                        Color::Reset
-                    } else {
-                        Color::DarkGray
-                    },
-                ),
+                Style::default().fg(if et_focused && app.ps.zhipu_endpoint_type == 1 {
+                    Color::Reset
+                } else {
+                    Color::DarkGray
+                }),
             ),
         ]));
         lines.push(Line::from(""));

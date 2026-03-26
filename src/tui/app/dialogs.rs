@@ -109,8 +109,7 @@ impl App {
                         .and_then(|p| p.api_key.clone());
                     if let Some(c) = config.providers.custom_by_name(cname) {
                         self.ps.base_url = c.base_url.clone().unwrap_or_default();
-                        self.ps.custom_model =
-                            c.default_model.clone().unwrap_or_default();
+                        self.ps.custom_model = c.default_model.clone().unwrap_or_default();
                         self.ps.context_window = c
                             .context_window
                             .map(|cw| cw.to_string())
@@ -119,7 +118,8 @@ impl App {
                     }
                     // Map to index 9+ if this name exists in custom_names list
                     let idx = self
-                        .ps.custom_names
+                        .ps
+                        .custom_names
                         .iter()
                         .position(|n| n == cname)
                         .map(|pos| 10 + pos)
@@ -287,7 +287,8 @@ impl App {
             self.ps.custom_name = name.to_string();
             // Map to index 9+ if this name exists in custom_names list
             let idx = self
-                .ps.custom_names
+                .ps
+                .custom_names
                 .iter()
                 .position(|n| n == name)
                 .map(|pos| 10 + pos)
@@ -332,7 +333,7 @@ impl App {
             let models =
                 super::onboarding::fetch_provider_models(provider_idx, api_key.as_deref(), None)
                     .await;
-            let _ = sender.send(TuiEvent::ModelSelectorModelsFetched(models));
+            let _ = sender.send(TuiEvent::ModelSelectorModelsFetched(provider_idx, models));
         });
 
         // Clear models until fetch completes
@@ -432,13 +433,11 @@ impl App {
                         6 => c.providers.zhipu.and_then(|p| p.api_key),
                         idx if idx >= 10 => {
                             let custom_idx = idx - 10;
-                            self.ps.custom_names
-                                .get(custom_idx)
-                                .and_then(|name| {
-                                    c.providers
-                                        .custom_by_name(name)
-                                        .and_then(|p| p.api_key.clone())
-                                })
+                            self.ps.custom_names.get(custom_idx).and_then(|name| {
+                                c.providers
+                                    .custom_by_name(name)
+                                    .and_then(|p| p.api_key.clone())
+                            })
                         }
                         _ => None,
                     }
@@ -464,7 +463,7 @@ impl App {
                         zhipu_et.as_deref(),
                     )
                     .await;
-                    let _ = sender.send(TuiEvent::ModelSelectorModelsFetched(models));
+                    let _ = sender.send(TuiEvent::ModelSelectorModelsFetched(provider_idx, models));
                 });
                 self.ps.models.clear();
                 self.ps.selected_model = 0;
@@ -473,14 +472,11 @@ impl App {
             // z.ai GLM endpoint type toggle (field 1)
             match event.code {
                 crossterm::event::KeyCode::Up | crossterm::event::KeyCode::Down => {
-                    self.ps.zhipu_endpoint_type =
-                        1 - self.ps.zhipu_endpoint_type;
+                    self.ps.zhipu_endpoint_type = 1 - self.ps.zhipu_endpoint_type;
                 }
                 _ => {}
             }
-        } else if self.ps.focused_field == 1
-            && self.ps.selected_provider >= 9
-        {
+        } else if self.ps.focused_field == 1 && self.ps.selected_provider >= 9 {
             // Base URL input for Custom provider (field 1)
             match event.code {
                 crossterm::event::KeyCode::Char(c) => {
@@ -491,12 +487,9 @@ impl App {
                 }
                 _ => {}
             }
-        } else if (self.ps.focused_field == 1
-            && self.ps.selected_provider < 7
-            && !is_zhipu)
+        } else if (self.ps.focused_field == 1 && self.ps.selected_provider < 7 && !is_zhipu)
             || (self.ps.focused_field == 2 && is_zhipu)
-            || (self.ps.focused_field == 2
-                && self.ps.selected_provider >= 9)
+            || (self.ps.focused_field == 2 && self.ps.selected_provider >= 9)
         {
             // API key input (field 1 for non-Custom non-zhipu, field 2 for zhipu/Custom)
             match event.code {
@@ -508,9 +501,7 @@ impl App {
                 }
                 _ => {}
             }
-        } else if self.ps.focused_field == 3
-            && self.ps.selected_provider >= 9
-        {
+        } else if self.ps.focused_field == 3 && self.ps.selected_provider >= 9 {
             // Custom provider: free-text model name input (field 3)
             match event.code {
                 crossterm::event::KeyCode::Char(c) => {
@@ -521,9 +512,7 @@ impl App {
                 }
                 _ => {}
             }
-        } else if self.ps.focused_field == 4
-            && self.ps.selected_provider >= 9
-        {
+        } else if self.ps.focused_field == 4 && self.ps.selected_provider >= 9 {
             // Custom provider: name identifier input (field 4)
             match event.code {
                 crossterm::event::KeyCode::Char(c) => {
@@ -536,9 +525,7 @@ impl App {
                 }
                 _ => {}
             }
-        } else if self.ps.focused_field == 5
-            && self.ps.selected_provider >= 9
-        {
+        } else if self.ps.focused_field == 5 && self.ps.selected_provider >= 9 {
             // Custom provider: context window input (field 5 — last before save)
             match event.code {
                 crossterm::event::KeyCode::Char(c) if c.is_ascii_digit() => {
@@ -549,9 +536,7 @@ impl App {
                 }
                 _ => {}
             }
-        } else if (self.ps.focused_field == 2
-            && self.ps.selected_provider < 9
-            && !is_zhipu)
+        } else if (self.ps.focused_field == 2 && self.ps.selected_provider < 9 && !is_zhipu)
             || (self.ps.focused_field == 3 && is_zhipu)
         {
             // Non-custom: filter/search model list (field 2, or field 3 for zhipu)
@@ -566,11 +551,10 @@ impl App {
                     // Keep selection valid after filter change
                     let filter = self.ps.model_filter.to_lowercase();
                     let count = if self.ps.models.is_empty() {
-                        PROVIDERS[self.ps.selected_provider]
-                            .models
-                            .len()
+                        PROVIDERS[self.ps.selected_provider].models.len()
                     } else {
-                        self.ps.models
+                        self.ps
+                            .models
                             .iter()
                             .filter(|m| m.to_lowercase().contains(&filter))
                             .count()
@@ -586,17 +570,15 @@ impl App {
                 }
                 _ => {
                     if keys::is_up(&event) {
-                        self.ps.selected_model =
-                            self.ps.selected_model.saturating_sub(1);
+                        self.ps.selected_model = self.ps.selected_model.saturating_sub(1);
                     } else if keys::is_down(&event) {
                         // Get filtered count
                         let filter = self.ps.model_filter.to_lowercase();
                         let max_models = if self.ps.models.is_empty() {
-                            PROVIDERS[self.ps.selected_provider]
-                                .models
-                                .len()
+                            PROVIDERS[self.ps.selected_provider].models.len()
                         } else {
-                            self.ps.models
+                            self.ps
+                                .models
                                 .iter()
                                 .filter(|m| m.to_lowercase().contains(&filter))
                                 .count()
@@ -1102,11 +1084,7 @@ impl App {
                 let _ = crate::config::Config::write_key(section, "endpoint_type", endpoint_type);
             }
             9 if !self.ps.base_url.is_empty() => {
-                let _ = crate::config::Config::write_key(
-                    section,
-                    "base_url",
-                    &self.ps.base_url,
-                );
+                let _ = crate::config::Config::write_key(section, "base_url", &self.ps.base_url);
                 if !self.ps.context_window.is_empty() {
                     let _ = crate::config::Config::write_key(
                         section,
@@ -1135,7 +1113,8 @@ impl App {
             // Point selection to the newly saved custom provider
             if !self.ps.custom_name.is_empty()
                 && let Some(pos) = self
-                    .ps.custom_names
+                    .ps
+                    .custom_names
                     .iter()
                     .position(|n| n == &self.ps.custom_name)
             {
@@ -1165,14 +1144,16 @@ impl App {
         } else if !self.ps.models.is_empty() {
             let filter = self.ps.model_filter.to_lowercase();
             let filtered: Vec<_> = self
-                .ps.models
+                .ps
+                .models
                 .iter()
                 .filter(|m| m.to_lowercase().contains(&filter))
                 .collect();
             if let Some(model) = filtered.get(self.ps.selected_model) {
                 model.to_string()
             } else {
-                self.ps.models
+                self.ps
+                    .models
                     .first()
                     .cloned()
                     .unwrap_or_else(|| self.default_model_name.clone())
@@ -1229,8 +1210,7 @@ impl App {
         // Only close dialog if explicitly requested
         if close_dialog {
             // Use user-configured name for custom providers (e.g. "nvidia"), fall back to generic
-            let provider_name = if provider_idx == 9 && !self.ps.custom_name.is_empty()
-            {
+            let provider_name = if provider_idx == 9 && !self.ps.custom_name.is_empty() {
                 self.ps.custom_name.clone()
             } else {
                 provider
@@ -1288,7 +1268,8 @@ impl App {
                                         )
                                     } else {
                                         (
-                                            super::onboarding::PROVIDERS[wizard.ps.selected_provider]
+                                            super::onboarding::PROVIDERS
+                                                [wizard.ps.selected_provider]
                                                 .name
                                                 .to_string(),
                                             wizard.ps.selected_model_name().to_string(),

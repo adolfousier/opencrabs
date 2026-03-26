@@ -426,10 +426,9 @@ impl OnboardingWizard {
                     }
                     // For providers without live fetch, load defaults from config.toml.example
                     if self.ps.config_models.is_empty() && self.ps.models.is_empty() {
-                        self.ps.config_models =
-                            crate::tui::provider_selector::load_default_models(
-                                self.ps.selected_provider,
-                            );
+                        self.ps.config_models = crate::tui::provider_selector::load_default_models(
+                            self.ps.selected_provider,
+                        );
                         self.ps.selected_model = 0;
                     }
                 }
