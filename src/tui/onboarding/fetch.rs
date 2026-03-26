@@ -265,6 +265,65 @@ pub async fn fetch_provider_models(
             }
             return OnboardingWizard::load_default_models(2);
         }
+        3 => {
+            // Google Gemini — list models via generativelanguage API
+            let key = match api_key {
+                Some(k) if !k.is_empty() => k,
+                _ => return Vec::new(),
+            };
+            let url = format!(
+                "https://generativelanguage.googleapis.com/v1beta/models?key={}",
+                key
+            );
+            // Gemini uses a different response shape: { models: [{ name: "models/gemini-..." }] }
+            #[derive(serde::Deserialize)]
+            struct GeminiModel {
+                name: String,
+                #[serde(default)]
+                supported_generation_methods: Vec<String>,
+            }
+            #[derive(serde::Deserialize)]
+            struct GeminiModelsResponse {
+                models: Vec<GeminiModel>,
+            }
+            match client.get(&url).send().await {
+                Ok(resp) if resp.status().is_success() => {
+                    match resp.json::<GeminiModelsResponse>().await {
+                        Ok(body) => {
+                            let mut models: Vec<String> = body
+                                .models
+                                .into_iter()
+                                .filter(|m| {
+                                    m.supported_generation_methods
+                                        .iter()
+                                        .any(|g| g == "generateContent")
+                                })
+                                .map(|m| {
+                                    m.name
+                                        .strip_prefix("models/")
+                                        .unwrap_or(&m.name)
+                                        .to_string()
+                                })
+                                .collect();
+                            models.sort();
+                            return models;
+                        }
+                        Err(e) => {
+                            tracing::warn!("Gemini models parse error: {}", e);
+                            return Vec::new();
+                        }
+                    }
+                }
+                Ok(resp) => {
+                    tracing::warn!("Gemini models API returned {}", resp.status());
+                    return Vec::new();
+                }
+                Err(e) => {
+                    tracing::warn!("Gemini models fetch failed: {}", e);
+                    return Vec::new();
+                }
+            }
+        }
         4 => {
             // OpenRouter — /api/v1/models
             let mut req = client.get("https://openrouter.ai/api/v1/models");
