@@ -11,7 +11,7 @@ use crate::db::models::ChannelMessage as DbChannelMessage;
 use crate::services::SessionService;
 use crate::utils::sanitize::redact_secrets;
 use crate::utils::truncate_str;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -50,7 +50,6 @@ pub(crate) async fn handle_message(
     msg: &Message,
     agent: Arc<AgentService>,
     session_svc: SessionService,
-    extra_sessions: Arc<Mutex<HashMap<u64, (Uuid, std::time::Instant)>>>,
     shared_session: Arc<Mutex<Option<Uuid>>>,
     discord_state: Arc<DiscordState>,
     config_rx: tokio::sync::watch::Receiver<Config>,
@@ -295,43 +294,43 @@ pub(crate) async fn handle_message(
             }
         }
     } else {
-        // Non-DM-owner sessions: keyed by channel_id for guild channels (shared per channel),
-        // by user_id for DMs (separate per user).
-        let session_key = if is_dm {
-            msg.author.id.get()
-        } else {
-            msg.channel_id.get()
-        };
+        // Non-DM-owner sessions: persisted in DB by title — survives restarts.
         let session_title = if is_dm {
             format!("Discord: {}", msg.author.name)
         } else {
             format!("Discord: #{}", msg.channel_id.get())
         };
-        let mut map = extra_sessions.lock().await;
-        if let Some((old_id, last_activity)) = map.get(&session_key).copied() {
-            if idle_timeout_hours
-                .is_some_and(|h| last_activity.elapsed().as_secs() > (h * 3600.0) as u64)
-            {
-                let _ = session_svc.archive_session(old_id).await;
-                map.remove(&session_key);
+
+        let existing = session_svc
+            .find_session_by_title(&session_title)
+            .await
+            .ok()
+            .flatten();
+
+        if let Some(session) = existing {
+            if idle_timeout_hours.is_some_and(|h| {
+                let elapsed = (chrono::Utc::now() - session.updated_at).num_seconds();
+                elapsed > (h * 3600.0) as i64
+            }) {
+                let _ = session_svc.archive_session(session.id).await;
                 match session_svc.create_session(Some(session_title)).await {
-                    Ok(session) => {
-                        map.insert(session_key, (session.id, std::time::Instant::now()));
-                        session.id
-                    }
+                    Ok(new_session) => new_session.id,
                     Err(e) => {
                         tracing::error!("Discord: failed to create session: {}", e);
                         return;
                     }
                 }
             } else {
-                map.insert(session_key, (old_id, std::time::Instant::now()));
-                old_id
+                session.id
             }
         } else {
             match session_svc.create_session(Some(session_title)).await {
                 Ok(session) => {
-                    map.insert(session_key, (session.id, std::time::Instant::now()));
+                    tracing::info!(
+                        "Discord: created new channel session {} for #{}",
+                        session.id,
+                        msg.channel_id.get()
+                    );
                     session.id
                 }
                 Err(e) => {
@@ -389,20 +388,19 @@ pub(crate) async fn handle_message(
                 return;
             }
             ChannelCommand::NewSession => {
-                match session_svc.create_session(Some("Chat".to_string())).await {
+                // Archive old channel session before creating new one
+                let session_title = if is_dm {
+                    format!("Discord: {}", msg.author.name)
+                } else {
+                    format!("Discord: #{}", msg.channel_id.get())
+                };
+                if let Ok(Some(old)) = session_svc.find_session_by_title(&session_title).await {
+                    let _ = session_svc.archive_session(old.id).await;
+                }
+                match session_svc.create_session(Some(session_title)).await {
                     Ok(new_session) => {
                         if is_owner && is_dm {
                             *shared_session.lock().await = Some(new_session.id);
-                        } else {
-                            let key = if is_dm {
-                                msg.author.id.get()
-                            } else {
-                                msg.channel_id.get()
-                            };
-                            extra_sessions
-                                .lock()
-                                .await
-                                .insert(key, (new_session.id, std::time::Instant::now()));
                         }
                         discord_state
                             .register_session_channel(new_session.id, msg.channel_id.get())

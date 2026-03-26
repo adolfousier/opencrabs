@@ -138,7 +138,6 @@ impl EventHandler for Handler {
             &msg,
             self.agent.clone(),
             self.session_svc.clone(),
-            self.extra_sessions.clone(),
             self.shared_session.clone(),
             self.discord_state.clone(),
             self.config_rx.clone(),
