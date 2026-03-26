@@ -1,6 +1,6 @@
 /// Sentinel value stored in api_key_input when a key was loaded from config.
 /// The actual key is never held in memory — this just signals "key exists".
-pub const EXISTING_KEY_SENTINEL: &str = "__EXISTING_KEY__";
+pub use crate::tui::provider_selector::EXISTING_KEY_SENTINEL;
 
 /// Provider definitions
 pub const PROVIDERS: &[ProviderInfo] = &[

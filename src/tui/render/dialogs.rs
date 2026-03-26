@@ -267,8 +267,8 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     const BRAND_BLUE: Color = Color::Rgb(120, 120, 120);
     const BRAND_GOLD: Color = Color::Rgb(215, 100, 20);
 
-    let focused_field = app.model_selector_focused_field; // 0=provider, 1=api_key, 2=model
-    let provider_idx = app.model_selector_provider_selected;
+    let focused_field = app.ps.focused_field; // 0=provider, 1=api_key, 2=model
+    let provider_idx = app.ps.selected_provider;
     let clamped_idx = provider_idx.min(PROVIDERS.len() - 1);
 
     tracing::trace!(
@@ -276,16 +276,16 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         provider_idx,
         clamped_idx,
         PROVIDERS.len(),
-        app.model_selector_custom_names,
+        app.ps.custom_names,
         focused_field,
     );
 
     let selected_provider = &PROVIDERS[clamped_idx];
 
     // Get models from fetched list, filtered by search text
-    let filter = app.model_selector_filter.to_lowercase();
+    let filter = app.ps.model_filter.to_lowercase();
     let display_models: Vec<&str> = app
-        .model_selector_models
+        .ps.models
         .iter()
         .filter(|m| filter.is_empty() || m.to_lowercase().contains(&filter))
         .map(|s| s.as_ref())
@@ -298,7 +298,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         .and_then(|s| s.model.clone())
         .unwrap_or_else(|| app.provider_model());
 
-    let custom_extra = app.model_selector_custom_names.len() as u16;
+    let custom_extra = app.ps.custom_names.len() as u16;
     let dialog_height = (model_count as u16 + custom_extra + 24).min(area.height.saturating_sub(4));
     let dialog_width = 64u16.min(area.width.saturating_sub(4));
 
@@ -324,7 +324,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     lines.push(Line::from(""));
 
     // Provider list — static providers sorted alphabetically, then custom names, then "+ New Custom" last.
-    let num_customs = app.model_selector_custom_names.len();
+    let num_customs = app.ps.custom_names.len();
     let mut static_indices: Vec<usize> = (0..9).collect();
     static_indices.sort_by_key(|&i| PROVIDERS[i].name.to_ascii_lowercase());
     let display_order: Vec<usize> = static_indices
@@ -345,7 +345,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
             PROVIDERS[idx].name.to_string()
         } else {
             let custom_idx = idx - 10;
-            app.model_selector_custom_names
+            app.ps.custom_names
                 .get(custom_idx)
                 .cloned()
                 .unwrap_or_else(|| "custom".to_string())
@@ -387,10 +387,10 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     if is_custom {
         // Base URL field (field 1 for Custom)
         let base_focused = focused_field == 1;
-        let base_display = if app.model_selector_base_url.is_empty() {
+        let base_display = if app.ps.base_url.is_empty() {
             "http://localhost:1234/v1".to_string()
         } else {
-            app.model_selector_base_url.clone()
+            app.ps.base_url.clone()
         };
         let cursor = if base_focused { "█" } else { "" };
         lines.push(Line::from(vec![
@@ -417,12 +417,12 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     // z.ai GLM endpoint type toggle (before API key)
     if provider_idx == 6 {
         let et_focused = focused_field == 1; // field 1 for zhipu = endpoint type
-        let api_marker = if app.model_selector_zhipu_endpoint_type == 0 {
+        let api_marker = if app.ps.zhipu_endpoint_type == 0 {
             "[*]"
         } else {
             "[ ]"
         };
-        let coding_marker = if app.model_selector_zhipu_endpoint_type == 1 {
+        let coding_marker = if app.ps.zhipu_endpoint_type == 1 {
             "[*]"
         } else {
             "[ ]"
@@ -439,7 +439,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(
                 format!("    {} General API  ", api_marker),
                 Style::default().fg(
-                    if et_focused && app.model_selector_zhipu_endpoint_type == 0 {
+                    if et_focused && app.ps.zhipu_endpoint_type == 0 {
                         Color::Reset
                     } else {
                         Color::DarkGray
@@ -449,7 +449,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(
                 format!("{} Coding API", coding_marker),
                 Style::default().fg(
-                    if et_focused && app.model_selector_zhipu_endpoint_type == 1 {
+                    if et_focused && app.ps.zhipu_endpoint_type == 1 {
                         Color::Reset
                     } else {
                         Color::DarkGray
@@ -469,13 +469,13 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
             || (focused_field == 2 && (is_custom || is_zhipu));
         let key_label = selected_provider.key_label;
 
-        let has_existing_key = app.model_selector_has_existing_key;
-        let has_user_key = !app.model_selector_api_key.is_empty();
+        let has_existing_key = app.ps.has_existing_key;
+        let has_user_key = !app.ps.api_key_input.is_empty();
 
         let (masked_key, key_hint) = if has_user_key {
             // User typed a new key - show asterisks for what they typed
             (
-                "*".repeat(app.model_selector_api_key.len().min(30)),
+                "*".repeat(app.ps.api_key_input.len().min(30)),
                 String::new(),
             )
         } else if has_existing_key {
@@ -544,10 +544,10 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     if is_custom {
         // Custom provider: free-text model name input (no filter/search)
         let model_cursor = if model_focused { "█" } else { "" };
-        let model_display = if app.model_selector_custom_model.is_empty() {
+        let model_display = if app.ps.custom_model.is_empty() {
             format!("enter model name (e.g. gpt-5-nano){}", model_cursor)
         } else {
-            format!("{}{}", app.model_selector_custom_model, model_cursor)
+            format!("{}{}", app.ps.custom_model, model_cursor)
         };
         lines.push(Line::from(vec![
             Span::styled(
@@ -562,7 +562,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
                 model_display,
                 Style::default().fg(if model_focused {
                     Color::Reset
-                } else if app.model_selector_custom_model.is_empty() {
+                } else if app.ps.custom_model.is_empty() {
                     Color::DarkGray
                 } else {
                     Color::Cyan
@@ -573,10 +573,10 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         // Non-custom: filter/search model list
         if model_focused {
             let filter_cursor = if model_focused { "█" } else { "" };
-            let filter_display = if app.model_selector_filter.is_empty() {
+            let filter_display = if app.ps.model_filter.is_empty() {
                 format!("  / filter{}", filter_cursor)
             } else {
-                format!("  / {}{}", app.model_selector_filter, filter_cursor)
+                format!("  / {}{}", app.ps.model_filter, filter_cursor)
             };
             lines.push(Line::from(Span::styled(
                 filter_display,
@@ -590,7 +590,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
 
         let total = display_models.len();
         let max_sel = if total > 0 { total - 1 } else { 0 };
-        let safe_selected = app.model_selector_selected.min(max_sel);
+        let safe_selected = app.ps.selected_model.min(max_sel);
         let (start, end) = if total <= MAX_VISIBLE_MODELS {
             (0, total)
         } else {
@@ -646,10 +646,10 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     if is_custom {
         let name_focused = focused_field == 4;
         let name_cursor = if name_focused { "█" } else { "" };
-        let name_display = if app.model_selector_custom_name.is_empty() {
+        let name_display = if app.ps.custom_name.is_empty() {
             format!("enter identifier (e.g. nvidia, kimi){}", name_cursor)
         } else {
-            format!("{}{}", app.model_selector_custom_name, name_cursor)
+            format!("{}{}", app.ps.custom_name, name_cursor)
         };
         lines.push(Line::from(""));
         lines.push(Line::from(vec![
@@ -665,7 +665,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
                 name_display,
                 Style::default().fg(if name_focused {
                     Color::Reset
-                } else if app.model_selector_custom_name.is_empty() {
+                } else if app.ps.custom_name.is_empty() {
                     Color::DarkGray
                 } else {
                     Color::Cyan
@@ -676,10 +676,10 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         // Context Window field (field 5)
         let cw_focused = focused_field == 5;
         let cw_cursor = if cw_focused { "█" } else { "" };
-        let cw_display = if app.model_selector_context_window.is_empty() {
+        let cw_display = if app.ps.context_window.is_empty() {
             format!("e.g. 128000 (optional){}", cw_cursor)
         } else {
-            format!("{}{}", app.model_selector_context_window, cw_cursor)
+            format!("{}{}", app.ps.context_window, cw_cursor)
         };
         lines.push(Line::from(vec![
             Span::styled(
@@ -694,7 +694,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
                 cw_display,
                 Style::default().fg(if cw_focused {
                     Color::Reset
-                } else if app.model_selector_context_window.is_empty() {
+                } else if app.ps.context_window.is_empty() {
                     Color::DarkGray
                 } else {
                     Color::Cyan

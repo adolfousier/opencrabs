@@ -352,18 +352,18 @@ fn wizard_is_custom_for_new_and_existing() {
     use crate::tui::onboarding::OnboardingWizard;
     let mut wizard = OnboardingWizard::new();
     // Index 9 = "+ New Custom Provider"
-    wizard.selected_provider = 9;
-    assert!(wizard.is_custom_provider());
+    wizard.ps.selected_provider = 9;
+    assert!(wizard.ps.is_custom());
     // Index 10+ = existing custom providers
-    wizard.selected_provider = 10;
-    assert!(wizard.is_custom_provider());
-    wizard.selected_provider = 11;
-    assert!(wizard.is_custom_provider());
+    wizard.ps.selected_provider = 10;
+    assert!(wizard.ps.is_custom());
+    wizard.ps.selected_provider = 11;
+    assert!(wizard.ps.is_custom());
     // Index < 9 = not custom
-    wizard.selected_provider = 0;
-    assert!(!wizard.is_custom_provider());
-    wizard.selected_provider = 8;
-    assert!(!wizard.is_custom_provider());
+    wizard.ps.selected_provider = 0;
+    assert!(!wizard.ps.is_custom());
+    wizard.ps.selected_provider = 8;
+    assert!(!wizard.ps.is_custom());
 }
 
 #[test]
@@ -371,24 +371,24 @@ fn wizard_current_provider_clamps_for_existing_custom() {
     use crate::tui::onboarding::{OnboardingWizard, PROVIDERS};
     let mut wizard = OnboardingWizard::new();
     // Index 10 should map to the Custom entry (index 9) in PROVIDERS
-    wizard.selected_provider = 10;
-    assert_eq!(wizard.current_provider().name, PROVIDERS[9].name);
-    wizard.selected_provider = 99;
-    assert_eq!(wizard.current_provider().name, PROVIDERS[9].name);
+    wizard.ps.selected_provider = 10;
+    assert_eq!(wizard.ps.current_provider().name, PROVIDERS[9].name);
+    wizard.ps.selected_provider = 99;
+    assert_eq!(wizard.ps.current_provider().name, PROVIDERS[9].name);
 }
 
 #[test]
 fn wizard_load_custom_fields_clears_for_new() {
     use crate::tui::onboarding::OnboardingWizard;
     let mut wizard = OnboardingWizard::new();
-    wizard.custom_provider_name = "leftover".to_string();
-    wizard.custom_base_url = "http://old-url".to_string();
-    wizard.custom_model = "old-model".to_string();
-    wizard.selected_provider = 9;
-    wizard.load_custom_fields_if_existing();
-    assert!(wizard.custom_provider_name.is_empty());
-    assert!(wizard.custom_base_url.is_empty());
-    assert!(wizard.custom_model.is_empty());
+    wizard.ps.custom_name = "leftover".to_string();
+    wizard.ps.base_url = "http://old-url".to_string();
+    wizard.ps.custom_model = "old-model".to_string();
+    wizard.ps.selected_provider = 9;
+    wizard.ps.load_custom_fields();
+    assert!(wizard.ps.custom_name.is_empty());
+    assert!(wizard.ps.base_url.is_empty());
+    assert!(wizard.ps.custom_model.is_empty());
 }
 
 #[test]
@@ -397,7 +397,7 @@ fn wizard_existing_custom_names_populated_from_config() {
     // The wizard loads existing_custom_names from config in new()
     // This test just verifies the field exists and is a Vec
     let wizard = OnboardingWizard::new();
-    let _: &Vec<String> = &wizard.existing_custom_names;
+    let _: &Vec<String> = &wizard.ps.custom_names;
 }
 
 #[test]

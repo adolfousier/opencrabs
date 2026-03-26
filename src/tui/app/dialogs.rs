@@ -9,107 +9,14 @@ use std::path::PathBuf;
 
 impl App {
     /// Detect existing API key for the currently selected provider in model selector.
-    /// Sets a boolean flag — never loads the actual key into memory.
+    /// Delegates to `ProviderSelectorState::detect_existing_key()`.
     pub(crate) fn detect_model_selector_key_for_provider(&mut self) {
-        let provider_idx = self.model_selector_provider_selected;
         tracing::debug!(
             "[detect_key] provider_idx={}, custom_names={:?}",
-            provider_idx,
-            self.model_selector_custom_names,
+            self.ps.selected_provider,
+            self.ps.custom_names,
         );
-        self.model_selector_api_key.clear();
-        self.model_selector_has_existing_key = false;
-
-        if let Ok(config) = crate::config::Config::load() {
-            // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=z.ai GLM, 7=Claude CLI, 8=OpenCode CLI, 9=Custom
-            let has_key = match provider_idx {
-                0 => config
-                    .providers
-                    .anthropic
-                    .as_ref()
-                    .is_some_and(|p| p.api_key.as_ref().is_some_and(|k| !k.is_empty())),
-                1 => config
-                    .providers
-                    .openai
-                    .as_ref()
-                    .is_some_and(|p| p.api_key.as_ref().is_some_and(|k| !k.is_empty())),
-                2 => config
-                    .providers
-                    .github
-                    .as_ref()
-                    .is_some_and(|p| p.api_key.as_ref().is_some_and(|k| !k.is_empty())),
-                3 => config
-                    .providers
-                    .gemini
-                    .as_ref()
-                    .is_some_and(|p| p.api_key.as_ref().is_some_and(|k| !k.is_empty())),
-                4 => config
-                    .providers
-                    .openrouter
-                    .as_ref()
-                    .is_some_and(|p| p.api_key.as_ref().is_some_and(|k| !k.is_empty())),
-                5 => config
-                    .providers
-                    .minimax
-                    .as_ref()
-                    .is_some_and(|p| p.api_key.as_ref().is_some_and(|k| !k.is_empty())),
-                6 => config
-                    .providers
-                    .zhipu
-                    .as_ref()
-                    .is_some_and(|p| p.api_key.as_ref().is_some_and(|k| !k.is_empty())),
-                7 => false, // Claude CLI — no API key needed
-                8 => false, // OpenCode CLI — no API key needed
-                9 => {
-                    // Index 9 = "+ New Custom Provider" — clear fields
-                    self.model_selector_custom_name.clear();
-                    self.model_selector_base_url.clear();
-                    self.model_selector_custom_model.clear();
-                    self.model_selector_context_window.clear();
-                    false
-                }
-                idx if idx >= 10 => {
-                    // Existing custom provider at index (idx - 10) in custom_names list
-                    let custom_idx = idx - 10;
-                    tracing::debug!(
-                        "[detect_key] existing custom: idx={}, custom_idx={}, names_len={}",
-                        idx,
-                        custom_idx,
-                        self.model_selector_custom_names.len(),
-                    );
-                    if let Some(cname) = self.model_selector_custom_names.get(custom_idx).cloned() {
-                        if let Some(c) = config.providers.custom_by_name(&cname) {
-                            tracing::debug!(
-                                "[detect_key] loaded custom '{}': base_url={:?}, model={:?}",
-                                cname,
-                                c.base_url,
-                                c.default_model,
-                            );
-                            self.model_selector_custom_name = cname;
-                            self.model_selector_base_url = c.base_url.clone().unwrap_or_default();
-                            self.model_selector_custom_model =
-                                c.default_model.clone().unwrap_or_default();
-                            self.model_selector_context_window = c
-                                .context_window
-                                .map(|cw| cw.to_string())
-                                .unwrap_or_default();
-                            c.api_key.as_ref().is_some_and(|k| !k.is_empty())
-                        } else {
-                            false
-                        }
-                    } else {
-                        false
-                    }
-                }
-                _ => false,
-            };
-
-            self.model_selector_has_existing_key = has_key;
-        }
-
-        // Clear model selection when provider changes
-        self.model_selector_selected = 0;
-        self.model_selector_filter.clear();
+        self.ps.detect_existing_key();
     }
 
     /// Open the model selector dialog - load from config and fetch models
@@ -120,7 +27,7 @@ impl App {
         let config = crate::config::Config::load().unwrap_or_default();
 
         // Cache existing custom provider names early (needed for index mapping)
-        self.model_selector_custom_names = config
+        self.ps.custom_names = config
             .providers
             .custom
             .as_ref()
@@ -201,18 +108,18 @@ impl App {
                         .custom_by_name(cname)
                         .and_then(|p| p.api_key.clone());
                     if let Some(c) = config.providers.custom_by_name(cname) {
-                        self.model_selector_base_url = c.base_url.clone().unwrap_or_default();
-                        self.model_selector_custom_model =
+                        self.ps.base_url = c.base_url.clone().unwrap_or_default();
+                        self.ps.custom_model =
                             c.default_model.clone().unwrap_or_default();
-                        self.model_selector_context_window = c
+                        self.ps.context_window = c
                             .context_window
                             .map(|cw| cw.to_string())
                             .unwrap_or_default();
-                        self.model_selector_custom_name = cname.to_string();
+                        self.ps.custom_name = cname.to_string();
                     }
                     // Map to index 9+ if this name exists in custom_names list
                     let idx = self
-                        .model_selector_custom_names
+                        .ps.custom_names
                         .iter()
                         .position(|n| n == cname)
                         .map(|pos| 10 + pos)
@@ -368,19 +275,19 @@ impl App {
         } else if let Some((name, custom_cfg)) = config.providers.active_custom() {
             tracing::debug!("[open_model_selector] Custom provider '{}' enabled", name);
             if let Some(base_url) = &custom_cfg.base_url {
-                self.model_selector_base_url = base_url.clone();
+                self.ps.base_url = base_url.clone();
             }
             // Load existing model name so /models doesn't lose it
-            self.model_selector_custom_model = custom_cfg.default_model.clone().unwrap_or_default();
-            self.model_selector_context_window = custom_cfg
+            self.ps.custom_model = custom_cfg.default_model.clone().unwrap_or_default();
+            self.ps.context_window = custom_cfg
                 .context_window
                 .map(|cw| cw.to_string())
                 .unwrap_or_default();
             // Remember the custom provider name for saving
-            self.model_selector_custom_name = name.to_string();
+            self.ps.custom_name = name.to_string();
             // Map to index 9+ if this name exists in custom_names list
             let idx = self
-                .model_selector_custom_names
+                .ps.custom_names
                 .iter()
                 .position(|n| n == name)
                 .map(|pos| 10 + pos)
@@ -397,17 +304,17 @@ impl App {
             api_key.is_some()
         );
 
-        self.model_selector_provider_selected = provider_idx;
+        self.ps.selected_provider = provider_idx;
 
         tracing::info!(
             "[open_model_selector] resolved: provider_idx={}, has_key={}, custom_names={:?}",
             provider_idx,
             api_key.is_some(),
-            self.model_selector_custom_names,
+            self.ps.custom_names,
         );
 
         // Load zhipu endpoint type from config
-        self.model_selector_zhipu_endpoint_type = config
+        self.ps.zhipu_endpoint_type = config
             .providers
             .zhipu
             .as_ref()
@@ -416,8 +323,8 @@ impl App {
             .unwrap_or(0);
 
         // Track whether key exists — never load the actual key into UI state
-        self.model_selector_has_existing_key = api_key.is_some();
-        self.model_selector_api_key.clear();
+        self.ps.has_existing_key = api_key.is_some();
+        self.ps.api_key_input.clear();
 
         // Spawn async model fetch — dialog opens immediately, models arrive via event
         let sender = self.event_sender();
@@ -429,13 +336,13 @@ impl App {
         });
 
         // Clear models until fetch completes
-        self.model_selector_models.clear();
+        self.ps.models.clear();
 
         // Reset view state
-        self.model_selector_showing_providers = false;
-        self.model_selector_filter.clear();
-        self.model_selector_focused_field = 0;
-        self.model_selector_selected = 0;
+        self.ps.showing_providers = false;
+        self.ps.model_filter.clear();
+        self.ps.focused_field = 0;
+        self.ps.selected_model = 0;
 
         self.mode = AppMode::ModelSelector;
     }
@@ -448,7 +355,7 @@ impl App {
         use super::events::keys;
         use super::onboarding::PROVIDERS;
 
-        let is_zhipu = self.model_selector_provider_selected == 6;
+        let is_zhipu = self.ps.selected_provider == 6;
 
         if keys::is_cancel(&event) {
             self.switch_mode(AppMode::Chat).await?;
@@ -457,7 +364,7 @@ impl App {
             // - Normal providers: provider(0) -> api_key(1) -> model(2) -> provider(0)
             // - Zhipu: provider(0) -> endpoint_type(1) -> api_key(2) -> model(3) -> provider(0)
             // - Custom provider: provider(0) -> base_url(1) -> api_key(2) -> model(3) -> provider(0)
-            let is_custom = self.model_selector_provider_selected >= 9; // Custom provider index
+            let is_custom = self.ps.selected_provider >= 9; // Custom provider index
             let max_field = if is_custom {
                 5
             } else if is_zhipu {
@@ -465,13 +372,13 @@ impl App {
             } else {
                 3
             };
-            self.model_selector_focused_field = (self.model_selector_focused_field + 1) % max_field;
+            self.ps.focused_field = (self.ps.focused_field + 1) % max_field;
             // If moving to provider, enable provider list; otherwise show model list
-            self.model_selector_showing_providers = self.model_selector_focused_field == 0;
-        } else if self.model_selector_focused_field == 0 {
+            self.ps.showing_providers = self.ps.focused_field == 0;
+        } else if self.ps.focused_field == 0 {
             // Provider selection (focused)
             // Navigate using display order: static providers sorted alphabetically, then customs, then "+New"
-            let num_customs = self.model_selector_custom_names.len();
+            let num_customs = self.ps.custom_names.len();
             let mut static_indices: Vec<usize> = (0..9).collect();
             static_indices.sort_by_key(|&i| PROVIDERS[i].name.to_ascii_lowercase());
             let display_order: Vec<usize> = static_indices
@@ -483,20 +390,20 @@ impl App {
                 crossterm::event::KeyCode::Up => {
                     let pos = display_order
                         .iter()
-                        .position(|&i| i == self.model_selector_provider_selected)
+                        .position(|&i| i == self.ps.selected_provider)
                         .unwrap_or(0);
                     if pos > 0 {
-                        self.model_selector_provider_selected = display_order[pos - 1];
+                        self.ps.selected_provider = display_order[pos - 1];
                     }
                     true
                 }
                 crossterm::event::KeyCode::Down => {
                     let pos = display_order
                         .iter()
-                        .position(|&i| i == self.model_selector_provider_selected)
+                        .position(|&i| i == self.ps.selected_provider)
                         .unwrap_or(0);
                     if pos + 1 < display_order.len() {
-                        self.model_selector_provider_selected = display_order[pos + 1];
+                        self.ps.selected_provider = display_order[pos + 1];
                     }
                     true
                 }
@@ -507,13 +414,13 @@ impl App {
             if provider_changed {
                 tracing::debug!(
                     "[model_selector] provider navigated to idx={}, custom_names_len={}",
-                    self.model_selector_provider_selected,
-                    self.model_selector_custom_names.len(),
+                    self.ps.selected_provider,
+                    self.ps.custom_names.len(),
                 );
                 self.detect_model_selector_key_for_provider();
 
                 // Re-fetch models for the new provider — load API key from config
-                let provider_idx = self.model_selector_provider_selected;
+                let provider_idx = self.ps.selected_provider;
                 let api_key = crate::config::Config::load().ok().and_then(|c| {
                     match provider_idx {
                         0 => c.providers.anthropic.and_then(|p| p.api_key),
@@ -525,7 +432,7 @@ impl App {
                         6 => c.providers.zhipu.and_then(|p| p.api_key),
                         idx if idx >= 10 => {
                             let custom_idx = idx - 10;
-                            self.model_selector_custom_names
+                            self.ps.custom_names
                                 .get(custom_idx)
                                 .and_then(|name| {
                                     c.providers
@@ -539,7 +446,7 @@ impl App {
                 });
                 let zhipu_et = if provider_idx == 6 {
                     Some(
-                        if self.model_selector_zhipu_endpoint_type == 1 {
+                        if self.ps.zhipu_endpoint_type == 1 {
                             "coding"
                         } else {
                             "api"
@@ -559,144 +466,144 @@ impl App {
                     .await;
                     let _ = sender.send(TuiEvent::ModelSelectorModelsFetched(models));
                 });
-                self.model_selector_models.clear();
-                self.model_selector_selected = 0;
+                self.ps.models.clear();
+                self.ps.selected_model = 0;
             }
-        } else if self.model_selector_focused_field == 1 && is_zhipu {
+        } else if self.ps.focused_field == 1 && is_zhipu {
             // z.ai GLM endpoint type toggle (field 1)
             match event.code {
                 crossterm::event::KeyCode::Up | crossterm::event::KeyCode::Down => {
-                    self.model_selector_zhipu_endpoint_type =
-                        1 - self.model_selector_zhipu_endpoint_type;
+                    self.ps.zhipu_endpoint_type =
+                        1 - self.ps.zhipu_endpoint_type;
                 }
                 _ => {}
             }
-        } else if self.model_selector_focused_field == 1
-            && self.model_selector_provider_selected >= 9
+        } else if self.ps.focused_field == 1
+            && self.ps.selected_provider >= 9
         {
             // Base URL input for Custom provider (field 1)
             match event.code {
                 crossterm::event::KeyCode::Char(c) => {
-                    self.model_selector_base_url.push(c);
+                    self.ps.base_url.push(c);
                 }
                 crossterm::event::KeyCode::Backspace => {
-                    self.model_selector_base_url.pop();
+                    self.ps.base_url.pop();
                 }
                 _ => {}
             }
-        } else if (self.model_selector_focused_field == 1
-            && self.model_selector_provider_selected < 7
+        } else if (self.ps.focused_field == 1
+            && self.ps.selected_provider < 7
             && !is_zhipu)
-            || (self.model_selector_focused_field == 2 && is_zhipu)
-            || (self.model_selector_focused_field == 2
-                && self.model_selector_provider_selected >= 9)
+            || (self.ps.focused_field == 2 && is_zhipu)
+            || (self.ps.focused_field == 2
+                && self.ps.selected_provider >= 9)
         {
             // API key input (field 1 for non-Custom non-zhipu, field 2 for zhipu/Custom)
             match event.code {
                 crossterm::event::KeyCode::Char(c) => {
-                    self.model_selector_api_key.push(c);
+                    self.ps.api_key_input.push(c);
                 }
                 crossterm::event::KeyCode::Backspace => {
-                    self.model_selector_api_key.pop();
+                    self.ps.api_key_input.pop();
                 }
                 _ => {}
             }
-        } else if self.model_selector_focused_field == 3
-            && self.model_selector_provider_selected >= 9
+        } else if self.ps.focused_field == 3
+            && self.ps.selected_provider >= 9
         {
             // Custom provider: free-text model name input (field 3)
             match event.code {
                 crossterm::event::KeyCode::Char(c) => {
-                    self.model_selector_custom_model.push(c);
+                    self.ps.custom_model.push(c);
                 }
                 crossterm::event::KeyCode::Backspace => {
-                    self.model_selector_custom_model.pop();
+                    self.ps.custom_model.pop();
                 }
                 _ => {}
             }
-        } else if self.model_selector_focused_field == 4
-            && self.model_selector_provider_selected >= 9
+        } else if self.ps.focused_field == 4
+            && self.ps.selected_provider >= 9
         {
             // Custom provider: name identifier input (field 4)
             match event.code {
                 crossterm::event::KeyCode::Char(c) => {
-                    self.model_selector_custom_name.push(c);
+                    self.ps.custom_name.push(c);
                     self.error_message = None;
                     self.error_message_shown_at = None;
                 }
                 crossterm::event::KeyCode::Backspace => {
-                    self.model_selector_custom_name.pop();
+                    self.ps.custom_name.pop();
                 }
                 _ => {}
             }
-        } else if self.model_selector_focused_field == 5
-            && self.model_selector_provider_selected >= 9
+        } else if self.ps.focused_field == 5
+            && self.ps.selected_provider >= 9
         {
             // Custom provider: context window input (field 5 — last before save)
             match event.code {
                 crossterm::event::KeyCode::Char(c) if c.is_ascii_digit() => {
-                    self.model_selector_context_window.push(c);
+                    self.ps.context_window.push(c);
                 }
                 crossterm::event::KeyCode::Backspace => {
-                    self.model_selector_context_window.pop();
+                    self.ps.context_window.pop();
                 }
                 _ => {}
             }
-        } else if (self.model_selector_focused_field == 2
-            && self.model_selector_provider_selected < 9
+        } else if (self.ps.focused_field == 2
+            && self.ps.selected_provider < 9
             && !is_zhipu)
-            || (self.model_selector_focused_field == 3 && is_zhipu)
+            || (self.ps.focused_field == 3 && is_zhipu)
         {
             // Non-custom: filter/search model list (field 2, or field 3 for zhipu)
             match event.code {
                 crossterm::event::KeyCode::Char(c) => {
                     // Type to filter models
-                    self.model_selector_filter.push(c);
-                    self.model_selector_selected = 0;
+                    self.ps.model_filter.push(c);
+                    self.ps.selected_model = 0;
                 }
                 crossterm::event::KeyCode::Backspace => {
-                    self.model_selector_filter.pop();
+                    self.ps.model_filter.pop();
                     // Keep selection valid after filter change
-                    let filter = self.model_selector_filter.to_lowercase();
-                    let count = if self.model_selector_models.is_empty() {
-                        PROVIDERS[self.model_selector_provider_selected]
+                    let filter = self.ps.model_filter.to_lowercase();
+                    let count = if self.ps.models.is_empty() {
+                        PROVIDERS[self.ps.selected_provider]
                             .models
                             .len()
                     } else {
-                        self.model_selector_models
+                        self.ps.models
                             .iter()
                             .filter(|m| m.to_lowercase().contains(&filter))
                             .count()
                     };
-                    if self.model_selector_selected >= count && count > 0 {
-                        self.model_selector_selected = count - 1;
+                    if self.ps.selected_model >= count && count > 0 {
+                        self.ps.selected_model = count - 1;
                     }
                 }
                 crossterm::event::KeyCode::Esc => {
                     // Clear filter on Escape
-                    self.model_selector_filter.clear();
-                    self.model_selector_selected = 0;
+                    self.ps.model_filter.clear();
+                    self.ps.selected_model = 0;
                 }
                 _ => {
                     if keys::is_up(&event) {
-                        self.model_selector_selected =
-                            self.model_selector_selected.saturating_sub(1);
+                        self.ps.selected_model =
+                            self.ps.selected_model.saturating_sub(1);
                     } else if keys::is_down(&event) {
                         // Get filtered count
-                        let filter = self.model_selector_filter.to_lowercase();
-                        let max_models = if self.model_selector_models.is_empty() {
-                            PROVIDERS[self.model_selector_provider_selected]
+                        let filter = self.ps.model_filter.to_lowercase();
+                        let max_models = if self.ps.models.is_empty() {
+                            PROVIDERS[self.ps.selected_provider]
                                 .models
                                 .len()
                         } else {
-                            self.model_selector_models
+                            self.ps.models
                                 .iter()
                                 .filter(|m| m.to_lowercase().contains(&filter))
                                 .count()
                         };
                         if max_models > 0 {
-                            self.model_selector_selected =
-                                (self.model_selector_selected + 1).min(max_models - 1);
+                            self.ps.selected_model =
+                                (self.ps.selected_model + 1).min(max_models - 1);
                         }
                     }
                 }
@@ -705,23 +612,23 @@ impl App {
 
         // Enter to confirm - move to next field
         if keys::is_enter(&event) {
-            let is_custom = self.model_selector_provider_selected >= 9;
+            let is_custom = self.ps.selected_provider >= 9;
 
             tracing::debug!(
                 "[model_selector] Enter pressed: field={}, provider_idx={}, is_custom={}, custom_name='{}', base_url='{}'",
-                self.model_selector_focused_field,
-                self.model_selector_provider_selected,
+                self.ps.focused_field,
+                self.ps.selected_provider,
                 is_custom,
-                self.model_selector_custom_name,
-                self.model_selector_base_url,
+                self.ps.custom_name,
+                self.ps.base_url,
             );
 
-            let is_cli_provider = matches!(self.model_selector_provider_selected, 7 | 8);
+            let is_cli_provider = matches!(self.ps.selected_provider, 7 | 8);
 
-            if self.model_selector_focused_field == 0 {
+            if self.ps.focused_field == 0 {
                 // On provider field - save config, DON'T close dialog
                 // Map indices >= 10 back to 9 for save (custom provider)
-                let save_idx = self.model_selector_provider_selected.min(9);
+                let save_idx = self.ps.selected_provider.min(9);
                 if let Err(e) = self
                     .save_provider_selection_internal(save_idx, false, false)
                     .await
@@ -729,25 +636,25 @@ impl App {
                     self.push_system_message(format!("Error: {}", e));
                 } else {
                     // CLI providers have no API key — skip straight to model field
-                    self.model_selector_focused_field = if is_cli_provider { 2 } else { 1 };
+                    self.ps.focused_field = if is_cli_provider { 2 } else { 1 };
                 }
-            } else if self.model_selector_focused_field == 1 && is_zhipu {
+            } else if self.ps.focused_field == 1 && is_zhipu {
                 // z.ai GLM: field 1 is endpoint type, move to field 2 (api_key)
-                self.model_selector_focused_field = 2;
-            } else if self.model_selector_focused_field == 1 && is_custom {
+                self.ps.focused_field = 2;
+            } else if self.ps.focused_field == 1 && is_custom {
                 // Custom provider: field 1 is base_url, move to field 2 (api_key)
-                self.model_selector_focused_field = 2;
-            } else if (self.model_selector_focused_field == 1 && !is_custom && !is_zhipu)
-                || (self.model_selector_focused_field == 2 && (is_custom || is_zhipu))
+                self.ps.focused_field = 2;
+            } else if (self.ps.focused_field == 1 && !is_custom && !is_zhipu)
+                || (self.ps.focused_field == 2 && (is_custom || is_zhipu))
             {
                 // On API key field (field 1 for non-Custom non-zhipu, field 2 for zhipu/Custom)
                 // Map >= 10 back to 9 for save (all custom providers use idx 9)
-                let provider_idx = self.model_selector_provider_selected.min(9);
+                let provider_idx = self.ps.selected_provider.min(9);
 
                 // User typed a new key, or kept existing (just hit Enter to move on)
-                let key_changed = !self.model_selector_api_key.is_empty();
+                let key_changed = !self.ps.api_key_input.is_empty();
                 let api_key = if key_changed {
-                    Some(self.model_selector_api_key.clone())
+                    Some(self.ps.api_key_input.clone())
                 } else {
                     // Existing key untouched — load from config (merged with keys.toml)
                     crate::config::Config::load().ok().and_then(|c| {
@@ -779,7 +686,7 @@ impl App {
                     // Fetch live models from the provider (for non-Custom)
                     if !is_custom {
                         let zhipu_et = if is_zhipu {
-                            Some(if self.model_selector_zhipu_endpoint_type == 1 {
+                            Some(if self.ps.zhipu_endpoint_type == 1 {
                                 "coding"
                             } else {
                                 "api"
@@ -787,39 +694,39 @@ impl App {
                         } else {
                             None
                         };
-                        self.model_selector_models = super::onboarding::fetch_provider_models(
+                        self.ps.models = super::onboarding::fetch_provider_models(
                             provider_idx,
                             api_key.as_deref(),
                             zhipu_et,
                         )
                         .await;
                     }
-                    self.model_selector_selected = 0;
+                    self.ps.selected_model = 0;
 
                     // Move to model field (field 2 for non-Custom, field 3 for Custom/zhipu)
-                    self.model_selector_focused_field = if is_custom || is_zhipu { 3 } else { 2 };
+                    self.ps.focused_field = if is_custom || is_zhipu { 3 } else { 2 };
                 }
-            } else if is_custom && self.model_selector_focused_field == 3 {
+            } else if is_custom && self.ps.focused_field == 3 {
                 // Custom: after model, go to name field (field 4)
-                self.model_selector_focused_field = 4;
-            } else if is_custom && self.model_selector_focused_field == 4 {
+                self.ps.focused_field = 4;
+            } else if is_custom && self.ps.focused_field == 4 {
                 // Custom: on name field — validate then go to context window
-                if self.model_selector_custom_name.is_empty() {
+                if self.ps.custom_name.is_empty() {
                     self.error_message =
                         Some("Enter a name identifier for this provider".to_string());
                     self.error_message_shown_at = Some(std::time::Instant::now());
                 } else {
                     self.error_message = None;
                     self.error_message_shown_at = None;
-                    self.model_selector_focused_field = 5;
+                    self.ps.focused_field = 5;
                 }
-            } else if is_custom && self.model_selector_focused_field == 5 {
+            } else if is_custom && self.ps.focused_field == 5 {
                 // Custom: on context window field — save
-                self.save_provider_selection(self.model_selector_provider_selected.min(9), false)
+                self.save_provider_selection(self.ps.selected_provider.min(9), false)
                     .await?;
             } else {
                 // Non-custom: on model field — save and close
-                self.save_provider_selection(self.model_selector_provider_selected.min(9), false)
+                self.save_provider_selection(self.ps.selected_provider.min(9), false)
                     .await?;
             }
         }
@@ -947,8 +854,8 @@ impl App {
         };
 
         // Only use a key if the user actually typed one — never pull from config
-        let api_key = if key_changed && !self.model_selector_api_key.is_empty() {
-            Some(self.model_selector_api_key.clone())
+        let api_key = if key_changed && !self.ps.api_key_input.is_empty() {
+            Some(self.ps.api_key_input.clone())
         } else {
             existing_key
         };
@@ -1039,7 +946,7 @@ impl App {
             6 => {
                 // z.ai GLM — use endpoint type from model selector state
                 let endpoint_type = Some(
-                    if self.model_selector_zhipu_endpoint_type == 1 {
+                    if self.ps.zhipu_endpoint_type == 1 {
                         "coding"
                     } else {
                         "api"
@@ -1083,16 +990,16 @@ impl App {
             }
             9 => {
                 // Custom OpenAI-compatible (named provider)
-                let custom_model = self.model_selector_custom_model.clone();
-                let custom_name = self.model_selector_custom_name.clone();
+                let custom_model = self.ps.custom_model.clone();
+                let custom_name = self.ps.custom_name.clone();
                 let mut customs = config.providers.custom.unwrap_or_default();
-                let context_window = self.model_selector_context_window.parse::<u32>().ok();
+                let context_window = self.ps.context_window.parse::<u32>().ok();
                 customs.insert(
                     custom_name,
                     ProviderConfig {
                         enabled: true,
                         api_key: api_key.clone(),
-                        base_url: Some(self.model_selector_base_url.clone()),
+                        base_url: Some(self.ps.base_url.clone()),
                         default_model: Some(custom_model),
                         models: vec![],
                         vision_model: None,
@@ -1119,8 +1026,8 @@ impl App {
             8 => "providers.opencode_cli",
             9 => {
                 // Resolve custom provider name: UI field > config active > "default"
-                let cname = if !self.model_selector_custom_name.is_empty() {
-                    self.model_selector_custom_name.clone()
+                let cname = if !self.ps.custom_name.is_empty() {
+                    self.ps.custom_name.clone()
                 } else if let Some((name, _)) = config.providers.active_custom() {
                     name.to_string()
                 } else {
@@ -1187,24 +1094,24 @@ impl App {
             }
             6 => {
                 // z.ai GLM — write endpoint_type from model selector state
-                let endpoint_type = if self.model_selector_zhipu_endpoint_type == 1 {
+                let endpoint_type = if self.ps.zhipu_endpoint_type == 1 {
                     "coding"
                 } else {
                     "api"
                 };
                 let _ = crate::config::Config::write_key(section, "endpoint_type", endpoint_type);
             }
-            9 if !self.model_selector_base_url.is_empty() => {
+            9 if !self.ps.base_url.is_empty() => {
                 let _ = crate::config::Config::write_key(
                     section,
                     "base_url",
-                    &self.model_selector_base_url,
+                    &self.ps.base_url,
                 );
-                if !self.model_selector_context_window.is_empty() {
+                if !self.ps.context_window.is_empty() {
                     let _ = crate::config::Config::write_key(
                         section,
                         "context_window",
-                        &self.model_selector_context_window,
+                        &self.ps.context_window,
                     );
                 }
             }
@@ -1215,7 +1122,7 @@ impl App {
         if provider_idx == 9
             && let Ok(fresh) = crate::config::Config::load()
         {
-            self.model_selector_custom_names = fresh
+            self.ps.custom_names = fresh
                 .providers
                 .custom
                 .as_ref()
@@ -1223,19 +1130,19 @@ impl App {
                 .unwrap_or_default();
             tracing::debug!(
                 "[save_provider] refreshed custom_names after save: {:?}",
-                self.model_selector_custom_names,
+                self.ps.custom_names,
             );
             // Point selection to the newly saved custom provider
-            if !self.model_selector_custom_name.is_empty()
+            if !self.ps.custom_name.is_empty()
                 && let Some(pos) = self
-                    .model_selector_custom_names
+                    .ps.custom_names
                     .iter()
-                    .position(|n| n == &self.model_selector_custom_name)
+                    .position(|n| n == &self.ps.custom_name)
             {
-                self.model_selector_provider_selected = 10 + pos;
+                self.ps.selected_provider = 10 + pos;
                 tracing::debug!(
                     "[save_provider] mapped custom '{}' to idx={}",
-                    self.model_selector_custom_name,
+                    self.ps.custom_name,
                     10 + pos,
                 );
             }
@@ -1254,23 +1161,23 @@ impl App {
         // provider instance picks up the correct model from config on disk.
         let is_custom = provider_idx == 9;
         let selected_model = if is_custom {
-            self.model_selector_custom_model.clone()
-        } else if !self.model_selector_models.is_empty() {
-            let filter = self.model_selector_filter.to_lowercase();
+            self.ps.custom_model.clone()
+        } else if !self.ps.models.is_empty() {
+            let filter = self.ps.model_filter.to_lowercase();
             let filtered: Vec<_> = self
-                .model_selector_models
+                .ps.models
                 .iter()
                 .filter(|m| m.to_lowercase().contains(&filter))
                 .collect();
-            if let Some(model) = filtered.get(self.model_selector_selected) {
+            if let Some(model) = filtered.get(self.ps.selected_model) {
                 model.to_string()
             } else {
-                self.model_selector_models
+                self.ps.models
                     .first()
                     .cloned()
                     .unwrap_or_else(|| self.default_model_name.clone())
             }
-        } else if let Some(model) = provider.models.get(self.model_selector_selected) {
+        } else if let Some(model) = provider.models.get(self.ps.selected_model) {
             model.to_string()
         } else if let Some(model) = provider.models.first() {
             model.to_string()
@@ -1322,9 +1229,9 @@ impl App {
         // Only close dialog if explicitly requested
         if close_dialog {
             // Use user-configured name for custom providers (e.g. "nvidia"), fall back to generic
-            let provider_name = if provider_idx == 9 && !self.model_selector_custom_name.is_empty()
+            let provider_name = if provider_idx == 9 && !self.ps.custom_name.is_empty()
             {
-                self.model_selector_custom_name.clone()
+                self.ps.custom_name.clone()
             } else {
                 provider
                     .name
@@ -1374,17 +1281,17 @@ impl App {
                             let msg = match wizard.step {
                                 OnboardingStep::ProviderAuth => {
                                     needs_rebuild = true;
-                                    let (pname, mname) = if wizard.is_custom_provider() {
+                                    let (pname, mname) = if wizard.ps.is_custom() {
                                         (
-                                            format!("Custom ({})", wizard.custom_provider_name),
-                                            wizard.custom_model.clone(),
+                                            format!("Custom ({})", wizard.ps.custom_name),
+                                            wizard.ps.custom_model.clone(),
                                         )
                                     } else {
                                         (
-                                            super::onboarding::PROVIDERS[wizard.selected_provider]
+                                            super::onboarding::PROVIDERS[wizard.ps.selected_provider]
                                                 .name
                                                 .to_string(),
-                                            wizard.selected_model_name().to_string(),
+                                            wizard.ps.selected_model_name().to_string(),
                                         )
                                     };
                                     format!("[Model changed to {} (provider: {})]", mname, pname)
@@ -1412,17 +1319,17 @@ impl App {
                     if let Some(ref wizard) = self.onboarding {
                         match wizard.apply_config() {
                             Ok(()) => {
-                                let (provider_name, model_name) = if wizard.is_custom_provider() {
+                                let (provider_name, model_name) = if wizard.ps.is_custom() {
                                     (
-                                        format!("Custom ({})", wizard.custom_provider_name),
-                                        wizard.custom_model.clone(),
+                                        format!("Custom ({})", wizard.ps.custom_name),
+                                        wizard.ps.custom_model.clone(),
                                     )
                                 } else {
                                     (
-                                        super::onboarding::PROVIDERS[wizard.selected_provider]
+                                        super::onboarding::PROVIDERS[wizard.ps.selected_provider]
                                             .name
                                             .to_string(),
-                                        wizard.selected_model_name().to_string(),
+                                        wizard.ps.selected_model_name().to_string(),
                                     )
                                 };
                                 self.push_system_message(format!(
@@ -1451,9 +1358,9 @@ impl App {
                     self.switch_mode(AppMode::Chat).await?;
                 }
                 WizardAction::FetchModels => {
-                    let provider_idx = wizard.selected_provider;
+                    let provider_idx = wizard.ps.selected_provider;
                     // Resolve API key from config (keys.toml) or raw input
-                    let api_key = if wizard.has_existing_key() {
+                    let api_key = if wizard.ps.has_existing_key_sentinel() {
                         let provider_name = super::onboarding::PROVIDERS
                             [provider_idx.min(super::onboarding::PROVIDERS.len() - 1)]
                         .name;
@@ -1489,16 +1396,16 @@ impl App {
                                 .and_then(|p| p.api_key.clone()),
                             _ => None,
                         }
-                    } else if !wizard.api_key_input.is_empty() {
-                        Some(wizard.api_key_input.clone())
+                    } else if !wizard.ps.api_key_input.is_empty() {
+                        Some(wizard.ps.api_key_input.clone())
                     } else {
                         None
                     };
-                    wizard.models_fetching = true;
+                    wizard.ps.models_fetching = true;
 
                     // Capture zhipu endpoint type from wizard state (not yet saved to config)
                     let zhipu_et = if provider_idx == 6 {
-                        Some(if wizard.zhipu_endpoint_type == 1 {
+                        Some(if wizard.ps.zhipu_endpoint_type == 1 {
                             "coding".to_string()
                         } else {
                             "api".to_string()

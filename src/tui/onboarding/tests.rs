@@ -12,7 +12,7 @@ fn test_wizard_creation() {
 #[test]
 fn test_step_navigation() {
     let mut wizard = OnboardingWizard::new();
-    wizard.api_key_input = "test-key".to_string();
+    wizard.ps.api_key_input = "test-key".to_string();
 
     assert_eq!(wizard.step, OnboardingStep::ModeSelect);
     wizard.next_step(); // ModeSelect -> Workspace
@@ -23,7 +23,7 @@ fn test_step_navigation() {
 fn test_advanced_mode_all_steps() {
     let mut wizard = OnboardingWizard::new();
     wizard.mode = WizardMode::Advanced;
-    wizard.api_key_input = "test-key".to_string();
+    wizard.ps.api_key_input = "test-key".to_string();
 
     wizard.next_step(); // ModeSelect -> Workspace
     assert_eq!(wizard.step, OnboardingStep::Workspace);
@@ -69,7 +69,7 @@ fn test_channels_telegram_goes_to_telegram_setup() {
 fn test_channels_whatsapp_skips_to_voice() {
     let mut wizard = OnboardingWizard::new();
     wizard.mode = WizardMode::Advanced;
-    wizard.api_key_input = "test-key".to_string();
+    wizard.ps.api_key_input = "test-key".to_string();
 
     wizard.next_step(); // ModeSelect -> Workspace
     wizard.next_step(); // Workspace -> ProviderAuth
@@ -157,13 +157,13 @@ fn test_prev_step_cancel() {
 #[test]
 fn test_provider_auth_defaults() {
     let wizard = clean_wizard();
-    assert_eq!(wizard.selected_provider, 0);
+    assert_eq!(wizard.ps.selected_provider, 0);
     assert_eq!(wizard.auth_field, AuthField::Provider);
-    assert!(wizard.api_key_input.is_empty());
-    assert_eq!(wizard.selected_model, 0);
+    assert!(wizard.ps.api_key_input.is_empty());
+    assert_eq!(wizard.ps.selected_model, 0);
     // First provider is Anthropic Claude
-    assert_eq!(PROVIDERS[wizard.selected_provider].name, "Anthropic Claude");
-    assert!(!PROVIDERS[wizard.selected_provider].help_lines.is_empty());
+    assert_eq!(PROVIDERS[wizard.ps.selected_provider].name, "Anthropic Claude");
+    assert!(!PROVIDERS[wizard.ps.selected_provider].help_lines.is_empty());
 }
 
 #[test]
@@ -190,10 +190,10 @@ fn test_channel_toggles_default_off() {
 /// pollutes provider/brain fields when a real config exists.
 fn clean_wizard() -> OnboardingWizard {
     let mut w = OnboardingWizard::new();
-    w.selected_provider = 0;
-    w.api_key_input = String::new();
-    w.custom_base_url = String::new();
-    w.custom_model = String::new();
+    w.ps.selected_provider = 0;
+    w.ps.api_key_input = String::new();
+    w.ps.base_url = String::new();
+    w.ps.custom_model = String::new();
     w.about_me = String::new();
     w.about_opencrabs = String::new();
     w.original_about_me = String::new();
@@ -261,17 +261,17 @@ fn test_handle_key_provider_navigation() {
     let mut wizard = clean_wizard();
     wizard.step = OnboardingStep::ProviderAuth;
     wizard.auth_field = AuthField::Provider;
-    assert_eq!(wizard.selected_provider, 0);
+    assert_eq!(wizard.ps.selected_provider, 0);
 
     wizard.handle_key(key(KeyCode::Down));
-    assert_eq!(wizard.selected_provider, 7); // Claude CLI (next alphabetically after Anthropic)
+    assert_eq!(wizard.ps.selected_provider, 7); // Claude CLI (next alphabetically after Anthropic)
 
     wizard.handle_key(key(KeyCode::Up));
-    assert_eq!(wizard.selected_provider, 0);
+    assert_eq!(wizard.ps.selected_provider, 0);
 
     // Can't go below 0
     wizard.handle_key(key(KeyCode::Up));
-    assert_eq!(wizard.selected_provider, 0);
+    assert_eq!(wizard.ps.selected_provider, 0);
 }
 
 #[test]
@@ -287,11 +287,11 @@ fn test_handle_key_api_key_typing() {
     // Type a key
     wizard.handle_key(key(KeyCode::Char('s')));
     wizard.handle_key(key(KeyCode::Char('k')));
-    assert_eq!(wizard.api_key_input, "sk");
+    assert_eq!(wizard.ps.api_key_input, "sk");
 
     // Backspace
     wizard.handle_key(key(KeyCode::Backspace));
-    assert_eq!(wizard.api_key_input, "s");
+    assert_eq!(wizard.ps.api_key_input, "s");
 }
 
 #[test]
@@ -330,7 +330,7 @@ fn test_handle_key_complete_step_returns_complete() {
 fn test_quickstart_skips_channels_voice() {
     let mut wizard = OnboardingWizard::new();
     wizard.mode = WizardMode::QuickStart;
-    wizard.api_key_input = "test-key".to_string();
+    wizard.ps.api_key_input = "test-key".to_string();
 
     wizard.next_step(); // ModeSelect -> Workspace
     assert_eq!(wizard.step, OnboardingStep::Workspace);
@@ -363,20 +363,20 @@ fn test_model_selection() {
     wizard.step = OnboardingStep::ProviderAuth;
     wizard.auth_field = AuthField::Model;
     // Set up config models for selection testing
-    wizard.config_models = vec!["model-a".into(), "model-b".into(), "model-c".into()];
+    wizard.ps.config_models = vec!["model-a".into(), "model-b".into(), "model-c".into()];
 
-    assert_eq!(wizard.selected_model, 0);
+    assert_eq!(wizard.ps.selected_model, 0);
     wizard.handle_key(key(KeyCode::Down));
-    assert_eq!(wizard.selected_model, 1);
+    assert_eq!(wizard.ps.selected_model, 1);
     wizard.handle_key(key(KeyCode::Down));
-    assert_eq!(wizard.selected_model, 2);
+    assert_eq!(wizard.ps.selected_model, 2);
     // Should clamp to max
     for _ in 0..20 {
         wizard.handle_key(key(KeyCode::Down));
     }
     // Provider selection stays within bounds (7 static + existing custom providers)
-    let max_idx = PROVIDERS.len() + wizard.existing_custom_names.len();
-    assert!(wizard.selected_provider < max_idx);
+    let max_idx = PROVIDERS.len() + wizard.ps.custom_names.len();
+    assert!(wizard.ps.selected_provider < max_idx);
 }
 
 #[test]
@@ -414,56 +414,56 @@ fn test_openrouter_provider_index() {
 fn test_model_count_uses_fetched_when_available() {
     let mut wizard = OnboardingWizard::new();
     // Clear any models loaded from existing config
-    wizard.config_models.clear();
-    wizard.fetched_models.clear();
+    wizard.ps.config_models.clear();
+    wizard.ps.models.clear();
     // Anthropic (0) has no static models — fetched from API
-    wizard.selected_provider = 0;
-    assert_eq!(wizard.model_count(), 0);
+    wizard.ps.selected_provider = 0;
+    assert_eq!(wizard.ps.model_count(), 0);
 
     // After fetching
-    wizard.fetched_models = vec![
+    wizard.ps.models = vec![
         "model-a".into(),
         "model-b".into(),
         "model-c".into(),
         "model-d".into(),
     ];
-    assert_eq!(wizard.model_count(), 4);
+    assert_eq!(wizard.ps.model_count(), 4);
 }
 
 #[test]
 fn test_selected_model_name_uses_fetched() {
     let mut wizard = OnboardingWizard::new();
     // No static models - should use fetched or show placeholder
-    assert!(wizard.selected_model_name().is_empty() || wizard.fetched_models.is_empty());
+    assert!(wizard.ps.selected_model_name().is_empty() || wizard.ps.models.is_empty());
 
-    wizard.fetched_models = vec!["live-model-1".into(), "live-model-2".into()];
-    wizard.selected_model = 1;
-    assert_eq!(wizard.selected_model_name(), "live-model-2");
+    wizard.ps.models = vec!["live-model-1".into(), "live-model-2".into()];
+    wizard.ps.selected_model = 1;
+    assert_eq!(wizard.ps.selected_model_name(), "live-model-2");
 }
 
 #[test]
 fn test_supports_model_fetch() {
     let mut wizard = OnboardingWizard::new();
-    wizard.selected_provider = 0; // Anthropic
-    assert!(wizard.supports_model_fetch());
-    wizard.selected_provider = 1; // OpenAI
-    assert!(wizard.supports_model_fetch());
-    wizard.selected_provider = 2; // GitHub Copilot (has /models endpoint)
-    assert!(wizard.supports_model_fetch());
-    wizard.selected_provider = 3; // Gemini
-    assert!(wizard.supports_model_fetch());
-    wizard.selected_provider = 4; // OpenRouter
-    assert!(wizard.supports_model_fetch());
-    wizard.selected_provider = 5; // Minimax
-    assert!(!wizard.supports_model_fetch());
-    wizard.selected_provider = 6; // z.ai GLM (supports fetch)
-    assert!(wizard.supports_model_fetch());
-    wizard.selected_provider = 7; // Claude CLI
-    assert!(!wizard.supports_model_fetch());
-    wizard.selected_provider = 8; // OpenCode CLI (supports fetch)
-    assert!(wizard.supports_model_fetch());
-    wizard.selected_provider = 9; // Custom
-    assert!(!wizard.supports_model_fetch());
+    wizard.ps.selected_provider = 0; // Anthropic
+    assert!(wizard.ps.supports_model_fetch());
+    wizard.ps.selected_provider = 1; // OpenAI
+    assert!(wizard.ps.supports_model_fetch());
+    wizard.ps.selected_provider = 2; // GitHub Copilot (has /models endpoint)
+    assert!(wizard.ps.supports_model_fetch());
+    wizard.ps.selected_provider = 3; // Gemini
+    assert!(wizard.ps.supports_model_fetch());
+    wizard.ps.selected_provider = 4; // OpenRouter
+    assert!(wizard.ps.supports_model_fetch());
+    wizard.ps.selected_provider = 5; // Minimax
+    assert!(!wizard.ps.supports_model_fetch());
+    wizard.ps.selected_provider = 6; // z.ai GLM (supports fetch)
+    assert!(wizard.ps.supports_model_fetch());
+    wizard.ps.selected_provider = 7; // Claude CLI
+    assert!(!wizard.ps.supports_model_fetch());
+    wizard.ps.selected_provider = 8; // OpenCode CLI (supports fetch)
+    assert!(wizard.ps.supports_model_fetch());
+    wizard.ps.selected_provider = 9; // Custom
+    assert!(!wizard.ps.supports_model_fetch());
 }
 
 #[test]
@@ -943,8 +943,8 @@ fn test_discord_cursor_movement_in_field() {
 #[test]
 fn test_provider_display_order_no_customs() {
     let mut wizard = clean_wizard();
-    wizard.existing_custom_names.clear();
-    let order = wizard.provider_display_order();
+    wizard.ps.custom_names.clear();
+    let order = wizard.ps.provider_display_order();
     // Static providers (0-8) sorted alphabetically, then 9 ("+ New Custom") last
     // Alphabetical: Anthropic(0), Claude CLI(7), GitHub Copilot(2), Google Gemini(3),
     //               Minimax(5), OpenAI(1), OpenCode CLI(8), OpenRouter(4), z.ai GLM(6)
@@ -954,8 +954,8 @@ fn test_provider_display_order_no_customs() {
 #[test]
 fn test_provider_display_order_with_customs() {
     let mut wizard = clean_wizard();
-    wizard.existing_custom_names = vec!["nvidia".into(), "opus".into(), "opusdistil".into()];
-    let order = wizard.provider_display_order();
+    wizard.ps.custom_names = vec!["nvidia".into(), "opus".into(), "opusdistil".into()];
+    let order = wizard.ps.provider_display_order();
     // Static providers sorted alphabetically, 10,11,12 existing customs, 9 ("+ New Custom") last
     assert_eq!(order, vec![0, 7, 2, 3, 5, 1, 8, 4, 6, 10, 11, 12, 9]);
 }
@@ -965,13 +965,13 @@ fn test_provider_nav_down_from_last_static_goes_to_first_custom() {
     let mut wizard = clean_wizard();
     wizard.step = OnboardingStep::ProviderAuth;
     wizard.auth_field = AuthField::Provider;
-    wizard.existing_custom_names = vec!["nvidia".into(), "opus".into()];
-    wizard.selected_provider = 6; // z.ai GLM (last static alphabetically)
+    wizard.ps.custom_names = vec!["nvidia".into(), "opus".into()];
+    wizard.ps.selected_provider = 6; // z.ai GLM (last static alphabetically)
 
     wizard.handle_key(key(KeyCode::Down));
     // Should go to nvidia (index 10), not "+ New Custom" (index 9)
     assert_eq!(
-        wizard.selected_provider, 10,
+        wizard.ps.selected_provider, 10,
         "Down from z.ai GLM should go to first custom provider, not +New Custom"
     );
 }
@@ -981,13 +981,13 @@ fn test_provider_nav_down_through_customs_to_new() {
     let mut wizard = clean_wizard();
     wizard.step = OnboardingStep::ProviderAuth;
     wizard.auth_field = AuthField::Provider;
-    wizard.existing_custom_names = vec!["nvidia".into()];
-    wizard.selected_provider = 10; // nvidia
+    wizard.ps.custom_names = vec!["nvidia".into()];
+    wizard.ps.selected_provider = 10; // nvidia
 
     wizard.handle_key(key(KeyCode::Down));
     // Should go to "+ New Custom" (index 9) which is visually last
     assert_eq!(
-        wizard.selected_provider, 9,
+        wizard.ps.selected_provider, 9,
         "Down from last custom should go to +New Custom"
     );
 }
@@ -997,13 +997,13 @@ fn test_provider_nav_up_from_new_custom_goes_to_last_custom() {
     let mut wizard = clean_wizard();
     wizard.step = OnboardingStep::ProviderAuth;
     wizard.auth_field = AuthField::Provider;
-    wizard.existing_custom_names = vec!["nvidia".into(), "opus".into()];
-    wizard.selected_provider = 9; // "+ New Custom"
+    wizard.ps.custom_names = vec!["nvidia".into(), "opus".into()];
+    wizard.ps.selected_provider = 9; // "+ New Custom"
 
     wizard.handle_key(key(KeyCode::Up));
     // Should go to opus (index 11), not z.ai GLM (index 6)
     assert_eq!(
-        wizard.selected_provider, 11,
+        wizard.ps.selected_provider, 11,
         "Up from +New Custom should go to last custom provider"
     );
 }
@@ -1013,12 +1013,12 @@ fn test_provider_nav_up_from_first_custom_goes_to_last_static() {
     let mut wizard = clean_wizard();
     wizard.step = OnboardingStep::ProviderAuth;
     wizard.auth_field = AuthField::Provider;
-    wizard.existing_custom_names = vec!["nvidia".into(), "opus".into()];
-    wizard.selected_provider = 10; // nvidia (first custom)
+    wizard.ps.custom_names = vec!["nvidia".into(), "opus".into()];
+    wizard.ps.selected_provider = 10; // nvidia (first custom)
 
     wizard.handle_key(key(KeyCode::Up));
     assert_eq!(
-        wizard.selected_provider, 6,
+        wizard.ps.selected_provider, 6,
         "Up from first custom should go to z.ai GLM (last static alphabetically)"
     );
 }
@@ -1028,17 +1028,17 @@ fn test_provider_nav_clamps_at_top_and_bottom() {
     let mut wizard = clean_wizard();
     wizard.step = OnboardingStep::ProviderAuth;
     wizard.auth_field = AuthField::Provider;
-    wizard.existing_custom_names = vec!["nvidia".into()];
+    wizard.ps.custom_names = vec!["nvidia".into()];
 
     // At top, Up stays at 0
-    wizard.selected_provider = 0;
+    wizard.ps.selected_provider = 0;
     wizard.handle_key(key(KeyCode::Up));
-    assert_eq!(wizard.selected_provider, 0);
+    assert_eq!(wizard.ps.selected_provider, 0);
 
     // At bottom ("+ New Custom" = 9), Down stays
-    wizard.selected_provider = 9;
+    wizard.ps.selected_provider = 9;
     wizard.handle_key(key(KeyCode::Down));
-    assert_eq!(wizard.selected_provider, 9);
+    assert_eq!(wizard.ps.selected_provider, 9);
 }
 
 #[test]
@@ -1046,15 +1046,15 @@ fn test_provider_nav_full_cycle_matches_display_order() {
     let mut wizard = clean_wizard();
     wizard.step = OnboardingStep::ProviderAuth;
     wizard.auth_field = AuthField::Provider;
-    wizard.existing_custom_names = vec!["nvidia".into(), "opus".into()];
-    wizard.selected_provider = 0;
+    wizard.ps.custom_names = vec!["nvidia".into(), "opus".into()];
+    wizard.ps.selected_provider = 0;
 
-    let expected_order = wizard.provider_display_order();
-    let mut visited = vec![wizard.selected_provider];
+    let expected_order = wizard.ps.provider_display_order();
+    let mut visited = vec![wizard.ps.selected_provider];
 
     for _ in 1..expected_order.len() {
         wizard.handle_key(key(KeyCode::Down));
-        visited.push(wizard.selected_provider);
+        visited.push(wizard.ps.selected_provider);
     }
 
     assert_eq!(

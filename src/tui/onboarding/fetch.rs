@@ -268,7 +268,7 @@ pub async fn fetch_provider_models(
                     return vec![model.clone()];
                 }
             }
-            return OnboardingWizard::load_default_models(2);
+            return crate::tui::provider_selector::load_default_models(2);
         }
         3 => {
             // Google Gemini — list models via generativelanguage API

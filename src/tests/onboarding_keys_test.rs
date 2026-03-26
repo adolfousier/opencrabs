@@ -28,18 +28,18 @@ fn test_is_custom_provider() {
     let mut wizard = OnboardingWizard::new();
 
     // Index 9 is Custom
-    wizard.selected_provider = 9;
-    assert!(wizard.is_custom_provider());
+    wizard.ps.selected_provider = 9;
+    assert!(wizard.ps.is_custom());
 
     // Other indices are not Custom
-    wizard.selected_provider = 0;
-    assert!(!wizard.is_custom_provider());
-    wizard.selected_provider = 1;
-    assert!(!wizard.is_custom_provider());
-    wizard.selected_provider = 2;
-    assert!(!wizard.is_custom_provider());
-    wizard.selected_provider = 8;
-    assert!(!wizard.is_custom_provider());
+    wizard.ps.selected_provider = 0;
+    assert!(!wizard.ps.is_custom());
+    wizard.ps.selected_provider = 1;
+    assert!(!wizard.ps.is_custom());
+    wizard.ps.selected_provider = 2;
+    assert!(!wizard.ps.is_custom());
+    wizard.ps.selected_provider = 8;
+    assert!(!wizard.ps.is_custom());
 }
 
 #[test]
@@ -49,12 +49,12 @@ fn test_all_providers_use_api_key_input() {
 
     for idx in 0..PROVIDERS.len() {
         let mut wizard = OnboardingWizard::new();
-        wizard.selected_provider = idx;
-        wizard.api_key_input = test_key.to_string();
+        wizard.ps.selected_provider = idx;
+        wizard.ps.api_key_input = test_key.to_string();
 
         // Custom provider also uses api_key_input (no separate field)
-        assert_eq!(wizard.api_key_input, test_key);
-        assert!(!wizard.has_existing_key()); // fresh key, not sentinel
+        assert_eq!(wizard.ps.api_key_input, test_key);
+        assert!(!wizard.ps.has_existing_key_sentinel()); // fresh key, not sentinel
     }
 }
 

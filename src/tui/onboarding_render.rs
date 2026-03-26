@@ -493,14 +493,14 @@ fn render_mode_select(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard)
 /// Returns the line index (in `lines`) of the currently focused element —
 /// used by `render_onboarding` to scroll the Paragraph and keep it visible.
 fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) -> usize {
-    let is_custom = wizard.is_custom_provider();
+    let is_custom = wizard.ps.is_custom();
     let mut focused_line: usize = 0;
 
     // Provider list — 8 static providers (0-7), then existing custom names (9+), then "+ New Custom" (8) last.
     // Visual order: 0-7, then 9+, then 8 (existing customs before add button).
-    let display_order = wizard.provider_display_order();
+    let display_order = wizard.ps.provider_display_order();
     for &idx in &display_order {
-        let selected = idx == wizard.selected_provider;
+        let selected = idx == wizard.ps.selected_provider;
         let focused = wizard.auth_field == AuthField::Provider;
 
         let prefix = if selected && focused { " > " } else { "   " };
@@ -513,7 +513,7 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
         } else {
             let custom_idx = idx - 10;
             wizard
-                .existing_custom_names
+                .ps.custom_names
                 .get(custom_idx)
                 .cloned()
                 .unwrap_or_else(|| "custom".to_string())
@@ -555,10 +555,10 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
         let model_focused = wizard.auth_field == AuthField::CustomModel;
 
         // Provider Name field
-        let name_display = if wizard.custom_provider_name.is_empty() {
+        let name_display = if wizard.ps.custom_name.is_empty() {
             "enter a name (e.g. nvidia, ollama)".to_string()
         } else {
-            wizard.custom_provider_name.clone()
+            wizard.ps.custom_name.clone()
         };
         let cursor = if name_focused { "█" } else { "" };
         lines.push(Line::from(vec![
@@ -580,10 +580,10 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
             ),
         ]));
 
-        let base_display = if wizard.custom_base_url.is_empty() {
+        let base_display = if wizard.ps.base_url.is_empty() {
             "http://localhost:8000/v1".to_string()
         } else {
-            wizard.custom_base_url.clone()
+            wizard.ps.base_url.clone()
         };
         let cursor = if base_focused { "█" } else { "" };
         lines.push(Line::from(vec![
@@ -606,13 +606,13 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
         ]));
 
         // API Key field (optional for custom providers)
-        let has_existing = wizard.has_existing_key();
-        let key_display = if wizard.api_key_input.is_empty() {
+        let has_existing = wizard.ps.has_existing_key_sentinel();
+        let key_display = if wizard.ps.api_key_input.is_empty() {
             "optional".to_string()
         } else if has_existing {
             "● configured".to_string()
         } else {
-            "*".repeat(wizard.api_key_input.len().min(30))
+            "*".repeat(wizard.ps.api_key_input.len().min(30))
         };
         let cursor = if api_key_focused && !has_existing {
             "█"
@@ -640,10 +640,10 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
             ),
         ]));
 
-        let model_display = if wizard.custom_model.is_empty() {
+        let model_display = if wizard.ps.custom_model.is_empty() {
             "model-name".to_string()
         } else {
-            wizard.custom_model.clone()
+            wizard.ps.custom_model.clone()
         };
         let cursor = if model_focused { "█" } else { "" };
         lines.push(Line::from(vec![
@@ -667,10 +667,10 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
 
         // Context Window field
         let cw_focused = wizard.auth_field == AuthField::CustomContextWindow;
-        let cw_display = if wizard.custom_context_window.is_empty() {
+        let cw_display = if wizard.ps.context_window.is_empty() {
             "e.g. 128000 (optional)".to_string()
         } else {
-            wizard.custom_context_window.clone()
+            wizard.ps.context_window.clone()
         };
         let cursor = if cw_focused { "█" } else { "" };
         lines.push(Line::from(vec![
@@ -691,11 +691,11 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
                 }),
             ),
         ]));
-    } else if wizard.selected_provider == 2 {
+    } else if wizard.ps.selected_provider == 2 {
         // GitHub Copilot — OAuth device flow
         use crate::tui::onboarding::GitHubDeviceFlowStatus;
 
-        if wizard.has_existing_key() {
+        if wizard.ps.has_existing_key_sentinel() {
             // Already authenticated
             lines.push(Line::from(Span::styled(
                 "  ● Authenticated with GitHub Copilot",
@@ -767,7 +767,7 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
         }
     } else {
         // Show help text for selected provider
-        let provider = wizard.current_provider();
+        let provider = wizard.ps.current_provider();
         for help_line in provider.help_lines {
             lines.push(Line::from(Span::styled(
                 format!("  {}", help_line),
@@ -779,14 +779,14 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
         lines.push(Line::from(""));
 
         // z.ai GLM endpoint type toggle (api vs coding) — BEFORE API key
-        if wizard.selected_provider == 6 {
+        if wizard.ps.selected_provider == 6 {
             let et_focused = wizard.auth_field == AuthField::ZhipuEndpointType;
-            let api_marker = if wizard.zhipu_endpoint_type == 0 {
+            let api_marker = if wizard.ps.zhipu_endpoint_type == 0 {
                 "[*]"
             } else {
                 "[ ]"
             };
-            let coding_marker = if wizard.zhipu_endpoint_type == 1 {
+            let coding_marker = if wizard.ps.zhipu_endpoint_type == 1 {
                 "[*]"
             } else {
                 "[ ]"
@@ -802,7 +802,7 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("    {} General API  ", api_marker),
-                    Style::default().fg(if et_focused && wizard.zhipu_endpoint_type == 0 {
+                    Style::default().fg(if et_focused && wizard.ps.zhipu_endpoint_type == 0 {
                         Color::White
                     } else {
                         Color::DarkGray
@@ -810,7 +810,7 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
                 ),
                 Span::styled(
                     format!("{} Coding API", coding_marker),
-                    Style::default().fg(if et_focused && wizard.zhipu_endpoint_type == 1 {
+                    Style::default().fg(if et_focused && wizard.ps.zhipu_endpoint_type == 1 {
                         Color::White
                     } else {
                         Color::DarkGray
@@ -821,26 +821,26 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
         }
 
         // CLI providers (Claude CLI, OpenCode CLI) have no API key — skip the field
-        if !matches!(wizard.selected_provider, 7 | 8) {
+        if !matches!(wizard.ps.selected_provider, 7 | 8) {
             let key_focused = wizard.auth_field == AuthField::ApiKey;
             let key_label = provider.key_label;
-            let (masked_key, key_hint) = if wizard.has_existing_key() {
+            let (masked_key, key_hint) = if wizard.ps.has_existing_key_sentinel() {
                 (
                     "**************************".to_string(),
                     " (already configured, type to replace)".to_string(),
                 )
-            } else if wizard.api_key_input.is_empty() {
+            } else if wizard.ps.api_key_input.is_empty() {
                 (
                     format!("enter your {}", key_label.to_lowercase()),
                     String::new(),
                 )
             } else {
                 (
-                    "*".repeat(wizard.api_key_input.len().min(30)),
+                    "*".repeat(wizard.ps.api_key_input.len().min(30)),
                     String::new(),
                 )
             };
-            let cursor = if key_focused && !wizard.has_existing_key() {
+            let cursor = if key_focused && !wizard.ps.has_existing_key_sentinel() {
                 "█"
             } else {
                 ""
@@ -857,7 +857,7 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
                 ),
                 Span::styled(
                     format!("{}{}", masked_key, cursor),
-                    Style::default().fg(if wizard.has_existing_key() {
+                    Style::default().fg(if wizard.ps.has_existing_key_sentinel() {
                         Color::Cyan
                     } else if key_focused {
                         Color::White
@@ -881,15 +881,15 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
     // Model selection — shared across all non-custom providers (including GitHub)
     if !is_custom {
         let model_focused = wizard.auth_field == AuthField::Model;
-        let model_count = wizard.model_count();
-        if model_count > 0 || wizard.models_fetching {
+        let model_count = wizard.ps.model_count();
+        if model_count > 0 || wizard.ps.models_fetching {
             lines.push(Line::from(""));
             // Record scroll anchor: 2 lines above the Model: label so the key
             // line stays visible as context when scrolling into the model section.
             if model_focused {
                 focused_line = lines.len().saturating_sub(1);
             }
-            let label = if wizard.models_fetching {
+            let label = if wizard.ps.models_fetching {
                 "  Model: (fetching...)".to_string()
             } else {
                 "  Model:".to_string()
@@ -954,18 +954,18 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
                 }
             };
 
-            if !wizard.models_fetching {
+            if !wizard.ps.models_fetching {
                 // Filter input (shown when model field is focused)
                 if model_focused {
                     let cursor = "█";
-                    let filter_display = if wizard.model_filter.is_empty() {
+                    let filter_display = if wizard.ps.model_filter.is_empty() {
                         format!("  / type to filter…{}", cursor)
                     } else {
-                        format!("  / {}{}", wizard.model_filter, cursor)
+                        format!("  / {}{}", wizard.ps.model_filter, cursor)
                     };
                     lines.push(Line::from(Span::styled(
                         filter_display,
-                        Style::default().fg(if wizard.model_filter.is_empty() {
+                        Style::default().fg(if wizard.ps.model_filter.is_empty() {
                             Color::DarkGray
                         } else {
                             Color::White
@@ -973,7 +973,7 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
                     )));
                 }
 
-                let filtered = wizard.filtered_model_names();
+                let filtered = wizard.ps.filtered_model_names();
                 if filtered.is_empty() {
                     lines.push(Line::from(Span::styled(
                         "  no models match".to_string(),
@@ -982,7 +982,7 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
                             .add_modifier(Modifier::ITALIC),
                     )));
                 } else {
-                    render_model_window(lines, &filtered, wizard.selected_model, model_focused);
+                    render_model_window(lines, &filtered, wizard.ps.selected_model, model_focused);
                 }
             }
         }
@@ -2451,10 +2451,10 @@ fn render_complete(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
     lines.push(Line::from(""));
 
     // Summary
-    let provider = &PROVIDERS[wizard.selected_provider.min(PROVIDERS.len() - 1)];
-    let provider_label = if wizard.selected_provider >= 9 && !wizard.custom_provider_name.is_empty()
+    let provider = &PROVIDERS[wizard.ps.selected_provider.min(PROVIDERS.len() - 1)];
+    let provider_label = if wizard.ps.selected_provider >= 9 && !wizard.ps.custom_name.is_empty()
     {
-        wizard.custom_provider_name.clone()
+        wizard.ps.custom_name.clone()
     } else {
         provider.name.to_string()
     };
@@ -2468,18 +2468,18 @@ fn render_complete(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
         ),
     ]));
 
-    if wizard.is_custom_provider() {
+    if wizard.ps.is_custom() {
         lines.push(Line::from(vec![
             Span::styled("  Base URL: ", Style::default().fg(Color::DarkGray)),
             Span::styled(
-                wizard.custom_base_url.clone(),
+                wizard.ps.base_url.clone(),
                 Style::default().fg(Color::White),
             ),
         ]));
         lines.push(Line::from(vec![
             Span::styled("  Model:    ", Style::default().fg(Color::DarkGray)),
             Span::styled(
-                wizard.custom_model.clone(),
+                wizard.ps.custom_model.clone(),
                 Style::default().fg(Color::White),
             ),
         ]));
@@ -2487,7 +2487,7 @@ fn render_complete(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
         lines.push(Line::from(vec![
             Span::styled("  Model:    ", Style::default().fg(Color::DarkGray)),
             Span::styled(
-                wizard.selected_model_name().to_string(),
+                wizard.ps.selected_model_name().to_string(),
                 Style::default()
                     .fg(Color::White)
                     .add_modifier(Modifier::BOLD),

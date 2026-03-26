@@ -24,7 +24,7 @@ fn provider_auth_to_channels_in_advanced() {
     let mut w = wizard();
     w.step = OnboardingStep::ProviderAuth;
     w.mode = WizardMode::Advanced;
-    w.api_key_input = "sk-test-key".to_string();
+    w.ps.api_key_input = "sk-test-key".to_string();
     w.next_step();
     assert_eq!(w.step, OnboardingStep::Channels);
 }
@@ -33,8 +33,8 @@ fn provider_auth_to_channels_in_advanced() {
 fn provider_auth_requires_api_key() {
     let mut w = wizard();
     w.step = OnboardingStep::ProviderAuth;
-    w.selected_provider = 0; // Anthropic — non-custom, requires API key
-    w.api_key_input.clear();
+    w.ps.selected_provider = 0; // Anthropic — non-custom, requires API key
+    w.ps.api_key_input.clear();
     w.next_step();
     // Should not advance — error set
     assert_eq!(w.step, OnboardingStep::ProviderAuth);
@@ -114,7 +114,7 @@ fn quickstart_provider_auth_skips_channels_to_daemon() {
     let mut w = wizard();
     w.mode = WizardMode::QuickStart;
     w.step = OnboardingStep::ProviderAuth;
-    w.api_key_input = "key".to_string();
+    w.ps.api_key_input = "key".to_string();
     w.next_step();
     assert_eq!(w.step, OnboardingStep::Daemon);
 }

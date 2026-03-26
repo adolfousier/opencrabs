@@ -317,27 +317,8 @@ pub struct App {
     pub session_renaming: bool,
     pub session_rename_buffer: String,
 
-    /// Model selector state (mirrors onboarding ProviderAuth)
-    pub model_selector_models: Vec<String>,
-    pub model_selector_selected: usize,
-    pub model_selector_showing_providers: bool,
-    pub model_selector_provider_selected: usize,
-    pub model_selector_api_key: String,
-    /// True when the provider already has an API key in config (don't overwrite on save)
-    pub model_selector_has_existing_key: bool,
-    pub model_selector_base_url: String,
-    pub model_selector_custom_model: String,
-    /// Context window size for custom providers (digits only, e.g. "128000")
-    pub model_selector_context_window: String,
-    /// Custom provider name (from config, e.g. "nvidia", "default")
-    pub model_selector_custom_name: String,
-    /// Cached list of existing custom provider names for the provider list
-    pub model_selector_custom_names: Vec<String>,
-    /// Focused field: 0=provider, 1=api_key, 2=model
-    pub model_selector_focused_field: usize,
-    pub model_selector_filter: String,
-    /// z.ai GLM endpoint type: 0=api, 1=coding
-    pub model_selector_zhipu_endpoint_type: u8,
+    /// Model selector state (shared with onboarding via ProviderSelectorState)
+    pub ps: crate::tui::provider_selector::ProviderSelectorState,
 
     /// Input history (arrow up/down to cycle through past messages)
     pub(crate) input_history: Vec<String>,
@@ -510,20 +491,7 @@ impl App {
             emoji_colon_offset: 0,
             session_renaming: false,
             session_rename_buffer: String::new(),
-            model_selector_models: Vec::new(),
-            model_selector_selected: 0,
-            model_selector_showing_providers: false,
-            model_selector_provider_selected: 0,
-            model_selector_api_key: String::new(),
-            model_selector_has_existing_key: false,
-            model_selector_base_url: String::new(),
-            model_selector_custom_model: String::new(),
-            model_selector_context_window: String::new(),
-            model_selector_custom_name: String::new(),
-            model_selector_custom_names: Vec::new(),
-            model_selector_focused_field: 0,
-            model_selector_filter: String::new(),
-            model_selector_zhipu_endpoint_type: 0,
+            ps: crate::tui::provider_selector::ProviderSelectorState::default(),
             input_history: Self::load_history(),
             input_history_index: None,
             input_history_stash: String::new(),
@@ -1011,10 +979,10 @@ impl App {
                     if let Some(ref mut wizard) = self.onboarding {
                         wizard.handle_paste(&text);
                         // Trigger model fetch if provider supports it and key was just pasted
-                        if wizard.supports_model_fetch() && !wizard.api_key_input.is_empty() {
-                            let provider_idx = wizard.selected_provider;
-                            let api_key = wizard.api_key_input.clone();
-                            wizard.models_fetching = true;
+                        if wizard.ps.supports_model_fetch() && !wizard.ps.api_key_input.is_empty() {
+                            let provider_idx = wizard.ps.selected_provider;
+                            let api_key = wizard.ps.api_key_input.clone();
+                            wizard.ps.models_fetching = true;
                             let sender = self.event_sender();
                             tokio::spawn(async move {
                                 let models = super::onboarding::fetch_provider_models(
@@ -1028,23 +996,16 @@ impl App {
                         }
                     }
                 } else if self.mode == AppMode::ModelSelector {
-                    let is_custom = self.model_selector_provider_selected >= 9;
-                    let is_zhipu = self.model_selector_provider_selected == 6;
-                    match (self.model_selector_focused_field, is_custom, is_zhipu) {
+                    let is_custom = self.ps.is_custom();
+                    let is_zhipu = self.ps.is_zhipu();
+                    match (self.ps.focused_field, is_custom, is_zhipu) {
                         // Zhipu: field 1 = endpoint type — paste auto-advances to API key
                         (1, false, true) => {
-                            self.model_selector_focused_field = 2;
-                            self.model_selector_api_key.push_str(&text);
-                            let provider_idx = self.model_selector_provider_selected;
-                            let api_key = self.model_selector_api_key.clone();
-                            let zhipu_et = Some(
-                                if self.model_selector_zhipu_endpoint_type == 1 {
-                                    "coding"
-                                } else {
-                                    "api"
-                                }
-                                .to_string(),
-                            );
+                            self.ps.focused_field = 2;
+                            self.ps.api_key_input.push_str(&text);
+                            let provider_idx = self.ps.selected_provider;
+                            let api_key = self.ps.api_key_input.clone();
+                            let zhipu_et = self.ps.zhipu_endpoint_str();
                             let sender = self.event_sender();
                             tokio::spawn(async move {
                                 let models = super::onboarding::fetch_provider_models(
@@ -1058,17 +1019,10 @@ impl App {
                         }
                         // Zhipu: field 2 = API key
                         (2, false, true) => {
-                            self.model_selector_api_key.push_str(&text);
-                            let provider_idx = self.model_selector_provider_selected;
-                            let api_key = self.model_selector_api_key.clone();
-                            let zhipu_et = Some(
-                                if self.model_selector_zhipu_endpoint_type == 1 {
-                                    "coding"
-                                } else {
-                                    "api"
-                                }
-                                .to_string(),
-                            );
+                            self.ps.api_key_input.push_str(&text);
+                            let provider_idx = self.ps.selected_provider;
+                            let api_key = self.ps.api_key_input.clone();
+                            let zhipu_et = self.ps.zhipu_endpoint_str();
                             let sender = self.event_sender();
                             tokio::spawn(async move {
                                 let models = super::onboarding::fetch_provider_models(
@@ -1082,10 +1036,10 @@ impl App {
                         }
                         // Non-custom non-zhipu: field 1 = API key
                         (1, false, false) => {
-                            self.model_selector_api_key.push_str(&text);
+                            self.ps.api_key_input.push_str(&text);
                             // Trigger model fetch after pasting key
-                            let provider_idx = self.model_selector_provider_selected;
-                            let api_key = self.model_selector_api_key.clone();
+                            let provider_idx = self.ps.selected_provider;
+                            let api_key = self.ps.api_key_input.clone();
                             let sender = self.event_sender();
                             tokio::spawn(async move {
                                 let models = super::onboarding::fetch_provider_models(
@@ -1099,13 +1053,13 @@ impl App {
                         }
                         // Custom: field 1 = base URL, field 2 = API key, field 3 = model
                         (1, true, _) => {
-                            self.model_selector_base_url.push_str(&text);
+                            self.ps.base_url.push_str(&text);
                         }
                         (2, true, _) => {
-                            self.model_selector_api_key.push_str(&text);
+                            self.ps.api_key_input.push_str(&text);
                         }
                         (3, true, _) => {
-                            self.model_selector_custom_model.push_str(&text);
+                            self.ps.custom_model.push_str(&text);
                         }
                         _ => {}
                     }
@@ -1600,10 +1554,10 @@ impl App {
 
             TuiEvent::OnboardingModelsFetched(models) => {
                 if let Some(ref mut wizard) = self.onboarding {
-                    wizard.models_fetching = false;
+                    wizard.ps.models_fetching = false;
                     if !models.is_empty() {
-                        wizard.fetched_models = models;
-                        wizard.resolve_selected_model_index();
+                        wizard.ps.models = models;
+                        wizard.ps.resolve_selected_model_index();
                     }
                 }
             }
@@ -1616,9 +1570,9 @@ impl App {
                         .and_then(|s| s.model.as_deref())
                         .unwrap_or(&self.default_model_name);
                     let selected = models.iter().position(|m| m == current_model).unwrap_or(0);
-                    self.model_selector_models = models;
-                    self.model_selector_selected = selected;
-                    self.model_selector_filter.clear();
+                    self.ps.models = models;
+                    self.ps.selected_model = selected;
+                    self.ps.model_filter.clear();
                 }
             }
             TuiEvent::GitHubDeviceCode(code) => {
@@ -1639,10 +1593,10 @@ impl App {
                         tracing::warn!("Failed to save Copilot OAuth token: {}", e);
                     }
                     // Mark key as existing and advance to model selection
-                    wizard.api_key_input = super::onboarding::EXISTING_KEY_SENTINEL.to_string();
+                    wizard.ps.api_key_input = super::onboarding::EXISTING_KEY_SENTINEL.to_string();
                     wizard.auth_field = super::onboarding::AuthField::Model;
-                    wizard.fetched_models.clear();
-                    wizard.selected_model = 0;
+                    wizard.ps.models.clear();
+                    wizard.ps.selected_model = 0;
                     // Trigger model fetch using the OAuth token
                     let token = oauth_token.clone();
                     let sender = self.event_sender();

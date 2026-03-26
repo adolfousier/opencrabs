@@ -1,71 +1,7 @@
-use crate::config::ProviderConfig;
-
 use super::types::*;
 use super::wizard::OnboardingWizard;
 
 impl OnboardingWizard {
-    /// Try to load an existing API key for the currently selected provider.
-    /// Checks keys.toml (merged into config) for the API key. If found, sets sentinel.
-    pub fn detect_existing_key(&mut self) {
-        // Helper: true when the provider has a non-empty API key
-        fn has_nonempty_key(p: Option<&ProviderConfig>) -> bool {
-            p.and_then(|p| p.api_key.as_ref())
-                .is_some_and(|k| !k.is_empty())
-        }
-
-        if let Ok(config) = crate::config::Config::load() {
-            let has_key = match self.selected_provider {
-                0 => has_nonempty_key(config.providers.anthropic.as_ref()),
-                1 => has_nonempty_key(config.providers.openai.as_ref()),
-                2 => {
-                    // GitHub Copilot — check config key (OAuth token)
-                    has_nonempty_key(config.providers.github.as_ref())
-                }
-                3 => has_nonempty_key(config.providers.gemini.as_ref()),
-                4 => has_nonempty_key(config.providers.openrouter.as_ref()),
-                5 => has_nonempty_key(config.providers.minimax.as_ref()),
-                6 => has_nonempty_key(config.providers.zhipu.as_ref()),
-                7 => {
-                    // Claude CLI — no API key needed
-                    false
-                }
-                8 => {
-                    // OpenCode CLI — no API key needed
-                    false
-                }
-                9 => {
-                    // Custom provider - also load base_url, model, and name
-                    // Try enabled first, fall back to first entry in custom map
-                    let found = config.providers.active_custom().or_else(|| {
-                        config
-                            .providers
-                            .custom
-                            .as_ref()
-                            .and_then(|m| m.iter().next())
-                            .map(|(n, c)| (n.as_str(), c))
-                    });
-                    if let Some((name, c)) = found {
-                        self.custom_provider_name = name.to_string();
-                        self.custom_base_url = c.base_url.clone().unwrap_or_default();
-                        self.custom_model = c.default_model.clone().unwrap_or_default();
-                        if c.api_key.as_ref().is_some_and(|k| !k.is_empty()) {
-                            self.api_key_input = EXISTING_KEY_SENTINEL.to_string();
-                        }
-                        c.base_url.as_ref().is_some_and(|u| !u.is_empty())
-                    } else {
-                        false
-                    }
-                }
-                _ => false,
-            };
-
-            if has_key {
-                self.api_key_input = EXISTING_KEY_SENTINEL.to_string();
-                self.api_key_cursor = 0;
-            }
-        }
-    }
-
     /// Detect existing Discord bot token from keys.toml
     pub(super) fn detect_existing_discord_token(&mut self) {
         if let Ok(config) = crate::config::Config::load()

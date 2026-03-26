@@ -25,10 +25,10 @@ fn alt_backspace() -> KeyEvent {
 
 fn clean_wizard() -> OnboardingWizard {
     let mut w = OnboardingWizard::new();
-    w.selected_provider = 0;
-    w.api_key_input = String::new();
-    w.custom_base_url = String::new();
-    w.custom_model = String::new();
+    w.ps.selected_provider = 0;
+    w.ps.api_key_input = String::new();
+    w.ps.base_url = String::new();
+    w.ps.custom_model = String::new();
     w
 }
 
@@ -39,11 +39,11 @@ fn ctrl_backspace_clears_api_key_field() {
     let mut w = clean_wizard();
     w.step = OnboardingStep::ProviderAuth;
     w.auth_field = AuthField::ApiKey;
-    w.api_key_input = "sk-some-long-key-here".to_string();
+    w.ps.api_key_input = "sk-some-long-key-here".to_string();
 
     w.handle_key(ctrl_backspace());
     assert!(
-        w.api_key_input.is_empty(),
+        w.ps.api_key_input.is_empty(),
         "Ctrl+Backspace should clear the field"
     );
 }
@@ -53,11 +53,11 @@ fn alt_backspace_clears_api_key_field() {
     let mut w = clean_wizard();
     w.step = OnboardingStep::ProviderAuth;
     w.auth_field = AuthField::ApiKey;
-    w.api_key_input = "sk-some-long-key-here".to_string();
+    w.ps.api_key_input = "sk-some-long-key-here".to_string();
 
     w.handle_key(alt_backspace());
     assert!(
-        w.api_key_input.is_empty(),
+        w.ps.api_key_input.is_empty(),
         "Alt+Backspace should clear the field"
     );
 }
@@ -67,11 +67,11 @@ fn plain_backspace_deletes_single_char() {
     let mut w = clean_wizard();
     w.step = OnboardingStep::ProviderAuth;
     w.auth_field = AuthField::ApiKey;
-    w.api_key_input = "abc".to_string();
+    w.ps.api_key_input = "abc".to_string();
 
     w.handle_key(key(KeyCode::Backspace));
     assert_eq!(
-        w.api_key_input, "ab",
+        w.ps.api_key_input, "ab",
         "Plain backspace should delete one char"
     );
 }
@@ -82,7 +82,7 @@ fn plain_backspace_deletes_single_char() {
 fn backtab_custom_provider_full_reverse_chain() {
     let mut w = clean_wizard();
     w.step = OnboardingStep::ProviderAuth;
-    w.selected_provider = 6; // Custom OpenAI-Compatible
+    w.ps.selected_provider = 6; // Custom OpenAI-Compatible
     w.auth_field = AuthField::CustomContextWindow;
 
     w.handle_key(key(KeyCode::BackTab));
@@ -107,60 +107,60 @@ fn backtab_custom_provider_full_reverse_chain() {
 fn ctrl_backspace_clears_custom_name() {
     let mut w = clean_wizard();
     w.step = OnboardingStep::ProviderAuth;
-    w.selected_provider = 6;
+    w.ps.selected_provider = 6;
     w.auth_field = AuthField::CustomName;
-    w.custom_provider_name = "My Provider".to_string();
+    w.ps.custom_name = "My Provider".to_string();
 
     w.handle_key(ctrl_backspace());
-    assert!(w.custom_provider_name.is_empty());
+    assert!(w.ps.custom_name.is_empty());
 }
 
 #[test]
 fn ctrl_backspace_clears_custom_base_url() {
     let mut w = clean_wizard();
     w.step = OnboardingStep::ProviderAuth;
-    w.selected_provider = 6;
+    w.ps.selected_provider = 6;
     w.auth_field = AuthField::CustomBaseUrl;
-    w.custom_base_url = "https://api.example.com".to_string();
+    w.ps.base_url = "https://api.example.com".to_string();
 
     w.handle_key(ctrl_backspace());
-    assert!(w.custom_base_url.is_empty());
+    assert!(w.ps.base_url.is_empty());
 }
 
 #[test]
 fn ctrl_backspace_clears_custom_api_key() {
     let mut w = clean_wizard();
     w.step = OnboardingStep::ProviderAuth;
-    w.selected_provider = 6;
+    w.ps.selected_provider = 6;
     w.auth_field = AuthField::CustomApiKey;
-    w.api_key_input = "sk-custom-key".to_string();
+    w.ps.api_key_input = "sk-custom-key".to_string();
 
     w.handle_key(ctrl_backspace());
-    assert!(w.api_key_input.is_empty());
+    assert!(w.ps.api_key_input.is_empty());
 }
 
 #[test]
 fn ctrl_backspace_clears_custom_model() {
     let mut w = clean_wizard();
     w.step = OnboardingStep::ProviderAuth;
-    w.selected_provider = 6;
+    w.ps.selected_provider = 6;
     w.auth_field = AuthField::CustomModel;
-    w.custom_model = "gpt-4o-mini".to_string();
+    w.ps.custom_model = "gpt-4o-mini".to_string();
 
     w.handle_key(ctrl_backspace());
-    assert!(w.custom_model.is_empty());
+    assert!(w.ps.custom_model.is_empty());
 }
 
 #[test]
 fn ctrl_backspace_clears_custom_context_window() {
     let mut w = clean_wizard();
     w.step = OnboardingStep::ProviderAuth;
-    w.selected_provider = 6;
+    w.ps.selected_provider = 6;
     w.auth_field = AuthField::CustomContextWindow;
-    w.custom_context_window = "128000".to_string();
+    w.ps.context_window = "128000".to_string();
 
     w.handle_key(ctrl_backspace());
-    assert!(w.custom_context_window.is_empty());
+    assert!(w.ps.context_window.is_empty());
 }
 
 // ── Telegram: BackTab backward navigation ──────────────────────
@@ -552,9 +552,9 @@ fn arrow_up_goes_back_trello_field() {
 fn arrow_down_advances_custom_provider_field() {
     let mut w = clean_wizard();
     w.step = OnboardingStep::ProviderAuth;
-    w.selected_provider = 6;
+    w.ps.selected_provider = 6;
     w.auth_field = AuthField::CustomName;
-    w.custom_provider_name = "test".to_string();
+    w.ps.custom_name = "test".to_string();
 
     w.handle_key(key(KeyCode::Down));
     assert_eq!(w.auth_field, AuthField::CustomBaseUrl);
@@ -564,7 +564,7 @@ fn arrow_down_advances_custom_provider_field() {
 fn arrow_up_goes_back_custom_provider_field() {
     let mut w = clean_wizard();
     w.step = OnboardingStep::ProviderAuth;
-    w.selected_provider = 6;
+    w.ps.selected_provider = 6;
     w.auth_field = AuthField::CustomBaseUrl;
 
     w.handle_key(key(KeyCode::Up));

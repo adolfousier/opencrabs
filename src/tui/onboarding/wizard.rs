@@ -7,26 +7,9 @@ pub struct OnboardingWizard {
     pub step: OnboardingStep,
     pub mode: WizardMode,
 
-    // Step 2: Provider/Auth
-    pub selected_provider: usize,
-    pub api_key_input: String,
-    pub api_key_cursor: usize,
-    pub selected_model: usize,
+    // Step 2: Provider/Auth — shared state with /models dialog
+    pub ps: crate::tui::provider_selector::ProviderSelectorState,
     pub auth_field: AuthField,
-    pub custom_provider_name: String,
-    pub custom_base_url: String,
-    pub custom_model: String,
-    /// Context window size in tokens for custom providers (e.g. "32000")
-    pub custom_context_window: String,
-    /// Models fetched live from provider API (overrides static list when non-empty)
-    pub fetched_models: Vec<String>,
-    pub models_fetching: bool,
-    /// Models from config.toml (used when API fetch not available)
-    pub config_models: Vec<String>,
-    /// Cached list of existing custom provider names (for provider list)
-    pub existing_custom_names: Vec<String>,
-    /// z.ai GLM endpoint type: 0 = API, 1 = Coding
-    pub zhipu_endpoint_type: usize,
 
     /// Step 4: Workspace
     pub workspace_path: String,
@@ -138,9 +121,6 @@ pub struct OnboardingWizard {
     /// GitHub Copilot device flow state
     pub github_user_code: Option<String>,
     pub github_device_flow_status: GitHubDeviceFlowStatus,
-
-    /// Model filter (live search in model list)
-    pub model_filter: String,
 
     /// Navigation
     pub focused_field: usize,
@@ -279,28 +259,34 @@ impl OnboardingWizard {
                 (0, String::new(), String::new(), String::new())
             };
 
-        let mut wizard = Self {
-            step: OnboardingStep::ModeSelect,
-            mode: WizardMode::QuickStart,
-
+        let ps = crate::tui::provider_selector::ProviderSelectorState {
             selected_provider,
             api_key_input,
             api_key_cursor: 0,
             selected_model: 0,
-            auth_field: AuthField::Provider,
-            custom_provider_name: custom_provider_name_init.unwrap_or_default(),
-            custom_base_url,
+            custom_name: custom_provider_name_init.unwrap_or_default(),
+            base_url: custom_base_url,
             custom_model,
-            custom_context_window: String::new(),
-            fetched_models: Vec::new(),
+            context_window: String::new(),
+            models: Vec::new(),
             models_fetching: false,
             config_models,
-            existing_custom_names: existing_config
+            custom_names: existing_config
                 .as_ref()
                 .and_then(|c| c.providers.custom.as_ref())
                 .map(|m| m.keys().cloned().collect())
                 .unwrap_or_default(),
             zhipu_endpoint_type: 0, // default to API mode
+            model_filter: String::new(),
+            ..Default::default()
+        };
+
+        let mut wizard = Self {
+            step: OnboardingStep::ModeSelect,
+            mode: WizardMode::QuickStart,
+
+            ps,
+            auth_field: AuthField::Provider,
 
             workspace_path: default_workspace.to_string_lossy().to_string(),
             seed_templates: true,
@@ -388,7 +374,6 @@ impl OnboardingWizard {
             github_user_code: None,
             github_device_flow_status: GitHubDeviceFlowStatus::Idle,
 
-            model_filter: String::new(),
             focused_field: 0,
             error_message: None,
             quick_jump: false,
@@ -422,24 +407,24 @@ impl OnboardingWizard {
             .as_ref()
             .is_some_and(|p| p.enabled)
         {
-            wizard.selected_provider = 0; // Anthropic
+            wizard.ps.selected_provider = 0; // Anthropic
             if let Some(model) = &config
                 .providers
                 .anthropic
                 .as_ref()
                 .and_then(|p| p.default_model.clone())
             {
-                wizard.custom_model = model.clone();
+                wizard.ps.custom_model = model.clone();
             }
         } else if config.providers.openai.as_ref().is_some_and(|p| p.enabled) {
-            wizard.selected_provider = 1; // OpenAI
+            wizard.ps.selected_provider = 1; // OpenAI
             if let Some(base_url) = &config
                 .providers
                 .openai
                 .as_ref()
                 .and_then(|p| p.base_url.clone())
             {
-                wizard.custom_base_url = base_url.clone();
+                wizard.ps.base_url = base_url.clone();
             }
             if let Some(model) = &config
                 .providers
@@ -447,54 +432,54 @@ impl OnboardingWizard {
                 .as_ref()
                 .and_then(|p| p.default_model.clone())
             {
-                wizard.custom_model = model.clone();
+                wizard.ps.custom_model = model.clone();
             }
         } else if config.providers.github.as_ref().is_some_and(|p| p.enabled) {
-            wizard.selected_provider = 2; // GitHub Copilot
+            wizard.ps.selected_provider = 2; // GitHub Copilot
             if let Some(model) = &config
                 .providers
                 .github
                 .as_ref()
                 .and_then(|p| p.default_model.clone())
             {
-                wizard.custom_model = model.clone();
+                wizard.ps.custom_model = model.clone();
             }
         } else if config.providers.gemini.as_ref().is_some_and(|p| p.enabled) {
-            wizard.selected_provider = 3; // Gemini
+            wizard.ps.selected_provider = 3; // Gemini
         } else if config
             .providers
             .openrouter
             .as_ref()
             .is_some_and(|p| p.enabled)
         {
-            wizard.selected_provider = 4; // OpenRouter
+            wizard.ps.selected_provider = 4; // OpenRouter
             if let Some(model) = &config
                 .providers
                 .openrouter
                 .as_ref()
                 .and_then(|p| p.default_model.clone())
             {
-                wizard.custom_model = model.clone();
+                wizard.ps.custom_model = model.clone();
             }
         } else if config.providers.minimax.as_ref().is_some_and(|p| p.enabled) {
-            wizard.selected_provider = 5; // Minimax
+            wizard.ps.selected_provider = 5; // Minimax
             if let Some(model) = &config
                 .providers
                 .minimax
                 .as_ref()
                 .and_then(|p| p.default_model.clone())
             {
-                wizard.custom_model = model.clone();
+                wizard.ps.custom_model = model.clone();
             }
         } else if config.providers.zhipu.as_ref().is_some_and(|p| p.enabled) {
-            wizard.selected_provider = 6; // z.ai GLM
+            wizard.ps.selected_provider = 6; // z.ai GLM
             if let Some(model) = &config
                 .providers
                 .zhipu
                 .as_ref()
                 .and_then(|p| p.default_model.clone())
             {
-                wizard.custom_model = model.clone();
+                wizard.ps.custom_model = model.clone();
             }
         } else if config
             .providers
@@ -502,14 +487,14 @@ impl OnboardingWizard {
             .as_ref()
             .is_some_and(|p| p.enabled)
         {
-            wizard.selected_provider = 7; // Claude CLI
+            wizard.ps.selected_provider = 7; // Claude CLI
             if let Some(model) = &config
                 .providers
                 .claude_cli
                 .as_ref()
                 .and_then(|p| p.default_model.clone())
             {
-                wizard.custom_model = model.clone();
+                wizard.ps.custom_model = model.clone();
             }
         } else if config
             .providers
@@ -517,21 +502,21 @@ impl OnboardingWizard {
             .as_ref()
             .is_some_and(|p| p.enabled)
         {
-            wizard.selected_provider = 8; // OpenCode CLI
+            wizard.ps.selected_provider = 8; // OpenCode CLI
             if let Some(model) = &config
                 .providers
                 .opencode_cli
                 .as_ref()
                 .and_then(|p| p.default_model.clone())
             {
-                wizard.custom_model = model.clone();
+                wizard.ps.custom_model = model.clone();
             }
         }
 
         // Detect if we have an existing API key for the selected provider
-        wizard.detect_existing_key();
-        wizard.reload_config_models();
-        wizard.resolve_selected_model_index();
+        wizard.ps.detect_existing_key();
+        wizard.ps.reload_config_models();
+        wizard.ps.resolve_selected_model_index();
 
         // Load channel toggles (indices match CHANNEL_NAMES order)
         wizard.channel_toggles[0].1 = config.channels.telegram.enabled; // Telegram
@@ -660,87 +645,5 @@ impl OnboardingWizard {
         wizard.auth_field = AuthField::Provider;
 
         wizard
-    }
-
-    /// Get provider info for currently selected provider
-    pub fn current_provider(&self) -> &ProviderInfo {
-        // Indices 0-8 are static providers (direct mapping)
-        // Index 9 is "+ New Custom Provider"
-        // Indices 10+ are existing custom providers — map to Custom entry (index 9)
-        let idx = if self.selected_provider >= 9 {
-            9 // Custom OpenAI-Compatible
-        } else {
-            self.selected_provider
-        };
-        &PROVIDERS[idx.min(PROVIDERS.len() - 1)]
-    }
-
-    /// Check if the current provider is a custom option (new or existing)
-    pub fn is_cli_provider(&self) -> bool {
-        matches!(self.selected_provider, 7 | 8)
-    }
-
-    pub fn is_custom_provider(&self) -> bool {
-        self.selected_provider >= 9
-    }
-
-    /// Visual display order: static providers (0-8) sorted alphabetically by name,
-    /// then existing custom providers (10+) already alphabetical from BTreeMap,
-    /// then "+ New Custom Provider" (9) always last.
-    pub fn provider_display_order(&self) -> Vec<usize> {
-        use crate::tui::onboarding::types::PROVIDERS;
-        let num_customs = self.existing_custom_names.len();
-        let mut static_indices: Vec<usize> = (0..9).collect();
-        static_indices.sort_by_key(|&i| PROVIDERS[i].name.to_ascii_lowercase());
-        static_indices
-            .into_iter()
-            .chain(10..10 + num_customs)
-            .chain(std::iter::once(9))
-            .collect()
-    }
-
-    /// Whether the current api_key_input holds a pre-existing key (from env/keyring)
-    pub fn has_existing_key(&self) -> bool {
-        self.api_key_input == EXISTING_KEY_SENTINEL
-    }
-
-    /// When navigating to an existing custom provider (index >= 10), load its config fields.
-    /// For index 9 (new custom), clear the fields.
-    /// For index 6 (z.ai GLM), load endpoint_type.
-    pub fn load_custom_fields_if_existing(&mut self) {
-        // z.ai GLM selected — load endpoint_type
-        if self.selected_provider == 6
-            && let Ok(config) = crate::config::Config::load()
-            && let Some(zhipu) = &config.providers.zhipu
-        {
-            self.zhipu_endpoint_type = match zhipu.endpoint_type.as_deref() {
-                Some("coding") => 1,
-                _ => 0,
-            };
-        }
-        if self.selected_provider == 9 {
-            // "+ New Custom Provider" — clear fields
-            self.custom_provider_name.clear();
-            self.custom_base_url.clear();
-            self.custom_model.clear();
-            self.custom_context_window.clear();
-        } else if self.selected_provider >= 10 {
-            let custom_idx = self.selected_provider - 10;
-            if let Some(cname) = self.existing_custom_names.get(custom_idx).cloned()
-                && let Ok(config) = crate::config::Config::load()
-                && let Some(c) = config.providers.custom_by_name(&cname)
-            {
-                self.custom_provider_name = cname;
-                self.custom_base_url = c.base_url.clone().unwrap_or_default();
-                self.custom_model = c.default_model.clone().unwrap_or_default();
-                self.custom_context_window = c
-                    .context_window
-                    .map(|cw| cw.to_string())
-                    .unwrap_or_default();
-                if c.api_key.as_ref().is_some_and(|k| !k.is_empty()) {
-                    self.api_key_input = EXISTING_KEY_SENTINEL.to_string();
-                }
-            }
-        }
     }
 }

@@ -162,36 +162,36 @@ fn with_name_sets_provider_name() {
 #[test]
 fn wizard_github_is_not_custom() {
     let mut wizard = OnboardingWizard::new();
-    wizard.selected_provider = 2;
-    assert!(!wizard.is_custom_provider());
+    wizard.ps.selected_provider = 2;
+    assert!(!wizard.ps.is_custom());
 }
 
 #[test]
 fn wizard_github_supports_model_fetch() {
     // GitHub Copilot supports live model fetching via /models endpoint
     let mut wizard = OnboardingWizard::new();
-    wizard.selected_provider = 2;
-    assert!(wizard.supports_model_fetch());
+    wizard.ps.selected_provider = 2;
+    assert!(wizard.ps.supports_model_fetch());
 }
 
 #[test]
 fn wizard_current_provider_at_index_2_is_github() {
     let mut wizard = OnboardingWizard::new();
-    wizard.selected_provider = 2;
-    assert_eq!(wizard.current_provider().name, "GitHub Copilot");
+    wizard.ps.selected_provider = 2;
+    assert_eq!(wizard.ps.current_provider().name, "GitHub Copilot");
 }
 
 #[test]
 fn wizard_model_filter_works_for_github() {
     let mut wizard = OnboardingWizard::new();
-    wizard.selected_provider = 2;
-    wizard.fetched_models = vec![
+    wizard.ps.selected_provider = 2;
+    wizard.ps.models = vec![
         "gpt-4o".to_string(),
         "gpt-4o-mini".to_string(),
         "Llama-3.3-70B-Instruct".to_string(),
     ];
-    wizard.model_filter = "gpt".to_string();
-    let filtered = wizard.filtered_model_names();
+    wizard.ps.model_filter = "gpt".to_string();
+    let filtered = wizard.ps.filtered_model_names();
     assert_eq!(filtered.len(), 2);
     assert!(filtered.iter().all(|m| m.contains("gpt")));
 }
@@ -199,37 +199,37 @@ fn wizard_model_filter_works_for_github() {
 #[test]
 fn wizard_all_model_names_uses_fetched_first() {
     let mut wizard = OnboardingWizard::new();
-    wizard.selected_provider = 2;
-    wizard.fetched_models = vec!["gpt-4o".to_string()];
-    let names = wizard.all_model_names();
+    wizard.ps.selected_provider = 2;
+    wizard.ps.models = vec!["gpt-4o".to_string()];
+    let names = wizard.ps.all_model_names();
     assert_eq!(names, vec!["gpt-4o"]);
 }
 
 #[test]
 fn wizard_all_model_names_falls_back_to_config_models() {
     let mut wizard = OnboardingWizard::new();
-    wizard.selected_provider = 2;
-    wizard.config_models = vec!["gpt-4o".to_string()];
-    let names = wizard.all_model_names();
+    wizard.ps.selected_provider = 2;
+    wizard.ps.config_models = vec!["gpt-4o".to_string()];
+    let names = wizard.ps.all_model_names();
     assert_eq!(names, vec!["gpt-4o"]);
 }
 
 #[test]
 fn wizard_selected_model_name_in_bounds() {
     let mut wizard = OnboardingWizard::new();
-    wizard.selected_provider = 2;
-    wizard.fetched_models = vec!["gpt-4o".to_string(), "gpt-4o-mini".to_string()];
-    wizard.selected_model = 1;
-    assert_eq!(wizard.selected_model_name(), "gpt-4o-mini");
+    wizard.ps.selected_provider = 2;
+    wizard.ps.models = vec!["gpt-4o".to_string(), "gpt-4o-mini".to_string()];
+    wizard.ps.selected_model = 1;
+    assert_eq!(wizard.ps.selected_model_name(), "gpt-4o-mini");
 }
 
 #[test]
 fn wizard_selected_model_name_out_of_bounds_fallback() {
     let mut wizard = OnboardingWizard::new();
-    wizard.selected_provider = 2;
-    wizard.fetched_models = vec!["gpt-4o".to_string()];
-    wizard.selected_model = 99;
-    assert_eq!(wizard.selected_model_name(), "gpt-4o");
+    wizard.ps.selected_provider = 2;
+    wizard.ps.models = vec!["gpt-4o".to_string()];
+    wizard.ps.selected_model = 99;
+    assert_eq!(wizard.ps.selected_model_name(), "gpt-4o");
 }
 
 // ── Factory ─────────────────────────────────────────────────────
@@ -351,7 +351,7 @@ fn wizard_github_static_models_empty() {
 fn github_load_default_models_from_config_example() {
     // Copilot models are fetched live from the API, not from config.toml.example
     // So load_default_models may return empty (no hardcoded list)
-    let models = OnboardingWizard::load_default_models(2);
+    let models = crate::tui::provider_selector::load_default_models(2);
     // Either empty or contains whatever is in config.toml.example
     let _ = models;
 }
@@ -374,28 +374,28 @@ fn github_token_persist_path_index_matches() {
 #[test]
 fn wizard_github_model_filter_empty_returns_all() {
     let mut wizard = OnboardingWizard::new();
-    wizard.selected_provider = 2;
-    wizard.fetched_models = vec!["gpt-4o".to_string(), "Llama-3.3-70B-Instruct".to_string()];
-    wizard.model_filter.clear();
-    assert_eq!(wizard.filtered_model_names().len(), 2);
+    wizard.ps.selected_provider = 2;
+    wizard.ps.models = vec!["gpt-4o".to_string(), "Llama-3.3-70B-Instruct".to_string()];
+    wizard.ps.model_filter.clear();
+    assert_eq!(wizard.ps.filtered_model_names().len(), 2);
 }
 
 #[test]
 fn wizard_github_model_filter_no_match() {
     let mut wizard = OnboardingWizard::new();
-    wizard.selected_provider = 2;
-    wizard.fetched_models = vec!["gpt-4o".to_string()];
-    wizard.model_filter = "nonexistent".to_string();
-    assert!(wizard.filtered_model_names().is_empty());
+    wizard.ps.selected_provider = 2;
+    wizard.ps.models = vec!["gpt-4o".to_string()];
+    wizard.ps.model_filter = "nonexistent".to_string();
+    assert!(wizard.ps.filtered_model_names().is_empty());
 }
 
 #[test]
 fn wizard_github_model_filter_case_insensitive() {
     let mut wizard = OnboardingWizard::new();
-    wizard.selected_provider = 2;
-    wizard.fetched_models = vec!["GPT-4o".to_string(), "Llama-3.3-70B-Instruct".to_string()];
-    wizard.model_filter = "gpt".to_string();
-    let filtered = wizard.filtered_model_names();
+    wizard.ps.selected_provider = 2;
+    wizard.ps.models = vec!["GPT-4o".to_string(), "Llama-3.3-70B-Instruct".to_string()];
+    wizard.ps.model_filter = "gpt".to_string();
+    let filtered = wizard.ps.filtered_model_names();
     assert_eq!(filtered.len(), 1);
     assert_eq!(filtered[0], "GPT-4o");
 }
@@ -403,15 +403,15 @@ fn wizard_github_model_filter_case_insensitive() {
 #[test]
 fn wizard_github_model_filter_by_provider_name() {
     let mut wizard = OnboardingWizard::new();
-    wizard.selected_provider = 2;
-    wizard.fetched_models = vec![
+    wizard.ps.selected_provider = 2;
+    wizard.ps.models = vec![
         "gpt-4o".to_string(),
         "gpt-4o-mini".to_string(),
         "Llama-3.3-70B-Instruct".to_string(),
         "Mistral-Large".to_string(),
     ];
-    wizard.model_filter = "llama".to_string();
-    let filtered = wizard.filtered_model_names();
+    wizard.ps.model_filter = "llama".to_string();
+    let filtered = wizard.ps.filtered_model_names();
     assert_eq!(filtered.len(), 1);
     assert_eq!(filtered[0], "Llama-3.3-70B-Instruct");
 }

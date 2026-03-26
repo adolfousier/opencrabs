@@ -26,21 +26,21 @@ impl OnboardingWizard {
                 }
                 self.step = OnboardingStep::ProviderAuth;
                 self.auth_field = AuthField::Provider;
-                self.detect_existing_key();
+                self.ps.detect_existing_key();
             }
             OnboardingStep::ProviderAuth => {
                 // CLI providers (Claude CLI, OpenCode CLI) have no API key
-                if self.api_key_input.is_empty()
-                    && !self.is_custom_provider()
-                    && !self.is_cli_provider()
+                if self.ps.api_key_input.is_empty()
+                    && !self.ps.is_custom()
+                    && !self.ps.is_cli()
                 {
                     self.error_message = Some("API key is required".to_string());
                     return;
                 }
-                if self.is_custom_provider()
-                    && (self.custom_base_url.is_empty()
-                        || self.custom_model.is_empty()
-                        || self.custom_provider_name.is_empty())
+                if self.ps.is_custom()
+                    && (self.ps.base_url.is_empty()
+                        || self.ps.custom_model.is_empty()
+                        || self.ps.custom_name.is_empty())
                 {
                     self.error_message = Some(
                         "Base URL, model name, and provider name are required for custom provider"

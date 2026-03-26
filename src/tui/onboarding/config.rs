@@ -45,7 +45,7 @@ impl OnboardingWizard {
         }
 
         // Reload models for the selected provider from the newly created config
-        self.reload_config_models();
+        self.ps.reload_config_models();
 
         Ok(())
     }
@@ -57,8 +57,8 @@ impl OnboardingWizard {
             && let Ok(config) = crate::config::Config::load()
         {
             let fresh = Self::from_config(&config);
-            self.api_key_input = fresh.api_key_input;
-            self.selected_provider = fresh.selected_provider;
+            self.ps.api_key_input = fresh.ps.api_key_input;
+            self.ps.selected_provider = fresh.ps.selected_provider;
             self.workspace_path = fresh.workspace_path;
             self.channel_toggles = fresh.channel_toggles;
             self.telegram_token_input = fresh.telegram_token_input;
@@ -77,7 +77,7 @@ impl OnboardingWizard {
             self.image_api_key_input = fresh.image_api_key_input;
         }
 
-        let auth_label = if self.is_cli_provider() {
+        let auth_label = if self.ps.is_cli() {
             "CLI Binary Found"
         } else {
             "API Key Present"
@@ -129,9 +129,9 @@ impl OnboardingWizard {
     /// Execute all health checks
     fn run_health_checks(&mut self) {
         // Check 1: API key / CLI binary present
-        self.health_results[0].1 = if self.is_cli_provider() {
+        self.health_results[0].1 = if self.ps.is_cli() {
             // CLI providers: check if the binary is installed
-            let binary = if self.selected_provider == 7 {
+            let binary = if self.ps.selected_provider == 7 {
                 "claude"
             } else {
                 "opencode"
@@ -141,8 +141,8 @@ impl OnboardingWizard {
             } else {
                 HealthStatus::Fail(format!("'{}' CLI not found in PATH", binary))
             }
-        } else if !self.api_key_input.is_empty()
-            || (self.is_custom_provider() && !self.custom_base_url.is_empty())
+        } else if !self.ps.api_key_input.is_empty()
+            || (self.ps.is_custom() && !self.ps.base_url.is_empty())
         {
             HealthStatus::Pass
         } else {
@@ -318,7 +318,7 @@ impl OnboardingWizard {
 
         // Enable + configure the selected provider
         let custom_section;
-        let section = match self.selected_provider {
+        let section = match self.ps.selected_provider {
             0 => "providers.anthropic",
             1 => "providers.openai",
             2 => "providers.github",
@@ -329,22 +329,22 @@ impl OnboardingWizard {
             7 => "providers.claude_cli",
             8 => "providers.opencode_cli",
             9 => {
-                custom_section = format!("providers.custom.{}", self.custom_provider_name);
+                custom_section = format!("providers.custom.{}", self.ps.custom_name);
                 &custom_section
             }
             _ => {
-                custom_section = format!("providers.custom.{}", self.custom_provider_name);
+                custom_section = format!("providers.custom.{}", self.ps.custom_name);
                 &custom_section
             }
         };
         let _ = Config::write_key(section, "enabled", "true");
-        let model = self.selected_model_name().to_string();
+        let model = self.ps.selected_model_name().to_string();
         if !model.is_empty() {
             let _ = Config::write_key(section, "default_model", &model);
         }
 
         // Write base_url for providers that need it
-        match self.selected_provider {
+        match self.ps.selected_provider {
             2 => {
                 let _ = Config::write_key(
                     section,
@@ -364,7 +364,7 @@ impl OnboardingWizard {
             }
             6 => {
                 // z.ai GLM — write endpoint_type (base_url computed dynamically in factory)
-                let endpoint_type = if self.zhipu_endpoint_type == 1 {
+                let endpoint_type = if self.ps.zhipu_endpoint_type == 1 {
                     "coding"
                 } else {
                     "api"
@@ -372,25 +372,25 @@ impl OnboardingWizard {
                 let _ = Config::write_key(section, "endpoint_type", endpoint_type);
             }
             n if n >= 9 => {
-                if !self.custom_base_url.is_empty() {
-                    let _ = Config::write_key(section, "base_url", &self.custom_base_url);
+                if !self.ps.base_url.is_empty() {
+                    let _ = Config::write_key(section, "base_url", &self.ps.base_url);
                 }
-                if !self.custom_model.is_empty() {
-                    let _ = Config::write_key(section, "default_model", &self.custom_model);
+                if !self.ps.custom_model.is_empty() {
+                    let _ = Config::write_key(section, "default_model", &self.ps.custom_model);
                 }
-                if !self.custom_context_window.is_empty() {
+                if !self.ps.context_window.is_empty() {
                     let _ =
-                        Config::write_key(section, "context_window", &self.custom_context_window);
+                        Config::write_key(section, "context_window", &self.ps.context_window);
                 }
             }
             _ => {}
         }
 
         // Write models array for providers that have static model lists
-        if !self.config_models.is_empty()
-            && (matches!(self.selected_provider, 2 | 5 | 6) || self.selected_provider >= 9)
+        if !self.ps.config_models.is_empty()
+            && (matches!(self.ps.selected_provider, 2 | 5 | 6) || self.ps.selected_provider >= 9)
         {
-            let _ = Config::write_array(section, "models", &self.config_models);
+            let _ = Config::write_array(section, "models", &self.ps.config_models);
         }
 
         // Channel enabled flags (from channel_toggles: 0=Telegram, 1=Discord, 2=WhatsApp, 3=Slack)
@@ -520,9 +520,9 @@ impl OnboardingWizard {
         }
 
         // Save API key to keys.toml via merge — never overwrite
-        if !self.has_existing_key()
-            && !self.api_key_input.is_empty()
-            && let Err(e) = crate::config::write_secret_key(section, "api_key", &self.api_key_input)
+        if !self.ps.has_existing_key_sentinel()
+            && !self.ps.api_key_input.is_empty()
+            && let Err(e) = crate::config::write_secret_key(section, "api_key", &self.ps.api_key_input)
         {
             tracing::warn!("Failed to save API key to keys.toml: {}", e);
         }

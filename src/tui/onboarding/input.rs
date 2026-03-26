@@ -13,9 +13,9 @@ impl OnboardingWizard {
             if self.quick_jump {
                 return WizardAction::Cancel;
             }
-            if !self.model_filter.is_empty() {
-                self.model_filter.clear();
-                self.selected_model = 0;
+            if !self.ps.model_filter.is_empty() {
+                self.ps.model_filter.clear();
+                self.ps.selected_model = 0;
                 return WizardAction::None;
             }
             if self.prev_step() {
@@ -259,29 +259,29 @@ impl OnboardingWizard {
             }
             OnboardingStep::ProviderAuth => match self.auth_field {
                 AuthField::ApiKey | AuthField::CustomApiKey => {
-                    if self.has_existing_key() {
-                        self.api_key_input.clear();
+                    if self.ps.has_existing_key_sentinel() {
+                        self.ps.api_key_input.clear();
                     }
-                    self.api_key_input.push_str(clean);
-                    self.api_key_cursor = self.api_key_input.len();
+                    self.ps.api_key_input.push_str(clean);
+                    self.ps.api_key_cursor = self.ps.api_key_input.len();
                 }
                 AuthField::CustomName => {
-                    self.custom_provider_name.push_str(clean);
+                    self.ps.custom_name.push_str(clean);
                 }
                 AuthField::CustomBaseUrl => {
-                    self.custom_base_url.push_str(clean);
+                    self.ps.base_url.push_str(clean);
                 }
                 AuthField::CustomModel => {
-                    self.custom_model.push_str(clean);
+                    self.ps.custom_model.push_str(clean);
                 }
                 AuthField::ZhipuEndpointType => {
                     // User pasted on endpoint type — they meant to paste API key
                     self.auth_field = AuthField::ApiKey;
-                    if self.has_existing_key() {
-                        self.api_key_input.clear();
+                    if self.ps.has_existing_key_sentinel() {
+                        self.ps.api_key_input.clear();
                     }
-                    self.api_key_input.push_str(clean);
-                    self.api_key_cursor = self.api_key_input.len();
+                    self.ps.api_key_input.push_str(clean);
+                    self.ps.api_key_cursor = self.ps.api_key_input.len();
                 }
                 _ => {}
             },
@@ -309,8 +309,8 @@ impl OnboardingWizard {
                 self.next_step();
                 // If entering ProviderAuth with existing key detected, pre-fetch models
                 if self.step == OnboardingStep::ProviderAuth
-                    && self.has_existing_key()
-                    && self.supports_model_fetch()
+                    && self.ps.has_existing_key_sentinel()
+                    && self.ps.supports_model_fetch()
                 {
                     return WizardAction::FetchModels;
                 }
@@ -324,65 +324,65 @@ impl OnboardingWizard {
         match self.auth_field {
             AuthField::Provider => match event.code {
                 KeyCode::Up | KeyCode::Char('k') => {
-                    let order = self.provider_display_order();
+                    let order = self.ps.provider_display_order();
                     let pos = order
                         .iter()
-                        .position(|&i| i == self.selected_provider)
+                        .position(|&i| i == self.ps.selected_provider)
                         .unwrap_or(0);
                     if pos > 0 {
-                        self.selected_provider = order[pos - 1];
+                        self.ps.selected_provider = order[pos - 1];
                     }
-                    self.selected_model = 0;
-                    self.model_filter.clear();
-                    self.api_key_input.clear();
-                    self.fetched_models.clear();
-                    self.config_models.clear();
-                    self.load_custom_fields_if_existing();
-                    self.reload_config_models();
-                    self.detect_existing_key();
+                    self.ps.selected_model = 0;
+                    self.ps.model_filter.clear();
+                    self.ps.api_key_input.clear();
+                    self.ps.models.clear();
+                    self.ps.config_models.clear();
+                    self.ps.load_custom_fields();
+                    self.ps.reload_config_models();
+                    self.ps.detect_existing_key();
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    let order = self.provider_display_order();
+                    let order = self.ps.provider_display_order();
                     let pos = order
                         .iter()
-                        .position(|&i| i == self.selected_provider)
+                        .position(|&i| i == self.ps.selected_provider)
                         .unwrap_or(0);
                     if pos + 1 < order.len() {
-                        self.selected_provider = order[pos + 1];
+                        self.ps.selected_provider = order[pos + 1];
                     }
-                    self.selected_model = 0;
-                    self.model_filter.clear();
-                    self.api_key_input.clear();
-                    self.fetched_models.clear();
-                    self.config_models.clear();
-                    self.load_custom_fields_if_existing();
-                    self.reload_config_models();
-                    self.detect_existing_key();
+                    self.ps.selected_model = 0;
+                    self.ps.model_filter.clear();
+                    self.ps.api_key_input.clear();
+                    self.ps.models.clear();
+                    self.ps.config_models.clear();
+                    self.ps.load_custom_fields();
+                    self.ps.reload_config_models();
+                    self.ps.detect_existing_key();
                 }
                 KeyCode::Enter | KeyCode::Tab => {
-                    self.detect_existing_key();
-                    if self.selected_provider == 2 {
+                    self.ps.detect_existing_key();
+                    if self.ps.selected_provider == 2 {
                         // GitHub Copilot: if already authenticated, go to model select
-                        if self.has_existing_key() {
+                        if self.ps.has_existing_key_sentinel() {
                             self.auth_field = AuthField::Model;
                             // Copilot supports live model fetch
-                            self.fetched_models.clear();
-                            self.selected_model = 0;
+                            self.ps.models.clear();
+                            self.ps.selected_model = 0;
                             return WizardAction::FetchModels;
                         }
                         // Not yet authenticated — start device flow
                         return WizardAction::GitHubDeviceFlow;
-                    } else if self.is_custom_provider() {
+                    } else if self.ps.is_custom() {
                         self.auth_field = AuthField::CustomName;
-                    } else if matches!(self.selected_provider, 7 | 8) {
+                    } else if matches!(self.ps.selected_provider, 7 | 8) {
                         // CLI providers (Claude CLI, OpenCode CLI): no API key — skip to model
                         self.auth_field = AuthField::Model;
-                        self.fetched_models.clear();
-                        self.selected_model = 0;
-                        if self.supports_model_fetch() {
+                        self.ps.models.clear();
+                        self.ps.selected_model = 0;
+                        if self.ps.supports_model_fetch() {
                             return WizardAction::FetchModels;
                         }
-                    } else if self.selected_provider == 6 {
+                    } else if self.ps.selected_provider == 6 {
                         // z.ai GLM: endpoint type first, then API key
                         self.auth_field = AuthField::ZhipuEndpointType;
                     } else {
@@ -394,43 +394,47 @@ impl OnboardingWizard {
             AuthField::ApiKey => match event.code {
                 KeyCode::Char(c) => {
                     // If existing key is loaded and user starts typing, clear it (replace mode)
-                    if self.has_existing_key() {
-                        self.api_key_input.clear();
+                    if self.ps.has_existing_key_sentinel() {
+                        self.ps.api_key_input.clear();
                     }
-                    self.api_key_input.push(c);
-                    self.api_key_cursor = self.api_key_input.len();
+                    self.ps.api_key_input.push(c);
+                    self.ps.api_key_cursor = self.ps.api_key_input.len();
                 }
                 KeyCode::Backspace if is_clear_field(&event) => {
-                    self.api_key_input.clear();
-                    self.api_key_cursor = 0;
+                    self.ps.api_key_input.clear();
+                    self.ps.api_key_cursor = 0;
                 }
                 KeyCode::Backspace => {
                     // If existing key sentinel, clear entirely on backspace
-                    if self.has_existing_key() {
-                        self.api_key_input.clear();
+                    if self.ps.has_existing_key_sentinel() {
+                        self.ps.api_key_input.clear();
                     } else {
-                        self.api_key_input.pop();
+                        self.ps.api_key_input.pop();
                     }
-                    self.api_key_cursor = self.api_key_input.len();
+                    self.ps.api_key_cursor = self.ps.api_key_input.len();
                 }
                 KeyCode::Enter | KeyCode::Tab | KeyCode::Down => {
                     self.auth_field = AuthField::Model;
                     // Fetch live models when we have a key and provider supports it
-                    if self.supports_model_fetch()
-                        && (!self.api_key_input.is_empty() || self.has_existing_key())
+                    if self.ps.supports_model_fetch()
+                        && (!self.ps.api_key_input.is_empty()
+                            || self.ps.has_existing_key_sentinel())
                     {
-                        self.fetched_models.clear();
-                        self.selected_model = 0;
+                        self.ps.models.clear();
+                        self.ps.selected_model = 0;
                         return WizardAction::FetchModels;
                     }
                     // For providers without live fetch, load defaults from config.toml.example
-                    if self.config_models.is_empty() && self.fetched_models.is_empty() {
-                        self.config_models = Self::load_default_models(self.selected_provider);
-                        self.selected_model = 0;
+                    if self.ps.config_models.is_empty() && self.ps.models.is_empty() {
+                        self.ps.config_models =
+                            crate::tui::provider_selector::load_default_models(
+                                self.ps.selected_provider,
+                            );
+                        self.ps.selected_model = 0;
                     }
                 }
                 KeyCode::BackTab | KeyCode::Up => {
-                    if self.selected_provider == 6 {
+                    if self.ps.selected_provider == 6 {
                         self.auth_field = AuthField::ZhipuEndpointType;
                     } else {
                         self.auth_field = AuthField::Provider;
@@ -440,42 +444,42 @@ impl OnboardingWizard {
             },
             AuthField::Model => match event.code {
                 KeyCode::Up => {
-                    self.selected_model = self.selected_model.saturating_sub(1);
+                    self.ps.selected_model = self.ps.selected_model.saturating_sub(1);
                 }
                 KeyCode::Down => {
-                    let count = self.model_count();
+                    let count = self.ps.model_count();
                     if count > 0 {
-                        self.selected_model = (self.selected_model + 1).min(count - 1);
+                        self.ps.selected_model = (self.ps.selected_model + 1).min(count - 1);
                     }
                 }
                 KeyCode::Char(c) if event.modifiers.is_empty() => {
-                    self.model_filter.push(c);
-                    self.selected_model = 0; // reset selection on filter change
+                    self.ps.model_filter.push(c);
+                    self.ps.selected_model = 0; // reset selection on filter change
                 }
                 KeyCode::Backspace => {
-                    if self.model_filter.is_empty() {
+                    if self.ps.model_filter.is_empty() {
                         // CLI providers have no API key — go back to Provider
-                        if matches!(self.selected_provider, 7 | 8) {
+                        if matches!(self.ps.selected_provider, 7 | 8) {
                             self.auth_field = AuthField::Provider;
                         } else {
                             self.auth_field = AuthField::ApiKey;
                         }
                     } else {
-                        self.model_filter.pop();
-                        self.selected_model = 0;
+                        self.ps.model_filter.pop();
+                        self.ps.selected_model = 0;
                     }
                 }
                 KeyCode::Enter => {
                     self.next_step();
                 }
                 KeyCode::BackTab => {
-                    if matches!(self.selected_provider, 7 | 8) {
+                    if matches!(self.ps.selected_provider, 7 | 8) {
                         self.auth_field = AuthField::Provider;
                     } else {
                         self.auth_field = AuthField::ApiKey;
                     }
-                    self.model_filter.clear();
-                    self.selected_model = 0;
+                    self.ps.model_filter.clear();
+                    self.ps.selected_model = 0;
                 }
                 KeyCode::Tab => {
                     self.next_step();
@@ -484,21 +488,21 @@ impl OnboardingWizard {
             },
             AuthField::CustomName => match event.code {
                 KeyCode::Char(c) => {
-                    self.custom_provider_name.push(c);
+                    self.ps.custom_name.push(c);
                 }
                 KeyCode::Backspace if is_clear_field(&event) => {
-                    self.custom_provider_name.clear();
+                    self.ps.custom_name.clear();
                 }
                 KeyCode::Backspace => {
-                    self.custom_provider_name.pop();
+                    self.ps.custom_name.pop();
                 }
                 KeyCode::Enter | KeyCode::Tab | KeyCode::Down => {
-                    if self.custom_provider_name.is_empty() {
+                    if self.ps.custom_name.is_empty() {
                         self.error_message =
                             Some("Enter a name identifier for this provider".to_string());
                         return WizardAction::None;
                     }
-                    self.custom_provider_name = self.custom_provider_name.to_lowercase();
+                    self.ps.custom_name = self.ps.custom_name.to_lowercase();
                     self.auth_field = AuthField::CustomBaseUrl;
                 }
                 KeyCode::BackTab | KeyCode::Up => {
@@ -508,13 +512,13 @@ impl OnboardingWizard {
             },
             AuthField::CustomBaseUrl => match event.code {
                 KeyCode::Char(c) => {
-                    self.custom_base_url.push(c);
+                    self.ps.base_url.push(c);
                 }
                 KeyCode::Backspace if is_clear_field(&event) => {
-                    self.custom_base_url.clear();
+                    self.ps.base_url.clear();
                 }
                 KeyCode::Backspace => {
-                    self.custom_base_url.pop();
+                    self.ps.base_url.pop();
                 }
                 KeyCode::Enter | KeyCode::Tab | KeyCode::Down => {
                     self.auth_field = AuthField::CustomApiKey;
@@ -526,19 +530,19 @@ impl OnboardingWizard {
             },
             AuthField::CustomApiKey => match event.code {
                 KeyCode::Char(c) => {
-                    if self.has_existing_key() {
-                        self.api_key_input.clear();
+                    if self.ps.has_existing_key_sentinel() {
+                        self.ps.api_key_input.clear();
                     }
-                    self.api_key_input.push(c);
+                    self.ps.api_key_input.push(c);
                 }
                 KeyCode::Backspace if is_clear_field(&event) => {
-                    self.api_key_input.clear();
+                    self.ps.api_key_input.clear();
                 }
                 KeyCode::Backspace => {
-                    if self.has_existing_key() {
-                        self.api_key_input.clear();
+                    if self.ps.has_existing_key_sentinel() {
+                        self.ps.api_key_input.clear();
                     } else {
-                        self.api_key_input.pop();
+                        self.ps.api_key_input.pop();
                     }
                 }
                 KeyCode::Enter | KeyCode::Tab | KeyCode::Down => {
@@ -551,13 +555,13 @@ impl OnboardingWizard {
             },
             AuthField::CustomModel => match event.code {
                 KeyCode::Char(c) => {
-                    self.custom_model.push(c);
+                    self.ps.custom_model.push(c);
                 }
                 KeyCode::Backspace if is_clear_field(&event) => {
-                    self.custom_model.clear();
+                    self.ps.custom_model.clear();
                 }
                 KeyCode::Backspace => {
-                    self.custom_model.pop();
+                    self.ps.custom_model.pop();
                 }
                 KeyCode::Enter | KeyCode::Tab | KeyCode::Down => {
                     self.auth_field = AuthField::CustomContextWindow;
@@ -570,7 +574,7 @@ impl OnboardingWizard {
             AuthField::ZhipuEndpointType => match event.code {
                 KeyCode::Up | KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('k') => {
                     // Toggle between 0 (api) and 1 (coding)
-                    self.zhipu_endpoint_type = 1 - self.zhipu_endpoint_type;
+                    self.ps.zhipu_endpoint_type = 1 - self.ps.zhipu_endpoint_type;
                 }
                 KeyCode::Enter | KeyCode::Tab => {
                     // Endpoint type selected → now enter API key
@@ -583,13 +587,13 @@ impl OnboardingWizard {
             },
             AuthField::CustomContextWindow => match event.code {
                 KeyCode::Char(c) if c.is_ascii_digit() => {
-                    self.custom_context_window.push(c);
+                    self.ps.context_window.push(c);
                 }
                 KeyCode::Backspace if is_clear_field(&event) => {
-                    self.custom_context_window.clear();
+                    self.ps.context_window.clear();
                 }
                 KeyCode::Backspace => {
-                    self.custom_context_window.pop();
+                    self.ps.context_window.pop();
                 }
                 KeyCode::Enter | KeyCode::Tab | KeyCode::Down => {
                     self.next_step();
@@ -660,8 +664,8 @@ impl OnboardingWizard {
     /// If we just entered ProviderAuth with an existing key, trigger model fetch
     pub(super) fn maybe_fetch_models(&self) -> WizardAction {
         if self.step == OnboardingStep::ProviderAuth
-            && self.has_existing_key()
-            && self.supports_model_fetch()
+            && self.ps.has_existing_key_sentinel()
+            && self.ps.supports_model_fetch()
         {
             WizardAction::FetchModels
         } else {
