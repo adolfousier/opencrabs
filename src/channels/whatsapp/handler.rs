@@ -763,6 +763,7 @@ pub(crate) async fn handle_message(
             if let ProgressEvent::IntermediateText { text, .. } = event {
                 let (clean, _) = crate::utils::extract_img_markers(&text);
                 let clean = redact_secrets(&clean);
+                let clean = crate::utils::slack_fmt::markdown_to_mrkdwn(&clean);
                 if !clean.trim().is_empty() {
                     was_streamed_cb.store(true, std::sync::atomic::Ordering::Relaxed);
                     let client = client_cb.clone();
@@ -913,6 +914,7 @@ pub(crate) async fn handle_message(
             let (text_content, img_paths) = crate::utils::extract_img_markers(&response.content);
             let text_content = crate::utils::sanitize::strip_llm_artifacts(&text_content);
             let text_content = redact_secrets(&text_content);
+            let text_content = crate::utils::slack_fmt::markdown_to_mrkdwn(&text_content);
 
             // Send images before text
             for img_path in img_paths {

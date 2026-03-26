@@ -124,7 +124,8 @@ impl Tool for WhatsAppSendTool {
             }
         };
 
-        // Prepend agent header and split long messages
+        // Convert markdown to WhatsApp format and prepend agent header
+        let message = crate::utils::slack_fmt::markdown_to_mrkdwn(&message);
         let tagged = format!(
             "{}\n\n{}",
             crate::channels::whatsapp::handler::MSG_HEADER,
