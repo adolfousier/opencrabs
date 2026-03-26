@@ -98,10 +98,6 @@ impl WhatsAppAgent {
             let wa_state = self.whatsapp_state.clone();
             let config_rx = self.config_rx.clone();
             let channel_msg_repo = self.channel_msg_repo.clone();
-            let extra_sessions: Arc<
-                Mutex<std::collections::HashMap<String, (Uuid, std::time::Instant)>>,
-            > = Arc::new(Mutex::new(std::collections::HashMap::new()));
-
             let owner_jid_clone = owner_jid.clone();
 
             let bot_result = Bot::builder()
@@ -112,7 +108,6 @@ impl WhatsAppAgent {
                 .on_event(move |event, client| {
                     let agent = agent.clone();
                     let session_svc = session_svc.clone();
-                    let extra_sessions = extra_sessions.clone();
                     let shared_session = shared_session.clone();
                     let wa_state = wa_state.clone();
                     let owner_jid = owner_jid_clone.clone();
@@ -143,7 +138,6 @@ impl WhatsAppAgent {
                                     client,
                                     agent,
                                     session_svc,
-                                    extra_sessions,
                                     shared_session,
                                     wa_state.clone(),
                                     config_rx,
