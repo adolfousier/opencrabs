@@ -73,7 +73,43 @@ impl OpenCodeCliProvider {
                             Some(format!("<thinking>{}</thinking>", thinking))
                         }
                     }
-                    ContentBlock::Image { source } => Some(materialize_image(source)),
+                    ContentBlock::Image { source } => {
+                        // CLI mode cannot process images inline.
+                        // Save to temp file and tell agent to use analyze_image.
+                        Some(match source {
+                            ImageSource::Base64 { media_type, data } => {
+                                let ext = match media_type.as_str() {
+                                    "image/png" => "png",
+                                    "image/jpeg" => "jpeg",
+                                    "image/gif" => "gif",
+                                    "image/webp" => "webp",
+                                    _ => "png",
+                                };
+                                let tmp = std::env::temp_dir().join(format!(
+                                    "opencrabs_cli_img_{}.{}",
+                                    uuid::Uuid::new_v4(),
+                                    ext
+                                ));
+                                use base64::Engine;
+                                if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data)
+                                    && std::fs::write(&tmp, &bytes).is_ok()
+                                {
+                                    format!(
+                                        "[User attached an image at {}. Use the analyze_image tool to view it.]",
+                                        tmp.display()
+                                    )
+                                } else {
+                                    "[User attached an image but it could not be decoded.]".to_string()
+                                }
+                            }
+                            ImageSource::Url { url } => {
+                                format!(
+                                    "[User attached an image: {}. Use the analyze_image tool to view it.]",
+                                    url
+                                )
+                            }
+                        })
+                    }
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
@@ -85,38 +121,6 @@ impl OpenCodeCliProvider {
         }
 
         parts.join("\n\n")
-    }
-}
-
-/// Save a base64 image to a temp file and return a prompt reference,
-/// or return the URL directly for URL-based images.
-fn materialize_image(source: &ImageSource) -> String {
-    match source {
-        ImageSource::Base64 { media_type, data } => {
-            let ext = match media_type.as_str() {
-                "image/png" => "png",
-                "image/jpeg" => "jpeg",
-                "image/gif" => "gif",
-                "image/webp" => "webp",
-                _ => "png",
-            };
-            let tmp = std::env::temp_dir().join(format!(
-                "opencrabs_img_{}.{}",
-                uuid::Uuid::new_v4(),
-                ext
-            ));
-            use base64::Engine;
-            if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data)
-                && std::fs::write(&tmp, &bytes).is_ok()
-            {
-                tracing::info!("CLI image materialized to {}", tmp.display());
-                return format!("[Attached image: {}]", tmp.display());
-            }
-            "[Attached image: failed to decode]".to_string()
-        }
-        ImageSource::Url { url } => {
-            format!("[Attached image URL: {}]", url)
-        }
     }
 }
 
@@ -644,6 +648,6 @@ impl Provider for OpenCodeCliProvider {
     }
 
     fn supports_vision(&self) -> bool {
-        true // Images saved to temp files and referenced in prompt
+        false // CLI mode cannot process images — use analyze_image fallback
     }
 }

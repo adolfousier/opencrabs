@@ -115,7 +115,7 @@ fn opencode_provider_supports_vision() {
         return;
     }
     let provider = OpenCodeCliProvider::new().unwrap();
-    assert!(provider.supports_vision());
+    assert!(!provider.supports_vision()); // CLI mode uses analyze_image fallback
 }
 
 #[test]
