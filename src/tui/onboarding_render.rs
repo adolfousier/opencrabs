@@ -1625,13 +1625,31 @@ fn render_slack_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard)
             .add_modifier(Modifier::ITALIC),
     )));
     lines.push(Line::from(Span::styled(
-        "  2. Enable Socket Mode > copy App Token",
+        "  2. OAuth > Bot Token Scopes: chat:write, channels:history,",
         Style::default()
             .fg(Color::DarkGray)
             .add_modifier(Modifier::ITALIC),
     )));
     lines.push(Line::from(Span::styled(
-        "  3. OAuth > Install > copy Bot Token",
+        "     groups:history, im:history, mpim:history, users:read,",
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::ITALIC),
+    )));
+    lines.push(Line::from(Span::styled(
+        "     files:read, files:write, reactions:write, app_mentions:read",
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::ITALIC),
+    )));
+    lines.push(Line::from(Span::styled(
+        "  3. Enable Socket Mode > copy App Token (xapp-...)",
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::ITALIC),
+    )));
+    lines.push(Line::from(Span::styled(
+        "  4. Install App to Workspace > copy Bot Token (xoxb-...)",
         Style::default()
             .fg(Color::DarkGray)
             .add_modifier(Modifier::ITALIC),

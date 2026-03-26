@@ -202,6 +202,9 @@ enum CliMessage {
     Result {
         stop_reason: Option<String>,
         usage: Option<CliUsage>,
+        #[serde(default)]
+        is_error: bool,
+        result: Option<String>,
     },
 }
 
@@ -737,14 +740,74 @@ impl Provider for ClaudeCliProvider {
                         }
                     }
 
-                    CliMessage::Result { stop_reason, usage } => {
-                        // Close any open content block
-                        if current_block_started {
+                    CliMessage::Result { stop_reason, usage, is_error, result } => {
+                        // CLI returned an error (API failure, image processing, etc.)
+                        // Surface it as a text block so the user sees what happened
+                        // instead of silently dropping the response.
+                        if is_error {
+                            let error_text = result.unwrap_or_else(|| "CLI returned an error".to_string());
+                            tracing::error!("CLI result is_error=true: {}", error_text);
+
+                            // Ensure message_start was sent
+                            if !started {
+                                started = true;
+                                let _ = tx
+                                    .send(Ok(StreamEvent::MessageStart {
+                                        message: StreamMessage {
+                                            id: format!("msg_{}", uuid::Uuid::new_v4().simple()),
+                                            model: original_model.clone(),
+                                            role: Role::Assistant,
+                                            usage: TokenUsage {
+                                                input_tokens: 0,
+                                                output_tokens: 0,
+                                            },
+                                        },
+                                    }))
+                                    .await;
+                            }
+
+                            // Close any open content block from partial streaming
+                            if current_block_started {
+                                let _ = tx
+                                    .send(Ok(StreamEvent::ContentBlockStop {
+                                        index: completed_blocks,
+                                    }))
+                                    .await;
+                                completed_blocks += 1;
+                            }
+
+                            // Emit the error as a visible text block
+                            let error_idx = completed_blocks + block_index_offset;
                             let _ = tx
-                                .send(Ok(StreamEvent::ContentBlockStop {
-                                    index: completed_blocks,
+                                .send(Ok(StreamEvent::ContentBlockStart {
+                                    index: error_idx,
+                                    content_block: ContentBlock::Text {
+                                        text: String::new(),
+                                    },
                                 }))
                                 .await;
+                            let _ = tx
+                                .send(Ok(StreamEvent::ContentBlockDelta {
+                                    index: error_idx,
+                                    delta: ContentDelta::TextDelta {
+                                        text: format!("\n\n⚠️ CLI error: {}", error_text),
+                                    },
+                                }))
+                                .await;
+                            let _ = tx
+                                .send(Ok(StreamEvent::ContentBlockStop {
+                                    index: error_idx,
+                                }))
+                                .await;
+                        } else {
+                            // Close any open content block
+                            if current_block_started {
+                                let _ = tx
+                                    .send(Ok(StreamEvent::ContentBlockStop {
+                                        index: completed_blocks,
+                                    }))
+                                    .await;
+                            }
                         }
 
                         let reason = stop_reason.map(|r| match r.as_str() {
