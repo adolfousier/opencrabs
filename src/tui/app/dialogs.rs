@@ -512,12 +512,51 @@ impl App {
                 );
                 self.detect_model_selector_key_for_provider();
 
-                // Re-fetch models for the new provider
+                // Re-fetch models for the new provider — load API key from config
                 let provider_idx = self.model_selector_provider_selected;
+                let api_key = crate::config::Config::load().ok().and_then(|c| {
+                    match provider_idx {
+                        0 => c.providers.anthropic.and_then(|p| p.api_key),
+                        1 => c.providers.openai.and_then(|p| p.api_key),
+                        2 => c.providers.github.and_then(|p| p.api_key),
+                        3 => c.providers.gemini.and_then(|p| p.api_key),
+                        4 => c.providers.openrouter.and_then(|p| p.api_key),
+                        5 => c.providers.minimax.and_then(|p| p.api_key),
+                        6 => c.providers.zhipu.and_then(|p| p.api_key),
+                        idx if idx >= 10 => {
+                            let custom_idx = idx - 10;
+                            self.model_selector_custom_names
+                                .get(custom_idx)
+                                .and_then(|name| {
+                                    c.providers
+                                        .custom_by_name(name)
+                                        .and_then(|p| p.api_key.clone())
+                                })
+                        }
+                        _ => None,
+                    }
+                    .filter(|k| !k.is_empty())
+                });
+                let zhipu_et = if provider_idx == 6 {
+                    Some(
+                        if self.model_selector_zhipu_endpoint_type == 1 {
+                            "coding"
+                        } else {
+                            "api"
+                        }
+                        .to_string(),
+                    )
+                } else {
+                    None
+                };
                 let sender = self.event_sender();
                 tokio::spawn(async move {
-                    let models =
-                        super::onboarding::fetch_provider_models(provider_idx, None, None).await;
+                    let models = super::onboarding::fetch_provider_models(
+                        provider_idx,
+                        api_key.as_deref(),
+                        zhipu_et.as_deref(),
+                    )
+                    .await;
                     let _ = sender.send(TuiEvent::ModelSelectorModelsFetched(models));
                 });
                 self.model_selector_models.clear();

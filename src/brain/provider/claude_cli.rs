@@ -745,12 +745,18 @@ impl Provider for ClaudeCliProvider {
                         }
                     }
 
-                    CliMessage::Result { stop_reason, usage, is_error, result } => {
+                    CliMessage::Result {
+                        stop_reason,
+                        usage,
+                        is_error,
+                        result,
+                    } => {
                         // CLI returned an error (API failure, image processing, etc.)
                         // Surface it as a text block so the user sees what happened
                         // instead of silently dropping the response.
                         if is_error {
-                            let error_text = result.unwrap_or_else(|| "CLI returned an error".to_string());
+                            let error_text =
+                                result.unwrap_or_else(|| "CLI returned an error".to_string());
                             tracing::error!("CLI result is_error=true: {}", error_text);
 
                             // Ensure message_start was sent
@@ -800,9 +806,7 @@ impl Provider for ClaudeCliProvider {
                                 }))
                                 .await;
                             let _ = tx
-                                .send(Ok(StreamEvent::ContentBlockStop {
-                                    index: error_idx,
-                                }))
+                                .send(Ok(StreamEvent::ContentBlockStop { index: error_idx }))
                                 .await;
                         } else {
                             // Close any open content block

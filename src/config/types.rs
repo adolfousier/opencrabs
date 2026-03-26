@@ -1804,7 +1804,7 @@ impl Config {
 
         let toml_str = toml::to_string_pretty(&doc)?;
         fs::write(&path, toml_str)?;
-        tracing::info!("Wrote config key [{section}].{key} = {value}");
+        tracing::info!("Wrote config key [{section}].{key}");
         Ok(())
     }
 

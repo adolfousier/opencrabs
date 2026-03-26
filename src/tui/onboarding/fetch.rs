@@ -164,6 +164,11 @@ pub async fn fetch_provider_models(
     api_key: Option<&str>,
     zhipu_endpoint_type: Option<&str>,
 ) -> Vec<String> {
+    tracing::info!(
+        "[fetch_provider_models] provider_index={}, has_api_key={}",
+        provider_index,
+        api_key.is_some(),
+    );
     #[derive(serde::Deserialize)]
     struct ModelEntry {
         id: String,
@@ -269,14 +274,21 @@ pub async fn fetch_provider_models(
             // Google Gemini — list models via generativelanguage API
             let key = match api_key {
                 Some(k) if !k.is_empty() => k,
-                _ => return Vec::new(),
+                _ => {
+                    tracing::warn!(
+                        "[fetch_provider_models] Gemini: no API key provided, returning empty"
+                    );
+                    return Vec::new();
+                }
             };
+            tracing::info!("[fetch_provider_models] Gemini: fetching models (key present)");
             let url = format!(
                 "https://generativelanguage.googleapis.com/v1beta/models?key={}",
                 key
             );
             // Gemini uses a different response shape: { models: [{ name: "models/gemini-..." }] }
             #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
             struct GeminiModel {
                 name: String,
                 #[serde(default)]
@@ -306,6 +318,10 @@ pub async fn fetch_provider_models(
                                 })
                                 .collect();
                             models.sort();
+                            tracing::info!(
+                                "[fetch_provider_models] Gemini: fetched {} models",
+                                models.len()
+                            );
                             return models;
                         }
                         Err(e) => {

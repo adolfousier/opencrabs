@@ -112,7 +112,7 @@ impl OnboardingWizard {
 
     /// Whether the current provider supports live model fetching
     pub fn supports_model_fetch(&self) -> bool {
-        matches!(self.selected_provider, 0 | 1 | 2 | 4 | 6 | 8) // Anthropic, OpenAI, GitHub Copilot, OpenRouter, z.ai GLM, OpenCode CLI
+        matches!(self.selected_provider, 0 | 1 | 2 | 3 | 4 | 6 | 8) // Anthropic, OpenAI, GitHub Copilot, Gemini, OpenRouter, z.ai GLM, OpenCode CLI
     }
 
     /// Load default models from embedded config.toml.example for GitHub, MiniMax, zhipu, and Custom
