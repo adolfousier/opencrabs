@@ -203,10 +203,40 @@ pub fn create_provider_with_warning(
 /// Accepts names like "anthropic", "openai", "minimax", "openrouter", or "custom:<name>".
 pub fn create_provider_by_name(config: &Config, name: &str) -> Result<Arc<dyn Provider>> {
     match name {
-        "claude-cli" | "claude_cli" => try_create_claude_cli(config)?
-            .ok_or_else(|| anyhow::anyhow!("Claude CLI not configured or binary not found")),
-        "opencode" | "opencode-cli" | "opencode_cli" => try_create_opencode_cli(config)?
-            .ok_or_else(|| anyhow::anyhow!("OpenCode CLI not configured or binary not found")),
+        "claude-cli" | "claude_cli" => {
+            // Bypass enabled check — session explicitly requested this provider
+            let model = config
+                .providers
+                .claude_cli
+                .as_ref()
+                .and_then(|c| c.default_model.clone());
+            match ClaudeCliProvider::new() {
+                Ok(mut provider) => {
+                    if let Some(m) = model {
+                        provider = provider.with_default_model(m);
+                    }
+                    Ok(Arc::new(provider))
+                }
+                Err(e) => Err(anyhow::anyhow!("Claude CLI binary not found: {}", e)),
+            }
+        }
+        "opencode" | "opencode-cli" | "opencode_cli" => {
+            // Bypass enabled check — session explicitly requested this provider
+            let model = config
+                .providers
+                .opencode_cli
+                .as_ref()
+                .and_then(|c| c.default_model.clone());
+            match OpenCodeCliProvider::new() {
+                Ok(mut provider) => {
+                    if let Some(m) = model {
+                        provider = provider.with_default_model(m);
+                    }
+                    Ok(Arc::new(provider))
+                }
+                Err(e) => Err(anyhow::anyhow!("OpenCode CLI binary not found: {}", e)),
+            }
+        }
         "anthropic" => try_create_anthropic(config)?
             .ok_or_else(|| anyhow::anyhow!("Anthropic not configured (missing API key)")),
         "openai" => try_create_openai(config)?

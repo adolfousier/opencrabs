@@ -448,7 +448,7 @@ impl App {
         let (approval_auto_session, approval_auto_always) =
             Self::read_approval_policy_from_config();
 
-        Self {
+        let this = Self {
             current_session: None,
             messages: Vec::new(),
             sessions: Vec::new(),
@@ -539,7 +539,13 @@ impl App {
             agent_service,
             event_handler: EventHandler::new(),
             prompt_analyzer: PromptAnalyzer::new(),
-        }
+        };
+        tracing::info!(
+            "App created — provider: {} / {}",
+            this.agent_service.provider_name(),
+            this.agent_service.provider_model(),
+        );
+        this
     }
 
     /// Get the provider name
@@ -662,6 +668,13 @@ impl App {
             // Create a new session if none exists
             self.create_new_session().await?;
         }
+
+        tracing::info!(
+            "Session loaded — provider: {} / {}, session: {:?}",
+            self.agent_service.provider_name(),
+            self.default_model_name,
+            self.current_session.as_ref().map(|s| s.id),
+        );
 
         // Load sessions list
         self.load_sessions().await?;

@@ -169,49 +169,28 @@ impl App {
         // Persist as last active session so startup restores it
         Self::save_last_session_id(session_id);
 
-        // Auto-restore provider if session has a different one than current
-        if let Some(ref saved_provider) = session.provider_name {
-            let current_provider = self.agent_service.provider_name();
-            if *saved_provider != current_provider {
-                // Try cache first
-                if let Some(cached) = self.provider_cache.get(saved_provider) {
-                    self.agent_service.swap_provider(cached.clone());
-                    tracing::info!(
-                        "Restored provider '{}' from cache for session {}",
-                        saved_provider,
-                        session_id
-                    );
-                } else {
-                    // Cache miss — create from config
-                    match crate::config::Config::load() {
-                        Ok(config) => {
-                            match crate::brain::provider::factory::create_provider_by_name(
-                                &config,
-                                saved_provider,
-                            ) {
-                                Ok(provider) => {
-                                    self.provider_cache
-                                        .insert(saved_provider.clone(), provider.clone());
-                                    self.agent_service.swap_provider(provider);
-                                    tracing::info!(
-                                        "Created and cached provider '{}' for session {}",
-                                        saved_provider,
-                                        session_id
-                                    );
-                                }
-                                Err(e) => {
-                                    tracing::warn!(
-                                        "Failed to restore provider '{}': {}. Using current.",
-                                        saved_provider,
-                                        e
-                                    );
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            tracing::warn!("Failed to load config for provider restore: {}", e);
-                        }
-                    }
+        // Sync session metadata to match the active provider from config.
+        // The config-enabled provider is authoritative — session metadata is
+        // only a display hint and must not override what the user configured.
+        {
+            let active_prov = self.agent_service.provider_name();
+            let active_model = self.agent_service.provider_model();
+            if session
+                .provider_name
+                .as_deref()
+                .is_none_or(|p| p != active_prov)
+                || session.model.as_deref().is_none_or(|m| m != active_model)
+            {
+                tracing::info!(
+                    "Session had provider '{}/{}', active is '{}/{}' — syncing session to config",
+                    session.provider_name.as_deref().unwrap_or("?"),
+                    session.model.as_deref().unwrap_or("?"),
+                    active_prov,
+                    active_model,
+                );
+                if let Some(ref mut s) = self.current_session {
+                    s.provider_name = Some(active_prov);
+                    s.model = Some(active_model);
                 }
             }
         }
