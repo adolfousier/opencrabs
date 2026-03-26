@@ -1,4 +1,4 @@
-//! CLI subcommands — run, init, config, db, keyring, logs, and config loading.
+//! CLI subcommands — run, init, config, db, keyring, logs, status, doctor, and config loading.
 
 use anyhow::{Context, Result};
 use std::sync::Arc;
@@ -6,7 +6,367 @@ use std::sync::Arc;
 use crate::brain::BrainLoader;
 use crate::brain::prompt_builder::RuntimeInfo;
 
-use super::{DbCommands, LogCommands, OutputFormat};
+use super::args::{DbCommands, LogCommands, OutputFormat};
+
+/// Show system status
+pub(crate) async fn cmd_status(config: &crate::config::Config) -> Result<()> {
+    use crate::db::Database;
+
+    let version = env!("CARGO_PKG_VERSION");
+    println!("🦀 OpenCrabs v{version}\n");
+
+    // Provider
+    match crate::brain::provider::create_provider(config) {
+        Ok(provider) => {
+            println!(
+                "  Provider:  {} ({})",
+                provider.name(),
+                provider.default_model()
+            );
+        }
+        Err(_) => println!("  Provider:  not configured"),
+    }
+
+    // Brain
+    let brain_path = BrainLoader::resolve_path();
+    let brain_files: Vec<&str> = ["persona.md", "system.md", "IDENTITY.md", "USER.md", "MEMORY.md", "AGENTS.md", "TOOLS.md", "SOUL.md"]
+        .iter()
+        .filter(|f| brain_path.join(f).exists())
+        .copied()
+        .collect();
+    if brain_files.is_empty() {
+        println!("  Brain:     no files found at {}", brain_path.display());
+    } else {
+        println!(
+            "  Brain:     {} files ({})",
+            brain_files.len(),
+            brain_files.join(", ")
+        );
+    }
+
+    // Database
+    let db_path = &config.database.path;
+    if db_path.exists() {
+        let size = std::fs::metadata(db_path)
+            .map(|m| m.len())
+            .unwrap_or(0);
+        let size_str = if size > 1_048_576 {
+            format!("{:.1} MB", size as f64 / 1_048_576.0)
+        } else {
+            format!("{:.0} KB", size as f64 / 1024.0)
+        };
+
+        match Database::connect(db_path).await {
+            Ok(db) => {
+                let counts = async {
+                    let conn = db.pool().get().await.ok()?;
+                    conn.interact(|c| {
+                        let sessions: i64 =
+                            c.query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))?;
+                        let messages: i64 =
+                            c.query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0))?;
+                        Ok::<_, rusqlite::Error>((sessions, messages))
+                    })
+                    .await
+                    .ok()?
+                    .ok()
+                }
+                .await;
+                if let Some((sessions, messages)) = counts {
+                    println!(
+                        "  Database:  {} — {} sessions, {} messages ({})",
+                        db_path.display(),
+                        sessions,
+                        messages,
+                        size_str
+                    );
+                } else {
+                    println!("  Database:  {} ({})", db_path.display(), size_str);
+                }
+            }
+            Err(_) => println!("  Database:  {} ({})", db_path.display(), size_str),
+        }
+    } else {
+        println!("  Database:  not initialized");
+    }
+
+    // Channels
+    let mut channels = Vec::new();
+    if config.channels.telegram.enabled {
+        channels.push("Telegram");
+    }
+    if config.channels.discord.enabled {
+        channels.push("Discord");
+    }
+    if config.channels.slack.enabled {
+        channels.push("Slack");
+    }
+    if config.channels.whatsapp.enabled {
+        channels.push("WhatsApp");
+    }
+    if config.channels.trello.enabled {
+        channels.push("Trello");
+    }
+    if channels.is_empty() {
+        println!("  Channels:  none enabled");
+    } else {
+        println!("  Channels:  {}", channels.join(", "));
+    }
+
+    // A2A
+    if config.a2a.enabled {
+        println!(
+            "  A2A:       enabled ({}:{})",
+            config.a2a.bind, config.a2a.port
+        );
+    }
+
+    // Dynamic tools
+    let tools_path = BrainLoader::resolve_path().join("tools.toml");
+    if tools_path.exists()
+        && let Ok(contents) = std::fs::read_to_string(&tools_path)
+    {
+        let count = contents.matches("[[tools]]").count();
+        if count > 0 {
+            println!("  Tools:     {} dynamic tool(s) in tools.toml", count);
+        }
+    }
+
+    // Cron
+    let cron_path = BrainLoader::resolve_path().join("cron.toml");
+    if cron_path.exists()
+        && let Ok(contents) = std::fs::read_to_string(&cron_path)
+    {
+        let count = contents.matches("[[jobs]]").count();
+        if count > 0 {
+            println!("  Cron:      {} job(s)", count);
+        }
+    }
+
+    // Logs
+    let log_dir = dirs::config_dir()
+        .map(|d| d.join("opencrabs").join("logs"))
+        .unwrap_or_default();
+    if log_dir.exists() {
+        let log_count = std::fs::read_dir(&log_dir)
+            .map(|rd| rd.filter_map(|e| e.ok()).filter(|e| {
+                e.path().extension().map(|ext| ext == "log").unwrap_or(false)
+            }).count())
+            .unwrap_or(0);
+        if log_count > 0 {
+            println!("  Logs:      {} file(s) in {}", log_count, log_dir.display());
+        }
+    }
+
+    println!();
+    Ok(())
+}
+
+/// Run diagnostics
+pub(crate) async fn cmd_doctor(config: &crate::config::Config) -> Result<()> {
+    use crate::db::Database;
+
+    let version = env!("CARGO_PKG_VERSION");
+    println!("🦀 OpenCrabs Doctor v{version}\n");
+
+    let mut pass = 0u32;
+    let mut fail = 0u32;
+    let mut warn = 0u32;
+
+    // 1. Config file
+    let config_path = dirs::config_dir()
+        .map(|d| d.join("opencrabs").join("config.toml"));
+    if let Some(ref p) = config_path
+        && p.exists()
+    {
+        println!("  ✅ Config file: {}", p.display());
+        pass += 1;
+    } else {
+        println!("  ❌ Config file: not found (run `opencrabs init` or `opencrabs onboard`)");
+        fail += 1;
+    }
+
+    // 2. Keys file
+    let keys_path = dirs::config_dir().map(|d| d.join("opencrabs").join("keys.toml"));
+    if let Some(ref p) = keys_path
+        && p.exists()
+    {
+        println!("  ✅ Keys file: {}", p.display());
+        pass += 1;
+    } else {
+        println!("  ⚠️  Keys file: not found (API keys stored in config.toml or env vars)");
+        warn += 1;
+    }
+
+    // 3. Provider
+    match crate::brain::provider::create_provider(config) {
+        Ok(provider) => {
+            println!(
+                "  ✅ Provider: {} (model: {})",
+                provider.name(),
+                provider.default_model()
+            );
+            pass += 1;
+        }
+        Err(e) => {
+            println!("  ❌ Provider: {}", e);
+            fail += 1;
+        }
+    }
+
+    // 4. Database
+    let db_path = &config.database.path;
+    if db_path.exists() {
+        match Database::connect(db_path).await {
+            Ok(db) => {
+                db.run_migrations().await.ok();
+                println!("  ✅ Database: {}", db_path.display());
+                pass += 1;
+            }
+            Err(e) => {
+                println!("  ❌ Database: failed to connect — {}", e);
+                fail += 1;
+            }
+        }
+    } else {
+        println!("  ❌ Database: not found at {} (run `opencrabs db init`)", db_path.display());
+        fail += 1;
+    }
+
+    // 5. Brain files
+    let brain_path = BrainLoader::resolve_path();
+    if brain_path.exists() {
+        let brain_files: Vec<&str> = ["persona.md", "system.md", "IDENTITY.md", "USER.md", "MEMORY.md"]
+            .iter()
+            .filter(|f| brain_path.join(f).exists())
+            .copied()
+            .collect();
+        if brain_files.is_empty() {
+            println!("  ⚠️  Brain: directory exists but no brain files found at {}", brain_path.display());
+            warn += 1;
+        } else {
+            println!("  ✅ Brain: {} files ({})", brain_files.len(), brain_files.join(", "));
+            pass += 1;
+        }
+    } else {
+        println!("  ⚠️  Brain: directory not found at {}", brain_path.display());
+        warn += 1;
+    }
+
+    // 6. Channels
+    println!();
+    println!("  Channels:");
+
+    // Telegram
+    if config.channels.telegram.enabled {
+        if config.channels.telegram.token.as_ref().is_some_and(|t| !t.is_empty()) {
+            println!("    ✅ Telegram: enabled, token set");
+            pass += 1;
+        } else {
+            println!("    ❌ Telegram: enabled but no bot token");
+            fail += 1;
+        }
+    } else {
+        println!("    ⬚  Telegram: disabled");
+    }
+
+    // Discord
+    if config.channels.discord.enabled {
+        if config.channels.discord.token.as_ref().is_some_and(|t| !t.is_empty()) {
+            println!("    ✅ Discord: enabled, token set");
+            pass += 1;
+        } else {
+            println!("    ❌ Discord: enabled but no bot token");
+            fail += 1;
+        }
+    } else {
+        println!("    ⬚  Discord: disabled");
+    }
+
+    // Slack
+    if config.channels.slack.enabled {
+        let has_bot = config.channels.slack.token.as_ref().is_some_and(|t| !t.is_empty());
+        let has_app = config.channels.slack.app_token.as_ref().is_some_and(|t| !t.is_empty());
+        if has_bot && has_app {
+            println!("    ✅ Slack: enabled, bot + app tokens set");
+            pass += 1;
+        } else {
+            let missing: Vec<&str> = [
+                (!has_bot).then_some("bot token"),
+                (!has_app).then_some("app token"),
+            ].into_iter().flatten().collect();
+            println!("    ❌ Slack: enabled but missing {}", missing.join(", "));
+            fail += 1;
+        }
+    } else {
+        println!("    ⬚  Slack: disabled");
+    }
+
+    // WhatsApp
+    if config.channels.whatsapp.enabled {
+        println!("    ✅ WhatsApp: enabled (pairs at runtime)");
+        pass += 1;
+    } else {
+        println!("    ⬚  WhatsApp: disabled");
+    }
+
+    // Trello
+    if config.channels.trello.enabled {
+        let has_token = config.channels.trello.token.as_ref().is_some_and(|t| !t.is_empty());
+        let has_app_token = config.channels.trello.app_token.as_ref().is_some_and(|t| !t.is_empty());
+        if has_token && has_app_token {
+            println!("    ✅ Trello: enabled, token + app token set");
+            pass += 1;
+        } else {
+            println!("    ❌ Trello: enabled but missing credentials");
+            fail += 1;
+        }
+    } else {
+        println!("    ⬚  Trello: disabled");
+    }
+
+    // 7. CLI tools in PATH
+    println!();
+    println!("  CLI tools:");
+    for (name, desc) in [
+        ("claude", "Claude CLI provider"),
+        ("opencode", "OpenCode CLI provider"),
+        ("docker", "container runtime"),
+        ("ffmpeg", "media processing"),
+        ("gh", "GitHub CLI"),
+    ] {
+        if which::which(name).is_ok() {
+            println!("    ✅ {name}: found ({desc})");
+            pass += 1;
+        } else {
+            println!("    ⬚  {name}: not found ({desc})");
+        }
+    }
+
+    // 8. Dynamic tools
+    let tools_path = brain_path.join("tools.toml");
+    if tools_path.exists()
+        && let Ok(contents) = std::fs::read_to_string(&tools_path)
+    {
+        let count = contents.matches("[[tools]]").count();
+        if count > 0 {
+            println!();
+            println!("  ✅ Dynamic tools: {} defined in tools.toml", count);
+            pass += 1;
+        }
+    }
+
+    // Summary
+    println!();
+    if fail == 0 {
+        println!("  ✅ All checks passed ({pass} ok, {warn} warnings)");
+    } else {
+        println!("  {fail} issue(s), {pass} ok, {warn} warning(s)");
+    }
+    println!();
+
+    Ok(())
+}
 
 /// Load configuration from file or defaults
 pub(crate) async fn load_config(config_path: Option<&str>) -> Result<crate::config::Config> {

@@ -1,0 +1,267 @@
+//! CLI argument types and entry point.
+
+use anyhow::Result;
+use clap::{Parser, Subcommand};
+
+use super::{commands, cron, ui};
+
+/// OpenCrabs - High-Performance Terminal AI Orchestration Agent
+#[derive(Parser, Debug)]
+#[command(name = "opencrabs")]
+#[command(version, about, long_about = None)]
+pub struct Cli {
+    /// Enable debug mode (creates log files in .opencrabs/logs/)
+    #[arg(short, long, global = true)]
+    pub debug: bool,
+
+    /// Configuration file path
+    #[arg(short, long, global = true)]
+    pub config: Option<String>,
+
+    /// Subcommand to execute
+    #[command(subcommand)]
+    pub command: Option<Commands>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Commands {
+    /// Start interactive TUI mode (default)
+    Chat {
+        /// Session ID to resume
+        #[arg(short, long)]
+        session: Option<String>,
+
+        /// Force onboarding wizard before chat
+        #[arg(long)]
+        onboard: bool,
+    },
+
+    /// Run the onboarding setup wizard
+    Onboard,
+
+    /// Run a single command non-interactively
+    Run {
+        /// The prompt to execute
+        prompt: String,
+
+        /// Auto-approve all tool executions (dangerous!)
+        #[arg(long, alias = "yolo")]
+        auto_approve: bool,
+
+        /// Output format
+        #[arg(short, long, default_value = "text")]
+        format: OutputFormat,
+    },
+
+    /// Show system status: version, provider, channels, database, brain
+    Status,
+
+    /// Run diagnostics: check config, provider connectivity, channel health, tools, brain
+    Doctor,
+
+    /// Initialize configuration
+    Init {
+        /// Force overwrite existing configuration
+        #[arg(short, long)]
+        force: bool,
+    },
+
+    /// Show configuration
+    Config {
+        /// Show full configuration including secrets
+        #[arg(short, long)]
+        show_secrets: bool,
+    },
+
+    /// Database operations
+    Db {
+        #[command(subcommand)]
+        operation: DbCommands,
+    },
+
+    /// Log management operations
+    Logs {
+        #[command(subcommand)]
+        operation: LogCommands,
+    },
+
+    /// Run in headless daemon mode — no TUI, channel bots only (Telegram, Discord, Slack, WhatsApp)
+    /// Used by the systemd/LaunchAgent service installed during onboarding
+    Daemon,
+
+    /// Manage scheduled cron jobs
+    Cron {
+        #[command(subcommand)]
+        operation: CronCommands,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum LogCommands {
+    /// Show log file location and status
+    Status,
+    /// View recent log entries (requires debug mode)
+    View {
+        /// Number of lines to show (default: 50)
+        #[arg(short, long, default_value = "50")]
+        lines: usize,
+    },
+    /// Clean up old log files
+    Clean {
+        /// Maximum age in days (default: 7)
+        #[arg(short = 'a', long, default_value = "7")]
+        days: u64,
+    },
+    /// Open log directory in file manager
+    Open,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum DbCommands {
+    /// Initialize database
+    Init,
+    /// Show database statistics
+    Stats,
+    /// Clear all sessions and messages from database
+    Clear {
+        /// Skip confirmation prompt (use with caution)
+        #[arg(short, long)]
+        force: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum CronCommands {
+    /// Add a new cron job
+    Add {
+        /// Job name
+        #[arg(long)]
+        name: String,
+
+        /// Cron expression (5-field: min hour dom mon dow)
+        #[arg(long)]
+        cron: String,
+
+        /// Timezone (default: UTC)
+        #[arg(long, default_value = "UTC")]
+        tz: String,
+
+        /// Prompt / instructions for the agent
+        #[arg(long, alias = "message")]
+        prompt: String,
+
+        /// Override provider (e.g. anthropic, openai)
+        #[arg(long)]
+        provider: Option<String>,
+
+        /// Override model (e.g. claude-sonnet-4-20250514)
+        #[arg(long)]
+        model: Option<String>,
+
+        /// Thinking mode: off, on, budget
+        #[arg(long, default_value = "off")]
+        thinking: String,
+
+        /// Auto-approve tool executions
+        #[arg(long, default_value = "true")]
+        auto_approve: bool,
+
+        /// Channel to deliver results (e.g. telegram:123456)
+        #[arg(long, alias = "deliver")]
+        deliver_to: Option<String>,
+    },
+
+    /// List all cron jobs
+    List,
+
+    /// Remove a cron job by ID or name
+    Remove {
+        /// Job ID or name
+        id: String,
+    },
+
+    /// Enable a cron job
+    Enable {
+        /// Job ID or name
+        id: String,
+    },
+
+    /// Disable a cron job (pause without deleting)
+    Disable {
+        /// Job ID or name
+        id: String,
+    },
+
+    /// Trigger a cron job immediately (runs on next scheduler tick)
+    Test {
+        /// Job ID or name
+        id: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum OutputFormat {
+    Text,
+    Json,
+    Markdown,
+}
+
+/// Main CLI entry point
+pub async fn run() -> Result<()> {
+    let cli = Cli::parse();
+
+    // Set up logging level based on debug flag
+    if cli.debug {
+        tracing::info!("Debug mode enabled");
+    }
+
+    // Load configuration
+    let config = commands::load_config(cli.config.as_deref()).await?;
+
+    // Auto-generate config.toml if API keys exist in env but no config file yet.
+    // This prevents the onboarding wizard from triggering when .env is already set up.
+    let config_path = dirs::config_dir().map(|d| d.join("opencrabs").join("config.toml"));
+    if let Some(ref path) = config_path
+        && !path.exists()
+        && config.has_any_api_key()
+    {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
+        if let Err(e) = config.save(path) {
+            tracing::warn!("Failed to auto-generate config.toml: {}", e);
+        } else {
+            tracing::info!("Auto-generated config.toml from environment");
+        }
+    }
+
+    match cli.command {
+        None | Some(Commands::Chat { .. }) => {
+            // Default: Interactive TUI mode
+            let (session, force_onboard) = match &cli.command {
+                Some(Commands::Chat { session, onboard }) => (session.clone(), *onboard),
+                _ => (None, false),
+            };
+            ui::cmd_chat(&config, session, force_onboard).await
+        }
+        Some(Commands::Onboard) => {
+            // Launch TUI with onboarding wizard (skip splash)
+            ui::cmd_chat(&config, None, true).await
+        }
+        Some(Commands::Status) => commands::cmd_status(&config).await,
+        Some(Commands::Doctor) => commands::cmd_doctor(&config).await,
+        Some(Commands::Init { force }) => commands::cmd_init(&config, force).await,
+        Some(Commands::Config { show_secrets }) => {
+            commands::cmd_config(&config, show_secrets).await
+        }
+        Some(Commands::Db { operation }) => commands::cmd_db(&config, operation).await,
+        Some(Commands::Logs { operation }) => commands::cmd_logs(operation).await,
+        Some(Commands::Run {
+            prompt,
+            auto_approve,
+            format,
+        }) => commands::cmd_run(&config, prompt, auto_approve, format).await,
+        Some(Commands::Daemon) => ui::cmd_daemon(&config).await,
+        Some(Commands::Cron { operation }) => cron::cmd_cron(&config, operation).await,
+    }
+}
