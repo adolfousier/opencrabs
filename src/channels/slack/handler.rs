@@ -500,8 +500,7 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
 
     // Resolve user display name via Slack API (cached per conversation turn)
     let user_name = {
-        let token =
-            SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
+        let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
         let session = client.open_session(&token);
         match session
             .users_info(&SlackApiUsersInfoRequest::new(SlackUserId::new(
@@ -529,13 +528,12 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
 
     // Resolve channel name via Slack API
     let channel_name = {
-        let token =
-            SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
+        let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
         let session = client.open_session(&token);
         match session
-            .conversations_info(&SlackApiConversationsInfoRequest::new(
-                SlackChannelId::new(channel_id.clone()),
-            ))
+            .conversations_info(&SlackApiConversationsInfoRequest::new(SlackChannelId::new(
+                channel_id.clone(),
+            )))
             .await
         {
             Ok(resp) => resp
@@ -544,7 +542,11 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                 .map(|n| format!("#{n}"))
                 .unwrap_or_else(|| channel_id.clone()),
             Err(e) => {
-                tracing::debug!("Slack: failed to resolve channel name for {}: {}", channel_id, e);
+                tracing::debug!(
+                    "Slack: failed to resolve channel name for {}: {}",
+                    channel_id,
+                    e
+                );
                 channel_id.clone()
             }
         }
