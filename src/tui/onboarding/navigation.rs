@@ -30,10 +30,7 @@ impl OnboardingWizard {
             }
             OnboardingStep::ProviderAuth => {
                 // CLI providers (Claude CLI, OpenCode CLI) have no API key
-                if self.ps.api_key_input.is_empty()
-                    && !self.ps.is_custom()
-                    && !self.ps.is_cli()
-                {
+                if self.ps.api_key_input.is_empty() && !self.ps.is_custom() && !self.ps.is_cli() {
                     self.error_message = Some("API key is required".to_string());
                     return;
                 }

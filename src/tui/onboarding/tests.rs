@@ -23,12 +23,12 @@ fn test_step_navigation() {
 fn test_advanced_mode_all_steps() {
     let mut wizard = OnboardingWizard::new();
     wizard.mode = WizardMode::Advanced;
-    wizard.ps.api_key_input = "test-key".to_string();
 
     wizard.next_step(); // ModeSelect -> Workspace
     assert_eq!(wizard.step, OnboardingStep::Workspace);
-    wizard.next_step(); // Workspace -> ProviderAuth
+    wizard.next_step(); // Workspace -> ProviderAuth (detect_existing_key clears api_key_input)
     assert_eq!(wizard.step, OnboardingStep::ProviderAuth);
+    wizard.ps.api_key_input = "test-key".to_string(); // set key AFTER reaching ProviderAuth
     wizard.next_step(); // ProviderAuth -> Channels
     assert_eq!(wizard.step, OnboardingStep::Channels);
     wizard.next_step(); // Channels -> VoiceSetup
@@ -69,10 +69,10 @@ fn test_channels_telegram_goes_to_telegram_setup() {
 fn test_channels_whatsapp_skips_to_voice() {
     let mut wizard = OnboardingWizard::new();
     wizard.mode = WizardMode::Advanced;
-    wizard.ps.api_key_input = "test-key".to_string();
 
     wizard.next_step(); // ModeSelect -> Workspace
     wizard.next_step(); // Workspace -> ProviderAuth
+    wizard.ps.api_key_input = "test-key".to_string();
     wizard.next_step(); // ProviderAuth -> Channels
 
     // Enable WhatsApp only (no token sub-step)
@@ -162,7 +162,10 @@ fn test_provider_auth_defaults() {
     assert!(wizard.ps.api_key_input.is_empty());
     assert_eq!(wizard.ps.selected_model, 0);
     // First provider is Anthropic Claude
-    assert_eq!(PROVIDERS[wizard.ps.selected_provider].name, "Anthropic Claude");
+    assert_eq!(
+        PROVIDERS[wizard.ps.selected_provider].name,
+        "Anthropic Claude"
+    );
     assert!(!PROVIDERS[wizard.ps.selected_provider].help_lines.is_empty());
 }
 
@@ -330,12 +333,12 @@ fn test_handle_key_complete_step_returns_complete() {
 fn test_quickstart_skips_channels_voice() {
     let mut wizard = OnboardingWizard::new();
     wizard.mode = WizardMode::QuickStart;
-    wizard.ps.api_key_input = "test-key".to_string();
 
     wizard.next_step(); // ModeSelect -> Workspace
     assert_eq!(wizard.step, OnboardingStep::Workspace);
     wizard.next_step(); // Workspace -> ProviderAuth
     assert_eq!(wizard.step, OnboardingStep::ProviderAuth);
+    wizard.ps.api_key_input = "test-key".to_string();
     wizard.next_step(); // ProviderAuth -> Daemon (QuickStart skips Channels & Voice)
     assert_eq!(wizard.step, OnboardingStep::Daemon);
 }

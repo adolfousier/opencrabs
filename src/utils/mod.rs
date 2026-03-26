@@ -7,6 +7,7 @@ pub mod image;
 pub mod install;
 pub mod retry;
 pub mod sanitize;
+pub mod slack_fmt;
 mod string;
 mod tool_context;
 

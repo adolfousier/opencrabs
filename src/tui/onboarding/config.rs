@@ -379,8 +379,7 @@ impl OnboardingWizard {
                     let _ = Config::write_key(section, "default_model", &self.ps.custom_model);
                 }
                 if !self.ps.context_window.is_empty() {
-                    let _ =
-                        Config::write_key(section, "context_window", &self.ps.context_window);
+                    let _ = Config::write_key(section, "context_window", &self.ps.context_window);
                 }
             }
             _ => {}
@@ -522,7 +521,8 @@ impl OnboardingWizard {
         // Save API key to keys.toml via merge — never overwrite
         if !self.ps.has_existing_key_sentinel()
             && !self.ps.api_key_input.is_empty()
-            && let Err(e) = crate::config::write_secret_key(section, "api_key", &self.ps.api_key_input)
+            && let Err(e) =
+                crate::config::write_secret_key(section, "api_key", &self.ps.api_key_input)
         {
             tracing::warn!("Failed to save API key to keys.toml: {}", e);
         }

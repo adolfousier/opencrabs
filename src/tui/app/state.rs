@@ -1014,7 +1014,10 @@ impl App {
                                     zhipu_et.as_deref(),
                                 )
                                 .await;
-                                let _ = sender.send(TuiEvent::ModelSelectorModelsFetched(models));
+                                let _ = sender.send(TuiEvent::ModelSelectorModelsFetched(
+                                    provider_idx,
+                                    models,
+                                ));
                             });
                         }
                         // Zhipu: field 2 = API key
@@ -1031,7 +1034,10 @@ impl App {
                                     zhipu_et.as_deref(),
                                 )
                                 .await;
-                                let _ = sender.send(TuiEvent::ModelSelectorModelsFetched(models));
+                                let _ = sender.send(TuiEvent::ModelSelectorModelsFetched(
+                                    provider_idx,
+                                    models,
+                                ));
                             });
                         }
                         // Non-custom non-zhipu: field 1 = API key
@@ -1048,7 +1054,10 @@ impl App {
                                     None,
                                 )
                                 .await;
-                                let _ = sender.send(TuiEvent::ModelSelectorModelsFetched(models));
+                                let _ = sender.send(TuiEvent::ModelSelectorModelsFetched(
+                                    provider_idx,
+                                    models,
+                                ));
                             });
                         }
                         // Custom: field 1 = base URL, field 2 = API key, field 3 = model
@@ -1561,9 +1570,12 @@ impl App {
                     }
                 }
             }
-            TuiEvent::ModelSelectorModelsFetched(models) => {
-                if self.mode == AppMode::ModelSelector && !models.is_empty() {
-                    // Pre-select session model or config model
+            TuiEvent::ModelSelectorModelsFetched(provider_idx, models) => {
+                // Discard stale fetches from a previously-selected provider
+                if self.mode == AppMode::ModelSelector
+                    && !models.is_empty()
+                    && provider_idx == self.ps.selected_provider
+                {
                     let current_model = self
                         .current_session
                         .as_ref()

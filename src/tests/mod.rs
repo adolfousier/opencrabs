@@ -32,6 +32,7 @@ pub mod queued_message_test;
 pub mod reasoning_lines_test;
 //pub mod plan_mode_integration_test;
 pub mod session_working_dir_test;
+pub mod slack_fmt_test;
 pub mod stream_loop_test;
 pub mod system_continuation_test;
 //pub mod streaming_test;
