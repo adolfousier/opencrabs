@@ -119,7 +119,6 @@ impl TelegramAgent {
             let msg_handler = Update::filter_message().endpoint({
                 let agent = agent.clone();
                 let session_svc = session_svc.clone();
-                let extra_sessions = extra_sessions.clone();
                 let bot_token = bot_token.clone();
                 let shared_session = shared_session.clone();
                 let telegram_state = telegram_state.clone();
@@ -128,7 +127,6 @@ impl TelegramAgent {
                 move |bot: Bot, msg: Message| {
                     let agent = agent.clone();
                     let session_svc = session_svc.clone();
-                    let extra_sessions = extra_sessions.clone();
                     let bot_token = bot_token.clone();
                     let shared_session = shared_session.clone();
                     let telegram_state = telegram_state.clone();
@@ -144,7 +142,6 @@ impl TelegramAgent {
                                 msg,
                                 agent,
                                 session_svc,
-                                extra_sessions,
                                 bot_token,
                                 shared_session,
                                 telegram_state,
