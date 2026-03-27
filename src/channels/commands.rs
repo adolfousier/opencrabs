@@ -53,21 +53,7 @@ pub fn sync_provider_from_config(agent: &AgentService) {
 
 /// Normalize provider names/aliases to stable IDs used by config.
 fn normalize_provider_name(name: &str) -> String {
-    let lowered = name.trim().to_lowercase();
-    match lowered.as_str() {
-        "anthropic" => "anthropic".to_string(),
-        "openai" => "openai".to_string(),
-        "openrouter" => "openrouter".to_string(),
-        "minimax" => "minimax".to_string(),
-        "gemini" | "google gemini" => "gemini".to_string(),
-        "github" | "github copilot" => "github".to_string(),
-        n if n.starts_with("custom:") => n.to_string(),
-        n if n.starts_with("custom(") && n.ends_with(')') => {
-            let inner = &n["custom(".len()..n.len() - 1];
-            format!("custom:{}", inner)
-        }
-        other => other.to_string(),
-    }
+    crate::utils::providers::normalize_provider_name(name)
 }
 
 /// Compare normalized provider names, handling custom runtime names (`deepseek`).
@@ -439,72 +425,13 @@ fn format_providers(agent: &AgentService) -> ProvidersResponse {
     }
 }
 
-/// List configured providers (those with API keys set).
+/// List configured providers (those with API keys set or enabled CLI providers).
 fn configured_providers() -> Vec<(String, String)> {
     let config = match crate::config::Config::load() {
         Ok(c) => c,
         Err(_) => return vec![],
     };
-
-    let mut result = Vec::new();
-
-    if config
-        .providers
-        .anthropic
-        .as_ref()
-        .is_some_and(|p| p.api_key.is_some())
-    {
-        result.push(("anthropic".to_string(), "Anthropic".to_string()));
-    }
-    if config
-        .providers
-        .openai
-        .as_ref()
-        .is_some_and(|p| p.api_key.is_some())
-    {
-        result.push(("openai".to_string(), "OpenAI".to_string()));
-    }
-    if config
-        .providers
-        .github
-        .as_ref()
-        .is_some_and(|p| p.api_key.is_some())
-    {
-        result.push(("github".to_string(), "GitHub Copilot".to_string()));
-    }
-    if config
-        .providers
-        .openrouter
-        .as_ref()
-        .is_some_and(|p| p.api_key.is_some())
-    {
-        result.push(("openrouter".to_string(), "OpenRouter".to_string()));
-    }
-    if config
-        .providers
-        .minimax
-        .as_ref()
-        .is_some_and(|p| p.api_key.is_some())
-    {
-        result.push(("minimax".to_string(), "MiniMax".to_string()));
-    }
-    if config
-        .providers
-        .gemini
-        .as_ref()
-        .is_some_and(|p| p.api_key.is_some())
-    {
-        result.push(("gemini".to_string(), "Gemini".to_string()));
-    }
-    if let Some(ref customs) = config.providers.custom {
-        for (name, cfg) in customs {
-            if cfg.api_key.is_some() {
-                result.push((format!("custom:{}", name), format!("Custom ({})", name)));
-            }
-        }
-    }
-
-    result
+    crate::utils::providers::configured_providers(&config.providers)
 }
 
 /// Fetch models for a specific provider (called from callback handler).
@@ -595,37 +522,13 @@ pub async fn models_for_provider(provider_name: &str) -> ModelsResponse {
 
 /// Get models from the provider's config section (for providers without /models endpoint).
 fn provider_config_models(config: &crate::config::Config, name: &str) -> Vec<String> {
-    let cfg = match name {
-        "anthropic" => config.providers.anthropic.as_ref(),
-        "openai" => config.providers.openai.as_ref(),
-        "github" => config.providers.github.as_ref(),
-        "openrouter" => config.providers.openrouter.as_ref(),
-        "minimax" => config.providers.minimax.as_ref(),
-        "gemini" => config.providers.gemini.as_ref(),
-        n if n.starts_with("custom:") => {
-            let custom_name = &n["custom:".len()..];
-            config
-                .providers
-                .custom
-                .as_ref()
-                .and_then(|m| m.get(custom_name))
-        }
-        _ => None,
-    };
-    cfg.map(|c| c.models.clone()).unwrap_or_default()
+    crate::utils::providers::config_for(&config.providers, name)
+        .map(|c| c.models.clone())
+        .unwrap_or_default()
 }
 
 pub fn provider_display_name(name: &str) -> &str {
-    match name {
-        "anthropic" => "Anthropic",
-        "openai" => "OpenAI",
-        "github" => "GitHub Copilot",
-        "openrouter" => "OpenRouter",
-        "minimax" => "MiniMax",
-        "gemini" => "Gemini",
-        n if n.starts_with("custom:") => &n["custom:".len()..],
-        other => other,
-    }
+    crate::utils::providers::display_name(name)
 }
 
 // ── Model switching ─────────────────────────────────────────────────────────
@@ -646,24 +549,9 @@ pub async fn switch_model(
     // Toggle enabled flags — disable all others, enable selected (same as TUI)
     let config =
         crate::config::Config::load().map_err(|e| format!("Failed to load config: {}", e))?;
-    for s in [
-        "providers.anthropic",
-        "providers.openai",
-        "providers.github",
-        "providers.gemini",
-        "providers.openrouter",
-        "providers.minimax",
-    ] {
+    for s in crate::utils::providers::all_config_sections(&config.providers) {
         if s != section {
-            let _ = crate::config::Config::write_key(s, "enabled", "false");
-        }
-    }
-    if let Some(ref customs) = config.providers.custom {
-        for name in customs.keys() {
-            let cs = format!("providers.custom.{}", name);
-            if cs != section {
-                let _ = crate::config::Config::write_key(&cs, "enabled", "false");
-            }
+            let _ = crate::config::Config::write_key(&s, "enabled", "false");
         }
     }
     let _ = crate::config::Config::write_key(&section, "enabled", "true");
@@ -712,24 +600,7 @@ pub async fn switch_model(
 
 /// Map a provider name to its config section key.
 pub(crate) fn provider_section(provider_name: &str) -> Option<String> {
-    match provider_name.to_lowercase().as_str() {
-        "anthropic" => Some("providers.anthropic".to_string()),
-        "openai" => Some("providers.openai".to_string()),
-        "github" | "github copilot" => Some("providers.github".to_string()),
-        "gemini" | "google" => Some("providers.gemini".to_string()),
-        "openrouter" => Some("providers.openrouter".to_string()),
-        "minimax" => Some("providers.minimax".to_string()),
-        n if n.starts_with("custom:") | n.starts_with("custom(") => {
-            // Extract custom provider name: "custom:deepseek" → "deepseek"
-            // or "Custom (deepseek)" → "deepseek"
-            let name = n
-                .strip_prefix("custom:")
-                .or_else(|| n.strip_prefix("custom(").and_then(|s| s.strip_suffix(')')))
-                .unwrap_or(n);
-            Some(format!("providers.custom.{}", name))
-        }
-        _ => None,
-    }
+    crate::utils::providers::config_section(provider_name)
 }
 
 #[cfg(test)]

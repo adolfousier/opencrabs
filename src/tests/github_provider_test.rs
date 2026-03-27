@@ -351,7 +351,7 @@ fn wizard_github_static_models_empty() {
 fn github_load_default_models_from_config_example() {
     // Copilot models are fetched live from the API, not from config.toml.example
     // So load_default_models may return empty (no hardcoded list)
-    let models = crate::tui::provider_selector::load_default_models(2);
+    let models = crate::tui::provider_selector::load_default_models("github");
     // Either empty or contains whatever is in config.toml.example
     let _ = models;
 }

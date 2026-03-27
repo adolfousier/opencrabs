@@ -5,6 +5,7 @@ pub use crate::tui::provider_selector::EXISTING_KEY_SENTINEL;
 /// Provider definitions
 pub const PROVIDERS: &[ProviderInfo] = &[
     ProviderInfo {
+        id: "anthropic",
         name: "Anthropic Claude",
         models: &[], // Fetched from API
         key_label: "Setup Token",
@@ -14,42 +15,49 @@ pub const PROVIDERS: &[ProviderInfo] = &[
         ],
     },
     ProviderInfo {
+        id: "openai",
         name: "OpenAI",
         models: &[],
         key_label: "API Key",
         help_lines: &["Get key from platform.openai.com"],
     },
     ProviderInfo {
+        id: "github",
         name: "GitHub Copilot",
         models: &[],
         key_label: "OAuth",
         help_lines: &["Sign in with GitHub to use your Copilot subscription"],
     },
     ProviderInfo {
+        id: "gemini",
         name: "Google Gemini",
         models: &[],
         key_label: "API Key",
         help_lines: &["Get key from aistudio.google.com"],
     },
     ProviderInfo {
+        id: "openrouter",
         name: "OpenRouter",
         models: &[],
         key_label: "API Key",
         help_lines: &["Get key from openrouter.ai/keys"],
     },
     ProviderInfo {
+        id: "minimax",
         name: "Minimax",
         models: &[], // Loaded from config.toml at runtime
         key_label: "API Key",
         help_lines: &["Get key from platform.minimax.io"],
     },
     ProviderInfo {
+        id: "zhipu",
         name: "z.ai GLM",
         models: &[], // Fetched from API
         key_label: "API Key",
         help_lines: &["Get key from open.bigmodel.cn"],
     },
     ProviderInfo {
+        id: "claude-cli",
         name: "Claude CLI",
         models: &["sonnet", "opus", "haiku"],
         key_label: "",
@@ -59,6 +67,7 @@ pub const PROVIDERS: &[ProviderInfo] = &[
         ],
     },
     ProviderInfo {
+        id: "opencode-cli",
         name: "OpenCode CLI",
         models: &[],
         key_label: "",
@@ -68,6 +77,7 @@ pub const PROVIDERS: &[ProviderInfo] = &[
         ],
     },
     ProviderInfo {
+        id: "", // dynamic — custom providers use runtime names
         name: "Custom OpenAI-Compatible",
         models: &[],
         key_label: "API Key",
@@ -76,6 +86,9 @@ pub const PROVIDERS: &[ProviderInfo] = &[
 ];
 
 pub struct ProviderInfo {
+    /// Canonical provider id matching `KNOWN_PROVIDERS` (e.g. "anthropic", "claude-cli")
+    /// Empty string for "Custom OpenAI-Compatible" (index 9) which is dynamic.
+    pub id: &'static str,
     pub name: &'static str,
     pub models: &'static [&'static str],
     pub key_label: &'static str,

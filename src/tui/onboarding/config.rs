@@ -131,7 +131,7 @@ impl OnboardingWizard {
         // Check 1: API key / CLI binary present
         self.health_results[0].1 = if self.ps.is_cli() {
             // CLI providers: check if the binary is installed
-            let binary = if self.ps.selected_provider == 7 {
+            let binary = if self.ps.provider_id() == "claude-cli" {
                 "claude"
             } else {
                 "opencode"
@@ -292,50 +292,30 @@ impl OnboardingWizard {
 
         // Write config.toml via merge (write_key) — never overwrite entire file
         // Disable all providers first, then enable selected one
-        let all_provider_sections = [
-            "providers.anthropic",
-            "providers.openai",
-            "providers.github",
-            "providers.gemini",
-            "providers.openrouter",
-            "providers.minimax",
-            "providers.zhipu",
-            "providers.claude_cli",
-            "providers.opencode_cli",
-        ];
-        for section in &all_provider_sections {
-            let _ = Config::write_key(section, "enabled", "false");
-        }
-        // Disable all custom providers
-        if let Ok(config) = Config::load()
-            && let Some(customs) = &config.providers.custom
         {
-            for name in customs.keys() {
-                let section = format!("providers.custom.{}", name);
-                let _ = Config::write_key(&section, "enabled", "false");
+            let all_sections = if let Ok(cfg) = Config::load() {
+                crate::utils::providers::all_config_sections(&cfg.providers)
+            } else {
+                crate::utils::providers::KNOWN_PROVIDERS
+                    .iter()
+                    .map(|p| p.config_section.to_string())
+                    .collect()
+            };
+            for section in &all_sections {
+                let _ = Config::write_key(section, "enabled", "false");
             }
         }
 
         // Enable + configure the selected provider
         let custom_section;
-        let section = match self.ps.selected_provider {
-            0 => "providers.anthropic",
-            1 => "providers.openai",
-            2 => "providers.github",
-            3 => "providers.gemini",
-            4 => "providers.openrouter",
-            5 => "providers.minimax",
-            6 => "providers.zhipu",
-            7 => "providers.claude_cli",
-            8 => "providers.opencode_cli",
-            9 => {
-                custom_section = format!("providers.custom.{}", self.ps.custom_name);
-                &custom_section
-            }
-            _ => {
-                custom_section = format!("providers.custom.{}", self.ps.custom_name);
-                &custom_section
-            }
+        let section = if self.ps.selected_provider < 9 {
+            let id = PROVIDERS[self.ps.selected_provider].id;
+            crate::utils::providers::find_provider_meta(id)
+                .map(|m| m.config_section)
+                .unwrap_or("providers.anthropic")
+        } else {
+            custom_section = format!("providers.custom.{}", self.ps.custom_name);
+            &custom_section
         };
         let _ = Config::write_key(section, "enabled", "true");
         let model = self.ps.selected_model_name().to_string();
@@ -343,26 +323,26 @@ impl OnboardingWizard {
             let _ = Config::write_key(section, "default_model", &model);
         }
 
-        // Write base_url for providers that need it
-        match self.ps.selected_provider {
-            2 => {
+        // Write base_url / extra config for providers that need it
+        match self.ps.provider_id() {
+            "github" => {
                 let _ = Config::write_key(
                     section,
                     "base_url",
                     "https://api.githubcopilot.com/chat/completions",
                 );
             }
-            4 => {
+            "openrouter" => {
                 let _ = Config::write_key(
                     section,
                     "base_url",
                     "https://openrouter.ai/api/v1/chat/completions",
                 );
             }
-            5 => {
+            "minimax" => {
                 let _ = Config::write_key(section, "base_url", "https://api.minimax.io/v1");
             }
-            6 => {
+            "zhipu" => {
                 // z.ai GLM — write endpoint_type (base_url computed dynamically in factory)
                 let endpoint_type = if self.ps.zhipu_endpoint_type == 1 {
                     "coding"
@@ -371,7 +351,8 @@ impl OnboardingWizard {
                 };
                 let _ = Config::write_key(section, "endpoint_type", endpoint_type);
             }
-            n if n >= 9 => {
+            "" => {
+                // Custom provider
                 if !self.ps.base_url.is_empty() {
                     let _ = Config::write_key(section, "base_url", &self.ps.base_url);
                 }
@@ -387,7 +368,8 @@ impl OnboardingWizard {
 
         // Write models array for providers that have static model lists
         if !self.ps.config_models.is_empty()
-            && (matches!(self.ps.selected_provider, 2 | 5 | 6) || self.ps.selected_provider >= 9)
+            && (matches!(self.ps.provider_id(), "github" | "minimax" | "zhipu" | "")
+                || self.ps.selected_provider >= 9)
         {
             let _ = Config::write_array(section, "models", &self.ps.config_models);
         }

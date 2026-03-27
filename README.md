@@ -1597,24 +1597,33 @@ Use `/approve` to change your approval policy at any time (persisted to `config.
 OpenCrabs uses a **conditional logging system** — no log files by default.
 
 ```bash
-# Enable debug mode (creates log files)
+# Stack traces on crash
+RUST_BACKTRACE=1 opencrabs
+
+# Verbose console output (no file logging)
+RUST_LOG=debug opencrabs
+
+# Debug mode: rolling file logs to ~/.opencrabs/logs/, auto-cleanup after 7 days
 opencrabs -d
-cargo run -- -d
 
-# Logs stored in ~/.opencrabs/logs/ (user workspace, not in repo)
-# Daily rolling rotation, auto-cleanup after 7 days
+# Both: file logs + verbose console output
+RUST_LOG=debug opencrabs -d
+```
 
-# Management
+All four work the same whether installed via `cargo install opencrabs` or built from source.
+
+```bash
+# Log management
 opencrabs logs status    # Check logging status
 opencrabs logs view      # View recent entries
 opencrabs logs clean     # Clean old logs
 opencrabs logs clean -d 3  # Clean logs older than 3 days
 ```
 
-**When debug mode is enabled:**
+**When debug mode (`-d`) is enabled:**
 - Log files created in `~/.opencrabs/logs/`
 - DEBUG level with thread IDs, file names, line numbers
-- Daily rolling rotation
+- Daily rolling rotation, noisy crates (hyper, h2, reqwest) suppressed to warn
 
 **When disabled (default):**
 - No log files created

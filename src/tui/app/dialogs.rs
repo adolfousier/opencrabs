@@ -42,261 +42,106 @@ impl App {
 
         // Resolve provider index + API key from session provider name
         let from_session: Option<(usize, Option<String>)> = session_provider.map(|name| {
-            match name {
-                "anthropic" => (
-                    0,
-                    config
-                        .providers
-                        .anthropic
-                        .as_ref()
-                        .and_then(|p| p.api_key.clone()),
-                ),
-                "openai" => (
-                    1,
-                    config
-                        .providers
-                        .openai
-                        .as_ref()
-                        .and_then(|p| p.api_key.clone()),
-                ),
-                "GitHub Copilot" | "github" => (
-                    2,
-                    config
-                        .providers
-                        .github
-                        .as_ref()
-                        .and_then(|p| p.api_key.clone()),
-                ),
-                "gemini" => (
-                    3,
-                    config
-                        .providers
-                        .gemini
-                        .as_ref()
-                        .and_then(|p| p.api_key.clone()),
-                ),
-                "openrouter" => (
-                    4,
-                    config
-                        .providers
-                        .openrouter
-                        .as_ref()
-                        .and_then(|p| p.api_key.clone()),
-                ),
-                "minimax" => (
-                    5,
-                    config
-                        .providers
-                        .minimax
-                        .as_ref()
-                        .and_then(|p| p.api_key.clone()),
-                ),
-                "zhipu" | "z.ai GLM" => (
-                    6,
-                    config
-                        .providers
-                        .zhipu
-                        .as_ref()
-                        .and_then(|p| p.api_key.clone()),
-                ),
-                "claude-cli" | "claude_cli" => (7, None),
-                "opencode" | "opencode-cli" | "opencode_cli" => (8, None),
-                cname => {
-                    // Any other name is a custom provider (e.g. "nvidia", "ollama")
-                    let api_key = config
-                        .providers
-                        .custom_by_name(cname)
-                        .and_then(|p| p.api_key.clone());
-                    if let Some(c) = config.providers.custom_by_name(cname) {
-                        self.ps.base_url = c.base_url.clone().unwrap_or_default();
-                        self.ps.custom_model = c.default_model.clone().unwrap_or_default();
-                        self.ps.context_window = c
-                            .context_window
-                            .map(|cw| cw.to_string())
-                            .unwrap_or_default();
-                        self.ps.custom_name = cname.to_string();
-                    }
-                    // Map to index 9+ if this name exists in custom_names list
-                    let idx = self
-                        .ps
-                        .custom_names
-                        .iter()
-                        .position(|n| n == cname)
-                        .map(|pos| 10 + pos)
-                        .unwrap_or(9);
-                    (idx, api_key)
+            use crate::utils::providers;
+            // Try known provider first
+            if let Some(idx) = providers::tui_index_for_id(name) {
+                let api_key =
+                    providers::config_for(&config.providers, name).and_then(|p| p.api_key.clone());
+                (idx, api_key)
+            } else {
+                // Custom provider (e.g. "nvidia", "ollama")
+                let api_key = config
+                    .providers
+                    .custom_by_name(name)
+                    .and_then(|p| p.api_key.clone());
+                if let Some(c) = config.providers.custom_by_name(name) {
+                    self.ps.base_url = c.base_url.clone().unwrap_or_default();
+                    self.ps.custom_model = c.default_model.clone().unwrap_or_default();
+                    self.ps.context_window = c
+                        .context_window
+                        .map(|cw| cw.to_string())
+                        .unwrap_or_default();
+                    self.ps.custom_name = name.to_string();
                 }
+                let idx = self
+                    .ps
+                    .custom_names
+                    .iter()
+                    .position(|n| n == name)
+                    .map(|pos| 10 + pos)
+                    .unwrap_or(9);
+                (idx, api_key)
             }
         });
 
-        // Determine which provider is enabled
-        // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=z.ai GLM, 7=Claude CLI, 8=OpenCode CLI, 9=Custom
+        // Determine which provider is enabled — iterate PROVIDERS using shared utility
         let (provider_idx, api_key) = if let Some(resolved) = from_session {
             tracing::debug!("[open_model_selector] From session: {:?}", session_provider);
             resolved
-        } else if config
-            .providers
-            .anthropic
-            .as_ref()
-            .is_some_and(|p| p.enabled)
-        {
-            tracing::debug!("[open_model_selector] Anthropic enabled");
-            (
-                0,
-                config
-                    .providers
-                    .anthropic
-                    .as_ref()
-                    .and_then(|p| p.api_key.clone()),
-            )
-        } else if config.providers.openai.as_ref().is_some_and(|p| p.enabled) {
-            if let Some(base_url) = config
-                .providers
-                .openai
-                .as_ref()
-                .and_then(|p| p.base_url.as_ref())
-            {
-                if base_url.contains("openrouter") {
-                    tracing::debug!("[open_model_selector] OpenAI (OpenRouter) enabled");
-                    (
-                        4,
-                        config
-                            .providers
-                            .openai
-                            .as_ref()
-                            .and_then(|p| p.api_key.clone()),
-                    )
-                } else if base_url.contains("minimax") {
-                    tracing::debug!("[open_model_selector] OpenAI (MiniMax) enabled");
-                    (
-                        5,
-                        config
-                            .providers
-                            .openai
-                            .as_ref()
-                            .and_then(|p| p.api_key.clone()),
-                    )
-                } else {
-                    tracing::debug!(
-                        "[open_model_selector] OpenAI (Custom) enabled, base_url={}",
-                        base_url
-                    );
-                    (
-                        9,
-                        config
-                            .providers
-                            .openai
-                            .as_ref()
-                            .and_then(|p| p.api_key.clone()),
-                    )
-                }
-            } else {
-                tracing::debug!("[open_model_selector] OpenAI enabled");
-                (
-                    1,
-                    config
-                        .providers
-                        .openai
-                        .as_ref()
-                        .and_then(|p| p.api_key.clone()),
-                )
-            }
-        } else if config.providers.github.as_ref().is_some_and(|p| p.enabled) {
-            tracing::debug!("[open_model_selector] GitHub Copilot enabled");
-            (
-                2,
-                config
-                    .providers
-                    .github
-                    .as_ref()
-                    .and_then(|p| p.api_key.clone()),
-            )
-        } else if config.providers.gemini.as_ref().is_some_and(|p| p.enabled) {
-            tracing::debug!("[open_model_selector] Gemini enabled");
-            (
-                3,
-                config
-                    .providers
-                    .gemini
-                    .as_ref()
-                    .and_then(|p| p.api_key.clone()),
-            )
-        } else if config
-            .providers
-            .openrouter
-            .as_ref()
-            .is_some_and(|p| p.enabled)
-        {
-            tracing::debug!("[open_model_selector] OpenRouter enabled");
-            (
-                4,
-                config
-                    .providers
-                    .openrouter
-                    .as_ref()
-                    .and_then(|p| p.api_key.clone()),
-            )
-        } else if config.providers.minimax.as_ref().is_some_and(|p| p.enabled) {
-            tracing::debug!("[open_model_selector] MiniMax enabled");
-            (
-                5,
-                config
-                    .providers
-                    .minimax
-                    .as_ref()
-                    .and_then(|p| p.api_key.clone()),
-            )
-        } else if config.providers.zhipu.as_ref().is_some_and(|p| p.enabled) {
-            tracing::debug!("[open_model_selector] z.ai GLM enabled");
-            (
-                6,
-                config
-                    .providers
-                    .zhipu
-                    .as_ref()
-                    .and_then(|p| p.api_key.clone()),
-            )
-        } else if config
-            .providers
-            .claude_cli
-            .as_ref()
-            .is_some_and(|p| p.enabled)
-        {
-            tracing::debug!("[open_model_selector] Claude CLI enabled");
-            (7, None)
-        } else if config
-            .providers
-            .opencode_cli
-            .as_ref()
-            .is_some_and(|p| p.enabled)
-        {
-            tracing::debug!("[open_model_selector] OpenCode CLI enabled");
-            (8, None)
-        } else if let Some((name, custom_cfg)) = config.providers.active_custom() {
-            tracing::debug!("[open_model_selector] Custom provider '{}' enabled", name);
-            if let Some(base_url) = &custom_cfg.base_url {
-                self.ps.base_url = base_url.clone();
-            }
-            // Load existing model name so /models doesn't lose it
-            self.ps.custom_model = custom_cfg.default_model.clone().unwrap_or_default();
-            self.ps.context_window = custom_cfg
-                .context_window
-                .map(|cw| cw.to_string())
-                .unwrap_or_default();
-            // Remember the custom provider name for saving
-            self.ps.custom_name = name.to_string();
-            // Map to index 9+ if this name exists in custom_names list
-            let idx = self
-                .ps
-                .custom_names
-                .iter()
-                .position(|n| n == name)
-                .map(|pos| 10 + pos)
-                .unwrap_or(9);
-            (idx, custom_cfg.api_key.clone())
         } else {
-            tracing::debug!("[open_model_selector] No provider enabled, defaulting to Anthropic");
-            (0, None) // Default
+            use crate::tui::onboarding::PROVIDERS;
+            use crate::utils::providers as prov;
+
+            let mut found: Option<(usize, Option<String>)> = None;
+
+            // Check known providers (indices 0-8) by iterating PROVIDERS
+            for (idx, info) in PROVIDERS.iter().enumerate().take(9) {
+                if let Some(cfg) = prov::config_for(&config.providers, info.id)
+                    && cfg.enabled
+                {
+                    // Special case: OpenAI with custom base_url may actually be another provider
+                    if info.id == "openai"
+                        && let Some(base_url) = &cfg.base_url
+                    {
+                        if base_url.contains("openrouter") {
+                            if let Some(oi) = prov::tui_index_for_id("openrouter") {
+                                found = Some((oi, cfg.api_key.clone()));
+                            }
+                        } else if base_url.contains("minimax") {
+                            if let Some(mi) = prov::tui_index_for_id("minimax") {
+                                found = Some((mi, cfg.api_key.clone()));
+                            }
+                        } else {
+                            found = Some((9, cfg.api_key.clone())); // custom-like
+                        }
+                        break;
+                    }
+                    tracing::debug!("[open_model_selector] {} enabled", info.name);
+                    found = Some((idx, cfg.api_key.clone()));
+                    break;
+                }
+            }
+
+            // Check custom providers if no known provider is enabled
+            if found.is_none()
+                && let Some((name, custom_cfg)) = config.providers.active_custom()
+            {
+                tracing::debug!("[open_model_selector] Custom provider '{}' enabled", name);
+                if let Some(base_url) = &custom_cfg.base_url {
+                    self.ps.base_url = base_url.clone();
+                }
+                self.ps.custom_model = custom_cfg.default_model.clone().unwrap_or_default();
+                self.ps.context_window = custom_cfg
+                    .context_window
+                    .map(|cw| cw.to_string())
+                    .unwrap_or_default();
+                self.ps.custom_name = name.to_string();
+                let idx = self
+                    .ps
+                    .custom_names
+                    .iter()
+                    .position(|n| n == name)
+                    .map(|pos| 10 + pos)
+                    .unwrap_or(9);
+                found = Some((idx, custom_cfg.api_key.clone()));
+            }
+
+            found.unwrap_or_else(|| {
+                tracing::debug!(
+                    "[open_model_selector] No provider enabled, defaulting to Anthropic"
+                );
+                (0, None)
+            })
         };
 
         tracing::debug!(

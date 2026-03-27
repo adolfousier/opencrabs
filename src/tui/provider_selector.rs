@@ -70,18 +70,28 @@ impl ProviderSelectorState {
     }
 
     pub fn is_cli(&self) -> bool {
-        matches!(self.selected_provider, 7 | 8)
+        let id = self.provider_id();
+        id == "claude-cli" || id == "opencode-cli"
     }
 
     pub fn is_zhipu(&self) -> bool {
-        self.selected_provider == 6
+        self.provider_id() == "zhipu"
+    }
+
+    /// Get the canonical provider id for the current selection.
+    pub fn provider_id(&self) -> &'static str {
+        if self.selected_provider < 9 {
+            PROVIDERS[self.selected_provider].id
+        } else {
+            "" // custom
+        }
     }
 
     /// Whether the current provider supports live model fetching from API.
     pub fn supports_model_fetch(&self) -> bool {
         matches!(
-            self.selected_provider,
-            0 | 1 | 2 | 3 | 4 | 6 | 8 // Anthropic, OpenAI, GitHub Copilot, Gemini, OpenRouter, z.ai GLM, OpenCode CLI
+            self.provider_id(),
+            "anthropic" | "openai" | "github" | "gemini" | "openrouter" | "zhipu" | "opencode-cli"
         )
     }
 
@@ -126,55 +136,50 @@ impl ProviderSelectorState {
         self.has_existing_key = false;
 
         if let Ok(config) = crate::config::Config::load() {
-            let has_key = match self.selected_provider {
-                0 => has_nonempty_key(config.providers.anthropic.as_ref()),
-                1 => has_nonempty_key(config.providers.openai.as_ref()),
-                2 => has_nonempty_key(config.providers.github.as_ref()),
-                3 => has_nonempty_key(config.providers.gemini.as_ref()),
-                4 => has_nonempty_key(config.providers.openrouter.as_ref()),
-                5 => has_nonempty_key(config.providers.minimax.as_ref()),
-                6 => has_nonempty_key(config.providers.zhipu.as_ref()),
-                7 | 8 => false, // CLI providers — no API key
-                9 => {
-                    // New custom — clear fields, check for existing custom
-                    let found = config.providers.active_custom().or_else(|| {
-                        config
-                            .providers
-                            .custom
-                            .as_ref()
-                            .and_then(|m| m.iter().next())
-                            .map(|(n, c)| (n.as_str(), c))
-                    });
-                    if let Some((name, c)) = found {
-                        self.custom_name = name.to_string();
+            let has_key = if self.selected_provider < 9 {
+                let id = PROVIDERS[self.selected_provider].id;
+                if self.is_cli() {
+                    false // CLI providers — no API key
+                } else {
+                    has_nonempty_key(crate::utils::providers::config_for(&config.providers, id))
+                }
+            } else if self.selected_provider == 9 {
+                // New custom — clear fields, check for existing custom
+                let found = config.providers.active_custom().or_else(|| {
+                    config
+                        .providers
+                        .custom
+                        .as_ref()
+                        .and_then(|m| m.iter().next())
+                        .map(|(n, c)| (n.as_str(), c))
+                });
+                if let Some((name, c)) = found {
+                    self.custom_name = name.to_string();
+                    self.base_url = c.base_url.clone().unwrap_or_default();
+                    self.custom_model = c.default_model.clone().unwrap_or_default();
+                    c.api_key.as_ref().is_some_and(|k| !k.is_empty())
+                } else {
+                    false
+                }
+            } else {
+                // Existing custom provider (10+)
+                let custom_idx = self.selected_provider - 10;
+                if let Some(cname) = self.custom_names.get(custom_idx).cloned() {
+                    if let Some(c) = config.providers.custom_by_name(&cname) {
+                        self.custom_name = cname;
                         self.base_url = c.base_url.clone().unwrap_or_default();
                         self.custom_model = c.default_model.clone().unwrap_or_default();
+                        self.context_window = c
+                            .context_window
+                            .map(|cw| cw.to_string())
+                            .unwrap_or_default();
                         c.api_key.as_ref().is_some_and(|k| !k.is_empty())
                     } else {
                         false
                     }
+                } else {
+                    false
                 }
-                idx if idx >= 10 => {
-                    // Existing custom provider
-                    let custom_idx = idx - 10;
-                    if let Some(cname) = self.custom_names.get(custom_idx).cloned() {
-                        if let Some(c) = config.providers.custom_by_name(&cname) {
-                            self.custom_name = cname;
-                            self.base_url = c.base_url.clone().unwrap_or_default();
-                            self.custom_model = c.default_model.clone().unwrap_or_default();
-                            self.context_window = c
-                                .context_window
-                                .map(|cw| cw.to_string())
-                                .unwrap_or_default();
-                            c.api_key.as_ref().is_some_and(|k| !k.is_empty())
-                        } else {
-                            false
-                        }
-                    } else {
-                        false
-                    }
-                }
-                _ => false,
             };
 
             self.has_existing_key = has_key;
@@ -192,7 +197,7 @@ impl ProviderSelectorState {
     /// Load custom provider fields when navigating to an existing custom (10+),
     /// clear fields for new custom (9), load zhipu endpoint type for index 6.
     pub fn load_custom_fields(&mut self) {
-        if self.selected_provider == 6
+        if self.is_zhipu()
             && let Ok(config) = crate::config::Config::load()
             && let Some(zhipu) = &config.providers.zhipu
         {
@@ -230,24 +235,22 @@ impl ProviderSelectorState {
     /// Used when making API calls (fetch models, save config). Returns None if no key.
     pub fn load_api_key_from_config(&self) -> Option<String> {
         let config = crate::config::Config::load().ok()?;
-        match self.selected_provider {
-            0 => config.providers.anthropic.and_then(|p| p.api_key),
-            1 => config.providers.openai.and_then(|p| p.api_key),
-            2 => config.providers.github.and_then(|p| p.api_key),
-            3 => config.providers.gemini.and_then(|p| p.api_key),
-            4 => config.providers.openrouter.and_then(|p| p.api_key),
-            5 => config.providers.minimax.and_then(|p| p.api_key),
-            6 => config.providers.zhipu.and_then(|p| p.api_key),
-            idx if idx >= 10 => {
-                let custom_idx = idx - 10;
-                self.custom_names.get(custom_idx).and_then(|name| {
-                    config
-                        .providers
-                        .custom_by_name(name)
-                        .and_then(|p| p.api_key.clone())
-                })
-            }
-            _ => None,
+        if self.selected_provider < 9 {
+            crate::utils::providers::config_for(
+                &config.providers,
+                PROVIDERS[self.selected_provider].id,
+            )
+            .and_then(|p| p.api_key.clone())
+        } else if self.selected_provider >= 10 {
+            let custom_idx = self.selected_provider - 10;
+            self.custom_names.get(custom_idx).and_then(|name| {
+                config
+                    .providers
+                    .custom_by_name(name)
+                    .and_then(|p| p.api_key.clone())
+            })
+        } else {
+            None
         }
         .filter(|k| !k.is_empty())
     }
@@ -283,44 +286,26 @@ impl ProviderSelectorState {
     pub fn reload_config_models(&mut self) {
         self.config_models.clear();
         if let Ok(config) = crate::config::Config::load() {
-            match self.selected_provider {
-                2 => {
-                    if let Some(p) = &config.providers.github
-                        && !p.models.is_empty()
-                    {
-                        self.config_models = p.models.clone();
-                        return;
-                    }
+            if self.is_cli() {
+                return; // CLI — static or fetched, no config models
+            }
+            if self.selected_provider < 9 {
+                let id = PROVIDERS[self.selected_provider].id;
+                if let Some(p) = crate::utils::providers::config_for(&config.providers, id)
+                    && !p.models.is_empty()
+                {
+                    self.config_models = p.models.clone();
+                    return;
                 }
-                5 => {
-                    if let Some(p) = &config.providers.minimax
-                        && !p.models.is_empty()
-                    {
-                        self.config_models = p.models.clone();
-                        return;
-                    }
-                }
-                6 => {
-                    if let Some(p) = &config.providers.zhipu
-                        && !p.models.is_empty()
-                    {
-                        self.config_models = p.models.clone();
-                        return;
-                    }
-                }
-                7 | 8 => return, // CLI — static or fetched, no config models
-                n if n >= 9 => {
-                    if let Some((_name, p)) = config.providers.active_custom()
-                        && !p.models.is_empty()
-                    {
-                        self.config_models = p.models.clone();
-                        return;
-                    }
-                }
-                _ => return,
+            } else if self.selected_provider >= 9
+                && let Some((_name, p)) = config.providers.active_custom()
+                && !p.models.is_empty()
+            {
+                self.config_models = p.models.clone();
+                return;
             }
         }
-        self.config_models = load_default_models(self.selected_provider);
+        self.config_models = load_default_models(self.provider_id());
     }
 
     /// All model names for the current provider (fetched → config → static fallback).
@@ -383,72 +368,54 @@ impl ProviderSelectorState {
 }
 
 /// Load default models from embedded config.toml.example for a provider.
-pub fn load_default_models(provider_index: usize) -> Vec<String> {
+pub fn load_default_models(provider_id: &str) -> Vec<String> {
     let config_content = include_str!("../../config.toml.example");
     let mut models = Vec::new();
 
     if let Ok(config) = config_content.parse::<toml::Value>()
         && let Some(providers) = config.get("providers")
     {
-        match provider_index {
-            2 => {
-                if let Some(github) = providers.get("github")
-                    && let Some(models_arr) = github.get("models").and_then(|m| m.as_array())
-                {
-                    for model in models_arr {
-                        if let Some(model_str) = model.as_str() {
-                            models.push(model_str.to_string());
-                        }
-                    }
-                }
-            }
-            5 => {
-                if let Some(minimax) = providers.get("minimax")
-                    && let Some(models_arr) = minimax.get("models").and_then(|m| m.as_array())
-                {
-                    for model in models_arr {
-                        if let Some(model_str) = model.as_str() {
-                            models.push(model_str.to_string());
-                        }
-                    }
-                }
-            }
-            6 => {
-                if let Some(zhipu) = providers.get("zhipu")
-                    && let Some(models_arr) = zhipu.get("models").and_then(|m| m.as_array())
-                {
-                    for model in models_arr {
-                        if let Some(model_str) = model.as_str() {
-                            models.push(model_str.to_string());
-                        }
-                    }
-                }
-            }
-            n if n >= 9 => {
-                if let Some(custom) = providers.get("custom")
-                    && let Some(custom_table) = custom.as_table()
-                {
-                    for (_name, entry) in custom_table {
-                        if let Some(models_arr) = entry.get("models").and_then(|m| m.as_array()) {
-                            for model in models_arr {
-                                if let Some(model_str) = model.as_str()
-                                    && !models.contains(&model_str.to_string())
-                                {
-                                    models.push(model_str.to_string());
-                                }
+        // Map provider id to config.toml.example section key
+        // (config uses underscore: "claude_cli", but provider id uses hyphen: "claude-cli")
+        let section_key = match provider_id {
+            "claude-cli" => "claude_cli",
+            "opencode-cli" => "opencode_cli",
+            "" => "custom", // empty id = custom providers
+            other => other,
+        };
+
+        if section_key == "custom" {
+            // Custom providers: merge models from all custom sections
+            if let Some(custom) = providers.get("custom")
+                && let Some(custom_table) = custom.as_table()
+            {
+                for (_name, entry) in custom_table {
+                    if let Some(models_arr) = entry.get("models").and_then(|m| m.as_array()) {
+                        for model in models_arr {
+                            if let Some(model_str) = model.as_str()
+                                && !models.contains(&model_str.to_string())
+                            {
+                                models.push(model_str.to_string());
                             }
                         }
                     }
                 }
             }
-            _ => {}
+        } else if let Some(section) = providers.get(section_key)
+            && let Some(models_arr) = section.get("models").and_then(|m| m.as_array())
+        {
+            for model in models_arr {
+                if let Some(model_str) = model.as_str() {
+                    models.push(model_str.to_string());
+                }
+            }
         }
     }
 
     tracing::debug!(
-        "Loaded {} default models from config.toml.example for provider {}",
+        "Loaded {} default models from config.toml.example for provider '{}'",
         models.len(),
-        provider_index
+        provider_id
     );
     models
 }
