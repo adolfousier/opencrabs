@@ -40,6 +40,25 @@ struct ToolMsg {
     dirty: bool,
 }
 
+/// Fun rotating status quips shown during long tool execution.
+const TOOL_STATUS_QUIPS: &[&str] = &[
+    "☕ Grab a coffee — my sub-agents are on fire right now",
+    "🦀 My crabs are working their claws off — hang tight",
+    "🔥 Still cooking... deep in the code",
+    "⚡ Sub-agents going brrr — almost there",
+    "🧠 Thinking hard so you don't have to",
+    "🏗️ Building something beautiful — one sec",
+    "🎯 Locked in — the crabs are laser-focused",
+    "🚀 Full speed ahead — engines at max",
+    "💪 Crunching through the code like a boss",
+    "🌊 Riding the wave — results incoming",
+    "🎪 The circus is in town — all crabs performing",
+    "🔧 Wrenching away at it — precision work",
+    "🏎️ Pedal to the metal — no brakes",
+    "🧪 Experimenting... for science!",
+    "🎵 Working to the rhythm — almost done",
+];
+
 /// Per-message streaming state shared between the progress callback and the edit loop.
 /// Each tool call gets its own message above; response streams in a separate message below.
 struct StreamingState {
@@ -57,6 +76,16 @@ struct StreamingState {
     /// When true, the edit loop deletes the response message and creates a fresh one
     /// at the bottom of the chat (so it appears below tool/approval messages).
     recreate: bool,
+    /// Rolling status message shown during long tool execution (single message, edited in-place)
+    status_msg_id: Option<MessageId>,
+    /// Number of tool rounds completed (for display)
+    tool_round_count: usize,
+    /// When tool execution started (for elapsed time)
+    tools_started_at: Option<std::time::Instant>,
+    /// Index into TOOL_STATUS_QUIPS for rotation
+    quip_index: usize,
+    /// When the current status quip was shown (for show/vanish timing)
+    status_shown_at: Option<std::time::Instant>,
 }
 
 impl StreamingState {
@@ -893,6 +922,11 @@ pub(crate) async fn handle_message(
         response: String::new(),
         dirty: false,
         recreate: false,
+        status_msg_id: None,
+        tool_round_count: 0,
+        tools_started_at: None,
+        quip_index: 0,
+        status_shown_at: None,
     }));
 
     let edit_cancel = CancellationToken::new();
@@ -911,7 +945,9 @@ pub(crate) async fn handle_message(
                         let mut s = st.lock().await;
                         let any_tools_dirty = s.tool_msgs.iter().any(|t| t.dirty);
                         let has_intermediate = !s.pending_intermediate.is_empty();
-                        if !s.dirty && !s.recreate && !any_tools_dirty && !has_intermediate { continue; }
+                        let has_active_tools = s.tool_msgs.iter().any(|t| t.completed.is_none());
+
+                        if !s.dirty && !s.recreate && !any_tools_dirty && !has_intermediate && !has_active_tools { continue; }
 
                         // ── Individual tool messages (each tool = its own message) ──
                         for tool in s.tool_msgs.iter_mut().filter(|t| t.dirty) {
@@ -937,6 +973,58 @@ pub(crate) async fn handle_message(
                             tool.dirty = false;
                         }
 
+                        // ── Rolling status quips during long tool execution ──
+                        // Show → stick 5s → vanish → pause 2s → next quip.
+                        // Keeps user informed during long gaps with no streaming text.
+                        if has_active_tools {
+                            let now = std::time::Instant::now();
+                            let shown_elapsed = s.status_shown_at
+                                .map(|t| now.duration_since(t).as_secs())
+                                .unwrap_or(999);
+
+                            if s.status_msg_id.is_some() && shown_elapsed >= 5 {
+                                // Vanish: delete current quip after 5s
+                                if let Some(mid) = s.status_msg_id.take() {
+                                    let _ = bot.delete_message(chat, mid).await;
+                                }
+                                s.status_shown_at = Some(now);
+                            } else if s.status_msg_id.is_none() && shown_elapsed >= 2 {
+                                // Show next quip after 2s gap
+                                let elapsed_total = s.tools_started_at
+                                    .map(|t| t.elapsed().as_secs())
+                                    .unwrap_or(0);
+                                let quip = TOOL_STATUS_QUIPS[s.quip_index % TOOL_STATUS_QUIPS.len()];
+                                s.quip_index += 1;
+
+                                let mut status = format!("{} ({} tools", quip, s.tool_round_count);
+                                if elapsed_total >= 5 {
+                                    let mins = elapsed_total / 60;
+                                    let secs = elapsed_total % 60;
+                                    if mins > 0 {
+                                        status.push_str(&format!(", {}m {}s", mins, secs));
+                                    } else {
+                                        status.push_str(&format!(", {}s", secs));
+                                    }
+                                }
+                                status.push(')');
+
+                                if let Ok(m) = bot.send_message(chat, &status).await {
+                                    s.status_msg_id = Some(m.id);
+                                    s.status_shown_at = Some(now);
+                                }
+                            }
+                        }
+
+                        // ── Delete status when real content arrives ──
+                        if has_intermediate || (s.dirty && !s.response.is_empty()) {
+                            if let Some(mid) = s.status_msg_id.take() {
+                                let _ = bot.delete_message(chat, mid).await;
+                            }
+                            // Reset tool tracking for next round
+                            s.tools_started_at = None;
+                            s.tool_round_count = 0;
+                        }
+
                         // ── Intermediate texts (agent commentary between tool rounds) ──
                         for text in s.pending_intermediate.drain(..) {
                             let text = crate::utils::sanitize::strip_llm_artifacts(&text);
@@ -959,6 +1047,10 @@ pub(crate) async fn handle_message(
                             }
                             let text = s.render();
                             if !text.is_empty() {
+                                // Delete status msg if still present (response starting)
+                                if let Some(mid) = s.status_msg_id.take() {
+                                    let _ = bot.delete_message(chat, mid).await;
+                                }
                                 if s.msg_id.is_none()
                                     && let Ok(m) = bot.send_message(chat, "\u{258b}").await
                                 {
@@ -1011,6 +1103,9 @@ pub(crate) async fn handle_message(
                 } => {
                     if let Ok(mut s) = st.try_lock() {
                         s.thinking.clear();
+                        if s.tools_started_at.is_none() {
+                            s.tools_started_at = Some(std::time::Instant::now());
+                        }
                         let ctx = tool_context(&tool_name, &tool_input);
                         s.tool_msgs.push(ToolMsg {
                             msg_id: None,
@@ -1025,6 +1120,7 @@ pub(crate) async fn handle_message(
                     tool_name, success, ..
                 } => {
                     if let Ok(mut s) = st.try_lock() {
+                        s.tool_round_count += 1;
                         if let Some(tool) = s
                             .tool_msgs
                             .iter_mut()
@@ -1130,8 +1226,15 @@ pub(crate) async fn handle_message(
     edit_cancel.cancel();
     // _typing_guard drop cancels typing loop
 
-    // Grab streaming message id (if any was created during streaming)
-    let streaming_msg_id = streaming.lock().await.msg_id;
+    // Grab streaming message id and clean up status message
+    let (streaming_msg_id, status_msg_id) = {
+        let s = streaming.lock().await;
+        (s.msg_id, s.status_msg_id)
+    };
+    // Delete rolling status message if still present
+    if let Some(mid) = status_msg_id {
+        let _ = bot.delete_message(msg.chat.id, mid).await;
+    }
 
     tracing::info!(
         "Telegram: agent call completed for session {} — delivering final response",
