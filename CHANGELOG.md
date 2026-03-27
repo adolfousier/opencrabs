@@ -5,7 +5,10 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.89] - 2026-03-26
+## [0.2.89] - 2026-03-27
+
+### Added
+- **Telegram rolling status quips** — During long CLI tool runs (subagents, 100+ tool rounds), Telegram now shows rotating fun messages like "☕ Grab a coffee — my sub-agents are on fire right now (42 tools, 2m 15s)". Each quip shows for 5s, vanishes, pauses 2s, then the next one appears. Auto-deletes when real streaming text arrives
 
 ### Fixed
 - **OpenCode CLI permission rejection** — Non-interactive spawns auto-rejected tool calls (no TTY). Now sets `OPENCODE_PERMISSION` env var to allow all permissions including external directories
