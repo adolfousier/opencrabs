@@ -224,6 +224,15 @@ allowed_users = []                      # Trello member IDs allowed to @mention 
 # session_idle_hours = 24.0             # Archive inactive non-owner sessions after N hours (default: never)
 
 # ========================================
+# Daemon Mode (systemd / launchd service)
+# ========================================
+# Settings for `opencrabs daemon` headless mode.
+[daemon]
+# HTTP health check port. When set, GET /health returns 200 OK + JSON.
+# Useful for systemd watchdog, uptime monitors, and external health probes.
+# health_port = 8080
+
+# ========================================
 # Agent-to-Agent (A2A) Protocol
 # ========================================
 # Enables HTTP gateway for peer-to-peer agent communication.

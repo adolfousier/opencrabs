@@ -163,6 +163,7 @@ impl SlackAgent {
             }
 
             socket_mode_listener.serve().await;
+            tracing::warn!("Slack: Socket Mode serve() exited — connection may have dropped");
         })
     }
 }

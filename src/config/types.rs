@@ -38,6 +38,10 @@ pub struct Config {
     #[serde(default)]
     pub agent: AgentConfig,
 
+    /// Daemon mode configuration (systemd / launchd service)
+    #[serde(default)]
+    pub daemon: DaemonConfig,
+
     /// A2A (Agent-to-Agent) protocol gateway configuration
     #[serde(default)]
     pub a2a: A2aConfig,
@@ -49,6 +53,16 @@ pub struct Config {
     /// Cron job defaults
     #[serde(default)]
     pub cron: CronConfig,
+}
+
+/// Daemon mode configuration (systemd / launchd service).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DaemonConfig {
+    /// Health check HTTP port. When set, `opencrabs daemon` binds a tiny HTTP
+    /// server on `0.0.0.0:<port>` that responds to `GET /health` with 200 OK.
+    /// Useful for systemd watchdog, uptime monitors, and external health probes.
+    #[serde(default)]
+    pub health_port: Option<u16>,
 }
 
 /// A2A (Agent-to-Agent) protocol gateway configuration.
@@ -1324,6 +1338,7 @@ impl Default for Config {
             providers: ProviderConfigs::default(),
             channels: ChannelsConfig::default(),
             agent: AgentConfig::default(),
+            daemon: DaemonConfig::default(),
             a2a: A2aConfig::default(),
             image: ImageConfig::default(),
             cron: CronConfig::default(),
@@ -1669,6 +1684,7 @@ impl Config {
             providers: overlay.providers,
             channels: overlay.channels,
             agent: overlay.agent,
+            daemon: overlay.daemon,
             a2a: overlay.a2a,
             image: overlay.image,
             cron: overlay.cron,

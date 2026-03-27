@@ -902,6 +902,15 @@ async fn cmd_chat_inner(
 
     // Run TUI or block in headless daemon mode
     if headless {
+        // Spawn health endpoint if configured (for systemd watchdog / uptime monitors)
+        if let Some(port) = config.daemon.health_port {
+            tokio::spawn(async move {
+                if let Err(e) = crate::cli::daemon_health::serve(port).await {
+                    tracing::error!("Daemon health server failed: {}", e);
+                }
+            });
+        }
+
         tracing::info!("OpenCrabs daemon started — press Ctrl+C to stop");
         println!("🦀 OpenCrabs daemon running. Press Ctrl+C to stop.");
         tokio::signal::ctrl_c()

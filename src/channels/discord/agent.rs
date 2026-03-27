@@ -68,22 +68,29 @@ impl DiscordAgent {
             let extra_sessions: Arc<Mutex<HashMap<u64, (Uuid, std::time::Instant)>>> =
                 Arc::new(Mutex::new(HashMap::new()));
 
-            let event_handler = Handler {
-                agent: self.agent_service,
-                session_svc: self.session_service,
-                extra_sessions,
-                shared_session: self.shared_session_id,
-                discord_state: self.discord_state,
-                config_rx: self.config_rx,
-                channel_msg_repo: self.channel_msg_repo,
-            };
+            let agent = self.agent_service;
+            let session_svc = self.session_service;
+            let shared_session = self.shared_session_id;
+            let discord_state = self.discord_state;
+            let config_rx = self.config_rx;
+            let channel_msg_repo = self.channel_msg_repo;
 
             let intents = GatewayIntents::GUILD_MESSAGES
                 | GatewayIntents::DIRECT_MESSAGES
                 | GatewayIntents::MESSAGE_CONTENT;
 
+            let make_handler = || Handler {
+                agent: agent.clone(),
+                session_svc: session_svc.clone(),
+                extra_sessions: extra_sessions.clone(),
+                shared_session: shared_session.clone(),
+                discord_state: discord_state.clone(),
+                config_rx: config_rx.clone(),
+                channel_msg_repo: channel_msg_repo.clone(),
+            };
+
             let mut client = match Client::builder(&token, intents)
-                .event_handler(event_handler)
+                .event_handler(make_handler())
                 .await
             {
                 Ok(c) => c,
@@ -93,8 +100,26 @@ impl DiscordAgent {
                 }
             };
 
-            if let Err(e) = client.start().await {
-                tracing::error!("Discord: client error: {}", e);
+            // Retry loop: if the gateway connection drops (network hiccup, Discord
+            // server restart, etc.), wait and reconnect instead of dying silently.
+            loop {
+                tracing::info!("Discord: starting gateway connection");
+                if let Err(e) = client.start().await {
+                    tracing::error!("Discord: client error: {} — reconnecting in 5s", e);
+                } else {
+                    tracing::warn!("Discord: client exited unexpectedly — reconnecting in 5s");
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                client = match Client::builder(&token, intents)
+                    .event_handler(make_handler())
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::error!("Discord: failed to rebuild client: {}", e);
+                        return;
+                    }
+                };
             }
         })
     }

@@ -8,6 +8,7 @@ pub mod compaction_test;
 pub mod context_window_test;
 pub mod cron_test;
 pub mod custom_provider_test;
+pub mod daemon_health_test;
 pub mod evolve_test;
 pub mod gemini_fetch_test;
 pub mod github_provider_test;

@@ -448,7 +448,18 @@ impl TelegramAgent {
 
             let tree = dptree::entry().branch(msg_handler).branch(cb_handler);
 
-            Dispatcher::builder(bot, tree).build().dispatch().await;
+            // Retry loop: if the dispatcher exits (network hiccup, Telegram conflict
+            // from another process using the same token, etc.), wait and reconnect.
+            // Without this, daemon mode silently loses the Telegram connection forever.
+            loop {
+                tracing::info!("Telegram: starting dispatcher polling loop");
+                Dispatcher::builder(bot.clone(), tree.clone())
+                    .build()
+                    .dispatch()
+                    .await;
+                tracing::warn!("Telegram: dispatcher exited unexpectedly — reconnecting in 5s");
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
         })
     }
 }
