@@ -5,6 +5,24 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.90] - 2026-03-27
+
+### Added
+- **Daemon health endpoint** — New `[daemon] health_port = 8080` config option. When set, `opencrabs daemon` binds a lightweight `GET /health` endpoint returning 200 OK + JSON status. Useful for systemd watchdog, uptime monitors, and external health probes
+- **Shared provider registry** — Single source of truth (`src/utils/providers.rs`) for all LLM provider metadata. TUI `/models`, `/onboard`, and channel `/models` all derive from `KNOWN_PROVIDERS` — no more hardcoded index-based match blocks that fall out of sync
+
+### Fixed
+- **Daemon mode Telegram/Discord dying silently** — Channel bots (Telegram long-polling, Discord gateway) would exit on network hiccups or token conflicts without restarting. Added retry loops with 5s backoff so daemon mode auto-reconnects instead of going unresponsive while the process stays alive
+- **CLI providers missing from channel `/models`** — Claude CLI and OpenCode CLI were not listed in Telegram/Discord/Slack provider pickers because `configured_providers()` required an explicit `enabled = true` config entry. CLI providers are now always listed since they need no API key — matching TUI behavior
+- **Channel providers out of sync with TUI** — Channels were missing zhipu (z.ai GLM), Claude CLI, and OpenCode CLI providers. All provider listings now derive from the shared registry
+
+### Changed
+- **CONTRIBUTING.md rewrite** — Anti-stub policy, step-by-step contribution workflows, exact CI commands, "What Gets Your PR Closed" section, and guidance for non-coders to open issues instead of submitting empty PRs
+
+### Testing
+- **10 daemon health tests** — DaemonConfig deserialization, health endpoint 200/404 responses, CLI providers always listed, API key providers gated correctly
+- **1,562 total tests** (up from 1,424)
+
 ## [0.2.89] - 2026-03-27
 
 ### Added
@@ -1778,6 +1796,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.90]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.90
 [0.2.89]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.89
 [0.2.88]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.88
 [0.2.87]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.87
