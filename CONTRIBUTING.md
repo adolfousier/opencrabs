@@ -1,363 +1,163 @@
-# Contributing to OpenCrab
+# Contributing to OpenCrabs
 
-Thank you for your interest in contributing to OpenCrab! We welcome contributions from the community and are excited to work with you.
+Thank you for your interest in contributing to OpenCrabs! We welcome contributions from the community — but we have clear standards to keep the project moving forward efficiently.
 
-## Table of Contents
+## Before You Do Anything
 
-- [Code of Conduct](#code-of-conduct)
-- [How Can I Contribute?](#how-can-i-contribute)
-- [Development Setup](#development-setup)
-- [Pull Request Process](#pull-request-process)
-- [Coding Standards](#coding-standards)
-- [Testing Guidelines](#testing-guidelines)
-- [Documentation](#documentation)
-- [License](#license)
+**Read this entire document.** PRs that ignore these guidelines will be closed without review.
 
-## Code of Conduct
+## Types of Contributions
 
-This project and everyone participating in it is governed by our commitment to creating a welcoming and inclusive environment. By participating, you are expected to:
+### 1. Bug Reports (Issues Only)
 
-- Use welcoming and inclusive language
-- Be respectful of differing viewpoints and experiences
-- Gracefully accept constructive criticism
-- Focus on what is best for the community
-- Show empathy towards other community members
+Found a bug? Open an issue — **do not submit a PR yet**.
 
-## How Can I Contribute?
+**Required information:**
+- Clear, descriptive title
+- Steps to reproduce (exact commands, config, inputs)
+- Expected vs. actual behavior
+- Environment: OS, Rust version (`rustc --version`), OpenCrabs version (`opencrabs --version`)
+- Full error messages and logs (redact API keys)
+- Screenshots if it's a TUI/visual issue
 
-### Reporting Bugs
+### 2. Feature Requests (Issues Only — No Code)
 
-Before creating bug reports, please check existing issues to avoid duplicates. When creating a bug report, include:
+Have an idea for a new feature? Open an issue with the `enhancement` label.
 
-- **Clear descriptive title** - A good title helps others find your issue
-- **Detailed steps to reproduce** - Include specific examples to demonstrate the steps
-- **Expected vs. actual behavior** - What you expected to happen and what actually happened
-- **Environment details**:
-  - OS and version (Windows/macOS/Linux)
-  - Rust version (`rustc --version`)
-  - OpenCrab version
-  - Configuration details (redact any API keys)
-- **Error messages and logs** - Include complete error messages and stack traces
+**What to include:**
+- What problem does this solve?
+- How should it work from the user's perspective?
+- Why is this useful to OpenCrabs users broadly (not just your use case)?
 
-### Suggesting Enhancements
+**What NOT to do:**
+- Do not submit a PR with stub/placeholder code for a feature that doesn't exist yet
+- Do not submit empty implementations with `todo!()`, `vec![]`, or `unimplemented!()`
+- Do not submit PRs that add files with no actual logic, no tests, and no integration
 
-Enhancement suggestions are tracked as GitHub issues. When creating an enhancement suggestion:
+**Stub PRs will be closed immediately.** If you want a feature built but don't have the skills to implement it, that's totally fine — open an issue, describe what you need, and the community or maintainers will pick it up. A well-written issue is 10x more valuable than a stub PR.
 
-- **Use a clear and descriptive title**
-- **Provide a detailed description** of the suggested enhancement
-- **Explain why this enhancement would be useful** to most OpenCrab users
-- **List any alternatives** you've considered
-- **Include mockups or examples** if applicable
+### 3. Code Contributions (PRs)
 
-### Pull Requests
+PRs are welcome for:
+- Bug fixes (reference the issue number)
+- Feature implementations (must have a linked issue approved by a maintainer first)
+- Performance improvements (with benchmarks showing the improvement)
+- Test coverage improvements
+- Documentation fixes
 
-We actively welcome your pull requests! Here's how to get started:
+## Step-by-Step: Submitting a Bug Fix
 
-1. Fork the repository and create your branch from `master`
-2. Make your changes following our coding standards
-3. Add or update tests as needed
-4. Ensure the test suite passes
-5. Update documentation to reflect your changes
-6. Submit your pull request
+1. **Find or create the issue** — Check existing issues first. If none exists, create one.
+2. **Wait for confirmation** — A maintainer will confirm it's a real bug and not a duplicate.
+3. **Fork and branch** — Fork the repo, create a branch from `main` (not `master`).
+4. **Fix the bug** — Keep changes minimal. Fix the bug, nothing more.
+5. **Add a test** — Write a test that fails without your fix and passes with it.
+6. **Run CI checks locally** (see below).
+7. **Submit the PR** — Reference the issue, explain what you changed and why.
+
+## Step-by-Step: Submitting a Feature
+
+1. **Open an issue first** — Describe the feature, get maintainer approval.
+2. **Discuss the design** — For non-trivial features, discuss the approach in the issue before writing code.
+3. **Fork and branch** from `main`.
+4. **Implement fully** — The feature must work end-to-end. No stubs, no placeholders, no "TODO: implement later".
+5. **Add tests** — Unit tests at minimum, integration tests for complex features.
+6. **Run CI checks locally** (see below).
+7. **Submit the PR** — Reference the issue, include before/after screenshots for UI changes.
 
 ## Development Setup
 
 ### Prerequisites
 
-- **Rust** 1.70 or later
-- **SQLite** (usually included with your system)
+- **Rust** 1.91 or later (edition 2024)
+- **SQLite** (bundled via `rusqlite`)
 - **Git**
 
-### Initial Setup
+### Build & Test
 
 ```bash
 # Clone your fork
-git clone https://github.com/adolfousier/opencrab.git
-cd opencrab
+git clone https://github.com/YOUR_USERNAME/opencrabs.git
+cd opencrabs
 
-# Build the project
-cargo build
+# Build with all features
+cargo clippy --all-features
 
-# Run tests
-cargo test
-
-# Run the application
-cargo run
+# Run the exact CI checks (you MUST pass all three before submitting a PR)
+cargo fmt --all -- --check
+cargo clippy --lib --bins --tests --all-features -- -D warnings
+cargo test --all-features --verbose
 ```
 
-### Development Tools
+**All three commands must pass.** PRs that fail CI will not be reviewed.
 
-We recommend installing these tools for a better development experience:
-
-```bash
-# Format checking
-cargo install rustfmt
-
-# Linting
-cargo install clippy
-
-# Code coverage
-cargo install cargo-tarpaulin
-
-# Auto-formatting on save (optional)
-cargo install cargo-watch
-```
-
-### Running the Development Version
-
-```bash
-# Run with debug logging
-RUST_LOG=debug cargo run
-
-# Run specific command
-cargo run -- init
-cargo run -- db stats
-
-# Run with local LLM (LM Studio)
-export OPENAI_BASE_URL="http://localhost:1234/v1"
-cargo run
-```
-
-## Pull Request Process
-
-1. **Update Documentation**
-   - Update README.md if you change functionality
-   - Add or update code comments for complex logic
-   - Update relevant guides in `docs/guides/`
-
-2. **Add Tests**
-   - Unit tests for new functionality
-   - Integration tests for complex features
-   - Ensure all tests pass: `cargo test`
-
-3. **Check Code Quality**
-   ```bash
-   # Format your code
-   cargo fmt
-
-   # Run clippy (no warnings allowed)
-   cargo clippy --all-targets --all-features -- -D warnings
-
-   # Run all tests
-   cargo test --all-features
-   ```
-
-4. **Update Changelog**
-   - Add a brief description of your changes
-   - Reference the issue number if applicable
-
-5. **Create Pull Request**
-   - Use a clear, descriptive title
-   - Reference any related issues
-   - Describe what your PR does and why
-   - List any breaking changes
-   - Include screenshots for UI changes
-
-6. **Review Process**
-   - Address any feedback from reviewers
-   - Keep your PR up to date with master
-   - Squash commits if requested
-
-## Coding Standards
-
-### Rust Style Guide
-
-We follow the [Rust Style Guide](https://doc.rust-lang.org/style-guide/) with these additions:
-
-- **Line length**: 100 characters (enforced by rustfmt)
-- **Comments**: Use `///` for doc comments, `//` for inline comments
-- **Error handling**: Use `anyhow::Result` for application errors, specific error types for libraries
-- **Async code**: Use `tokio` runtime, avoid blocking calls in async functions
-
-### Code Organization
+### Project Structure
 
 ```
 src/
-├── cli/          # Command-line interface
-├── config/       # Configuration management
-├── db/           # Database layer
-├── llm/          # LLM provider integrations
-│   ├── agent/    # Agent orchestration
-│   ├── provider/ # Provider implementations
-│   └── tools/    # Tool implementations
-├── services/     # Business logic
-└── tui/          # Terminal UI
+├── brain/           # AI agent core
+│   ├── agent/       # Agent orchestration, tool loop, context management
+│   ├── provider/    # LLM provider implementations (Anthropic, OpenAI, etc.)
+│   └── tools/       # Built-in tools (bash, edit, browser, etc.)
+├── channels/        # Communication channels (Telegram, Discord, Slack, WhatsApp)
+├── config/          # Configuration management
+├── database/        # SQLite database layer
+├── memory/          # Long-term memory (FTS5 + vector search)
+├── tui/             # Terminal UI (ratatui)
+└── utils/           # Shared utilities
 ```
 
-### Naming Conventions
+## Coding Standards
 
-- **Modules**: `snake_case` (e.g., `llm_provider`)
-- **Structs/Enums**: `PascalCase` (e.g., `AgentService`)
-- **Functions/Variables**: `snake_case` (e.g., `send_message`)
-- **Constants**: `SCREAMING_SNAKE_CASE` (e.g., `DEFAULT_TIMEOUT`)
+### Rust Conventions
 
-### Documentation
+- **Files**: `snake_case.rs` — never PascalCase, never camelCase
+- **Structs/Enums**: `PascalCase`
+- **Functions/Variables**: `snake_case`
+- **Constants**: `SCREAMING_SNAKE_CASE`
+- **Error handling**: `anyhow::Result` for application errors, `thiserror` for typed errors
+- **Async**: `tokio` runtime — never block in async functions
 
-- **Public APIs**: Must have doc comments
-- **Modules**: Should have module-level documentation
-- **Complex logic**: Add inline comments explaining "why", not "what"
-- **Examples**: Include usage examples in doc comments
+### What We Value
 
-Example:
-```rust
-/// Sends a message to the AI agent and returns the response.
-///
-/// # Arguments
-///
-/// * `session_id` - The ID of the conversation session
-/// * `message` - The user's message text
-/// * `context` - Optional additional context for the AI
-///
-/// # Returns
-///
-/// Returns the AI's response including content, token usage, and cost
-///
-/// # Errors
-///
-/// Returns an error if:
-/// - The session doesn't exist
-/// - The provider API call fails
-/// - Tool execution fails
-///
-/// # Example
-///
-/// ```rust
-/// let response = agent.send_message(
-///     session_id,
-///     "Explain async/await".to_string(),
-///     None
-/// ).await?;
-/// println!("{}", response.content);
-/// ```
-pub async fn send_message(
-    &self,
-    session_id: Uuid,
-    message: String,
-    context: Option<MessageContext>,
-) -> Result<AgentResponse> {
-    // Implementation...
-}
-```
+- **Working code** over clever code
+- **Minimal diffs** — change only what's needed
+- **Tests that prove the fix** — not tests for the sake of coverage
+- **Comments that explain why**, not what
 
-## Testing Guidelines
+### Commit Messages
 
-### Test Organization
-
-- **Unit tests**: In the same file as the code, in a `tests` module
-- **Integration tests**: In `tests/` directory
-- **Test fixtures**: In `tests/fixtures/`
-
-### Writing Tests
-
-```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_function_name() {
-        // Arrange
-        let input = "test";
-
-        // Act
-        let result = function_under_test(input);
-
-        // Assert
-        assert_eq!(result, expected);
-    }
-
-    #[tokio::test]
-    async fn test_async_function() {
-        // Test async functions
-        let result = async_function().await;
-        assert!(result.is_ok());
-    }
-}
-```
-
-### Running Tests
-
-```bash
-# All tests
-cargo test
-
-# Specific test
-cargo test test_name
-
-# With output
-cargo test -- --nocapture
-
-# Integration tests only
-cargo test --test '*'
-
-# Documentation tests
-cargo test --doc
-
-# With coverage
-cargo tarpaulin --out Html --output-dir coverage
-```
-
-### Test Coverage
-
-- Aim for **>80% code coverage** for new features
-- **100% coverage** for critical paths (database migrations, security features)
-- Use `cargo tarpaulin` to measure coverage
-
-## Documentation
-
-### README Updates
-
-Update README.md if you:
-- Add new features
-- Change command-line interface
-- Add new configuration options
-- Change system requirements
-
-### Code Comments
-
-- Explain **why**, not **what**
-- Document non-obvious behavior
-- Include examples for complex APIs
-- Update comments when changing code
-
-### User Guides
-
-If you add a major feature, consider adding a guide in `docs/guides/`:
-- Step-by-step instructions
-- Screenshots or examples
-- Common issues and solutions
-- Performance considerations
-
-## Commit Messages
-
-Use clear, descriptive commit messages:
+Use [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```
-Add support for LM Studio local LLMs
-
-- Add OPENAI_BASE_URL environment variable support
-- Update CLI to support provider selection
-- Add comprehensive LM Studio guide
-- Update README with quick start
-
-Fixes #123
+feat: add voice message support for Discord channel
+fix: prevent duplicate message rendering for CLI providers
+refactor: simplify tool loop iteration tracking
 ```
 
-Format:
-- **First line**: Brief summary (50 chars or less)
-- **Blank line**
-- **Body**: Detailed explanation (wrap at 72 chars)
-- **Footer**: Issue references, breaking changes
+## What Gets Your PR Closed
+
+To be transparent, here's what will get your PR closed immediately:
+
+- **Stub/placeholder code** — Empty implementations, `todo!()`, functions that return hardcoded empty values
+- **No linked issue** — Feature PRs without an approved issue
+- **Fails CI** — If `cargo fmt --check`, `cargo clippy`, or `cargo test` fail
+- **Unrelated changes** — Reformatting files you didn't modify, drive-by "improvements"
+- **No tests** — Bug fixes without a regression test, features without any tests
+- **AI-generated spam** — PRs that look like they were generated by an LLM with no understanding of the codebase
+
+## Don't Know How to Code?
+
+That's completely fine. You can still contribute meaningfully:
+
+- **Report bugs** with detailed reproduction steps
+- **Request features** with clear descriptions of the problem you're trying to solve
+- **Improve documentation** — fix typos, clarify confusing sections, add examples
+- **Test pre-release builds** and report issues
+- **Answer questions** in GitHub Discussions
+
+A well-written bug report or feature request is worth more than a stub PR. Seriously.
 
 ## License
 
-By contributing to OpenCrab, you agree that your contributions will be licensed under the MIT License. See [LICENSE.md](LICENSE.md) for details.
-
-## Questions?
-
-Don't hesitate to ask questions by:
-- Opening an issue with the "question" label
-- Starting a discussion in GitHub Discussions
-- Reaching out to maintainers
-
-Thank you for contributing to OpenCrab!
+By contributing to OpenCrabs, you agree that your contributions will be licensed under the MIT License. See [LICENSE](LICENSE) for details.
