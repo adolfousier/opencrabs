@@ -172,6 +172,8 @@ pub async fn fetch_provider_models(
     #[derive(serde::Deserialize)]
     struct ModelEntry {
         id: String,
+        #[serde(default)]
+        created: i64,
     }
     #[derive(serde::Deserialize)]
     struct ModelsResponse {
@@ -318,6 +320,7 @@ pub async fn fetch_provider_models(
                                 })
                                 .collect();
                             models.sort();
+                            models.reverse(); // Newest model versions first
                             tracing::info!(
                                 "[fetch_provider_models] Gemini: fetched {} models",
                                 models.len()
@@ -382,9 +385,10 @@ pub async fn fetch_provider_models(
     match result {
         Ok(resp) if resp.status().is_success() => match resp.json::<ModelsResponse>().await {
             Ok(body) => {
-                let mut models: Vec<String> = body.data.into_iter().map(|m| m.id).collect();
-                models.sort();
-                models
+                let mut entries = body.data;
+                // Sort newest first (by created timestamp descending)
+                entries.sort_by(|a, b| b.created.cmp(&a.created));
+                entries.into_iter().map(|m| m.id).collect()
             }
             Err(_) => Vec::new(),
         },
