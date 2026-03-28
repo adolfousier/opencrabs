@@ -282,6 +282,8 @@ pub async fn fetch_copilot_models(oauth_token: &str) -> anyhow::Result<Vec<Strin
     #[derive(serde::Deserialize)]
     struct ModelEntry {
         id: String,
+        #[serde(default)]
+        created: i64,
     }
     #[derive(serde::Deserialize)]
     struct ModelsResponse {
@@ -289,9 +291,10 @@ pub async fn fetch_copilot_models(oauth_token: &str) -> anyhow::Result<Vec<Strin
     }
 
     let body: ModelsResponse = resp.json().await?;
-    let mut models: Vec<String> = body.data.into_iter().map(|m| m.id).collect();
-    models.sort();
-    Ok(models)
+    let mut entries = body.data;
+    // Sort newest first (by created timestamp descending)
+    entries.sort_by(|a, b| b.created.cmp(&a.created));
+    Ok(entries.into_iter().map(|m| m.id).collect())
 }
 
 #[cfg(test)]
