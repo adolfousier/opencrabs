@@ -644,6 +644,13 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
                 Span::styled(suffix, Style::default().fg(Color::DarkGray)),
             ]));
         }
+
+        if end < total {
+            lines.push(Line::from(Span::styled(
+                format!("  ↓ {} more", total - end),
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
     }
 
     // Custom provider: name identifier field (field 4 — last before save)
