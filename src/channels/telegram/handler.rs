@@ -99,6 +99,13 @@ impl StreamingState {
                 &self.thinking
             };
             let t = crate::utils::sanitize::strip_llm_artifacts(t.trim());
+            // Collapse repeated whitespace/newlines, then add line breaks after
+            // sentence-ending punctuation so thinking text reads well in Telegram.
+            let t = t.split_whitespace().collect::<Vec<_>>().join(" ");
+            let t = t
+                .replace(". ", ".\n")
+                .replace("? ", "?\n")
+                .replace("! ", "!\n");
             parts.push(format!("💭 _{}_", redact_secrets(&t)));
         }
         if !self.response.is_empty() {
