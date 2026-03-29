@@ -8,12 +8,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Flag set when Config::load() recovered from a last-known-good snapshot.
-static CONFIG_RECOVERED: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+static CONFIG_RECOVERED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Unknown top-level keys found in config.toml (possible typos).
-static CONFIG_TYPO_WARNINGS: std::sync::Mutex<Vec<String>> =
-    std::sync::Mutex::new(Vec::new());
+static CONFIG_TYPO_WARNINGS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
 /// Main configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1592,8 +1590,17 @@ impl Config {
 
     /// Known top-level sections in config.toml.
     const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
-        "crabrace", "database", "logging", "debug", "providers", "channels", "agent", "daemon",
-        "a2a", "image", "cron",
+        "crabrace",
+        "database",
+        "logging",
+        "debug",
+        "providers",
+        "channels",
+        "agent",
+        "daemon",
+        "a2a",
+        "image",
+        "cron",
     ];
 
     /// Check for unknown top-level keys and log warnings.

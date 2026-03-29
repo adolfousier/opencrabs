@@ -366,7 +366,12 @@ impl OnboardingWizard {
                 );
             }
             "minimax" => {
-                try_write!(write_errors, section, "base_url", "https://api.minimax.io/v1");
+                try_write!(
+                    write_errors,
+                    section,
+                    "base_url",
+                    "https://api.minimax.io/v1"
+                );
             }
             "zhipu" => {
                 let endpoint_type = if self.ps.zhipu_endpoint_type == 1 {
@@ -381,10 +386,20 @@ impl OnboardingWizard {
                     try_write!(write_errors, section, "base_url", &self.ps.base_url);
                 }
                 if !self.ps.custom_model.is_empty() {
-                    try_write!(write_errors, section, "default_model", &self.ps.custom_model);
+                    try_write!(
+                        write_errors,
+                        section,
+                        "default_model",
+                        &self.ps.custom_model
+                    );
                 }
                 if !self.ps.context_window.is_empty() {
-                    try_write!(write_errors, section, "context_window", &self.ps.context_window);
+                    try_write!(
+                        write_errors,
+                        section,
+                        "context_window",
+                        &self.ps.context_window
+                    );
                 }
             }
             _ => {}
@@ -399,17 +414,57 @@ impl OnboardingWizard {
         }
 
         // Channel enabled flags (from channel_toggles: 0=Telegram, 1=Discord, 2=WhatsApp, 3=Slack)
-        try_write!(write_errors, "channels.telegram", "enabled", &self.is_telegram_enabled().to_string());
-        try_write!(write_errors, "channels.discord", "enabled", &self.is_discord_enabled().to_string());
-        try_write!(write_errors, "channels.whatsapp", "enabled", &self.channel_toggles.get(2).is_some_and(|t| t.1).to_string());
-        try_write!(write_errors, "channels.slack", "enabled", &self.is_slack_enabled().to_string());
-        try_write!(write_errors, "channels.trello", "enabled", &self.is_trello_enabled().to_string());
+        try_write!(
+            write_errors,
+            "channels.telegram",
+            "enabled",
+            &self.is_telegram_enabled().to_string()
+        );
+        try_write!(
+            write_errors,
+            "channels.discord",
+            "enabled",
+            &self.is_discord_enabled().to_string()
+        );
+        try_write!(
+            write_errors,
+            "channels.whatsapp",
+            "enabled",
+            &self.channel_toggles.get(2).is_some_and(|t| t.1).to_string()
+        );
+        try_write!(
+            write_errors,
+            "channels.slack",
+            "enabled",
+            &self.is_slack_enabled().to_string()
+        );
+        try_write!(
+            write_errors,
+            "channels.trello",
+            "enabled",
+            &self.is_trello_enabled().to_string()
+        );
 
         // respond_to per channel
         let respond_to_values = ["all", "dm_only", "mention"];
-        try_write!(write_errors, "channels.telegram", "respond_to", respond_to_values[self.telegram_respond_to.min(2)]);
-        try_write!(write_errors, "channels.discord", "respond_to", respond_to_values[self.discord_respond_to.min(2)]);
-        try_write!(write_errors, "channels.slack", "respond_to", respond_to_values[self.slack_respond_to.min(2)]);
+        try_write!(
+            write_errors,
+            "channels.telegram",
+            "respond_to",
+            respond_to_values[self.telegram_respond_to.min(2)]
+        );
+        try_write!(
+            write_errors,
+            "channels.discord",
+            "respond_to",
+            respond_to_values[self.discord_respond_to.min(2)]
+        );
+        try_write!(
+            write_errors,
+            "channels.slack",
+            "respond_to",
+            respond_to_values[self.slack_respond_to.min(2)]
+        );
 
         // Voice config (0=Off, 1=API, 2=Local for both STT and TTS)
         let is_local_stt = self.stt_mode == 2;
@@ -417,19 +472,39 @@ impl OnboardingWizard {
         let groq_key_exists = !self.groq_api_key_input.is_empty() || self.has_existing_groq_key();
 
         // STT API provider (Groq)
-        try_write!(write_errors, "providers.stt.groq", "enabled", &(is_api_stt && groq_key_exists).to_string());
+        try_write!(
+            write_errors,
+            "providers.stt.groq",
+            "enabled",
+            &(is_api_stt && groq_key_exists).to_string()
+        );
         if is_api_stt && groq_key_exists {
-            try_write!(write_errors, "providers.stt.groq", "default_model", "whisper-large-v3-turbo");
+            try_write!(
+                write_errors,
+                "providers.stt.groq",
+                "default_model",
+                "whisper-large-v3-turbo"
+            );
         }
 
         // STT local provider
-        try_write!(write_errors, "providers.stt.local", "enabled", &is_local_stt.to_string());
+        try_write!(
+            write_errors,
+            "providers.stt.local",
+            "enabled",
+            &is_local_stt.to_string()
+        );
         if is_local_stt {
             #[cfg(feature = "local-stt")]
             {
                 use crate::channels::voice::local_whisper::LOCAL_MODEL_PRESETS;
                 if self.selected_local_stt_model < LOCAL_MODEL_PRESETS.len() {
-                    try_write!(write_errors, "providers.stt.local", "model", LOCAL_MODEL_PRESETS[self.selected_local_stt_model].id);
+                    try_write!(
+                        write_errors,
+                        "providers.stt.local",
+                        "model",
+                        LOCAL_MODEL_PRESETS[self.selected_local_stt_model].id
+                    );
                 }
             }
         }
@@ -437,19 +512,39 @@ impl OnboardingWizard {
         // TTS API provider (OpenAI)
         let is_api_tts = self.tts_enabled && self.tts_mode == 1;
         let is_local_tts = self.tts_enabled && self.tts_mode == 2;
-        try_write!(write_errors, "providers.tts.openai", "enabled", &is_api_tts.to_string());
+        try_write!(
+            write_errors,
+            "providers.tts.openai",
+            "enabled",
+            &is_api_tts.to_string()
+        );
         if is_api_tts {
-            try_write!(write_errors, "providers.tts.openai", "default_model", "gpt-4o-mini-tts");
+            try_write!(
+                write_errors,
+                "providers.tts.openai",
+                "default_model",
+                "gpt-4o-mini-tts"
+            );
         }
 
         // TTS local provider (Piper)
-        try_write!(write_errors, "providers.tts.local", "enabled", &is_local_tts.to_string());
+        try_write!(
+            write_errors,
+            "providers.tts.local",
+            "enabled",
+            &is_local_tts.to_string()
+        );
         if is_local_tts {
             #[cfg(feature = "local-tts")]
             {
                 use crate::channels::voice::local_tts::PIPER_VOICES;
                 if self.selected_tts_voice < PIPER_VOICES.len() {
-                    try_write!(write_errors, "providers.tts.local", "voice", PIPER_VOICES[self.selected_tts_voice].id);
+                    try_write!(
+                        write_errors,
+                        "providers.tts.local",
+                        "voice",
+                        PIPER_VOICES[self.selected_tts_voice].id
+                    );
                 }
             }
         }
@@ -567,23 +662,53 @@ impl OnboardingWizard {
 
         // Persist channel IDs/user IDs to config.toml (if new)
         if !self.telegram_user_id_input.is_empty() && !self.has_existing_telegram_user_id() {
-            try_write_array!(write_errors, "channels.telegram", "allowed_users", std::slice::from_ref(&self.telegram_user_id_input));
+            try_write_array!(
+                write_errors,
+                "channels.telegram",
+                "allowed_users",
+                std::slice::from_ref(&self.telegram_user_id_input)
+            );
         }
         if !self.discord_channel_id_input.is_empty() && !self.has_existing_discord_channel_id() {
-            try_write_array!(write_errors, "channels.discord", "allowed_channels", std::slice::from_ref(&self.discord_channel_id_input));
+            try_write_array!(
+                write_errors,
+                "channels.discord",
+                "allowed_channels",
+                std::slice::from_ref(&self.discord_channel_id_input)
+            );
         }
         if !self.slack_channel_id_input.is_empty() && !self.has_existing_slack_channel_id() {
-            try_write_array!(write_errors, "channels.slack", "allowed_channels", std::slice::from_ref(&self.slack_channel_id_input));
+            try_write_array!(
+                write_errors,
+                "channels.slack",
+                "allowed_channels",
+                std::slice::from_ref(&self.slack_channel_id_input)
+            );
         }
         if !self.discord_allowed_list_input.is_empty() && !self.has_existing_discord_allowed_list()
         {
-            try_write_array!(write_errors, "channels.discord", "allowed_users", std::slice::from_ref(&self.discord_allowed_list_input));
+            try_write_array!(
+                write_errors,
+                "channels.discord",
+                "allowed_users",
+                std::slice::from_ref(&self.discord_allowed_list_input)
+            );
         }
         if !self.slack_allowed_list_input.is_empty() && !self.has_existing_slack_allowed_list() {
-            try_write_array!(write_errors, "channels.slack", "allowed_users", std::slice::from_ref(&self.slack_allowed_list_input));
+            try_write_array!(
+                write_errors,
+                "channels.slack",
+                "allowed_users",
+                std::slice::from_ref(&self.slack_allowed_list_input)
+            );
         }
         if !self.whatsapp_phone_input.is_empty() && !self.has_existing_whatsapp_phone() {
-            try_write_array!(write_errors, "channels.whatsapp", "allowed_phones", std::slice::from_ref(&self.whatsapp_phone_input));
+            try_write_array!(
+                write_errors,
+                "channels.whatsapp",
+                "allowed_phones",
+                std::slice::from_ref(&self.whatsapp_phone_input)
+            );
         }
         if !self.trello_board_id_input.is_empty() && !self.has_existing_trello_board_id() {
             let boards: Vec<String> = self
