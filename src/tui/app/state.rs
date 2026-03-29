@@ -746,6 +746,15 @@ impl App {
             );
         }
 
+        // Notify user about unknown config keys (possible typos)
+        let typo_warnings = crate::config::Config::take_typo_warnings();
+        if !typo_warnings.is_empty() {
+            self.push_system_message(format!(
+                "⚠️ Unknown keys in config.toml (possible typos): {}",
+                typo_warnings.join(", ")
+            ));
+        }
+
         // Notify user if DB integrity check failed
         if crate::db::db_integrity_failed() {
             self.push_system_message(

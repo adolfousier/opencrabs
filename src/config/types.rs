@@ -11,6 +11,10 @@ use std::path::{Path, PathBuf};
 static CONFIG_RECOVERED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
+/// Unknown top-level keys found in config.toml (possible typos).
+static CONFIG_TYPO_WARNINGS: std::sync::Mutex<Vec<String>> =
+    std::sync::Mutex::new(Vec::new());
+
 /// Main configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -1575,8 +1579,56 @@ impl Config {
         // Expand tilde in database path (TOML doesn't expand ~)
         config.database.path = expand_tilde(&config.database.path);
 
+        // Warn about unknown top-level keys in config.toml
+        if let Some(path) = Self::system_config_path()
+            && path.exists()
+        {
+            Self::warn_unknown_keys(&path);
+        }
+
         tracing::debug!("Configuration loaded successfully");
         Ok(config)
+    }
+
+    /// Known top-level sections in config.toml.
+    const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
+        "crabrace", "database", "logging", "debug", "providers", "channels", "agent", "daemon",
+        "a2a", "image", "cron",
+    ];
+
+    /// Check for unknown top-level keys and log warnings.
+    fn warn_unknown_keys(path: &Path) {
+        let Ok(raw) = std::fs::read_to_string(path) else {
+            return;
+        };
+        let Ok(table) = raw.parse::<toml::Table>() else {
+            return;
+        };
+        let mut unknown: Vec<String> = Vec::new();
+        for key in table.keys() {
+            if !Self::KNOWN_TOP_LEVEL_KEYS.contains(&key.as_str()) {
+                unknown.push(key.clone());
+            }
+        }
+        if !unknown.is_empty() {
+            tracing::warn!(
+                "Unknown top-level keys in config.toml (possible typos): {}",
+                unknown.join(", ")
+            );
+            CONFIG_TYPO_WARNINGS
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .extend(unknown);
+        }
+    }
+
+    /// Returns any config typo warnings collected during load (drains the list).
+    pub fn take_typo_warnings() -> Vec<String> {
+        CONFIG_TYPO_WARNINGS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .drain(..)
+            .collect()
     }
 
     /// Load configuration from a specific file path
