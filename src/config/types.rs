@@ -607,9 +607,10 @@ impl ProviderConfigs {
             .map(|(name, cfg)| (name.as_str(), cfg))
     }
 
-    /// Get a specific custom provider by name
+    /// Get a specific custom provider by name (case-insensitive, normalized)
     pub fn custom_by_name(&self, name: &str) -> Option<&ProviderConfig> {
-        self.custom.as_ref()?.get(name)
+        let normalized = normalize_toml_key(name);
+        self.custom.as_ref()?.get(&normalized)
     }
 
     /// Return `(provider_name, default_model)` for the currently active provider,
@@ -713,7 +714,7 @@ where
             }
             if val.is_table() {
                 let cfg: ProviderConfig = val.clone().try_into().map_err(de::Error::custom)?;
-                map.insert(name.clone(), cfg);
+                map.insert(normalize_toml_key(name), cfg);
             }
         }
         Ok(Some(map))
@@ -726,10 +727,14 @@ where
         map.insert("default".to_string(), config);
         Ok(Some(map))
     } else {
-        // Pure named map format
-        let map: BTreeMap<String, ProviderConfig> = toml::Value::Table(table.clone())
+        // Pure named map format — normalize keys on load
+        let raw: BTreeMap<String, ProviderConfig> = toml::Value::Table(table.clone())
             .try_into()
             .map_err(de::Error::custom)?;
+        let map: BTreeMap<String, ProviderConfig> = raw
+            .into_iter()
+            .map(|(k, v)| (normalize_toml_key(&k), v))
+            .collect();
         Ok(if map.is_empty() { None } else { Some(map) })
     }
 }
@@ -1102,6 +1107,20 @@ pub fn save_keys(keys: &ProviderConfigs) -> Result<()> {
 /// Equivalent to `Config::write_key` but targets `~/.opencrabs/keys.toml`.
 /// Use for persisting secrets (tokens, API keys) that must not go into config.toml.
 ///
+/// Normalize a TOML section key: lowercase, replace dots/underscores/spaces
+/// with hyphens, strip non-alphanumeric chars (except hyphen).
+/// e.g. "Qwen_2.5_4B" → "qwen-2-5-4b", "My Provider" → "my-provider"
+pub fn normalize_toml_key(key: &str) -> String {
+    key.trim()
+        .to_lowercase()
+        .replace(['.', '_', ' '], "-")
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '-')
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string()
+}
+
 /// # Example
 /// ```no_run
 /// # fn main() -> anyhow::Result<()> {
@@ -1127,17 +1146,28 @@ pub fn write_secret_key(section: &str, key: &str, value: &str) -> Result<()> {
         toml::Value::Table(toml::map::Map::new())
     };
 
-    let parts: Vec<&str> = section.split('.').collect();
+    // Normalize custom provider names (e.g. "Qwen_2.5_4B" → "qwen-2-5-4b")
+    let parts: Vec<String> = section
+        .split('.')
+        .enumerate()
+        .map(|(i, p)| {
+            if i >= 2 && section.starts_with("providers.custom") {
+                normalize_toml_key(p)
+            } else {
+                p.to_string()
+            }
+        })
+        .collect();
     let mut current = doc
         .as_table_mut()
         .context("keys.toml root is not a table")?;
 
     for part in &parts {
-        if !current.contains_key(*part) {
-            current.insert(part.to_string(), toml::Value::Table(toml::map::Map::new()));
+        if !current.contains_key(part.as_str()) {
+            current.insert(part.clone(), toml::Value::Table(toml::map::Map::new()));
         }
         current = current
-            .get_mut(*part)
+            .get_mut(part.as_str())
             .context("section not found after insert")?
             .as_table_mut()
             .with_context(|| format!("'{}' is not a table", part))?;
@@ -1913,15 +1943,29 @@ impl Config {
         };
 
         // Navigate/create the section table (supports dotted paths like "channels.slack")
-        let parts: Vec<&str> = section.split('.').collect();
+        // Normalize custom provider names (e.g. "Qwen_2.5_4B" → "qwen-2-5-4b")
+        let parts: Vec<String> = section
+            .split('.')
+            .enumerate()
+            .map(|(i, p)| {
+                // providers.custom.<name> — normalize the <name> part
+                if i >= 2
+                    && section.starts_with("providers.custom")
+                {
+                    normalize_toml_key(p)
+                } else {
+                    p.to_string()
+                }
+            })
+            .collect();
         let mut current = doc.as_table_mut().context("config root is not a table")?;
 
         for part in &parts {
-            if !current.contains_key(*part) {
-                current.insert(part.to_string(), toml::Value::Table(toml::map::Map::new()));
+            if !current.contains_key(part.as_str()) {
+                current.insert(part.clone(), toml::Value::Table(toml::map::Map::new()));
             }
             current = current
-                .get_mut(*part)
+                .get_mut(part.as_str())
                 .context("section not found after insert")?
                 .as_table_mut()
                 .with_context(|| format!("'{}' is not a table", part))?;
