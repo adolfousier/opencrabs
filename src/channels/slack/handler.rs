@@ -1041,6 +1041,22 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                 let _ = session.chat_post_message(&request).await;
                 return;
             }
+            ChannelCommand::Evolve => {
+                let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
+                let session_api = client.open_session(&token);
+                let request = SlackApiChatPostMessageRequest::new(
+                    SlackChannelId::new(channel_id.clone()),
+                    SlackMessageContent::new().with_text("⏳ Checking for updates...".to_string()),
+                );
+                let _ = session_api.chat_post_message(&request).await;
+                let result = commands::run_evolve().await;
+                let request = SlackApiChatPostMessageRequest::new(
+                    SlackChannelId::new(channel_id.clone()),
+                    SlackMessageContent::new().with_text(result),
+                );
+                let _ = session_api.chat_post_message(&request).await;
+                return;
+            }
             ChannelCommand::Compact => {
                 let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
                 let session = client.open_session(&token);

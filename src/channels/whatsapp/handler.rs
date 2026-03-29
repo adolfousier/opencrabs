@@ -642,6 +642,20 @@ pub(crate) async fn handle_message(
                 let _ = client.send_message(info.source.chat.clone(), reply).await;
                 return;
             }
+            ChannelCommand::Evolve => {
+                let status = waproto::whatsapp::Message {
+                    conversation: Some("⏳ Checking for updates...".to_string()),
+                    ..Default::default()
+                };
+                let _ = client.send_message(info.source.chat.clone(), status).await;
+                let result = commands::run_evolve().await;
+                let reply = waproto::whatsapp::Message {
+                    conversation: Some(result),
+                    ..Default::default()
+                };
+                let _ = client.send_message(info.source.chat.clone(), reply).await;
+                return;
+            }
             ChannelCommand::Compact => {
                 let status = waproto::whatsapp::Message {
                     conversation: Some("⏳ Compacting context...".to_string()),

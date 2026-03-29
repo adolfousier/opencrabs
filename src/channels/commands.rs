@@ -80,6 +80,8 @@ pub enum ChannelCommand {
     Stop,
     /// `/compact` — trigger context compaction via the agent
     Compact,
+    /// `/evolve` — check for updates and install directly (no LLM needed)
+    Evolve,
     /// User-defined command with action "prompt" — forward prompt text to the agent
     UserPrompt(String),
     /// User-defined command with action "system" — display text directly
@@ -131,6 +133,7 @@ pub async fn handle_command(
     let trimmed = text.trim();
     let result = match trimmed {
         "/compact" => ChannelCommand::Compact,
+        "/evolve" => ChannelCommand::Evolve,
         "/help" => ChannelCommand::Help(format_help()),
         "/models" => ChannelCommand::Models(format_providers(agent)),
         "/new" => ChannelCommand::NewSession,
@@ -149,6 +152,7 @@ pub async fn handle_command(
         ChannelCommand::NewSession => Some("New session started.".to_string()),
         ChannelCommand::Stop => Some("Operation stopped.".to_string()),
         ChannelCommand::UserSystem(body) => Some(body.clone()),
+        ChannelCommand::Evolve => Some("Checking for updates...".to_string()),
         ChannelCommand::Compact | ChannelCommand::UserPrompt(_) | ChannelCommand::NotACommand => {
             None
         }
@@ -598,6 +602,21 @@ pub async fn switch_model(
     Ok(change_msg)
 }
 
+/// Run evolve directly (no LLM needed). Returns a user-facing status message.
+pub async fn run_evolve() -> String {
+    use crate::brain::tools::{evolve::EvolveTool, Tool, ToolExecutionContext};
+
+    let ctx = ToolExecutionContext::new(uuid::Uuid::nil());
+    let tool = EvolveTool::new(None);
+    match tool
+        .execute(serde_json::json!({"check_only": false}), &ctx)
+        .await
+    {
+        Ok(result) => result.output,
+        Err(e) => format!("Evolve failed: {}", e),
+    }
+}
+
 /// Map a provider name to its config section key.
 pub(crate) fn provider_section(provider_name: &str) -> Option<String> {
     crate::utils::providers::config_section(provider_name)
@@ -792,6 +811,7 @@ mod tests {
             ChannelCommand::Stop => "Stop",
             ChannelCommand::UserPrompt(_) => "UserPrompt",
             ChannelCommand::UserSystem(_) => "UserSystem",
+            ChannelCommand::Evolve => "Evolve",
             ChannelCommand::NotACommand => "NotACommand",
         }
     }

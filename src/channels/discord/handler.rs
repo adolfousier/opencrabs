@@ -468,6 +468,12 @@ pub(crate) async fn handle_message(
                 let _ = msg.channel_id.say(&ctx.http, reply).await;
                 return;
             }
+            ChannelCommand::Evolve => {
+                let _ = msg.channel_id.say(&ctx.http, "⏳ Checking for updates...").await;
+                let result = commands::run_evolve().await;
+                let _ = msg.channel_id.say(&ctx.http, &result).await;
+                return;
+            }
             ChannelCommand::Compact => {
                 let _ = msg
                     .channel_id
