@@ -164,29 +164,36 @@ pub async fn on_interaction(
                     } else {
                         (None, rest)
                     };
-                    if let Some(pname) = provider_name
-                        && let Ok(config) = crate::config::Config::load()
-                        && let Ok(new_provider) =
-                            crate::brain::provider::factory::create_provider_by_name(&config, pname)
-                    {
-                        state.agent.swap_provider(new_provider);
-                    }
-                    let session_id = *state.shared_session.lock().await;
-                    let reply = match crate::channels::commands::switch_model(
-                        &state.agent,
-                        model_name,
-                        session_id,
-                    )
-                    .await
-                    {
-                        Ok(ctx) => {
-                            tracing::info!("Slack: model switched to {}", model_name);
-                            let _ = ctx;
-                            format!("✅ Model switched to `{}`", model_name)
+                    let mut provider_err: Option<String> = None;
+                    if let Some(pname) = provider_name {
+                        match crate::config::Config::load() {
+                            Ok(config) => match crate::brain::provider::factory::create_provider_by_name(&config, pname) {
+                                Ok(new_provider) => state.agent.swap_provider(new_provider),
+                                Err(e) => provider_err = Some(format!("Failed to create provider '{}': {}", pname, e)),
+                            },
+                            Err(e) => provider_err = Some(format!("Failed to load config: {}", e)),
                         }
-                        Err(e) => {
-                            tracing::warn!("Slack: model switch failed: {}", e);
-                            format!("⚠️ {}", e)
+                    }
+                    let reply = if let Some(err) = provider_err {
+                        tracing::warn!("Slack: provider switch failed: {}", err);
+                        format!("⚠️ {}", err)
+                    } else {
+                        let session_id = *state.shared_session.lock().await;
+                        match crate::channels::commands::switch_model(
+                            &state.agent,
+                            model_name,
+                            session_id,
+                        )
+                        .await
+                        {
+                            Ok(_) => {
+                                tracing::info!("Slack: model switched to {}", model_name);
+                                format!("✅ Model switched to `{}`", model_name)
+                            }
+                            Err(e) => {
+                                tracing::warn!("Slack: model switch failed: {}", e);
+                                format!("⚠️ {}", e)
+                            }
                         }
                     };
                     if let Some(ref channel) = block_actions.channel {

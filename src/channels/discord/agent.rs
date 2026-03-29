@@ -316,26 +316,30 @@ impl EventHandler for Handler {
                 } else {
                     (None, rest)
                 };
-                if let Some(pname) = provider_name
-                    && let Ok(config) = crate::config::Config::load()
-                    && let Ok(new_provider) =
-                        crate::brain::provider::factory::create_provider_by_name(&config, pname)
-                {
-                    self.agent.swap_provider(new_provider);
-                }
-                let session_id = *self.shared_session.lock().await;
-                let reply = match crate::channels::commands::switch_model(
-                    &self.agent,
-                    model_name,
-                    session_id,
-                )
-                .await
-                {
-                    Ok(ctx) => {
-                        let _ = ctx;
-                        format!("✅ Model switched to `{}`", model_name)
+                let mut provider_err: Option<String> = None;
+                if let Some(pname) = provider_name {
+                    match crate::config::Config::load() {
+                        Ok(config) => match crate::brain::provider::factory::create_provider_by_name(&config, pname) {
+                            Ok(new_provider) => self.agent.swap_provider(new_provider),
+                            Err(e) => provider_err = Some(format!("Failed to create provider '{}': {}", pname, e)),
+                        },
+                        Err(e) => provider_err = Some(format!("Failed to load config: {}", e)),
                     }
-                    Err(e) => format!("⚠️ {}", e),
+                }
+                let reply = if let Some(err) = provider_err {
+                    format!("⚠️ {}", err)
+                } else {
+                    let session_id = *self.shared_session.lock().await;
+                    match crate::channels::commands::switch_model(
+                        &self.agent,
+                        model_name,
+                        session_id,
+                    )
+                    .await
+                    {
+                        Ok(_) => format!("✅ Model switched to `{}`", model_name),
+                        Err(e) => format!("⚠️ {}", e),
+                    }
                 };
                 let _ = comp
                     .create_response(
