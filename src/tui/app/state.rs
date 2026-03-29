@@ -1179,6 +1179,10 @@ impl App {
                     self.processing_sessions.remove(&session_id);
                     self.session_cancel_tokens.remove(&session_id);
                     self.sessions_with_unread.insert(session_id);
+                    // Refresh pane cache so inactive pane shows the completed response
+                    if self.pane_manager.is_split() {
+                        self.preload_pane_session(session_id).await;
+                    }
                 }
             }
             TuiEvent::Error {
@@ -1199,6 +1203,10 @@ impl App {
                     }
                 } else {
                     tracing::warn!("Background session {} error: {}", session_id, message);
+                    // Refresh pane cache so inactive pane shows whatever was written
+                    if self.pane_manager.is_split() {
+                        self.preload_pane_session(session_id).await;
+                    }
                 }
             }
             TuiEvent::SwitchMode(mode) => {
