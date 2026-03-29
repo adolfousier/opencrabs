@@ -220,7 +220,9 @@ impl App {
     /// the next startup can restore the correct session.
     fn save_last_session_id(session_id: Uuid) {
         let base = crate::config::opencrabs_home();
-        let _ = std::fs::write(base.join("last_session"), session_id.to_string());
+        if let Err(e) = std::fs::write(base.join("last_session"), session_id.to_string()) {
+            tracing::warn!("Failed to persist last_session: {}", e);
+        }
     }
 
     /// Read the last active session ID from disk.

@@ -99,16 +99,22 @@ impl Tool for DiscordConnectTool {
             .collect();
 
         // Save token to keys.toml for persistence
-        let _ = crate::config::write_secret_key("channels.discord", "token", &token);
+        if let Err(e) = crate::config::write_secret_key("channels.discord", "token", &token) {
+            tracing::error!("Failed to save Discord token: {}", e);
+        }
 
         // Persist enabled state + allowed_users to config (read by config_rx)
-        let _ = crate::config::Config::write_key("channels.discord", "enabled", "true");
-        if !allowed_users.is_empty() {
-            let _ = crate::config::Config::write_array(
+        if let Err(e) = crate::config::Config::write_key("channels.discord", "enabled", "true") {
+            tracing::error!("Failed to enable Discord in config: {}", e);
+        }
+        if !allowed_users.is_empty()
+            && let Err(e) = crate::config::Config::write_array(
                 "channels.discord",
                 "allowed_users",
                 &allowed_users,
-            );
+            )
+        {
+            tracing::error!("Failed to save Discord allowed_users: {}", e);
         }
 
         // Create and spawn the Discord agent

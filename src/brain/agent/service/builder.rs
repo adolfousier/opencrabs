@@ -57,7 +57,10 @@ pub struct AgentService {
 impl AgentService {
     /// Create a new agent service
     pub fn new(provider: Arc<dyn Provider>, context: ServiceContext) -> Self {
-        let config = crate::config::Config::load().unwrap_or_default();
+        let config = crate::config::Config::load().unwrap_or_else(|e| {
+            tracing::error!("Failed to load config for agent service, using defaults: {}", e);
+            crate::config::Config::default()
+        });
 
         Self {
             provider: std::sync::RwLock::new(provider),

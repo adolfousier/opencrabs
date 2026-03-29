@@ -166,16 +166,30 @@ impl Tool for TrelloConnectTool {
         }
 
         // Persist to keys.toml / config.toml
-        let _ = crate::config::write_secret_key("channels.trello", "app_token", &api_key);
-        let _ = crate::config::write_secret_key("channels.trello", "token", &api_token);
-        let _ = crate::config::Config::write_key("channels.trello", "enabled", "true");
-        let _ = crate::config::Config::write_array("channels.trello", "board_ids", &board_ids);
-        if !allowed_users.is_empty() {
-            let _ = crate::config::Config::write_array(
+        if let Err(e) = crate::config::write_secret_key("channels.trello", "app_token", &api_key) {
+            tracing::error!("Failed to save Trello API key: {}", e);
+        }
+        if let Err(e) =
+            crate::config::write_secret_key("channels.trello", "token", &api_token)
+        {
+            tracing::error!("Failed to save Trello API token: {}", e);
+        }
+        if let Err(e) = crate::config::Config::write_key("channels.trello", "enabled", "true") {
+            tracing::error!("Failed to enable Trello in config: {}", e);
+        }
+        if let Err(e) =
+            crate::config::Config::write_array("channels.trello", "board_ids", &board_ids)
+        {
+            tracing::error!("Failed to save Trello board_ids: {}", e);
+        }
+        if !allowed_users.is_empty()
+            && let Err(e) = crate::config::Config::write_array(
                 "channels.trello",
                 "allowed_users",
                 &allowed_users,
-            );
+            )
+        {
+            tracing::error!("Failed to save Trello allowed_users: {}", e);
         }
 
         // Spawn the TrelloAgent

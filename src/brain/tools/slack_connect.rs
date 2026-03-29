@@ -113,19 +113,34 @@ impl Tool for SlackConnectTool {
             .unwrap_or_default();
 
         // Save tokens to keys.toml for persistence
-        let _ = crate::config::write_secret_key("channels.slack", "token", &bot_token);
-        let _ = crate::config::write_secret_key("channels.slack", "app_token", &app_token);
+        if let Err(e) = crate::config::write_secret_key("channels.slack", "token", &bot_token) {
+            tracing::error!("Failed to save Slack bot token: {}", e);
+        }
+        if let Err(e) = crate::config::write_secret_key("channels.slack", "app_token", &app_token)
+        {
+            tracing::error!("Failed to save Slack app token: {}", e);
+        }
 
         // Persist to config so startup can read them (field is 'token', not 'bot_token')
-        let _ = crate::config::Config::write_key("channels.slack", "enabled", "true");
-        let _ = crate::config::Config::write_key("channels.slack", "token", &bot_token);
-        let _ = crate::config::Config::write_key("channels.slack", "app_token", &app_token);
-        if !allowed_users.is_empty() {
-            let _ = crate::config::Config::write_array(
+        if let Err(e) = crate::config::Config::write_key("channels.slack", "enabled", "true") {
+            tracing::error!("Failed to enable Slack in config: {}", e);
+        }
+        if let Err(e) = crate::config::Config::write_key("channels.slack", "token", &bot_token) {
+            tracing::error!("Failed to save Slack token to config: {}", e);
+        }
+        if let Err(e) =
+            crate::config::Config::write_key("channels.slack", "app_token", &app_token)
+        {
+            tracing::error!("Failed to save Slack app_token to config: {}", e);
+        }
+        if !allowed_users.is_empty()
+            && let Err(e) = crate::config::Config::write_array(
                 "channels.slack",
                 "allowed_users",
                 &allowed_users,
-            );
+            )
+        {
+            tracing::error!("Failed to save Slack allowed_users: {}", e);
         }
 
         // Create and spawn the Slack agent

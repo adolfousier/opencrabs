@@ -229,12 +229,16 @@ impl PaneManager {
         crate::config::opencrabs_home().join("layout.json")
     }
 
-    /// Save current layout to disk. Silently ignores errors.
+    /// Save current layout to disk.
     pub fn save_layout(&self) {
         // Don't persist single-pane (default) state — removing the file
         // signals "no custom layout" so startup stays fast.
         if !self.is_split() {
-            let _ = std::fs::remove_file(Self::layout_path());
+            if let Err(e) = std::fs::remove_file(Self::layout_path())
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                tracing::warn!("Failed to remove layout.json: {}", e);
+            }
             return;
         }
         let snapshot = LayoutSnapshot {
@@ -250,8 +254,10 @@ impl PaneManager {
             focused: self.focused,
             next_id: self.next_id,
         };
-        if let Ok(json) = serde_json::to_string_pretty(&snapshot) {
-            let _ = std::fs::write(Self::layout_path(), json);
+        if let Ok(json) = serde_json::to_string_pretty(&snapshot)
+            && let Err(e) = std::fs::write(Self::layout_path(), json)
+        {
+            tracing::warn!("Failed to save layout.json: {}", e);
         }
     }
 
@@ -264,7 +270,9 @@ impl PaneManager {
         };
         let Ok(snapshot) = serde_json::from_str::<LayoutSnapshot>(&data) else {
             tracing::warn!("Corrupt layout.json — starting with single pane");
-            let _ = std::fs::remove_file(&path);
+            if let Err(e) = std::fs::remove_file(&path) {
+                tracing::warn!("Failed to remove corrupt layout.json: {}", e);
+            }
             return Self::new();
         };
         let panes: Vec<Pane> = snapshot

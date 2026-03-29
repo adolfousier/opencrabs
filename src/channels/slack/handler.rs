@@ -773,7 +773,9 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                 let elapsed = (chrono::Utc::now() - session.updated_at).num_seconds();
                 elapsed > (h * 3600.0) as i64
             }) {
-                let _ = state.session_svc.archive_session(session.id).await;
+                if let Err(e) = state.session_svc.archive_session(session.id).await {
+                    tracing::error!("Slack: failed to archive session {}: {}", session.id, e);
+                }
                 match state.session_svc.create_session(Some(session_title)).await {
                     Ok(new_session) => new_session.id,
                     Err(e) => {
@@ -968,8 +970,9 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                     .session_svc
                     .find_session_by_title(&session_title)
                     .await
+                    && let Err(e) = state.session_svc.archive_session(old.id).await
                 {
-                    let _ = state.session_svc.archive_session(old.id).await;
+                    tracing::error!("Slack: failed to archive old session {}: {}", old.id, e);
                 }
                 match state.session_svc.create_session(Some(session_title)).await {
                     Ok(new_session) => {

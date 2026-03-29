@@ -90,16 +90,22 @@ impl Tool for TelegramConnectTool {
             allowed_users_raw.iter().map(|id| id.to_string()).collect();
 
         // Save token to keys.toml for persistence
-        let _ = crate::config::write_secret_key("channels.telegram", "token", &token);
+        if let Err(e) = crate::config::write_secret_key("channels.telegram", "token", &token) {
+            tracing::error!("Failed to save Telegram token: {}", e);
+        }
 
         // Persist enabled state + allowed_users to config (read by config_rx)
-        let _ = crate::config::Config::write_key("channels.telegram", "enabled", "true");
-        if !allowed_users.is_empty() {
-            let _ = crate::config::Config::write_array(
+        if let Err(e) = crate::config::Config::write_key("channels.telegram", "enabled", "true") {
+            tracing::error!("Failed to enable Telegram in config: {}", e);
+        }
+        if !allowed_users.is_empty()
+            && let Err(e) = crate::config::Config::write_array(
                 "channels.telegram",
                 "allowed_users",
                 &allowed_users,
-            );
+            )
+        {
+            tracing::error!("Failed to save Telegram allowed_users: {}", e);
         }
 
         // Create and spawn the Telegram agent

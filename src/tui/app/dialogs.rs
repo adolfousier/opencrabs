@@ -917,6 +917,14 @@ impl App {
 
         // Disable ALL other providers on disk before enabling the selected one.
         // rebuild_agent_service() reloads from disk, so this is the only source of truth.
+        let mut write_errors: Vec<String> = Vec::new();
+        let mut try_write = |s: &str, k: &str, v: &str| {
+            if let Err(e) = crate::config::Config::write_key(s, k, v) {
+                tracing::warn!("Failed to write {}.{}: {}", s, k, e);
+                write_errors.push(format!("{}.{}", s, k));
+            }
+        };
+
         for s in [
             "providers.anthropic",
             "providers.openai",
@@ -929,44 +937,38 @@ impl App {
             "providers.opencode_cli",
         ] {
             if s != section {
-                let _ = crate::config::Config::write_key(s, "enabled", "false");
+                try_write(s, "enabled", "false");
             }
         }
         if let Some(ref customs) = config.providers.custom {
             for name in customs.keys() {
                 let cs = format!("providers.custom.{}", name);
                 if cs != section {
-                    let _ = crate::config::Config::write_key(&cs, "enabled", "false");
+                    try_write(&cs, "enabled", "false");
                 }
             }
         }
 
-        if let Err(e) = crate::config::Config::write_key(section, "enabled", "true") {
-            tracing::warn!("Failed to write {}.enabled: {}", section, e);
-        }
+        try_write(section, "enabled", "true");
 
         // Write base_url if applicable
         match provider_idx {
             2 => {
-                let _ = crate::config::Config::write_key(
+                try_write(
                     section,
                     "base_url",
                     "https://api.githubcopilot.com/chat/completions",
                 );
             }
             4 => {
-                let _ = crate::config::Config::write_key(
+                try_write(
                     section,
                     "base_url",
                     "https://openrouter.ai/api/v1/chat/completions",
                 );
             }
             5 => {
-                let _ = crate::config::Config::write_key(
-                    section,
-                    "base_url",
-                    "https://api.minimax.io/v1",
-                );
+                try_write(section, "base_url", "https://api.minimax.io/v1");
             }
             6 => {
                 // z.ai GLM — write endpoint_type from model selector state
@@ -975,16 +977,12 @@ impl App {
                 } else {
                     "api"
                 };
-                let _ = crate::config::Config::write_key(section, "endpoint_type", endpoint_type);
+                try_write(section, "endpoint_type", endpoint_type);
             }
             9 if !self.ps.base_url.is_empty() => {
-                let _ = crate::config::Config::write_key(section, "base_url", &self.ps.base_url);
+                try_write(section, "base_url", &self.ps.base_url);
                 if !self.ps.context_window.is_empty() {
-                    let _ = crate::config::Config::write_key(
-                        section,
-                        "context_window",
-                        &self.ps.context_window,
-                    );
+                    try_write(section, "context_window", &self.ps.context_window);
                 }
             }
             _ => {}
@@ -1034,6 +1032,15 @@ impl App {
         // Write default_model to config BEFORE rebuild so the provider picks it up
         if let Err(e) = crate::config::Config::write_key(section, "default_model", &default_model) {
             tracing::warn!("Failed to persist model to config: {}", e);
+            write_errors.push(format!("{}.default_model", section));
+        }
+
+        // Warn user if any config writes failed
+        if !write_errors.is_empty() {
+            self.push_system_message(format!(
+                "⚠️ Failed to save some config keys: {}. Check file permissions on config.toml.",
+                write_errors.join(", ")
+            ));
         }
 
         // Rebuild agent service with new provider (now sees the correct model)

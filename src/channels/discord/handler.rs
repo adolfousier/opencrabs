@@ -316,7 +316,9 @@ pub(crate) async fn handle_message(
                 let elapsed = (chrono::Utc::now() - session.updated_at).num_seconds();
                 elapsed > (h * 3600.0) as i64
             }) {
-                let _ = session_svc.archive_session(session.id).await;
+                if let Err(e) = session_svc.archive_session(session.id).await {
+                    tracing::error!("Discord: failed to archive session {}: {}", session.id, e);
+                }
                 match session_svc.create_session(Some(session_title)).await {
                     Ok(new_session) => new_session.id,
                     Err(e) => {
@@ -402,8 +404,10 @@ pub(crate) async fn handle_message(
                 } else {
                     format!("Discord: #{}", msg.channel_id.get())
                 };
-                if let Ok(Some(old)) = session_svc.find_session_by_title(&session_title).await {
-                    let _ = session_svc.archive_session(old.id).await;
+                if let Ok(Some(old)) = session_svc.find_session_by_title(&session_title).await
+                    && let Err(e) = session_svc.archive_session(old.id).await
+                {
+                    tracing::error!("Discord: failed to archive old session {}: {}", old.id, e);
                 }
                 match session_svc.create_session(Some(session_title)).await {
                     Ok(new_session) => {

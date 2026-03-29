@@ -150,21 +150,32 @@ impl Tool for WhatsAppConnectTool {
             .unwrap_or_default();
 
         // Save allowed phones to config if provided
-        if !tool_phones.is_empty() {
-            let _ = crate::config::Config::write_array(
+        if !tool_phones.is_empty()
+            && let Err(e) = crate::config::Config::write_array(
                 "channels.whatsapp",
                 "allowed_phones",
                 &tool_phones,
-            );
+            )
+        {
+            tracing::error!("Failed to save WhatsApp allowed_phones: {}", e);
         }
 
         // Wipe session and enable WhatsApp — ChannelManager will (re)start the agent
         let wa_dir = opencrabs_home().join("whatsapp");
-        let _ = std::fs::create_dir_all(&wa_dir);
-        let _ = std::fs::remove_file(wa_dir.join("session.db"));
-        let _ = std::fs::remove_file(wa_dir.join("session.db-wal"));
-        let _ = std::fs::remove_file(wa_dir.join("session.db-shm"));
-        let _ = crate::config::Config::write_key("channels.whatsapp", "enabled", "true");
+        if let Err(e) = std::fs::create_dir_all(&wa_dir) {
+            tracing::error!("Failed to create WhatsApp dir: {}", e);
+        }
+        // Session files may not exist — ignore NotFound, log other errors
+        for f in ["session.db", "session.db-wal", "session.db-shm"] {
+            if let Err(e) = std::fs::remove_file(wa_dir.join(f))
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                tracing::warn!("Failed to remove WhatsApp {}: {}", f, e);
+            }
+        }
+        if let Err(e) = crate::config::Config::write_key("channels.whatsapp", "enabled", "true") {
+            tracing::error!("Failed to enable WhatsApp in config: {}", e);
+        }
 
         // Subscribe to QR/connected events from the agent bot
         let mut qr_rx = self.whatsapp_state.subscribe_qr();
