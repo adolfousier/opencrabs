@@ -530,7 +530,7 @@ impl App {
             sudo_input: String::new(),
             plan_document: None,
             plan_file_path: None,
-            pane_manager: PaneManager::new(),
+            pane_manager: PaneManager::load_layout(),
             pane_message_cache: HashMap::new(),
             #[cfg(feature = "whatsapp")]
             whatsapp_state,
@@ -1945,6 +1945,7 @@ impl App {
         // Split pane focus & close (global — work from Chat mode)
         if keys::is_close_pane(&event) && self.pane_manager.is_split() {
             self.pane_manager.close_focused();
+            self.pane_manager.save_layout();
             if let Some(pane) = self.pane_manager.focused_pane()
                 && let Some(session_id) = pane.session_id
             {

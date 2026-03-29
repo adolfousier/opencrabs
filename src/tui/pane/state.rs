@@ -1,10 +1,11 @@
 //! Pane state — individual pane identity and the manager that tracks all panes.
 
 use super::layout::{SplitDirection, SplitNode};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Unique identifier for a pane within the split layout.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PaneId(pub u32);
 
 impl PaneId {
@@ -33,6 +34,21 @@ impl Pane {
             auto_scroll: true,
         }
     }
+}
+
+/// Serializable snapshot of the pane layout (for persistence across restarts).
+#[derive(Serialize, Deserialize)]
+struct LayoutSnapshot {
+    root: Option<SplitNode>,
+    panes: Vec<PaneSnapshot>,
+    focused: PaneId,
+    next_id: u32,
+}
+
+#[derive(Serialize, Deserialize)]
+struct PaneSnapshot {
+    id: PaneId,
+    session_id: Option<Uuid>,
 }
 
 /// Manages all panes and the split layout tree.
@@ -203,6 +219,67 @@ impl PaneManager {
         match &self.root {
             None => vec![self.panes.first().map(|p| p.id).unwrap_or(PaneId::ROOT)],
             Some(tree) => tree.leaves(),
+        }
+    }
+
+    // ── Layout persistence ───────────────────────────────────────────────
+
+    /// Path to the layout persistence file.
+    fn layout_path() -> std::path::PathBuf {
+        crate::config::opencrabs_home().join("layout.json")
+    }
+
+    /// Save current layout to disk. Silently ignores errors.
+    pub fn save_layout(&self) {
+        // Don't persist single-pane (default) state — removing the file
+        // signals "no custom layout" so startup stays fast.
+        if !self.is_split() {
+            let _ = std::fs::remove_file(Self::layout_path());
+            return;
+        }
+        let snapshot = LayoutSnapshot {
+            root: self.root.clone(),
+            panes: self
+                .panes
+                .iter()
+                .map(|p| PaneSnapshot {
+                    id: p.id,
+                    session_id: p.session_id,
+                })
+                .collect(),
+            focused: self.focused,
+            next_id: self.next_id,
+        };
+        if let Ok(json) = serde_json::to_string_pretty(&snapshot) {
+            let _ = std::fs::write(Self::layout_path(), json);
+        }
+    }
+
+    /// Restore layout from disk. Returns default single-pane if file is
+    /// missing or corrupt.
+    pub fn load_layout() -> Self {
+        let path = Self::layout_path();
+        let Ok(data) = std::fs::read_to_string(&path) else {
+            return Self::new();
+        };
+        let Ok(snapshot) = serde_json::from_str::<LayoutSnapshot>(&data) else {
+            tracing::warn!("Corrupt layout.json — starting with single pane");
+            let _ = std::fs::remove_file(&path);
+            return Self::new();
+        };
+        let panes: Vec<Pane> = snapshot
+            .panes
+            .into_iter()
+            .map(|s| Pane::new(s.id, s.session_id))
+            .collect();
+        if panes.is_empty() {
+            return Self::new();
+        }
+        Self {
+            root: snapshot.root,
+            panes,
+            focused: snapshot.focused,
+            next_id: snapshot.next_id,
         }
     }
 }
