@@ -5,6 +5,34 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.91] - 2026-03-29
+
+### Added
+- **Startup update prompt** — When a new version is available, a centered dialog appears on top of the splash screen asking the user to accept (Enter) or skip (Esc). Accepting triggers `/evolve` automatically; skipping returns to splash so the user sees their current version. After update, the binary restarts and splash shows the new version
+- **`/doctor` channel command** — Health check now available directly on Telegram, Discord, Slack, and WhatsApp without going through the LLM. Returns provider status, channel config, voice config, and approval policy
+- **Shared text command handler** — New `try_execute_text_command()` in `commands.rs` handles Help, Usage, Evolve, Doctor, and UserSystem commands in one place. All four channel handlers delegate through this shared function, eliminating duplicated command logic
+- **Pane session preloading** — Restored split panes now preload their session messages from DB on startup, so pane content is visible immediately instead of blank
+- **Persistent pane layout** — Split pane configuration (splits, sizes, focused pane) now saves to `~/.opencrabs/pane_layout.json` on quit and Ctrl+C, and restores on restart
+
+### Fixed
+- **UTF-8 char boundary panics** — `split_message()` in all 5 channel handlers (Telegram, Discord, Slack, WhatsApp, Trello) could panic on multi-byte characters (emojis, €, CJK). Now uses `is_char_boundary()` to find safe split points
+- **Model switch errors silently swallowed** — Telegram, Discord, and Slack always showed "✅ Model switched" even when provider creation failed. Now surfaces the actual error with `⚠️` prefix
+- **CLI provider ARG_MAX crash** — When OpenCode CLI conversation context exceeded OS `ARG_MAX` (~1MB on macOS), the spawn failed with "Argument list too long". The emergency compaction handler now catches this error, auto-compacts context, and retries. If compaction itself fails, falls back to hard truncation (keeps last 24 messages) with a marker telling the agent to use `search_session` for older context
+- **`/evolve` hitting provider errors on channels** — `/evolve` was being routed through the LLM instead of executing directly. Now runs as a direct command on all channels (downloads and reinstalls without LLM involvement)
+- **CLI tool calls lost on Esc×2 and restart** — Tool call results from CLI providers were not persisted to DB, so they vanished on double-escape cancel or process restart. Now saved alongside regular messages
+- **Session not reloaded after double-escape cancel** — After cancelling with Esc×2, the session context was stale. Now reloads from DB to pick up any changes made during the cancelled operation
+- **Thinking text unreadable on Telegram** — Thinking/reasoning blocks had poor formatting. Improved readability with proper styling
+- **Model selector missing '↓ N more' indicator** — Long model lists didn't show a scroll indicator. Added count of hidden items below the visible list
+- **Model list sorted alphabetically instead of by date** — Fetched models now sort newest-first so latest releases appear at the top
+- **Pane layout lost on quit** — Split pane configuration was only in memory. Now persists to disk on quit and Ctrl+C
+
+### Changed
+- **`config.toml.example`** — Added z.ai GLM provider section with configuration examples
+
+### Testing
+- **2 emergency compaction tests** — `ArgTooLongMockProvider` and `ContextLengthMockProvider` verify the retry flow works after compaction/truncation
+- **1,564 total tests** (up from 1,562)
+
 ## [0.2.90] - 2026-03-27
 
 ### Added
@@ -1796,6 +1824,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.91]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.91
 [0.2.90]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.90
 [0.2.89]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.89
 [0.2.88]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.88
