@@ -1230,14 +1230,23 @@ pub(crate) async fn handle_message(
                         }
                     }
                 }
-                ProgressEvent::IntermediateText { text, .. } => {
+                ProgressEvent::IntermediateText { text, reasoning } => {
                     if let Ok(mut s) = st.try_lock() {
                         s.thinking.clear();
                         // Clear accumulated streaming response — it's now captured
                         // as an intermediate message. Without this, text from
                         // consecutive tool rounds gets concatenated without spacing.
                         s.response.clear();
-                        s.pending_intermediate.push(text);
+                        // Use reasoning as fallback when model produces no text
+                        // blocks between tool rounds (only thinking + tool_use).
+                        let content = if text.is_empty() {
+                            reasoning.unwrap_or_default()
+                        } else {
+                            text
+                        };
+                        if !content.is_empty() {
+                            s.pending_intermediate.push(content);
+                        }
                     }
                 }
                 ProgressEvent::SelfHealingAlert { message } => {
