@@ -87,8 +87,8 @@ async fn test_context_includes_brain_after_db_rebuild() {
     let context = ServiceContext::new(db.pool().clone());
 
     let brain_text = "You are a helpful assistant for software development.";
-    let agent_service =
-        AgentService::new(provider, context.clone()).with_system_brain(brain_text.to_string());
+    let agent_service = AgentService::new_for_test(provider, context.clone())
+        .with_system_brain(brain_text.to_string());
 
     let session_service = SessionService::new(context);
     let session = session_service
@@ -120,7 +120,7 @@ async fn test_context_does_not_drop_between_requests() {
     db.run_migrations().await.unwrap();
     let context = ServiceContext::new(db.pool().clone());
 
-    let agent_service = AgentService::new(provider, context.clone())
+    let agent_service = AgentService::new_for_test(provider, context.clone())
         .with_system_brain("System brain prompt.".to_string());
 
     let session_service = SessionService::new(context);
@@ -162,7 +162,7 @@ async fn test_tool_loop_context_grows_with_results() {
     let registry = ToolRegistry::new();
     registry.register(Arc::new(MockTool));
 
-    let agent_service = AgentService::new(provider, context.clone())
+    let agent_service = AgentService::new_for_test(provider, context.clone())
         .with_tool_registry(Arc::new(registry))
         .with_auto_approve_tools(true)
         .with_system_brain("Brain.".to_string());
@@ -199,12 +199,12 @@ fn test_base_context_tokens_uses_real_tool_schemas() {
         db.run_migrations().await.unwrap();
         let context = ServiceContext::new(db.pool().clone());
 
-        let service_no_tools = AgentService::new(provider.clone(), context.clone())
+        let service_no_tools = AgentService::new_for_test(provider.clone(), context.clone())
             .with_system_brain("Brain.".to_string());
 
         let registry = ToolRegistry::new();
         registry.register(Arc::new(MockTool));
-        let service_with_tools = AgentService::new(provider, context)
+        let service_with_tools = AgentService::new_for_test(provider, context)
             .with_system_brain("Brain.".to_string())
             .with_tool_registry(Arc::new(registry));
 

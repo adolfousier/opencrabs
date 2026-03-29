@@ -103,7 +103,7 @@ async fn create_error_agent(
     tool_registry.register(Arc::new(WriteTool));
     tool_registry.register(Arc::new(BashTool));
 
-    let agent_service = AgentService::new(provider, service_context.clone())
+    let agent_service = AgentService::new_for_test(provider, service_context.clone())
         .with_tool_registry(Arc::new(tool_registry));
 
     Ok((agent_service, service_context))
@@ -239,7 +239,7 @@ async fn test_error_empty_message() -> Result<()> {
     let provider = Arc::new(WorkingMockProvider);
     let service_context = ServiceContext::new(db.pool().clone());
 
-    let agent_service = AgentService::new(provider, service_context.clone());
+    let agent_service = AgentService::new_for_test(provider, service_context.clone());
 
     let session_service = SessionService::new(service_context);
     let session = session_service

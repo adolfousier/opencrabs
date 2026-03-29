@@ -10,7 +10,7 @@ async fn test_explicit_model_override() {
 
     // MockProviderWithModel echoes back the requested model name
     let provider = Arc::new(MockProviderWithModel::new("test-provider", "default-model"));
-    let agent_service = AgentService::new(provider, context.clone());
+    let agent_service = AgentService::new_for_test(provider, context.clone());
 
     let session_service = SessionService::new(context);
     let session = session_service
@@ -45,7 +45,7 @@ async fn test_default_model_fallback() {
         "test-provider",
         "provider-default",
     ));
-    let agent_service = AgentService::new(provider, context.clone());
+    let agent_service = AgentService::new_for_test(provider, context.clone());
 
     let session_service = SessionService::new(context);
     let session = session_service
@@ -73,7 +73,7 @@ async fn test_swap_provider_changes_default_model() {
     let context = ServiceContext::new(pool);
 
     let initial_provider = Arc::new(MockProviderWithModel::new("provider-1", "model-1"));
-    let agent_service = AgentService::new(initial_provider, context);
+    let agent_service = AgentService::new_for_test(initial_provider, context);
 
     assert_eq!(
         agent_service.provider_model(),
@@ -132,7 +132,7 @@ async fn test_model_in_response_matches_request() {
     let context = ServiceContext::new(pool);
 
     let provider = Arc::new(MockProviderWithModel::new("echo-provider", "echo-default"));
-    let agent_service = AgentService::new(provider, context.clone());
+    let agent_service = AgentService::new_for_test(provider, context.clone());
 
     let session_service = SessionService::new(context);
     let session = session_service
@@ -165,7 +165,7 @@ async fn test_different_sessions_different_models() {
     let context = ServiceContext::new(pool);
 
     let provider = Arc::new(MockProviderWithModel::new("shared-provider", "default"));
-    let agent_service = Arc::new(AgentService::new(provider, context.clone()));
+    let agent_service = Arc::new(AgentService::new_for_test(provider, context.clone()));
 
     let session_service = SessionService::new(context);
     let session_a = session_service
