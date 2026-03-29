@@ -230,6 +230,21 @@ impl App {
         Uuid::parse_str(content.trim()).ok()
     }
 
+    /// Pre-load a session's messages into the pane cache (for restored split panes).
+    pub(crate) async fn preload_pane_session(&mut self, session_id: Uuid) {
+        let all_messages = self
+            .message_service
+            .list_messages_for_session(session_id)
+            .await
+            .unwrap_or_default();
+        let messages =
+            crate::brain::agent::AgentService::messages_from_last_compaction(all_messages);
+        let (display, _) = Self::trim_messages_to_display_budget(&messages, 200_000);
+        let expanded: Vec<DisplayMessage> =
+            display.into_iter().flat_map(Self::expand_message).collect();
+        self.pane_message_cache.insert(session_id, expanded);
+    }
+
     /// Trim a list of DB messages to fit within a token budget (newest messages kept).
     /// Returns (kept_messages, hidden_count).
     fn trim_messages_to_display_budget(
