@@ -1139,7 +1139,13 @@ impl App {
                 self.processing_sessions.remove(&session_id);
                 self.session_cancel_tokens.remove(&session_id);
                 if self.is_current_session(session_id) {
-                    self.show_error(message);
+                    // Reload from DB to pick up any writes the agent made after
+                    // the Esc×2 cancel (tool blocks, reasoning, etc. persisted
+                    // between the initial reload and the Cancelled return).
+                    self.load_session(session_id).await?;
+                    if message != "Cancelled" {
+                        self.show_error(message);
+                    }
                 } else {
                     tracing::warn!("Background session {} error: {}", session_id, message);
                 }

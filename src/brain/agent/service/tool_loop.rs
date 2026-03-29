@@ -379,6 +379,55 @@ impl AgentService {
         let mut stream_retry_count = 0u32; // Track consecutive stream drop retries
         const MAX_STREAM_RETRIES: u32 = 2; // Retry up to 2 times on dropped streams
 
+        // Detect CLI provider once (doesn't change during the loop)
+        let is_cli_provider = self
+            .provider
+            .read()
+            .map(|p| p.cli_handles_tools())
+            .unwrap_or(false);
+
+        // Accumulator for CLI provider tool calls — intercepted from progress events
+        // so they can be persisted as <!-- tools-v2: ... --> markers in the DB.
+        let cli_tool_accum: std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+
+        // Wrap progress_callback for CLI providers to intercept ToolCompleted events
+        let progress_callback: Option<ProgressCallback> = if is_cli_provider {
+            if let Some(ref original_cb) = progress_callback {
+                let orig = original_cb.clone();
+                let accum = cli_tool_accum.clone();
+                Some(std::sync::Arc::new(
+                    move |sid: Uuid, event: ProgressEvent| {
+                        if let ProgressEvent::ToolCompleted {
+                            ref tool_name,
+                            ref tool_input,
+                            success,
+                            ref summary,
+                        } = event
+                        {
+                            let desc = AgentService::format_tool_summary(
+                                &tool_name.to_lowercase(),
+                                tool_input,
+                            );
+                            let entry = if summary.is_empty() {
+                                serde_json::json!({"d": desc, "s": success})
+                            } else {
+                                serde_json::json!({"d": desc, "s": success, "o": summary})
+                            };
+                            if let Ok(mut acc) = accum.lock() {
+                                acc.push(entry);
+                            }
+                        }
+                        orig(sid, event);
+                    },
+                ))
+            } else {
+                None
+            }
+        } else {
+            progress_callback
+        };
+
         loop {
             // Safety: warn every 50 iterations but never hard-stop
             // Loop detection (below) is the real safety net
@@ -463,11 +512,6 @@ impl AgentService {
 
             // CLI providers: pass queue callback so stream_complete can check
             // for queued user messages at tool boundaries mid-stream.
-            let is_cli_provider = self
-                .provider
-                .read()
-                .map(|p| p.cli_handles_tools())
-                .unwrap_or(false);
             let queued_buf = tokio::sync::Mutex::new(None);
 
             // Send to provider via streaming — retry once after emergency compaction if prompt is too long
@@ -840,29 +884,82 @@ impl AgentService {
                 }
             }
 
-            // Persist reasoning content to DB (before iteration text)
-            if let Some(ref reasoning) = reasoning_text
-                && !reasoning.trim().is_empty()
-            {
-                let _ = message_service
-                    .append_content(
-                        assistant_db_msg.id,
-                        &format!("<!-- reasoning -->\n{}\n<!-- /reasoning -->\n\n", reasoning),
-                    )
-                    .await;
-            }
+            // ── DB persistence ──────────────────────────────────────────
+            // CLI providers: combine reasoning + text + tool markers into a
+            // single atomic append_content call. This prevents Esc×2 cancel
+            // from reading a partial DB state (text without tool blocks) when
+            // load_session fires between separate writes.
+            if is_cli_provider {
+                let mut cli_content = String::new();
 
-            // Accumulate text from every iteration
-            if !iteration_text.is_empty() {
-                if !accumulated_text.is_empty() {
-                    accumulated_text.push_str("\n\n");
+                // 1. Reasoning
+                if let Some(ref reasoning) = reasoning_text
+                    && !reasoning.trim().is_empty()
+                {
+                    cli_content.push_str(&format!(
+                        "<!-- reasoning -->\n{}\n<!-- /reasoning -->\n\n",
+                        reasoning
+                    ));
                 }
-                accumulated_text.push_str(&iteration_text);
 
-                // REAL-TIME PERSISTENCE: Save to DB immediately after each iteration's text
-                let _ = message_service
-                    .append_content(assistant_db_msg.id, &format!("{}\n\n", iteration_text))
-                    .await;
+                // 2. Iteration text
+                if !iteration_text.is_empty() {
+                    if !accumulated_text.is_empty() {
+                        accumulated_text.push_str("\n\n");
+                    }
+                    accumulated_text.push_str(&iteration_text);
+                    cli_content.push_str(&format!("{}\n\n", iteration_text));
+                }
+
+                // 3. Tool markers from streaming progress events
+                let entries: Vec<serde_json::Value> = cli_tool_accum
+                    .lock()
+                    .map(|mut acc| acc.drain(..).collect())
+                    .unwrap_or_default();
+                if !entries.is_empty() {
+                    let marker = format!(
+                        "\n<!-- tools-v2: {} -->\n",
+                        serde_json::to_string(&entries).unwrap_or_default()
+                    );
+                    accumulated_text.push_str(&marker);
+                    cli_content.push_str(&marker);
+                }
+
+                // Single atomic write — no partial state visible to load_session
+                if !cli_content.is_empty() {
+                    let _ = message_service
+                        .append_content(assistant_db_msg.id, &cli_content)
+                        .await;
+                }
+            } else {
+                // Non-CLI: separate writes (tool execution happens between iterations)
+                if let Some(ref reasoning) = reasoning_text
+                    && !reasoning.trim().is_empty()
+                {
+                    let _ = message_service
+                        .append_content(
+                            assistant_db_msg.id,
+                            &format!(
+                                "<!-- reasoning -->\n{}\n<!-- /reasoning -->\n\n",
+                                reasoning
+                            ),
+                        )
+                        .await;
+                }
+
+                if !iteration_text.is_empty() {
+                    if !accumulated_text.is_empty() {
+                        accumulated_text.push_str("\n\n");
+                    }
+                    accumulated_text.push_str(&iteration_text);
+
+                    let _ = message_service
+                        .append_content(
+                            assistant_db_msg.id,
+                            &format!("{}\n\n", iteration_text),
+                        )
+                        .await;
+                }
             }
 
             tracing::debug!("Found {} tool uses to execute", tool_uses.len());
@@ -873,30 +970,8 @@ impl AgentService {
             if is_cli_provider && !tool_uses.is_empty() {
                 // Text/tool interleaving and ToolStarted/ToolCompleted events
                 // are already emitted during streaming by helpers.rs.
-                // Here we only handle DB persistence and cleanup.
+                // Tool markers already persisted atomically above via cli_tool_accum.
                 iteration_text.clear();
-
-                // Persist tool markers to DB so tool groups survive
-                // session reload and cancel (double-escape)
-                let cli_tool_entries: Vec<serde_json::Value> = tool_uses
-                    .iter()
-                    .map(|(_, name, input)| {
-                        let desc = Self::format_tool_summary(&name.to_lowercase(), input);
-                        serde_json::json!({"d": desc, "s": true})
-                    })
-                    .collect();
-                if !cli_tool_entries.is_empty() {
-                    let marker = format!(
-                        "\n<!-- tools-v2: {} -->\n",
-                        serde_json::to_string(&cli_tool_entries).unwrap_or_default()
-                    );
-                    accumulated_text.push_str(&marker);
-                    let _ = message_service
-                        .append_content(assistant_db_msg.id, &marker)
-                        .await;
-                }
-
-                // Clear tool_uses so we don't try to execute them below
                 tool_uses.clear();
             }
 
