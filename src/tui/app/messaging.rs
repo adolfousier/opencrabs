@@ -654,6 +654,7 @@ impl App {
             "read_file" | "read" => {
                 let path = ci(tool_input, "path")
                     .or_else(|| ci(tool_input, "file_path"))
+                    .or_else(|| ci(tool_input, "filePath"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
                 format!("Read {}", path)
@@ -661,6 +662,7 @@ impl App {
             "write_file" | "write" => {
                 let path = ci(tool_input, "path")
                     .or_else(|| ci(tool_input, "file_path"))
+                    .or_else(|| ci(tool_input, "filePath"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
                 format!("Write {}", path)
@@ -668,6 +670,7 @@ impl App {
             "edit_file" | "edit" => {
                 let path = ci(tool_input, "path")
                     .or_else(|| ci(tool_input, "file_path"))
+                    .or_else(|| ci(tool_input, "filePath"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
                 format!("Edit {}", path)
