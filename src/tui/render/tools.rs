@@ -55,7 +55,7 @@ pub(super) fn render_tool_group<'a>(
         for (i, call) in group.calls.iter().enumerate() {
             let connector = if is_last_call(i) { "└─" } else { "├─" };
             let continuation = if is_last_call(i) { "   " } else { "│  " };
-            let in_flight = call.details.is_none();
+            let in_flight = !call.completed;
 
             let header_style = if call.success || in_flight {
                 Style::default()
