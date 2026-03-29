@@ -46,10 +46,13 @@ use sessions::render_sessions;
 
 /// Render the entire UI
 pub fn render(f: &mut Frame, app: &mut App) {
-    if app.mode == AppMode::Splash {
+    if app.mode == AppMode::Splash || app.mode == AppMode::UpdatePrompt {
         let config = crate::config::Config::load().unwrap_or_default();
         let (provider, model) = crate::config::resolve_provider_from_config(&config);
         splash::render_splash(f, f.area(), provider, model);
+        if app.mode == AppMode::UpdatePrompt {
+            render_update_dialog(f, app, f.area());
+        }
         return;
     }
 
@@ -183,13 +186,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
             render_restart_dialog(f, app, f.area());
         }
         AppMode::UpdatePrompt => {
-            render_chat(f, app, chunks[0]);
-            if plan_height > 0 {
-                render_plan_checklist(f, app, chunks[1]);
-            }
-            render_input(f, app, chunks[2]);
-            render_status_bar(f, app, chunks[3]);
-            render_update_dialog(f, app, f.area());
+            // Handled by early return above (renders on top of splash)
         }
     }
 }

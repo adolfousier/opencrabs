@@ -1778,8 +1778,6 @@ impl App {
             }
             TuiEvent::UpdateAvailable(version) => {
                 self.update_available_version = Some(version);
-                // Dismiss splash so the update dialog is visible
-                self.splash_shown_at = None;
                 self.switch_mode(AppMode::UpdatePrompt).await?;
             }
             TuiEvent::FocusGained | TuiEvent::FocusLost => {
@@ -2057,10 +2055,19 @@ impl App {
             }
             AppMode::UpdatePrompt => {
                 if keys::is_cancel(&event) {
+                    // Decline — return to splash so user sees current version
                     self.update_available_version = None;
-                    self.switch_mode(AppMode::Chat).await?;
+                    if self.splash_shown_at.is_some() {
+                        // Reset splash timer so it shows for the full duration
+                        self.splash_shown_at = Some(std::time::Instant::now());
+                        self.switch_mode(AppMode::Splash).await?;
+                    } else {
+                        self.switch_mode(AppMode::Chat).await?;
+                    }
                 } else if keys::is_enter(&event) {
                     let version = self.update_available_version.take();
+                    // Dismiss splash so update progress is visible
+                    self.splash_shown_at = None;
                     self.switch_mode(AppMode::Chat).await?;
                     if let Some(v) = version {
                         self.push_system_message(format!("Updating to v{}...", v));
