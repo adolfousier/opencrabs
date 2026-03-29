@@ -167,10 +167,19 @@ pub async fn on_interaction(
                     let mut provider_err: Option<String> = None;
                     if let Some(pname) = provider_name {
                         match crate::config::Config::load() {
-                            Ok(config) => match crate::brain::provider::factory::create_provider_by_name(&config, pname) {
-                                Ok(new_provider) => state.agent.swap_provider(new_provider),
-                                Err(e) => provider_err = Some(format!("Failed to create provider '{}': {}", pname, e)),
-                            },
+                            Ok(config) => {
+                                match crate::brain::provider::factory::create_provider_by_name(
+                                    &config, pname,
+                                ) {
+                                    Ok(new_provider) => state.agent.swap_provider(new_provider),
+                                    Err(e) => {
+                                        provider_err = Some(format!(
+                                            "Failed to create provider '{}': {}",
+                                            pname, e
+                                        ))
+                                    }
+                                }
+                            }
                             Err(e) => provider_err = Some(format!("Failed to load config: {}", e)),
                         }
                     }

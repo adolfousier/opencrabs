@@ -3,26 +3,26 @@
 //! Simulates the scenario where opencode CLI spawn fails because the conversation
 //! context exceeds OS ARG_MAX. The tool loop should catch this, auto-compact, and retry.
 
-use anyhow::Result;
-use async_trait::async_trait;
 use crate::{
-    db::Database,
     brain::{
         agent::service::AgentService,
         provider::{
+            Provider, ProviderStream,
             error::{ProviderError, Result as ProviderResult},
             types::{
                 ContentBlock, ContentDelta, LLMRequest, LLMResponse, MessageDelta, Role,
                 StopReason, StreamEvent, StreamMessage, TokenUsage,
             },
-            Provider, ProviderStream,
         },
     },
+    db::Database,
     services::{ServiceContext, SessionService},
 };
+use anyhow::Result;
+use async_trait::async_trait;
 use std::sync::{
-    atomic::{AtomicU32, Ordering},
     Arc,
+    atomic::{AtomicU32, Ordering},
 };
 
 /// Mock provider that fails with "Argument list too long" on the first stream() call,
@@ -335,7 +335,8 @@ async fn context_length_exceeded_triggers_emergency_compaction() -> Result<()> {
 
     let resp = result.unwrap();
     assert!(
-        resp.content.contains("Recovered after ContextLengthExceeded"),
+        resp.content
+            .contains("Recovered after ContextLengthExceeded"),
         "Response should come from the retry: {}",
         resp.content
     );

@@ -405,10 +405,9 @@ impl AgentService {
                 Some(std::sync::Arc::new(
                     move |sid: Uuid, event: ProgressEvent| {
                         match event {
-                            ProgressEvent::IntermediateText {
-                                ref text,
-                                ..
-                            } if !text.is_empty() => {
+                            ProgressEvent::IntermediateText { ref text, .. }
+                                if !text.is_empty() =>
+                            {
                                 if let Ok(mut acc) = segs.lock() {
                                     acc.push(CliSegment::Text(text.clone()));
                                 }
@@ -556,7 +555,10 @@ impl AgentService {
                     if e.to_string().contains("prompt is too long")
                         || e.to_string().contains("too many tokens")
                         || e.to_string().contains("Argument list too long")
-                        || matches!(e, crate::brain::provider::ProviderError::ContextLengthExceeded(_)) =>
+                        || matches!(
+                            e,
+                            crate::brain::provider::ProviderError::ContextLengthExceeded(_)
+                        ) =>
                 {
                     tracing::warn!("Prompt too long for provider — emergency compaction");
                     match self
@@ -592,7 +594,10 @@ impl AgentService {
                             context.add_message(Message::user(cont_text));
                         }
                         Err(compact_err) => {
-                            tracing::error!("Emergency compaction also failed: {} — falling back to hard truncation", compact_err);
+                            tracing::error!(
+                                "Emergency compaction also failed: {} — falling back to hard truncation",
+                                compact_err
+                            );
 
                             // Hard truncate: keep last 12 message pairs (24 messages).
                             // Full conversation is in the DB — agent can search_session for older context.
@@ -617,7 +622,9 @@ impl AgentService {
                                  Continue from where you left off.]",
                                 total.saturating_sub(KEEP_MESSAGES)
                             );
-                            context.messages.insert(0, Message::user(truncation_marker.clone()));
+                            context
+                                .messages
+                                .insert(0, Message::user(truncation_marker.clone()));
 
                             // Persist truncation marker to DB
                             if let Err(e) = message_service
@@ -632,13 +639,26 @@ impl AgentService {
                                 .messages
                                 .iter()
                                 .map(|m| {
-                                    m.content.iter().map(|b| match b {
-                                        ContentBlock::Text { text } => crate::brain::tokenizer::count_tokens(text),
-                                        ContentBlock::ToolUse { input, .. } => crate::brain::tokenizer::count_tokens(&input.to_string()),
-                                        ContentBlock::ToolResult { content, .. } => crate::brain::tokenizer::count_tokens(content),
-                                        ContentBlock::Thinking { thinking, .. } => crate::brain::tokenizer::count_tokens(thinking),
-                                        ContentBlock::Image { .. } => 1000,
-                                    }).sum::<usize>()
+                                    m.content
+                                        .iter()
+                                        .map(|b| match b {
+                                            ContentBlock::Text { text } => {
+                                                crate::brain::tokenizer::count_tokens(text)
+                                            }
+                                            ContentBlock::ToolUse { input, .. } => {
+                                                crate::brain::tokenizer::count_tokens(
+                                                    &input.to_string(),
+                                                )
+                                            }
+                                            ContentBlock::ToolResult { content, .. } => {
+                                                crate::brain::tokenizer::count_tokens(content)
+                                            }
+                                            ContentBlock::Thinking { thinking, .. } => {
+                                                crate::brain::tokenizer::count_tokens(thinking)
+                                            }
+                                            ContentBlock::Image { .. } => 1000,
+                                        })
+                                        .sum::<usize>()
                                 })
                                 .sum();
                         }
@@ -809,8 +829,7 @@ impl AgentService {
                                 if !pending_tools.is_empty() {
                                     let marker = format!(
                                         "\n<!-- tools-v2: {} -->\n",
-                                        serde_json::to_string(&pending_tools)
-                                            .unwrap_or_default()
+                                        serde_json::to_string(&pending_tools).unwrap_or_default()
                                     );
                                     cancel_content.push_str(&marker);
                                     accumulated_text.push_str(&marker);
@@ -844,9 +863,7 @@ impl AgentService {
                             && !text.trim().is_empty()
                         {
                             // Only append if not already covered by segments
-                            if cancel_content.is_empty()
-                                || !cancel_content.contains(text.trim())
-                            {
+                            if cancel_content.is_empty() || !cancel_content.contains(text.trim()) {
                                 cancel_content.push_str(&format!("{}\n\n", text));
                                 if !accumulated_text.is_empty() {
                                     accumulated_text.push_str("\n\n");
@@ -873,10 +890,7 @@ impl AgentService {
                             }
                             accumulated_text.push_str(text);
                             let _ = message_service
-                                .append_content(
-                                    assistant_db_msg.id,
-                                    &format!("{}\n\n", text),
-                                )
+                                .append_content(assistant_db_msg.id, &format!("{}\n\n", text))
                                 .await;
                         }
                     }
@@ -1062,8 +1076,7 @@ impl AgentService {
                             if !pending_tools.is_empty() {
                                 let marker = format!(
                                     "\n<!-- tools-v2: {} -->\n",
-                                    serde_json::to_string(&pending_tools)
-                                        .unwrap_or_default()
+                                    serde_json::to_string(&pending_tools).unwrap_or_default()
                                 );
                                 cli_content.push_str(&marker);
                                 accumulated_text.push_str(&marker);

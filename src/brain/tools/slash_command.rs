@@ -73,11 +73,21 @@ impl SlashCommandTool {
         lines.push(String::new());
         lines.push("Channels:".to_string());
         let ch = &config.channels;
-        if ch.telegram.enabled { lines.push("  telegram — enabled".to_string()); }
-        if ch.discord.enabled { lines.push("  discord — enabled".to_string()); }
-        if ch.slack.enabled { lines.push("  slack — enabled".to_string()); }
-        if ch.whatsapp.enabled { lines.push("  whatsapp — enabled".to_string()); }
-        if ch.trello.enabled { lines.push("  trello — enabled".to_string()); }
+        if ch.telegram.enabled {
+            lines.push("  telegram — enabled".to_string());
+        }
+        if ch.discord.enabled {
+            lines.push("  discord — enabled".to_string());
+        }
+        if ch.slack.enabled {
+            lines.push("  slack — enabled".to_string());
+        }
+        if ch.whatsapp.enabled {
+            lines.push("  whatsapp — enabled".to_string());
+        }
+        if ch.trello.enabled {
+            lines.push("  trello — enabled".to_string());
+        }
 
         // Voice config
         lines.push(String::new());
