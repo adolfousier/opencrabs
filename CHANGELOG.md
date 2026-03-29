@@ -5,6 +5,44 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.92] - 2026-03-29
+
+### Added
+- **Self-healing config recovery** — When `config.toml` becomes corrupted or unloadable, OpenCrabs automatically restores from the last-known-good snapshot saved on every successful write. User sees a notification explaining what was recovered
+- **Provider health tracking** — Per-provider success/failure history tracked in `~/.opencrabs/provider_health.json`. `/doctor` slash command shows health stats. Failed providers logged with timestamps for debugging intermittent API issues
+- **DB integrity check on startup** — SQLite `PRAGMA integrity_check` runs at boot. If corruption is detected, a notification appears in TUI and all channels instead of silently failing
+- **Unknown config key warnings** — Unknown top-level keys in `config.toml` now trigger a startup notification listing the unrecognized keys, catching typos like `[teelgram]` or `[a2a_gatway]`
+- **Self-healing user notifications** — All self-healing events (config recovery, provider failures, integrity issues) surface as visible notifications across TUI, Telegram, Discord, Slack, and WhatsApp instead of hidden log entries
+
+### Fixed
+- **Telegram intermediate texts vanishing between tool rounds** — Messages sent during multi-tool iterations disappeared because new edits overwrote previous content. Telegram handler now maintains a persistent intermediate message stack with proper ordering
+- **Telegram intermediate texts not sticking** — Follow-up fix: intermediate text messages were still being deleted prematurely during rapid tool execution. Reworked the message lifecycle to hold messages until the final response arrives
+- **Duplicate final response on Telegram for CLI providers** — CLI providers return all content blocks in a single iteration. IntermediateText emitted the full text, then the final response repeated it. Now IntermediateText only emits text before the last tool block; final response only extracts text after it
+- **Reasoning as fallback intermediate text** — When a CLI provider returns reasoning but no visible text between tool rounds, the reasoning content is now used as fallback intermediate text for channels instead of showing nothing
+- **Non-focused panes hiding tool calls and thinking text** — `render_simple_message` skipped tool_group messages entirely, so non-focused split panes showed less content than the focused pane. Now shows compact tool call summaries and stripped reasoning text
+- **Non-focused pane collapsed tool groups** — Tool groups in non-focused panes now display as single collapsed lines matching the focused pane style, with thinking indicators for reasoning blocks
+- **Non-focused panes not scrolled to bottom** — Split panes that weren't focused appeared stuck at the top. Fixed scroll position calculation for inactive panes
+- **Inactive split panes stale cache** — Cached render state for background panes wasn't invalidated when new messages arrived. Now clears cache on session updates
+- **Tool calls showing running forever after completion** — Tool call status stayed at "running" spinner even after the tool finished. Now correctly transitions to success/failure state
+- **Silently dropped errors across config, channels, and persistence** — 14 files had `let _ = ...` or `.ok()` swallowing errors in config writes, channel sends, tool connections, and pane state. All now surface errors via logging or user notifications
+- **Remaining silent error drops in tools and channel handlers** — Second pass caught additional swallowed errors in Slack connect, Trello connect, slash commands, Telegram handler, and WhatsApp handler
+- **Onboarding config write errors batched** — Config writes during onboarding used individual `let _ =` calls. Replaced with `try_write!` macros that batch errors and surface them at the end of each wizard step
+- **Config::load() fallback-to-default** — Render, dialogs, messaging, and cron modules silently fell back to default config when load failed, masking real config issues. Now propagate errors or use the passed-in config reference
+- **Custom provider name normalization** — Custom provider names with mixed case or whitespace were treated as different providers. Now normalized on both load and save
+- **Case-insensitive tool input key lookup** — Tool input display descriptions used exact-case key matching, failing for providers that return keys in different casing
+- **Cached state not cleaned on session delete** — Deleting a session left stale cached pane state behind. Now clears cache entries for the deleted session
+- **`gateway` serde alias for A2A config** — Added `gateway` as a serde alias for the A2A config section, plus deduplication of typo warnings
+- **Model selector wiping API keys on Enter** — Pressing Enter in the model selector could clear the API key for the selected provider. Now preserves existing keys
+- **IntermediateText emission timing for CLI providers** — IntermediateText was emitted after clearing iteration state, losing the accumulated text. Now emits before clearing
+
+### Changed
+- **AgentService::new() requires &Config** — Constructor now takes an explicit `&Config` parameter instead of calling `Config::load()` internally. Eliminates hidden I/O, makes dependencies explicit, and enables test injection. All production callers and 11 test files updated
+
+### Testing
+- **27 self-healing system tests** — Config snapshot/restore, provider health tracking, DB integrity check, unknown key detection, notification delivery across all channels
+- **All test files migrated to `AgentService::new_for_test()`** — 11 test files updated to use the new test constructor
+- **1,593 total tests** (up from 1,564)
+
 ## [0.2.91] - 2026-03-29
 
 ### Added
@@ -1824,6 +1862,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.92]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.92
 [0.2.91]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.91
 [0.2.90]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.90
 [0.2.89]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.89

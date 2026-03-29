@@ -107,7 +107,12 @@ fn render_simple_message(lines: &mut Vec<Line<'_>>, msg: &DisplayMessage) {
                 ("●", Color::DarkGray)
             };
             lines.push(Line::from(Span::styled(
-                format!("  {} {} tool call{}", icon, n, if n == 1 { "" } else { "s" }),
+                format!(
+                    "  {} {} tool call{}",
+                    icon,
+                    n,
+                    if n == 1 { "" } else { "s" }
+                ),
                 Style::default().fg(color),
             )));
         }
