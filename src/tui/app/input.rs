@@ -1147,9 +1147,15 @@ impl App {
                     .map(|s| s.id == session_id)
                     .unwrap_or(false);
                 self.session_service.delete_session(session_id).await?;
+                // Clean up all cached state for this session
+                self.session_context_cache.remove(&session_id);
+                self.pane_message_cache.remove(&session_id);
+                self.session_cancel_tokens.remove(&session_id);
+                self.processing_sessions.remove(&session_id);
                 if is_current {
                     self.current_session = None;
                     self.messages.clear();
+                    self.render_cache.clear();
                     *self.shared_session_id.lock().await = None;
                 }
                 self.load_sessions().await?;
