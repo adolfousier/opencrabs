@@ -608,7 +608,7 @@ pub async fn switch_model(
 
 /// Run evolve directly (no LLM needed). Returns a user-facing status message.
 pub async fn run_evolve() -> String {
-    use crate::brain::tools::{evolve::EvolveTool, Tool, ToolExecutionContext};
+    use crate::brain::tools::{Tool, ToolExecutionContext, evolve::EvolveTool};
 
     let ctx = ToolExecutionContext::new(uuid::Uuid::nil());
     let tool = EvolveTool::new(None);
@@ -635,9 +635,9 @@ pub fn run_doctor() -> String {
 /// Channels call this first — if it returns Some, send the text and return.
 pub async fn try_execute_text_command(cmd: &ChannelCommand) -> Option<String> {
     match cmd {
-        ChannelCommand::Help(body) | ChannelCommand::Usage(body) | ChannelCommand::UserSystem(body) => {
-            Some(body.clone())
-        }
+        ChannelCommand::Help(body)
+        | ChannelCommand::Usage(body)
+        | ChannelCommand::UserSystem(body) => Some(body.clone()),
         ChannelCommand::Doctor => Some(run_doctor()),
         ChannelCommand::Evolve => Some(run_evolve().await),
         _ => None,
