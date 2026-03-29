@@ -398,6 +398,16 @@ impl AgentService {
             .filter(|b| !matches!(b, ContentBlock::Text { text } if text.is_empty()))
             .collect();
 
+        // Snapshot config as "last known good" on first successful provider call.
+        // Only runs once per process — avoids repeated I/O on every response.
+        {
+            use std::sync::atomic::{AtomicBool, Ordering};
+            static SAVED: AtomicBool = AtomicBool::new(false);
+            if !SAVED.swap(true, Ordering::Relaxed) {
+                crate::config::save_last_good_config();
+            }
+        }
+
         let reasoning = if reasoning_buf.is_empty() {
             None
         } else {

@@ -984,6 +984,67 @@ pub fn daily_backup(path: &Path, max_days: usize) {
     }
 }
 
+/// Snapshot current config + keys as "last known good".
+///
+/// Called after a successful provider response proves the config works.
+/// On config parse failure, `Config::load()` falls back to these files.
+/// Silently ignores errors — must never block normal operation.
+pub fn save_last_good_config() {
+    let home = opencrabs_home();
+
+    let config_path = home.join("config.toml");
+    let keys_path_src = home.join("keys.toml");
+    let config_good = home.join("config.last_good.toml");
+    let keys_good = home.join("keys.last_good.toml");
+
+    if config_path.exists()
+        && let Err(e) = fs::copy(&config_path, &config_good)
+    {
+        tracing::debug!("Failed to save last-good config: {e}");
+    }
+    if keys_path_src.exists()
+        && let Err(e) = fs::copy(&keys_path_src, &keys_good)
+    {
+        tracing::debug!("Failed to save last-good keys: {e}");
+    }
+}
+
+/// Try loading config from last-known-good snapshot.
+///
+/// Returns None if no snapshot exists or if it also fails to parse.
+pub fn load_last_good_config() -> Option<Config> {
+    let home = opencrabs_home();
+    let config_good = home.join("config.last_good.toml");
+
+    if !config_good.exists() {
+        return None;
+    }
+
+    tracing::warn!("Attempting recovery from last-known-good config");
+
+    // Load base config from the good snapshot
+    let mut config = match Config::load_from_path(&config_good) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Last-good config also failed: {e}");
+            return None;
+        }
+    };
+
+    // Try loading keys from good snapshot
+    let keys_good = home.join("keys.last_good.toml");
+    if keys_good.exists()
+        && let Ok(content) = fs::read_to_string(&keys_good)
+        && let Ok(keys) = toml::from_str::<KeysFile>(&content)
+    {
+        config.providers = merge_provider_keys(config.providers, keys.providers);
+        config.channels = merge_channel_keys(config.channels, keys.channels);
+    }
+
+    tracing::warn!("Recovered config from last-known-good snapshot");
+    Some(config)
+}
+
 /// Get path to keys.toml - separate file for sensitive API keys
 pub fn keys_path() -> PathBuf {
     opencrabs_home().join("keys.toml")
@@ -1419,6 +1480,21 @@ impl Config {
     /// 3. Local config: ./opencrabs.toml
     /// 4. Environment variables
     pub fn load() -> Result<Self> {
+        match Self::load_inner() {
+            Ok(config) => Ok(config),
+            Err(e) => {
+                tracing::error!("Config load failed: {e} — trying last-known-good");
+                if let Some(good) = load_last_good_config() {
+                    Ok(good)
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    /// Inner load implementation — separated so `load()` can wrap with recovery.
+    fn load_inner() -> Result<Self> {
         tracing::debug!("Loading configuration...");
 
         // Start with defaults
