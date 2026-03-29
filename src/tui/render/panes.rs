@@ -93,66 +93,67 @@ fn render_simple_message(lines: &mut Vec<Line<'_>>, msg: &DisplayMessage) {
         return;
     }
 
-    // Tool groups: show compact summary of each tool call
+    // Tool groups: single collapsed line matching focused pane style
     if msg.role == "tool_group" {
         if let Some(ref group) = msg.tool_group {
-            for call in &group.calls {
-                let icon = if !call.completed {
-                    "⚙"
-                } else if call.success {
-                    "✓"
-                } else {
-                    "✗"
-                };
-                let color = if !call.completed {
-                    Color::Yellow
-                } else if call.success {
-                    Color::DarkGray
-                } else {
-                    Color::Red
-                };
-                lines.push(Line::from(Span::styled(
-                    format!("  {} {}", icon, call.description),
-                    Style::default().fg(color),
-                )));
-            }
+            let n = group.calls.len();
+            let all_done = group.calls.iter().all(|c| c.completed);
+            let any_failed = group.calls.iter().any(|c| c.completed && !c.success);
+            let (icon, color) = if !all_done {
+                ("⚙", Color::Yellow)
+            } else if any_failed {
+                ("●", Color::Red)
+            } else {
+                ("●", Color::DarkGray)
+            };
+            lines.push(Line::from(Span::styled(
+                format!("  {} {} tool call{}", icon, n, if n == 1 { "" } else { "s" }),
+                Style::default().fg(color),
+            )));
         }
         return;
     }
 
+    let is_assistant = msg.role == "assistant";
     let (prefix, color) = match msg.role.as_str() {
         "user" => ("> ", Color::Cyan),
         "assistant" => ("", Color::Reset),
         _ => ("", Color::DarkGray),
     };
 
-    // Strip reasoning blocks from content for preview
-    let raw = &msg.content;
-    let content = if raw.contains("<!-- reasoning -->") {
-        // Show just "[thinking...]" instead of raw reasoning XML
-        let stripped = raw
-            .split("<!-- reasoning -->")
-            .enumerate()
-            .map(|(i, part)| {
-                if i == 0 {
-                    part.to_string()
-                } else if let Some(after) = part.split("<!-- /reasoning -->").nth(1) {
-                    after.to_string()
-                } else {
-                    String::new()
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("");
-        let trimmed = stripped.trim().to_string();
-        if trimmed.is_empty() {
-            "[thinking...]".to_string()
+    // Strip reasoning/tool-marker blocks from content
+    let mut content = msg.content.clone();
+    // Remove <!-- reasoning -->...<!-- /reasoning --> blocks
+    while let Some(start) = content.find("<!-- reasoning -->") {
+        if let Some(end) = content.find("<!-- /reasoning -->") {
+            content = format!(
+                "{}{}",
+                &content[..start],
+                &content[end + "<!-- /reasoning -->".len()..]
+            );
         } else {
-            trimmed
+            content = content[..start].to_string();
         }
-    } else {
-        raw.clone()
-    };
+    }
+    // Remove <!-- tools-v2: ... --> markers
+    while let Some(start) = content.find("<!-- tools-v2:") {
+        if let Some(end) = content[start..].find("-->") {
+            content = format!("{}{}", &content[..start], &content[start + end + 3..]);
+        } else {
+            break;
+        }
+    }
+    let content = content.trim().to_string();
+
+    // Show thinking indicator if assistant has reasoning details
+    if is_assistant && msg.details.is_some() {
+        lines.push(Line::from(Span::styled(
+            "  ▸ Thinking",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
+        )));
+    }
 
     // Truncate long messages for preview
     let content = if content.len() > 500 {
@@ -161,7 +162,7 @@ fn render_simple_message(lines: &mut Vec<Line<'_>>, msg: &DisplayMessage) {
         content
     };
 
-    if content.trim().is_empty() {
+    if content.is_empty() {
         return;
     }
 
