@@ -806,6 +806,13 @@ pub(crate) async fn handle_message(
                 bot.send_message(msg.chat.id, reply).await?;
                 return Ok(());
             }
+            ChannelCommand::Evolve => {
+                bot.send_message(msg.chat.id, "⏳ Checking for updates...")
+                    .await?;
+                let result = commands::run_evolve().await;
+                bot.send_message(msg.chat.id, &result).await?;
+                return Ok(());
+            }
             ChannelCommand::Compact => {
                 bot.send_message(msg.chat.id, "⏳ Compacting context...")
                     .await?;
