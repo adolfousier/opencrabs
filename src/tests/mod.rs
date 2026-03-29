@@ -2,6 +2,7 @@ pub mod altgr_input_test;
 pub mod brain_templates_test;
 pub mod candle_whisper_test;
 pub mod channel_search_test;
+pub mod cli_arg_too_long_test;
 pub mod cli_test;
 pub mod collapse_build_output_test;
 pub mod compaction_test;

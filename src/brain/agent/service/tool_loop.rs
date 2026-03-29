@@ -386,37 +386,54 @@ impl AgentService {
             .map(|p| p.cli_handles_tools())
             .unwrap_or(false);
 
-        // Accumulator for CLI provider tool calls — intercepted from progress events
-        // so they can be persisted as <!-- tools-v2: ... --> markers in the DB.
-        let cli_tool_accum: std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>> =
+        // Ordered content segments for CLI providers — tracks text and tool markers
+        // in the exact order they stream, so DB persistence preserves interleaving.
+        #[derive(Clone)]
+        enum CliSegment {
+            Text(String),
+            Tool(serde_json::Value),
+        }
+        let cli_segments: std::sync::Arc<std::sync::Mutex<Vec<CliSegment>>> =
             std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
 
-        // Wrap progress_callback for CLI providers to intercept ToolCompleted events
+        // Wrap progress_callback for CLI providers to intercept IntermediateText
+        // and ToolCompleted events, preserving their streaming order.
         let progress_callback: Option<ProgressCallback> = if is_cli_provider {
             if let Some(ref original_cb) = progress_callback {
                 let orig = original_cb.clone();
-                let accum = cli_tool_accum.clone();
+                let segs = cli_segments.clone();
                 Some(std::sync::Arc::new(
                     move |sid: Uuid, event: ProgressEvent| {
-                        if let ProgressEvent::ToolCompleted {
-                            ref tool_name,
-                            ref tool_input,
-                            success,
-                            ref summary,
-                        } = event
-                        {
-                            let desc = AgentService::format_tool_summary(
-                                &tool_name.to_lowercase(),
-                                tool_input,
-                            );
-                            let entry = if summary.is_empty() {
-                                serde_json::json!({"d": desc, "s": success})
-                            } else {
-                                serde_json::json!({"d": desc, "s": success, "o": summary})
-                            };
-                            if let Ok(mut acc) = accum.lock() {
-                                acc.push(entry);
+                        match event {
+                            ProgressEvent::IntermediateText {
+                                ref text,
+                                ..
+                            } if !text.is_empty() => {
+                                if let Ok(mut acc) = segs.lock() {
+                                    acc.push(CliSegment::Text(text.clone()));
+                                }
                             }
+                            ProgressEvent::ToolCompleted {
+                                ref tool_name,
+                                ref tool_input,
+                                success,
+                                ref summary,
+                                ..
+                            } => {
+                                let desc = AgentService::format_tool_summary(
+                                    &tool_name.to_lowercase(),
+                                    tool_input,
+                                );
+                                let entry = if summary.is_empty() {
+                                    serde_json::json!({"d": desc, "s": success})
+                                } else {
+                                    serde_json::json!({"d": desc, "s": success, "o": summary})
+                                };
+                                if let Ok(mut acc) = segs.lock() {
+                                    acc.push(CliSegment::Tool(entry));
+                                }
+                            }
+                            _ => {}
                         }
                         orig(sid, event);
                     },
@@ -537,10 +554,11 @@ impl AgentService {
                 Ok(resp) => resp,
                 Err(ref e)
                     if e.to_string().contains("prompt is too long")
-                        || e.to_string().contains("too many tokens") =>
+                        || e.to_string().contains("too many tokens")
+                        || e.to_string().contains("Argument list too long")
+                        || matches!(e, crate::brain::provider::ProviderError::ContextLengthExceeded(_)) =>
                 {
                     tracing::warn!("Prompt too long for provider — emergency compaction");
-                    let err_msg = e.to_string();
                     match self
                         .compact_context(session_id, &mut context, &model_name)
                         .await
@@ -574,11 +592,55 @@ impl AgentService {
                             context.add_message(Message::user(cont_text));
                         }
                         Err(compact_err) => {
-                            tracing::error!("Emergency compaction also failed: {}", compact_err);
-                            return Err(AgentError::Internal(format!(
-                                "Provider rejected prompt ({}) and emergency compaction failed: {}",
-                                err_msg, compact_err
-                            )));
+                            tracing::error!("Emergency compaction also failed: {} — falling back to hard truncation", compact_err);
+
+                            // Hard truncate: keep last 12 message pairs (24 messages).
+                            // Full conversation is in the DB — agent can search_session for older context.
+                            const KEEP_MESSAGES: usize = 24;
+                            let total = context.messages.len();
+                            if total > KEEP_MESSAGES {
+                                let dropped = total - KEEP_MESSAGES;
+                                context.messages = context.messages.split_off(dropped);
+                                tracing::warn!(
+                                    "Hard truncated context: dropped {} messages, kept {}",
+                                    dropped,
+                                    context.messages.len()
+                                );
+                            }
+
+                            // Insert truncation marker so the agent knows context was lost
+                            let truncation_marker = format!(
+                                "[CONTEXT TRUNCATION — The conversation was too large for the provider \
+                                 and compaction failed. The {} oldest messages were dropped. \
+                                 The full conversation history is still in the database — use the \
+                                 search_session tool if you need to recall earlier context. \
+                                 Continue from where you left off.]",
+                                total.saturating_sub(KEEP_MESSAGES)
+                            );
+                            context.messages.insert(0, Message::user(truncation_marker.clone()));
+
+                            // Persist truncation marker to DB
+                            if let Err(e) = message_service
+                                .create_message(session_id, "user".to_string(), truncation_marker)
+                                .await
+                            {
+                                tracing::error!("Failed to persist truncation marker: {}", e);
+                            }
+
+                            // Re-estimate token count after truncation
+                            context.token_count = context
+                                .messages
+                                .iter()
+                                .map(|m| {
+                                    m.content.iter().map(|b| match b {
+                                        ContentBlock::Text { text } => crate::brain::tokenizer::count_tokens(text),
+                                        ContentBlock::ToolUse { input, .. } => crate::brain::tokenizer::count_tokens(&input.to_string()),
+                                        ContentBlock::ToolResult { content, .. } => crate::brain::tokenizer::count_tokens(content),
+                                        ContentBlock::Thinking { thinking, .. } => crate::brain::tokenizer::count_tokens(thinking),
+                                        ContentBlock::Image { .. } => 1000,
+                                    }).sum::<usize>()
+                                })
+                                .sum();
                         }
                     }
 
@@ -719,19 +781,104 @@ impl AgentService {
                 && let Some(ref token) = cancel_token
                 && token.is_cancelled()
             {
-                // Extract any text from the partial response for persistence
-                for block in &response.content {
-                    if let ContentBlock::Text { text } = block
-                        && !text.trim().is_empty()
+                if is_cli_provider {
+                    // CLI providers: persist interleaved text + tool markers from
+                    // streaming events. These were accumulated by the wrapped callback.
+                    let mut cancel_content = String::new();
+
+                    // Reasoning
+                    if let Some(ref reasoning) = reasoning_text
+                        && !reasoning.trim().is_empty()
                     {
-                        if !accumulated_text.is_empty() {
-                            accumulated_text.push_str("\n\n");
+                        cancel_content.push_str(&format!(
+                            "<!-- reasoning -->\n{}\n<!-- /reasoning -->\n\n",
+                            reasoning
+                        ));
+                    }
+
+                    // Build interleaved content from ordered segments
+                    let segments: Vec<CliSegment> = cli_segments
+                        .lock()
+                        .map(|mut s| s.drain(..).collect())
+                        .unwrap_or_default();
+                    let mut pending_tools: Vec<serde_json::Value> = Vec::new();
+                    for seg in segments {
+                        match seg {
+                            CliSegment::Text(text) => {
+                                // Flush pending tools before text
+                                if !pending_tools.is_empty() {
+                                    let marker = format!(
+                                        "\n<!-- tools-v2: {} -->\n",
+                                        serde_json::to_string(&pending_tools)
+                                            .unwrap_or_default()
+                                    );
+                                    cancel_content.push_str(&marker);
+                                    accumulated_text.push_str(&marker);
+                                    pending_tools.clear();
+                                }
+                                cancel_content.push_str(&format!("{}\n\n", text));
+                                if !accumulated_text.is_empty() {
+                                    accumulated_text.push_str("\n\n");
+                                }
+                                accumulated_text.push_str(&text);
+                            }
+                            CliSegment::Tool(entry) => {
+                                pending_tools.push(entry);
+                            }
                         }
-                        accumulated_text.push_str(text);
-                        // Persist partial text to DB
+                    }
+                    // Flush trailing tools
+                    if !pending_tools.is_empty() {
+                        let marker = format!(
+                            "\n<!-- tools-v2: {} -->\n",
+                            serde_json::to_string(&pending_tools).unwrap_or_default()
+                        );
+                        cancel_content.push_str(&marker);
+                        accumulated_text.push_str(&marker);
+                    }
+
+                    // Also extract any text from the partial response not yet
+                    // emitted as IntermediateText (trailing text after last tool)
+                    for block in &response.content {
+                        if let ContentBlock::Text { text } = block
+                            && !text.trim().is_empty()
+                        {
+                            // Only append if not already covered by segments
+                            if cancel_content.is_empty()
+                                || !cancel_content.contains(text.trim())
+                            {
+                                cancel_content.push_str(&format!("{}\n\n", text));
+                                if !accumulated_text.is_empty() {
+                                    accumulated_text.push_str("\n\n");
+                                }
+                                accumulated_text.push_str(text);
+                            }
+                        }
+                    }
+
+                    // Single atomic write
+                    if !cancel_content.is_empty() {
                         let _ = message_service
-                            .append_content(assistant_db_msg.id, &format!("{}\n\n", text))
+                            .append_content(assistant_db_msg.id, &cancel_content)
                             .await;
+                    }
+                } else {
+                    // Non-CLI: persist partial text from response blocks
+                    for block in &response.content {
+                        if let ContentBlock::Text { text } = block
+                            && !text.trim().is_empty()
+                        {
+                            if !accumulated_text.is_empty() {
+                                accumulated_text.push_str("\n\n");
+                            }
+                            accumulated_text.push_str(text);
+                            let _ = message_service
+                                .append_content(
+                                    assistant_db_msg.id,
+                                    &format!("{}\n\n", text),
+                                )
+                                .await;
+                        }
                     }
                 }
                 tracing::info!(
@@ -885,10 +1032,10 @@ impl AgentService {
             }
 
             // ── DB persistence ──────────────────────────────────────────
-            // CLI providers: combine reasoning + text + tool markers into a
-            // single atomic append_content call. This prevents Esc×2 cancel
-            // from reading a partial DB state (text without tool blocks) when
-            // load_session fires between separate writes.
+            // CLI providers: build interleaved content from ordered segments
+            // (text + tool markers in streaming order) for a single atomic write.
+            // This preserves the text→tools→text sequence seen during live streaming
+            // and survives Esc×2 cancel + restart.
             if is_cli_provider {
                 let mut cli_content = String::new();
 
@@ -902,27 +1049,45 @@ impl AgentService {
                     ));
                 }
 
-                // 2. Iteration text
-                if !iteration_text.is_empty() {
-                    if !accumulated_text.is_empty() {
-                        accumulated_text.push_str("\n\n");
-                    }
-                    accumulated_text.push_str(&iteration_text);
-                    cli_content.push_str(&format!("{}\n\n", iteration_text));
-                }
-
-                // 3. Tool markers from streaming progress events
-                let entries: Vec<serde_json::Value> = cli_tool_accum
+                // 2. Interleaved text + tool markers from streaming events
+                let segments: Vec<CliSegment> = cli_segments
                     .lock()
-                    .map(|mut acc| acc.drain(..).collect())
+                    .map(|mut s| s.drain(..).collect())
                     .unwrap_or_default();
-                if !entries.is_empty() {
+                let mut pending_tools: Vec<serde_json::Value> = Vec::new();
+                for seg in segments {
+                    match seg {
+                        CliSegment::Text(text) => {
+                            // Flush pending tools before text
+                            if !pending_tools.is_empty() {
+                                let marker = format!(
+                                    "\n<!-- tools-v2: {} -->\n",
+                                    serde_json::to_string(&pending_tools)
+                                        .unwrap_or_default()
+                                );
+                                cli_content.push_str(&marker);
+                                accumulated_text.push_str(&marker);
+                                pending_tools.clear();
+                            }
+                            cli_content.push_str(&format!("{}\n\n", text));
+                            if !accumulated_text.is_empty() {
+                                accumulated_text.push_str("\n\n");
+                            }
+                            accumulated_text.push_str(&text);
+                        }
+                        CliSegment::Tool(entry) => {
+                            pending_tools.push(entry);
+                        }
+                    }
+                }
+                // Flush trailing tools
+                if !pending_tools.is_empty() {
                     let marker = format!(
                         "\n<!-- tools-v2: {} -->\n",
-                        serde_json::to_string(&entries).unwrap_or_default()
+                        serde_json::to_string(&pending_tools).unwrap_or_default()
                     );
-                    accumulated_text.push_str(&marker);
                     cli_content.push_str(&marker);
+                    accumulated_text.push_str(&marker);
                 }
 
                 // Single atomic write — no partial state visible to load_session
@@ -939,10 +1104,7 @@ impl AgentService {
                     let _ = message_service
                         .append_content(
                             assistant_db_msg.id,
-                            &format!(
-                                "<!-- reasoning -->\n{}\n<!-- /reasoning -->\n\n",
-                                reasoning
-                            ),
+                            &format!("<!-- reasoning -->\n{}\n<!-- /reasoning -->\n\n", reasoning),
                         )
                         .await;
                 }
@@ -954,10 +1116,7 @@ impl AgentService {
                     accumulated_text.push_str(&iteration_text);
 
                     let _ = message_service
-                        .append_content(
-                            assistant_db_msg.id,
-                            &format!("{}\n\n", iteration_text),
-                        )
+                        .append_content(assistant_db_msg.id, &format!("{}\n\n", iteration_text))
                         .await;
                 }
             }
@@ -970,7 +1129,7 @@ impl AgentService {
             if is_cli_provider && !tool_uses.is_empty() {
                 // Text/tool interleaving and ToolStarted/ToolCompleted events
                 // are already emitted during streaming by helpers.rs.
-                // Tool markers already persisted atomically above via cli_tool_accum.
+                // Tool markers already persisted atomically above via cli_segments.
                 iteration_text.clear();
                 tool_uses.clear();
             }
