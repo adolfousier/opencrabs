@@ -531,7 +531,7 @@ impl AgentService {
             let queued_buf = tokio::sync::Mutex::new(None);
 
             // Send to provider via streaming — retry once after emergency compaction if prompt is too long
-            let (mut response, reasoning_text) = match self
+            let (mut response, mut reasoning_text) = match self
                 .stream_complete(
                     session_id,
                     request,
@@ -1166,6 +1166,22 @@ impl AgentService {
                 // Text/tool interleaving and ToolStarted/ToolCompleted events
                 // are already emitted during streaming by helpers.rs.
                 // Tool markers already persisted atomically above via cli_segments.
+                //
+                // Emit intermediate text for channels (Telegram, etc.) so they
+                // show text between tool rounds — helpers.rs only emits when
+                // cli_unflushed_text is non-empty, but models often produce
+                // thinking + tools with no text content blocks in between.
+                if !iteration_text.is_empty()
+                    && let Some(ref cb) = progress_callback
+                {
+                    cb(
+                        session_id,
+                        ProgressEvent::IntermediateText {
+                            text: iteration_text.clone(),
+                            reasoning: reasoning_text.take(),
+                        },
+                    );
+                }
                 iteration_text.clear();
                 tool_uses.clear();
             }

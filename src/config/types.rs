@@ -1949,9 +1949,7 @@ impl Config {
             .enumerate()
             .map(|(i, p)| {
                 // providers.custom.<name> — normalize the <name> part
-                if i >= 2
-                    && section.starts_with("providers.custom")
-                {
+                if i >= 2 && section.starts_with("providers.custom") {
                     normalize_toml_key(p)
                 } else {
                     p.to_string()

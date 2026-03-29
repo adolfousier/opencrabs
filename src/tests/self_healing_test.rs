@@ -3,7 +3,7 @@
 //! Tests for config recovery, DB integrity, config typo warnings,
 //! custom provider name normalization, and state cleanup.
 
-use crate::config::{normalize_toml_key, Config};
+use crate::config::{Config, normalize_toml_key};
 use crate::db::Database;
 
 // ── Config Last-Known-Good Recovery ─────────────────────────────────────
@@ -195,8 +195,16 @@ base_url = "http://localhost:8080/v1"
     let custom = config.providers.custom.unwrap();
 
     // Keys should be normalized
-    assert!(custom.contains_key("qwen-2-5-4b"), "Keys: {:?}", custom.keys().collect::<Vec<_>>());
-    assert!(custom.contains_key("my-other-model"), "Keys: {:?}", custom.keys().collect::<Vec<_>>());
+    assert!(
+        custom.contains_key("qwen-2-5-4b"),
+        "Keys: {:?}",
+        custom.keys().collect::<Vec<_>>()
+    );
+    assert!(
+        custom.contains_key("my-other-model"),
+        "Keys: {:?}",
+        custom.keys().collect::<Vec<_>>()
+    );
 
     // Original casing should NOT be preserved
     assert!(!custom.contains_key("Qwen_2_5_4B"));
@@ -205,14 +213,8 @@ base_url = "http://localhost:8080/v1"
     // Values should be intact
     let qwen = custom.get("qwen-2-5-4b").unwrap();
     assert!(qwen.enabled);
-    assert_eq!(
-        qwen.base_url.as_deref(),
-        Some("http://localhost:11434/v1")
-    );
-    assert_eq!(
-        qwen.default_model.as_deref(),
-        Some("qwen2.5:4b")
-    );
+    assert_eq!(qwen.base_url.as_deref(), Some("http://localhost:11434/v1"));
+    assert_eq!(qwen.default_model.as_deref(), Some("qwen2.5:4b"));
 }
 
 #[test]
@@ -333,7 +335,9 @@ async fn pending_requests_created_and_cleared() {
     let session_id = uuid::Uuid::new_v4();
 
     // Create a pending request (simulates agent start)
-    repo.insert(id, session_id, "test message", "tui").await.unwrap();
+    repo.insert(id, session_id, "test message", "tui")
+        .await
+        .unwrap();
 
     // Should show up as interrupted
     let interrupted = repo.get_interrupted().await.unwrap();
@@ -359,8 +363,12 @@ async fn pending_requests_deduplicate_by_session() {
     let session_id = uuid::Uuid::new_v4();
 
     // Insert same session twice with different request IDs
-    repo.insert(uuid::Uuid::new_v4(), session_id, "msg1", "tui").await.unwrap();
-    repo.insert(uuid::Uuid::new_v4(), session_id, "msg2", "tui").await.unwrap();
+    repo.insert(uuid::Uuid::new_v4(), session_id, "msg1", "tui")
+        .await
+        .unwrap();
+    repo.insert(uuid::Uuid::new_v4(), session_id, "msg2", "tui")
+        .await
+        .unwrap();
 
     // Should still only recover once per session
     let interrupted = repo.get_interrupted().await.unwrap();
@@ -374,7 +382,7 @@ async fn pending_requests_deduplicate_by_session() {
 
 #[tokio::test]
 async fn session_delete_cascades_messages() {
-    use crate::services::{MessageService, SessionService, ServiceContext};
+    use crate::services::{MessageService, ServiceContext, SessionService};
 
     let db = Database::connect_in_memory().await.unwrap();
     db.run_migrations().await.unwrap();
@@ -384,7 +392,10 @@ async fn session_delete_cascades_messages() {
     let msg_svc = MessageService::new(ctx.clone());
 
     // Create session and add messages
-    let session = session_svc.create_session(Some("test".to_string())).await.unwrap();
+    let session = session_svc
+        .create_session(Some("test".to_string()))
+        .await
+        .unwrap();
     msg_svc
         .create_message(session.id, "user".to_string(), "hello".to_string())
         .await
