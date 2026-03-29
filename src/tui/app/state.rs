@@ -1160,6 +1160,7 @@ impl App {
                 self.create_new_session().await?;
             }
             TuiEvent::Quit => {
+                self.pane_manager.save_layout();
                 self.should_quit = true;
             }
             TuiEvent::Tick => {
@@ -1814,6 +1815,7 @@ impl App {
                 if let Some(token) = &self.cancel_token {
                     token.cancel();
                 }
+                self.pane_manager.save_layout();
                 self.should_quit = true;
                 // Force exit after 1s in case spawn_blocking tasks are stuck
                 tokio::spawn(async {
