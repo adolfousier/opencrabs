@@ -1167,22 +1167,40 @@ impl AgentService {
                 // are already emitted during streaming by helpers.rs.
                 // Tool markers already persisted atomically above via cli_segments.
                 //
-                // Emit intermediate text for channels (Telegram, etc.) so they
-                // show text between tool rounds — helpers.rs only emits when
-                // cli_unflushed_text is non-empty, but models often produce
-                // thinking + tools with no text content blocks in between.
+                // Emit intermediate text for channels (Telegram, etc.).
+                // Only emit text that appears BEFORE tool blocks — the trailing
+                // text (after the last tool) will be in the final response, so
+                // emitting it here too would cause a duplicate message.
                 if let Some(ref cb) = progress_callback {
-                    let has_text = !iteration_text.is_empty();
+                    // Find text blocks that appear before the last tool_use block.
+                    let last_tool_idx = response
+                        .content
+                        .iter()
+                        .rposition(|b| matches!(b, ContentBlock::ToolUse { .. }))
+                        .unwrap_or(0);
+                    let intermediate_only: String = response
+                        .content
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, b)| {
+                            if i < last_tool_idx
+                                && let ContentBlock::Text { text } = b
+                                && !text.trim().is_empty()
+                            {
+                                return Some(text.as_str());
+                            }
+                            None
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n\n");
+
+                    let has_intermediate = !intermediate_only.is_empty();
                     let has_reasoning = reasoning_text.is_some();
-                    if has_text || has_reasoning {
+                    if has_intermediate || has_reasoning {
                         cb(
                             session_id,
                             ProgressEvent::IntermediateText {
-                                text: if has_text {
-                                    iteration_text.clone()
-                                } else {
-                                    String::new()
-                                },
+                                text: intermediate_only,
                                 reasoning: reasoning_text.take(),
                             },
                         );
@@ -1850,7 +1868,37 @@ impl AgentService {
 
         // Extract text from the final response only (for TUI display).
         // Intermediate text was already shown in real-time via IntermediateText events.
-        let final_text = Self::extract_text_from_response(&response);
+        // For CLI providers with tools: only extract trailing text (after the last tool
+        // block), since text before tools was already emitted as IntermediateText.
+        let final_text = if is_cli_provider
+            && response
+                .content
+                .iter()
+                .any(|b| matches!(b, ContentBlock::ToolUse { .. }))
+        {
+            let last_tool_idx = response
+                .content
+                .iter()
+                .rposition(|b| matches!(b, ContentBlock::ToolUse { .. }))
+                .unwrap_or(0);
+            response
+                .content
+                .iter()
+                .enumerate()
+                .filter_map(|(i, b)| {
+                    if i > last_tool_idx
+                        && let ContentBlock::Text { text } = b
+                        && !text.trim().is_empty()
+                    {
+                        return Some(text.as_str());
+                    }
+                    None
+                })
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        } else {
+            Self::extract_text_from_response(&response)
+        };
 
         // The assistant message was already created and updated in real-time.
         // Now update with final token usage.
