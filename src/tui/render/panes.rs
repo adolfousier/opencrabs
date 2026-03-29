@@ -7,9 +7,8 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Padding, Paragraph, Wrap},
+    widgets::{Block, Borders, Padding, Paragraph},
 };
-use unicode_width::UnicodeWidthStr;
 
 /// Render a single inactive (non-focused) pane.
 /// Shows the session's cached messages as a read-only chat view.
@@ -79,23 +78,11 @@ pub(super) fn render_inactive_pane(f: &mut Frame, app: &App, pane_id: PaneId, ar
         )));
     }
 
-    // Compute wrapped height so we can scroll to bottom
-    let width = inner.width as usize;
-    let wrapped_height: usize = if width == 0 {
-        lines.len()
-    } else {
-        lines
-            .iter()
-            .map(|line| {
-                let w: usize = line.spans.iter().map(|s| s.content.width()).sum();
-                if w == 0 { 1 } else { w.div_ceil(width) }
-            })
-            .sum()
-    };
-    let scroll = (wrapped_height as u16).saturating_sub(inner.height);
-    let para = Paragraph::new(lines)
-        .wrap(Wrap { trim: false })
-        .scroll((scroll, 0));
+    // Show last N lines that fit — no wrapping, so 1 Line = 1 row (guaranteed).
+    let visible = inner.height as usize;
+    let skip = lines.len().saturating_sub(visible);
+    let visible_lines: Vec<Line> = lines.into_iter().skip(skip).collect();
+    let para = Paragraph::new(visible_lines);
     f.render_widget(para, inner);
 }
 
