@@ -61,6 +61,15 @@ const TOOL_STATUS_QUIPS: &[&str] = &[
 
 /// Per-message streaming state shared between the progress callback and the edit loop.
 /// Each tool call gets its own message above; response streams in a separate message below.
+/// Ordered display event — preserves chronological ordering of tools and intermediate texts.
+#[derive(Clone)]
+enum DisplayItem {
+    /// New tool at this index in tool_msgs (needs send_message)
+    NewTool(usize),
+    /// Intermediate text between tool rounds
+    Intermediate(String),
+}
+
 struct StreamingState {
     /// Response/thinking message (always at bottom)
     msg_id: Option<MessageId>,
@@ -68,8 +77,8 @@ struct StreamingState {
     thinking: String,
     /// Each tool call = its own individual message
     tool_msgs: Vec<ToolMsg>,
-    /// Intermediate agent texts (between tool rounds) — each sent as its own message
-    pending_intermediate: Vec<String>,
+    /// Ordered queue of new display items (tools + intermediates in chronological order)
+    display_queue: Vec<DisplayItem>,
     /// Response text from streaming chunks — own message at bottom
     response: String,
     dirty: bool,
@@ -924,11 +933,11 @@ pub(crate) async fn handle_message(
     );
 
     // ── Streaming setup ───────────────────────────────────────────────────────
-    let streaming = Arc::new(Mutex::new(StreamingState {
+    let streaming = Arc::new(std::sync::Mutex::new(StreamingState {
         msg_id: None,
         thinking: String::new(),
         tool_msgs: Vec::new(),
-        pending_intermediate: Vec::new(),
+        display_queue: Vec::new(),
         response: String::new(),
         dirty: false,
         recreate: false,
@@ -953,8 +962,6 @@ pub(crate) async fn handle_message(
                     _ = cancel.cancelled() => break,
                     _ = tokio::time::sleep(std::time::Duration::from_millis(1500)) => {
                         // ── Snapshot state under lock, then release immediately ──
-                        // This prevents blocking the progress callback's try_lock()
-                        // during Telegram API calls (which can take hundreds of ms).
                         struct Snapshot {
                             dirty: bool,
                             recreate: bool,
@@ -965,26 +972,32 @@ pub(crate) async fn handle_message(
                             tools_started_at: Option<std::time::Instant>,
                             quip_index: usize,
                             status_shown_at: Option<std::time::Instant>,
-                            // Cloned tool state for dirty tools
-                            tools: Vec<(usize, String, Option<bool>, Option<MessageId>)>,
-                            intermediates: Vec<String>,
+                            /// Ordered display items (tools + intermediates in chronological order)
+                            display_items: Vec<DisplayItem>,
+                            /// Dirty tools that already have messages (need editing, not new sends)
+                            tool_edits: Vec<(usize, String, Option<bool>, MessageId)>,
                             has_active_tools: bool,
+                            has_intermediates: bool,
                         }
 
                         let snap = {
-                            let mut s = st.lock().await;
+                            let mut s = st.lock().unwrap_or_else(|e| e.into_inner());
+                            let has_display = !s.display_queue.is_empty();
                             let any_tools_dirty = s.tool_msgs.iter().any(|t| t.dirty);
-                            let has_intermediate = !s.pending_intermediate.is_empty();
                             let has_active_tools = s.tool_msgs.iter().any(|t| t.completed.is_none());
 
-                            if !s.dirty && !s.recreate && !any_tools_dirty && !has_intermediate && !has_active_tools { continue; }
+                            if !s.dirty && !s.recreate && !any_tools_dirty && !has_display && !has_active_tools { continue; }
 
-                            // Collect dirty tools
-                            let tools: Vec<_> = s.tool_msgs.iter().enumerate()
-                                .filter(|(_, t)| t.dirty)
+                            // Drain the ordered display queue
+                            let display_items: Vec<DisplayItem> = s.display_queue.drain(..).collect();
+                            let has_intermediates = display_items.iter().any(|d| matches!(d, DisplayItem::Intermediate(_)));
+
+                            // Collect dirty tools that already have messages (for editing)
+                            let tool_edits: Vec<_> = s.tool_msgs.iter().enumerate()
+                                .filter(|(_, t)| t.dirty && t.msg_id.is_some())
                                 .map(|(i, t)| {
                                     let label = format!("**{}**{}", t.name, t.context);
-                                    (i, label, t.completed, t.msg_id)
+                                    (i, label, t.completed, t.msg_id.unwrap())
                                 })
                                 .collect();
 
@@ -992,9 +1005,6 @@ pub(crate) async fn handle_message(
                             for t in s.tool_msgs.iter_mut().filter(|t| t.dirty) {
                                 t.dirty = false;
                             }
-
-                            // Drain intermediates
-                            let intermediates: Vec<String> = s.pending_intermediate.drain(..).collect();
 
                             // Snapshot response
                             let response_text = if s.dirty || s.recreate {
@@ -1013,9 +1023,10 @@ pub(crate) async fn handle_message(
                                 tools_started_at: s.tools_started_at,
                                 quip_index: s.quip_index,
                                 status_shown_at: s.status_shown_at,
-                                tools,
-                                intermediates,
+                                display_items,
+                                tool_edits,
                                 has_active_tools,
+                                has_intermediates,
                             };
 
                             // Pre-clear state that will be handled
@@ -1026,7 +1037,7 @@ pub(crate) async fn handle_message(
                                 s.dirty = false;
                             }
                             // Clear status tracking if content arriving
-                            if !snap.intermediates.is_empty() || (snap.dirty && !snap.response_text.is_empty()) {
+                            if snap.has_intermediates || (snap.dirty && !snap.response_text.is_empty()) {
                                 s.status_msg_id = None;
                                 s.tools_started_at = None;
                                 s.tool_round_count = 0;
@@ -1034,32 +1045,65 @@ pub(crate) async fn handle_message(
 
                             snap
                         };
-                        // Lock is now released — progress callback can update state freely
+                        // Lock is now released
 
-                        // ── Individual tool messages (each tool = its own message) ──
-                        for (idx, label, completed, existing_mid) in &snap.tools {
+                        // ── Ordered display: tools and intermediates in chronological order ──
+                        for item in &snap.display_items {
+                            match item {
+                                DisplayItem::NewTool(idx) => {
+                                    let tool_info = {
+                                        let s = st.lock().unwrap_or_else(|e| e.into_inner());
+                                        s.tool_msgs.get(*idx).map(|t| {
+                                            let label = format!("**{}**{}", t.name, t.context);
+                                            (label, t.completed, t.msg_id)
+                                        })
+                                    };
+                                    if let Some((label, completed, existing_mid)) = tool_info {
+                                        let text = match completed {
+                                            None => format!("⚙️ {}", label),
+                                            Some(true) => format!("✅ {}", label),
+                                            Some(false) => format!("❌ {}", label),
+                                        };
+                                        let html = markdown_to_telegram_html(&text);
+                                        if existing_mid.is_none()
+                                            && let Ok(m) = bot
+                                                .send_message(chat, &html)
+                                                .parse_mode(ParseMode::Html)
+                                                .await
+                                        {
+                                            let mut s = st.lock().unwrap_or_else(|e| e.into_inner());
+                                            if let Some(tool) = s.tool_msgs.get_mut(*idx) {
+                                                tool.msg_id = Some(m.id);
+                                            }
+                                        }
+                                    }
+                                }
+                                DisplayItem::Intermediate(text) => {
+                                    let text = crate::utils::sanitize::strip_llm_artifacts(text);
+                                    let html = markdown_to_telegram_html(&text);
+                                    if !html.is_empty() {
+                                        let _ = bot
+                                            .send_message(chat, &html)
+                                            .parse_mode(ParseMode::Html)
+                                            .await;
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── Edit existing tool messages (status updates) ──
+                        for (idx, label, completed, mid) in &snap.tool_edits {
+                            let _ = idx; // used for identification only
                             let text = match completed {
                                 None => format!("⚙️ {}", label),
                                 Some(true) => format!("✅ {}", label),
                                 Some(false) => format!("❌ {}", label),
                             };
                             let html = markdown_to_telegram_html(&text);
-                            if let Some(mid) = existing_mid {
-                                let _ = bot
-                                    .edit_message_text(chat, *mid, &html)
-                                    .parse_mode(ParseMode::Html)
-                                    .await;
-                            } else if let Ok(m) = bot
-                                .send_message(chat, &html)
+                            let _ = bot
+                                .edit_message_text(chat, *mid, &html)
                                 .parse_mode(ParseMode::Html)
-                                .await
-                            {
-                                // Write back the new msg_id
-                                let mut s = st.lock().await;
-                                if let Some(tool) = s.tool_msgs.get_mut(*idx) {
-                                    tool.msg_id = Some(m.id);
-                                }
-                            }
+                                .await;
                         }
 
                         // ── Rolling status quips during long tool execution ──
@@ -1073,7 +1117,7 @@ pub(crate) async fn handle_message(
                                 if let Some(mid) = snap.status_msg_id {
                                     let _ = bot.delete_message(chat, mid).await;
                                 }
-                                let mut s = st.lock().await;
+                                let mut s = st.lock().unwrap_or_else(|e| e.into_inner());
                                 s.status_msg_id = None;
                                 s.status_shown_at = Some(now);
                             } else if snap.status_msg_id.is_none() && shown_elapsed >= 2 {
@@ -1095,7 +1139,7 @@ pub(crate) async fn handle_message(
                                 status.push(')');
 
                                 if let Ok(m) = bot.send_message(chat, &status).await {
-                                    let mut s = st.lock().await;
+                                    let mut s = st.lock().unwrap_or_else(|e| e.into_inner());
                                     s.status_msg_id = Some(m.id);
                                     s.status_shown_at = Some(now);
                                     s.quip_index += 1;
@@ -1104,22 +1148,10 @@ pub(crate) async fn handle_message(
                         }
 
                         // ── Delete status when real content arrives ──
-                        if (!snap.intermediates.is_empty() || (snap.dirty && !snap.response_text.is_empty()))
+                        if (snap.has_intermediates || (snap.dirty && !snap.response_text.is_empty()))
                             && let Some(mid) = snap.status_msg_id
                         {
                             let _ = bot.delete_message(chat, mid).await;
-                        }
-
-                        // ── Intermediate texts (agent commentary between tool rounds) ──
-                        for text in &snap.intermediates {
-                            let text = crate::utils::sanitize::strip_llm_artifacts(text);
-                            let html = markdown_to_telegram_html(&text);
-                            if !html.is_empty() {
-                                let _ = bot
-                                    .send_message(chat, &html)
-                                    .parse_mode(ParseMode::Html)
-                                    .await;
-                            }
                         }
 
                         // ── Response message (thinking + response, always at bottom) ──
@@ -1128,28 +1160,28 @@ pub(crate) async fn handle_message(
                                 && let Some(old_mid) = snap.msg_id
                             {
                                 let _ = bot.delete_message(chat, old_mid).await;
-                                let mut s = st.lock().await;
+                                let mut s = st.lock().unwrap_or_else(|e| e.into_inner());
                                 s.msg_id = None;
                             }
                             if !snap.response_text.is_empty() {
                                 // Delete status msg if still present
                                 if let Some(mid) = snap.status_msg_id {
                                     let _ = bot.delete_message(chat, mid).await;
-                                    let mut s = st.lock().await;
+                                    let mut s = st.lock().unwrap_or_else(|e| e.into_inner());
                                     s.status_msg_id = None;
                                 }
                                 let current_msg_id = {
-                                    let s = st.lock().await;
+                                    let s = st.lock().unwrap_or_else(|e| e.into_inner());
                                     s.msg_id
                                 };
                                 if current_msg_id.is_none()
                                     && let Ok(m) = bot.send_message(chat, "\u{258b}").await
                                 {
-                                    let mut s = st.lock().await;
+                                    let mut s = st.lock().unwrap_or_else(|e| e.into_inner());
                                     s.msg_id = Some(m.id);
                                 }
                                 let msg_id = {
-                                    let s = st.lock().await;
+                                    let s = st.lock().unwrap_or_else(|e| e.into_inner());
                                     s.msg_id
                                 };
                                 if let Some(mid) = msg_id {
@@ -1177,13 +1209,13 @@ pub(crate) async fn handle_message(
         Arc::new(move |_sid, event| {
             match event {
                 ProgressEvent::ReasoningChunk { text } => {
-                    if let Ok(mut s) = st.try_lock() {
+                    if let Ok(mut s) = st.lock() {
                         s.thinking.push_str(&text);
                         s.dirty = true;
                     }
                 }
                 ProgressEvent::StreamingChunk { text } => {
-                    if let Ok(mut s) = st.try_lock() {
+                    if let Ok(mut s) = st.lock() {
                         if !s.thinking.is_empty() {
                             s.thinking.clear();
                         }
@@ -1195,12 +1227,13 @@ pub(crate) async fn handle_message(
                     tool_name,
                     tool_input,
                 } => {
-                    if let Ok(mut s) = st.try_lock() {
+                    if let Ok(mut s) = st.lock() {
                         s.thinking.clear();
                         if s.tools_started_at.is_none() {
                             s.tools_started_at = Some(std::time::Instant::now());
                         }
                         let ctx = tool_context(&tool_name, &tool_input);
+                        let idx = s.tool_msgs.len();
                         s.tool_msgs.push(ToolMsg {
                             msg_id: None,
                             name: tool_name,
@@ -1208,12 +1241,13 @@ pub(crate) async fn handle_message(
                             completed: None,
                             dirty: true,
                         });
+                        s.display_queue.push(DisplayItem::NewTool(idx));
                     }
                 }
                 ProgressEvent::ToolCompleted {
                     tool_name, success, ..
                 } => {
-                    if let Ok(mut s) = st.try_lock() {
+                    if let Ok(mut s) = st.lock() {
                         s.tool_round_count += 1;
                         if let Some(tool) = s
                             .tool_msgs
@@ -1231,12 +1265,16 @@ pub(crate) async fn handle_message(
                     }
                 }
                 ProgressEvent::IntermediateText { text, reasoning } => {
-                    if let Ok(mut s) = st.try_lock() {
+                    if let Ok(mut s) = st.lock() {
                         s.thinking.clear();
                         // Clear accumulated streaming response — it's now captured
                         // as an intermediate message. Without this, text from
                         // consecutive tool rounds gets concatenated without spacing.
                         s.response.clear();
+                        // Delete the streaming message so stale text doesn't linger
+                        if s.msg_id.is_some() {
+                            s.recreate = true;
+                        }
                         // Use reasoning as fallback when model produces no text
                         // blocks between tool rounds (only thinking + tool_use).
                         let content = if text.is_empty() {
@@ -1245,13 +1283,14 @@ pub(crate) async fn handle_message(
                             text
                         };
                         if !content.is_empty() {
-                            s.pending_intermediate.push(content);
+                            s.display_queue.push(DisplayItem::Intermediate(content));
                         }
                     }
                 }
                 ProgressEvent::SelfHealingAlert { message } => {
-                    if let Ok(mut s) = st.try_lock() {
-                        s.pending_intermediate.push(format!("🔧 {}", message));
+                    if let Ok(mut s) = st.lock() {
+                        s.display_queue
+                            .push(DisplayItem::Intermediate(format!("🔧 {}", message)));
                     }
                 }
                 _ => {}
@@ -1335,24 +1374,56 @@ pub(crate) async fn handle_message(
     // _typing_guard drop cancels typing loop
 
     // Grab streaming message id and clean up status message
-    let (streaming_msg_id, status_msg_id, remaining_intermediate) = {
-        let mut s = streaming.lock().await;
-        let intermediates: Vec<String> = s.pending_intermediate.drain(..).collect();
-        (s.msg_id, s.status_msg_id, intermediates)
+    let (streaming_msg_id, status_msg_id, remaining_display) = {
+        let mut s = streaming.lock().unwrap_or_else(|e| e.into_inner());
+        let display: Vec<DisplayItem> = s.display_queue.drain(..).collect();
+        (s.msg_id, s.status_msg_id, display)
     };
     // Delete rolling status message if still present
     if let Some(mid) = status_msg_id {
         let _ = bot.delete_message(msg.chat.id, mid).await;
     }
-    // Send any remaining intermediate texts that weren't flushed by the edit loop
-    for text in remaining_intermediate {
-        let text = crate::utils::sanitize::strip_llm_artifacts(&text);
-        let html = markdown_to_telegram_html(&text);
-        if !html.is_empty() {
-            let _ = bot
-                .send_message(msg.chat.id, &html)
-                .parse_mode(ParseMode::Html)
-                .await;
+    // Send any remaining display items that weren't flushed by the edit loop
+    for item in remaining_display {
+        match item {
+            DisplayItem::NewTool(idx) => {
+                let tool_info = {
+                    let s = streaming.lock().unwrap_or_else(|e| e.into_inner());
+                    s.tool_msgs.get(idx).map(|t| {
+                        let label = format!("**{}**{}", t.name, t.context);
+                        (label, t.completed, t.msg_id)
+                    })
+                };
+                if let Some((label, completed, existing_mid)) = tool_info {
+                    let text = match completed {
+                        None => format!("⚙️ {}", label),
+                        Some(true) => format!("✅ {}", label),
+                        Some(false) => format!("❌ {}", label),
+                    };
+                    let html = markdown_to_telegram_html(&text);
+                    if existing_mid.is_none()
+                        && let Ok(m) = bot
+                            .send_message(msg.chat.id, &html)
+                            .parse_mode(ParseMode::Html)
+                            .await
+                    {
+                        let mut s = streaming.lock().unwrap_or_else(|e| e.into_inner());
+                        if let Some(tool) = s.tool_msgs.get_mut(idx) {
+                            tool.msg_id = Some(m.id);
+                        }
+                    }
+                }
+            }
+            DisplayItem::Intermediate(text) => {
+                let text = crate::utils::sanitize::strip_llm_artifacts(&text);
+                let html = markdown_to_telegram_html(&text);
+                if !html.is_empty() {
+                    let _ = bot
+                        .send_message(msg.chat.id, &html)
+                        .parse_mode(ParseMode::Html)
+                        .await;
+                }
+            }
         }
     }
 
