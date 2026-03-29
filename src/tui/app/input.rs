@@ -681,27 +681,13 @@ impl App {
                         }
                         self.is_processing = false;
                         self.processing_started_at = None;
-                        // Preserve partial streaming response as a message before clearing
-                        if let Some(text) = self.streaming_response.take()
-                            && !text.trim().is_empty()
-                        {
-                            self.messages.push(DisplayMessage {
-                                id: Uuid::new_v4(),
-                                role: "assistant".to_string(),
-                                content: text,
-                                timestamp: chrono::Utc::now(),
-                                token_count: None,
-                                cost: None,
-                                approval: None,
-                                approve_menu: None,
-                                details: None,
-                                expanded: false,
-                                tool_group: None,
-                            });
-                        }
+                        self.streaming_response = None;
                         self.streaming_reasoning = None;
                         self.cancel_token = None;
                         self.escape_pending_at = None;
+                        self.active_tool_group = None;
+                        self.streaming_output_tokens = 0;
+                        self.intermediate_text_received = false;
                         // Deny any pending approvals so agent callbacks don't hang
                         for msg in &mut self.messages {
                             if let Some(ref mut approval) = msg.approval
@@ -716,26 +702,12 @@ impl App {
                                     ApprovalState::Denied("Operation cancelled".to_string());
                             }
                         }
-                        // Finalize any active tool group
-                        if let Some(group) = self.active_tool_group.take() {
-                            let count = group.calls.len();
-                            self.messages.push(DisplayMessage {
-                                id: Uuid::new_v4(),
-                                role: "tool_group".to_string(),
-                                content: format!(
-                                    "{} tool call{}",
-                                    count,
-                                    if count == 1 { "" } else { "s" }
-                                ),
-                                timestamp: chrono::Utc::now(),
-                                token_count: None,
-                                cost: None,
-                                approval: None,
-                                approve_menu: None,
-                                details: None,
-                                expanded: false,
-                                tool_group: Some(group),
-                            });
+                        // Reload session from DB so tool calls appear inline
+                        // (matching the persisted order from expand_message) instead
+                        // of being stacked at the bottom from in-memory finalization.
+                        if let Some(ref session) = self.current_session {
+                            let session_id = session.id;
+                            self.load_session(session_id).await?;
                         }
                         self.push_system_message("Operation cancelled.".to_string());
                     } else {
@@ -1150,6 +1122,7 @@ impl App {
             }
             self.pane_manager
                 .split(crate::tui::pane::SplitDirection::Horizontal);
+            self.pane_manager.save_layout();
             // Stay on sessions screen — user picks which session goes in the new pane.
             // When they press Enter, load_session assigns it to the focused (new) pane.
         } else if event.code == KeyCode::Char('_') {
@@ -1162,6 +1135,7 @@ impl App {
             }
             self.pane_manager
                 .split(crate::tui::pane::SplitDirection::Vertical);
+            self.pane_manager.save_layout();
             // Stay on sessions screen — user picks which session goes in the new pane.
         } else if event.code == KeyCode::Char('d') || event.code == KeyCode::Char('D') {
             // Delete the selected session
