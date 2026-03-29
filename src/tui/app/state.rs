@@ -181,6 +181,8 @@ pub struct ToolCallEntry {
     pub description: String,
     pub success: bool,
     pub details: Option<String>,
+    /// Whether the tool has finished executing
+    pub completed: bool,
     /// Full raw tool input — shown untruncated in expanded view
     pub tool_input: serde_json::Value,
 }
@@ -1274,6 +1276,7 @@ impl App {
                     description: desc,
                     success: true,
                     details: None,
+                    completed: false,
                     tool_input: tool_input.clone(),
                 };
                 if let Some(ref mut group) = self.active_tool_group {
@@ -1426,16 +1429,17 @@ impl App {
                 };
 
                 // Update the existing Started entry instead of pushing a duplicate.
-                // Match by description — the Started entry has the same desc but no details.
+                // Match by description — the Started entry that hasn't completed yet.
                 let updated = if let Some(ref mut group) = self.active_tool_group {
                     if let Some(existing) = group
                         .calls
                         .iter_mut()
                         .rev()
-                        .find(|c| c.description == desc && c.details.is_none())
+                        .find(|c| c.description == desc && !c.completed)
                     {
                         existing.success = success;
                         existing.details = details.clone();
+                        existing.completed = true;
                         true
                     } else {
                         false
@@ -1450,6 +1454,7 @@ impl App {
                         description: desc,
                         success,
                         details,
+                        completed: true,
                         tool_input: tool_input.clone(),
                     };
                     if let Some(ref mut group) = self.active_tool_group {

@@ -967,6 +967,7 @@ impl App {
                                 description: desc,
                                 success,
                                 details: output,
+                                completed: true,
                                 tool_input: serde_json::Value::Null,
                             }
                         })
@@ -979,6 +980,7 @@ impl App {
                             description: desc.to_string(),
                             success: true,
                             details: None,
+                            completed: true,
                             tool_input: serde_json::Value::Null,
                         })
                         .collect()
