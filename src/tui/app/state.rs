@@ -722,12 +722,11 @@ impl App {
             }
         }
 
-        // Spawn background release check (once on startup after 10s, then daily)
+        // Spawn background release check (immediately on startup, then daily).
+        // No initial delay — if an update exists the prompt appears before/during splash.
         {
             let tx = self.event_sender();
             tokio::spawn(async move {
-                // Initial delay so TUI has time to settle
-                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
                 loop {
                     if let Some(latest) = crate::brain::tools::evolve::check_for_update().await {
                         let _ = tx.send(TuiEvent::UpdateAvailable(latest));
@@ -1779,6 +1778,8 @@ impl App {
             }
             TuiEvent::UpdateAvailable(version) => {
                 self.update_available_version = Some(version);
+                // Dismiss splash so the update dialog is visible
+                self.splash_shown_at = None;
                 self.switch_mode(AppMode::UpdatePrompt).await?;
             }
             TuiEvent::FocusGained | TuiEvent::FocusLost => {
