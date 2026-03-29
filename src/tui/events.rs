@@ -136,6 +136,9 @@ pub enum TuiEvent {
     /// A system message to display in chat
     SystemMessage(String),
 
+    /// Update available — show prompt dialog with version string
+    UpdateAvailable(String),
+
     /// Channel test message result during onboarding
     ChannelTestResult {
         channel: String,
@@ -272,6 +275,8 @@ pub enum AppMode {
     UsageDialog,
     /// Restart confirmation pending (after successful /rebuild)
     RestartPending,
+    /// Update prompt — ask user to accept or decline update
+    UpdatePrompt,
     /// Directory picker dialog (triggered by /cd)
     DirectoryPicker,
     /// Onboarding wizard

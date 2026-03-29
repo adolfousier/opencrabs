@@ -381,6 +381,9 @@ pub struct App {
     /// Self-update state
     pub rebuild_status: Option<String>,
 
+    /// Version string when an update is available (shown in update prompt dialog)
+    pub update_available_version: Option<String>,
+
     /// Session to resume after restart (set via --session CLI arg)
     pub resume_session_id: Option<Uuid>,
 
@@ -518,6 +521,7 @@ impl App {
             session_context_cache: HashMap::new(),
             active_tool_group: None,
             rebuild_status: None,
+            update_available_version: None,
             resume_session_id: None,
             render_cache: HashMap::new(),
             chat_line_to_msg: Vec::new(),
@@ -676,6 +680,22 @@ impl App {
             self.current_session.as_ref().map(|s| s.id),
         );
 
+        // Pre-load sessions for restored split panes so they render
+        // immediately instead of showing empty until focused.
+        if self.pane_manager.is_split() {
+            let focused = self.pane_manager.focused;
+            let pane_sessions: Vec<Uuid> = self
+                .pane_manager
+                .panes
+                .iter()
+                .filter(|p| p.id != focused)
+                .filter_map(|p| p.session_id)
+                .collect();
+            for sid in pane_sessions {
+                self.preload_pane_session(sid).await;
+            }
+        }
+
         // Load sessions list
         self.load_sessions().await?;
 
@@ -710,11 +730,7 @@ impl App {
                 tokio::time::sleep(std::time::Duration::from_secs(10)).await;
                 loop {
                     if let Some(latest) = crate::brain::tools::evolve::check_for_update().await {
-                        let _ = tx.send(TuiEvent::SystemMessage(format!(
-                            "Update available: v{} -> v{}. Type /evolve or ask Crabs to evolve.",
-                            crate::VERSION,
-                            latest
-                        )));
+                        let _ = tx.send(TuiEvent::UpdateAvailable(latest));
                     }
                     // Check again in 24 hours
                     tokio::time::sleep(std::time::Duration::from_secs(86400)).await;
@@ -1122,7 +1138,14 @@ impl App {
                 response,
             } => {
                 if self.is_current_session(session_id) {
-                    self.complete_response(response).await?;
+                    if self.is_processing {
+                        self.complete_response(response).await?;
+                    } else {
+                        // Session was cancelled (Esc×2) — agent finished after cancel.
+                        // Reload from DB to pick up any final content the agent wrote
+                        // before detecting the cancellation token.
+                        self.load_session(session_id).await?;
+                    }
                 } else {
                     // Background session completed — mark as unread
                     self.processing_sessions.remove(&session_id);
@@ -1754,6 +1777,10 @@ impl App {
             TuiEvent::SystemMessage(msg) => {
                 self.push_system_message(msg);
             }
+            TuiEvent::UpdateAvailable(version) => {
+                self.update_available_version = Some(version);
+                self.switch_mode(AppMode::UpdatePrompt).await?;
+            }
             TuiEvent::FocusGained | TuiEvent::FocusLost => {
                 // Handled by the event loop for tick coalescing
             }
@@ -2024,6 +2051,23 @@ impl App {
                             self.switch_mode(AppMode::Chat).await?;
                         }
                         // If restart succeeds, this process is replaced — we never reach here
+                    }
+                }
+            }
+            AppMode::UpdatePrompt => {
+                if keys::is_cancel(&event) {
+                    self.update_available_version = None;
+                    self.switch_mode(AppMode::Chat).await?;
+                } else if keys::is_enter(&event) {
+                    let version = self.update_available_version.take();
+                    self.switch_mode(AppMode::Chat).await?;
+                    if let Some(v) = version {
+                        self.push_system_message(format!("Updating to v{}...", v));
+                        let tx = self.event_sender();
+                        let _ = tx.send(TuiEvent::MessageSubmitted(
+                            "Use the `evolve` tool now to check for and install the latest version."
+                                .to_string(),
+                        ));
                     }
                 }
             }

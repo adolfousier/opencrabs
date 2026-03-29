@@ -1,6 +1,6 @@
 //! Dialog rendering
 //!
-//! File picker, directory picker, model selector, usage dialog, and restart dialog.
+//! File picker, directory picker, model selector, usage dialog, restart dialog, and update prompt.
 
 use super::super::app::App;
 use ratatui::{
@@ -1066,6 +1066,70 @@ pub(super) fn render_restart_dialog(f: &mut Frame, app: &App, area: Rect) {
     let dialog = Paragraph::new(lines).block(
         Block::default()
             .title(" Rebuild Complete ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan)),
+    );
+    f.render_widget(dialog, dialog_area);
+}
+
+/// Render update prompt dialog
+pub(super) fn render_update_dialog(f: &mut Frame, app: &App, area: Rect) {
+    let version = app.update_available_version.as_deref().unwrap_or("unknown");
+
+    let dialog_height = 8u16;
+    let dialog_width = 55u16.min(area.width.saturating_sub(4));
+
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(40),
+            Constraint::Length(dialog_height),
+            Constraint::Percentage(40),
+        ])
+        .split(area);
+
+    let horizontal = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Min((area.width.saturating_sub(dialog_width)) / 2),
+            Constraint::Length(dialog_width),
+            Constraint::Min(0),
+        ])
+        .split(vertical[1]);
+
+    let dialog_area = horizontal[1];
+    f.render_widget(Clear, dialog_area);
+
+    let lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("  v{} -> v{}", crate::VERSION, version),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from("  Update now?"),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(
+                "  [Enter] ",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Update  "),
+            Span::styled(
+                "[Esc] ",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Skip"),
+        ]),
+    ];
+
+    let dialog = Paragraph::new(lines).block(
+        Block::default()
+            .title(" Update Available ")
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Cyan)),
     );
