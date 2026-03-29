@@ -55,13 +55,12 @@ pub struct AgentService {
 }
 
 impl AgentService {
-    /// Create a new agent service
-    pub fn new(provider: Arc<dyn Provider>, context: ServiceContext) -> Self {
-        let config = crate::config::Config::load().unwrap_or_else(|e| {
-            tracing::error!("Failed to load config for agent service, using defaults: {}", e);
-            crate::config::Config::default()
-        });
-
+    /// Create a new agent service. Reads agent settings from the provided config.
+    pub fn new(
+        provider: Arc<dyn Provider>,
+        context: ServiceContext,
+        config: &crate::config::Config,
+    ) -> Self {
         Self {
             provider: std::sync::RwLock::new(provider),
             context,
@@ -81,6 +80,12 @@ impl AgentService {
             brain_path: None,
             session_updated_tx: None,
         }
+    }
+
+    /// Create an agent service for tests (uses Config::default()).
+    /// Only use in test code where no real user config exists.
+    pub fn new_for_test(provider: Arc<dyn Provider>, context: ServiceContext) -> Self {
+        Self::new(provider, context, &crate::config::Config::default())
     }
 
     /// Get the service context
