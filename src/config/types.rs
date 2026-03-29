@@ -49,7 +49,7 @@ pub struct Config {
     pub daemon: DaemonConfig,
 
     /// A2A (Agent-to-Agent) protocol gateway configuration
-    #[serde(default)]
+    #[serde(default, alias = "gateway")]
     pub a2a: A2aConfig,
 
     /// Image generation and vision configuration
@@ -1599,12 +1599,20 @@ impl Config {
         "agent",
         "daemon",
         "a2a",
+        "gateway",
         "image",
         "cron",
     ];
 
     /// Check for unknown top-level keys and log warnings.
+    /// Only collects warnings once — subsequent calls are no-ops.
     fn warn_unknown_keys(path: &Path) {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static CHECKED: AtomicBool = AtomicBool::new(false);
+        if CHECKED.swap(true, Ordering::Relaxed) {
+            return;
+        }
+
         let Ok(raw) = std::fs::read_to_string(path) else {
             return;
         };
