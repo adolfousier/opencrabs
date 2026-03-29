@@ -116,8 +116,7 @@ impl Tool for SlackConnectTool {
         if let Err(e) = crate::config::write_secret_key("channels.slack", "token", &bot_token) {
             tracing::error!("Failed to save Slack bot token: {}", e);
         }
-        if let Err(e) = crate::config::write_secret_key("channels.slack", "app_token", &app_token)
-        {
+        if let Err(e) = crate::config::write_secret_key("channels.slack", "app_token", &app_token) {
             tracing::error!("Failed to save Slack app token: {}", e);
         }
 
@@ -128,8 +127,7 @@ impl Tool for SlackConnectTool {
         if let Err(e) = crate::config::Config::write_key("channels.slack", "token", &bot_token) {
             tracing::error!("Failed to save Slack token to config: {}", e);
         }
-        if let Err(e) =
-            crate::config::Config::write_key("channels.slack", "app_token", &app_token)
+        if let Err(e) = crate::config::Config::write_key("channels.slack", "app_token", &app_token)
         {
             tracing::error!("Failed to save Slack app_token to config: {}", e);
         }
