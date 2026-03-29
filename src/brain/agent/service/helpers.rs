@@ -51,7 +51,13 @@ impl AgentService {
             .read()
             .expect("provider lock poisoned")
             .clone();
-        let mut stream = provider.stream(request).await?;
+        let mut stream = match provider.stream(request).await {
+            Ok(s) => s,
+            Err(e) => {
+                crate::config::health::record_failure(provider.name(), &e.to_string());
+                return Err(e);
+            }
+        };
 
         // Accumulate state from stream events
         let mut id = String::new();
@@ -360,6 +366,7 @@ impl AgentService {
                 StreamEvent::MessageStop => break,
                 StreamEvent::Ping => {}
                 StreamEvent::Error { error } => {
+                    crate::config::health::record_failure(provider.name(), &error);
                     return Err(crate::brain::provider::ProviderError::StreamError(error));
                 }
             }
@@ -398,8 +405,8 @@ impl AgentService {
             .filter(|b| !matches!(b, ContentBlock::Text { text } if text.is_empty()))
             .collect();
 
-        // Snapshot config as "last known good" on first successful provider call.
-        // Only runs once per process — avoids repeated I/O on every response.
+        // Track provider health + snapshot config on first success.
+        crate::config::health::record_success(provider.name());
         {
             use std::sync::atomic::{AtomicBool, Ordering};
             static SAVED: AtomicBool = AtomicBool::new(false);

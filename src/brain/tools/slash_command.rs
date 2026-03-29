@@ -100,6 +100,36 @@ impl SlashCommandTool {
         // Approval policy
         lines.push(format!("Approval: {}", config.agent.approval_policy));
 
+        // Provider health
+        lines.push(String::new());
+        lines.push("Provider Health:".to_string());
+        let health_state: crate::config::health::HealthState =
+            std::fs::read_to_string(crate::config::opencrabs_home().join("provider_health.json"))
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_default();
+        if health_state.providers.is_empty() {
+            lines.push("  (no data yet)".to_string());
+        } else {
+            for (name, h) in &health_state.providers {
+                let status = if h.consecutive_failures > 0 {
+                    format!("FAILING ({}x)", h.consecutive_failures)
+                } else {
+                    "OK".to_string()
+                };
+                lines.push(format!("  {} — {}", name, status));
+            }
+        }
+
+        // Last known good config
+        let has_good = crate::config::opencrabs_home()
+            .join("config.last_good.toml")
+            .exists();
+        lines.push(format!(
+            "Config recovery: {}",
+            if has_good { "snapshot available" } else { "no snapshot" }
+        ));
+
         lines.join("\n")
     }
 }
