@@ -899,18 +899,22 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
     // ── Channel commands (/help, /usage, /models) ──────────────────────────
     {
         use crate::channels::commands::{self, ChannelCommand};
-        match commands::handle_command(&content, session_id, &state.agent, &state.session_svc).await
-        {
-            ChannelCommand::Help(body) | ChannelCommand::Usage(body) => {
-                let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
-                let session = client.open_session(&token);
-                let request = SlackApiChatPostMessageRequest::new(
-                    SlackChannelId::new(channel_id),
-                    SlackMessageContent::new().with_text(body),
-                );
-                let _ = session.chat_post_message(&request).await;
-                return;
-            }
+        let cmd =
+            commands::handle_command(&content, session_id, &state.agent, &state.session_svc).await;
+
+        // Handle simple text-response commands (Help, Usage, Evolve, Doctor, etc.)
+        if let Some(reply) = commands::try_execute_text_command(&cmd).await {
+            let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
+            let session = client.open_session(&token);
+            let request = SlackApiChatPostMessageRequest::new(
+                SlackChannelId::new(channel_id),
+                SlackMessageContent::new().with_text(reply),
+            );
+            let _ = session.chat_post_message(&request).await;
+            return;
+        }
+
+        match cmd {
             ChannelCommand::Models(resp) => {
                 let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
                 let session = client.open_session(&token);
@@ -1041,22 +1045,6 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                 let _ = session.chat_post_message(&request).await;
                 return;
             }
-            ChannelCommand::Evolve => {
-                let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
-                let session_api = client.open_session(&token);
-                let request = SlackApiChatPostMessageRequest::new(
-                    SlackChannelId::new(channel_id.clone()),
-                    SlackMessageContent::new().with_text("⏳ Checking for updates...".to_string()),
-                );
-                let _ = session_api.chat_post_message(&request).await;
-                let result = commands::run_evolve().await;
-                let request = SlackApiChatPostMessageRequest::new(
-                    SlackChannelId::new(channel_id.clone()),
-                    SlackMessageContent::new().with_text(result),
-                );
-                let _ = session_api.chat_post_message(&request).await;
-                return;
-            }
             ChannelCommand::Compact => {
                 let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
                 let session = client.open_session(&token);
@@ -1073,17 +1061,9 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                 content = prompt;
                 // fall through to agent with the prompt as the message
             }
-            ChannelCommand::UserSystem(text) => {
-                let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
-                let session = client.open_session(&token);
-                let request = SlackApiChatPostMessageRequest::new(
-                    SlackChannelId::new(channel_id),
-                    SlackMessageContent::new().with_text(text),
-                );
-                let _ = session.chat_post_message(&request).await;
-                return;
-            }
             ChannelCommand::NotACommand => {}
+            // Help, Usage, Evolve, Doctor, UserSystem handled by try_execute_text_command above
+            _ => {}
         }
     }
 

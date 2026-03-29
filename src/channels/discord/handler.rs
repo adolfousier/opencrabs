@@ -351,11 +351,15 @@ pub(crate) async fn handle_message(
     // ── Channel commands (/help, /usage, /models) ──────────────────────────
     {
         use crate::channels::commands::{self, ChannelCommand};
-        match commands::handle_command(&content, session_id, &agent, &session_svc).await {
-            ChannelCommand::Help(body) | ChannelCommand::Usage(body) => {
-                let _ = msg.channel_id.say(&ctx.http, &body).await;
-                return;
-            }
+        let cmd = commands::handle_command(&content, session_id, &agent, &session_svc).await;
+
+        // Handle simple text-response commands (Help, Usage, Evolve, Doctor, etc.)
+        if let Some(reply) = commands::try_execute_text_command(&cmd).await {
+            let _ = msg.channel_id.say(&ctx.http, &reply).await;
+            return;
+        }
+
+        match cmd {
             ChannelCommand::Models(resp) => {
                 use serenity::builder::{CreateActionRow, CreateButton, CreateMessage};
                 use serenity::model::application::ButtonStyle;
@@ -468,12 +472,6 @@ pub(crate) async fn handle_message(
                 let _ = msg.channel_id.say(&ctx.http, reply).await;
                 return;
             }
-            ChannelCommand::Evolve => {
-                let _ = msg.channel_id.say(&ctx.http, "⏳ Checking for updates...").await;
-                let result = commands::run_evolve().await;
-                let _ = msg.channel_id.say(&ctx.http, &result).await;
-                return;
-            }
             ChannelCommand::Compact => {
                 let _ = msg
                     .channel_id
@@ -487,11 +485,9 @@ pub(crate) async fn handle_message(
                 content = prompt;
                 // fall through to agent with the prompt as the message
             }
-            ChannelCommand::UserSystem(text) => {
-                let _ = msg.channel_id.say(&ctx.http, &text).await;
-                return;
-            }
             ChannelCommand::NotACommand => {}
+            // Help, Usage, Evolve, Doctor, UserSystem handled by try_execute_text_command above
+            _ => {}
         }
     }
 

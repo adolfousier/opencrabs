@@ -80,6 +80,8 @@ pub enum ChannelCommand {
     Stop,
     /// `/compact` — trigger context compaction via the agent
     Compact,
+    /// `/doctor` — health check (no LLM needed)
+    Doctor,
     /// `/evolve` — check for updates and install directly (no LLM needed)
     Evolve,
     /// User-defined command with action "prompt" — forward prompt text to the agent
@@ -133,6 +135,7 @@ pub async fn handle_command(
     let trimmed = text.trim();
     let result = match trimmed {
         "/compact" => ChannelCommand::Compact,
+        "/doctor" => ChannelCommand::Doctor,
         "/evolve" => ChannelCommand::Evolve,
         "/help" => ChannelCommand::Help(format_help()),
         "/models" => ChannelCommand::Models(format_providers(agent)),
@@ -152,6 +155,7 @@ pub async fn handle_command(
         ChannelCommand::NewSession => Some("New session started.".to_string()),
         ChannelCommand::Stop => Some("Operation stopped.".to_string()),
         ChannelCommand::UserSystem(body) => Some(body.clone()),
+        ChannelCommand::Doctor => Some("Running health check...".to_string()),
         ChannelCommand::Evolve => Some("Checking for updates...".to_string()),
         ChannelCommand::Compact | ChannelCommand::UserPrompt(_) | ChannelCommand::NotACommand => {
             None
@@ -617,6 +621,29 @@ pub async fn run_evolve() -> String {
     }
 }
 
+/// Run doctor health check directly (no LLM needed). Returns a user-facing status message.
+pub fn run_doctor() -> String {
+    use crate::brain::tools::slash_command::SlashCommandTool;
+
+    // Reuse the slash command tool's doctor logic
+    SlashCommandTool::doctor_text()
+}
+
+/// Try to execute a command that returns a simple text response (no platform-specific UI).
+/// Returns `Some(text)` for commands handled here, `None` for commands that need
+/// platform-specific rendering (Models, Sessions, NewSession) or agent passthrough.
+/// Channels call this first — if it returns Some, send the text and return.
+pub async fn try_execute_text_command(cmd: &ChannelCommand) -> Option<String> {
+    match cmd {
+        ChannelCommand::Help(body) | ChannelCommand::Usage(body) | ChannelCommand::UserSystem(body) => {
+            Some(body.clone())
+        }
+        ChannelCommand::Doctor => Some(run_doctor()),
+        ChannelCommand::Evolve => Some(run_evolve().await),
+        _ => None,
+    }
+}
+
 /// Map a provider name to its config section key.
 pub(crate) fn provider_section(provider_name: &str) -> Option<String> {
     crate::utils::providers::config_section(provider_name)
@@ -811,6 +838,7 @@ mod tests {
             ChannelCommand::Stop => "Stop",
             ChannelCommand::UserPrompt(_) => "UserPrompt",
             ChannelCommand::UserSystem(_) => "UserSystem",
+            ChannelCommand::Doctor => "Doctor",
             ChannelCommand::Evolve => "Evolve",
             ChannelCommand::NotACommand => "NotACommand",
         }

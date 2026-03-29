@@ -572,15 +572,19 @@ pub(crate) async fn handle_message(
     // ── Channel commands (/help, /usage, /models, /stop) ────────────────────
     {
         use crate::channels::commands::{self, ChannelCommand};
-        match commands::handle_command(&content, session_id, &agent, &session_svc).await {
-            ChannelCommand::Help(body) | ChannelCommand::Usage(body) => {
-                let reply = waproto::whatsapp::Message {
-                    conversation: Some(body),
-                    ..Default::default()
-                };
-                let _ = client.send_message(info.source.chat.clone(), reply).await;
-                return;
-            }
+        let cmd = commands::handle_command(&content, session_id, &agent, &session_svc).await;
+
+        // Handle simple text-response commands (Help, Usage, Evolve, Doctor, etc.)
+        if let Some(reply_text) = commands::try_execute_text_command(&cmd).await {
+            let reply = waproto::whatsapp::Message {
+                conversation: Some(reply_text),
+                ..Default::default()
+            };
+            let _ = client.send_message(info.source.chat.clone(), reply).await;
+            return;
+        }
+
+        match cmd {
             ChannelCommand::Models(resp) => {
                 // WhatsApp has no inline buttons — send plain text list
                 let reply = waproto::whatsapp::Message {
@@ -642,20 +646,6 @@ pub(crate) async fn handle_message(
                 let _ = client.send_message(info.source.chat.clone(), reply).await;
                 return;
             }
-            ChannelCommand::Evolve => {
-                let status = waproto::whatsapp::Message {
-                    conversation: Some("⏳ Checking for updates...".to_string()),
-                    ..Default::default()
-                };
-                let _ = client.send_message(info.source.chat.clone(), status).await;
-                let result = commands::run_evolve().await;
-                let reply = waproto::whatsapp::Message {
-                    conversation: Some(result),
-                    ..Default::default()
-                };
-                let _ = client.send_message(info.source.chat.clone(), reply).await;
-                return;
-            }
             ChannelCommand::Compact => {
                 let status = waproto::whatsapp::Message {
                     conversation: Some("⏳ Compacting context...".to_string()),
@@ -670,15 +660,9 @@ pub(crate) async fn handle_message(
                 content = prompt;
                 // fall through to agent with the prompt as the message
             }
-            ChannelCommand::UserSystem(text) => {
-                let reply = waproto::whatsapp::Message {
-                    conversation: Some(text),
-                    ..Default::default()
-                };
-                let _ = client.send_message(info.source.chat.clone(), reply).await;
-                return;
-            }
             ChannelCommand::NotACommand => {}
+            // Help, Usage, Evolve, Doctor, UserSystem handled by try_execute_text_command above
+            _ => {}
         }
     }
 

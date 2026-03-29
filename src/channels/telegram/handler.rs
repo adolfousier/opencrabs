@@ -713,13 +713,17 @@ pub(crate) async fn handle_message(
     let mut text = text;
     if !is_voice {
         use crate::channels::commands::{self, ChannelCommand};
-        match commands::handle_command(&text, session_id, &agent, &session_svc).await {
-            ChannelCommand::Help(body) | ChannelCommand::Usage(body) => {
-                bot.send_message(msg.chat.id, md_to_html(&body))
-                    .parse_mode(ParseMode::Html)
-                    .await?;
-                return Ok(());
-            }
+        let cmd = commands::handle_command(&text, session_id, &agent, &session_svc).await;
+
+        // Handle simple text-response commands (Help, Usage, Evolve, Doctor, etc.)
+        if let Some(reply) = commands::try_execute_text_command(&cmd).await {
+            bot.send_message(msg.chat.id, md_to_html(&reply))
+                .parse_mode(ParseMode::Html)
+                .await?;
+            return Ok(());
+        }
+
+        match cmd {
             ChannelCommand::Models(resp) => {
                 let rows: Vec<Vec<InlineKeyboardButton>> = resp
                     .providers
@@ -806,13 +810,6 @@ pub(crate) async fn handle_message(
                 bot.send_message(msg.chat.id, reply).await?;
                 return Ok(());
             }
-            ChannelCommand::Evolve => {
-                bot.send_message(msg.chat.id, "⏳ Checking for updates...")
-                    .await?;
-                let result = commands::run_evolve().await;
-                bot.send_message(msg.chat.id, &result).await?;
-                return Ok(());
-            }
             ChannelCommand::Compact => {
                 bot.send_message(msg.chat.id, "⏳ Compacting context...")
                     .await?;
@@ -824,13 +821,9 @@ pub(crate) async fn handle_message(
                 text = prompt;
                 // fall through to agent with the prompt as the message
             }
-            ChannelCommand::UserSystem(text) => {
-                bot.send_message(msg.chat.id, md_to_html(&text))
-                    .parse_mode(ParseMode::Html)
-                    .await?;
-                return Ok(());
-            }
             ChannelCommand::NotACommand => {} // fall through to agent
+            // Help, Usage, Evolve, Doctor, UserSystem handled by try_execute_text_command above
+            _ => {}
         }
     }
 

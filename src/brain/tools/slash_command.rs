@@ -11,6 +11,89 @@ use serde_json::Value;
 
 pub struct SlashCommandTool;
 
+impl SlashCommandTool {
+    /// Run the doctor health check and return the result as plain text.
+    /// Used by channel commands to avoid going through the LLM.
+    pub fn doctor_text() -> String {
+        let config = match crate::config::Config::load() {
+            Ok(c) => c,
+            Err(e) => return format!("Failed to load config: {}", e),
+        };
+
+        let mut lines = vec!["Health Check".to_string(), String::new()];
+
+        // Check keys.toml validity
+        let keys_path = crate::config::keys_path();
+        if keys_path.exists() {
+            match std::fs::read_to_string(&keys_path) {
+                Ok(content) => match toml::from_str::<toml::Value>(&content) {
+                    Ok(_) => lines.push("keys.toml — OK".to_string()),
+                    Err(e) => lines.push(format!("keys.toml — PARSE ERROR: {e}")),
+                },
+                Err(e) => lines.push(format!("keys.toml — READ ERROR: {e}")),
+            }
+        } else {
+            lines.push("keys.toml — NOT FOUND".to_string());
+        }
+        lines.push(String::new());
+
+        // Check providers
+        let providers = [
+            ("anthropic", &config.providers.anthropic),
+            ("openai", &config.providers.openai),
+            ("gemini", &config.providers.gemini),
+            ("openrouter", &config.providers.openrouter),
+            ("minimax", &config.providers.minimax),
+        ];
+
+        lines.push("Providers:".to_string());
+        for (name, provider_opt) in &providers {
+            if let Some(provider) = provider_opt
+                && provider.enabled
+            {
+                let has_key = provider.api_key.as_ref().is_some_and(|k| !k.is_empty());
+                let model = provider.default_model.as_deref().unwrap_or("(not set)");
+                let status = if has_key { "OK" } else { "MISSING API KEY" };
+                lines.push(format!("  {} — {} (model: {})", name, status, model));
+            }
+        }
+
+        if let Some(ref custom) = config.providers.custom {
+            for (name, provider) in custom {
+                if provider.enabled {
+                    let has_key = provider.api_key.as_ref().is_some_and(|k| !k.is_empty());
+                    let model = provider.default_model.as_deref().unwrap_or("(not set)");
+                    let status = if has_key { "OK" } else { "MISSING API KEY" };
+                    lines.push(format!("  custom/{} — {} (model: {})", name, status, model));
+                }
+            }
+        }
+
+        // Check channels
+        lines.push(String::new());
+        lines.push("Channels:".to_string());
+        let ch = &config.channels;
+        if ch.telegram.enabled { lines.push("  telegram — enabled".to_string()); }
+        if ch.discord.enabled { lines.push("  discord — enabled".to_string()); }
+        if ch.slack.enabled { lines.push("  slack — enabled".to_string()); }
+        if ch.whatsapp.enabled { lines.push("  whatsapp — enabled".to_string()); }
+        if ch.trello.enabled { lines.push("  trello — enabled".to_string()); }
+
+        // Voice config
+        lines.push(String::new());
+        lines.push(format!(
+            "Voice: STT={}, TTS={}",
+            config.voice_config().stt_enabled,
+            config.voice_config().tts_enabled
+        ));
+
+        // Approval policy
+        lines.push(format!("Approval: {}", config.agent.approval_policy));
+
+        lines.join("\n")
+    }
+}
+
 #[async_trait]
 impl Tool for SlashCommandTool {
     fn name(&self) -> &str {
