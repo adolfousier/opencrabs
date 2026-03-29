@@ -169,9 +169,7 @@ impl Tool for TrelloConnectTool {
         if let Err(e) = crate::config::write_secret_key("channels.trello", "app_token", &api_key) {
             tracing::error!("Failed to save Trello API key: {}", e);
         }
-        if let Err(e) =
-            crate::config::write_secret_key("channels.trello", "token", &api_token)
-        {
+        if let Err(e) = crate::config::write_secret_key("channels.trello", "token", &api_token) {
             tracing::error!("Failed to save Trello API token: {}", e);
         }
         if let Err(e) = crate::config::Config::write_key("channels.trello", "enabled", "true") {

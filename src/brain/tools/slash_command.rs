@@ -127,7 +127,11 @@ impl SlashCommandTool {
             .exists();
         lines.push(format!(
             "Config recovery: {}",
-            if has_good { "snapshot available" } else { "no snapshot" }
+            if has_good {
+                "snapshot available"
+            } else {
+                "no snapshot"
+            }
         ));
 
         lines.join("\n")
