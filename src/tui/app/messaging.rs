@@ -208,6 +208,10 @@ impl App {
         if let Some(pane) = self.pane_manager.focused_pane_mut() {
             pane.session_id = Some(session_id);
         }
+        // Persist layout so pane-to-session mapping survives restarts
+        if self.pane_manager.is_split() {
+            self.pane_manager.save_layout();
+        }
 
         Ok(())
     }

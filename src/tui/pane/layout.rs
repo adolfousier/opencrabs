@@ -2,9 +2,10 @@
 
 use super::state::PaneId;
 use ratatui::layout::Rect;
+use serde::{Deserialize, Serialize};
 
 /// Direction of a split.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SplitDirection {
     /// Left | Right
     Horizontal,
@@ -13,7 +14,7 @@ pub enum SplitDirection {
 }
 
 /// Recursive binary tree node for the pane layout.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SplitNode {
     /// A terminal node — contains a single pane.
     Leaf(PaneId),
