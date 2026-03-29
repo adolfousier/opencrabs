@@ -119,7 +119,8 @@ impl Tool for ResumeAgentTool {
 
         // Build a new AgentService for the resumed run
         let child_service = {
-            let config = crate::config::Config::load().unwrap_or_default();
+            let config = crate::config::Config::load()
+                .map_err(|e| ToolError::Execution(format!("Config load failed: {}", e)))?;
             let provider = crate::brain::provider::create_provider(&config)
                 .map_err(|e| ToolError::Execution(format!("Failed to create provider: {}", e)))?;
 
@@ -134,7 +135,7 @@ impl Tool for ResumeAgentTool {
             child_registry.register(Arc::new(crate::brain::tools::web_search::WebSearchTool));
 
             Arc::new(
-                crate::brain::agent::AgentService::new(provider, service_context)
+                crate::brain::agent::AgentService::new(provider, service_context, &config)
                     .with_tool_registry(Arc::new(child_registry))
                     .with_auto_approve_tools(true)
                     .with_working_directory(context.working_directory.clone()),

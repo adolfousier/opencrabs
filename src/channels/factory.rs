@@ -73,10 +73,12 @@ impl ChannelFactory {
     /// set, otherwise the override is ignored. A2A and headless tools that have no interactive
     /// user can set their own auto-approval via session context.
     pub fn create_agent_service(&self) -> Arc<AgentService> {
-        let mut builder = AgentService::new(self.provider.clone(), self.service_context.clone())
-            .with_system_brain(self.shared_brain.clone())
-            .with_working_directory(self.working_directory.clone())
-            .with_brain_path(self.brain_path.clone());
+        let config = self.config_rx.borrow();
+        let mut builder =
+            AgentService::new(self.provider.clone(), self.service_context.clone(), &config)
+                .with_system_brain(self.shared_brain.clone())
+                .with_working_directory(self.working_directory.clone())
+                .with_brain_path(self.brain_path.clone());
 
         if let Some(registry) = self.tool_registry.get() {
             builder = builder.with_tool_registry(registry.clone());

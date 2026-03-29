@@ -289,7 +289,7 @@ async fn cmd_chat_inner(
 
     // Create agent service with dynamic system brain
     let agent_service = Arc::new(
-        AgentService::new(provider.clone(), service_context.clone())
+        AgentService::new(provider.clone(), service_context.clone(), config)
             .with_system_brain(system_brain.clone())
             .with_working_directory(working_directory.clone()),
     );
@@ -686,7 +686,7 @@ async fn cmd_chat_inner(
     channel_factory.set_session_updated_tx(session_updated_tx.clone());
 
     let agent_service = Arc::new(
-        AgentService::new(provider.clone(), service_context.clone())
+        AgentService::new(provider.clone(), service_context.clone(), config)
             .with_system_brain(system_brain)
             .with_tool_registry(shared_tool_registry.clone())
             .with_approval_callback(Some(approval_callback))

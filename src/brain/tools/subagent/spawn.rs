@@ -93,7 +93,8 @@ impl Tool for SpawnAgentTool {
 
         // Build a minimal AgentService for the child
         let child_service = {
-            let config = crate::config::Config::load().unwrap_or_default();
+            let config = crate::config::Config::load()
+                .map_err(|e| ToolError::Execution(format!("Config load failed: {}", e)))?;
 
             // Get provider from parent context
             let provider = crate::brain::provider::create_provider(&config)
@@ -112,10 +113,11 @@ impl Tool for SpawnAgentTool {
             child_registry.register(Arc::new(crate::brain::tools::ls::LsTool));
             child_registry.register(Arc::new(crate::brain::tools::web_search::WebSearchTool));
 
-            let agent = crate::brain::agent::AgentService::new(provider, service_context.clone())
-                .with_tool_registry(Arc::new(child_registry))
-                .with_auto_approve_tools(true) // children auto-approve (parent already approved spawn)
-                .with_working_directory(context.working_directory.clone());
+            let agent =
+                crate::brain::agent::AgentService::new(provider, service_context.clone(), &config)
+                    .with_tool_registry(Arc::new(child_registry))
+                    .with_auto_approve_tools(true) // children auto-approve (parent already approved spawn)
+                    .with_working_directory(context.working_directory.clone());
 
             Arc::new(agent)
         };

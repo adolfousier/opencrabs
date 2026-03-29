@@ -781,7 +781,7 @@ pub(crate) async fn cmd_run(
 
     // Create service context and agent service
     let service_context = ServiceContext::new(db.pool().clone());
-    let agent_service = AgentService::new(provider.clone(), service_context.clone())
+    let agent_service = AgentService::new(provider.clone(), service_context.clone(), config)
         .with_tool_registry(Arc::new(tool_registry))
         .with_system_brain(system_brain);
 
@@ -1089,7 +1089,7 @@ pub(crate) async fn cmd_agent_interactive(
     let system_brain = brain_loader.build_system_brain(Some(&runtime_info), None);
 
     let service_context = ServiceContext::new(db.pool().clone());
-    let agent_service = AgentService::new(provider.clone(), service_context.clone())
+    let agent_service = AgentService::new(provider.clone(), service_context.clone(), config)
         .with_tool_registry(Arc::new(tool_registry))
         .with_system_brain(system_brain);
 
