@@ -12,7 +12,8 @@ pub mod helpers {
     pub async fn placeholder_agent_service() -> Arc<AgentService> {
         let provider = Arc::new(PlaceholderProvider);
         let ctx = placeholder_service_context().await;
-        Arc::new(AgentService::new(provider, ctx))
+        let config = crate::config::Config::default();
+        Arc::new(AgentService::new(provider, ctx, &config))
     }
 
     /// Create a `ServiceContext` backed by an in-memory SQLite database.

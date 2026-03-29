@@ -720,7 +720,7 @@ async fn create_test_service_with_provider(provider: Arc<dyn Provider>) -> (Agen
     let pool = db.pool().clone();
 
     let context = ServiceContext::new(pool);
-    let agent_service = AgentService::new(provider, context.clone());
+    let agent_service = AgentService::new_for_test(provider, context.clone());
 
     let session_service = SessionService::new(context);
     let session = session_service

@@ -121,7 +121,7 @@ async fn create_test_agent(
     tool_registry.register(Arc::new(WriteTool));
     tool_registry.register(Arc::new(BashTool));
 
-    let agent_service = AgentService::new(provider, service_context.clone())
+    let agent_service = AgentService::new_for_test(provider, service_context.clone())
         .with_tool_registry(Arc::new(tool_registry));
 
     Ok((agent_service, service_context))
@@ -386,7 +386,7 @@ async fn test_end_to_end_system_brain() -> Result<()> {
     ));
     let service_context = ServiceContext::new(db.pool().clone());
 
-    let agent_service = AgentService::new(provider, service_context.clone())
+    let agent_service = AgentService::new_for_test(provider, service_context.clone())
         .with_system_brain("You are a pirate assistant.".to_string());
 
     let session_service = SessionService::new(service_context);

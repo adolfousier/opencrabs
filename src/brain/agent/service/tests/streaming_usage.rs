@@ -459,7 +459,7 @@ async fn test_deferred_usage_with_tool_calls() {
     let registry = ToolRegistry::new();
     registry.register(Arc::new(MockTool));
 
-    let agent_service = AgentService::new(provider, context.clone())
+    let agent_service = AgentService::new_for_test(provider, context.clone())
         .with_tool_registry(Arc::new(registry))
         .with_auto_approve_tools(true);
 
