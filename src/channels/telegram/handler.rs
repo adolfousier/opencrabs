@@ -952,25 +952,101 @@ pub(crate) async fn handle_message(
                 tokio::select! {
                     _ = cancel.cancelled() => break,
                     _ = tokio::time::sleep(std::time::Duration::from_millis(1500)) => {
-                        let mut s = st.lock().await;
-                        let any_tools_dirty = s.tool_msgs.iter().any(|t| t.dirty);
-                        let has_intermediate = !s.pending_intermediate.is_empty();
-                        let has_active_tools = s.tool_msgs.iter().any(|t| t.completed.is_none());
+                        // ── Snapshot state under lock, then release immediately ──
+                        // This prevents blocking the progress callback's try_lock()
+                        // during Telegram API calls (which can take hundreds of ms).
+                        struct Snapshot {
+                            dirty: bool,
+                            recreate: bool,
+                            response_text: String,
+                            msg_id: Option<MessageId>,
+                            status_msg_id: Option<MessageId>,
+                            tool_round_count: usize,
+                            tools_started_at: Option<std::time::Instant>,
+                            quip_index: usize,
+                            status_shown_at: Option<std::time::Instant>,
+                            // Cloned tool state for dirty tools
+                            tools: Vec<(usize, String, Option<bool>, Option<MessageId>)>,
+                            intermediates: Vec<String>,
+                            has_active_tools: bool,
+                        }
 
-                        if !s.dirty && !s.recreate && !any_tools_dirty && !has_intermediate && !has_active_tools { continue; }
+                        let snap = {
+                            let mut s = st.lock().await;
+                            let any_tools_dirty = s.tool_msgs.iter().any(|t| t.dirty);
+                            let has_intermediate = !s.pending_intermediate.is_empty();
+                            let has_active_tools = s.tool_msgs.iter().any(|t| t.completed.is_none());
+
+                            if !s.dirty && !s.recreate && !any_tools_dirty && !has_intermediate && !has_active_tools { continue; }
+
+                            // Collect dirty tools
+                            let tools: Vec<_> = s.tool_msgs.iter().enumerate()
+                                .filter(|(_, t)| t.dirty)
+                                .map(|(i, t)| {
+                                    let label = format!("**{}**{}", t.name, t.context);
+                                    (i, label, t.completed, t.msg_id)
+                                })
+                                .collect();
+
+                            // Mark tools as not dirty
+                            for t in s.tool_msgs.iter_mut().filter(|t| t.dirty) {
+                                t.dirty = false;
+                            }
+
+                            // Drain intermediates
+                            let intermediates: Vec<String> = s.pending_intermediate.drain(..).collect();
+
+                            // Snapshot response
+                            let response_text = if s.dirty || s.recreate {
+                                s.render()
+                            } else {
+                                String::new()
+                            };
+
+                            let snap = Snapshot {
+                                dirty: s.dirty,
+                                recreate: s.recreate,
+                                response_text,
+                                msg_id: s.msg_id,
+                                status_msg_id: s.status_msg_id,
+                                tool_round_count: s.tool_round_count,
+                                tools_started_at: s.tools_started_at,
+                                quip_index: s.quip_index,
+                                status_shown_at: s.status_shown_at,
+                                tools,
+                                intermediates,
+                                has_active_tools,
+                            };
+
+                            // Pre-clear state that will be handled
+                            if s.recreate {
+                                s.recreate = false;
+                            }
+                            if s.dirty {
+                                s.dirty = false;
+                            }
+                            // Clear status tracking if content arriving
+                            if !snap.intermediates.is_empty() || (snap.dirty && !snap.response_text.is_empty()) {
+                                s.status_msg_id = None;
+                                s.tools_started_at = None;
+                                s.tool_round_count = 0;
+                            }
+
+                            snap
+                        };
+                        // Lock is now released — progress callback can update state freely
 
                         // ── Individual tool messages (each tool = its own message) ──
-                        for tool in s.tool_msgs.iter_mut().filter(|t| t.dirty) {
-                            let label = format!("**{}**{}", tool.name, tool.context);
-                            let text = match tool.completed {
+                        for (idx, label, completed, existing_mid) in &snap.tools {
+                            let text = match completed {
                                 None => format!("⚙️ {}", label),
                                 Some(true) => format!("✅ {}", label),
                                 Some(false) => format!("❌ {}", label),
                             };
                             let html = markdown_to_telegram_html(&text);
-                            if let Some(mid) = tool.msg_id {
+                            if let Some(mid) = existing_mid {
                                 let _ = bot
-                                    .edit_message_text(chat, mid, &html)
+                                    .edit_message_text(chat, *mid, &html)
                                     .parse_mode(ParseMode::Html)
                                     .await;
                             } else if let Ok(m) = bot
@@ -978,35 +1054,35 @@ pub(crate) async fn handle_message(
                                 .parse_mode(ParseMode::Html)
                                 .await
                             {
-                                tool.msg_id = Some(m.id);
+                                // Write back the new msg_id
+                                let mut s = st.lock().await;
+                                if let Some(tool) = s.tool_msgs.get_mut(*idx) {
+                                    tool.msg_id = Some(m.id);
+                                }
                             }
-                            tool.dirty = false;
                         }
 
                         // ── Rolling status quips during long tool execution ──
-                        // Show → stick 5s → vanish → pause 2s → next quip.
-                        // Keeps user informed during long gaps with no streaming text.
-                        if has_active_tools {
+                        if snap.has_active_tools {
                             let now = std::time::Instant::now();
-                            let shown_elapsed = s.status_shown_at
+                            let shown_elapsed = snap.status_shown_at
                                 .map(|t| now.duration_since(t).as_secs())
                                 .unwrap_or(999);
 
-                            if s.status_msg_id.is_some() && shown_elapsed >= 5 {
-                                // Vanish: delete current quip after 5s
-                                if let Some(mid) = s.status_msg_id.take() {
+                            if snap.status_msg_id.is_some() && shown_elapsed >= 5 {
+                                if let Some(mid) = snap.status_msg_id {
                                     let _ = bot.delete_message(chat, mid).await;
                                 }
+                                let mut s = st.lock().await;
+                                s.status_msg_id = None;
                                 s.status_shown_at = Some(now);
-                            } else if s.status_msg_id.is_none() && shown_elapsed >= 2 {
-                                // Show next quip after 2s gap
-                                let elapsed_total = s.tools_started_at
+                            } else if snap.status_msg_id.is_none() && shown_elapsed >= 2 {
+                                let elapsed_total = snap.tools_started_at
                                     .map(|t| t.elapsed().as_secs())
                                     .unwrap_or(0);
-                                let quip = TOOL_STATUS_QUIPS[s.quip_index % TOOL_STATUS_QUIPS.len()];
-                                s.quip_index += 1;
+                                let quip = TOOL_STATUS_QUIPS[snap.quip_index % TOOL_STATUS_QUIPS.len()];
 
-                                let mut status = format!("{} ({} tools", quip, s.tool_round_count);
+                                let mut status = format!("{} ({} tools", quip, snap.tool_round_count);
                                 if elapsed_total >= 5 {
                                     let mins = elapsed_total / 60;
                                     let secs = elapsed_total % 60;
@@ -1019,25 +1095,24 @@ pub(crate) async fn handle_message(
                                 status.push(')');
 
                                 if let Ok(m) = bot.send_message(chat, &status).await {
+                                    let mut s = st.lock().await;
                                     s.status_msg_id = Some(m.id);
                                     s.status_shown_at = Some(now);
+                                    s.quip_index += 1;
                                 }
                             }
                         }
 
                         // ── Delete status when real content arrives ──
-                        if has_intermediate || (s.dirty && !s.response.is_empty()) {
-                            if let Some(mid) = s.status_msg_id.take() {
-                                let _ = bot.delete_message(chat, mid).await;
-                            }
-                            // Reset tool tracking for next round
-                            s.tools_started_at = None;
-                            s.tool_round_count = 0;
+                        if (!snap.intermediates.is_empty() || (snap.dirty && !snap.response_text.is_empty()))
+                            && let Some(mid) = snap.status_msg_id
+                        {
+                            let _ = bot.delete_message(chat, mid).await;
                         }
 
                         // ── Intermediate texts (agent commentary between tool rounds) ──
-                        for text in s.pending_intermediate.drain(..) {
-                            let text = crate::utils::sanitize::strip_llm_artifacts(&text);
+                        for text in &snap.intermediates {
+                            let text = crate::utils::sanitize::strip_llm_artifacts(text);
                             let html = markdown_to_telegram_html(&text);
                             if !html.is_empty() {
                                 let _ = bot
@@ -1048,26 +1123,37 @@ pub(crate) async fn handle_message(
                         }
 
                         // ── Response message (thinking + response, always at bottom) ──
-                        if s.dirty || s.recreate {
-                            if s.recreate {
-                                if let Some(old_mid) = s.msg_id.take() {
-                                    let _ = bot.delete_message(chat, old_mid).await;
-                                }
-                                s.recreate = false;
+                        if snap.dirty || snap.recreate {
+                            if snap.recreate
+                                && let Some(old_mid) = snap.msg_id
+                            {
+                                let _ = bot.delete_message(chat, old_mid).await;
+                                let mut s = st.lock().await;
+                                s.msg_id = None;
                             }
-                            let text = s.render();
-                            if !text.is_empty() {
-                                // Delete status msg if still present (response starting)
-                                if let Some(mid) = s.status_msg_id.take() {
+                            if !snap.response_text.is_empty() {
+                                // Delete status msg if still present
+                                if let Some(mid) = snap.status_msg_id {
                                     let _ = bot.delete_message(chat, mid).await;
+                                    let mut s = st.lock().await;
+                                    s.status_msg_id = None;
                                 }
-                                if s.msg_id.is_none()
+                                let current_msg_id = {
+                                    let s = st.lock().await;
+                                    s.msg_id
+                                };
+                                if current_msg_id.is_none()
                                     && let Ok(m) = bot.send_message(chat, "\u{258b}").await
                                 {
+                                    let mut s = st.lock().await;
                                     s.msg_id = Some(m.id);
                                 }
-                                if let Some(mid) = s.msg_id {
-                                    let html = markdown_to_telegram_html(&text);
+                                let msg_id = {
+                                    let s = st.lock().await;
+                                    s.msg_id
+                                };
+                                if let Some(mid) = msg_id {
+                                    let html = markdown_to_telegram_html(&snap.response_text);
                                     let display = format!("{}\u{258b}", html); // ▋ cursor
                                     let _ = bot
                                         .edit_message_text(chat, mid, display)
@@ -1075,11 +1161,9 @@ pub(crate) async fn handle_message(
                                         .await;
                                 }
                             }
-                            s.dirty = false;
                         }
 
                         // Re-send typing indicator after any bot message
-                        // (Telegram clears typing on every bot message)
                         let _ = bot.send_chat_action(chat, ChatAction::Typing).await;
                     }
                 }
@@ -1242,13 +1326,25 @@ pub(crate) async fn handle_message(
     // _typing_guard drop cancels typing loop
 
     // Grab streaming message id and clean up status message
-    let (streaming_msg_id, status_msg_id) = {
-        let s = streaming.lock().await;
-        (s.msg_id, s.status_msg_id)
+    let (streaming_msg_id, status_msg_id, remaining_intermediate) = {
+        let mut s = streaming.lock().await;
+        let intermediates: Vec<String> = s.pending_intermediate.drain(..).collect();
+        (s.msg_id, s.status_msg_id, intermediates)
     };
     // Delete rolling status message if still present
     if let Some(mid) = status_msg_id {
         let _ = bot.delete_message(msg.chat.id, mid).await;
+    }
+    // Send any remaining intermediate texts that weren't flushed by the edit loop
+    for text in remaining_intermediate {
+        let text = crate::utils::sanitize::strip_llm_artifacts(&text);
+        let html = markdown_to_telegram_html(&text);
+        if !html.is_empty() {
+            let _ = bot
+                .send_message(msg.chat.id, &html)
+                .parse_mode(ParseMode::Html)
+                .await;
+        }
     }
 
     tracing::info!(
