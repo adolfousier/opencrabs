@@ -93,7 +93,7 @@ impl CronScheduler {
             return Ok(existing.id);
         }
         // Create a new dedicated cron session
-        let config = Config::load().unwrap_or_default();
+        let config = Config::load()?;
         let provider = config.cron.default_provider.clone();
         let model = config.cron.default_model.clone();
         let session = session_svc
@@ -191,7 +191,7 @@ async fn execute_job(
     cron_session_id: Uuid,
 ) -> anyhow::Result<()> {
     // Resolve effective provider/model: job override > config default > system default
-    let config = Config::load().unwrap_or_default();
+    let config = Config::load()?;
     let effective_provider = job
         .provider
         .clone()

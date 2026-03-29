@@ -47,7 +47,13 @@ use sessions::render_sessions;
 /// Render the entire UI
 pub fn render(f: &mut Frame, app: &mut App) {
     if app.mode == AppMode::Splash || app.mode == AppMode::UpdatePrompt {
-        let config = crate::config::Config::load().unwrap_or_default();
+        let config = match crate::config::Config::load() {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("Failed to load config for splash: {e}");
+                return;
+            }
+        };
         let (provider, model) = crate::config::resolve_provider_from_config(&config);
         splash::render_splash(f, f.area(), provider, model);
         if app.mode == AppMode::UpdatePrompt {

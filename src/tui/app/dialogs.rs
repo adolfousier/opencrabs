@@ -24,7 +24,17 @@ impl App {
         tracing::debug!("[open_model_selector] Opening model selector");
 
         // Load config to get enabled provider
-        let config = crate::config::Config::load().unwrap_or_default();
+        let config = match crate::config::Config::load() {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("Failed to load config for model selector: {}", e);
+                self.push_system_message(format!(
+                    "⚠️ Could not load config.toml: {}. Model selector unavailable.",
+                    e
+                ));
+                return;
+            }
+        };
 
         // Cache existing custom provider names early (needed for index mapping)
         self.ps.custom_names = config
@@ -479,8 +489,8 @@ impl App {
                 let provider_idx = self.ps.selected_provider.min(9);
 
                 // User typed a new key — sentinel means key was pre-populated and not changed
-                let key_changed = !self.ps.api_key_input.is_empty()
-                    && !self.ps.has_existing_key_sentinel();
+                let key_changed =
+                    !self.ps.api_key_input.is_empty() && !self.ps.has_existing_key_sentinel();
                 let api_key = if key_changed {
                     Some(self.ps.api_key_input.clone())
                 } else {
@@ -586,8 +596,13 @@ impl App {
 
         let provider = &PROVIDERS[provider_idx];
 
-        // Load existing config to merge
-        let mut config = crate::config::Config::load().unwrap_or_default();
+        // Load existing config to merge — CRITICAL: empty defaults would wipe all settings
+        let mut config = crate::config::Config::load().map_err(|e| {
+            anyhow::anyhow!(
+                "Cannot save provider: config.toml failed to load ({}). Fix config first.",
+                e
+            )
+        })?;
 
         // Disable all providers first - we'll enable only the selected one
         if let Some(ref mut p) = config.providers.anthropic {

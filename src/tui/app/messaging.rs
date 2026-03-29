@@ -414,7 +414,17 @@ impl App {
                     "brain" => OnboardingStep::BrainSetup,
                     _ => OnboardingStep::ModeSelect,
                 };
-                let config = crate::config::Config::load().unwrap_or_default();
+                let config = match crate::config::Config::load() {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::error!("Failed to load config for onboarding: {}", e);
+                        self.push_system_message(format!(
+                            "⚠️ Could not load config: {}. Cannot open onboarding.",
+                            e
+                        ));
+                        return false;
+                    }
+                };
                 let mut wizard = OnboardingWizard::from_config(&config);
                 wizard.step = step;
                 // Deep-link to a specific step: lock to that step only
