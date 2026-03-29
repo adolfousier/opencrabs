@@ -913,7 +913,7 @@ impl App {
         let brain_path = self.agent_service.brain_path().clone();
 
         // Create new agent service with new provider — preserve ALL callbacks
-        let mut new_agent_service = AgentService::new(provider, context)
+        let mut new_agent_service = AgentService::new(provider, context, &config)
             .with_tool_registry(tool_registry)
             .with_approval_callback(Some(approval_callback))
             .with_progress_callback(progress_callback)
