@@ -1243,6 +1243,17 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                         }
                     });
                 }
+                ProgressEvent::SelfHealingAlert { message } => {
+                    tokio::spawn(async move {
+                        let session = client.open_session(&token);
+                        let text = format!("🔧 {}", message);
+                        let req = SlackApiChatPostMessageRequest::new(
+                            channel,
+                            SlackMessageContent::new().with_text(text),
+                        );
+                        let _ = session.chat_post_message(&req).await;
+                    });
+                }
                 _ => {}
             }
         })

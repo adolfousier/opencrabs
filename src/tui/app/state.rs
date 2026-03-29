@@ -737,6 +737,15 @@ impl App {
             });
         }
 
+        // Notify user if config was recovered from last-known-good snapshot
+        if crate::config::Config::was_recovered() {
+            self.push_system_message(
+                "Config recovered from last-known-good snapshot. \
+                 Review ~/.opencrabs/config.toml for issues."
+                    .to_string(),
+            );
+        }
+
         Ok(())
     }
 

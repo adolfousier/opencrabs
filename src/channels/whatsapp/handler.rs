@@ -762,27 +762,44 @@ pub(crate) async fn handle_message(
         let jid_cb = info.source.chat.clone();
         let was_streamed_cb = was_streamed.clone();
         Arc::new(move |_session_id, event| {
-            if let ProgressEvent::IntermediateText { text, .. } = event {
-                let (clean, _) = crate::utils::extract_img_markers(&text);
-                let clean = redact_secrets(&clean);
-                let clean = crate::utils::slack_fmt::markdown_to_mrkdwn(&clean);
-                if !clean.trim().is_empty() {
-                    was_streamed_cb.store(true, std::sync::atomic::Ordering::Relaxed);
+            match event {
+                ProgressEvent::IntermediateText { text, .. } => {
+                    let (clean, _) = crate::utils::extract_img_markers(&text);
+                    let clean = redact_secrets(&clean);
+                    let clean = crate::utils::slack_fmt::markdown_to_mrkdwn(&clean);
+                    if !clean.trim().is_empty() {
+                        was_streamed_cb.store(true, std::sync::atomic::Ordering::Relaxed);
+                        let client = client_cb.clone();
+                        let jid = jid_cb.clone();
+                        let tagged = format!("{}\n\n{}", MSG_HEADER, clean.trim());
+                        tokio::spawn(async move {
+                            for chunk in split_message(&tagged, 4000) {
+                                let msg = waproto::whatsapp::Message {
+                                    conversation: Some(chunk.to_string()),
+                                    ..Default::default()
+                                };
+                                if let Err(e) = client.send_message(jid.clone(), msg).await {
+                                    tracing::error!("WhatsApp: intermediate text send failed: {}", e);
+                                }
+                            }
+                        });
+                    }
+                }
+                ProgressEvent::SelfHealingAlert { message } => {
                     let client = client_cb.clone();
                     let jid = jid_cb.clone();
-                    let tagged = format!("{}\n\n{}", MSG_HEADER, clean.trim());
+                    let alert = format!("{}\n\n🔧 {}", MSG_HEADER, message);
                     tokio::spawn(async move {
-                        for chunk in split_message(&tagged, 4000) {
-                            let msg = waproto::whatsapp::Message {
-                                conversation: Some(chunk.to_string()),
-                                ..Default::default()
-                            };
-                            if let Err(e) = client.send_message(jid.clone(), msg).await {
-                                tracing::error!("WhatsApp: intermediate text send failed: {}", e);
-                            }
+                        let msg = waproto::whatsapp::Message {
+                            conversation: Some(alert),
+                            ..Default::default()
+                        };
+                        if let Err(e) = client.send_message(jid, msg).await {
+                            tracing::error!("WhatsApp: self-healing alert send failed: {}", e);
                         }
                     });
                 }
+                _ => {}
             }
         })
     };

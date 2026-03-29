@@ -77,6 +77,10 @@ pub enum ProgressEvent {
     ReasoningChunk {
         text: String,
     },
+    /// Self-healing action was taken (config recovery, emergency compaction, truncation, etc.)
+    SelfHealingAlert {
+        message: String,
+    },
 }
 
 /// Callback for reporting progress during agent execution.

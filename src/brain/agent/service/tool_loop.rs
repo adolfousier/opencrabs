@@ -592,6 +592,16 @@ impl AgentService {
                                 cont_text.push_str("\n\nCRITICAL: Tool approval is REQUIRED. You MUST wait for user approval before EVERY tool execution. Do NOT batch tool calls without approval.");
                             }
                             context.add_message(Message::user(cont_text));
+
+                            // Notify user about emergency compaction
+                            if let Some(ref cb) = progress_callback {
+                                cb(
+                                    session_id,
+                                    ProgressEvent::SelfHealingAlert {
+                                        message: "Emergency compaction: context was too large for the provider. Conversation has been compacted automatically.".to_string(),
+                                    },
+                                );
+                            }
                         }
                         Err(compact_err) => {
                             tracing::error!(
@@ -632,6 +642,19 @@ impl AgentService {
                                 .await
                             {
                                 tracing::error!("Failed to persist truncation marker: {}", e);
+                            }
+
+                            // Notify user about hard truncation
+                            if let Some(ref cb) = progress_callback {
+                                cb(
+                                    session_id,
+                                    ProgressEvent::SelfHealingAlert {
+                                        message: format!(
+                                            "Hard truncation: compaction failed, {} oldest messages were dropped. Full history is still in the database.",
+                                            total.saturating_sub(KEEP_MESSAGES)
+                                        ),
+                                    },
+                                );
                             }
 
                             // Re-estimate token count after truncation

@@ -7,6 +7,10 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Flag set when Config::load() recovered from a last-known-good snapshot.
+static CONFIG_RECOVERED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 /// Main configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -1485,12 +1489,18 @@ impl Config {
             Err(e) => {
                 tracing::error!("Config load failed: {e} — trying last-known-good");
                 if let Some(good) = load_last_good_config() {
+                    CONFIG_RECOVERED.store(true, std::sync::atomic::Ordering::Relaxed);
                     Ok(good)
                 } else {
                     Err(e)
                 }
             }
         }
+    }
+
+    /// Returns true (once) if the last `Config::load()` fell back to a last-known-good snapshot.
+    pub fn was_recovered() -> bool {
+        CONFIG_RECOVERED.swap(false, std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Inner load implementation — separated so `load()` can wrap with recovery.

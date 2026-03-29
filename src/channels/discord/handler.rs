@@ -633,6 +633,12 @@ pub(crate) async fn handle_message(
                         }
                     });
                 }
+                ProgressEvent::SelfHealingAlert { message } => {
+                    tokio::spawn(async move {
+                        let text = format!("🔧 {}", message);
+                        let _ = channel.say(&http, &text).await;
+                    });
+                }
                 _ => {}
             }
         })

@@ -1153,6 +1153,12 @@ pub(crate) async fn handle_message(
                         s.pending_intermediate.push(text);
                     }
                 }
+                ProgressEvent::SelfHealingAlert { message } => {
+                    if let Ok(mut s) = st.try_lock() {
+                        s.pending_intermediate
+                            .push(format!("🔧 {}", message));
+                    }
+                }
                 _ => {}
             }
         })

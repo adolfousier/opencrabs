@@ -434,6 +434,9 @@ async fn cmd_chat_inner(
                 ProgressEvent::QueuedUserMessage { text } => {
                     progress_sender.send(TuiEvent::QueuedUserMessage { session_id, text })
                 }
+                ProgressEvent::SelfHealingAlert { message } => {
+                    progress_sender.send(TuiEvent::SystemMessage(format!("🔧 {}", message)))
+                }
             };
             if let Err(e) = result {
                 tracing::error!("Progress event channel closed: {}", e);
