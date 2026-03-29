@@ -740,8 +740,17 @@ impl App {
         // Notify user if config was recovered from last-known-good snapshot
         if crate::config::Config::was_recovered() {
             self.push_system_message(
-                "Config recovered from last-known-good snapshot. \
+                "🔧 Config recovered from last-known-good snapshot. \
                  Review ~/.opencrabs/config.toml for issues."
+                    .to_string(),
+            );
+        }
+
+        // Notify user if DB integrity check failed
+        if crate::db::db_integrity_failed() {
+            self.push_system_message(
+                "⚠️ Database integrity check FAILED — data may be corrupted. \
+                 Consider backing up and recreating the database."
                     .to_string(),
             );
         }

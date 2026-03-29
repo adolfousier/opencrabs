@@ -4,6 +4,15 @@ use anyhow::{Context, Result};
 use deadpool_sqlite::{Config, Hook, InteractError, Pool as DeadPool, Runtime};
 use rusqlite_migration::{M, Migrations};
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
+
+/// Flag set when the startup integrity check detects corruption.
+static DB_INTEGRITY_FAILED: AtomicBool = AtomicBool::new(false);
+
+/// Returns true (once) if the last startup integrity check detected corruption.
+pub fn db_integrity_failed() -> bool {
+    DB_INTEGRITY_FAILED.swap(false, std::sync::atomic::Ordering::Relaxed)
+}
 
 /// Type alias for database pool
 pub type Pool = DeadPool;
@@ -186,6 +195,32 @@ impl Database {
             .context("Failed to run database migrations")?;
 
         tracing::info!("Database migrations completed");
+
+        // Run integrity check on startup
+        let integrity_ok = self
+            .pool
+            .get()
+            .await
+            .context("Failed to get connection for integrity check")?
+            .interact(|conn| -> rusqlite::Result<bool> {
+                let result: String =
+                    conn.pragma_query_value(None, "integrity_check", |r| r.get(0))?;
+                Ok(result == "ok")
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to run integrity check")?;
+
+        if !integrity_ok {
+            tracing::error!(
+                "Database integrity check FAILED — data may be corrupted. \
+                 Consider backing up and recreating the database."
+            );
+            DB_INTEGRITY_FAILED.store(true, std::sync::atomic::Ordering::Relaxed);
+        } else {
+            tracing::debug!("Database integrity check passed");
+        }
+
         Ok(())
     }
 
