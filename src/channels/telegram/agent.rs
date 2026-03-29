@@ -283,33 +283,39 @@ impl TelegramAgent {
                                     (None, rest)
                                 };
                                 // Switch provider if specified and different
-                                if let Some(pname) = provider_name
-                                    && let Ok(config) = crate::config::Config::load()
-                                    && let Ok(new_provider) = crate::brain::provider::factory::create_provider_by_name(&config, pname)
-                                {
-                                    agent.swap_provider(new_provider);
+                                let mut provider_err: Option<String> = None;
+                                if let Some(pname) = provider_name {
+                                    match crate::config::Config::load() {
+                                        Ok(config) => match crate::brain::provider::factory::create_provider_by_name(&config, pname) {
+                                            Ok(new_provider) => agent.swap_provider(new_provider),
+                                            Err(e) => provider_err = Some(format!("Failed to create provider '{}': {}", pname, e)),
+                                        },
+                                        Err(e) => provider_err = Some(format!("Failed to load config: {}", e)),
+                                    }
                                 }
-                                let session_id = *shared_session.lock().await;
-                                let switch_text = match crate::channels::commands::switch_model(&agent, model_name, session_id).await {
-                                    Ok(ctx) => ctx,
-                                    Err(e) => format!("⚠️ {}", e),
+                                let (switch_ok, display_text) = if let Some(err) = provider_err {
+                                    (false, format!("⚠️ {}", err))
+                                } else {
+                                    let session_id = *shared_session.lock().await;
+                                    match crate::channels::commands::switch_model(&agent, model_name, session_id).await {
+                                        Ok(_) => (true, format!("✅ Model switched to <code>{}</code>", model_name)),
+                                        Err(e) => (false, format!("⚠️ {}", e)),
+                                    }
                                 };
-                                let _ = bot
-                                    .answer_callback_query(&query.id)
-                                    .text(&switch_text)
-                                    .await;
+                                let _ = bot.answer_callback_query(&query.id).await;
                                 if let Some(msg) = &query.message {
-                                    let text =
-                                        format!("✅ Model switched to <code>{}</code>", model_name);
                                     use teloxide::payloads::EditMessageTextSetters;
                                     use teloxide::prelude::Requester;
                                     let _ = bot
-                                        .edit_message_text(msg.chat().id, msg.id(), &text)
+                                        .edit_message_text(msg.chat().id, msg.id(), &display_text)
                                         .parse_mode(teloxide::types::ParseMode::Html)
                                         .reply_markup(
                                             teloxide::types::InlineKeyboardMarkup::default(),
                                         )
                                         .await;
+                                }
+                                if !switch_ok {
+                                    tracing::warn!("Telegram model switch failed: {}", display_text);
                                 }
                                 return ResponseResult::Ok(());
                             }
