@@ -279,7 +279,11 @@ impl EventHandler for Handler {
                                         m.clone()
                                     };
                                     let label = if label.len() > 80 {
-                                        format!("{}…", &label[..79])
+                                        let mut end = 79;
+                                        while !label.is_char_boundary(end) {
+                                            end -= 1;
+                                        }
+                                        format!("{}…", &label[..end])
                                     } else {
                                         label
                                     };

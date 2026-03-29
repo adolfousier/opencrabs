@@ -229,7 +229,11 @@ pub fn split_message(text: &str, max_len: usize) -> Vec<&str> {
     let mut chunks = Vec::new();
     let mut start = 0;
     while start < text.len() {
-        let end = (start + max_len).min(text.len());
+        let mut end = (start + max_len).min(text.len());
+        // Ensure end falls on a char boundary (back up if inside a multi-byte char)
+        while end < text.len() && !text.is_char_boundary(end) {
+            end -= 1;
+        }
         let break_at = if end < text.len() {
             text[start..end]
                 .rfind('\n')

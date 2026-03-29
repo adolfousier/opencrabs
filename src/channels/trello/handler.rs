@@ -272,10 +272,14 @@ pub fn split_comment(text: &str, max_len: usize) -> Vec<String> {
     let mut remaining = text;
 
     while remaining.len() > max_len {
-        // Try to find a newline within the limit
-        let split_at = match remaining[..max_len].rfind('\n') {
+        // Ensure we split on a char boundary (back up if inside a multi-byte char)
+        let mut safe_max = max_len;
+        while safe_max > 0 && !remaining.is_char_boundary(safe_max) {
+            safe_max -= 1;
+        }
+        let split_at = match remaining[..safe_max].rfind('\n') {
             Some(pos) => pos + 1,
-            None => max_len,
+            None => safe_max,
         };
         chunks.push(remaining[..split_at].to_string());
         remaining = &remaining[split_at..];
