@@ -625,11 +625,23 @@ impl App {
     }
 
     /// Format a human-readable description of a tool call from its name and input
+    /// Case-insensitive key lookup on a JSON object.
+    /// Handles camelCase, snake_case, or whatever the model sends.
+    fn get_input_ci<'a>(input: &'a Value, key: &str) -> Option<&'a Value> {
+        input.get(key).or_else(|| {
+            let lower = key.to_lowercase();
+            input
+                .as_object()
+                .and_then(|obj| obj.iter().find(|(k, _)| k.to_lowercase() == lower))
+                .map(|(_, v)| v)
+        })
+    }
+
     pub fn format_tool_description(tool_name: &str, tool_input: &Value) -> String {
+        let ci = Self::get_input_ci;
         match tool_name {
             "bash" => {
-                let cmd = tool_input
-                    .get("command")
+                let cmd = ci(tool_input, "command")
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
                 let short: String = cmd.chars().take(80).collect();
@@ -640,50 +652,43 @@ impl App {
                 }
             }
             "read_file" | "read" => {
-                let path = tool_input
-                    .get("path")
-                    .or_else(|| tool_input.get("file_path"))
+                let path = ci(tool_input, "path")
+                    .or_else(|| ci(tool_input, "file_path"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
                 format!("Read {}", path)
             }
             "write_file" | "write" => {
-                let path = tool_input
-                    .get("path")
-                    .or_else(|| tool_input.get("file_path"))
+                let path = ci(tool_input, "path")
+                    .or_else(|| ci(tool_input, "file_path"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
                 format!("Write {}", path)
             }
             "edit_file" | "edit" => {
-                let path = tool_input
-                    .get("path")
-                    .or_else(|| tool_input.get("file_path"))
+                let path = ci(tool_input, "path")
+                    .or_else(|| ci(tool_input, "file_path"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
                 format!("Edit {}", path)
             }
             "ls" => {
-                let path = tool_input
-                    .get("path")
+                let path = ci(tool_input, "path")
                     .and_then(|v| v.as_str())
                     .unwrap_or(".");
                 format!("ls {}", path)
             }
             "glob" => {
-                let pattern = tool_input
-                    .get("pattern")
+                let pattern = ci(tool_input, "pattern")
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
                 format!("Glob {}", pattern)
             }
             "grep" => {
-                let pattern = tool_input
-                    .get("pattern")
+                let pattern = ci(tool_input, "pattern")
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
-                let path = tool_input
-                    .get("path")
+                let path = ci(tool_input, "path")
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
                 if path.is_empty() {
@@ -693,113 +698,97 @@ impl App {
                 }
             }
             "lsp" => {
-                let op = tool_input
-                    .get("operation")
+                let op = ci(tool_input, "operation")
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
                 format!("LSP {}", op)
             }
             "web_search" => {
-                let query = tool_input
-                    .get("query")
+                let query = ci(tool_input, "query")
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
                 format!("Search: {}", query)
             }
             "exa_search" => {
-                let query = tool_input
-                    .get("query")
+                let query = ci(tool_input, "query")
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
                 format!("EXA search: {}", query)
             }
             "brave_search" => {
-                let query = tool_input
-                    .get("query")
+                let query = ci(tool_input, "query")
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
                 format!("Brave search: {}", query)
             }
             "http_request" => {
-                let url = tool_input
-                    .get("url")
+                let url = ci(tool_input, "url")
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
-                let method = tool_input
-                    .get("method")
+                let method = ci(tool_input, "method")
                     .and_then(|v| v.as_str())
                     .unwrap_or("GET");
                 format!("{} {}", method, url)
             }
             "execute_code" => {
-                let lang = tool_input
-                    .get("language")
+                let lang = ci(tool_input, "language")
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
                 format!("Execute {}", lang)
             }
             "notebook_edit" => {
-                let path = tool_input
-                    .get("notebook_path")
+                let path = ci(tool_input, "notebook_path")
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
                 format!("Notebook {}", path)
             }
             "parse_document" => {
-                let path = tool_input
-                    .get("path")
+                let path = ci(tool_input, "path")
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
                 format!("Parse {}", path)
             }
             "task_manager" => {
-                let op = tool_input
-                    .get("operation")
+                let op = ci(tool_input, "operation")
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
                 format!("Task: {}", op)
             }
             "plan" => {
-                let op = tool_input
-                    .get("operation")
+                let op = ci(tool_input, "operation")
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
                 match op {
                     "create" => {
-                        let name = tool_input
-                            .get("title")
-                            .or_else(|| tool_input.get("name"))
+                        let name = ci(tool_input, "title")
+                            .or_else(|| ci(tool_input, "name"))
                             .and_then(|v| v.as_str())
                             .unwrap_or("plan");
                         format!("Plan: create '{}'", name)
                     }
                     "add_task" => {
-                        let title = tool_input
-                            .get("title")
+                        let title = ci(tool_input, "title")
                             .and_then(|v| v.as_str())
                             .unwrap_or("task");
                         format!("Plan: add task '{}'", title)
                     }
                     "finalize" => "Plan: finalize — awaiting approval".to_string(),
                     "start_task" => {
-                        let id = tool_input
-                            .get("task_id")
+                        let id = ci(tool_input, "task_id")
                             .and_then(|v| v.as_u64())
                             .map(|n| n.to_string())
                             .unwrap_or_else(|| "?".to_string());
                         format!("Plan: start task #{}", id)
                     }
                     "complete_task" => {
-                        let id = tool_input
-                            .get("task_id")
+                        let id = ci(tool_input, "task_id")
                             .and_then(|v| v.as_u64())
                             .map(|n| n.to_string())
                             .unwrap_or_else(|| "?".to_string());
                         format!("Plan: complete task #{}", id)
                     }
                     "update_task" => {
-                        let id = tool_input
-                            .get("task_id")
+                        let id = ci(tool_input, "task_id")
                             .and_then(|v| v.as_u64())
                             .map(|n| n.to_string())
                             .unwrap_or_else(|| "?".to_string());
