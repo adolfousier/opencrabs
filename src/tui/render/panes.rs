@@ -86,10 +86,37 @@ pub(super) fn render_inactive_pane(f: &mut Frame, app: &App, pane_id: PaneId, ar
     f.render_widget(para, inner);
 }
 
-/// Render a single message in simplified form (no markdown, no tool groups).
+/// Render a single message in simplified form for inactive panes.
 fn render_simple_message(lines: &mut Vec<Line<'_>>, msg: &DisplayMessage) {
-    // Skip system/tool messages
-    if msg.role == "tool_group" || msg.role == "system" {
+    // Skip system messages
+    if msg.role == "system" || msg.role == "history_marker" {
+        return;
+    }
+
+    // Tool groups: show compact summary of each tool call
+    if msg.role == "tool_group" {
+        if let Some(ref group) = msg.tool_group {
+            for call in &group.calls {
+                let icon = if !call.completed {
+                    "⚙"
+                } else if call.success {
+                    "✓"
+                } else {
+                    "✗"
+                };
+                let color = if !call.completed {
+                    Color::Yellow
+                } else if call.success {
+                    Color::DarkGray
+                } else {
+                    Color::Red
+                };
+                lines.push(Line::from(Span::styled(
+                    format!("  {} {}", icon, call.description),
+                    Style::default().fg(color),
+                )));
+            }
+        }
         return;
     }
 
@@ -99,12 +126,44 @@ fn render_simple_message(lines: &mut Vec<Line<'_>>, msg: &DisplayMessage) {
         _ => ("", Color::DarkGray),
     };
 
-    // Truncate long messages for preview
-    let content = if msg.content.len() > 500 {
-        format!("{}...", &msg.content[..497])
+    // Strip reasoning blocks from content for preview
+    let raw = &msg.content;
+    let content = if raw.contains("<!-- reasoning -->") {
+        // Show just "[thinking...]" instead of raw reasoning XML
+        let stripped = raw
+            .split("<!-- reasoning -->")
+            .enumerate()
+            .map(|(i, part)| {
+                if i == 0 {
+                    part.to_string()
+                } else if let Some(after) = part.split("<!-- /reasoning -->").nth(1) {
+                    after.to_string()
+                } else {
+                    String::new()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("");
+        let trimmed = stripped.trim().to_string();
+        if trimmed.is_empty() {
+            "[thinking...]".to_string()
+        } else {
+            trimmed
+        }
     } else {
-        msg.content.clone()
+        raw.clone()
     };
+
+    // Truncate long messages for preview
+    let content = if content.len() > 500 {
+        format!("{}...", &content[..497])
+    } else {
+        content
+    };
+
+    if content.trim().is_empty() {
+        return;
+    }
 
     for (i, line) in content.lines().enumerate() {
         let p = if i == 0 { prefix } else { "" };
