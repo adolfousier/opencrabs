@@ -478,8 +478,9 @@ impl App {
                 // Map >= 10 back to 9 for save (all custom providers use idx 9)
                 let provider_idx = self.ps.selected_provider.min(9);
 
-                // User typed a new key, or kept existing (just hit Enter to move on)
-                let key_changed = !self.ps.api_key_input.is_empty();
+                // User typed a new key — sentinel means key was pre-populated and not changed
+                let key_changed = !self.ps.api_key_input.is_empty()
+                    && !self.ps.has_existing_key_sentinel();
                 let api_key = if key_changed {
                     Some(self.ps.api_key_input.clone())
                 } else {
@@ -1020,8 +1021,9 @@ impl App {
             }
         }
 
-        // Only write key to keys.toml if the user typed a new one
+        // Only write key to keys.toml if the user typed a new one (never write sentinel)
         if key_changed
+            && !self.ps.has_existing_key_sentinel()
             && let Some(ref key) = api_key
             && !key.is_empty()
             && let Err(e) = crate::config::write_secret_key(section, "api_key", key)
