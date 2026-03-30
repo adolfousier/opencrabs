@@ -1543,14 +1543,47 @@ impl App {
             response.usage.output_tokens
         );
 
-        // Check if we already added assistant messages via IntermediateText this cycle.
-        // Uses a per-cycle flag (not a history search) so prior turns don't cause false positives.
         if self.intermediate_text_received {
-            tracing::debug!(
-                "Skipping duplicate assistant message - already shown via IntermediateText"
-            );
+            // IntermediateText only contained text BEFORE the last tool block.
+            // The full response may have trailing text AFTER the last tool.
+            // Update the last intermediate assistant message with the full content
+            // so trailing text is not lost, and add cost/token metadata.
+            if let Some(last_assistant) = self
+                .messages
+                .iter_mut()
+                .rev()
+                .find(|m| m.role == "assistant")
+            {
+                let old_len = last_assistant.content.len();
+                last_assistant.content = response.content.clone();
+                last_assistant.token_count = Some(response.usage.output_tokens as i32);
+                last_assistant.cost = Some(response.cost);
+                if reasoning_details.is_some() {
+                    last_assistant.details = reasoning_details;
+                }
+                tracing::debug!(
+                    "Updated intermediate assistant message: old_len={}, new_len={}",
+                    old_len,
+                    response.content.len()
+                );
+            } else {
+                // No intermediate message found (shouldn't happen), add as new
+                self.messages.push(DisplayMessage {
+                    id: response.message_id,
+                    role: "assistant".to_string(),
+                    content: response.content,
+                    timestamp: chrono::Utc::now(),
+                    token_count: Some(response.usage.output_tokens as i32),
+                    cost: Some(response.cost),
+                    approval: None,
+                    approve_menu: None,
+                    details: reasoning_details,
+                    expanded: false,
+                    tool_group: None,
+                });
+            }
         } else {
-            // Add assistant message to UI only if not already added
+            // Add assistant message to UI
             let assistant_msg = DisplayMessage {
                 id: response.message_id,
                 role: "assistant".to_string(),

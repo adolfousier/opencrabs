@@ -162,7 +162,8 @@ fn render_simple_message(lines: &mut Vec<Line<'_>>, msg: &DisplayMessage) {
 
     // Truncate long messages for preview
     let content = if content.len() > 500 {
-        format!("{}...", &content[..497])
+        let end = content.floor_char_boundary(497);
+        format!("{}...", &content[..end])
     } else {
         content
     };

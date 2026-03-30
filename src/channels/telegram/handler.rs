@@ -105,7 +105,8 @@ impl StreamingState {
         let mut parts = Vec::new();
         if !self.thinking.is_empty() {
             let t = if self.thinking.len() > 800 {
-                &self.thinking[self.thinking.len() - 800..]
+                let start = self.thinking.ceil_char_boundary(self.thinking.len() - 800);
+                &self.thinking[start..]
             } else {
                 &self.thinking
             };
