@@ -87,7 +87,7 @@ impl AgentService {
         // CLI: after the first tool completes, stop forwarding reasoning
         // chunks to TUI so thinking doesn't bloat across 100+ tool iterations.
         // Reasoning still accumulates in reasoning_buf for DB persistence.
-        let is_cli = queue_cb.is_some();
+        let is_cli = provider.cli_handles_tools();
         let mut seen_tool = false;
         // CLI: track unflushed text so we can emit IntermediateText at tool
         // boundaries, giving the TUI real-time text→tools→text interleaving
