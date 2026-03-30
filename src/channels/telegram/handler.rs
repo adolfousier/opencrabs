@@ -95,6 +95,8 @@ struct StreamingState {
     quip_index: usize,
     /// When the current status quip was shown (for show/vanish timing)
     status_shown_at: Option<std::time::Instant>,
+    /// Intermediate texts already sent — used to dedup final response
+    sent_intermediates: Vec<String>,
 }
 
 impl StreamingState {
@@ -946,6 +948,7 @@ pub(crate) async fn handle_message(
         tools_started_at: None,
         quip_index: 0,
         status_shown_at: None,
+        sent_intermediates: Vec::new(),
     }));
 
     let edit_cancel = CancellationToken::new();
@@ -1086,6 +1089,9 @@ pub(crate) async fn handle_message(
                                             .send_message(chat, &html)
                                             .parse_mode(ParseMode::Html)
                                             .await;
+                                        // Track for dedup against final response
+                                        let mut s = st.lock().unwrap_or_else(|e| e.into_inner());
+                                        s.sent_intermediates.push(text.clone());
                                     }
                                 }
                             }
@@ -1422,6 +1428,8 @@ pub(crate) async fn handle_message(
                         .send_message(msg.chat.id, &html)
                         .parse_mode(ParseMode::Html)
                         .await;
+                    let mut s = streaming.lock().unwrap_or_else(|e| e.into_inner());
+                    s.sent_intermediates.push(text.clone());
                 }
             }
         }
@@ -1440,6 +1448,23 @@ pub(crate) async fn handle_message(
             // Strip LLM-hallucinated artifacts (<!-- tools-v2 -->, XML tool blocks)
             let text_only = crate::utils::sanitize::strip_llm_artifacts(&text_only);
             let text_only = redact_secrets(&text_only);
+
+            // Dedup: strip text that was already sent as intermediate messages
+            // to avoid duplicating content on Telegram.
+            let sent = {
+                let s = streaming.lock().unwrap_or_else(|e| e.into_inner());
+                s.sent_intermediates.clone()
+            };
+            let text_only = if !sent.is_empty() {
+                let mut remaining = text_only;
+                for intermediate in &sent {
+                    // Remove the intermediate text from the final response
+                    remaining = remaining.replace(intermediate.as_str(), "");
+                }
+                remaining.trim().to_string()
+            } else {
+                text_only
+            };
 
             for img_path in img_paths {
                 match tokio::fs::read(&img_path).await {
