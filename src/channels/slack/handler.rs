@@ -1271,6 +1271,8 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
             Some(cancel_token),
             Some(approval_cb),
             Some(progress_cb),
+            "slack",
+            Some(&channel_id),
         )
         .await;
 

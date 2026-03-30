@@ -1314,6 +1314,7 @@ pub(crate) async fn handle_message(
         .store_cancel_token(session_id, cancel_token.clone())
         .await;
 
+    let chat_id_str = msg.chat.id.0.to_string();
     let result = agent
         .send_message_with_tools_and_callback(
             session_id,
@@ -1322,6 +1323,8 @@ pub(crate) async fn handle_message(
             Some(cancel_token.clone()),
             Some(approval_cb),
             Some(progress_cb.clone()),
+            "telegram",
+            Some(&chat_id_str),
         )
         .await;
 
@@ -1356,6 +1359,8 @@ pub(crate) async fn handle_message(
                             Some(cancel_token2),
                             Some(approval_cb2),
                             Some(progress_cb),
+                            "telegram",
+                            Some(&chat_id_str),
                         )
                         .await;
                     telegram_state.remove_cancel_token(new_id).await;

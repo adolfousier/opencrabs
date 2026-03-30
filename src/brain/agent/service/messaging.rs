@@ -115,13 +115,7 @@ impl AgentService {
         })
     }
 
-    /// Send a message with automatic tool execution
-    ///
-    /// This method implements a tool execution loop:
-    /// 1. Send message to LLM
-    /// 2. If LLM requests tool use, execute the tool
-    /// 3. Send tool results back to LLM
-    /// 4. Repeat until LLM finishes or max iterations reached
+    /// Send a message with automatic tool execution (TUI channel).
     pub async fn send_message_with_tools(
         &self,
         session_id: Uuid,
@@ -132,7 +126,7 @@ impl AgentService {
             .await
     }
 
-    /// Shim: send with tools + optional cancellation token.
+    /// Shim: send with tools + optional cancellation token (TUI channel).
     /// Delegates to `run_tool_loop` with service-level callbacks.
     pub async fn send_message_with_tools_and_mode(
         &self,
@@ -141,15 +135,28 @@ impl AgentService {
         model: Option<String>,
         cancel_token: Option<CancellationToken>,
     ) -> Result<AgentResponse> {
-        self.run_tool_loop(session_id, user_message, model, cancel_token, None, None)
-            .await
+        self.run_tool_loop(
+            session_id,
+            user_message,
+            model,
+            cancel_token,
+            None,
+            None,
+            "tui",
+            None,
+        )
+        .await
     }
 
-    /// Send a message with per-call callback overrides.
+    /// Send a message with per-call callback overrides and channel routing.
+    #[allow(clippy::too_many_arguments)]
     ///
     /// `override_approval_callback` and `override_progress_callback` take
     /// precedence over the service-level callbacks (used by Telegram, Discord, etc.).
     /// Pass `None` to fall back to the service-level callback.
+    ///
+    /// `channel` and `channel_chat_id` identify the originating channel for
+    /// crash recovery routing.
     pub async fn send_message_with_tools_and_callback(
         &self,
         session_id: Uuid,
@@ -158,6 +165,8 @@ impl AgentService {
         cancel_token: Option<CancellationToken>,
         override_approval_callback: Option<ApprovalCallback>,
         override_progress_callback: Option<ProgressCallback>,
+        channel: &str,
+        channel_chat_id: Option<&str>,
     ) -> Result<AgentResponse> {
         self.run_tool_loop(
             session_id,
@@ -166,6 +175,8 @@ impl AgentService {
             cancel_token,
             override_approval_callback,
             override_progress_callback,
+            channel,
+            channel_chat_id,
         )
         .await
     }

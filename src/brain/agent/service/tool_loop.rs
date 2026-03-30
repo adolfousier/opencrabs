@@ -114,6 +114,7 @@ impl AgentService {
     /// Core tool-execution loop — called by all public shims.
     /// `override_approval_callback` and `override_progress_callback` take
     /// precedence over the service-level callbacks (used by Telegram, etc.)
+    #[allow(clippy::too_many_arguments)]
     pub(super) async fn run_tool_loop(
         &self,
         session_id: Uuid,
@@ -122,12 +123,14 @@ impl AgentService {
         cancel_token: Option<CancellationToken>,
         override_approval_callback: Option<ApprovalCallback>,
         override_progress_callback: Option<ProgressCallback>,
+        channel: &str,
+        channel_chat_id: Option<&str>,
     ) -> Result<AgentResponse> {
         // Track this request for restart recovery
         let pending_repo = crate::db::PendingRequestRepository::new(self.context.pool());
         let request_id = Uuid::new_v4();
         if let Err(e) = pending_repo
-            .insert(request_id, session_id, &user_message, "tui")
+            .insert(request_id, session_id, &user_message, channel, channel_chat_id)
             .await
         {
             tracing::warn!("Failed to track pending request: {}", e);
