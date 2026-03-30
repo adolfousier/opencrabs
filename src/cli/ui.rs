@@ -788,10 +788,19 @@ async fn cmd_chat_inner(
                                                 && let Some(bot) = tg.bot().await
                                             {
                                                 use teloxide::prelude::*;
-                                                let clean = crate::utils::sanitize::strip_llm_artifacts(&response.content);
-                                                let html = crate::channels::telegram::handler::md_to_html(&clean);
+                                                let clean =
+                                                    crate::utils::sanitize::strip_llm_artifacts(
+                                                        &response.content,
+                                                    );
+                                                let html =
+                                                    crate::channels::telegram::handler::md_to_html(
+                                                        &clean,
+                                                    );
                                                 let _ = bot
-                                                    .send_message(teloxide::types::ChatId(chat_id), html)
+                                                    .send_message(
+                                                        teloxide::types::ChatId(chat_id),
+                                                        html,
+                                                    )
                                                     .parse_mode(teloxide::types::ParseMode::Html)
                                                     .await;
                                             }
@@ -801,7 +810,8 @@ async fn cmd_chat_inner(
                                                 && let Ok(ch_id) = cid.parse::<u64>()
                                                 && let Some(http) = dc.http().await
                                             {
-                                                let channel = serenity::model::id::ChannelId::new(ch_id);
+                                                let channel =
+                                                    serenity::model::id::ChannelId::new(ch_id);
                                                 let _ = channel.say(&http, &response.content).await;
                                             }
                                         }
@@ -809,7 +819,8 @@ async fn cmd_chat_inner(
                                         "whatsapp" => {
                                             if let Some(ref cid) = channel_chat_id
                                                 && let Some(client) = wa.client().await
-                                                && let Ok(jid) = cid.parse::<wacore_binary::jid::Jid>()
+                                                && let Ok(jid) =
+                                                    cid.parse::<wacore_binary::jid::Jid>()
                                             {
                                                 let msg = waproto::whatsapp::Message {
                                                     conversation: Some(response.content.clone()),

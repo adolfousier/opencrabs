@@ -378,6 +378,294 @@ async fn pending_requests_deduplicate_by_session() {
     assert_eq!(unique_sessions.len(), 1);
 }
 
+// ── Pending Requests: Channel Routing ────────────────────────────────────
+
+#[tokio::test]
+async fn pending_request_stores_channel_and_chat_id() {
+    use crate::db::repository::PendingRequestRepository;
+
+    let db = Database::connect_in_memory().await.unwrap();
+    db.run_migrations().await.unwrap();
+    let repo = PendingRequestRepository::new(db.pool().clone());
+
+    let id = uuid::Uuid::new_v4();
+    let session_id = uuid::Uuid::new_v4();
+
+    repo.insert(id, session_id, "hello", "telegram", Some("-100123456"))
+        .await
+        .unwrap();
+
+    let interrupted = repo.get_interrupted().await.unwrap();
+    assert_eq!(interrupted.len(), 1);
+    assert_eq!(interrupted[0].channel, "telegram");
+    assert_eq!(
+        interrupted[0].channel_chat_id.as_deref(),
+        Some("-100123456")
+    );
+}
+
+#[tokio::test]
+async fn pending_request_channel_chat_id_is_optional() {
+    use crate::db::repository::PendingRequestRepository;
+
+    let db = Database::connect_in_memory().await.unwrap();
+    db.run_migrations().await.unwrap();
+    let repo = PendingRequestRepository::new(db.pool().clone());
+
+    // TUI requests have no chat_id
+    repo.insert(
+        uuid::Uuid::new_v4(),
+        uuid::Uuid::new_v4(),
+        "msg",
+        "tui",
+        None,
+    )
+    .await
+    .unwrap();
+
+    let interrupted = repo.get_interrupted().await.unwrap();
+    assert_eq!(interrupted.len(), 1);
+    assert_eq!(interrupted[0].channel, "tui");
+    assert!(interrupted[0].channel_chat_id.is_none());
+}
+
+#[tokio::test]
+async fn pending_requests_multi_channel_coexistence() {
+    use crate::db::repository::PendingRequestRepository;
+
+    let db = Database::connect_in_memory().await.unwrap();
+    db.run_migrations().await.unwrap();
+    let repo = PendingRequestRepository::new(db.pool().clone());
+
+    // Insert requests from different channels
+    let tui_sid = uuid::Uuid::new_v4();
+    let tg_sid = uuid::Uuid::new_v4();
+    let dc_sid = uuid::Uuid::new_v4();
+    let slack_sid = uuid::Uuid::new_v4();
+
+    repo.insert(uuid::Uuid::new_v4(), tui_sid, "tui msg", "tui", None)
+        .await
+        .unwrap();
+    repo.insert(
+        uuid::Uuid::new_v4(),
+        tg_sid,
+        "telegram msg",
+        "telegram",
+        Some("-100999"),
+    )
+    .await
+    .unwrap();
+    repo.insert(
+        uuid::Uuid::new_v4(),
+        dc_sid,
+        "discord msg",
+        "discord",
+        Some("123456789"),
+    )
+    .await
+    .unwrap();
+    repo.insert(
+        uuid::Uuid::new_v4(),
+        slack_sid,
+        "slack msg",
+        "slack",
+        Some("C01ABC"),
+    )
+    .await
+    .unwrap();
+
+    // All should be in get_interrupted
+    let all = repo.get_interrupted().await.unwrap();
+    assert_eq!(all.len(), 4);
+
+    // Filter by channel
+    let tui_only = repo.get_interrupted_for_channel("tui").await.unwrap();
+    assert_eq!(tui_only.len(), 1);
+    assert_eq!(tui_only[0].session_id, tui_sid.to_string());
+
+    let tg_only = repo.get_interrupted_for_channel("telegram").await.unwrap();
+    assert_eq!(tg_only.len(), 1);
+    assert_eq!(tg_only[0].channel_chat_id.as_deref(), Some("-100999"));
+
+    let dc_only = repo.get_interrupted_for_channel("discord").await.unwrap();
+    assert_eq!(dc_only.len(), 1);
+
+    let slack_only = repo.get_interrupted_for_channel("slack").await.unwrap();
+    assert_eq!(slack_only.len(), 1);
+
+    // Empty channel returns nothing
+    let wa = repo.get_interrupted_for_channel("whatsapp").await.unwrap();
+    assert!(wa.is_empty());
+}
+
+#[tokio::test]
+async fn pending_requests_delete_ids() {
+    use crate::db::repository::PendingRequestRepository;
+
+    let db = Database::connect_in_memory().await.unwrap();
+    db.run_migrations().await.unwrap();
+    let repo = PendingRequestRepository::new(db.pool().clone());
+
+    let id1 = uuid::Uuid::new_v4();
+    let id2 = uuid::Uuid::new_v4();
+    let id3 = uuid::Uuid::new_v4();
+
+    repo.insert(id1, uuid::Uuid::new_v4(), "msg1", "tui", None)
+        .await
+        .unwrap();
+    repo.insert(id2, uuid::Uuid::new_v4(), "msg2", "telegram", Some("123"))
+        .await
+        .unwrap();
+    repo.insert(id3, uuid::Uuid::new_v4(), "msg3", "discord", Some("456"))
+        .await
+        .unwrap();
+
+    // Delete only first two
+    repo.delete_ids(vec![id1.to_string(), id2.to_string()])
+        .await
+        .unwrap();
+
+    let remaining = repo.get_interrupted().await.unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].channel, "discord");
+}
+
+#[tokio::test]
+async fn pending_requests_delete_ids_empty_is_noop() {
+    use crate::db::repository::PendingRequestRepository;
+
+    let db = Database::connect_in_memory().await.unwrap();
+    db.run_migrations().await.unwrap();
+    let repo = PendingRequestRepository::new(db.pool().clone());
+
+    repo.insert(
+        uuid::Uuid::new_v4(),
+        uuid::Uuid::new_v4(),
+        "msg",
+        "tui",
+        None,
+    )
+    .await
+    .unwrap();
+
+    // Empty delete should not error or delete anything
+    repo.delete_ids(vec![]).await.unwrap();
+
+    let remaining = repo.get_interrupted().await.unwrap();
+    assert_eq!(remaining.len(), 1);
+}
+
+#[tokio::test]
+async fn pending_request_delete_removes_single_request() {
+    use crate::db::repository::PendingRequestRepository;
+
+    let db = Database::connect_in_memory().await.unwrap();
+    db.run_migrations().await.unwrap();
+    let repo = PendingRequestRepository::new(db.pool().clone());
+
+    let id1 = uuid::Uuid::new_v4();
+    let id2 = uuid::Uuid::new_v4();
+
+    repo.insert(id1, uuid::Uuid::new_v4(), "msg1", "telegram", Some("111"))
+        .await
+        .unwrap();
+    repo.insert(id2, uuid::Uuid::new_v4(), "msg2", "telegram", Some("222"))
+        .await
+        .unwrap();
+
+    // Delete only the first
+    repo.delete(id1).await.unwrap();
+
+    let remaining = repo.get_interrupted().await.unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].channel_chat_id.as_deref(), Some("222"));
+}
+
+// ── UTF-8 Safe String Truncation ────────────────────────────────────────
+
+#[test]
+fn floor_char_boundary_prevents_emoji_panic() {
+    // 🔺 is 4 bytes (F0 9F 94 BA). Place it so byte index 500 lands inside it.
+    let mut s = "A".repeat(497); // 497 ASCII bytes
+    s.push('🔺'); // bytes 497..501
+    s.push_str(&"B".repeat(100)); // more content after
+
+    assert!(s.len() > 500);
+
+    // This would panic without floor_char_boundary:
+    // let _ = &s[..500];  // panics: 500 is inside '🔺'
+
+    let end = s.floor_char_boundary(500);
+    let truncated = &s[..end];
+    // Should truncate before the emoji (at byte 497)
+    assert_eq!(end, 497);
+    assert_eq!(truncated.len(), 497);
+    assert!(truncated.is_char_boundary(truncated.len()));
+}
+
+#[test]
+fn ceil_char_boundary_prevents_emoji_panic_from_end() {
+    // Create a string where (len - 800) lands inside the emoji
+    let mut s = "X".repeat(100);
+    s.push('🔺'); // bytes 100..104
+    s.push_str(&"Y".repeat(797)); // total = 100 + 4 + 797 = 901
+
+    let target = s.len() - 800; // = 101 → inside '🔺'
+
+    // This would panic: &s[101..]
+    let start = s.ceil_char_boundary(target);
+    let truncated = &s[start..];
+    assert!(s.is_char_boundary(start));
+    // Should round up to 104 (after the emoji)
+    assert_eq!(start, 104);
+    assert!(truncated.starts_with('Y'));
+}
+
+#[test]
+fn floor_char_boundary_handles_cjk_characters() {
+    // CJK characters are 3 bytes each (e.g., '中' = E4 B8 AD)
+    let s = "中".repeat(200); // 200 × 3 = 600 bytes
+    assert_eq!(s.len(), 600);
+
+    let end = s.floor_char_boundary(500);
+    // 500 / 3 = 166.66 → should truncate to 166 × 3 = 498
+    assert_eq!(end, 498);
+    let truncated = &s[..end];
+    assert!(truncated.is_char_boundary(truncated.len()));
+}
+
+#[test]
+fn floor_char_boundary_ascii_is_identity() {
+    let s = "Hello, world! This is a plain ASCII string that is long enough.".repeat(10);
+    let end = s.floor_char_boundary(500);
+    // ASCII chars are 1 byte each, so 500 is always a valid boundary
+    assert_eq!(end, 500);
+}
+
+// ── Panic Protection Pattern ────────────────────────────────────────────
+
+#[tokio::test]
+async fn nested_spawn_catches_panic() {
+    // Simulates the pattern used in telegram/agent.rs for panic protection
+    let result = tokio::task::spawn(async {
+        panic!("simulated agent panic");
+    })
+    .await;
+
+    // The outer await should return Err (JoinError) instead of propagating the panic
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(err.is_panic());
+}
+
+#[tokio::test]
+async fn nested_spawn_returns_ok_on_success() {
+    let result = tokio::task::spawn(async { 42 }).await;
+
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), 42);
+}
+
 // ── State Cleanup on Session Delete ─────────────────────────────────────
 
 #[tokio::test]

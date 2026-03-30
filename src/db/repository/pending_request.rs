@@ -107,10 +107,7 @@ impl PendingRequestRepository {
     }
 
     /// Get interrupted requests for a specific channel
-    pub async fn get_interrupted_for_channel(
-        &self,
-        channel: &str,
-    ) -> Result<Vec<PendingRequest>> {
+    pub async fn get_interrupted_for_channel(&self, channel: &str) -> Result<Vec<PendingRequest>> {
         let ch = channel.to_string();
         self.pool
             .get()

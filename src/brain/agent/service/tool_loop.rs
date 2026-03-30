@@ -130,7 +130,13 @@ impl AgentService {
         let pending_repo = crate::db::PendingRequestRepository::new(self.context.pool());
         let request_id = Uuid::new_v4();
         if let Err(e) = pending_repo
-            .insert(request_id, session_id, &user_message, channel, channel_chat_id)
+            .insert(
+                request_id,
+                session_id,
+                &user_message,
+                channel,
+                channel_chat_id,
+            )
             .await
         {
             tracing::warn!("Failed to track pending request: {}", e);

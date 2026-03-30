@@ -124,7 +124,7 @@ impl Database {
     }
 
     /// Total number of migrations defined below — keep in sync when adding new ones.
-    const MIGRATION_COUNT: usize = 11;
+    const MIGRATION_COUNT: usize = 12;
 
     /// Run database migrations
     pub async fn run_migrations(&self) -> Result<()> {
@@ -159,6 +159,9 @@ impl Database {
             )),
             M::up(include_str!(
                 "../migrations/20260308000001_add_pending_requests.sql"
+            )),
+            M::up(include_str!(
+                "../migrations/20260330000001_pending_requests_channel_chat_id.sql"
             )),
         ]);
 
