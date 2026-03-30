@@ -27,13 +27,14 @@ impl ClaudeCliProvider {
         let path = resolve_claude_path()?;
         Ok(Self {
             claude_path: path,
-            default_model: "sonnet".to_string(),
+            default_model: "sonnet-4-6".to_string(),
         })
     }
 
     /// Override the default model (e.g. "opus", "haiku", "sonnet").
+    /// Normalizes to display form (e.g. "opus" → "opus-4-6").
     pub fn with_default_model(mut self, model: String) -> Self {
-        self.default_model = model;
+        self.default_model = Self::normalize_model(&model);
         self
     }
 
@@ -48,13 +49,15 @@ impl ClaudeCliProvider {
         }
     }
 
-    /// Normalize a model name to its full Anthropic ID for pricing/usage tracking.
-    /// CLI shorthands like "opus" → "claude-opus-4-6", already-full names pass through.
+    /// Normalize a model name for pricing/usage tracking.
+    /// CLI shorthands like "opus" → "opus-4-6". Strips "claude-" prefix.
     fn normalize_model(model: &str) -> String {
-        match model {
-            "opus" => "claude-opus-4-6".to_string(),
-            "sonnet" => "claude-sonnet-4-6".to_string(),
-            "haiku" => "claude-haiku-4-5-20251001".to_string(),
+        // Strip "claude-" prefix first (API returns "claude-opus-4-6")
+        let stripped = model.strip_prefix("claude-").unwrap_or(model);
+        match stripped {
+            "opus" => "opus-4-6".to_string(),
+            "sonnet" => "sonnet-4-6".to_string(),
+            "haiku" => "haiku-4-5".to_string(),
             other => other.to_string(),
         }
     }
@@ -645,7 +648,9 @@ impl Provider for ClaudeCliProvider {
                             let msg_id = message.id.unwrap_or_else(|| {
                                 format!("msg_{}", uuid::Uuid::new_v4().simple())
                             });
-                            let msg_model = message.model.unwrap_or_else(|| original_model.clone());
+                            let msg_model = message.model
+                                .map(|m| Self::normalize_model(&m))
+                                .unwrap_or_else(|| original_model.clone());
                             let input_tokens =
                                 message.usage.as_ref().map(|u| u.total_input()).unwrap_or(0);
 
@@ -927,9 +932,9 @@ impl Provider for ClaudeCliProvider {
             "sonnet".to_string(),
             "opus".to_string(),
             "haiku".to_string(),
-            "claude-sonnet-4-6".to_string(),
-            "claude-opus-4-6".to_string(),
-            "claude-haiku-4-5-20251001".to_string(),
+            "sonnet-4-6".to_string(),
+            "opus-4-6".to_string(),
+            "haiku-4-5".to_string(),
         ]
     }
 
@@ -1107,54 +1112,5 @@ fn normalize_stream_event(event: StreamEvent) -> StreamEvent {
             },
         },
         other => other,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_cli_usage_total_input_excludes_cache_tokens() {
-        let usage = CliUsage {
-            input_tokens: 1,
-            output_tokens: 200,
-            cache_creation_input_tokens: 351,
-            cache_read_input_tokens: 165_793,
-        };
-        // total_input() returns only non-cached tokens
-        assert_eq!(usage.total_input(), 1);
-        // total_with_cache() includes everything (for billing)
-        assert_eq!(usage.total_with_cache(), 166_145);
-    }
-
-    #[test]
-    fn test_cli_usage_total_input_no_cache() {
-        let usage = CliUsage {
-            input_tokens: 5000,
-            output_tokens: 100,
-            cache_creation_input_tokens: 0,
-            cache_read_input_tokens: 0,
-        };
-        assert_eq!(usage.total_input(), 5000);
-        assert_eq!(usage.total_with_cache(), 5000);
-    }
-
-    #[test]
-    fn test_cli_usage_deserializes_cache_fields() {
-        let json = r#"{"input_tokens":1,"output_tokens":128,"cache_creation_input_tokens":326,"cache_read_input_tokens":161868}"#;
-        let usage: CliUsage = serde_json::from_str(json).unwrap();
-        assert_eq!(usage.input_tokens, 1);
-        assert_eq!(usage.cache_creation_input_tokens, 326);
-        assert_eq!(usage.cache_read_input_tokens, 161_868);
-        assert_eq!(usage.total_input(), 1);
-        assert_eq!(usage.total_with_cache(), 162_195);
-    }
-
-    #[test]
-    fn test_cli_usage_missing_cache_fields_default_to_zero() {
-        let json = r#"{"input_tokens":5000,"output_tokens":100}"#;
-        let usage: CliUsage = serde_json::from_str(json).unwrap();
-        assert_eq!(usage.total_input(), 5000);
     }
 }

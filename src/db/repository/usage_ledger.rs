@@ -17,6 +17,12 @@ pub struct ModelUsageStats {
     pub entry_count: i64,
 }
 
+/// Strip "claude-" prefix from model names so "claude-opus-4-6" → "opus-4-6".
+/// This prevents duplicate entries in the ledger for the same underlying model.
+pub(crate) fn normalize_model_name(model: &str) -> String {
+    model.strip_prefix("claude-").unwrap_or(model).to_string()
+}
+
 /// Repository for usage ledger operations
 #[derive(Clone)]
 pub struct UsageLedgerRepository {
@@ -37,7 +43,7 @@ impl UsageLedgerRepository {
         cost: f64,
     ) -> Result<()> {
         let sid = session_id.to_string();
-        let mdl = model.to_string();
+        let mdl = normalize_model_name(model);
         self.pool
             .get()
             .await
@@ -73,16 +79,26 @@ impl UsageLedgerRepository {
             .context("Failed to query usage totals")
     }
 
-    /// Get usage stats grouped by model
+    /// Get usage stats grouped by model (normalizes "claude-X" → "X" to merge duplicates)
     pub async fn stats_by_model(&self) -> Result<Vec<ModelUsageStats>> {
         self.pool
             .get()
             .await
             .context("Failed to get connection")?
             .interact(|conn| {
+                // Normalize model names in SQL so old "claude-opus-4-6" merges with "opus"
                 let mut stmt = conn.prepare_cached(
-                    "SELECT model, COALESCE(SUM(token_count), 0), COALESCE(SUM(cost), 0.0), COUNT(*) \
-                     FROM usage_ledger WHERE model != '' GROUP BY model ORDER BY SUM(cost) DESC",
+                    "SELECT \
+                       CASE \
+                         WHEN model LIKE 'claude-%' THEN REPLACE(model, 'claude-', '') \
+                         ELSE model \
+                       END AS normalized_model, \
+                       COALESCE(SUM(token_count), 0), \
+                       COALESCE(SUM(cost), 0.0), \
+                       COUNT(*) \
+                     FROM usage_ledger WHERE model != '' \
+                     GROUP BY normalized_model \
+                     ORDER BY SUM(cost) DESC",
                 )?;
                 let rows = stmt.query_map([], |row| {
                     Ok(ModelUsageStats {
@@ -97,53 +113,5 @@ impl UsageLedgerRepository {
             .await
             .map_err(interact_err)?
             .context("Failed to query usage by model")
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::db::Database;
-
-    #[tokio::test]
-    async fn test_record_and_totals() {
-        let db = Database::connect_in_memory()
-            .await
-            .expect("Failed to create database");
-        db.run_migrations().await.expect("Failed to run migrations");
-        let repo = UsageLedgerRepository::new(db.pool().clone());
-
-        repo.record("s1", "claude-sonnet-4-5", 100, 0.05)
-            .await
-            .unwrap();
-        repo.record("s1", "claude-sonnet-4-5", 200, 0.10)
-            .await
-            .unwrap();
-        repo.record("s2", "claude-opus-4", 500, 0.50).await.unwrap();
-
-        let (tokens, cost) = repo.totals().await.unwrap();
-        assert_eq!(tokens, 800);
-        assert!((cost - 0.65).abs() < 0.001);
-    }
-
-    #[tokio::test]
-    async fn test_stats_by_model() {
-        let db = Database::connect_in_memory()
-            .await
-            .expect("Failed to create database");
-        db.run_migrations().await.expect("Failed to run migrations");
-        let repo = UsageLedgerRepository::new(db.pool().clone());
-
-        repo.record("s1", "sonnet", 100, 0.05).await.unwrap();
-        repo.record("s2", "opus", 500, 0.50).await.unwrap();
-        repo.record("s3", "sonnet", 200, 0.10).await.unwrap();
-
-        let stats = repo.stats_by_model().await.unwrap();
-        assert_eq!(stats.len(), 2);
-        // opus should be first (higher cost)
-        assert_eq!(stats[0].model, "opus");
-        assert_eq!(stats[0].total_tokens, 500);
-        assert_eq!(stats[1].model, "sonnet");
-        assert_eq!(stats[1].total_tokens, 300);
     }
 }

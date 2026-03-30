@@ -2201,9 +2201,14 @@ impl App {
         Ok(())
     }
 
-    /// Get total token count for current session
+    /// Get total token count for current session (from DB, not in-memory messages).
+    /// In-memory messages only cover the current context window — the DB has the
+    /// cumulative total across all compactions.
     pub fn total_tokens(&self) -> i32 {
-        self.messages.iter().filter_map(|m| m.token_count).sum()
+        self.current_session
+            .as_ref()
+            .map(|s| s.token_count)
+            .unwrap_or(0)
     }
 
     /// Get context usage as a percentage
@@ -2216,9 +2221,12 @@ impl App {
         (used / self.context_max_tokens as f64) * 100.0
     }
 
-    /// Get total cost for current session
+    /// Get total cost for current session (from DB, not in-memory messages).
     pub fn total_cost(&self) -> f64 {
-        self.messages.iter().filter_map(|m| m.cost).sum()
+        self.current_session
+            .as_ref()
+            .map(|s| s.total_cost)
+            .unwrap_or(0.0)
     }
 
     /// Handle tool approval request — inline in chat (session-aware)
