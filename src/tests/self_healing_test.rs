@@ -335,7 +335,7 @@ async fn pending_requests_created_and_cleared() {
     let session_id = uuid::Uuid::new_v4();
 
     // Create a pending request (simulates agent start)
-    repo.insert(id, session_id, "test message", "tui")
+    repo.insert(id, session_id, "test message", "tui", None)
         .await
         .unwrap();
 
@@ -363,10 +363,10 @@ async fn pending_requests_deduplicate_by_session() {
     let session_id = uuid::Uuid::new_v4();
 
     // Insert same session twice with different request IDs
-    repo.insert(uuid::Uuid::new_v4(), session_id, "msg1", "tui")
+    repo.insert(uuid::Uuid::new_v4(), session_id, "msg1", "tui", None)
         .await
         .unwrap();
-    repo.insert(uuid::Uuid::new_v4(), session_id, "msg2", "tui")
+    repo.insert(uuid::Uuid::new_v4(), session_id, "msg2", "tui", None)
         .await
         .unwrap();
 

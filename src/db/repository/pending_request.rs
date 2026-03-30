@@ -18,6 +18,7 @@ pub struct PendingRequest {
     pub session_id: String,
     pub user_message: String,
     pub channel: String,
+    pub channel_chat_id: Option<String>,
 }
 
 /// Repository for pending request operations
@@ -38,20 +39,22 @@ impl PendingRequestRepository {
         session_id: Uuid,
         user_message: &str,
         channel: &str,
+        channel_chat_id: Option<&str>,
     ) -> Result<()> {
         let id_s = id.to_string();
         let sid = session_id.to_string();
         let msg = user_message.to_string();
         let ch = channel.to_string();
+        let cid = channel_chat_id.map(|s| s.to_string());
         self.pool
             .get()
             .await
             .context("Failed to get connection")?
             .interact(move |conn| {
                 conn.execute(
-                    "INSERT INTO pending_requests (id, session_id, user_message, channel, status) \
-                     VALUES (?1, ?2, ?3, ?4, 'PROCESSING')",
-                    params![id_s, sid, msg, ch],
+                    "INSERT INTO pending_requests (id, session_id, user_message, channel, channel_chat_id, status) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, 'PROCESSING')",
+                    params![id_s, sid, msg, ch, cid],
                 )
             })
             .await
@@ -84,7 +87,7 @@ impl PendingRequestRepository {
             .context("Failed to get connection")?
             .interact(|conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT id, session_id, user_message, channel \
+                    "SELECT id, session_id, user_message, channel, channel_chat_id \
                      FROM pending_requests ORDER BY created_at ASC",
                 )?;
                 let rows = stmt.query_map([], |row| {
@@ -93,6 +96,7 @@ impl PendingRequestRepository {
                         session_id: row.get("session_id")?,
                         user_message: row.get("user_message")?,
                         channel: row.get("channel")?,
+                        channel_chat_id: row.get("channel_chat_id")?,
                     })
                 })?;
                 rows.collect::<std::result::Result<Vec<_>, _>>()
@@ -100,6 +104,58 @@ impl PendingRequestRepository {
             .await
             .map_err(interact_err)?
             .context("Failed to get interrupted requests")
+    }
+
+    /// Get interrupted requests for a specific channel
+    pub async fn get_interrupted_for_channel(
+        &self,
+        channel: &str,
+    ) -> Result<Vec<PendingRequest>> {
+        let ch = channel.to_string();
+        self.pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT id, session_id, user_message, channel, channel_chat_id \
+                     FROM pending_requests WHERE channel = ?1 ORDER BY created_at ASC",
+                )?;
+                let rows = stmt.query_map(params![ch], |row| {
+                    Ok(PendingRequest {
+                        id: row.get("id")?,
+                        session_id: row.get("session_id")?,
+                        user_message: row.get("user_message")?,
+                        channel: row.get("channel")?,
+                        channel_chat_id: row.get("channel_chat_id")?,
+                    })
+                })?;
+                rows.collect::<std::result::Result<Vec<_>, _>>()
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to get interrupted requests for channel")
+    }
+
+    /// Delete specific requests by ID
+    pub async fn delete_ids(&self, ids: Vec<String>) -> Result<()> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        self.pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                for id in &ids {
+                    conn.execute("DELETE FROM pending_requests WHERE id = ?1", params![id])?;
+                }
+                Ok::<_, rusqlite::Error>(())
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to delete pending requests")?;
+        Ok(())
     }
 
     /// Delete all rows (called on startup after reading interrupted requests)

@@ -705,6 +705,7 @@ async fn cmd_chat_inner(
     // Rows only exist if the process died mid-request (normal completions delete them).
     // Instead of replaying the original message, we send a continuation prompt so the
     // agent reads context and picks up naturally — no loops, no leaking restart signals.
+    // Routes responses back to the originating channel (TUI, Telegram, Discord, etc.).
     let resume_event_sender = app.event_sender();
     {
         let pending_repo = crate::db::PendingRequestRepository::new(db.pool().clone());
@@ -722,27 +723,34 @@ async fn cmd_chat_inner(
                 for req in requests {
                     if let Ok(session_id) = uuid::Uuid::parse_str(&req.session_id) {
                         if !seen.insert(session_id) {
-                            tracing::debug!(
-                                "Skipping duplicate resume for session {}",
-                                &req.session_id[..8.min(req.session_id.len())]
-                            );
                             continue;
                         }
                         let agent = agent.clone();
                         let ev_tx = resume_event_sender.clone();
+                        let channel = req.channel.clone();
+                        let channel_chat_id = req.channel_chat_id.clone();
                         tracing::info!(
-                            "Resuming session {} (channel: {})",
+                            "Resuming session {} (channel: {}, chat_id: {:?})",
                             &req.session_id[..8.min(req.session_id.len())],
-                            req.channel
+                            channel,
+                            channel_chat_id,
                         );
-                        // Create a cancel token so the TUI can abort via double-Escape
+
+                        // TUI: wire cancel token and send response via TuiEvent
+                        // Non-TUI: send response back to the originating channel
+                        let tg = telegram_state.clone();
+                        let dc = discord_state.clone();
+                        let wa = whatsapp_state.clone();
+                        let sk = slack_state.clone();
                         let token = tokio_util::sync::CancellationToken::new();
-                        let _ = resume_event_sender.send(
-                            crate::tui::events::TuiEvent::PendingResumed {
-                                session_id,
-                                cancel_token: token.clone(),
-                            },
-                        );
+                        if channel == "tui" {
+                            let _ = resume_event_sender.send(
+                                crate::tui::events::TuiEvent::PendingResumed {
+                                    session_id,
+                                    cancel_token: token.clone(),
+                                },
+                            );
+                        }
                         tokio::spawn(async move {
                             let prompt = "[System: A restart just occurred while you were \
                                 processing a request. Read the conversation context and continue \
@@ -760,16 +768,80 @@ async fn cmd_chat_inner(
                             {
                                 Ok(response) => {
                                     tracing::info!(
-                                        "Resume completed for session {}: {} chars",
+                                        "Resume completed for session {} ({}): {} chars",
                                         session_id,
+                                        channel,
                                         response.content.len()
                                     );
-                                    let _ = ev_tx.send(
-                                        crate::tui::events::TuiEvent::ResponseComplete {
-                                            session_id,
-                                            response,
-                                        },
-                                    );
+                                    match channel.as_str() {
+                                        "tui" => {
+                                            let _ = ev_tx.send(
+                                                crate::tui::events::TuiEvent::ResponseComplete {
+                                                    session_id,
+                                                    response,
+                                                },
+                                            );
+                                        }
+                                        "telegram" => {
+                                            if let Some(ref cid) = channel_chat_id
+                                                && let Ok(chat_id) = cid.parse::<i64>()
+                                                && let Some(bot) = tg.bot().await
+                                            {
+                                                use teloxide::prelude::*;
+                                                let clean = crate::utils::sanitize::strip_llm_artifacts(&response.content);
+                                                let html = crate::channels::telegram::handler::md_to_html(&clean);
+                                                let _ = bot
+                                                    .send_message(teloxide::types::ChatId(chat_id), html)
+                                                    .parse_mode(teloxide::types::ParseMode::Html)
+                                                    .await;
+                                            }
+                                        }
+                                        "discord" => {
+                                            if let Some(ref cid) = channel_chat_id
+                                                && let Ok(ch_id) = cid.parse::<u64>()
+                                                && let Some(http) = dc.http().await
+                                            {
+                                                let channel = serenity::model::id::ChannelId::new(ch_id);
+                                                let _ = channel.say(&http, &response.content).await;
+                                            }
+                                        }
+                                        #[cfg(feature = "whatsapp")]
+                                        "whatsapp" => {
+                                            if let Some(ref cid) = channel_chat_id
+                                                && let Some(client) = wa.client().await
+                                                && let Ok(jid) = cid.parse::<wacore_binary::jid::Jid>()
+                                            {
+                                                let msg = waproto::whatsapp::Message {
+                                                    conversation: Some(response.content.clone()),
+                                                    ..Default::default()
+                                                };
+                                                let _ = client.send_message(jid, msg).await;
+                                            }
+                                        }
+                                        "slack" => {
+                                            if let Some(ref cid) = channel_chat_id
+                                                && let (Some(token_val), Some(client)) =
+                                                    (sk.bot_token().await, sk.client().await)
+                                            {
+                                                let api_token = slack_morphism::prelude::SlackApiToken::new(
+                                                    slack_morphism::prelude::SlackApiTokenValue::from(token_val),
+                                                );
+                                                let session = client.open_session(&api_token);
+                                                let req = slack_morphism::prelude::SlackApiChatPostMessageRequest::new(
+                                                    cid.clone().into(),
+                                                    slack_morphism::prelude::SlackMessageContent::new()
+                                                        .with_text(response.content.clone()),
+                                                );
+                                                let _ = session.chat_post_message(&req).await;
+                                            }
+                                        }
+                                        other => {
+                                            tracing::warn!(
+                                                "No recovery routing for channel '{}' — response saved to DB only",
+                                                other
+                                            );
+                                        }
+                                    }
                                 }
                                 Err(e) => {
                                     tracing::error!(
@@ -777,10 +849,12 @@ async fn cmd_chat_inner(
                                         session_id,
                                         e
                                     );
-                                    let _ = ev_tx.send(crate::tui::events::TuiEvent::Error {
-                                        session_id,
-                                        message: e.to_string(),
-                                    });
+                                    if channel == "tui" {
+                                        let _ = ev_tx.send(crate::tui::events::TuiEvent::Error {
+                                            session_id,
+                                            message: e.to_string(),
+                                        });
+                                    }
                                 }
                             }
                         });

@@ -244,6 +244,8 @@ async fn execute_job(
                 Box::pin(async { Ok((true, false)) })
             })),
             None, // no progress callback
+            "cron",
+            None,
         )
         .await;
 

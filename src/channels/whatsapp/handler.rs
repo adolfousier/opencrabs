@@ -912,6 +912,7 @@ pub(crate) async fn handle_message(
         .store_cancel_token(session_id, cancel_token.clone())
         .await;
 
+    let wa_chat_id = format!("{}", info.source.chat);
     let result = agent
         .send_message_with_tools_and_callback(
             session_id,
@@ -920,6 +921,8 @@ pub(crate) async fn handle_message(
             Some(cancel_token),
             Some(approval_cb),
             Some(progress_cb),
+            "whatsapp",
+            Some(&wa_chat_id),
         )
         .await;
 
