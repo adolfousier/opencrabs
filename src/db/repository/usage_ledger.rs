@@ -17,10 +17,16 @@ pub struct ModelUsageStats {
     pub entry_count: i64,
 }
 
-/// Strip "claude-" prefix from model names so "claude-opus-4-6" → "opus-4-6".
-/// This prevents duplicate entries in the ledger for the same underlying model.
+/// Normalize model names for consistent ledger tracking.
+/// "claude-opus-4-6" → "opus-4-6", bare "opus" → "opus-4-6", "sonnet" → "sonnet-4-6".
 pub(crate) fn normalize_model_name(model: &str) -> String {
-    model.strip_prefix("claude-").unwrap_or(model).to_string()
+    let stripped = model.strip_prefix("claude-").unwrap_or(model);
+    match stripped {
+        "opus" => "opus-4-6".to_string(),
+        "sonnet" => "sonnet-4-6".to_string(),
+        "haiku" => "haiku-4-5".to_string(),
+        other => other.to_string(),
+    }
 }
 
 /// Repository for usage ledger operations
@@ -86,10 +92,14 @@ impl UsageLedgerRepository {
             .await
             .context("Failed to get connection")?
             .interact(|conn| {
-                // Normalize model names in SQL so old "claude-opus-4-6" merges with "opus"
+                // Normalize model names in SQL to merge duplicates:
+                // "claude-opus-4-6" → "opus-4-6", bare "opus" → "opus-4-6", etc.
                 let mut stmt = conn.prepare_cached(
                     "SELECT \
                        CASE \
+                         WHEN model IN ('opus', 'claude-opus-4-6') THEN 'opus-4-6' \
+                         WHEN model IN ('sonnet', 'claude-sonnet-4-6') THEN 'sonnet-4-6' \
+                         WHEN model IN ('haiku', 'claude-haiku-4-5-20251001') THEN 'haiku-4-5' \
                          WHEN model LIKE 'claude-%' THEN REPLACE(model, 'claude-', '') \
                          ELSE model \
                        END AS normalized_model, \

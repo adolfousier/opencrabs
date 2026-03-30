@@ -36,9 +36,10 @@ async fn test_stats_by_model() {
 
     let stats = repo.stats_by_model().await.unwrap();
     assert_eq!(stats.len(), 2);
-    assert_eq!(stats[0].model, "opus");
+    // normalize_model_name maps bare "opus" → "opus-4-6" at write time
+    assert_eq!(stats[0].model, "opus-4-6");
     assert_eq!(stats[0].total_tokens, 500);
-    assert_eq!(stats[1].model, "sonnet");
+    assert_eq!(stats[1].model, "sonnet-4-6");
     assert_eq!(stats[1].total_tokens, 300);
 }
 
@@ -50,9 +51,13 @@ async fn test_stats_by_model_merges_claude_prefix() {
     db.run_migrations().await.expect("Failed to run migrations");
     let repo = UsageLedgerRepository::new(db.pool().clone());
 
-    repo.record("s1", "claude-opus-4-6", 1000, 1.0).await.unwrap();
+    repo.record("s1", "claude-opus-4-6", 1000, 1.0)
+        .await
+        .unwrap();
     repo.record("s2", "opus-4-6", 500, 0.50).await.unwrap();
-    repo.record("s3", "claude-sonnet-4-6", 200, 0.10).await.unwrap();
+    repo.record("s3", "claude-sonnet-4-6", 200, 0.10)
+        .await
+        .unwrap();
 
     let stats = repo.stats_by_model().await.unwrap();
     assert_eq!(stats.len(), 2);
@@ -66,6 +71,9 @@ async fn test_stats_by_model_merges_claude_prefix() {
 fn test_normalize_model_name() {
     assert_eq!(normalize_model_name("claude-opus-4-6"), "opus-4-6");
     assert_eq!(normalize_model_name("claude-sonnet-4-6"), "sonnet-4-6");
+    assert_eq!(normalize_model_name("opus"), "opus-4-6");
+    assert_eq!(normalize_model_name("sonnet"), "sonnet-4-6");
+    assert_eq!(normalize_model_name("haiku"), "haiku-4-5");
     assert_eq!(normalize_model_name("opus-4-6"), "opus-4-6");
     assert_eq!(normalize_model_name("MiniMax-M2.5"), "MiniMax-M2.5");
 }
