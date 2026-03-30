@@ -137,20 +137,32 @@ impl TelegramAgent {
                         // process callback queries (approval button clicks)
                         // while the agent is running.
                         tokio::spawn(async move {
-                            if let Err(e) = handle_message(
-                                bot,
-                                msg,
-                                agent,
-                                session_svc,
-                                bot_token,
-                                shared_session,
-                                telegram_state,
-                                config_rx,
-                                channel_msg_repo,
-                            )
-                            .await
-                            {
-                                tracing::error!("Telegram handle_message error: {e}");
+                            let result = tokio::task::spawn(async move {
+                                handle_message(
+                                    bot,
+                                    msg,
+                                    agent,
+                                    session_svc,
+                                    bot_token,
+                                    shared_session,
+                                    telegram_state,
+                                    config_rx,
+                                    channel_msg_repo,
+                                )
+                                .await
+                            })
+                            .await;
+                            match result {
+                                Ok(Ok(())) => {}
+                                Ok(Err(e)) => {
+                                    tracing::error!("Telegram handle_message error: {e}");
+                                }
+                                Err(panic_err) => {
+                                    tracing::error!(
+                                        "Telegram handle_message panicked: {:?}",
+                                        panic_err
+                                    );
+                                }
                             }
                         });
                         ResponseResult::Ok(())

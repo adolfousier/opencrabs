@@ -381,9 +381,10 @@ impl AgentService {
             for block in &msg.content {
                 match block {
                     ContentBlock::Text { text } => {
-                        // Truncate very long text blocks to 500 chars
+                        // Truncate very long text blocks to ~500 bytes
                         let display = if text.len() > 500 {
-                            format!("{}… [truncated]", &text[..500])
+                            let end = text.floor_char_boundary(500);
+                            format!("{}… [truncated]", &text[..end])
                         } else {
                             text.clone()
                         };
@@ -393,7 +394,8 @@ impl AgentService {
                         let input_preview = {
                             let s = input.to_string();
                             if s.len() > 200 {
-                                format!("{}…", &s[..200])
+                                let end = s.floor_char_boundary(200);
+                                format!("{}…", &s[..end])
                             } else {
                                 s
                             }
@@ -405,7 +407,8 @@ impl AgentService {
                     }
                     ContentBlock::ToolResult { content, .. } => {
                         let display = if content.len() > 300 {
-                            format!("{}… [truncated]", &content[..300])
+                            let end = content.floor_char_boundary(300);
+                            format!("{}… [truncated]", &content[..end])
                         } else {
                             content.clone()
                         };
@@ -417,7 +420,8 @@ impl AgentService {
                     ContentBlock::Thinking { thinking, .. } => {
                         if !thinking.is_empty() {
                             let display = if thinking.len() > 300 {
-                                format!("{}… [truncated]", &thinking[..300])
+                                let end = thinking.floor_char_boundary(300);
+                                format!("{}… [truncated]", &thinking[..end])
                             } else {
                                 thinking.clone()
                             };
