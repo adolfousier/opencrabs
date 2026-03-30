@@ -5,6 +5,22 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.93] - 2026-03-30
+
+### Fixed
+- **Crash recovery routes responses back to originating channel** — Previously `pending_requests` always stored `channel="tui"` and recovery only sent responses via TuiEvent. Now each channel (Telegram, Discord, Slack, WhatsApp, Trello) passes its name and `chat_id` through to `run_tool_loop`, which stores them in the DB. On restart, recovery routes responses back to the correct channel using the stored `channel_chat_id`
+- **UTF-8 panics on multi-byte string truncation** — Byte-index slicing on multi-byte emoji (e.g. `🔺` at bytes 497..501) caused panics in `context.rs`, `panes.rs`, and Telegram handler. All string truncation now uses `floor_char_boundary`/`ceil_char_boundary` to land on valid UTF-8 boundaries
+- **TUI responses vanishing when CLI model ends with tool calls** — Previous fix extracted only trailing text (after last tool) as the final response, but when the model ends with tool calls and no trailing text, `final_text` was empty. Reverted to extracting all text; Telegram dedup now happens in the handler by tracking sent intermediate texts and stripping them from the final response
+- **TUI dropping trailing text after tool calls** — `complete_response` now updates the intermediate message instead of skipping it, ensuring text that follows tool call blocks renders correctly
+- **Panic protection for Telegram message handler** — Nested `tokio::task::spawn` catches panics in the Telegram message handler instead of silently losing them
+
+### Added
+- **New DB migration: `pending_requests_channel_chat_id`** — Adds `channel` and `channel_chat_id` columns to `pending_requests` table for cross-channel crash recovery routing
+
+### Testing
+- **Crash recovery and self-healing tests for all channels** — Channel-specific pending request storage, `get_interrupted_for_channel` filtering, `delete_ids` selective deletion, multi-channel coexistence, UTF-8 safe string truncation with emoji/CJK, panic protection pattern verification
+- **1,605 total tests** (up from 1,593)
+
 ## [0.2.92] - 2026-03-29
 
 ### Added
@@ -1862,6 +1878,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.93]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.93
+[0.2.93]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.93
 [0.2.92]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.92
 [0.2.91]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.91
 [0.2.90]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.90
