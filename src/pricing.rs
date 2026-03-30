@@ -200,11 +200,13 @@ pub const DEFAULT_PRICING_TOML: &str = r#"
 
 [providers.anthropic]
 entries = [
-  # Claude Opus 4.x — $5/$25 per M tokens
+  # Opus 4.x (normalized: "opus-4-6") — $5/$25 per M tokens
+  { prefix = "opus-4",             input_per_m = 5.0,  output_per_m = 25.0 },
   { prefix = "claude-opus-4",      input_per_m = 5.0,  output_per_m = 25.0 },
-  # Claude Opus 3 (legacy) — $15/$75
+  # Opus 3 (legacy) — $15/$75
   { prefix = "claude-3-opus",      input_per_m = 15.0, output_per_m = 75.0 },
-  # Claude Sonnet 4.x — $3/$15
+  # Sonnet 4.x (normalized: "sonnet-4-6") — $3/$15
+  { prefix = "sonnet-4",           input_per_m = 3.0,  output_per_m = 15.0 },
   { prefix = "claude-sonnet-4",    input_per_m = 3.0,  output_per_m = 15.0 },
   # Claude 3.7 Sonnet — $3/$15
   { prefix = "claude-3-7-sonnet",  input_per_m = 3.0,  output_per_m = 15.0 },
@@ -212,7 +214,8 @@ entries = [
   { prefix = "claude-3-5-sonnet",  input_per_m = 3.0,  output_per_m = 15.0 },
   # Claude 3 Sonnet (legacy) — $3/$15
   { prefix = "claude-3-sonnet",    input_per_m = 3.0,  output_per_m = 15.0 },
-  # Claude Haiku 4.x — $1/$5
+  # Haiku 4.x (normalized: "haiku-4-5") — $1/$5
+  { prefix = "haiku-4",            input_per_m = 1.0,  output_per_m = 5.0  },
   { prefix = "claude-haiku-4",     input_per_m = 1.0,  output_per_m = 5.0  },
   # Claude 3.5 Haiku — $0.80/$4
   { prefix = "claude-3-5-haiku",   input_per_m = 0.80, output_per_m = 4.0  },

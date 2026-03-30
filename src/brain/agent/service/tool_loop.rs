@@ -540,7 +540,7 @@ impl AgentService {
             let queued_buf = tokio::sync::Mutex::new(None);
 
             // Send to provider via streaming — retry once after emergency compaction if prompt is too long
-            let (mut response, mut reasoning_text) = match self
+            let (mut response, reasoning_text) = match self
                 .stream_complete(
                     session_id,
                     request,
@@ -1173,48 +1173,13 @@ impl AgentService {
             // Break immediately after — the CLI already completed its full run.
             if is_cli_provider && !tool_uses.is_empty() {
                 // Text/tool interleaving and ToolStarted/ToolCompleted events
-                // are already emitted during streaming by helpers.rs.
+                // are already emitted during streaming by helpers.rs
+                // (cli_unflushed_text flushes at tool boundaries + stream end).
                 // Tool markers already persisted atomically above via cli_segments.
                 //
-                // Emit intermediate text for channels (Telegram, etc.).
-                // Only emit text that appears BEFORE tool blocks — the trailing
-                // text (after the last tool) will be in the final response, so
-                // emitting it here too would cause a duplicate message.
-                if let Some(ref cb) = progress_callback {
-                    // Find text blocks that appear before the last tool_use block.
-                    let last_tool_idx = response
-                        .content
-                        .iter()
-                        .rposition(|b| matches!(b, ContentBlock::ToolUse { .. }))
-                        .unwrap_or(0);
-                    let intermediate_only: String = response
-                        .content
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(i, b)| {
-                            if i < last_tool_idx
-                                && let ContentBlock::Text { text } = b
-                                && !text.trim().is_empty()
-                            {
-                                return Some(text.as_str());
-                            }
-                            None
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n\n");
-
-                    let has_intermediate = !intermediate_only.is_empty();
-                    let has_reasoning = reasoning_text.is_some();
-                    if has_intermediate || has_reasoning {
-                        cb(
-                            session_id,
-                            ProgressEvent::IntermediateText {
-                                text: intermediate_only,
-                                reasoning: reasoning_text.take(),
-                            },
-                        );
-                    }
-                }
+                // Do NOT re-emit IntermediateText here — helpers.rs already sent
+                // all text blocks during streaming. Emitting again causes the
+                // entire conversation text to appear duplicated in the TUI.
                 iteration_text.clear();
                 tool_uses.clear();
             }
