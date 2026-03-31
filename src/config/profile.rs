@@ -280,6 +280,113 @@ pub fn import_profile(archive: &Path) -> Result<String> {
     Ok(profile_name)
 }
 
+// ─── Profile Migration ───────────────────────────────────────────────
+
+/// Migrate config and brain files from one profile to another.
+/// Copies `*.md`, `*.toml`, and `memory/` directory.
+/// Does NOT copy database, sessions, logs, locks, or layout.
+pub fn migrate_profile(from: &str, to: &str, force: bool) -> Result<Vec<String>> {
+    let base = base_opencrabs_dir();
+
+    let src_dir = if from == "default" {
+        base.clone()
+    } else {
+        let dir = base.join("profiles").join(from);
+        if !dir.exists() {
+            bail!("source profile '{}' does not exist", from);
+        }
+        dir
+    };
+
+    let dst_dir = if to == "default" {
+        base.clone()
+    } else {
+        let dir = base.join("profiles").join(to);
+        if !dir.exists() {
+            bail!(
+                "destination profile '{}' does not exist. Create it first with: opencrabs profile create {}",
+                to, to
+            );
+        }
+        dir
+    };
+
+    if src_dir == dst_dir {
+        bail!("source and destination profiles are the same");
+    }
+
+    let mut migrated = Vec::new();
+
+    // Copy top-level *.md and *.toml files (config, keys, brain files)
+    // Skip: profiles.toml (registry), layout.json, locks, DB
+    let skip_files = ["profiles.toml", "layout.json"];
+
+    for entry in fs::read_dir(&src_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+
+        if path.is_file() {
+            let dominated = name_str.ends_with(".md") || name_str.ends_with(".toml");
+            if !dominated || skip_files.contains(&name_str.as_ref()) {
+                continue;
+            }
+
+            let dst_path = dst_dir.join(&name);
+            if dst_path.exists() && !force {
+                tracing::warn!(
+                    "Skipping '{}' — already exists in '{}' (use --force to overwrite)",
+                    name_str,
+                    to
+                );
+                continue;
+            }
+
+            fs::copy(&path, &dst_path).with_context(|| {
+                format!("failed to copy {} to {}", path.display(), dst_path.display())
+            })?;
+            migrated.push(name_str.to_string());
+        }
+    }
+
+    // Copy memory/ directory
+    let src_memory = src_dir.join("memory");
+    if src_memory.exists() && src_memory.is_dir() {
+        let dst_memory = dst_dir.join("memory");
+        fs::create_dir_all(&dst_memory)?;
+
+        for entry in fs::read_dir(&src_memory)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                let dst_path = dst_memory.join(&name);
+
+                if dst_path.exists() && !force {
+                    tracing::warn!(
+                        "Skipping memory/'{}' — already exists (use --force to overwrite)",
+                        name_str
+                    );
+                    continue;
+                }
+
+                fs::copy(&path, &dst_path)?;
+                migrated.push(format!("memory/{}", name_str));
+            }
+        }
+    }
+
+    tracing::info!(
+        "Migrated {} files from profile '{}' to '{}'",
+        migrated.len(),
+        from,
+        to
+    );
+    Ok(migrated)
+}
+
 // ─── Token Lock ──────────────────────────────────────────────────────
 
 /// Check and acquire a token lock for a channel credential.
