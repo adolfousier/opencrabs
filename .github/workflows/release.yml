@@ -99,15 +99,11 @@ jobs:
 
       - name: Install CMake (Windows)
         if: matrix.os == 'windows-latest'
-        run: choco install cmake -y
-
-      - name: Install CMake (macOS)
-        if: matrix.os == 'macos-latest'
-        run: brew install cmake
+        uses: lukka/get-cmake@latest
 
       - name: Install NASM (Windows)
         if: matrix.os == 'windows-latest'
-        run: choco install nasm -y
+        uses: ilammy/setup-nasm@v1
 
       - name: Build
         env:
