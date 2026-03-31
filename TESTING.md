@@ -186,7 +186,7 @@ Profile tests live in `src/tests/profile_test.rs` and cover multi-instance isola
 cargo test --all-features -p opencrabs -- profile_test
 ```
 
-**Note:** Filesystem CRUD tests are sequential (single `#[test]` function) to avoid concurrent write corruption of `~/.opencrabs/profiles.toml`. In-memory tests run in parallel. The `test_set_and_get_active_profile` test accounts for `OnceLock` semantics (can only be set once per process).
+**Note:** All filesystem-touching tests acquire a global `fs_lock()` mutex to prevent concurrent write corruption of `~/.opencrabs/profiles.toml`. The mutex uses `unwrap_or_else(|p| p.into_inner())` to recover from poison (a prior test panic won't cascade-fail every subsequent test). In-memory tests run in parallel without the lock. The `test_set_and_get_active_profile` test accounts for `OnceLock` semantics (can only be set once per process).
 
 ---
 

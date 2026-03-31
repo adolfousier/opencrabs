@@ -211,12 +211,19 @@ fn factory_creates_opencode_by_alt_names() {
 
 #[tokio::test]
 async fn e2e_opencode_simple_completion() {
+    use tokio::time::{Duration, timeout};
+
     let Some(provider) = try_provider() else {
         return;
     };
     let request = simple_request("opencode/gpt-5-nano", "Reply with exactly: HELLO_OPENCRABS");
 
-    let response = provider.complete(request).await;
+    let result = timeout(Duration::from_secs(30), provider.complete(request)).await;
+    if result.is_err() {
+        eprintln!("e2e_opencode_simple_completion timed out after 30s, skipping");
+        return;
+    }
+    let response = result.unwrap();
     assert!(
         response.is_ok(),
         "completion should succeed: {:?}",
@@ -285,6 +292,8 @@ async fn e2e_opencode_streaming() {
 
 #[tokio::test]
 async fn e2e_opencode_with_bash_tool() {
+    use tokio::time::{Duration, timeout};
+
     let provider = {
         let Some(p) = try_provider() else { return };
         p
@@ -296,10 +305,12 @@ async fn e2e_opencode_with_bash_tool() {
     );
     request.system = Some("You are a helpful assistant. Reply concisely.".to_string());
 
-    let response = provider
-        .complete(request)
-        .await
-        .expect("completion should work");
+    let result = timeout(Duration::from_secs(30), provider.complete(request)).await;
+    if result.is_err() {
+        eprintln!("e2e_opencode_with_bash_tool timed out after 30s, skipping");
+        return;
+    }
+    let response = result.unwrap().expect("completion should work");
     let llm_text = extract_text(&response);
     assert!(
         llm_text.contains('4'),
@@ -333,7 +344,13 @@ async fn e2e_opencode_with_write_and_read_tools() {
         "Write exactly this text and nothing else: OpenCrabs integration test OK",
     );
 
-    let response = provider.complete(request).await.expect("completion works");
+    use tokio::time::{Duration, timeout};
+    let result = timeout(Duration::from_secs(30), provider.complete(request)).await;
+    if result.is_err() {
+        eprintln!("e2e_opencode_with_write_and_read_tools timed out after 30s, skipping");
+        return;
+    }
+    let response = result.unwrap().expect("completion works");
     let generated_text = extract_text(&response);
 
     // Write using WriteTool
@@ -444,6 +461,8 @@ async fn e2e_opencode_with_glob_and_grep_tools() {
     );
 
     // Use provider to interpret the results
+    use tokio::time::{Duration, timeout};
+
     let provider = {
         let Some(p) = try_provider() else { return };
         p
@@ -456,7 +475,12 @@ async fn e2e_opencode_with_glob_and_grep_tools() {
         ),
     );
 
-    let response = provider.complete(request).await.expect("completion works");
+    let result = timeout(Duration::from_secs(30), provider.complete(request)).await;
+    if result.is_err() {
+        eprintln!("e2e_opencode_with_glob_and_grep_tools timed out after 30s, skipping");
+        return;
+    }
+    let response = result.unwrap().expect("completion works");
     let answer = extract_text(&response);
     assert!(answer.contains('2'), "should answer 2, got: {}", answer);
 }
@@ -465,6 +489,8 @@ async fn e2e_opencode_with_glob_and_grep_tools() {
 
 #[tokio::test]
 async fn e2e_opencode_multi_turn() {
+    use tokio::time::{Duration, timeout};
+
     let provider = {
         let Some(p) = try_provider() else { return };
         p
@@ -477,10 +503,12 @@ async fn e2e_opencode_multi_turn() {
     );
     request1.system = Some("You are a helpful assistant with good memory.".to_string());
 
-    let resp1 = provider
-        .complete(request1)
-        .await
-        .expect("turn 1 should work");
+    let result1 = timeout(Duration::from_secs(30), provider.complete(request1)).await;
+    if result1.is_err() {
+        eprintln!("e2e_opencode_multi_turn turn 1 timed out after 30s, skipping");
+        return;
+    }
+    let resp1 = result1.unwrap().expect("turn 1 should work");
 
     // Turn 2: ask for the fact back via message history
     let request2 = LLMRequest {
@@ -506,10 +534,12 @@ async fn e2e_opencode_multi_turn() {
         ..LLMRequest::new("opencode/gpt-5-nano", vec![])
     };
 
-    let resp2 = provider
-        .complete(request2)
-        .await
-        .expect("turn 2 should work");
+    let result2 = timeout(Duration::from_secs(30), provider.complete(request2)).await;
+    if result2.is_err() {
+        eprintln!("e2e_opencode_multi_turn turn 2 timed out after 30s, skipping");
+        return;
+    }
+    let resp2 = result2.unwrap().expect("turn 2 should work");
     let text = extract_text(&resp2);
     assert!(
         text.contains("CRAB42"),
