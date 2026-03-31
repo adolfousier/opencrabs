@@ -496,7 +496,15 @@ pub fn validate_profile_name(name: &str) -> Result<()> {
 fn is_pid_alive(pid: u32) -> bool {
     #[cfg(unix)]
     {
-        unsafe { libc::kill(pid as i32, 0) == 0 }
+        // kill(pid, 0) returns 0 if we can signal the process.
+        // If it returns -1, check errno: ESRCH means the process doesn't exist,
+        // EPERM means it exists but we lack permission (still alive).
+        let ret = unsafe { libc::kill(pid as i32, 0) };
+        if ret == 0 {
+            return true;
+        }
+        // EPERM = process exists but owned by another user (e.g. PID 1 = launchd)
+        std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
     }
     #[cfg(not(unix))]
     {

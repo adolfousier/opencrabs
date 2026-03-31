@@ -258,6 +258,27 @@ Run multiple isolated OpenCrabs instances from the same installation. Each profi
 
 **Profile migration:** Use `opencrabs profile migrate --from default --to hermes` to copy all `.md` brain files, `.toml` config files, and `memory/` entries to a new profile. Sessions and database are not copied — the new profile starts clean. Add `--force` to overwrite existing files in the target profile. After migrating, customize the new profile's `SOUL.md`, `IDENTITY.md`, and `config.toml` to give it a different personality and provider setup.
 
+### Daemon & Service
+
+Run profiles as background services:
+
+```bash
+# Install as system service (macOS launchd / Linux systemd)
+opencrabs -p hermes service install
+opencrabs -p hermes service start
+
+# Each profile gets its own service
+# macOS: com.opencrabs.daemon.hermes
+# Linux: opencrabs-hermes.service
+
+# Manage independently
+opencrabs -p hermes service status
+opencrabs -p hermes service stop
+opencrabs -p hermes service uninstall
+```
+
+Multiple profiles can run as simultaneous daemon services with full isolation.
+
 **Environment variable:** Set `OPENCRABS_PROFILE=hermes` to select a profile without the `-p` flag. Useful for systemd services, cron jobs, and daemon mode.
 
 ---
@@ -1924,6 +1945,10 @@ The heartbeat prompt is loaded into the agent's brain every turn. When the heart
 ### Autostart on Boot
 
 To keep OpenCrabs always running, set it to start automatically with your system.
+
+> **Profile-aware setup:** For named profiles, use `opencrabs -p <name> service install` instead of manual configuration. It generates the correct service name (`com.opencrabs.daemon.<name>` on macOS, `opencrabs-<name>.service` on Linux), includes the `-p` flag in the daemon args, and isolates log paths per profile. Multiple profiles can run as simultaneous daemon services.
+
+The examples below show manual setup for the **default profile**. For named profiles, replace `daemon` with `-p <name> daemon` in the command arguments.
 
 #### Linux (systemd)
 

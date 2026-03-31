@@ -125,7 +125,8 @@ cargo test --all-features
 | Tests — Onboarding Keys | 4 | `src/tests/onboarding_keys_test.rs` |
 | Tests — TUI Render Clear | 4 | `src/tests/tui_render_clear_test.rs` |
 | Tests — Gemini Fetch | 3 | `src/tests/gemini_fetch_test.rs` |
-| **Total** | **1,562** | |
+| Tests — Profiles | 37 | `src/tests/profile_test.rs` |
+| **Total** | **1,599** | |
 
 ---
 
@@ -160,6 +161,32 @@ cargo test --all-features -- --nocapture
 # Run only local-stt tests
 cargo test --features local-stt -- local_whisper
 ```
+
+---
+
+## Profile Tests
+
+Profile tests live in `src/tests/profile_test.rs` and cover multi-instance isolation:
+
+| Area | What's tested |
+|------|--------------|
+| Name validation | Reserved names, length bounds, special characters |
+| Token hashing | Determinism, uniqueness, fixed length, hex output |
+| Registry (in-memory) | CRUD, serde roundtrip, touch timestamps |
+| Path resolution | Base dir, env var override, default vs named profiles |
+| Filesystem CRUD | Create/delete lifecycle, duplicate detection, registry sync |
+| Export/Import | Roundtrip with config files, nested memory directories |
+| Migration | Copy `.md`/`.toml` files, skip/force behavior, default source |
+| Token locks | Acquire/release, stale PID cleanup, cross-profile conflict |
+| Profile isolation | Separate directories, concurrent writes, default vs named |
+| Concurrent writes | Tokio tasks creating 5 profiles simultaneously |
+
+```bash
+# Run profile tests only
+cargo test --all-features -p opencrabs -- profile
+```
+
+**Note:** Filesystem CRUD tests are sequential (single `#[test]` function) to avoid concurrent write corruption of `~/.opencrabs/profiles.toml`. In-memory tests run in parallel. The `test_set_and_get_active_profile` test accounts for `OnceLock` semantics (can only be set once per process).
 
 ---
 
