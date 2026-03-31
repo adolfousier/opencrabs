@@ -47,14 +47,6 @@ jobs:
           path: target
           key: ${{ runner.os }}-target-stable-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Install CMake (macOS)
-        if: runner.os == 'macOS'
-        run: brew install cmake
-
-      - name: Install CMake (Windows)
-        if: runner.os == 'Windows'
-        run: choco install cmake -y
-
       - name: Run tests (Windows — no whatsapp/local-stt/local-tts)
         if: runner.os == 'Windows'
         run: cargo test --no-default-features --features "telegram,discord,slack,whatsapp,trello" --verbose
