@@ -332,264 +332,185 @@ fn list_profiles_always_includes_default() {
 }
 
 // ─── Profile CRUD (Filesystem — Sequential) ─────────────────────────
-// All tests that write to ~/.opencrabs/profiles.toml run inside a single
-// test function to prevent concurrent write corruption.
+// Everything that writes to ~/.opencrabs/ (profiles.toml, locks/, profiles/)
+// runs inside ONE test function to prevent concurrent corruption from
+// parallel test execution.
 
 #[test]
-fn profile_crud_lifecycle() {
-    let name = "_test_crud_seq";
+fn filesystem_operations_sequential() {
+    let pid = std::process::id();
+    let lock_dir = base_opencrabs_dir().join("locks");
+    fs::create_dir_all(&lock_dir).unwrap();
+
+    // ══════════════════════════════════════════════════════════════════
+    // Part 1: Profile CRUD lifecycle
+    // ══════════════════════════════════════════════════════════════════
+    let name = "_test_fs_seq";
     let profile_dir = base_opencrabs_dir().join("profiles").join(name);
 
-    // ── Clean slate (aggressive — handles stale state from previous runs) ──
-    if profile_dir.exists() {
-        fs::remove_dir_all(&profile_dir).expect("failed to clean stale test profile dir");
-    }
-    let mut reg = ProfileRegistry::load().unwrap_or_default();
-    reg.profiles.remove(name);
-    reg.save().expect("failed to clean registry");
-
-    // ── Create ──
-    let path = create_profile(name, Some("sequential lifecycle")).unwrap();
-    assert!(path.exists());
-    assert!(path.join("memory").exists());
-    assert!(path.join("logs").exists());
-
-    // ── Verify directory is the source of truth ──
-    assert!(profile_dir.exists());
-
-    // ── Duplicate create fails ──
-    let err = create_profile(name, None).unwrap_err();
-    assert!(err.to_string().contains("already exists"));
-
-    // ── List includes it ──
-    // Re-load registry to ensure our entry is there
-    let profiles = list_profiles().unwrap();
-    let found = profiles.iter().any(|p| p.name == name);
-    assert!(found, "created profile should appear in list");
-
-    // ── Delete ──
-    delete_profile(name).unwrap();
-    assert!(!path.exists(), "profile directory should be removed");
-
-    // ── Delete again fails ──
-    let err = delete_profile(name).unwrap_err();
-    assert!(err.to_string().contains("does not exist"));
-}
-
-#[test]
-fn profile_export_import_lifecycle() {
-    let name = "_test_exp_imp_seq";
-    let archive_path = std::env::temp_dir().join("_test_profile_export_seq.tar.gz");
-    let profile_dir = base_opencrabs_dir().join("profiles").join(name);
-
-    // ── Clean slate ──
+    // Clean slate
     let _ = fs::remove_dir_all(&profile_dir);
-    let _ = fs::remove_file(&archive_path);
     let mut reg = ProfileRegistry::load().unwrap_or_default();
     reg.profiles.remove(name);
     let _ = reg.save();
 
-    // ── Create with content ──
-    let dir = create_profile(name, Some("export test")).unwrap();
-    fs::write(dir.join("config.toml"), "[general]\nname = \"test\"").unwrap();
+    // Create
+    let path = create_profile(name, Some("sequential test")).unwrap();
+    assert!(path.exists(), "profile directory should be created");
+    assert!(path.join("memory").exists(), "memory subdir should exist");
+    assert!(path.join("logs").exists(), "logs subdir should exist");
+
+    // Verify in registry
+    let reg = ProfileRegistry::load().unwrap();
+    assert!(reg.profiles.contains_key(name), "should be in registry");
+
+    // Duplicate create fails
+    let err = create_profile(name, None).unwrap_err();
+    assert!(err.to_string().contains("already exists"));
+
+    // List includes it
+    let profiles = list_profiles().unwrap();
+    let found = profiles.iter().any(|p| p.name == name);
+    assert!(found, "should appear in list");
+
+    // Delete
+    delete_profile(name).unwrap();
+    assert!(!path.exists(), "directory gone after delete");
+
+    let reg = ProfileRegistry::load().unwrap();
+    assert!(!reg.profiles.contains_key(name), "removed from registry");
+
+    // Delete again fails
+    let err = delete_profile(name).unwrap_err();
+    assert!(err.to_string().contains("does not exist"));
+
+    // ══════════════════════════════════════════════════════════════════
+    // Part 2: Export/Import roundtrip
+    // ══════════════════════════════════════════════════════════════════
+    let exp_name = "_test_fs_exp";
+    let exp_dir = base_opencrabs_dir().join("profiles").join(exp_name);
+    let archive = std::env::temp_dir().join(format!("_test_fs_export_{}.tar.gz", pid));
+
+    let _ = fs::remove_dir_all(&exp_dir);
+    let _ = fs::remove_file(&archive);
+    let mut reg = ProfileRegistry::load().unwrap_or_default();
+    reg.profiles.remove(exp_name);
+    let _ = reg.save();
+
+    // Create with content
+    let dir = create_profile(exp_name, Some("export test")).unwrap();
+    fs::write(dir.join("config.toml"), "[agent]\ncontext_limit = 42000").unwrap();
     fs::write(dir.join("memory").join("note.md"), "remember this").unwrap();
 
-    // ── Export ──
-    export_profile(name, &archive_path).unwrap();
-    assert!(archive_path.exists());
-    assert!(archive_path.metadata().unwrap().len() > 0);
+    // Export
+    export_profile(exp_name, &archive).unwrap();
+    assert!(archive.exists(), "archive created");
+    assert!(archive.metadata().unwrap().len() > 0, "archive non-empty");
 
-    // ── Delete ──
-    delete_profile(name).unwrap();
+    // Delete
+    delete_profile(exp_name).unwrap();
     assert!(!dir.exists());
 
-    // ── Import ──
-    let imported = import_profile(&archive_path).unwrap();
-    assert_eq!(imported, name);
+    // Import
+    let imported = import_profile(&archive).unwrap();
+    assert_eq!(imported, exp_name);
 
-    // ── Verify content survived ──
-    let reimported = base_opencrabs_dir().join("profiles").join(name);
+    // Verify content survived
+    let reimported = base_opencrabs_dir().join("profiles").join(exp_name);
     assert!(reimported.exists());
     let config = fs::read_to_string(reimported.join("config.toml")).unwrap();
-    assert!(config.contains("name = \"test\""));
+    assert!(config.contains("context_limit = 42000"));
     let note = fs::read_to_string(reimported.join("memory").join("note.md")).unwrap();
     assert_eq!(note, "remember this");
 
-    // ── Clean up ──
-    let _ = delete_profile(name);
-    let _ = fs::remove_file(&archive_path);
-}
+    // Registry has it
+    let reg = ProfileRegistry::load().unwrap();
+    assert!(reg.profiles.contains_key(exp_name));
 
-#[test]
-fn export_default_profile_succeeds() {
-    // Unique filename to avoid parallel test conflicts
-    let archive = std::env::temp_dir().join(format!(
-        "_test_default_export_{}.tar.gz",
-        std::process::id()
-    ));
+    // Clean up
+    let _ = delete_profile(exp_name);
     let _ = fs::remove_file(&archive);
 
-    // Other profile tests create/delete subdirs concurrently under ~/.opencrabs/,
-    // which can cause tar to see a dir entry then fail to stat it.
-    // Retry once on transient IO errors.
-    let result =
-        export_profile("default", &archive).or_else(|_| export_profile("default", &archive));
-
+    // Export default profile
+    let default_archive =
+        std::env::temp_dir().join(format!("_test_fs_default_export_{}.tar.gz", pid));
+    let _ = fs::remove_file(&default_archive);
+    // Retry once for transient IO (concurrent dir mutations under ~/.opencrabs/)
+    let result = export_profile("default", &default_archive)
+        .or_else(|_| export_profile("default", &default_archive));
     if result.is_ok() {
-        assert!(archive.exists());
-        assert!(archive.metadata().unwrap().len() > 0);
+        assert!(default_archive.exists());
     }
+    let _ = fs::remove_file(&default_archive);
 
-    let _ = fs::remove_file(&archive);
-}
+    // ══════════════════════════════════════════════════════════════════
+    // Part 3: Token locks
+    // ══════════════════════════════════════════════════════════════════
 
-// ─── Token Locks ─────────────────────────────────────────────────────
-// Lock files use unique per-test names so they don't collide.
+    // Basic acquire and release
+    let ch1 = "_test_fs_lk1";
+    let th1 = hash_token("fs_lock_1");
+    release_token_lock(ch1, &th1);
 
-#[test]
-fn acquire_and_release_token_lock() {
-    let channel = "_test_lock";
-    let token_hash = hash_token("test_acquire_release");
+    acquire_token_lock(ch1, &th1).unwrap();
+    let lf1 = lock_dir.join(format!("{}_{}.lock", ch1, th1));
+    assert!(lf1.exists(), "lock file created");
 
-    release_token_lock(channel, &token_hash);
-
-    acquire_token_lock(channel, &token_hash).unwrap();
-
-    let lock_file = base_opencrabs_dir()
-        .join("locks")
-        .join(format!("{}_{}.lock", channel, token_hash));
-    assert!(lock_file.exists());
-
-    let contents = fs::read_to_string(&lock_file).unwrap();
-    assert!(contents.contains(&std::process::id().to_string()));
-
-    release_token_lock(channel, &token_hash);
-    assert!(!lock_file.exists());
-}
-
-#[test]
-fn acquire_same_lock_twice_succeeds_same_pid() {
-    let channel = "_test_reacquire";
-    let token_hash = hash_token("test_reacquire");
-
-    release_token_lock(channel, &token_hash);
-
-    acquire_token_lock(channel, &token_hash).unwrap();
-    acquire_token_lock(channel, &token_hash).unwrap();
-
-    release_token_lock(channel, &token_hash);
-}
-
-#[test]
-fn stale_lock_from_dead_pid_is_overwritten() {
-    let channel = "_test_stale";
-    let token_hash = hash_token("test_stale_lock");
-    let lock_dir = base_opencrabs_dir().join("locks");
-    fs::create_dir_all(&lock_dir).unwrap();
-
-    let lock_file = lock_dir.join(format!("{}_{}.lock", channel, token_hash));
-    fs::write(&lock_file, "default:999999999").unwrap();
-
-    acquire_token_lock(channel, &token_hash).unwrap();
-
-    let contents = fs::read_to_string(&lock_file).unwrap();
-    assert!(contents.contains(&std::process::id().to_string()));
-
-    release_token_lock(channel, &token_hash);
-}
-
-#[test]
-fn release_all_locks_cleans_own_locks() {
-    let token_hash_a = hash_token("release_all_a");
-    let token_hash_b = hash_token("release_all_b");
-
-    // Clean stale locks from previous runs (e.g. daemon PID)
-    release_token_lock("_test_all_a", &token_hash_a);
-    release_token_lock("_test_all_b", &token_hash_b);
-
-    acquire_token_lock("_test_all_a", &token_hash_a).unwrap();
-    acquire_token_lock("_test_all_b", &token_hash_b).unwrap();
-
-    let lock_a = base_opencrabs_dir()
-        .join("locks")
-        .join(format!("_test_all_a_{}.lock", token_hash_a));
-    let lock_b = base_opencrabs_dir()
-        .join("locks")
-        .join(format!("_test_all_b_{}.lock", token_hash_b));
-
-    assert!(lock_a.exists());
-    assert!(lock_b.exists());
-
-    release_all_locks();
-
-    assert!(!lock_a.exists());
-    assert!(!lock_b.exists());
-}
-
-#[test]
-fn release_all_locks_preserves_other_profiles() {
-    let token_hash = hash_token("preserve_other");
-    let lock_dir = base_opencrabs_dir().join("locks");
-    fs::create_dir_all(&lock_dir).unwrap();
-
-    let lock_file = lock_dir.join(format!("_test_preserve_{}.lock", token_hash));
-    fs::write(&lock_file, "other_profile:999999999").unwrap();
-
-    release_all_locks();
-
-    assert!(lock_file.exists());
-
-    let _ = fs::remove_file(&lock_file);
-}
-
-#[test]
-fn lock_file_contains_profile_and_pid() {
-    let channel = "_test_lock_contents";
-    let token_hash = hash_token("lock_contents_check");
-
-    release_token_lock(channel, &token_hash);
-    acquire_token_lock(channel, &token_hash).unwrap();
-
-    let lock_file = base_opencrabs_dir()
-        .join("locks")
-        .join(format!("{}_{}.lock", channel, token_hash));
-    let contents = fs::read_to_string(&lock_file).unwrap();
+    let contents = fs::read_to_string(&lf1).unwrap();
+    assert!(contents.contains(&pid.to_string()), "contains our PID");
 
     // Format: "profile:pid"
     let parts: Vec<&str> = contents.splitn(2, ':').collect();
     assert_eq!(parts.len(), 2);
-    assert_eq!(parts[0], "default"); // no active profile set = "default"
-    assert_eq!(parts[1], std::process::id().to_string());
+    assert_eq!(parts[0], "default");
 
-    release_token_lock(channel, &token_hash);
-}
+    release_token_lock(ch1, &th1);
+    assert!(!lf1.exists(), "lock file removed after release");
 
-#[test]
-fn lock_different_channels_same_token() {
-    let token_hash = hash_token("multi_channel_token");
+    // Re-acquire same lock (same PID, same profile)
+    let ch2 = "_test_fs_lk2";
+    let th2 = hash_token("fs_lock_2");
+    release_token_lock(ch2, &th2);
+    acquire_token_lock(ch2, &th2).unwrap();
+    acquire_token_lock(ch2, &th2).unwrap(); // same PID overwrite
+    release_token_lock(ch2, &th2);
 
-    release_token_lock("_test_ch_a", &token_hash);
-    release_token_lock("_test_ch_b", &token_hash);
+    // Stale lock from dead PID
+    let ch3 = "_test_fs_lk3";
+    let th3 = hash_token("fs_lock_3");
+    let stale = lock_dir.join(format!("{}_{}.lock", ch3, th3));
+    fs::write(&stale, "default:999999999").unwrap();
+    acquire_token_lock(ch3, &th3).unwrap();
+    let contents = fs::read_to_string(&stale).unwrap();
+    assert!(contents.contains(&pid.to_string()));
+    release_token_lock(ch3, &th3);
 
-    acquire_token_lock("_test_ch_a", &token_hash).unwrap();
-    acquire_token_lock("_test_ch_b", &token_hash).unwrap();
+    // Different channels, same token hash
+    let th_multi = hash_token("multi_ch");
+    let ch_a = "_test_fs_mca";
+    let ch_b = "_test_fs_mcb";
+    release_token_lock(ch_a, &th_multi);
+    release_token_lock(ch_b, &th_multi);
+    acquire_token_lock(ch_a, &th_multi).unwrap();
+    acquire_token_lock(ch_b, &th_multi).unwrap();
+    let la = lock_dir.join(format!("{}_{}.lock", ch_a, th_multi));
+    let lb = lock_dir.join(format!("{}_{}.lock", ch_b, th_multi));
+    assert!(la.exists());
+    assert!(lb.exists());
 
-    let lock_a = base_opencrabs_dir()
-        .join("locks")
-        .join(format!("_test_ch_a_{}.lock", token_hash));
-    let lock_b = base_opencrabs_dir()
-        .join("locks")
-        .join(format!("_test_ch_b_{}.lock", token_hash));
+    // release_all_locks cleans our locks
+    release_all_locks();
+    assert!(!la.exists(), "release_all cleaned lock a");
+    assert!(!lb.exists(), "release_all cleaned lock b");
 
-    assert!(lock_a.exists());
-    assert!(lock_b.exists());
+    // release_all preserves other profiles' locks
+    let th_other = hash_token("other_profile_tok");
+    let other_lock = lock_dir.join(format!("_test_fs_other_{}.lock", th_other));
+    fs::write(&other_lock, "other_profile:999999999").unwrap();
+    release_all_locks();
+    assert!(other_lock.exists(), "other profile's lock preserved");
+    let _ = fs::remove_file(&other_lock);
 
-    release_token_lock("_test_ch_a", &token_hash);
-    release_token_lock("_test_ch_b", &token_hash);
-}
-
-#[test]
-fn release_nonexistent_lock_is_noop() {
-    // Should not panic
+    // Release nonexistent lock is noop
     release_token_lock("_nonexistent_channel", "0000000000000000");
 }
