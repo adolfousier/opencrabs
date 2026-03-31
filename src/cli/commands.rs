@@ -7,8 +7,8 @@ use crate::brain::BrainLoader;
 use crate::brain::prompt_builder::RuntimeInfo;
 
 use super::args::{
-    ChannelCommands, DbCommands, LogCommands, MemoryCommands, OutputFormat, ServiceCommands,
-    SessionCommands,
+    ChannelCommands, DbCommands, LogCommands, MemoryCommands, OutputFormat, ProfileCommands,
+    ServiceCommands, SessionCommands,
 };
 
 /// Show system status
@@ -1779,6 +1779,62 @@ WantedBy=default.target
                 }
             }
 
+            Ok(())
+        }
+    }
+}
+
+/// Profile management
+pub(crate) async fn cmd_profile(operation: ProfileCommands) -> Result<()> {
+    use crate::config::profile;
+
+    match operation {
+        ProfileCommands::Create { name, description } => {
+            let path = profile::create_profile(&name, description.as_deref())?;
+            println!("✅ Created profile '{name}'");
+            println!("   Path: {}", path.display());
+            println!("\n   Usage: opencrabs -p {name}");
+            Ok(())
+        }
+        ProfileCommands::List => {
+            let profiles = profile::list_profiles()?;
+            let active = profile::active_profile().unwrap_or("default");
+
+            println!("Profiles:\n");
+            for p in &profiles {
+                let marker = if p.name == active { " ←" } else { "" };
+                let desc = p
+                    .description
+                    .as_deref()
+                    .map(|d| format!(" — {d}"))
+                    .unwrap_or_default();
+                println!("  {}{}{}", p.name, desc, marker);
+            }
+            println!("\n  {} profile(s) total", profiles.len());
+            Ok(())
+        }
+        ProfileCommands::Delete { name, force } => {
+            if !force {
+                println!("⚠️  This will permanently delete profile '{name}' and ALL its data.");
+                println!("   Re-run with --force to confirm.");
+                return Ok(());
+            }
+            profile::delete_profile(&name)?;
+            println!("✅ Deleted profile '{name}'");
+            Ok(())
+        }
+        ProfileCommands::Export { name, output } => {
+            let output_path = output
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| std::path::PathBuf::from(format!("{name}.tar.gz")));
+            profile::export_profile(&name, &output_path)?;
+            println!("✅ Exported profile '{name}' to {}", output_path.display());
+            Ok(())
+        }
+        ProfileCommands::Import { path } => {
+            let name = profile::import_profile(std::path::Path::new(&path))?;
+            println!("✅ Imported profile '{name}'");
+            println!("\n   Usage: opencrabs -p {name}");
             Ok(())
         }
     }

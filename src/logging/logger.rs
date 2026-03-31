@@ -31,10 +31,9 @@ pub struct LogConfig {
 
 impl Default for LogConfig {
     fn default() -> Self {
-        let home = dirs::home_dir().unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
         Self {
             debug_mode: false,
-            log_dir: home.join(".opencrabs").join("logs"),
+            log_dir: crate::config::opencrabs_home().join("logs"),
             log_level: Level::INFO,
             console_output: false,
             log_prefix: "opencrabs".to_string(),
@@ -218,8 +217,7 @@ pub fn setup_from_cli(debug: bool) -> Result<LoggerGuard, Box<dyn std::error::Er
 
 /// Get the path to the current log file (if debug mode is enabled)
 pub fn get_log_path() -> Option<PathBuf> {
-    let home = dirs::home_dir()?;
-    let log_dir = home.join(".opencrabs").join("logs");
+    let log_dir = crate::config::opencrabs_home().join("logs");
 
     if log_dir.exists() {
         // Return the most recent log file
@@ -242,8 +240,7 @@ pub fn get_log_path() -> Option<PathBuf> {
 
 /// Clean up old log files based on max age
 pub fn cleanup_old_logs(max_age_days: u64) -> Result<usize, Box<dyn std::error::Error>> {
-    let home = dirs::home_dir().ok_or("Could not determine home directory")?;
-    let log_dir = home.join(".opencrabs").join("logs");
+    let log_dir = crate::config::opencrabs_home().join("logs");
 
     if !log_dir.exists() {
         return Ok(0);

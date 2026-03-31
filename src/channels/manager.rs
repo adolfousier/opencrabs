@@ -98,6 +98,12 @@ impl ChannelManager {
 
         if should_run && !is_running {
             if let Some(ref token) = tg.token {
+                let token_hash = crate::config::profile::hash_token(token);
+                if let Err(e) = crate::config::profile::acquire_token_lock("telegram", &token_hash)
+                {
+                    tracing::warn!("ChannelManager: Telegram token lock denied — {}", e);
+                    return;
+                }
                 let agent = crate::channels::telegram::TelegramAgent::new(
                     self.channel_factory.create_agent_service(),
                     self.channel_factory.service_context(),
@@ -163,6 +169,11 @@ impl ChannelManager {
 
         if should_run && !is_running {
             if let Some(ref token) = dc.token {
+                let token_hash = crate::config::profile::hash_token(token);
+                if let Err(e) = crate::config::profile::acquire_token_lock("discord", &token_hash) {
+                    tracing::warn!("ChannelManager: Discord token lock denied — {}", e);
+                    return;
+                }
                 let agent = crate::channels::discord::DiscordAgent::new(
                     self.channel_factory.create_agent_service(),
                     self.channel_factory.service_context(),
@@ -204,6 +215,11 @@ impl ChannelManager {
 
         if should_run && !is_running {
             if let (Some(bot_tok), Some(app_tok)) = (sl.token.clone(), sl.app_token.clone()) {
+                let token_hash = crate::config::profile::hash_token(&bot_tok);
+                if let Err(e) = crate::config::profile::acquire_token_lock("slack", &token_hash) {
+                    tracing::warn!("ChannelManager: Slack token lock denied — {}", e);
+                    return;
+                }
                 let agent = crate::channels::slack::SlackAgent::new(
                     self.channel_factory.create_agent_service(),
                     self.channel_factory.service_context(),
@@ -242,6 +258,11 @@ impl ChannelManager {
 
         if should_run && !is_running {
             if let (Some(api_key), Some(api_token)) = (tr.app_token.clone(), tr.token.clone()) {
+                let token_hash = crate::config::profile::hash_token(&api_token);
+                if let Err(e) = crate::config::profile::acquire_token_lock("trello", &token_hash) {
+                    tracing::warn!("ChannelManager: Trello token lock denied — {}", e);
+                    return;
+                }
                 let agent = crate::channels::trello::TrelloAgent::new(
                     self.channel_factory.create_agent_service(),
                     self.channel_factory.service_context(),
