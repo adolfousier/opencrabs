@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use super::types::*;
 
 /// Main onboarding wizard state
@@ -144,9 +142,7 @@ impl OnboardingWizard {
     /// Create a new wizard with default state
     /// Loads existing config if available to pre-fill settings
     pub fn new() -> Self {
-        let default_workspace = dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("~"))
-            .join(".opencrabs");
+        let default_workspace = crate::config::opencrabs_home();
 
         // config_models loaded on demand per provider via reload_config_models()
         let config_models = Vec::new();

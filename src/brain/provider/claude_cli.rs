@@ -648,7 +648,8 @@ impl Provider for ClaudeCliProvider {
                             let msg_id = message.id.unwrap_or_else(|| {
                                 format!("msg_{}", uuid::Uuid::new_v4().simple())
                             });
-                            let msg_model = message.model
+                            let msg_model = message
+                                .model
                                 .map(|m| Self::normalize_model(&m))
                                 .unwrap_or_else(|| original_model.clone());
                             let input_tokens =

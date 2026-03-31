@@ -7,8 +7,8 @@ use crate::brain::BrainLoader;
 use crate::brain::prompt_builder::RuntimeInfo;
 
 use super::args::{
-    ChannelCommands, DbCommands, LogCommands, MemoryCommands, OutputFormat, ServiceCommands,
-    SessionCommands,
+    ChannelCommands, DbCommands, LogCommands, MemoryCommands, OutputFormat, ProfileCommands,
+    ServiceCommands, SessionCommands,
 };
 
 /// Show system status
@@ -1542,20 +1542,64 @@ pub(crate) async fn cmd_session(
     }
 }
 
+/// Resolve profile-specific service identifiers.
+/// Default profile → `com.opencrabs.daemon` / `opencrabs`
+/// Named profile → `com.opencrabs.daemon.hermes` / `opencrabs-hermes`
+fn service_identifiers() -> (String, String, String) {
+    let profile = crate::config::profile::active_profile();
+    let suffix = match profile {
+        Some(name) if name != "default" => format!(".{name}"),
+        _ => String::new(),
+    };
+    let systemd_suffix = match profile {
+        Some(name) if name != "default" => format!("-{name}"),
+        _ => String::new(),
+    };
+    let plist_name = format!("com.opencrabs.daemon{suffix}");
+    let systemd_name = format!("opencrabs{systemd_suffix}");
+    let log_suffix = if suffix.is_empty() {
+        String::new()
+    } else {
+        suffix.clone()
+    };
+    (plist_name, systemd_name, log_suffix)
+}
+
+/// Build the daemon arguments, including `-p <profile>` when a named profile is active.
+fn daemon_args() -> Vec<String> {
+    let mut args = Vec::new();
+    if let Some(name) = crate::config::profile::active_profile()
+        && name != "default"
+    {
+        args.push("-p".to_string());
+        args.push(name.to_string());
+    }
+    args.push("daemon".to_string());
+    args
+}
+
 /// OS service management
 pub(crate) async fn cmd_service(operation: ServiceCommands) -> Result<()> {
     let binary = std::env::current_exe().context("Could not determine binary path")?;
     let binary_str = binary.display().to_string();
+    let (plist_name, _systemd_name, log_suffix) = service_identifiers();
+    let args = daemon_args();
+    let profile_label = crate::config::profile::active_profile().unwrap_or("default");
 
     match operation {
         ServiceCommands::Install => {
             #[cfg(target_os = "macos")]
             {
-                let plist_name = "com.opencrabs.daemon";
                 let plist_path = dirs::home_dir()
                     .context("No home dir")?
                     .join("Library/LaunchAgents")
                     .join(format!("{plist_name}.plist"));
+
+                let args_xml: String =
+                    std::iter::once(format!("        <string>{binary_str}</string>"))
+                        .chain(args.iter().map(|a| format!("        <string>{a}</string>")))
+                        .collect::<Vec<_>>()
+                        .join("\n");
 
                 let plist = format!(
                     r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -1566,17 +1610,16 @@ pub(crate) async fn cmd_service(operation: ServiceCommands) -> Result<()> {
     <string>{plist_name}</string>
     <key>ProgramArguments</key>
     <array>
-        <string>{binary_str}</string>
-        <string>daemon</string>
+{args_xml}
     </array>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/tmp/opencrabs-daemon.out.log</string>
+    <string>/tmp/opencrabs-daemon{log_suffix}.out.log</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/opencrabs-daemon.err.log</string>
+    <string>/tmp/opencrabs-daemon{log_suffix}.err.log</string>
 </dict>
 </plist>"#
                 );
@@ -1585,7 +1628,10 @@ pub(crate) async fn cmd_service(operation: ServiceCommands) -> Result<()> {
                     std::fs::create_dir_all(parent)?;
                 }
                 std::fs::write(&plist_path, plist)?;
-                println!("✅ Installed LaunchAgent: {}", plist_path.display());
+                println!(
+                    "✅ Installed LaunchAgent [{profile_label}]: {}",
+                    plist_path.display()
+                );
                 println!("   Run: opencrabs service start");
             }
 
@@ -1593,16 +1639,21 @@ pub(crate) async fn cmd_service(operation: ServiceCommands) -> Result<()> {
             {
                 let unit_path = dirs::home_dir()
                     .context("No home dir")?
-                    .join(".config/systemd/user/opencrabs.service");
+                    .join(format!(".config/systemd/user/{systemd_name}.service"));
+
+                let exec_args = std::iter::once(binary_str.clone())
+                    .chain(args.iter().cloned())
+                    .collect::<Vec<_>>()
+                    .join(" ");
 
                 let unit = format!(
                     r#"[Unit]
-Description=OpenCrabs Daemon
+Description=OpenCrabs Daemon [{profile_label}]
 After=network.target
 
 [Service]
 Type=simple
-ExecStart={binary_str} daemon
+ExecStart={exec_args}
 Restart=on-failure
 RestartSec=5
 
@@ -1618,13 +1669,16 @@ WantedBy=default.target
                 std::process::Command::new("systemctl")
                     .args(["--user", "daemon-reload"])
                     .status()?;
-                println!("✅ Installed systemd user unit: {}", unit_path.display());
+                println!(
+                    "✅ Installed systemd user unit [{profile_label}]: {}",
+                    unit_path.display()
+                );
                 println!("   Run: opencrabs service start");
             }
 
             #[cfg(not(any(target_os = "macos", target_os = "linux")))]
             {
-                let _ = binary_str;
+                let _ = (binary_str, args);
                 anyhow::bail!("Service install not supported on this platform");
             }
 
@@ -1638,18 +1692,18 @@ WantedBy=default.target
                     .arg(
                         dirs::home_dir()
                             .context("No home dir")?
-                            .join("Library/LaunchAgents/com.opencrabs.daemon.plist"),
+                            .join(format!("Library/LaunchAgents/{plist_name}.plist")),
                     )
                     .status()?;
-                println!("✅ Started OpenCrabs daemon");
+                println!("✅ Started OpenCrabs daemon [{profile_label}]");
             }
 
             #[cfg(target_os = "linux")]
             {
                 std::process::Command::new("systemctl")
-                    .args(["--user", "start", "opencrabs"])
+                    .args(["--user", "start", &systemd_name])
                     .status()?;
-                println!("✅ Started OpenCrabs daemon");
+                println!("✅ Started OpenCrabs daemon [{profile_label}]");
             }
 
             Ok(())
@@ -1662,29 +1716,28 @@ WantedBy=default.target
                     .arg(
                         dirs::home_dir()
                             .context("No home dir")?
-                            .join("Library/LaunchAgents/com.opencrabs.daemon.plist"),
+                            .join(format!("Library/LaunchAgents/{plist_name}.plist")),
                     )
                     .status()?;
-                println!("✅ Stopped OpenCrabs daemon");
+                println!("✅ Stopped OpenCrabs daemon [{profile_label}]");
             }
 
             #[cfg(target_os = "linux")]
             {
                 std::process::Command::new("systemctl")
-                    .args(["--user", "stop", "opencrabs"])
+                    .args(["--user", "stop", &systemd_name])
                     .status()?;
-                println!("✅ Stopped OpenCrabs daemon");
+                println!("✅ Stopped OpenCrabs daemon [{profile_label}]");
             }
 
             Ok(())
         }
         ServiceCommands::Restart => {
-            // Inline stop + start to avoid recursive async
             #[cfg(target_os = "macos")]
             {
                 let plist = dirs::home_dir()
                     .context("No home dir")?
-                    .join("Library/LaunchAgents/com.opencrabs.daemon.plist");
+                    .join(format!("Library/LaunchAgents/{plist_name}.plist"));
                 let _ = std::process::Command::new("launchctl")
                     .args(["unload"])
                     .arg(&plist)
@@ -1693,14 +1746,14 @@ WantedBy=default.target
                     .args(["load", "-w"])
                     .arg(&plist)
                     .status()?;
-                println!("✅ Restarted OpenCrabs daemon");
+                println!("✅ Restarted OpenCrabs daemon [{profile_label}]");
             }
             #[cfg(target_os = "linux")]
             {
                 std::process::Command::new("systemctl")
-                    .args(["--user", "restart", "opencrabs"])
+                    .args(["--user", "restart", &systemd_name])
                     .status()?;
-                println!("✅ Restarted OpenCrabs daemon");
+                println!("✅ Restarted OpenCrabs daemon [{profile_label}]");
             }
             Ok(())
         }
@@ -1708,20 +1761,20 @@ WantedBy=default.target
             #[cfg(target_os = "macos")]
             {
                 let output = std::process::Command::new("launchctl")
-                    .args(["list", "com.opencrabs.daemon"])
+                    .args(["list", &plist_name])
                     .output()?;
                 if output.status.success() {
-                    println!("✅ OpenCrabs daemon is running");
+                    println!("✅ OpenCrabs daemon [{profile_label}] is running");
                     println!("{}", String::from_utf8_lossy(&output.stdout));
                 } else {
-                    println!("⬚  OpenCrabs daemon is not running");
+                    println!("⬚  OpenCrabs daemon [{profile_label}] is not running");
                 }
             }
 
             #[cfg(target_os = "linux")]
             {
                 let output = std::process::Command::new("systemctl")
-                    .args(["--user", "status", "opencrabs"])
+                    .args(["--user", "status", &systemd_name])
                     .output()?;
                 println!("{}", String::from_utf8_lossy(&output.stdout));
             }
@@ -1729,56 +1782,124 @@ WantedBy=default.target
             Ok(())
         }
         ServiceCommands::Uninstall => {
-            // Stop first (ignore errors)
             #[cfg(target_os = "macos")]
             {
                 let plist = dirs::home_dir()
                     .context("No home dir")?
-                    .join("Library/LaunchAgents/com.opencrabs.daemon.plist");
+                    .join(format!("Library/LaunchAgents/{plist_name}.plist"));
                 let _ = std::process::Command::new("launchctl")
                     .args(["unload"])
                     .arg(&plist)
                     .status();
+                if plist.exists() {
+                    std::fs::remove_file(&plist)?;
+                    println!(
+                        "✅ Removed LaunchAgent [{profile_label}]: {}",
+                        plist.display()
+                    );
+                } else {
+                    println!("⬚  LaunchAgent [{profile_label}] not found");
+                }
             }
             #[cfg(target_os = "linux")]
             {
                 let _ = std::process::Command::new("systemctl")
-                    .args(["--user", "stop", "opencrabs"])
+                    .args(["--user", "stop", &systemd_name])
                     .status();
-            }
-
-            #[cfg(target_os = "macos")]
-            {
-                let plist_path = dirs::home_dir()
-                    .context("No home dir")?
-                    .join("Library/LaunchAgents/com.opencrabs.daemon.plist");
-                if plist_path.exists() {
-                    std::fs::remove_file(&plist_path)?;
-                    println!("✅ Removed LaunchAgent: {}", plist_path.display());
-                } else {
-                    println!("⬚  LaunchAgent not found");
-                }
-            }
-
-            #[cfg(target_os = "linux")]
-            {
                 std::process::Command::new("systemctl")
-                    .args(["--user", "disable", "opencrabs"])
+                    .args(["--user", "disable", &systemd_name])
                     .status()?;
                 let unit_path = dirs::home_dir()
                     .context("No home dir")?
-                    .join(".config/systemd/user/opencrabs.service");
+                    .join(format!(".config/systemd/user/{systemd_name}.service"));
                 if unit_path.exists() {
                     std::fs::remove_file(&unit_path)?;
                     std::process::Command::new("systemctl")
                         .args(["--user", "daemon-reload"])
                         .status()?;
-                    println!("✅ Removed systemd unit: {}", unit_path.display());
+                    println!(
+                        "✅ Removed systemd unit [{profile_label}]: {}",
+                        unit_path.display()
+                    );
                 } else {
-                    println!("⬚  Systemd unit not found");
+                    println!("⬚  Systemd unit [{profile_label}] not found");
                 }
             }
 
+            Ok(())
+        }
+    }
+}
+
+/// Profile management
+pub(crate) async fn cmd_profile(operation: ProfileCommands) -> Result<()> {
+    use crate::config::profile;
+
+    match operation {
+        ProfileCommands::Create { name, description } => {
+            let path = profile::create_profile(&name, description.as_deref())?;
+            println!("✅ Created profile '{name}'");
+            println!("   Path: {}", path.display());
+            println!("\n   Usage: opencrabs -p {name}");
+            Ok(())
+        }
+        ProfileCommands::List => {
+            let profiles = profile::list_profiles()?;
+            let active = profile::active_profile().unwrap_or("default");
+
+            println!("Profiles:\n");
+            for p in &profiles {
+                let marker = if p.name == active { " ←" } else { "" };
+                let desc = p
+                    .description
+                    .as_deref()
+                    .map(|d| format!(" — {d}"))
+                    .unwrap_or_default();
+                println!("  {}{}{}", p.name, desc, marker);
+            }
+            println!("\n  {} profile(s) total", profiles.len());
+            Ok(())
+        }
+        ProfileCommands::Delete { name, force } => {
+            if !force {
+                println!("⚠️  This will permanently delete profile '{name}' and ALL its data.");
+                println!("   Re-run with --force to confirm.");
+                return Ok(());
+            }
+            profile::delete_profile(&name)?;
+            println!("✅ Deleted profile '{name}'");
+            Ok(())
+        }
+        ProfileCommands::Export { name, output } => {
+            let output_path = output
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| std::path::PathBuf::from(format!("{name}.tar.gz")));
+            profile::export_profile(&name, &output_path)?;
+            println!("✅ Exported profile '{name}' to {}", output_path.display());
+            Ok(())
+        }
+        ProfileCommands::Import { path } => {
+            let name = profile::import_profile(std::path::Path::new(&path))?;
+            println!("✅ Imported profile '{name}'");
+            println!("\n   Usage: opencrabs -p {name}");
+            Ok(())
+        }
+        ProfileCommands::Migrate { from, to, force } => {
+            let migrated = profile::migrate_profile(&from, &to, force)?;
+            if migrated.is_empty() {
+                println!("⚠️  No files migrated from '{from}' to '{to}'.");
+                println!("   All files already exist in '{to}'. Use --force to overwrite.");
+            } else {
+                println!(
+                    "✅ Migrated {} files from '{from}' to '{to}':\n",
+                    migrated.len()
+                );
+                for file in &migrated {
+                    println!("   {file}");
+                }
+                println!("\n   Switch to the new profile: opencrabs -p {to}");
+                println!("   Then customize identity, brain files, keys, etc.");
+            }
             Ok(())
         }
     }

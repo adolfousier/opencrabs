@@ -1005,10 +1005,14 @@ async fn cmd_chat_inner(
             .await
             .context("Failed to listen for ctrl_c")?;
         tracing::info!("OpenCrabs daemon shutting down");
+        crate::config::profile::release_all_locks();
         return Ok(());
     }
     tracing::debug!("Launching TUI");
     let tui_result = tui::run(app).await;
+
+    // Release all token locks on exit (normal or crash)
+    crate::config::profile::release_all_locks();
 
     if let Err(ref e) = tui_result {
         // TUI crashed or failed to start — offer crash recovery dialog.

@@ -18,6 +18,10 @@ pub struct Cli {
     #[arg(short, long, global = true)]
     pub config: Option<String>,
 
+    /// Profile to use (default: "default", or OPENCRABS_PROFILE env)
+    #[arg(short, long, global = true)]
+    pub profile: Option<String>,
+
     /// Subcommand to execute
     #[command(subcommand)]
     pub command: Option<Commands>,
@@ -131,6 +135,12 @@ pub enum Commands {
     /// Run in headless daemon mode — no TUI, channel bots only (Telegram, Discord, Slack, WhatsApp)
     /// Used by the systemd/LaunchAgent service installed during onboarding
     Daemon,
+
+    /// Manage profiles — isolated OpenCrabs instances with their own config, DB, and memory
+    Profile {
+        #[command(subcommand)]
+        operation: ProfileCommands,
+    },
 
     /// Manage scheduled cron jobs
     Cron {
@@ -289,6 +299,56 @@ pub enum SessionCommands {
 }
 
 #[derive(Subcommand, Debug)]
+pub enum ProfileCommands {
+    /// Create a new profile
+    Create {
+        /// Profile name (alphanumeric, hyphens, underscores)
+        name: String,
+
+        /// Optional description
+        #[arg(short, long)]
+        description: Option<String>,
+    },
+    /// List all profiles
+    List,
+    /// Delete a profile and all its data
+    Delete {
+        /// Profile name to delete
+        name: String,
+
+        /// Skip confirmation prompt
+        #[arg(short, long)]
+        force: bool,
+    },
+    /// Export a profile as a tar.gz archive
+    Export {
+        /// Profile name to export
+        name: String,
+
+        /// Output file path (default: <name>.tar.gz)
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+    /// Import a profile from a tar.gz archive
+    Import {
+        /// Path to the archive file
+        path: String,
+    },
+    /// Migrate config and brain files from one profile to another (no DB/sessions)
+    Migrate {
+        /// Source profile name
+        from: String,
+
+        /// Destination profile name
+        to: String,
+
+        /// Overwrite existing files in the destination
+        #[arg(short, long)]
+        force: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 pub enum ServiceCommands {
     /// Install as OS service (launchd on macOS, systemd on Linux)
     Install,
@@ -314,6 +374,18 @@ pub enum OutputFormat {
 /// Main CLI entry point
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
+
+    // Set active profile BEFORE anything touches opencrabs_home()
+    crate::config::profile::set_active_profile(cli.profile.clone())
+        .unwrap_or_else(|e| tracing::warn!("Profile already set: {}", e));
+
+    // Track profile usage
+    if let Some(ref name) = cli.profile
+        && let Ok(mut registry) = crate::config::profile::ProfileRegistry::load()
+    {
+        registry.touch(name);
+        let _ = registry.save();
+    }
 
     // Set up logging level based on debug flag
     if cli.debug {
@@ -385,6 +457,7 @@ pub async fn run() -> Result<()> {
         Some(Commands::Session { operation }) => commands::cmd_session(&config, operation).await,
         Some(Commands::Service { operation }) => commands::cmd_service(operation).await,
         Some(Commands::Daemon) => ui::cmd_daemon(&config).await,
+        Some(Commands::Profile { operation }) => commands::cmd_profile(operation).await,
         Some(Commands::Cron { operation }) => cron::cmd_cron(&config, operation).await,
         Some(Commands::Completions { shell }) => {
             use clap::CommandFactory;
