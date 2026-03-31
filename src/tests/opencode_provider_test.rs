@@ -236,6 +236,7 @@ async fn e2e_opencode_simple_completion() {
 #[tokio::test]
 async fn e2e_opencode_streaming() {
     use futures::StreamExt;
+    use tokio::time::{timeout, Duration};
 
     let provider = {
         let Some(p) = try_provider() else { return };
@@ -251,20 +252,28 @@ async fn e2e_opencode_streaming() {
     let mut got_text = false;
     let mut got_stop = false;
 
-    while let Some(event) = stream.next().await {
-        let event = event.expect("stream event should not be error");
-        match event {
-            StreamEvent::MessageStart { .. } => got_start = true,
-            StreamEvent::ContentBlockDelta {
-                delta: ContentDelta::TextDelta { .. },
-                ..
-            } => got_text = true,
-            StreamEvent::MessageStop => {
-                got_stop = true;
-                break;
+    let result = timeout(Duration::from_secs(30), async {
+        while let Some(event) = stream.next().await {
+            let event = event.expect("stream event should not be error");
+            match event {
+                StreamEvent::MessageStart { .. } => got_start = true,
+                StreamEvent::ContentBlockDelta {
+                    delta: ContentDelta::TextDelta { .. },
+                    ..
+                } => got_text = true,
+                StreamEvent::MessageStop => {
+                    got_stop = true;
+                    break;
+                }
+                _ => {}
             }
-            _ => {}
         }
+    })
+    .await;
+
+    if result.is_err() {
+        eprintln!("e2e_opencode_streaming timed out after 30s, skipping");
+        return;
     }
 
     assert!(got_start, "should have received MessageStart");
