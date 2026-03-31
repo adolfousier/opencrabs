@@ -486,19 +486,11 @@ fn try_create_minimax(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         minimax_config,
     );
 
-    // MiniMax M2.7/M2.5 doesn't support vision — inject MiniMax-Text-01 into config
-    // so existing users get it automatically and can change it later
+    // MiniMax M2.7/M2.5 doesn't support vision — default to MiniMax-Text-01 in-memory.
+    // Do NOT write to config here — this runs inside ConfigWatcher callbacks and
+    // writing triggers another reload → infinite loop → crash.
     if minimax_config.vision_model.is_none() {
         provider = provider.with_vision_model("MiniMax-Text-01".to_string());
-        if let Err(e) =
-            crate::config::Config::write_key("providers.minimax", "vision_model", "MiniMax-Text-01")
-        {
-            tracing::warn!("Failed to persist minimax vision_model to config: {}", e);
-        } else {
-            tracing::info!(
-                "Auto-injected vision_model = MiniMax-Text-01 into providers.minimax config"
-            );
-        }
     }
 
     Ok(Some(Arc::new(provider)))

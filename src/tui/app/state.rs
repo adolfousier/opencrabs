@@ -1560,29 +1560,11 @@ impl App {
                 // Refresh approval policy
                 (self.approval_auto_session, self.approval_auto_always) =
                     Self::read_approval_policy_from_config();
-                // Sync agent provider if model changed (e.g. channel switched model)
-                if let Ok(config) = crate::config::Config::load() {
-                    let (cfg_prov, cfg_model) = config.providers.active_provider_and_model();
-                    let cur_prov = self.agent_service.provider_name();
-                    let cur_model = self.agent_service.provider_model();
-                    if cfg_prov != cur_prov || cfg_model != cur_model {
-                        match crate::brain::provider::create_provider(&config) {
-                            Ok(new_provider) => {
-                                tracing::info!(
-                                    "TUI synced provider: {} / {} → {} / {}",
-                                    cur_prov,
-                                    cur_model,
-                                    cfg_prov,
-                                    cfg_model,
-                                );
-                                self.agent_service.swap_provider(new_provider);
-                            }
-                            Err(e) => {
-                                tracing::warn!("ConfigReloaded: failed to swap provider: {}", e);
-                            }
-                        }
-                    }
-                }
+                // Provider swap is already handled by the ConfigWatcher callback
+                // (ui.rs). Do NOT re-create the provider here — it causes a
+                // redundant create_provider call every reload, and the model-name
+                // comparison (config alias vs provider full ID) never matches,
+                // so it would fire on every single reload.
                 tracing::info!("Config reloaded — refreshed commands, approval policy, agent");
             }
             TuiEvent::TokenCountUpdated { session_id, count }
