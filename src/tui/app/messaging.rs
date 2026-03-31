@@ -105,10 +105,12 @@ impl App {
         self.streaming_output_tokens = 0;
         self.intermediate_text_received = false;
 
-        // Restore session's working directory if persisted
+        // Restore session's working directory if persisted.
+        // Only write to config if actually changed — writing triggers ConfigWatcher
+        // which reloads config → calls load_session → writes again → infinite loop.
         if let Some(ref dir_str) = session.working_directory {
             let path = std::path::PathBuf::from(dir_str);
-            if path.is_dir() {
+            if path.is_dir() && path != self.working_directory {
                 self.working_directory = path.clone();
                 self.agent_service.set_working_directory(path.clone());
                 let _ = crate::config::Config::write_key(
