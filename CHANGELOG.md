@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Profile-aware daemon services** — `opencrabs -p hermes service install` creates profile-specific plist/systemd units (`com.opencrabs.daemon.hermes` / `opencrabs-hermes`). Multiple profile daemons can run simultaneously as separate OS services
 
 ### Fixed
+- **CLI stream idle timeout too short** — CLI providers run tools internally (cargo build, cargo test, gh commands) that can take several minutes without producing stream events. The 60-second idle timeout caused premature stream termination → retry → fresh CLI session repeating all prior work. Now 10 minutes for CLI providers, 60 seconds for API providers
+- **CLI token usage lost on EOF** — When Claude CLI exits without a `Result` message but accumulates token counts from `message_delta` events, the usage was silently discarded. Now flushes accumulated input/output tokens as a final `MessageDelta` + `MessageStop` on EOF
+- **Service command compilation on Linux** — `_systemd_name` variable was prefixed with underscore (suppressing "unused" warning on macOS) but referenced without underscore in Linux-only code paths, causing CI build failure on ubuntu-latest
 - **TUI duplicate text on streaming responses** — Streaming responses were doubled on screen due to intermediate text emission timing
 - **Usage stats wrong totals** — Model name duplication in usage ledger (`opus` vs `opus-4-6`) caused inflated cost tracking. Now merges bare model names with their versioned equivalents
 - **IntermediateText not firing for Telegram/channels on CLI providers** — CLI providers weren't emitting intermediate text events to channel handlers, causing silent gaps in multi-tool conversations
