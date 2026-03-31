@@ -1579,10 +1579,11 @@ fn daemon_args() -> Vec<String> {
 }
 
 /// OS service management
+#[allow(unused_variables)]
 pub(crate) async fn cmd_service(operation: ServiceCommands) -> Result<()> {
     let binary = std::env::current_exe().context("Could not determine binary path")?;
     let binary_str = binary.display().to_string();
-    let (plist_name, _systemd_name, log_suffix) = service_identifiers();
+    let (plist_name, systemd_name, log_suffix) = service_identifiers();
     let args = daemon_args();
     let profile_label = crate::config::profile::active_profile().unwrap_or("default");
 

@@ -98,7 +98,17 @@ impl AgentService {
         // NVIDIA/Kimi and some other providers occasionally hang silently without sending
         // [DONE] — this timeout lets the retry logic in tool_loop.rs recover instead of
         // blocking the TUI forever.
-        const STREAM_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+        //
+        // CLI providers need a much longer timeout: they run tools internally
+        // (cargo build, cargo test, gh commands) that can take several minutes
+        // without producing any stream events. 60s is too short and causes
+        // premature stream termination → retry → fresh CLI session that repeats
+        // all prior work from scratch.
+        let stream_idle_timeout = if is_cli {
+            std::time::Duration::from_secs(600) // 10 min for CLI tool execution
+        } else {
+            std::time::Duration::from_secs(60)
+        };
 
         loop {
             // Race stream.next() against cancellation token and idle timeout.
@@ -116,7 +126,7 @@ impl AgentService {
                     tracing::info!("Stream cancelled by user");
                     break;
                 }
-                result = tokio::time::timeout(STREAM_IDLE_TIMEOUT, stream.next()) => {
+                result = tokio::time::timeout(stream_idle_timeout, stream.next()) => {
                     match result {
                         Ok(Some(item)) => item,
                         Ok(None) => break, // Stream ended normally
@@ -124,7 +134,7 @@ impl AgentService {
                             tracing::warn!(
                                 "⏱️ Stream idle timeout after {}s — no event received from provider. \
                                  Treating as dropped stream (stop_reason=None → will retry).",
-                                STREAM_IDLE_TIMEOUT.as_secs()
+                                stream_idle_timeout.as_secs()
                             );
                             break; // stop_reason stays None → triggers retry in tool_loop
                         }
