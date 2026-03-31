@@ -924,12 +924,14 @@ fn expand_tilde(p: &Path) -> PathBuf {
     }
 }
 
-/// Canonical base directory: `~/.opencrabs/`
+/// Canonical base directory for the active profile.
 ///
-/// All OpenCrabs data lives here: config, database, history, brain workspace.
+/// - Default profile: `~/.opencrabs/`
+/// - Named profile: `~/.opencrabs/profiles/<name>/`
+///
+/// Selection priority: `set_active_profile()` > `OPENCRABS_PROFILE` env > default.
 pub fn opencrabs_home() -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    let p = home.join(".opencrabs");
+    let p = super::profile::resolve_profile_home();
     if !p.exists() {
         let _ = std::fs::create_dir_all(&p);
     }

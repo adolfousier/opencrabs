@@ -219,14 +219,68 @@ Images are passed to the active model's vision pipeline if it supports multimoda
 | `opencrabs completions <shell>` | Generate shell completions (bash, zsh, fish, powershell) |
 | `opencrabs version` | Print version and exit |
 
-| `opencrabs profile create <name>` | Create a new isolated profile with its own config, keys, memory, and database |
-| `opencrabs profile list` | List all profiles with creation date and last used |
-| `opencrabs profile delete <name>` | Delete a profile and all its data |
-| `opencrabs profile migrate --from <name> --to <name>` | Copy config and brain files between profiles (`--force` to overwrite) |
-| `opencrabs profile export <name> -o <file>` | Export a profile as a `.tar.gz` archive |
-| `opencrabs profile import <file>` | Import a profile from a `.tar.gz` archive |
+Global flags: `--debug` (enable file logging), `--config <path>` (custom config file), `--profile <name>` / `-p <name>` (run as a named profile).
 
-Global flags: `--debug` (enable file logging), `--config <path>` (custom config file), `-p <profile>` (run as a named profile).
+### Profiles — Multi-Instance Crab Agents
+
+Run multiple isolated OpenCrabs instances from the same installation. Each profile gets its own config, brain files, memory, sessions, database, and gateway service.
+
+| Command | Description |
+|---------|-------------|
+| `opencrabs profile create <name>` | Create a new profile with fresh config and brain files |
+| `opencrabs profile list` | List all profiles with last-used timestamps |
+| `opencrabs profile delete <name>` | Delete a profile and all its data |
+| `opencrabs profile export <name> -o profile.tar.gz` | Export a profile as a portable archive |
+| `opencrabs profile import profile.tar.gz` | Import a profile from an archive |
+| `opencrabs profile migrate --from <name> --to <name>` | Copy config and brain files between profiles (no DB or sessions) |
+| `opencrabs -p <name>` | Launch OpenCrabs as the specified profile |
+
+**Default profile:** `~/.opencrabs/` — works exactly as before. No migration needed. Users who never touch profiles see zero difference.
+
+**Named profiles** live at `~/.opencrabs/profiles/<name>/` with full isolation:
+```
+~/.opencrabs/
+├── config.toml          # default profile
+├── opencrabs.db
+├── profiles.toml        # profile registry
+├── locks/               # token-lock files
+└── profiles/
+    ├── hermes/          # named profile
+    │   ├── config.toml
+    │   ├── keys.toml
+    │   ├── opencrabs.db
+    │   ├── SOUL.md
+    │   └── memory/
+    └── scout/
+        └── ...
+```
+
+**Token-lock isolation:** Two profiles cannot use the same bot credential (Telegram token, Discord token, etc.). On startup, each profile acquires a lock on its channel tokens. If another profile already holds the lock, the channel refuses to start — preventing two instances from fighting over the same bot.
+
+**Profile migration:** Use `opencrabs profile migrate --from default --to hermes` to copy all `.md` brain files, `.toml` config files, and `memory/` entries to a new profile. Sessions and database are not copied — the new profile starts clean. Add `--force` to overwrite existing files in the target profile. After migrating, customize the new profile's `SOUL.md`, `IDENTITY.md`, and `config.toml` to give it a different personality and provider setup.
+
+### Daemon & Service
+
+Run profiles as background services:
+
+```bash
+# Install as system service (macOS launchd / Linux systemd)
+opencrabs -p hermes service install
+opencrabs -p hermes service start
+
+# Each profile gets its own service
+# macOS: com.opencrabs.daemon.hermes
+# Linux: opencrabs-hermes.service
+
+# Manage independently
+opencrabs -p hermes service status
+opencrabs -p hermes service stop
+opencrabs -p hermes service uninstall
+```
+
+Multiple profiles can run as simultaneous daemon services with full isolation.
+
+**Environment variable:** Set `OPENCRABS_PROFILE=hermes` to select a profile without the `-p` flag. Useful for systemd services, cron jobs, and daemon mode.
 
 ---
 
@@ -1955,6 +2009,10 @@ The heartbeat prompt is loaded into the agent's brain every turn. When the heart
 ### Autostart on Boot
 
 To keep OpenCrabs always running, set it to start automatically with your system.
+
+> **Profile-aware setup:** For named profiles, use `opencrabs -p <name> service install` instead of manual configuration. It generates the correct service name (`com.opencrabs.daemon.<name>` on macOS, `opencrabs-<name>.service` on Linux), includes the `-p` flag in the daemon args, and isolates log paths per profile. Multiple profiles can run as simultaneous daemon services.
+
+The examples below show manual setup for the **default profile**. For named profiles, replace `daemon` with `-p <name> daemon` in the command arguments.
 
 #### Linux (systemd)
 
