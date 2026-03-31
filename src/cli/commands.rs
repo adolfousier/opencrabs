@@ -1843,7 +1843,10 @@ pub(crate) async fn cmd_profile(operation: ProfileCommands) -> Result<()> {
                 println!("⚠️  No files migrated from '{from}' to '{to}'.");
                 println!("   All files already exist in '{to}'. Use --force to overwrite.");
             } else {
-                println!("✅ Migrated {} files from '{from}' to '{to}':\n", migrated.len());
+                println!(
+                    "✅ Migrated {} files from '{from}' to '{to}':\n",
+                    migrated.len()
+                );
                 for file in &migrated {
                     println!("   {file}");
                 }

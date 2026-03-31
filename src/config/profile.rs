@@ -305,7 +305,8 @@ pub fn migrate_profile(from: &str, to: &str, force: bool) -> Result<Vec<String>>
         if !dir.exists() {
             bail!(
                 "destination profile '{}' does not exist. Create it first with: opencrabs profile create {}",
-                to, to
+                to,
+                to
             );
         }
         dir
@@ -344,7 +345,11 @@ pub fn migrate_profile(from: &str, to: &str, force: bool) -> Result<Vec<String>>
             }
 
             fs::copy(&path, &dst_path).with_context(|| {
-                format!("failed to copy {} to {}", path.display(), dst_path.display())
+                format!(
+                    "failed to copy {} to {}",
+                    path.display(),
+                    dst_path.display()
+                )
             })?;
             migrated.push(name_str.to_string());
         }

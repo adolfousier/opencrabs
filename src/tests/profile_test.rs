@@ -12,8 +12,8 @@ use std::path::PathBuf;
 
 use crate::config::profile::{
     ProfileEntry, ProfileRegistry, acquire_token_lock, base_opencrabs_dir, create_profile,
-    delete_profile, export_profile, hash_token, import_profile, list_profiles, release_all_locks,
-    release_token_lock, validate_profile_name,
+    delete_profile, export_profile, hash_token, import_profile, list_profiles, migrate_profile,
+    release_all_locks, release_token_lock, validate_profile_name,
 };
 
 // ─── Name Validation ─────────────────────────────────────────────────
@@ -513,4 +513,182 @@ fn filesystem_operations_sequential() {
 
     // Release nonexistent lock is noop
     release_token_lock("_nonexistent_channel", "0000000000000000");
+}
+
+// ─── Migration Tests ─────────────────────────────────────────────────
+
+#[test]
+fn migrate_same_profile_errors() {
+    let err = migrate_profile("default", "default", false);
+    assert!(err.is_err());
+    assert!(
+        err.unwrap_err()
+            .to_string()
+            .contains("source and destination profiles are the same")
+    );
+}
+
+#[test]
+fn migrate_nonexistent_source_errors() {
+    let err = migrate_profile("_test_migrate_no_src", "default", false);
+    assert!(err.is_err());
+    assert!(err.unwrap_err().to_string().contains("does not exist"));
+}
+
+#[test]
+fn migrate_nonexistent_destination_errors() {
+    let err = migrate_profile("default", "_test_migrate_no_dst", false);
+    assert!(err.is_err());
+    assert!(err.unwrap_err().to_string().contains("does not exist"));
+}
+
+#[test]
+fn migrate_profile_copies_md_and_toml_files() {
+    let base = crate::config::profile::base_opencrabs_dir();
+    let src_name = "_test_migrate_src";
+    let dst_name = "_test_migrate_dst";
+    let src_dir = base.join("profiles").join(src_name);
+    let dst_dir = base.join("profiles").join(dst_name);
+
+    // Cleanup from previous runs
+    let _ = fs::remove_dir_all(&src_dir);
+    let _ = fs::remove_dir_all(&dst_dir);
+    let mut reg = ProfileRegistry::load().unwrap();
+    reg.profiles.remove(src_name);
+    reg.profiles.remove(dst_name);
+    let _ = reg.save();
+
+    // Create both profiles
+    create_profile(src_name, Some("source")).unwrap();
+    create_profile(dst_name, Some("destination")).unwrap();
+
+    // Populate source with brain files and config
+    fs::write(src_dir.join("SOUL.md"), "# Source Soul").unwrap();
+    fs::write(src_dir.join("IDENTITY.md"), "# Source Identity").unwrap();
+    fs::write(src_dir.join("config.toml"), "[general]\nname = \"source\"").unwrap();
+    fs::write(src_dir.join("keys.toml"), "[keys]\nsecret = \"abc\"").unwrap();
+    fs::create_dir_all(src_dir.join("memory")).unwrap();
+    fs::write(src_dir.join("memory").join("note.md"), "# A memory").unwrap();
+
+    // Files that should NOT migrate
+    fs::write(src_dir.join("layout.json"), "{}").unwrap();
+    fs::write(src_dir.join("profiles.toml"), "skip").unwrap();
+    fs::write(src_dir.join("random.txt"), "not a toml or md").unwrap();
+
+    // Migrate
+    let migrated = migrate_profile(src_name, dst_name, false).unwrap();
+
+    // Verify correct files were copied
+    assert!(dst_dir.join("SOUL.md").exists());
+    assert!(dst_dir.join("IDENTITY.md").exists());
+    assert!(dst_dir.join("config.toml").exists());
+    assert!(dst_dir.join("keys.toml").exists());
+    assert!(dst_dir.join("memory").join("note.md").exists());
+
+    // Verify content matches
+    assert_eq!(
+        fs::read_to_string(dst_dir.join("SOUL.md")).unwrap(),
+        "# Source Soul"
+    );
+    assert_eq!(
+        fs::read_to_string(dst_dir.join("memory").join("note.md")).unwrap(),
+        "# A memory"
+    );
+
+    // Verify skipped files
+    assert!(!dst_dir.join("layout.json").exists());
+    assert!(!dst_dir.join("random.txt").exists());
+    // profiles.toml in dst should not be the source's "skip" content
+    assert!(!dst_dir.join("profiles.toml").exists());
+
+    assert!(migrated.contains(&"SOUL.md".to_string()));
+    assert!(migrated.contains(&"IDENTITY.md".to_string()));
+    assert!(migrated.contains(&"config.toml".to_string()));
+    assert!(migrated.contains(&"keys.toml".to_string()));
+    assert!(migrated.contains(&"memory/note.md".to_string()));
+    assert_eq!(migrated.len(), 5);
+
+    // Cleanup
+    let _ = fs::remove_dir_all(&src_dir);
+    let _ = fs::remove_dir_all(&dst_dir);
+    let mut reg = ProfileRegistry::load().unwrap();
+    reg.profiles.remove(src_name);
+    reg.profiles.remove(dst_name);
+    let _ = reg.save();
+}
+
+#[test]
+fn migrate_profile_skips_existing_without_force() {
+    let base = crate::config::profile::base_opencrabs_dir();
+    let src_name = "_test_migrate_skip_src";
+    let dst_name = "_test_migrate_skip_dst";
+    let src_dir = base.join("profiles").join(src_name);
+    let dst_dir = base.join("profiles").join(dst_name);
+
+    let _ = fs::remove_dir_all(&src_dir);
+    let _ = fs::remove_dir_all(&dst_dir);
+    let mut reg = ProfileRegistry::load().unwrap();
+    reg.profiles.remove(src_name);
+    reg.profiles.remove(dst_name);
+    let _ = reg.save();
+
+    create_profile(src_name, None).unwrap();
+    create_profile(dst_name, None).unwrap();
+
+    // Source has a file
+    fs::write(src_dir.join("SOUL.md"), "source content").unwrap();
+    // Destination already has the same file
+    fs::write(dst_dir.join("SOUL.md"), "existing content").unwrap();
+
+    // Migrate without force — should skip
+    let migrated = migrate_profile(src_name, dst_name, false).unwrap();
+    assert!(
+        migrated.is_empty(),
+        "should skip existing files without --force"
+    );
+    assert_eq!(
+        fs::read_to_string(dst_dir.join("SOUL.md")).unwrap(),
+        "existing content",
+        "original content preserved"
+    );
+
+    // Migrate with force — should overwrite
+    let migrated = migrate_profile(src_name, dst_name, true).unwrap();
+    assert_eq!(migrated.len(), 1);
+    assert_eq!(
+        fs::read_to_string(dst_dir.join("SOUL.md")).unwrap(),
+        "source content",
+        "overwritten with source"
+    );
+
+    let _ = fs::remove_dir_all(&src_dir);
+    let _ = fs::remove_dir_all(&dst_dir);
+    let mut reg = ProfileRegistry::load().unwrap();
+    reg.profiles.remove(src_name);
+    reg.profiles.remove(dst_name);
+    let _ = reg.save();
+}
+
+#[test]
+fn migrate_from_default_profile_works() {
+    let base = crate::config::profile::base_opencrabs_dir();
+    let dst_name = "_test_migrate_from_default";
+    let dst_dir = base.join("profiles").join(dst_name);
+
+    let _ = fs::remove_dir_all(&dst_dir);
+    let mut reg = ProfileRegistry::load().unwrap();
+    reg.profiles.remove(dst_name);
+    let _ = reg.save();
+
+    create_profile(dst_name, None).unwrap();
+
+    // Default profile should have at least some .md or .toml files
+    // Migrate from default — should succeed and find files
+    let result = migrate_profile("default", dst_name, false);
+    assert!(result.is_ok(), "migrate from default should succeed");
+
+    let _ = fs::remove_dir_all(&dst_dir);
+    let mut reg = ProfileRegistry::load().unwrap();
+    reg.profiles.remove(dst_name);
+    let _ = reg.save();
 }
