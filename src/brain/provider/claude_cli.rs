@@ -418,6 +418,7 @@ impl Provider for ClaudeCliProvider {
             let mut current_block_chars: usize = 0;
             let mut input_tokens: u32 = 0;
             let mut output_tokens: u32 = 0;
+            let mut result_received = false;
             let mut line_count = 0u32;
             // Track block index offset across tool rounds — each CLI turn
             // restarts content block indices at 0, so we offset them to prevent
@@ -864,6 +865,7 @@ impl Provider for ClaudeCliProvider {
                             .await;
 
                         let _ = tx.send(Ok(StreamEvent::MessageStop)).await;
+                        result_received = true;
                         break;
                     }
 
@@ -884,6 +886,30 @@ impl Provider for ClaudeCliProvider {
                         }
                     }
                 }
+            }
+
+            // If the loop ended without a Result message (EOF/error) but we
+            // accumulated token usage from message_delta events, send a final
+            // MessageDelta + MessageStop so helpers.rs captures the real counts.
+            if started && !result_received && (input_tokens > 0 || output_tokens > 0) {
+                tracing::info!(
+                    "CLI EOF without Result — flushing accumulated usage: input={}, output={}",
+                    input_tokens,
+                    output_tokens
+                );
+                let _ = tx
+                    .send(Ok(StreamEvent::MessageDelta {
+                        delta: MessageDelta {
+                            stop_reason: Some(StopReason::EndTurn),
+                            stop_sequence: None,
+                        },
+                        usage: TokenUsage {
+                            input_tokens,
+                            output_tokens,
+                        },
+                    }))
+                    .await;
+                let _ = tx.send(Ok(StreamEvent::MessageStop)).await;
             }
 
             // Wait for process exit

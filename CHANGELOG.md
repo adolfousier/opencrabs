@@ -5,6 +5,35 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.94] - 2026-03-31
+
+### Added
+- **Multi-profile support** — Run multiple isolated OpenCrabs instances from a single installation. Each profile gets its own config, memory, sessions, skills, and gateway service under `~/.opencrabs/profiles/<name>/`. Create with `opencrabs profile create <name>`, switch with `opencrabs -p <name>` or `OPENCRABS_PROFILE` env var. Default profile (`~/.opencrabs/`) works exactly as before — zero breaking changes
+- **Profile migration** — Copy config and brain files between profiles with `opencrabs profile migrate --from default --to hermes [--force]`. Migrates all `.md` and `.toml` files plus the `memory/` directory. Excludes DB, sessions, logs, and layout state so the target profile starts fresh with the source's personality and configuration
+- **Profile export/import** — Share profiles as portable `.tar.gz` archives with `opencrabs profile export <name>` and `opencrabs profile import <path>`
+- **Token-lock isolation** — PID-based lock files prevent two profiles from binding the same bot token (Telegram, Discord, Slack, Trello). Stale lock detection automatically cleans up locks from dead processes
+- **Profile-aware daemon services** — `opencrabs -p hermes service install` creates profile-specific plist/systemd units (`com.opencrabs.daemon.hermes` / `opencrabs-hermes`). Multiple profile daemons can run simultaneously as separate OS services
+
+### Fixed
+- **TUI duplicate text on streaming responses** — Streaming responses were doubled on screen due to intermediate text emission timing
+- **Usage stats wrong totals** — Model name duplication in usage ledger (`opus` vs `opus-4-6`) caused inflated cost tracking. Now merges bare model names with their versioned equivalents
+- **IntermediateText not firing for Telegram/channels on CLI providers** — CLI providers weren't emitting intermediate text events to channel handlers, causing silent gaps in multi-tool conversations
+- **E2E test suite hanging on slow providers** — Added 30-second timeout to `e2e_opencode_streaming` test to prevent indefinite blocking under concurrent load
+- **E2E tests crashing suite on API key/network failures** — Gemini and OpenCode E2E tests now gracefully skip with a warning instead of panicking when API keys are invalid or network is unreachable
+
+### Changed
+- **`opencrabs_home()` delegates to profile resolver** — All 30+ call sites automatically resolve to the active profile's directory. Logger, onboarding wizard, and brain file resolver no longer hardcode `~/.opencrabs`
+- **Channel manager acquires token locks before spawning** — Telegram, Discord, Slack, and Trello channel connections check for token conflicts before starting. All locks released on TUI exit and daemon shutdown
+
+### Testing
+- **57 profile tests** — Name validation (8), token hashing (6), registry CRUD (10), path resolution (3), error messages (4), CRUD lifecycle, export/import roundtrip, token lock acquire/release/stale detection, migration with force/skip/nested dirs, isolation guarantees, daemon service argument generation
+- **Usage ledger normalization tests** — Model name merging for bare vs versioned names
+- **1,605 total tests**
+
+### Docs
+- **README profiles section** — Full command reference, directory structure diagram, token-lock isolation explanation, daemon service management, migration workflow
+- **TESTING.md** — Updated with profile test counts and categories
+
 ## [0.2.93] - 2026-03-30
 
 ### Fixed
@@ -1878,7 +1907,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
-[0.2.93]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.93
+[0.2.94]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.94
 [0.2.93]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.93
 [0.2.92]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.92
 [0.2.91]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.91

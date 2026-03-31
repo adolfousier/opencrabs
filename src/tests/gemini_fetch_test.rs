@@ -43,10 +43,11 @@ mod tests {
         eprintln!("Status: {}", status);
         eprintln!("Body (first 500 chars): {}", &body[..body.len().min(500)]);
 
-        if status == reqwest::StatusCode::FORBIDDEN
-            || status == reqwest::StatusCode::UNAUTHORIZED
-        {
-            eprintln!("SKIP: Gemini API key rejected ({}), likely IP restriction", status);
+        if status == reqwest::StatusCode::FORBIDDEN || status == reqwest::StatusCode::UNAUTHORIZED {
+            eprintln!(
+                "SKIP: Gemini API key rejected ({}), likely IP restriction",
+                status
+            );
             return;
         }
 
@@ -114,7 +115,9 @@ mod tests {
         }
 
         if models.is_empty() {
-            eprintln!("SKIP: fetch_provider_models returned empty — likely IP restriction or API issue");
+            eprintln!(
+                "SKIP: fetch_provider_models returned empty — likely IP restriction or API issue"
+            );
             return;
         }
     }
