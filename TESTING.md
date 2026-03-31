@@ -125,8 +125,8 @@ cargo test --all-features
 | Tests — Onboarding Keys | 4 | `src/tests/onboarding_keys_test.rs` |
 | Tests — TUI Render Clear | 4 | `src/tests/tui_render_clear_test.rs` |
 | Tests — Gemini Fetch | 3 | `src/tests/gemini_fetch_test.rs` |
-| Tests — Profiles | 37 | `src/tests/profile_test.rs` |
-| **Total** | **1,599** | |
+| Tests — Profiles | 57 | `src/tests/profile_test.rs` |
+| **Total** | **1,660** | |
 
 ---
 
@@ -183,7 +183,7 @@ Profile tests live in `src/tests/profile_test.rs` and cover multi-instance isola
 
 ```bash
 # Run profile tests only
-cargo test --all-features -p opencrabs -- profile
+cargo test --all-features -p opencrabs -- profile_test
 ```
 
 **Note:** Filesystem CRUD tests are sequential (single `#[test]` function) to avoid concurrent write corruption of `~/.opencrabs/profiles.toml`. In-memory tests run in parallel. The `test_set_and_get_active_profile` test accounts for `OnceLock` semantics (can only be set once per process).
