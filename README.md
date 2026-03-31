@@ -188,6 +188,7 @@ Images are passed to the active model's vision pipeline if it supports multimoda
 | **Web Search** | DuckDuckGo (built-in, no key needed) + EXA AI (neural, free via MCP) by default; Brave Search optional (key in `keys.toml`) |
 | **Debug Logging** | `--debug` flag enables file logging; `DEBUG_LOGS_LOCATION` env var for custom log directory |
 | **Agent-to-Agent (A2A)** | HTTP gateway implementing A2A Protocol RC v1.0 — peer-to-peer agent communication via JSON-RPC 2.0. Supports `message/send`, `message/stream` (SSE), `tasks/get`, `tasks/cancel`. Built-in `a2a_send` tool lets the agent proactively call remote A2A agents. Optional Bearer token auth. Includes multi-agent debate (Bee Colony) with confidence-weighted consensus. Task persistence across restarts |
+| **Profiles** | Run multiple isolated instances from the same installation. Each profile gets its own config, keys, memory, sessions, and database. Create with `opencrabs profile create <name>`, switch with `-p <name>`. Migrate config between profiles with `profile migrate`. Export/import for sharing. Token-lock isolation prevents two profiles from using the same bot credential |
 
 ### CLI
 | Command | Description |
@@ -218,7 +219,14 @@ Images are passed to the active model's vision pipeline if it supports multimoda
 | `opencrabs completions <shell>` | Generate shell completions (bash, zsh, fish, powershell) |
 | `opencrabs version` | Print version and exit |
 
-Global flags: `--debug` (enable file logging), `--config <path>` (custom config file).
+| `opencrabs profile create <name>` | Create a new isolated profile with its own config, keys, memory, and database |
+| `opencrabs profile list` | List all profiles with creation date and last used |
+| `opencrabs profile delete <name>` | Delete a profile and all its data |
+| `opencrabs profile migrate --from <name> --to <name>` | Copy config and brain files between profiles (`--force` to overwrite) |
+| `opencrabs profile export <name> -o <file>` | Export a profile as a `.tar.gz` archive |
+| `opencrabs profile import <file>` | Import a profile from a `.tar.gz` archive |
+
+Global flags: `--debug` (enable file logging), `--config <path>` (custom config file), `-p <profile>` (run as a named profile).
 
 ---
 
@@ -765,6 +773,15 @@ cargo run --bin opencrabs -- config --show-secrets
 cargo run --bin opencrabs -- db init           # Initialize database
 cargo run --bin opencrabs -- db stats          # Show statistics
 
+# Profiles — multi-instance isolation
+cargo run --bin opencrabs -- profile create hermes
+cargo run --bin opencrabs -- profile list
+cargo run --bin opencrabs -- -p hermes         # Run as "hermes" profile
+cargo run --bin opencrabs -- profile migrate --from default --to hermes
+cargo run --bin opencrabs -- profile export hermes -o backup.tar.gz
+cargo run --bin opencrabs -- profile import backup.tar.gz
+cargo run --bin opencrabs -- profile delete hermes
+
 # Debug mode
 cargo run --bin opencrabs -- -d                # Enable file logging
 cargo run --bin opencrabs -- -d run "analyze this"
@@ -1111,6 +1128,60 @@ OpenCrabs uses three config files — all **hot-reloaded at runtime** (no restar
 | `~/.opencrabs/tools.toml` | Runtime-defined agent tools (HTTP, shell) | No |
 
 Changes to any of these files are picked up automatically within ~300ms while OpenCrabs is running. The active LLM provider, channel allowlists, approval policy, and slash command autocomplete all update without restart.
+
+### Profiles (Multi-Instance)
+
+Run multiple isolated OpenCrabs instances from the same installation. Each profile gets its own config, memory, sessions, skills, and gateway service.
+
+```bash
+# Create a new profile
+opencrabs profile create hermes
+
+# Run as a specific profile
+opencrabs -p hermes
+
+# Or set via environment variable
+OPENCRABS_PROFILE=hermes opencrabs daemon
+
+# List all profiles
+opencrabs profile list
+
+# Migrate config and brain files from one profile to another
+# Copies: *.md, *.toml (config, keys, tools, commands), memory/ directory
+# Skips: database, sessions, logs, locks
+opencrabs profile migrate --from default --to hermes
+opencrabs profile migrate --from default --to hermes --force  # overwrite existing files
+
+# Export/import for sharing or backup
+opencrabs profile export hermes -o hermes-backup.tar.gz
+opencrabs profile import hermes-backup.tar.gz
+
+# Delete a profile
+opencrabs profile delete hermes
+```
+
+**Directory layout:**
+
+```
+~/.opencrabs/                    # "default" profile (backward compatible)
+├── config.toml
+├── keys.toml
+├── opencrabs.db
+├── memory/
+├── profiles.toml                # profile registry
+├── locks/                       # token-lock files
+└── profiles/
+    └── hermes/                  # named profile — fully isolated
+        ├── config.toml
+        ├── keys.toml
+        ├── opencrabs.db
+        ├── memory/
+        └── *.md
+```
+
+**Token-lock isolation:** Two profiles cannot use the same bot token (Telegram, Discord, Slack, Trello). On startup, OpenCrabs acquires PID-based locks for each channel credential. If another profile already holds that token, the channel refuses to start and notifies the user. Stale locks from crashed processes are automatically cleaned up.
+
+**Migration workflow:** Use `profile migrate` to clone your configuration into a new profile, then customize the brain files (SOUL.md, IDENTITY.md) to give the new instance its own personality. The original profile's database and sessions stay untouched.
 
 Search order for `config.toml`:
 1. `~/.opencrabs/config.toml` (primary)
