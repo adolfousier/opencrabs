@@ -334,6 +334,18 @@ pub enum ProfileCommands {
         /// Path to the archive file
         path: String,
     },
+    /// Migrate config and brain files from one profile to another (no DB/sessions)
+    Migrate {
+        /// Source profile name
+        from: String,
+
+        /// Destination profile name
+        to: String,
+
+        /// Overwrite existing files in the destination
+        #[arg(short, long)]
+        force: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
