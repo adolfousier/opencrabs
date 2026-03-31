@@ -872,15 +872,16 @@ impl App {
             }
         } else if keys::is_up(&event)
             && !self.slash_suggestions_active
-            && self.input_buffer.is_empty()
             && self.queued_message_preview.is_some()
             && self.input_history_index.is_none()
         {
-            // Arrow Up on empty input while a message is queued — recall it for editing.
-            // Removes from the queue so the user can modify and re-send.
-            let content = self.queued_message_preview.take().unwrap();
+            // Arrow Up while a message is queued — dequeue it for editing.
+            // The queue puts the text in input_buffer too, so this works
+            // regardless of whether the buffer is empty or matches the queued text.
+            // Removes from the queue so the user can modify and re-send via Enter.
+            self.queued_message_preview.take();
             *self.message_queue.lock().await = None;
-            self.input_buffer = content;
+            // Keep current input_buffer as-is (already has the queued text)
             self.cursor_position = self.input_buffer.len();
         } else if keys::is_up(&event)
             && !self.slash_suggestions_active

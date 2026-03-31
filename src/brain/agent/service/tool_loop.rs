@@ -250,7 +250,7 @@ impl AgentService {
 
         // Create assistant message placeholder NOW for real-time persistence.
         // We'll append content as we go and update with final tokens at the end.
-        let assistant_db_msg = message_service
+        let mut assistant_db_msg = message_service
             .create_message(session_id, "assistant".to_string(), String::new())
             .await
             .map_err(|e| AgentError::Database(e.to_string()))?;
@@ -1237,6 +1237,15 @@ impl AgentService {
                     let _ = message_service
                         .create_message(session_id, "user".to_string(), queued_msg)
                         .await;
+                    // Create a NEW assistant placeholder so the next response
+                    // gets a sequence number AFTER the queued user message.
+                    // Without this, the next LLM response appends to the old
+                    // placeholder (created before the user message), causing
+                    // the reply to appear ABOVE the user's message in the DB.
+                    assistant_db_msg = message_service
+                        .create_message(session_id, "assistant".to_string(), String::new())
+                        .await
+                        .map_err(|e| AgentError::Database(e.to_string()))?;
                     continue;
                 }
 
@@ -1776,6 +1785,12 @@ impl AgentService {
                 let _ = message_service
                     .create_message(session_id, "user".to_string(), queued_msg)
                     .await;
+                // Create a NEW assistant placeholder so the next response
+                // gets a sequence number AFTER the queued user message.
+                assistant_db_msg = message_service
+                    .create_message(session_id, "assistant".to_string(), String::new())
+                    .await
+                    .map_err(|e| AgentError::Database(e.to_string()))?;
             }
         }
 
