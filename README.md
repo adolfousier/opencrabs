@@ -218,7 +218,47 @@ Images are passed to the active model's vision pipeline if it supports multimoda
 | `opencrabs completions <shell>` | Generate shell completions (bash, zsh, fish, powershell) |
 | `opencrabs version` | Print version and exit |
 
-Global flags: `--debug` (enable file logging), `--config <path>` (custom config file).
+Global flags: `--debug` (enable file logging), `--config <path>` (custom config file), `--profile <name>` / `-p <name>` (run as a named profile).
+
+### Profiles — Multi-Instance Crab Agents
+
+Run multiple isolated OpenCrabs instances from the same installation. Each profile gets its own config, brain files, memory, sessions, database, and gateway service.
+
+| Command | Description |
+|---------|-------------|
+| `opencrabs profile create <name>` | Create a new profile with fresh config and brain files |
+| `opencrabs profile list` | List all profiles with last-used timestamps |
+| `opencrabs profile delete <name>` | Delete a profile and all its data |
+| `opencrabs profile export <name> -o profile.tar.gz` | Export a profile as a portable archive |
+| `opencrabs profile import profile.tar.gz` | Import a profile from an archive |
+| `opencrabs profile migrate --from <name> --to <name>` | Copy config and brain files between profiles (no DB or sessions) |
+| `opencrabs -p <name>` | Launch OpenCrabs as the specified profile |
+
+**Default profile:** `~/.opencrabs/` — works exactly as before. No migration needed. Users who never touch profiles see zero difference.
+
+**Named profiles** live at `~/.opencrabs/profiles/<name>/` with full isolation:
+```
+~/.opencrabs/
+├── config.toml          # default profile
+├── opencrabs.db
+├── profiles.toml        # profile registry
+├── locks/               # token-lock files
+└── profiles/
+    ├── hermes/          # named profile
+    │   ├── config.toml
+    │   ├── keys.toml
+    │   ├── opencrabs.db
+    │   ├── SOUL.md
+    │   └── memory/
+    └── scout/
+        └── ...
+```
+
+**Token-lock isolation:** Two profiles cannot use the same bot credential (Telegram token, Discord token, etc.). On startup, each profile acquires a lock on its channel tokens. If another profile already holds the lock, the channel refuses to start — preventing two instances from fighting over the same bot.
+
+**Profile migration:** Use `opencrabs profile migrate --from default --to hermes` to copy all `.md` brain files, `.toml` config files, and `memory/` entries to a new profile. Sessions and database are not copied — the new profile starts clean. Add `--force` to overwrite existing files in the target profile. After migrating, customize the new profile's `SOUL.md`, `IDENTITY.md`, and `config.toml` to give it a different personality and provider setup.
+
+**Environment variable:** Set `OPENCRABS_PROFILE=hermes` to select a profile without the `-p` flag. Useful for systemd services, cron jobs, and daemon mode.
 
 ---
 
