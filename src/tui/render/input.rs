@@ -182,19 +182,48 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
 
     // Build attachment indicator for the top-right title area
     let attach_title = if !app.attachments.is_empty() {
-        let names: Vec<String> = app
+        let spans: Vec<Span> = app
             .attachments
             .iter()
             .enumerate()
-            .map(|(i, _att)| format!("Image #{}", i + 1))
+            .flat_map(|(i, _att)| {
+                let focused = app.focused_attachment == Some(i);
+                let label = format!("Image #{}", i + 1);
+                let style = if focused {
+                    // Highlight focused attachment — inverted colors
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Rgb(60, 185, 185))
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                        .fg(Color::Rgb(60, 185, 185))
+                        .add_modifier(Modifier::BOLD)
+                };
+                let mut result = vec![Span::styled(label, style)];
+                if i + 1 < app.attachments.len() {
+                    result.push(Span::styled(
+                        " | ",
+                        Style::default().fg(Color::Rgb(60, 185, 185)),
+                    ));
+                }
+                result
+            })
             .collect();
-        Line::from(Span::styled(
-            format!(" [{}] ", names.join(" | ")),
+        let mut all_spans = vec![Span::styled(
+            " [",
             Style::default()
                 .fg(Color::Rgb(60, 185, 185))
                 .add_modifier(Modifier::BOLD),
-        ))
-        .alignment(Alignment::Right)
+        )];
+        all_spans.extend(spans);
+        all_spans.push(Span::styled(
+            "] ",
+            Style::default()
+                .fg(Color::Rgb(60, 185, 185))
+                .add_modifier(Modifier::BOLD),
+        ));
+        Line::from(all_spans).alignment(Alignment::Right)
     } else {
         Line::from("")
     };

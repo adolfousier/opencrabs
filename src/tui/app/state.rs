@@ -247,6 +247,9 @@ pub struct App {
     pub cursor_position: usize,
     /// Images attached to the current input (auto-detected from pasted paths)
     pub attachments: Vec<ImageAttachment>,
+    /// When Some, an attachment is focused (Up/Down to navigate, Backspace/Delete to remove).
+    /// Index into `attachments`. None means input text is focused.
+    pub focused_attachment: Option<usize>,
     pub scroll_offset: usize,
     /// When true, new streaming content auto-scrolls to bottom.
     /// Set to false when user scrolls up; re-enabled when they scroll back to bottom or send a message.
@@ -462,6 +465,7 @@ impl App {
             input_buffer: String::new(),
             cursor_position: 0,
             attachments: Vec::new(),
+            focused_attachment: None,
             scroll_offset: 0,
             auto_scroll: true,
             selected_session_index: 0,

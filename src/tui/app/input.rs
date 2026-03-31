@@ -605,6 +605,53 @@ impl App {
             self.escape_pending_at = None;
         }
 
+        // --- Attachment focus navigation ---
+        // When an attachment is focused, Up/Down navigate between attachments,
+        // Backspace/Delete removes the focused one, any other key returns to input.
+        if self.focused_attachment.is_some() {
+            if keys::is_up(&event) {
+                // Move to previous attachment (or stay at first)
+                if let Some(idx) = self.focused_attachment
+                    && idx > 0
+                {
+                    self.focused_attachment = Some(idx - 1);
+                }
+                return Ok(());
+            } else if keys::is_down(&event) {
+                // Move to next attachment, or return to input if at last
+                if let Some(idx) = self.focused_attachment {
+                    if idx + 1 < self.attachments.len() {
+                        self.focused_attachment = Some(idx + 1);
+                    } else {
+                        self.focused_attachment = None; // back to input
+                    }
+                }
+                return Ok(());
+            } else if event.code == KeyCode::Backspace || event.code == KeyCode::Delete {
+                // Remove the focused attachment
+                if let Some(idx) = self.focused_attachment
+                    && idx < self.attachments.len()
+                {
+                    self.attachments.remove(idx);
+                    // Adjust focus: stay on same index if more remain, else move back
+                    if self.attachments.is_empty() {
+                        self.focused_attachment = None;
+                    } else if idx >= self.attachments.len() {
+                        self.focused_attachment = Some(self.attachments.len() - 1);
+                    }
+                }
+                return Ok(());
+            } else if keys::is_cancel(&event) {
+                // Escape returns to input without removing
+                self.focused_attachment = None;
+                return Ok(());
+            } else {
+                // Any other key returns to input
+                self.focused_attachment = None;
+                // Fall through to handle the key normally
+            }
+        }
+
         if keys::is_newline(&event) {
             // Alt+Enter or Shift+Enter = insert newline for multi-line input
             self.input_buffer.insert(self.cursor_position, '\n');
@@ -647,6 +694,7 @@ impl App {
             self.input_buffer.clear();
             self.cursor_position = 0;
             self.attachments.clear();
+            self.focused_attachment = None;
             self.slash_suggestions_active = false;
             self.dismiss_emoji_picker();
 
@@ -742,6 +790,7 @@ impl App {
                     self.input_buffer.clear();
                     self.cursor_position = 0;
                     self.attachments.clear();
+                    self.focused_attachment = None;
                     self.error_message = None;
                     self.error_message_shown_at = None;
                     self.escape_pending_at = None;
@@ -870,6 +919,15 @@ impl App {
                         next_line_start + byte_offset_at_display_col(next_line, target_col);
                 }
             }
+        } else if keys::is_up(&event)
+            && !self.slash_suggestions_active
+            && !self.attachments.is_empty()
+            && self.cursor_position == 0
+            && self.input_history_index.is_none()
+        {
+            // Arrow Up at start of input with attachments — focus last attachment.
+            // User can then Up/Down to navigate, Backspace/Delete to remove.
+            self.focused_attachment = Some(self.attachments.len() - 1);
         } else if keys::is_up(&event)
             && !self.slash_suggestions_active
             && self.queued_message_preview.is_some()
