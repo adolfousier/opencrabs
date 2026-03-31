@@ -105,7 +105,7 @@ impl AgentService {
         // premature stream termination → retry → fresh CLI session that repeats
         // all prior work from scratch.
         let stream_idle_timeout = if is_cli {
-            std::time::Duration::from_secs(600) // 10 min for CLI tool execution
+            std::time::Duration::from_secs(3600) // 1 hour — CLI agents can run 30min+
         } else {
             std::time::Duration::from_secs(60)
         };
