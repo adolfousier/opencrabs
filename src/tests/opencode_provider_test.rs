@@ -236,7 +236,7 @@ async fn e2e_opencode_simple_completion() {
 #[tokio::test]
 async fn e2e_opencode_streaming() {
     use futures::StreamExt;
-    use tokio::time::{timeout, Duration};
+    use tokio::time::{Duration, timeout};
 
     let provider = {
         let Some(p) = try_provider() else { return };
