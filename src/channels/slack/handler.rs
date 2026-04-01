@@ -904,8 +904,13 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         return;
     }
 
-    // Sync channel agent's provider with config (TUI or other channel may have switched)
-    crate::channels::commands::sync_provider_from_config(&state.agent);
+    // Restore session's own provider (each session keeps its provider independently)
+    let session_meta = state.session_svc.get_session(session_id).await.ok().flatten();
+    crate::channels::commands::sync_provider_for_session(
+        &state.agent,
+        session_meta.as_ref().and_then(|s| s.provider_name.as_deref()),
+        session_meta.as_ref().and_then(|s| s.model.as_deref()),
+    );
 
     // ── Channel commands (/help, /usage, /models) ──────────────────────────
     {

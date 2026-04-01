@@ -144,23 +144,12 @@ impl ProviderSelectorState {
                     has_nonempty_key(crate::utils::providers::config_for(&config.providers, id))
                 }
             } else if self.selected_provider == 9 {
-                // New custom — clear fields, check for existing custom
-                let found = config.providers.active_custom().or_else(|| {
-                    config
-                        .providers
-                        .custom
-                        .as_ref()
-                        .and_then(|m| m.iter().next())
-                        .map(|(n, c)| (n.as_str(), c))
-                });
-                if let Some((name, c)) = found {
-                    self.custom_name = name.to_string();
-                    self.base_url = c.base_url.clone().unwrap_or_default();
-                    self.custom_model = c.default_model.clone().unwrap_or_default();
-                    c.api_key.as_ref().is_some_and(|k| !k.is_empty())
-                } else {
-                    false
-                }
+                // New custom — start with blank fields
+                self.custom_name.clear();
+                self.base_url.clear();
+                self.custom_model.clear();
+                self.context_window.clear();
+                false
             } else {
                 // Existing custom provider (10+)
                 let custom_idx = self.selected_provider - 10;

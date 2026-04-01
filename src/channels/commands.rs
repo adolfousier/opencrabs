@@ -10,17 +10,47 @@ use crate::config::Config;
 use crate::db::repository::SessionListOptions;
 use crate::services::SessionService;
 
-/// Sync the channel agent's provider with the current config.
+/// Sync the channel agent's provider for a specific session.
 ///
-/// Each channel has its own `AgentService` instance, so when the TUI (or another
-/// channel) switches models, this agent won't know until we check. Call this at
-/// the top of every message handler so the agent always uses the live provider.
-pub fn sync_provider_from_config(agent: &AgentService) {
+/// If the session has its own provider/model stored, restore that — so each
+/// channel keeps its own provider independently of the TUI or other channels.
+/// Only falls back to the global config if the session has no provider set.
+pub fn sync_provider_for_session(agent: &AgentService, session_provider: Option<&str>, session_model: Option<&str>) {
     let config = match Config::load() {
         Ok(c) => c,
         Err(_) => return,
     };
 
+    // If the session has an explicit provider, restore it (ignoring global config)
+    if let Some(sess_prov) = session_provider {
+        let agent_provider = agent.provider_name();
+        let agent_model = agent.provider_model();
+        let sess_prov_norm = normalize_provider_name(sess_prov);
+        let agent_prov_norm = normalize_provider_name(&agent_provider);
+        let same_provider = provider_names_match(&sess_prov_norm, &agent_prov_norm);
+        let same_model = session_model.is_none_or(|m| m == agent_model);
+
+        if !same_provider || !same_model {
+            match crate::brain::provider::factory::create_provider_by_name(&config, sess_prov) {
+                Ok(new_provider) => {
+                    tracing::info!(
+                        "Channel: restored session provider {}/{} (was {}/{})",
+                        sess_prov,
+                        session_model.unwrap_or("default"),
+                        agent_provider,
+                        agent_model,
+                    );
+                    agent.swap_provider(new_provider);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to restore session provider '{}': {}", sess_prov, e);
+                }
+            }
+        }
+        return;
+    }
+
+    // No session provider — fall back to global config (first message in a new session)
     let (cfg_provider, cfg_model) = config.providers.active_provider_and_model();
     let agent_provider = agent.provider_name();
     let agent_model = agent.provider_model();
@@ -29,18 +59,13 @@ pub fn sync_provider_from_config(agent: &AgentService) {
     let agent_provider_norm = normalize_provider_name(&agent_provider);
     let same_provider = provider_names_match(&cfg_provider_norm, &agent_provider_norm);
 
-    // Only swap if provider/model changed after normalizing aliases
     if !same_provider || cfg_model != agent_model {
         match crate::brain::provider::create_provider(&config) {
             Ok(new_provider) => {
                 tracing::info!(
-                    "Channel agent synced: {} ({}) / {} → {} ({}) / {}",
+                    "Channel agent synced to config: {} → {}",
                     agent_provider,
-                    agent_provider_norm,
-                    agent_model,
                     cfg_provider,
-                    cfg_provider_norm,
-                    cfg_model,
                 );
                 agent.swap_provider(new_provider);
             }
@@ -541,9 +566,13 @@ pub fn provider_display_name(name: &str) -> &str {
 
 // ── Model switching ─────────────────────────────────────────────────────────
 
-/// Switch the active model within the current provider and persist to config.
+/// Switch the active model for this session's provider.
+///
+/// Persists provider + model to the session DB record so the session keeps
+/// its own provider independently. Does NOT toggle global config enabled flags
+/// — that would leak into other sessions/channels.
 /// Saves a `[Model changed to ...]` message to the session history so the agent
-/// is aware of the switch — matching TUI behaviour.
+/// is aware of the switch.
 /// Returns an error message on failure so channels can report it to the user.
 pub async fn switch_model(
     agent: &AgentService,
@@ -551,23 +580,9 @@ pub async fn switch_model(
     session_id: Option<uuid::Uuid>,
 ) -> Result<String, String> {
     let provider_name = agent.provider_name();
-    let section = provider_section(&provider_name)
-        .ok_or_else(|| format!("Unknown provider '{}' — cannot switch model", provider_name))?;
 
-    // Toggle enabled flags — disable all others, enable selected (same as TUI)
     let config =
         crate::config::Config::load().map_err(|e| format!("Failed to load config: {}", e))?;
-    for s in crate::utils::providers::all_config_sections(&config.providers) {
-        if s != section {
-            let _ = crate::config::Config::write_key(&s, "enabled", "false");
-        }
-    }
-    let _ = crate::config::Config::write_key(&section, "enabled", "true");
-
-    crate::config::Config::write_key(&section, "default_model", model_name).map_err(|e| {
-        tracing::warn!("Failed to persist model to config: {}", e);
-        format!("Failed to save model: {}", e)
-    })?;
 
     tracing::info!(
         "Channel: switched model to {} (provider: {})",
@@ -575,15 +590,13 @@ pub async fn switch_model(
         provider_name
     );
 
-    // Reload provider from config so the change takes effect immediately
-    let config = crate::config::Config::load().map_err(|e| {
-        tracing::warn!("Failed to reload config after model switch: {}", e);
-        format!("Model saved but failed to reload config: {}", e)
-    })?;
-    let new_provider = crate::brain::provider::create_provider(&config).map_err(|e| {
-        tracing::warn!("Failed to create provider after model switch: {}", e);
-        format!("Model saved but failed to reload provider: {}", e)
-    })?;
+    // Create provider by name (doesn't modify global config enabled flags)
+    let new_provider =
+        crate::brain::provider::factory::create_provider_by_name(&config, &provider_name)
+            .map_err(|e| {
+                tracing::warn!("Failed to create provider after model switch: {}", e);
+                format!("Model saved but failed to reload provider: {}", e)
+            })?;
     let display_name = provider_display_name(&provider_name);
     agent.swap_provider(new_provider);
 
@@ -592,8 +605,19 @@ pub async fn switch_model(
         model_name, display_name
     );
 
-    // Persist to session history so the agent knows about the switch
+    // Persist provider + model to session DB record so it survives restarts
     if let Some(sid) = session_id {
+        let session_svc =
+            crate::services::SessionService::new(agent.context().clone());
+        if let Ok(Some(mut session)) = session_svc.get_session(sid).await {
+            session.provider_name = Some(provider_name.clone());
+            session.model = Some(model_name.to_string());
+            if let Err(e) = session_svc.update_session(&session).await {
+                tracing::warn!("Failed to persist provider to session: {}", e);
+            }
+        }
+
+        // Persist change message to session history so the agent knows
         let msg_svc = crate::services::MessageService::new(agent.context().clone());
         if let Err(e) = msg_svc
             .create_message(sid, "user".to_string(), change_msg.clone())

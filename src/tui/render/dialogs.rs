@@ -300,9 +300,17 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         .unwrap_or_else(|| app.provider_model());
 
     let custom_extra = app.ps.custom_names.len() as u16;
+    let is_custom_selected = provider_idx >= 9;
     // 9 static providers + custom_extra + "+ New Custom" + API key line + filter + models + footer + padding
     let provider_lines = 9 + custom_extra + 1; // static + customs + new custom
-    let content_lines = provider_lines + 4 + model_count as u16 + 4; // providers + key/filter chrome + models + footer
+    // Custom providers show text fields instead of model list:
+    // Base URL(2) + API Key(2) + Model text(1) + Name(2) + Context Window(1) + spacing(2) + help(2) = 12
+    let form_lines: u16 = if is_custom_selected {
+        12
+    } else {
+        4 + model_count as u16 + 4 // key/filter chrome + model list + footer
+    };
+    let content_lines = provider_lines + form_lines;
     let max_height = (area.height * 3 / 4).max(20); // cap at 75% of terminal
     let dialog_height = content_lines
         .min(max_height)

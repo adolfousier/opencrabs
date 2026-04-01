@@ -275,8 +275,41 @@ impl App {
                 );
                 self.detect_model_selector_key_for_provider();
 
-                // Re-fetch models for the new provider — load API key from config
+                // Clear/populate custom fields based on selected provider
                 let provider_idx = self.ps.selected_provider;
+                if provider_idx == 9 {
+                    // "+ New Custom" — clear all custom fields for fresh entry
+                    self.ps.custom_name.clear();
+                    self.ps.custom_model.clear();
+                    self.ps.base_url.clear();
+                    self.ps.context_window.clear();
+                    self.ps.api_key_input.clear();
+                } else if provider_idx >= 10 {
+                    // Existing custom provider — populate fields from config
+                    let custom_idx = provider_idx - 10;
+                    if let Some(name) = self.ps.custom_names.get(custom_idx).cloned() {
+                        if let Ok(c) = crate::config::Config::load() {
+                            if let Some(cfg) = c.providers.custom_by_name(&name) {
+                                self.ps.custom_name = name;
+                                self.ps.base_url = cfg.base_url.clone().unwrap_or_default();
+                                self.ps.custom_model =
+                                    cfg.default_model.clone().unwrap_or_default();
+                                self.ps.context_window = cfg
+                                    .context_window
+                                    .map(|cw| cw.to_string())
+                                    .unwrap_or_default();
+                            }
+                        }
+                    }
+                } else {
+                    // Static provider — clear custom fields
+                    self.ps.custom_name.clear();
+                    self.ps.custom_model.clear();
+                    self.ps.base_url.clear();
+                    self.ps.context_window.clear();
+                }
+
+                // Re-fetch models for the new provider — load API key from config
                 let api_key = crate::config::Config::load().ok().and_then(|c| {
                     match provider_idx {
                         0 => c.providers.anthropic.and_then(|p| p.api_key),
