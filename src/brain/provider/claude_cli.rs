@@ -415,8 +415,12 @@ impl Provider for ClaudeCliProvider {
             let mut current_block_chars: usize = 0;
             let mut input_tokens: u32 = 0;
             let mut output_tokens: u32 = 0;
-            let mut cache_creation_tokens_acc: u32 = 0;
-            let mut cache_read_tokens_acc: u32 = 0;
+            // Per-round values (replaced each round) — actual context window
+            let mut cache_creation_tokens_last: u32 = 0;
+            let mut cache_read_tokens_last: u32 = 0;
+            // Cumulative billing totals (summed across all rounds)
+            let mut cache_creation_tokens_billing: u32 = 0;
+            let mut cache_read_tokens_billing: u32 = 0;
             let mut result_received = false;
             let mut line_count = 0u32;
             // Track block index offset across tool rounds — each CLI turn
@@ -537,10 +541,16 @@ impl Provider for ClaudeCliProvider {
                                         if round_input > input_tokens {
                                             input_tokens = round_input;
                                         }
-                                        // Track cache tokens separately for cost breakdown
-                                        cache_creation_tokens_acc =
+                                        // Per-round: replace (this IS the context window)
+                                        cache_creation_tokens_last =
                                             round_usage.cache_creation_input_tokens;
-                                        cache_read_tokens_acc = round_usage.cache_read_input_tokens;
+                                        cache_read_tokens_last =
+                                            round_usage.cache_read_input_tokens;
+                                        // Billing: accumulate across all rounds
+                                        cache_creation_tokens_billing +=
+                                            round_usage.cache_creation_input_tokens;
+                                        cache_read_tokens_billing +=
+                                            round_usage.cache_read_input_tokens;
                                     }
                                 }
                                 // Send Ping to prevent idle timeout during tool execution
@@ -679,6 +689,7 @@ impl Provider for ClaudeCliProvider {
                                             output_tokens: 0,
                                             cache_creation_tokens: cc,
                                             cache_read_tokens: cr,
+                                            ..Default::default()
                                         },
                                     },
                                 }))
@@ -866,15 +877,46 @@ impl Provider for ClaudeCliProvider {
                             );
                         }
 
-                        // Prefer the SSE-accumulated cache tokens — the CLI reports
-                        // cache_read/creation in message_delta SSE events, NOT in the
-                        // Result message.  Fall back to Result's usage if SSE had none.
+                        // Context window = last round's per-call cache tokens.
+                        // Billing = cumulative across all rounds (for cost).
+                        // The Result message reports cumulative totals — use it for
+                        // billing if SSE didn't capture any rounds.
                         let (result_cc, result_cr) = usage
                             .as_ref()
                             .map(|u| (u.cache_creation_input_tokens, u.cache_read_input_tokens))
                             .unwrap_or((0, 0));
-                        let cache_creation = cache_creation_tokens_acc.max(result_cc);
-                        let cache_read = cache_read_tokens_acc.max(result_cr);
+
+                        // For context: use last SSE round (per-call), fallback to Result
+                        let ctx_cache_creation = if cache_creation_tokens_last > 0 {
+                            cache_creation_tokens_last
+                        } else {
+                            result_cc
+                        };
+                        let ctx_cache_read = if cache_read_tokens_last > 0 {
+                            cache_read_tokens_last
+                        } else {
+                            result_cr
+                        };
+
+                        // For billing: use cumulative SSE totals, fallback to Result
+                        let billing_cache_creation = if cache_creation_tokens_billing > 0 {
+                            cache_creation_tokens_billing
+                        } else {
+                            result_cc
+                        };
+                        let billing_cache_read = if cache_read_tokens_billing > 0 {
+                            cache_read_tokens_billing
+                        } else {
+                            result_cr
+                        };
+
+                        tracing::info!(
+                            "CLI token split: context={}+{}+{}={}, billing={}+{}+{}={}",
+                            final_input, ctx_cache_creation, ctx_cache_read,
+                            final_input + ctx_cache_creation + ctx_cache_read,
+                            final_input, billing_cache_creation, billing_cache_read,
+                            final_input + billing_cache_creation + billing_cache_read,
+                        );
 
                         let _ = tx
                             .send(Ok(StreamEvent::MessageDelta {
@@ -885,8 +927,12 @@ impl Provider for ClaudeCliProvider {
                                 usage: TokenUsage {
                                     input_tokens: final_input,
                                     output_tokens: final_output,
-                                    cache_creation_tokens: cache_creation,
-                                    cache_read_tokens: cache_read,
+                                    // Context window tokens (per-call)
+                                    cache_creation_tokens: ctx_cache_creation,
+                                    cache_read_tokens: ctx_cache_read,
+                                    // Billing tokens (cumulative across rounds)
+                                    billing_cache_creation,
+                                    billing_cache_read,
                                 },
                             }))
                             .await;
@@ -933,8 +979,9 @@ impl Provider for ClaudeCliProvider {
                         usage: TokenUsage {
                             input_tokens,
                             output_tokens,
-                            cache_creation_tokens: cache_creation_tokens_acc,
-                            cache_read_tokens: cache_read_tokens_acc,
+                            cache_creation_tokens: cache_creation_tokens_last,
+                            cache_read_tokens: cache_read_tokens_last,
+                            ..Default::default()
                         },
                     }))
                     .await;

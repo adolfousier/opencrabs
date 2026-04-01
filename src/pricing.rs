@@ -225,27 +225,38 @@ pub const DEFAULT_PRICING_TOML: &str = r#"
 
 [providers.anthropic]
 entries = [
-  # Opus 4.x (normalized: "opus-4-6") — $5/$25 per M tokens
-  { prefix = "opus-4",             input_per_m = 5.0,  output_per_m = 25.0 },
-  { prefix = "claude-opus-4",      input_per_m = 5.0,  output_per_m = 25.0 },
+  # Opus 4.6 / 4.5 — $5/$25, cache write $6.25, cache read $0.50
+  { prefix = "opus-4-6",           input_per_m = 5.0,   output_per_m = 25.0, cache_write_per_m = 6.25,  cache_read_per_m = 0.50 },
+  { prefix = "opus-4-5",           input_per_m = 5.0,   output_per_m = 25.0, cache_write_per_m = 6.25,  cache_read_per_m = 0.50 },
+  { prefix = "claude-opus-4-6",    input_per_m = 5.0,   output_per_m = 25.0, cache_write_per_m = 6.25,  cache_read_per_m = 0.50 },
+  { prefix = "claude-opus-4-5",    input_per_m = 5.0,   output_per_m = 25.0, cache_write_per_m = 6.25,  cache_read_per_m = 0.50 },
+  # Opus 4.1 / 4 — $15/$75, cache write $18.75, cache read $1.50
+  { prefix = "opus-4-1",           input_per_m = 15.0,  output_per_m = 75.0, cache_write_per_m = 18.75, cache_read_per_m = 1.50 },
+  { prefix = "opus-4",             input_per_m = 15.0,  output_per_m = 75.0, cache_write_per_m = 18.75, cache_read_per_m = 1.50 },
+  { prefix = "claude-opus-4-1",    input_per_m = 15.0,  output_per_m = 75.0, cache_write_per_m = 18.75, cache_read_per_m = 1.50 },
+  { prefix = "claude-opus-4",      input_per_m = 15.0,  output_per_m = 75.0, cache_write_per_m = 18.75, cache_read_per_m = 1.50 },
   # Opus 3 (legacy) — $15/$75
-  { prefix = "claude-3-opus",      input_per_m = 15.0, output_per_m = 75.0 },
-  # Sonnet 4.x (normalized: "sonnet-4-6") — $3/$15
-  { prefix = "sonnet-4",           input_per_m = 3.0,  output_per_m = 15.0 },
-  { prefix = "claude-sonnet-4",    input_per_m = 3.0,  output_per_m = 15.0 },
+  { prefix = "claude-3-opus",      input_per_m = 15.0,  output_per_m = 75.0, cache_write_per_m = 18.75, cache_read_per_m = 1.50 },
+  # Sonnet 4.6 / 4.5 / 4 — $3/$15, cache write $3.75, cache read $0.30
+  { prefix = "sonnet-4-6",         input_per_m = 3.0,   output_per_m = 15.0, cache_write_per_m = 3.75,  cache_read_per_m = 0.30 },
+  { prefix = "sonnet-4-5",         input_per_m = 3.0,   output_per_m = 15.0, cache_write_per_m = 3.75,  cache_read_per_m = 0.30 },
+  { prefix = "sonnet-4",           input_per_m = 3.0,   output_per_m = 15.0, cache_write_per_m = 3.75,  cache_read_per_m = 0.30 },
+  { prefix = "claude-sonnet-4-6",  input_per_m = 3.0,   output_per_m = 15.0, cache_write_per_m = 3.75,  cache_read_per_m = 0.30 },
+  { prefix = "claude-sonnet-4-5",  input_per_m = 3.0,   output_per_m = 15.0, cache_write_per_m = 3.75,  cache_read_per_m = 0.30 },
+  { prefix = "claude-sonnet-4",    input_per_m = 3.0,   output_per_m = 15.0, cache_write_per_m = 3.75,  cache_read_per_m = 0.30 },
   # Claude 3.7 Sonnet — $3/$15
-  { prefix = "claude-3-7-sonnet",  input_per_m = 3.0,  output_per_m = 15.0 },
+  { prefix = "claude-3-7-sonnet",  input_per_m = 3.0,   output_per_m = 15.0, cache_write_per_m = 3.75, cache_read_per_m = 0.30 },
   # Claude 3.5 Sonnet — $3/$15
-  { prefix = "claude-3-5-sonnet",  input_per_m = 3.0,  output_per_m = 15.0 },
+  { prefix = "claude-3-5-sonnet",  input_per_m = 3.0,   output_per_m = 15.0, cache_write_per_m = 3.75, cache_read_per_m = 0.30 },
   # Claude 3 Sonnet (legacy) — $3/$15
-  { prefix = "claude-3-sonnet",    input_per_m = 3.0,  output_per_m = 15.0 },
-  # Haiku 4.x (normalized: "haiku-4-5") — $1/$5
-  { prefix = "haiku-4",            input_per_m = 1.0,  output_per_m = 5.0  },
-  { prefix = "claude-haiku-4",     input_per_m = 1.0,  output_per_m = 5.0  },
+  { prefix = "claude-3-sonnet",    input_per_m = 3.0,   output_per_m = 15.0  },
+  # Haiku 4.x — $1/$5, cache write $1.25, cache read $0.10
+  { prefix = "haiku-4",            input_per_m = 1.0,   output_per_m = 5.0, cache_write_per_m = 1.25, cache_read_per_m = 0.10 },
+  { prefix = "claude-haiku-4",     input_per_m = 1.0,   output_per_m = 5.0, cache_write_per_m = 1.25, cache_read_per_m = 0.10 },
   # Claude 3.5 Haiku — $0.80/$4
-  { prefix = "claude-3-5-haiku",   input_per_m = 0.80, output_per_m = 4.0  },
+  { prefix = "claude-3-5-haiku",   input_per_m = 0.80,  output_per_m = 4.0, cache_write_per_m = 1.0, cache_read_per_m = 0.08 },
   # Claude 3 Haiku (legacy) — $0.25/$1.25
-  { prefix = "claude-3-haiku",     input_per_m = 0.25, output_per_m = 1.25 },
+  { prefix = "claude-3-haiku",     input_per_m = 0.25,  output_per_m = 1.25  },
 ]
 
 [providers.openai]
@@ -253,10 +264,13 @@ entries = [
   { prefix = "gpt-5-nano",          input_per_m = 0.10, output_per_m = 0.40  },
   { prefix = "gpt-5-mini",         input_per_m = 0.30, output_per_m = 1.20  },
   { prefix = "gpt-5",              input_per_m = 1.25, output_per_m = 10.0  },
+  { prefix = "gpt-4.1",            input_per_m = 2.0,  output_per_m = 8.0   },
+  { prefix = "gpt-4o",             input_per_m = 2.5,  output_per_m = 10.0  },
   { prefix = "gpt-4-turbo",        input_per_m = 10.0, output_per_m = 30.0  },
   { prefix = "gpt-4",              input_per_m = 30.0, output_per_m = 60.0  },
+  { prefix = "o4-mini",            input_per_m = 1.10, output_per_m = 4.40  },
   { prefix = "o3-mini",            input_per_m = 1.10, output_per_m = 4.40  },
-  { prefix = "o3",                 input_per_m = 10.0, output_per_m = 40.0  },
+  { prefix = "o3",                 input_per_m = 2.0,  output_per_m = 8.0   },
   { prefix = "o1-mini",            input_per_m = 1.10, output_per_m = 4.40  },
   { prefix = "o1",                 input_per_m = 15.0, output_per_m = 60.0  },
 ]
@@ -281,6 +295,8 @@ entries = [
 
 [providers.google]
 entries = [
+  { prefix = "gemini-2.5-pro",     input_per_m = 1.25, output_per_m = 10.0  },
+  { prefix = "gemini-2.5-flash",   input_per_m = 0.15, output_per_m = 0.60  },
   { prefix = "gemini-2.0-flash",   input_per_m = 0.10, output_per_m = 0.40  },
   { prefix = "gemini-1.5-pro",     input_per_m = 1.25, output_per_m = 5.0   },
   { prefix = "gemini-1.5-flash",   input_per_m = 0.075,output_per_m = 0.30  },

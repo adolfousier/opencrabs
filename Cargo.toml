@@ -1,6 +1,6 @@
 [package]
 name = "opencrabs"
-version = "0.2.96"
+version = "0.2.95"
 edition = "2024"
 rust-version = "1.91"
 authors = ["Adolfo Usier <adolfo@meetneura.ai>"]
@@ -212,5 +212,9 @@ path = "src/benches/database.rs"
 name = "memory"
 harness = false
 path = "src/benches/memory.rs"
+
+[[example]]
+name = "browser_test"
+required-features = ["browser"]
 
 [lints.clippy]

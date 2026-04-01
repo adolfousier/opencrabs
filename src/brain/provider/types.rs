@@ -226,6 +226,14 @@ pub struct TokenUsage {
     /// Cache read input tokens (Anthropic-specific)
     #[serde(default)]
     pub cache_read_tokens: u32,
+    /// Billing: cumulative cache creation across all CLI tool rounds.
+    /// For non-CLI providers or single-round calls, this stays 0 and
+    /// cache_creation_tokens is used for both context and billing.
+    #[serde(default)]
+    pub billing_cache_creation: u32,
+    /// Billing: cumulative cache read across all CLI tool rounds.
+    #[serde(default)]
+    pub billing_cache_read: u32,
 }
 
 impl TokenUsage {
@@ -235,7 +243,25 @@ impl TokenUsage {
     }
 
     /// All tokens including cache — for billing/usage display.
+    /// Uses cumulative billing fields when available (CLI multi-round),
+    /// falls back to per-call cache fields for single-round providers.
     pub fn billable_input(&self) -> u32 {
+        let cc = if self.billing_cache_creation > 0 {
+            self.billing_cache_creation
+        } else {
+            self.cache_creation_tokens
+        };
+        let cr = if self.billing_cache_read > 0 {
+            self.billing_cache_read
+        } else {
+            self.cache_read_tokens
+        };
+        self.input_tokens + cc + cr
+    }
+
+    /// Context window tokens — per-call cache values representing
+    /// the actual prompt size sent to the model on the last API call.
+    pub fn context_input(&self) -> u32 {
         self.input_tokens + self.cache_creation_tokens + self.cache_read_tokens
     }
 

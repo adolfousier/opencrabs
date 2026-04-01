@@ -331,10 +331,27 @@ impl AgentService {
             }
         }
 
-        // Auto-compact: triggers at >80% usage
-        let compaction_result = self
-            .enforce_context_budget(session_id, &mut context, &model_name, &progress_callback)
-            .await;
+        // Detect CLI provider once (doesn't change during the loop)
+        let is_cli_provider = self
+            .provider
+            .read()
+            .map(|p| p.cli_handles_tools())
+            .unwrap_or(false);
+
+        // CLI providers manage their own context window internally.
+        // Keep our tiktoken estimate from DB messages as-is — it's a reasonable
+        // approximation. Don't reset to 0, because CLI cache tokens (used for
+        // calibration below) are cumulative across internal tool rounds, not
+        // the actual context window size.
+
+        // Auto-compact: triggers at >65% usage.
+        // CLI providers manage their own context window — skip our compaction entirely.
+        let compaction_result = if is_cli_provider {
+            None
+        } else {
+            self.enforce_context_budget(session_id, &mut context, &model_name, &progress_callback)
+                .await
+        };
 
         if let Some(ref summary) = compaction_result {
             // Persist compaction marker to DB so restarts load from this point
@@ -391,13 +408,6 @@ impl AgentService {
         let mut recent_tool_calls: Vec<String> = Vec::new(); // Track tool calls to detect loops
         let mut stream_retry_count = 0u32; // Track consecutive stream drop retries
         const MAX_STREAM_RETRIES: u32 = 2; // Retry up to 2 times on dropped streams
-
-        // Detect CLI provider once (doesn't change during the loop)
-        let is_cli_provider = self
-            .provider
-            .read()
-            .map(|p| p.cli_handles_tools())
-            .unwrap_or(false);
 
         // Ordered content segments for CLI providers — tracks text and tool markers
         // in the exact order they stream, so DB persistence preserves interleaving.
@@ -488,11 +498,18 @@ impl AgentService {
                 cb(session_id, ProgressEvent::Thinking);
             }
 
-            // Enforce 80% budget before every API call
-            if let Some(ref summary) = self
-                .enforce_context_budget(session_id, &mut context, &model_name, &progress_callback)
+            // Enforce 65% budget before every API call (skip for CLI — it manages its own context)
+            if let Some(ref summary) = if is_cli_provider {
+                None
+            } else {
+                self.enforce_context_budget(
+                    session_id,
+                    &mut context,
+                    &model_name,
+                    &progress_callback,
+                )
                 .await
-            {
+            } {
                 // Persist compaction marker to DB so restarts load from this point
                 let compaction_marker = format!(
                     "[CONTEXT COMPACTION — The conversation was automatically compacted. \
@@ -757,40 +774,58 @@ impl AgentService {
             };
             total_input_tokens += call_input_tokens;
             total_output_tokens += response.usage.output_tokens;
-            total_cache_creation += response.usage.cache_creation_tokens;
-            total_cache_read += response.usage.cache_read_tokens;
+            // Use billing fields (cumulative across CLI rounds) when available
+            total_cache_creation += if response.usage.billing_cache_creation > 0 {
+                response.usage.billing_cache_creation
+            } else {
+                response.usage.cache_creation_tokens
+            };
+            total_cache_read += if response.usage.billing_cache_read > 0 {
+                response.usage.billing_cache_read
+            } else {
+                response.usage.cache_read_tokens
+            };
 
-            // Calibrate context token count with the API's real input_tokens.
-            // Even with tiktoken, there's some drift since Anthropic's tokenizer differs slightly.
-            // The API knows the exact count — use it to keep our tracking honest.
-            let api_input = response.usage.input_tokens as usize;
-            let tool_overhead = self.actual_tool_schema_tokens();
-            let real_message_tokens = api_input.saturating_sub(tool_overhead);
-            // Sanity: real_message_tokens must be at least 100 — anything lower
-            // means the provider reported garbage input_tokens or the tool_overhead
-            // estimate is wildly off. Also reject calibrations that would drop the
-            // count by more than 80 % (likely a provider bug, not real drift).
-            let min_sane = 100;
-            let max_drop_ratio = 0.2; // don't drop below 20% of current estimate
-            let min_after_drop = (context.token_count as f64 * max_drop_ratio) as usize;
-            if real_message_tokens >= min_sane && real_message_tokens >= min_after_drop {
-                let drift = (context.token_count as f64 - real_message_tokens as f64).abs();
-                if drift > 5000.0 {
+            // Calibrate context token count from the provider's reported usage.
+            //
+            // CLI providers: use context_input() which gives the LAST round's
+            // per-call cache tokens (actual context window), NOT cumulative billing.
+            if is_cli_provider {
+                let cli_context = response.usage.context_input() as usize;
+                if cli_context > 0 {
                     tracing::info!(
-                        "Token calibration: estimated {} → API actual {} (drift: {:.0})",
+                        "CLI context calibration: {} → {} (from per-call cache tokens)",
                         context.token_count,
-                        real_message_tokens,
-                        drift,
+                        cli_context,
                     );
-                    context.token_count = real_message_tokens;
+                    context.token_count = cli_context;
                 }
-            } else if real_message_tokens > 0 && real_message_tokens < min_sane {
-                tracing::warn!(
-                    "Token calibration skipped: api_input={}, tool_overhead={}, result={} (below sanity threshold)",
-                    api_input,
-                    tool_overhead,
-                    real_message_tokens,
-                );
+            } else {
+                let api_input = response.usage.input_tokens as usize;
+                let tool_overhead = self.actual_tool_schema_tokens();
+                let real_message_tokens = api_input.saturating_sub(tool_overhead);
+                let min_sane = 100;
+                let max_drop_ratio = 0.2;
+                let min_after_drop = (context.token_count as f64 * max_drop_ratio) as usize;
+                if real_message_tokens >= min_sane && real_message_tokens >= min_after_drop {
+                    let drift = (context.token_count as f64 - real_message_tokens as f64).abs();
+                    if drift > 5000.0 {
+                        tracing::info!(
+                            "Token calibration: estimated {} → API actual {} (drift: {:.0})",
+                            context.token_count,
+                            real_message_tokens,
+                            drift,
+                        );
+                        context.token_count = real_message_tokens;
+                    }
+                } else if real_message_tokens > 0 && real_message_tokens < min_sane {
+                    tracing::warn!(
+                        "Token calibration skipped: api_input={}, tool_overhead={}, result={} (below sanity threshold)",
+                        api_input,
+                        tool_overhead,
+                        real_message_tokens,
+                    );
+                }
             }
             // Fire real-time token count update after every API response
             if let Some(ref cb) = progress_callback {
@@ -802,16 +837,19 @@ impl AgentService {
                 cb(session_id, ProgressEvent::TokenCount(context.token_count));
             }
 
-            // Post-calibration compaction check.
-            // CLI providers handle tools internally — their API input_tokens reflects
-            // the CLI's full internal context (dozens of tool turns) which can grow to
-            // 200k+ while our pre-call estimate stays at ~8k. The budget check at the
-            // top of the loop never catches this because we only run 1 iteration.
-            // After calibration corrects our count, enforce the budget immediately.
-            if let Some(ref summary) = self
-                .enforce_context_budget(session_id, &mut context, &model_name, &progress_callback)
+            // Post-calibration compaction check (API providers only).
+            // CLI providers handle their own context — no compaction needed from us.
+            if let Some(ref summary) = if is_cli_provider {
+                None
+            } else {
+                self.enforce_context_budget(
+                    session_id,
+                    &mut context,
+                    &model_name,
+                    &progress_callback,
+                )
                 .await
-            {
+            } {
                 let compaction_marker = format!(
                     "[CONTEXT COMPACTION — The conversation was automatically compacted \
                      after token calibration revealed high context usage.]\n\n{}",
@@ -1732,7 +1770,7 @@ impl AgentService {
             };
             context.add_message(tool_result_msg);
 
-            // Fire token count update after tool results are added — keeps TUI in sync
+            // Fire token count update after tool results are added — keeps TUI in sync.
             if let Some(ref cb) = progress_callback {
                 cb(session_id, ProgressEvent::TokenCount(context.token_count));
             }
@@ -1740,11 +1778,18 @@ impl AgentService {
                 cb(session_id, ProgressEvent::TokenCount(context.token_count));
             }
 
-            // Enforce 80% budget after tool results (results can be massive)
-            if let Some(ref summary) = self
-                .enforce_context_budget(session_id, &mut context, &model_name, &progress_callback)
+            // Enforce 65% budget after tool results (skip for CLI — it manages its own context)
+            if let Some(ref summary) = if is_cli_provider {
+                None
+            } else {
+                self.enforce_context_budget(
+                    session_id,
+                    &mut context,
+                    &model_name,
+                    &progress_callback,
+                )
                 .await
-            {
+            } {
                 // Persist compaction marker to DB so restarts load from this point
                 let compaction_marker = format!(
                     "[CONTEXT COMPACTION — The conversation was automatically compacted. \
@@ -1839,6 +1884,7 @@ impl AgentService {
                         output_tokens: total_output_tokens,
                         cache_creation_tokens: total_cache_creation,
                         cache_read_tokens: total_cache_read,
+                        ..Default::default()
                     },
                     stop_reason: Some(crate::brain::provider::StopReason::EndTurn),
                 }
@@ -1907,6 +1953,7 @@ impl AgentService {
                 output_tokens: total_output_tokens,
                 cache_creation_tokens: total_cache_creation,
                 cache_read_tokens: total_cache_read,
+                ..Default::default()
             },
             context_tokens: context.token_count as u32,
             cost,
