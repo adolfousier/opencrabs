@@ -50,6 +50,21 @@ Use these **exact parameter names** when calling tools:
 | `channel_search` | `operation` | `channel`, `chat_id`, `query`, `n` |
 | `cron_manage` | `action` | `name`, `cron`, `tz`, `prompt`, `provider`, `model`, `thinking`, `auto_approve`, `deliver_to`, `job_id`, `enabled` |
 | `slack_send` | `action` | `message`, `channel_id`, `thread_ts`, `message_ts`, `emoji`, `user_id`, `topic`, `blocks`, `limit`, `file_path`, `caption` |
+| `notebook_edit` | `path`, `operation` | `cell_type`, `source`, `position`, `index`, `create_backup` |
+| `parse_document` | `path` | `max_chars`, `pages`, `include_metadata` |
+| `memory_search` | `query` | `n` |
+| `config_manager` | `operation` | `section`, `key`, `value`, `command_name`, `command_description`, `command_prompt`, `command_action`, `path` |
+| `tool_manage` | `action` | `name`, `description`, `executor`, `method`, `url`, `headers`, `command`, `params`, `requires_approval`, `timeout_secs` |
+| `a2a_send` | `action`, `url` | `message`, `task_id`, `context_id`, `api_key` |
+| `whatsapp_send` | `message` | `phone` |
+| `whatsapp_connect` | — | `allowed_phones` |
+| `browser_navigate` | `url` | `headless` |
+| `browser_click` | `selector` | — |
+| `browser_type` | `text` | `selector` |
+| `browser_screenshot` | — | `selector` |
+| `browser_eval` | `script` | — |
+| `browser_content` | — | `selector`, `text_only` |
+| `browser_wait` | — | `selector`, `timeout_secs`, `delay_secs` |
 | `evolve` | — | `check_only` |
 | `rebuild` | — | — |
 | `spawn_agent` | `prompt` | `label` |
@@ -82,6 +97,15 @@ Use these **exact parameter names** when calling tools:
 > **`cron_manage` actions (5):** `create` (schedule a new cron job), `list` (show all jobs), `delete` (remove a job by id), `enable` (activate a paused job), `disable` (pause a job without deleting). Jobs run in isolated sessions with configurable provider/model/thinking. Use `deliver_to` to send results to a channel (e.g. `telegram:chat_id`, `discord:channel_id`). Cron expressions follow standard 5-field format (min hour dom mon dow). See AGENTS.md for best practices on heartbeat vs cron.
 > **`evolve`:** Download the latest OpenCrabs release binary from GitHub and hot-restart. Use `check_only: true` to check for updates without installing. Works on all platforms (macOS arm64/amd64, Linux arm64/amd64, Windows amd64). No Rust toolchain needed — downloads pre-built binaries. Falls back to legacy asset naming for older releases. Available as `/evolve` slash command on TUI and all channels.
 > **`rebuild`:** Build OpenCrabs from source (`cargo build --release`) and hot-restart. Use when you need to build from source (e.g. after editing code). Requires Rust toolchain. Available as `/rebuild` slash command.
+> **`notebook_edit`:** Edit Jupyter notebooks (.ipynb). Operations: `add_cell` (insert a new cell), `edit_cell` (modify cell source), `delete_cell` (remove by index), `move_cell` (reorder). `cell_type` is `code` or `markdown`. `position` is insertion index for `add_cell`.
+> **`parse_document`:** Extract text from PDF, DOCX, HTML, and other document formats. Returns plain text content. Use `pages` to limit PDF page range (e.g. `"1-5"`). Use `max_chars` to truncate long documents.
+> **`memory_search`:** Hybrid semantic search across past memory logs. Combines FTS5 keyword search + vector embeddings (768-dim, local GGUF model) via Reciprocal Rank Fusion. No API key needed, runs entirely offline. `n` controls number of results (default 5).
+> **`config_manager`:** Read/write `config.toml` and `commands.toml` at runtime. Operations: `read_config` (read a section or key), `write_config` (set a key), `add_command` (create a slash command), `remove_command` (delete one), `list_commands` (show all), `set_working_directory` (change CWD). Changes are picked up by the config watcher within ~300ms.
+> **`tool_manage`:** Manage runtime tools defined in `tools.toml`. Actions: `list` (show all tools), `add` (create new tool), `remove` (delete tool), `enable`/`disable` (toggle), `reload` (re-read tools.toml). Executor is `http` or `shell`. Template variables (`{{param}}`) are substituted in URL/command.
+> **`a2a_send`:** Send tasks to remote A2A-compatible agents. Actions: `discover` (fetch Agent Card), `send` (send task message), `get` (check task status), `cancel` (cancel running task). `url` is the agent's base URL. `context_id` links multiple messages in a conversation.
+> **`whatsapp_send`:** Send a WhatsApp message. `message` is the text content. `phone` is the recipient phone number (optional — defaults to the current chat).
+> **`whatsapp_connect`:** Connect to WhatsApp via QR code pairing. `allowed_phones` filters which numbers can interact with the bot.
+> **Browser tools:** Auto-detect and connect to your default Chromium-based browser (Chrome, Brave, Edge, Arc, Vivaldi, Opera, Chromium). Uses native profile (cookies, logins, extensions). `browser_navigate` launches the browser if not connected. `headless: true` runs without visible window. `browser_content` with `text_only: true` strips HTML tags. `browser_wait` polls every 200ms until `selector` appears or `timeout_secs` expires. `browser_eval` runs arbitrary JavaScript and returns the result. All browser tools share one persistent browser session per OpenCrabs instance.
 > **Slack:** Always use `slack_send` instead of `http_request` for Slack — credentials handled securely. `thread_ts` and `message_ts` are Slack timestamps (e.g. `1503435956.000247`). Emoji names have no colons (e.g. `thumbsup`).
 > **`slack_send` actions (17):** `send`, `reply`, `react`, `unreact`, `edit`, `delete`, `pin`, `unpin`, `get_messages`, `get_channel`, `list_channels`, `get_user`, `list_members`, `kick_user`, `set_topic`, `send_blocks`, `send_file`
 
