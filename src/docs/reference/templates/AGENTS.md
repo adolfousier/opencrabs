@@ -56,9 +56,42 @@ Compaction triggers automatically at 80% context usage. The system generates a c
 - **DO NOT load in shared contexts** (Discord, group chats, sessions with other people)
 - This is for **security** — contains personal context that shouldn't leak to strangers
 - You can **read, edit, and update** MEMORY.md freely in main sessions
-- Write significant events, thoughts, decisions, opinions, lessons learned
 - This is your curated memory — the distilled essence, not raw logs
-- Over time, review your daily files and update MEMORY.md with what's worth keeping
+
+### 🔥 MANDATORY Memory Triggers — Write to MEMORY.md Immediately When:
+
+**User corrects you or gives feedback:**
+- "Don't do X" → store as a rule with WHY so you never repeat it
+- "Always do Y" → store as a preference
+- "That's wrong because Z" → store the lesson learned
+- This is the #1 use of memory. If you get corrected and don't store it, you WILL repeat the mistake.
+
+**User states a preference or workflow rule:**
+- Build commands, CI patterns, deploy steps, naming conventions
+- "Use clippy not cargo check" → memory. "Never push without asking" → memory.
+
+**You make a mistake worth avoiding:**
+- Silent errors you missed, wrong assumptions, broken patterns
+- Store the root cause and the correct approach — not the fix itself (that's in git)
+
+**User shares context about people, services, or environments:**
+- "The staging server is at X" → memory
+- "Talk to Y about Z" → memory
+- Credentials locations, API endpoints, team roles
+
+**CRITICAL RULE: Write BEFORE you respond.** When a trigger fires (correction, preference, mistake), append to MEMORY.md FIRST, then reply to the user. Not after. Not later. Not "I'll remember that." WRITE IT. If you say "noted" or "got it" without writing to MEMORY.md, you lied — you'll forget it next session.
+
+Format: one-liner rules. Not paragraphs. Not explanations. Just the rule and optionally why.
+```
+- NEVER push without explicit user approval — violated this twice, user was furious
+- Use cargo clippy --all-features, NEVER cargo check or cargo build
+- Config write inside ConfigWatcher callback = infinite reload loop → crash
+```
+
+**What does NOT go in memory:**
+- Commit hashes, file lists, release notes — that's git history
+- Architecture docs, design decisions — those go in dedicated docs
+- Debugging steps — the fix is in the code, the context is in the commit message
 
 ### 📝 Write It Down - No "Mental Notes"!
 - **Memory is limited** — if you want to remember something, WRITE IT TO A FILE
