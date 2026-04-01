@@ -214,18 +214,34 @@ pub enum StopReason {
 }
 
 /// Token usage information
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct TokenUsage {
-    /// Input tokens
+    /// Input tokens (non-cached)
     pub input_tokens: u32,
     /// Output tokens
     pub output_tokens: u32,
+    /// Cache creation input tokens (Anthropic-specific)
+    #[serde(default)]
+    pub cache_creation_tokens: u32,
+    /// Cache read input tokens (Anthropic-specific)
+    #[serde(default)]
+    pub cache_read_tokens: u32,
 }
 
 impl TokenUsage {
-    /// Total tokens used
+    /// Non-cached tokens only — for context window tracking.
     pub fn total(&self) -> u32 {
         self.input_tokens + self.output_tokens
+    }
+
+    /// All tokens including cache — for billing/usage display.
+    pub fn billable_input(&self) -> u32 {
+        self.input_tokens + self.cache_creation_tokens + self.cache_read_tokens
+    }
+
+    /// Total billable tokens (input + cache + output).
+    pub fn billable_total(&self) -> u32 {
+        self.billable_input() + self.output_tokens
     }
 }
 
@@ -321,6 +337,7 @@ mod tests {
         let usage = TokenUsage {
             input_tokens: 100,
             output_tokens: 200,
+            ..Default::default()
         };
         assert_eq!(usage.total(), 300);
     }

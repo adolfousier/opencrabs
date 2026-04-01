@@ -52,6 +52,7 @@ impl Provider for ArgTooLongMockProvider {
             usage: TokenUsage {
                 input_tokens: 100,
                 output_tokens: 50,
+                ..Default::default()
             },
         })
     }
@@ -78,6 +79,7 @@ impl Provider for ArgTooLongMockProvider {
                         usage: TokenUsage {
                             input_tokens: 50,
                             output_tokens: 0,
+                            ..Default::default()
                         },
                     },
                 }))
@@ -110,6 +112,7 @@ impl Provider for ArgTooLongMockProvider {
                     usage: TokenUsage {
                         input_tokens: 50,
                         output_tokens: 10,
+                        ..Default::default()
                     },
                 }))
                 .await;
@@ -169,6 +172,7 @@ impl Provider for ContextLengthMockProvider {
             usage: TokenUsage {
                 input_tokens: 100,
                 output_tokens: 50,
+                ..Default::default()
             },
         })
     }
@@ -191,6 +195,7 @@ impl Provider for ContextLengthMockProvider {
                         usage: TokenUsage {
                             input_tokens: 50,
                             output_tokens: 0,
+                            ..Default::default()
                         },
                     },
                 }))
@@ -223,6 +228,7 @@ impl Provider for ContextLengthMockProvider {
                     usage: TokenUsage {
                         input_tokens: 50,
                         output_tokens: 10,
+                        ..Default::default()
                     },
                 }))
                 .await;

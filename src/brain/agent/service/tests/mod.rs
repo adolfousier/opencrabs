@@ -34,6 +34,7 @@ impl Provider for MockProvider {
             usage: TokenUsage {
                 input_tokens: 10,
                 output_tokens: 20,
+                ..Default::default()
             },
         })
     }
@@ -135,6 +136,7 @@ impl Provider for MockProviderWithTools {
                 usage: TokenUsage {
                     input_tokens: 10,
                     output_tokens: 20,
+                    ..Default::default()
                 },
             })
         } else {
@@ -148,6 +150,7 @@ impl Provider for MockProviderWithTools {
                 usage: TokenUsage {
                     input_tokens: 15,
                     output_tokens: 25,
+                    ..Default::default()
                 },
             })
         }
@@ -356,6 +359,7 @@ impl Provider for MockProviderWithModel {
             usage: TokenUsage {
                 input_tokens: 10,
                 output_tokens: 20,
+                ..Default::default()
             },
         })
     }
@@ -459,6 +463,7 @@ impl Provider for MockProviderWithNamedTool {
                 usage: TokenUsage {
                     input_tokens: 10,
                     output_tokens: 20,
+                    ..Default::default()
                 },
             })
         } else {
@@ -472,6 +477,7 @@ impl Provider for MockProviderWithNamedTool {
                 usage: TokenUsage {
                     input_tokens: 15,
                     output_tokens: 25,
+                    ..Default::default()
                 },
             })
         }
@@ -607,6 +613,7 @@ impl Provider for MockProviderWithTwoToolCalls {
                 usage: TokenUsage {
                     input_tokens: 10,
                     output_tokens: 20,
+                    ..Default::default()
                 },
             })
         } else {
@@ -620,6 +627,7 @@ impl Provider for MockProviderWithTwoToolCalls {
                 usage: TokenUsage {
                     input_tokens: 15,
                     output_tokens: 25,
+                    ..Default::default()
                 },
             })
         }

@@ -160,6 +160,7 @@ mod fallback_runtime {
                     usage: crate::brain::provider::TokenUsage {
                         input_tokens: 0,
                         output_tokens: 0,
+                        ..Default::default()
                     },
                 })
             }

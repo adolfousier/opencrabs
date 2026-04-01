@@ -252,6 +252,7 @@ impl Provider for OpenCodeCliProvider {
         let mut usage = TokenUsage {
             input_tokens: 0,
             output_tokens: 0,
+            ..Default::default()
         };
         let mut text_buf = String::new();
 
@@ -414,6 +415,7 @@ impl Provider for OpenCodeCliProvider {
                                         usage: TokenUsage {
                                             input_tokens: 0,
                                             output_tokens: 0,
+                                            ..Default::default()
                                         },
                                     },
                                 }))
@@ -434,6 +436,7 @@ impl Provider for OpenCodeCliProvider {
                                         usage: TokenUsage {
                                             input_tokens: 0,
                                             output_tokens: 0,
+                                            ..Default::default()
                                         },
                                     },
                                 }))
@@ -477,6 +480,7 @@ impl Provider for OpenCodeCliProvider {
                                         usage: TokenUsage {
                                             input_tokens: 0,
                                             output_tokens: 0,
+                                            ..Default::default()
                                         },
                                     },
                                 }))
@@ -531,6 +535,7 @@ impl Provider for OpenCodeCliProvider {
                                     usage: TokenUsage {
                                         input_tokens,
                                         output_tokens,
+                                        ..Default::default()
                                     },
                                 }))
                                 .await;
@@ -674,6 +679,7 @@ impl Provider for OpenCodeCliProvider {
                         usage: TokenUsage {
                             input_tokens: 0,
                             output_tokens: 0,
+                            ..Default::default()
                         },
                     }))
                     .await;

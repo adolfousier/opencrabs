@@ -610,6 +610,7 @@ impl OpenAIProvider {
             usage: TokenUsage {
                 input_tokens: response.usage.prompt_tokens.unwrap_or(0),
                 output_tokens: response.usage.completion_tokens.unwrap_or(0),
+                ..Default::default()
             },
         }
     }
@@ -981,8 +982,7 @@ impl Provider for OpenAIProvider {
                                             },
                                             usage: crate::brain::provider::types::TokenUsage {
                                                 input_tokens: total_input_tokens as u32,
-                                                output_tokens: 0,
-                                            },
+                                                output_tokens: 0, ..Default::default() },
                                         }));
                                     }
                                     events.push(Ok(StreamEvent::MessageStop));
@@ -1018,8 +1018,7 @@ impl Provider for OpenAIProvider {
                                                     role: Role::Assistant,
                                                     usage: crate::brain::provider::types::TokenUsage {
                                                         input_tokens: 0,
-                                                        output_tokens: 0,
-                                                    },
+                                                        output_tokens: 0, ..Default::default() },
                                                 },
                                             }));
                                         }
@@ -1197,8 +1196,7 @@ impl Provider for OpenAIProvider {
                                                     },
                                                     usage: crate::brain::provider::types::TokenUsage {
                                                         input_tokens: raw_input,
-                                                        output_tokens: raw_output,
-                                                    },
+                                                        output_tokens: raw_output, ..Default::default() },
                                                 }));
                                                 events.push(Ok(StreamEvent::MessageStop));
                                             } else {
@@ -1224,8 +1222,7 @@ impl Provider for OpenAIProvider {
                                                         },
                                                         usage: crate::brain::provider::types::TokenUsage {
                                                             input_tokens: input,
-                                                            output_tokens: output,
-                                                        },
+                                                            output_tokens: output, ..Default::default() },
                                                     }));
                                                     events.push(Ok(StreamEvent::MessageStop));
                                                 }

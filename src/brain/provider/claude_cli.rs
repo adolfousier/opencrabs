@@ -258,16 +258,11 @@ struct CliUsage {
 }
 
 impl CliUsage {
-    /// Non-cached input tokens only.
-    /// The CLI's cache_creation and cache_read tokens are its own system
-    /// prompt being cached by Anthropic — not conversation content we control.
-    /// Including them inflates our context tracking and misleads the TUI display.
+    /// Full token count including cache — this is the real usage.
+    /// Cache tokens DO cost money (cache_read at ~10% of input rate,
+    /// cache_creation at ~125%). Excluding them caused near-zero token
+    /// reporting since most CLI context is prompt-cached.
     fn total_input(&self) -> u32 {
-        self.input_tokens
-    }
-
-    /// Full token count including cache (for cost/billing and debug logging).
-    fn total_with_cache(&self) -> u32 {
         self.input_tokens + self.cache_creation_input_tokens + self.cache_read_input_tokens
     }
 }
@@ -282,10 +277,7 @@ impl Provider for ClaudeCliProvider {
         let mut model = String::new();
         let mut content = Vec::new();
         let mut stop_reason = None;
-        let mut usage = TokenUsage {
-            input_tokens: 0,
-            output_tokens: 0,
-        };
+        let mut usage = TokenUsage::default();
 
         // Simple accumulator — text blocks only
         let mut text_buf = String::new();
@@ -295,7 +287,7 @@ impl Provider for ClaudeCliProvider {
                 StreamEvent::MessageStart { message } => {
                     id = message.id;
                     model = message.model;
-                    usage.input_tokens = message.usage.input_tokens;
+                    usage = message.usage;
                 }
                 StreamEvent::ContentBlockDelta {
                     delta: ContentDelta::TextDelta { text },
@@ -306,6 +298,12 @@ impl Provider for ClaudeCliProvider {
                 StreamEvent::MessageDelta { delta: d, usage: u } => {
                     stop_reason = d.stop_reason;
                     usage.output_tokens = u.output_tokens;
+                    if u.cache_creation_tokens > 0 {
+                        usage.cache_creation_tokens = u.cache_creation_tokens;
+                    }
+                    if u.cache_read_tokens > 0 {
+                        usage.cache_read_tokens = u.cache_read_tokens;
+                    }
                 }
                 StreamEvent::MessageStop => break,
                 _ => {}
@@ -418,6 +416,8 @@ impl Provider for ClaudeCliProvider {
             let mut current_block_chars: usize = 0;
             let mut input_tokens: u32 = 0;
             let mut output_tokens: u32 = 0;
+            let mut cache_creation_tokens_acc: u32 = 0;
+            let mut cache_read_tokens_acc: u32 = 0;
             let mut result_received = false;
             let mut line_count = 0u32;
             // Track block index offset across tool rounds — each CLI turn
@@ -538,6 +538,10 @@ impl Provider for ClaudeCliProvider {
                                         if round_input > input_tokens {
                                             input_tokens = round_input;
                                         }
+                                        // Track cache tokens separately for cost breakdown
+                                        cache_creation_tokens_acc =
+                                            round_usage.cache_creation_input_tokens;
+                                        cache_read_tokens_acc = round_usage.cache_read_input_tokens;
                                     }
                                 }
                                 // Send Ping to prevent idle timeout during tool execution
@@ -653,8 +657,17 @@ impl Provider for ClaudeCliProvider {
                                 .model
                                 .map(|m| Self::normalize_model(&m))
                                 .unwrap_or_else(|| original_model.clone());
-                            let input_tokens =
-                                message.usage.as_ref().map(|u| u.total_input()).unwrap_or(0);
+                            let (input_tokens, cc, cr) = message
+                                .usage
+                                .as_ref()
+                                .map(|u| {
+                                    (
+                                        u.total_input(),
+                                        u.cache_creation_input_tokens,
+                                        u.cache_read_input_tokens,
+                                    )
+                                })
+                                .unwrap_or((0, 0, 0));
 
                             let _ = tx
                                 .send(Ok(StreamEvent::MessageStart {
@@ -665,6 +678,8 @@ impl Provider for ClaudeCliProvider {
                                         usage: TokenUsage {
                                             input_tokens,
                                             output_tokens: 0,
+                                            cache_creation_tokens: cc,
+                                            cache_read_tokens: cr,
                                         },
                                     },
                                 }))
@@ -778,6 +793,7 @@ impl Provider for ClaudeCliProvider {
                                             usage: TokenUsage {
                                                 input_tokens: 0,
                                                 output_tokens: 0,
+                                                ..Default::default()
                                             },
                                         },
                                     }))
@@ -843,13 +859,18 @@ impl Provider for ClaudeCliProvider {
                             .unwrap_or(input_tokens);
                         if let Some(ref u) = usage {
                             tracing::debug!(
-                                "CLI session complete: input={}, cache_create={}, cache_read={}, total_with_cache={}",
+                                "CLI session complete: input={}, cache_create={}, cache_read={}, total={}",
                                 u.input_tokens,
                                 u.cache_creation_input_tokens,
                                 u.cache_read_input_tokens,
-                                u.total_with_cache()
+                                u.total_input()
                             );
                         }
+
+                        let (cache_creation, cache_read) = usage
+                            .as_ref()
+                            .map(|u| (u.cache_creation_input_tokens, u.cache_read_input_tokens))
+                            .unwrap_or((0, 0));
 
                         let _ = tx
                             .send(Ok(StreamEvent::MessageDelta {
@@ -860,6 +881,8 @@ impl Provider for ClaudeCliProvider {
                                 usage: TokenUsage {
                                     input_tokens: final_input,
                                     output_tokens: final_output,
+                                    cache_creation_tokens: cache_creation,
+                                    cache_read_tokens: cache_read,
                                 },
                             }))
                             .await;
@@ -906,6 +929,8 @@ impl Provider for ClaudeCliProvider {
                         usage: TokenUsage {
                             input_tokens,
                             output_tokens,
+                            cache_creation_tokens: cache_creation_tokens_acc,
+                            cache_read_tokens: cache_read_tokens_acc,
                         },
                     }))
                     .await;

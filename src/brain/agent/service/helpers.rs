@@ -65,6 +65,8 @@ impl AgentService {
         let mut stop_reason: Option<StopReason> = None;
         let mut input_tokens = 0u32;
         let mut output_tokens = 0u32;
+        let mut cache_creation_tokens = 0u32;
+        let mut cache_read_tokens = 0u32;
 
         // --- Text repetition detection ---
         // Some providers (e.g. MiniMax) loop the same content indefinitely without
@@ -372,6 +374,13 @@ impl AgentService {
                     if usage.output_tokens > output_tokens {
                         output_tokens = usage.output_tokens;
                     }
+                    // Cache tokens: take the max (running totals from CLI providers)
+                    if usage.cache_creation_tokens > cache_creation_tokens {
+                        cache_creation_tokens = usage.cache_creation_tokens;
+                    }
+                    if usage.cache_read_tokens > cache_read_tokens {
+                        cache_read_tokens = usage.cache_read_tokens;
+                    }
                 }
                 StreamEvent::MessageStop => break,
                 StreamEvent::Ping => {}
@@ -445,6 +454,8 @@ impl AgentService {
                 usage: TokenUsage {
                     input_tokens,
                     output_tokens,
+                    cache_creation_tokens,
+                    cache_read_tokens,
                 },
             },
             reasoning,

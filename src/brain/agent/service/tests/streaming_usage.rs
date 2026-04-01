@@ -33,6 +33,7 @@ impl Provider for MockDeferredUsageProvider {
             usage: TokenUsage {
                 input_tokens: self.input_tokens,
                 output_tokens: self.output_tokens,
+                ..Default::default()
             },
         })
     }
@@ -50,6 +51,7 @@ impl Provider for MockDeferredUsageProvider {
                     usage: TokenUsage {
                         input_tokens: 0,
                         output_tokens: 0,
+                        ..Default::default()
                     },
                 },
             }),
@@ -76,6 +78,7 @@ impl Provider for MockDeferredUsageProvider {
                 usage: TokenUsage {
                     input_tokens: 0,
                     output_tokens: 0,
+                    ..Default::default()
                 },
             }),
             // 4. Usage-only chunk — real usage, no stop_reason (deferred)
@@ -87,6 +90,7 @@ impl Provider for MockDeferredUsageProvider {
                 usage: TokenUsage {
                     input_tokens: self.input_tokens,
                     output_tokens: self.output_tokens,
+                    ..Default::default()
                 },
             }),
             // 5. MessageStop
@@ -144,6 +148,7 @@ impl Provider for MockInlineUsageProvider {
             usage: TokenUsage {
                 input_tokens: self.input_tokens,
                 output_tokens: self.output_tokens,
+                ..Default::default()
             },
         })
     }
@@ -160,6 +165,7 @@ impl Provider for MockInlineUsageProvider {
                     usage: TokenUsage {
                         input_tokens: self.input_tokens,
                         output_tokens: 0,
+                        ..Default::default()
                     },
                 },
             }),
@@ -185,6 +191,7 @@ impl Provider for MockInlineUsageProvider {
                 usage: TokenUsage {
                     input_tokens: self.input_tokens,
                     output_tokens: self.output_tokens,
+                    ..Default::default()
                 },
             }),
             Ok(StreamEvent::MessageStop),
@@ -319,6 +326,7 @@ async fn test_deferred_usage_with_tool_calls() {
                     usage: TokenUsage {
                         input_tokens: 8000,
                         output_tokens: 100,
+                        ..Default::default()
                     },
                 })
             } else {
@@ -332,6 +340,7 @@ async fn test_deferred_usage_with_tool_calls() {
                     usage: TokenUsage {
                         input_tokens: 9500,
                         output_tokens: 50,
+                        ..Default::default()
                     },
                 })
             }
@@ -368,6 +377,7 @@ async fn test_deferred_usage_with_tool_calls() {
                         usage: TokenUsage {
                             input_tokens: 0,
                             output_tokens: 0,
+                            ..Default::default()
                         },
                     },
                 }),
@@ -413,6 +423,7 @@ async fn test_deferred_usage_with_tool_calls() {
                 usage: TokenUsage {
                     input_tokens: 0,
                     output_tokens: 0,
+                    ..Default::default()
                 },
             }));
             events.push(Ok(StreamEvent::MessageDelta {
@@ -423,6 +434,7 @@ async fn test_deferred_usage_with_tool_calls() {
                 usage: TokenUsage {
                     input_tokens: input_tok,
                     output_tokens: output_tok,
+                    ..Default::default()
                 },
             }));
             events.push(Ok(StreamEvent::MessageStop));

@@ -329,8 +329,7 @@ impl Provider for WorkingMockProvider {
             stop_reason: Some(StopReason::EndTurn),
             usage: TokenUsage {
                 input_tokens: 10,
-                output_tokens: 20,
-            },
+                output_tokens: 20, ..Default::default() },
         })
     }
 

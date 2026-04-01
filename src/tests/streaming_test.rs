@@ -28,8 +28,7 @@ impl StreamingMockProvider {
                 role: Role::Assistant,
                 usage: TokenUsage {
                     input_tokens: 10,
-                    output_tokens: 0,
-                },
+                    output_tokens: 0, ..Default::default() },
             },
         }];
 
@@ -62,8 +61,7 @@ impl StreamingMockProvider {
             },
             usage: TokenUsage {
                 input_tokens: 10,
-                output_tokens: 20,
-            },
+                output_tokens: 20, ..Default::default() },
         });
 
         // Add message stop

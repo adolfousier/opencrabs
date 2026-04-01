@@ -278,6 +278,7 @@ impl GeminiProvider {
             usage: TokenUsage {
                 input_tokens,
                 output_tokens,
+                ..Default::default()
             },
         }
     }
@@ -460,6 +461,7 @@ impl Provider for GeminiProvider {
                                             usage: TokenUsage {
                                                 input_tokens: 0,
                                                 output_tokens: 0,
+                                                ..Default::default()
                                             },
                                         },
                                     }));

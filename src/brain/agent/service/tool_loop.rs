@@ -291,6 +291,7 @@ impl AgentService {
                         usage: crate::brain::provider::TokenUsage {
                             input_tokens: 0,
                             output_tokens: 0,
+                            ..Default::default()
                         },
                         context_tokens: context.token_count as u32,
                         cost: 0.0,
@@ -320,6 +321,7 @@ impl AgentService {
                         usage: crate::brain::provider::TokenUsage {
                             input_tokens: 0,
                             output_tokens: 0,
+                            ..Default::default()
                         },
                         context_tokens: context.token_count as u32,
                         cost: 0.0,
@@ -382,6 +384,8 @@ impl AgentService {
         let mut iteration = 0;
         let mut total_input_tokens = 0u32;
         let mut total_output_tokens = 0u32;
+        let mut total_cache_creation = 0u32;
+        let mut total_cache_read = 0u32;
         let mut final_response: Option<LLMResponse> = None;
         let mut accumulated_text = String::new(); // Collect text from all iterations (not just final)
         let mut recent_tool_calls: Vec<String> = Vec::new(); // Track tool calls to detect loops
@@ -753,6 +757,8 @@ impl AgentService {
             };
             total_input_tokens += call_input_tokens;
             total_output_tokens += response.usage.output_tokens;
+            total_cache_creation += response.usage.cache_creation_tokens;
+            total_cache_read += response.usage.cache_read_tokens;
 
             // Calibrate context token count with the API's real input_tokens.
             // Even with tiktoken, there's some drift since Anthropic's tokenizer differs slightly.
@@ -952,6 +958,10 @@ impl AgentService {
                     // Subtract the tokens we just counted — they'll be re-counted on retry
                     total_input_tokens -= response.usage.input_tokens;
                     total_output_tokens -= response.usage.output_tokens;
+                    total_cache_creation =
+                        total_cache_creation.saturating_sub(response.usage.cache_creation_tokens);
+                    total_cache_read =
+                        total_cache_read.saturating_sub(response.usage.cache_read_tokens);
                     // Don't increment iteration — this is a retry, not a new turn
                     iteration -= 1;
                     continue;
@@ -1797,24 +1807,14 @@ impl AgentService {
         // === GRACEFUL SAVE ON CANCEL/LOOP-BREAK ===
         // If we broke out of the loop without a final_response (cancellation, error, etc.)
         // but we have accumulated text/tool results, they're already in the DB from real-time persistence.
-        // Just ensure session usage is updated.
+        // Usage update is handled below in the unified path after response synthesis —
+        // doing it here too would double-count because the synthesized response (line below)
+        // still flows through the final update_session_usage call.
         if final_response.is_none() && !accumulated_text.is_empty() {
             tracing::info!(
                 "Loop broken without final response but accumulated text ({} chars) already persisted in real-time",
                 accumulated_text.len()
             );
-            // Also save token usage for what we consumed
-            let partial_tokens = total_input_tokens + total_output_tokens;
-            if partial_tokens > 0 {
-                let partial_cost = self
-                    .provider
-                    .read()
-                    .expect("provider lock poisoned")
-                    .calculate_cost(&model_name, total_input_tokens, total_output_tokens);
-                let _ = session_service
-                    .update_session_usage(session_id, partial_tokens as i32, partial_cost)
-                    .await;
-            }
         }
 
         // If the loop broke without a final_response but we have accumulated text,
@@ -1837,6 +1837,8 @@ impl AgentService {
                     usage: crate::brain::provider::TokenUsage {
                         input_tokens: total_input_tokens,
                         output_tokens: total_output_tokens,
+                        cache_creation_tokens: total_cache_creation,
+                        cache_read_tokens: total_cache_read,
                     },
                     stop_reason: Some(crate::brain::provider::StopReason::EndTurn),
                 }
@@ -1862,13 +1864,14 @@ impl AgentService {
         // The assistant message was already created and updated in real-time.
         // Now update with final token usage.
 
-        // Calculate total cost
-        let total_tokens = total_input_tokens + total_output_tokens;
+        // Calculate total cost — use billable tokens (includes cache) for cost/display
+        let billable_input = total_input_tokens + total_cache_creation + total_cache_read;
+        let total_tokens = billable_input + total_output_tokens;
         let cost = self
             .provider
             .read()
             .expect("provider lock poisoned")
-            .calculate_cost(&response.model, total_input_tokens, total_output_tokens);
+            .calculate_cost(&response.model, billable_input, total_output_tokens);
 
         // Update message with usage info
         message_service
@@ -1895,6 +1898,8 @@ impl AgentService {
             usage: crate::brain::provider::TokenUsage {
                 input_tokens: total_input_tokens,
                 output_tokens: total_output_tokens,
+                cache_creation_tokens: total_cache_creation,
+                cache_read_tokens: total_cache_read,
             },
             context_tokens: context.token_count as u32,
             cost,
