@@ -109,6 +109,94 @@ Use these **exact parameter names** when calling tools:
 > **Slack:** Always use `slack_send` instead of `http_request` for Slack — credentials handled securely. `thread_ts` and `message_ts` are Slack timestamps (e.g. `1503435956.000247`). Emoji names have no colons (e.g. `thumbsup`).
 > **`slack_send` actions (17):** `send`, `reply`, `react`, `unreact`, `edit`, `delete`, `pin`, `unpin`, `get_messages`, `get_channel`, `list_channels`, `get_user`, `list_members`, `kick_user`, `set_topic`, `send_blocks`, `send_file`
 
+## Browser Automation (CDP)
+
+OpenCrabs has **built-in browser control** via Chrome DevTools Protocol — no Node.js, no Playwright, pure Rust. Launches a real Chrome/Chromium instance and controls it programmatically.
+
+| Tool | What it does |
+|------|-------------|
+| `browser_navigate` | Navigate to URL. Pass `headless: false` for visible window. |
+| `browser_click` | Click element by CSS selector. |
+| `browser_type` | Type text into input field by selector. |
+| `browser_screenshot` | Full-page or element screenshot. Returns file path. |
+| `browser_eval` | Execute JavaScript in page context. Returns result. |
+| `browser_content` | Extract text/HTML from page or element. |
+| `browser_wait` | Wait for selector to appear or fixed delay. |
+
+- **Headless (default):** No visible window. Fast, low resources. Use for automation and scraping.
+- **Headed:** Visible Chrome window. Pass `headless: false`. Use for debugging.
+- **Compose workflows:** navigate → wait → click → type → screenshot is a typical flow.
+- **Screenshots return file paths.** Use `<<IMG:path>>` to send to channels.
+- **Requires** Chrome/Chromium installed. Feature-gated: `browser` flag (enabled with `--all-features`).
+
+---
+
+## Dynamic Tools (Runtime)
+
+Define tools in `~/.opencrabs/tools.toml` — callable immediately without restart. Managed via `tool_manage`.
+
+### tool_manage actions
+
+| Action | What |
+|--------|------|
+| `list` | Show all dynamic tools with enabled/disabled status |
+| `add` | Create new tool (persists to tools.toml) |
+| `remove` | Delete a tool |
+| `enable` / `disable` | Toggle without removing |
+| `reload` | Hot-reload from tools.toml |
+
+### Executor Types
+
+- **`http`** — Config: `method`, `url`, `headers`, `body_template`
+- **`shell`** — Config: `command`, `args`, `working_dir`
+
+### tools.toml Format
+
+```toml
+[[tools]]
+name = "check_api_health"
+description = "Check if the production API is responding"
+executor_type = "http"
+enabled = true
+
+[tools.executor_config]
+method = "GET"
+url = "https://api.example.com/health"
+
+[[tools]]
+name = "disk_usage"
+description = "Check disk usage on the system"
+executor_type = "shell"
+enabled = true
+
+[tools.executor_config]
+command = "df"
+args = ["-h"]
+```
+
+Dynamic tools appear in the LLM's tool list alongside compiled tools. The agent can call them autonomously.
+
+### Commands vs Tools
+
+| | `commands.toml` | `tools.toml` |
+|---|---|---|
+| **Triggered by** | User typing `/command` | Agent deciding to call a tool |
+| **Appears in** | Slash command menu | LLM tool list |
+| **Use case** | User shortcuts, macros | Agent-callable external integrations |
+
+---
+
+## Profile-Aware Paths
+
+All paths resolve through `opencrabs_home()`:
+- **Default profile:** `~/.opencrabs/`
+- **Named profile:** `~/.opencrabs/profiles/<name>/`
+- **Override:** `OPENCRABS_PROFILE` env var or `-p <name>` CLI flag
+
+Config, keys, brain files, DB, memory, logs — all scoped per profile. Token-lock isolation prevents two profiles from using the same bot credential.
+
+---
+
 ## System CLI Tools
 
 OpenCrabs can leverage any CLI tool installed on the host system via `bash`. Common ones worth knowing about:
