@@ -5,6 +5,22 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.95] - 2026-04-01
+
+### Added
+- **Up/Down arrow navigation for attached images** — Navigate between attached images in the input area using arrow keys. Visual indicator shows current position (e.g. "2/4"). Previously required detaching and reattaching to reorder
+
+### Fixed
+- **Config reload feedback loop causing silent crash** — Writing config inside a ConfigWatcher callback triggered an infinite reload cycle. Two additional triggers found and removed: `Config::write_key()` inside provider creation, and redundant `create_provider()` on every config reload event that never matched due to alias vs full model ID comparison
+- **Queued message ordering and Up-arrow dequeue** — Messages queued while the agent was processing could arrive out of order. Up-arrow now correctly dequeues the last queued message instead of the first
+- **E2E test timeouts** — `e2e_opencode_streaming` wrapped with 30s timeout to prevent test suite hang under concurrent load. Gemini fetch tests gracefully skip on API key/network failures instead of crashing the suite
+- **Profile test isolation on Windows** — `test_resolve_profile_home_with_env_var` race condition fixed (OnceLock shared across parallel tests). Token lock test skips alive-PID assertion on Windows where `OpenProcess` fails in restricted CI environments
+
+### Changed
+- **Brain file templates updated** — MEMORY.md template restructured as agent scratchpad for rules, corrections, and preferences (not a diary). AGENTS.md template adds mandatory memory triggers: write BEFORE responding when user corrects behavior, states preferences, or shares rules. TOOLS.md template adds 15 missing tools: `notebook_edit`, `parse_document`, `memory_search`, `config_manager`, `tool_manage`, `a2a_send`, `whatsapp_send`, `whatsapp_connect`, and 7 browser automation tools
+
+> **Existing users:** Your local brain files (`~/.opencrabs/*.md`) may be outdated. Ask your crab: *"Compare my brain files against the latest templates in `src/docs/reference/templates/` and append anything missing."* This will diff your AGENTS.md, TOOLS.md, and MEMORY.md against the updated templates and add new sections (memory triggers, missing tool docs, profile-aware paths) without overwriting your customizations
+
 ## [0.2.94] - 2026-03-31
 
 ### Added
@@ -1910,6 +1926,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.95]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.95
 [0.2.94]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.94
 [0.2.93]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.93
 [0.2.92]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.92
