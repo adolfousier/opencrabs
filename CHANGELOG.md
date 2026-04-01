@@ -5,6 +5,11 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.96] - 2026-04-01
+
+### Fixed
+- **CLI token tracking showing near-zero usage** — `CliUsage::total_input()` returned only `input_tokens` (1-3 per message), excluding `cache_creation_input_tokens` (~80K) and `cache_read_input_tokens` (~14K). Every CLI provider message burned real API credits but reported $0.00 cost and ~6 tokens. Now includes all cache tokens in usage tracking, cost calculation, and session stats. `TokenUsage` struct gains `cache_creation_tokens` and `cache_read_tokens` fields. All 14 provider and test files updated
+
 ## [0.2.95] - 2026-04-01
 
 ### Added
@@ -1926,6 +1931,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.96]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.96
 [0.2.95]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.95
 [0.2.94]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.94
 [0.2.93]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.93
