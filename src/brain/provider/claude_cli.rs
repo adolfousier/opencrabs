@@ -258,12 +258,11 @@ struct CliUsage {
 }
 
 impl CliUsage {
-    /// Full token count including cache — this is the real usage.
-    /// Cache tokens DO cost money (cache_read at ~10% of input rate,
-    /// cache_creation at ~125%). Excluding them caused near-zero token
-    /// reporting since most CLI context is prompt-cached.
+    /// Non-cached input tokens only. Cache tokens flow separately via
+    /// TokenUsage.cache_creation_tokens / cache_read_tokens fields.
+    /// tool_loop.rs combines them: billable = input + cache_create + cache_read.
     fn total_input(&self) -> u32 {
-        self.input_tokens + self.cache_creation_input_tokens + self.cache_read_input_tokens
+        self.input_tokens
     }
 }
 
@@ -867,10 +866,15 @@ impl Provider for ClaudeCliProvider {
                             );
                         }
 
-                        let (cache_creation, cache_read) = usage
+                        // Prefer the SSE-accumulated cache tokens — the CLI reports
+                        // cache_read/creation in message_delta SSE events, NOT in the
+                        // Result message.  Fall back to Result's usage if SSE had none.
+                        let (result_cc, result_cr) = usage
                             .as_ref()
                             .map(|u| (u.cache_creation_input_tokens, u.cache_read_input_tokens))
                             .unwrap_or((0, 0));
+                        let cache_creation = cache_creation_tokens_acc.max(result_cc);
+                        let cache_read = cache_read_tokens_acc.max(result_cr);
 
                         let _ = tx
                             .send(Ok(StreamEvent::MessageDelta {

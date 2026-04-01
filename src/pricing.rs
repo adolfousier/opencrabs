@@ -16,6 +16,12 @@ pub struct PricingEntry {
     pub prefix: String,
     pub input_per_m: f64,
     pub output_per_m: f64,
+    /// Cache write cost per million tokens (defaults to 1.25x input_per_m if absent)
+    #[serde(default)]
+    pub cache_write_per_m: Option<f64>,
+    /// Cache read cost per million tokens (defaults to 0.1x input_per_m if absent)
+    #[serde(default)]
+    pub cache_read_per_m: Option<f64>,
 }
 
 /// Per-provider block in the TOML file.
@@ -34,17 +40,36 @@ pub struct PricingConfig {
 }
 
 impl PricingConfig {
-    /// Calculate cost for a model + token counts.
-    /// Searches all providers, matches by prefix (case-insensitive, first match wins).
-    /// Returns 0.0 if no match found.
+    /// Calculate cost for a model + token counts (no cache breakdown).
+    /// Treats all input tokens at the regular input rate.
     pub fn calculate_cost(&self, model: &str, input_tokens: u32, output_tokens: u32) -> f64 {
+        self.calculate_cost_with_cache(model, input_tokens, output_tokens, 0, 0)
+    }
+
+    /// Calculate cost with full cache breakdown.
+    /// `input_tokens` = non-cached input only.
+    /// Cache write defaults to 1.25x input rate, cache read to 0.1x.
+    pub fn calculate_cost_with_cache(
+        &self,
+        model: &str,
+        input_tokens: u32,
+        output_tokens: u32,
+        cache_creation_tokens: u32,
+        cache_read_tokens: u32,
+    ) -> f64 {
         let m = model.to_lowercase();
         for block in self.providers.values() {
             for entry in &block.entries {
                 if m.contains(&entry.prefix.to_lowercase()) {
                     let input = (input_tokens as f64 / 1_000_000.0) * entry.input_per_m;
                     let output = (output_tokens as f64 / 1_000_000.0) * entry.output_per_m;
-                    return input + output;
+                    let cache_write_rate =
+                        entry.cache_write_per_m.unwrap_or(entry.input_per_m * 1.25);
+                    let cache_read_rate = entry.cache_read_per_m.unwrap_or(entry.input_per_m * 0.1);
+                    let cache_write =
+                        (cache_creation_tokens as f64 / 1_000_000.0) * cache_write_rate;
+                    let cache_read = (cache_read_tokens as f64 / 1_000_000.0) * cache_read_rate;
+                    return input + output + cache_write + cache_read;
                 }
             }
         }

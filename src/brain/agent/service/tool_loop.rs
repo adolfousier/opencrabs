@@ -1864,14 +1864,21 @@ impl AgentService {
         // The assistant message was already created and updated in real-time.
         // Now update with final token usage.
 
-        // Calculate total cost — use billable tokens (includes cache) for cost/display
+        // Calculate total cost with full cache breakdown for accurate pricing.
+        // input_tokens = non-cached, cache_creation/read tracked separately.
         let billable_input = total_input_tokens + total_cache_creation + total_cache_read;
         let total_tokens = billable_input + total_output_tokens;
         let cost = self
             .provider
             .read()
             .expect("provider lock poisoned")
-            .calculate_cost(&response.model, billable_input, total_output_tokens);
+            .calculate_cost_with_cache(
+                &response.model,
+                total_input_tokens,
+                total_output_tokens,
+                total_cache_creation,
+                total_cache_read,
+            );
 
         // Update message with usage info
         message_service

@@ -45,15 +45,20 @@ impl AgentService {
             .map_err(|e| AgentError::Database(e.to_string()))?;
 
         // Calculate total tokens and cost for this message
-        let total_tokens = response.usage.input_tokens + response.usage.output_tokens;
+        let billable_input = response.usage.input_tokens
+            + response.usage.cache_creation_tokens
+            + response.usage.cache_read_tokens;
+        let total_tokens = billable_input + response.usage.output_tokens;
         let cost = self
             .provider
             .read()
             .expect("provider lock poisoned")
-            .calculate_cost(
+            .calculate_cost_with_cache(
                 &response.model,
                 response.usage.input_tokens,
                 response.usage.output_tokens,
+                response.usage.cache_creation_tokens,
+                response.usage.cache_read_tokens,
             );
 
         // Update message with usage info

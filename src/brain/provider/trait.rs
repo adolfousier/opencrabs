@@ -75,6 +75,34 @@ pub trait Provider: Send + Sync {
 
     /// Calculate cost for token usage (in USD)
     fn calculate_cost(&self, model: &str, input_tokens: u32, output_tokens: u32) -> f64;
+
+    /// Calculate cost with full cache token breakdown.
+    /// Default: tries PricingConfig for cache-aware pricing, falls back to
+    /// `calculate_cost` with all input tokens at the regular rate.
+    fn calculate_cost_with_cache(
+        &self,
+        model: &str,
+        input_tokens: u32,
+        output_tokens: u32,
+        cache_creation_tokens: u32,
+        cache_read_tokens: u32,
+    ) -> f64 {
+        let cost = crate::pricing::PricingConfig::load().calculate_cost_with_cache(
+            model,
+            input_tokens,
+            output_tokens,
+            cache_creation_tokens,
+            cache_read_tokens,
+        );
+        if cost > 0.0 {
+            cost
+        } else {
+            // Fallback: no pricing entry matched — use provider's own rate
+            // treating all tokens (including cache) at the regular input rate.
+            let total_input = input_tokens + cache_creation_tokens + cache_read_tokens;
+            self.calculate_cost(model, total_input, output_tokens)
+        }
+    }
 }
 
 /// Provider capabilities
