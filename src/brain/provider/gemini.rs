@@ -5,7 +5,7 @@
 //!
 //! ## API Format
 //! - Base URL: `https://generativelanguage.googleapis.com/v1beta`
-//! - Auth: `?key={api_key}` query parameter
+//! - Auth: `x-goog-api-key` request header
 //! - Chat: `POST /models/{model}:generateContent`
 //! - Stream: `POST /models/{model}:streamGenerateContent?alt=sse`
 //!
@@ -69,14 +69,11 @@ impl GeminiProvider {
     fn generate_url(&self, model: &str, stream: bool) -> String {
         if stream {
             format!(
-                "{}/models/{}:streamGenerateContent?alt=sse&key={}",
-                GEMINI_BASE_URL, model, self.api_key
+                "{}/models/{}:streamGenerateContent?alt=sse",
+                GEMINI_BASE_URL, model
             )
         } else {
-            format!(
-                "{}/models/{}:generateContent?key={}",
-                GEMINI_BASE_URL, model, self.api_key
-            )
+            format!("{}/models/{}:generateContent", GEMINI_BASE_URL, model)
         }
     }
 
@@ -331,6 +328,7 @@ impl Provider for GeminiProvider {
                     .client
                     .post(&url)
                     .header("Content-Type", "application/json")
+                    .header("x-goog-api-key", &self.api_key)
                     .json(&body)
                     .send()
                     .await?;
@@ -384,6 +382,7 @@ impl Provider for GeminiProvider {
                     .client
                     .post(&url)
                     .header("Content-Type", "application/json")
+                    .header("x-goog-api-key", &self.api_key)
                     .json(&body)
                     .send()
                     .await?;
@@ -588,10 +587,7 @@ impl Provider for GeminiProvider {
 
     async fn fetch_models(&self) -> Vec<String> {
         // Fetch live model list from Gemini models API
-        let url = format!(
-            "{}/models?key={}&pageSize=100",
-            GEMINI_BASE_URL, self.api_key
-        );
+        let url = format!("{}/models?pageSize=100", GEMINI_BASE_URL);
 
         #[derive(serde::Deserialize)]
         struct ModelEntry {
@@ -602,7 +598,13 @@ impl Provider for GeminiProvider {
             models: Option<Vec<ModelEntry>>,
         }
 
-        match self.client.get(&url).send().await {
+        match self
+            .client
+            .get(&url)
+            .header("x-goog-api-key", &self.api_key)
+            .send()
+            .await
+        {
             Ok(resp) if resp.status().is_success() => {
                 match resp.json::<ModelsResponse>().await {
                     Ok(body) => {

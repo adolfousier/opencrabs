@@ -22,15 +22,15 @@ mod tests {
             }
         };
 
-        eprintln!("Key length: {}", key.len());
-        eprintln!("Key starts with: {}", &key[..key.len().min(6)]);
+        // Use header-based auth instead of query param to avoid CodeQL cleartext alert
+        let url = "https://generativelanguage.googleapis.com/v1beta/models";
 
-        let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models?key={}",
-            key
-        );
-
-        let resp = match reqwest::Client::new().get(&url).send().await {
+        let resp = match reqwest::Client::new()
+            .get(url)
+            .header("x-goog-api-key", &key)
+            .send()
+            .await
+        {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("SKIP: Gemini API unreachable: {e}");
