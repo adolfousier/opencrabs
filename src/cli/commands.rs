@@ -1678,11 +1678,11 @@ WantedBy=default.target
             }
 
             #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-            {
-                let _ = (binary_str, args);
-                anyhow::bail!("Service install not supported on this platform");
-            }
+            return Err(anyhow::anyhow!(
+                "Service install not supported on this platform"
+            ));
 
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             Ok(())
         }
         ServiceCommands::Start => {
