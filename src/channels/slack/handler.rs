@@ -395,7 +395,7 @@ pub async fn on_push_event(
                 msg.sender.bot_id
             );
             tokio::spawn(async move {
-                handle_message(&msg, client).await;
+                handle_message(&msg, client, false).await;
             });
         }
         SlackEventCallbackBody::AppMention(mention) => {
@@ -438,7 +438,7 @@ pub async fn on_push_event(
                 deleted_ts: None,
             };
             tokio::spawn(async move {
-                handle_message(&msg, client).await;
+                handle_message(&msg, client, true).await;
             });
         }
         other => {
@@ -482,7 +482,11 @@ pub fn on_error(
 }
 
 /// Handle an incoming Slack message event.
-async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) {
+async fn handle_message(
+    msg: &SlackMessageEvent,
+    client: Arc<SlackHyperClient>,
+    is_app_mention: bool,
+) {
     let state = match HANDLER_STATE.get() {
         Some(s) => s.clone(),
         None => {
@@ -656,13 +660,13 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                 return;
             }
             RespondTo::Mention => {
-                let mentioned = if let Some(ref bid) = state.bot_user_id {
-                    text.contains(&format!("<@{}>", bid))
-                } else {
-                    // bot_user_id unknown (auth.test failed) — accept any <@U...> mention
-                    // since app_mention events guarantee the bot was tagged
-                    text.contains("<@U")
-                };
+                // app_mention events are already verified by Slack — trust them
+                let mentioned = is_app_mention
+                    || if let Some(ref bid) = state.bot_user_id {
+                        text.contains(&format!("<@{}>", bid))
+                    } else {
+                        text.contains("<@U")
+                    };
                 if !mentioned {
                     tracing::debug!(
                         "Slack: respond_to=mention, bot not mentioned — ignoring (bot_user_id={:?}, text={:?})",
@@ -1092,11 +1096,9 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
     }
 
     // Detect thread replies so the agent knows the message is in a thread context.
-    // Slack doesn't embed the parent message in the event — fetching it would require
-    // an API call per message, so we note the thread context without the parent text.
-    let reply_context = msg
-        .origin
-        .thread_ts
+    // Also store the thread_ts so we reply in the same thread.
+    let thread_ts = msg.origin.thread_ts.clone();
+    let reply_context = thread_ts
         .as_ref()
         .map(|ts| format!("[Replying in thread (thread_ts: {ts})]"));
 
@@ -1174,10 +1176,13 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
     {
         let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
         let session = client.open_session(&token);
-        let req = SlackApiChatPostMessageRequest::new(
+        let mut req = SlackApiChatPostMessageRequest::new(
             SlackChannelId::new(channel_id.clone()),
             SlackMessageContent::new().with_text("_thinking..._".to_string()),
         );
+        if let Some(ref ts) = thread_ts {
+            req = req.with_thread_ts(ts.clone());
+        }
         if let Ok(resp) = session.chat_post_message(&req).await {
             *thinking_ts.lock().await = Some(resp.ts);
         }
@@ -1198,12 +1203,14 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
         let channel_cb = SlackChannelId::new(channel_id.clone());
         let client_cb = client.clone();
         let thinking_ts_cb = thinking_ts.clone();
+        let thread_ts_cb = thread_ts.clone();
 
         Arc::new(move |_session_id, event| {
             let tools = tools.clone();
             let token = SlackApiToken::new(SlackApiTokenValue::from(bot_token_cb.clone()));
             let channel = channel_cb.clone();
             let client = client_cb.clone();
+            let thread_ts_inner = thread_ts_cb.clone();
 
             match event {
                 ProgressEvent::ToolStarted {
@@ -1220,10 +1227,13 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                             let _ = session.chat_delete(&del).await;
                         }
                         let text = format!("⚙️ *{}*{}", tool_name, ctx);
-                        let req = SlackApiChatPostMessageRequest::new(
+                        let mut req = SlackApiChatPostMessageRequest::new(
                             channel,
                             SlackMessageContent::new().with_text(text),
                         );
+                        if let Some(ref ts) = thread_ts_inner {
+                            req = req.with_thread_ts(ts.clone());
+                        }
                         if let Ok(resp) = session.chat_post_message(&req).await {
                             let mut t = tools.lock().await;
                             t.push(ToolEntry {
@@ -1259,13 +1269,17 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                     });
                 }
                 ProgressEvent::SelfHealingAlert { message } => {
+                    let thread_ts_heal = thread_ts_inner.clone();
                     tokio::spawn(async move {
                         let session = client.open_session(&token);
                         let text = format!("🔧 {}", message);
-                        let req = SlackApiChatPostMessageRequest::new(
+                        let mut req = SlackApiChatPostMessageRequest::new(
                             channel,
                             SlackMessageContent::new().with_text(text),
                         );
+                        if let Some(ref ts) = thread_ts_heal {
+                            req = req.with_thread_ts(ts.clone());
+                        }
                         let _ = session.chat_post_message(&req).await;
                     });
                 }
@@ -1346,10 +1360,13 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
                 if chunk.is_empty() {
                     continue;
                 }
-                let request = SlackApiChatPostMessageRequest::new(
+                let mut request = SlackApiChatPostMessageRequest::new(
                     SlackChannelId::new(channel_id.clone()),
                     SlackMessageContent::new().with_text(chunk.to_string()),
                 );
+                if let Some(ref ts) = thread_ts {
+                    request = request.with_thread_ts(ts.clone());
+                }
                 if let Err(e) = session.chat_post_message(&request).await {
                     tracing::error!("Slack: failed to send reply: {}", e);
                 }
@@ -1363,10 +1380,13 @@ async fn handle_message(msg: &SlackMessageEvent, client: Arc<SlackHyperClient>) 
             let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
             let session = client.open_session(&token);
             let error_msg = format!("Error: {}", e);
-            let request = SlackApiChatPostMessageRequest::new(
+            let mut request = SlackApiChatPostMessageRequest::new(
                 SlackChannelId::new(channel_id),
                 SlackMessageContent::new().with_text(error_msg),
             );
+            if let Some(ref ts) = thread_ts {
+                request = request.with_thread_ts(ts.clone());
+            }
             let _ = session.chat_post_message(&request).await;
         }
     }
