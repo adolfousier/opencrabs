@@ -79,4 +79,4 @@ src/plans/
 *.backup
 commands.md
 cc-research.md
-examples/
+# examples/
