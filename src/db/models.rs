@@ -485,6 +485,73 @@ impl CronJob {
     }
 }
 
+// ─── CronJobRun ──────────────────────────────────────────────────────────────
+
+/// A single execution record for a cron job.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CronJobRun {
+    pub id: Uuid,
+    pub job_id: Uuid,
+    pub job_name: String,
+    pub status: String, // "running", "success", "error"
+    pub content: Option<String>,
+    pub error: Option<String>,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cost: f64,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub started_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+}
+
+impl CronJobRun {
+    pub fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
+        Ok(CronJobRun {
+            id: uuid_col(row, "id")?,
+            job_id: uuid_col(row, "job_id")?,
+            job_name: row.get("job_name")?,
+            status: row.get("status")?,
+            content: row.get("content")?,
+            error: row.get("error")?,
+            input_tokens: row.get("input_tokens")?,
+            output_tokens: row.get("output_tokens")?,
+            cost: row.get("cost")?,
+            provider: row.get("provider")?,
+            model: row.get("model")?,
+            started_at: rfc3339_col(row, "started_at")?,
+            completed_at: opt_rfc3339_col(row, "completed_at")?,
+            created_at: rfc3339_col(row, "created_at")?,
+        })
+    }
+
+    pub fn new_running(
+        job_id: Uuid,
+        job_name: String,
+        provider: Option<String>,
+        model: Option<String>,
+    ) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4(),
+            job_id,
+            job_name,
+            status: "running".to_string(),
+            content: None,
+            error: None,
+            input_tokens: 0,
+            output_tokens: 0,
+            cost: 0.0,
+            provider,
+            model,
+            started_at: now,
+            completed_at: None,
+            created_at: now,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

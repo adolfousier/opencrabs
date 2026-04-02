@@ -8,7 +8,8 @@
 use crate::channels::ChannelFactory;
 use crate::config::Config;
 use crate::db::CronJobRepository;
-use crate::db::models::CronJob;
+use crate::db::CronJobRunRepository;
+use crate::db::models::{CronJob, CronJobRun};
 use crate::services::{ServiceContext, SessionService};
 use chrono::Utc;
 use cron::Schedule;
@@ -23,6 +24,7 @@ const CRON_SESSION_NAME: &str = "Cron";
 /// Background cron scheduler that polls the database and executes due jobs.
 pub struct CronScheduler {
     repo: CronJobRepository,
+    run_repo: CronJobRunRepository,
     factory: Arc<ChannelFactory>,
     service_context: ServiceContext,
     /// Dedicated session for all cron jobs — isolated from TUI sessions.
@@ -35,12 +37,14 @@ pub struct CronScheduler {
 impl CronScheduler {
     pub fn new(
         repo: CronJobRepository,
+        run_repo: CronJobRunRepository,
         factory: Arc<ChannelFactory>,
         service_context: ServiceContext,
         shared_session_id: Arc<Mutex<Option<Uuid>>>,
     ) -> Self {
         Self {
             repo,
+            run_repo,
             factory,
             service_context,
             cron_session_id: None,
@@ -129,8 +133,9 @@ impl CronScheduler {
                 let job = job.clone();
                 let factory = self.factory.clone();
                 let ctx = self.service_context.clone();
+                let run_repo = self.run_repo.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = execute_job(&job, &factory, &ctx, cron_sid).await {
+                    if let Err(e) = execute_job(&job, &factory, &ctx, cron_sid, &run_repo).await {
                         tracing::error!("Cron job '{}' failed: {e}", job.name);
                     }
                 });
@@ -184,11 +189,13 @@ impl CronScheduler {
 
 /// Execute a single cron job in the shared cron session.
 /// Isolated from TUI — never touches the user's active session.
+/// Results are always stored in the DB; channel delivery is optional.
 async fn execute_job(
     job: &CronJob,
     factory: &ChannelFactory,
     _ctx: &ServiceContext,
     cron_session_id: Uuid,
+    run_repo: &CronJobRunRepository,
 ) -> anyhow::Result<()> {
     // Resolve effective provider/model: job override > config default > system default
     let config = Config::load()?;
@@ -200,6 +207,18 @@ async fn execute_job(
         .model
         .clone()
         .or_else(|| config.cron.default_model.clone());
+
+    // Create a run record in the DB (status = "running")
+    let run = CronJobRun::new_running(
+        job.id,
+        job.name.clone(),
+        effective_provider.clone(),
+        effective_model.clone(),
+    );
+    let run_id = run.id.to_string();
+    if let Err(e) = run_repo.insert(&run).await {
+        tracing::error!("Failed to insert cron run record: {e}");
+    }
 
     let session_id = cron_session_id;
     tracing::info!(
@@ -251,6 +270,8 @@ async fn execute_job(
 
     match result {
         Ok(response) => {
+            let clean = crate::utils::sanitize::strip_llm_artifacts(&response.content);
+
             tracing::info!(
                 "Cron job '{}' completed — {} tokens, ${:.6}",
                 job.name,
@@ -258,9 +279,22 @@ async fn execute_job(
                 response.cost
             );
 
-            // Deliver results to all configured channels (comma-separated)
+            // Save result to DB
+            if let Err(e) = run_repo
+                .complete_success(
+                    &run_id,
+                    &clean,
+                    response.usage.input_tokens as i64,
+                    response.usage.output_tokens as i64,
+                    response.cost,
+                )
+                .await
+            {
+                tracing::error!("Failed to save cron run result to DB: {e}");
+            }
+
+            // Optionally deliver to configured channels too
             if let Some(ref deliver_to) = job.deliver_to {
-                let clean = crate::utils::sanitize::strip_llm_artifacts(&response.content);
                 for target in deliver_to
                     .split(',')
                     .map(str::trim)
@@ -272,7 +306,14 @@ async fn execute_job(
         }
         Err(e) => {
             tracing::error!("Cron job '{}' agent error: {e}", job.name);
-            // Deliver error to all configured channels
+
+            // Save error to DB
+            let error_msg = format!("{e}");
+            if let Err(db_err) = run_repo.complete_error(&run_id, &error_msg).await {
+                tracing::error!("Failed to save cron run error to DB: {db_err}");
+            }
+
+            // Optionally deliver error to configured channels too
             if let Some(ref deliver_to) = job.deliver_to {
                 let msg = format!("Cron job '{}' failed: {e}", job.name);
                 for target in deliver_to
