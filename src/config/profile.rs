@@ -508,7 +508,7 @@ fn is_pid_alive(pid: u32) -> bool {
     }
     #[cfg(windows)]
     {
-        extern "system" {
+        unsafe extern "system" {
             fn OpenProcess(dwDesiredAccess: u32, bInheritHandle: i32, dwProcessId: u32) -> isize;
             fn CloseHandle(hObject: isize) -> i32;
         }
