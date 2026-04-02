@@ -5,26 +5,38 @@ All notable changes to OpenCrab will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.95] - 2026-04-01
+## [0.2.95] - 2026-04-02
 
 ### Added
 - **Up/Down arrow navigation for attached images** — Navigate between attached images in the input area using arrow keys. Visual indicator shows current position (e.g. "2/4"). Previously required detaching and reattaching to reorder
+- **Rolling build output for /rebuild** — Build progress now shows as a single updating message with the last 6 compile lines, replacing the previous flood of 200+ individual system messages. Cleared automatically on restart
+- **Rolling status quips for CLI providers** — Processing status messages now fire from the first keystroke even before tools have started, via a `processing` flag on the streaming snapshot. Previously required active tool calls to trigger
+- **Multi-target cron delivery** — `deliver_to` field now supports comma-separated targets (e.g. `http://...,telegram:-12345`). Each target receives results independently. All existing cron jobs updated to deliver to both agentverse and Telegram
 
 ### Fixed
-- **CLI token tracking showing near-zero usage** — `CliUsage::total_input()` returned only `input_tokens` (1-3 per message), excluding `cache_creation_input_tokens` (~80K) and `cache_read_input_tokens` (~14K). Every CLI provider message burned real API credits but reported $0.00 cost and ~6 tokens. Now includes all cache tokens in usage tracking, cost calculation, and session stats. `TokenUsage` struct gains `cache_creation_tokens` and `cache_read_tokens` fields with cache-aware pricing (1.25× input rate for cache writes, 0.1× for cache reads). All 14 provider and test files updated
-- **Config reload feedback loop causing silent crash** — Writing config inside a ConfigWatcher callback triggered an infinite reload cycle. Two additional triggers found and removed: `Config::write_key()` inside provider creation, and redundant `create_provider()` on every config reload event that never matched due to alias vs full model ID comparison
+- **CLI token tracking showing near-zero usage** — `CliUsage::total_input()` returned only `input_tokens` (1-3 per message), excluding `cache_creation_input_tokens` (~80K) and `cache_read_input_tokens` (~14K). Every CLI provider message burned real API credits but reported $0.00 cost and ~6 tokens. Now includes all cache tokens in usage tracking, cost calculation, and session stats. `TokenUsage` struct gains `cache_creation_tokens`, `cache_read_tokens`, `billing_cache_creation`, and `billing_cache_read` fields separating context window tracking from billing. Cache-aware pricing (1.25x input rate for cache writes, 0.1x for cache reads)
+- **Context window display showing 2.3M tokens** — CLI providers accumulated tiktoken estimates via `add_message()` without calibration, snowballing `context.token_count` to 2.3M and triggering false compaction. Now capped at model's context window. Billing tokens (cumulative across CLI tool rounds) tracked separately from context window (per-call values)
+- **Per-session provider isolation** — Changing provider/model in TUI no longer changes it for Telegram/Discord/Slack sessions. Each session's provider is persisted in DB and restored on message receipt via `sync_provider_from_config`. Channel `/models` command no longer mutates global config
+- **Custom provider dialog** — "+ New Custom Provider" now shows blank form fields instead of retaining values from previously loaded custom provider (e.g. nvidia). Dialog height increased to show all custom provider fields (Base URL, API Key, Model, Name, Context Window) without truncation
+- **Config reload feedback loop causing silent crash** — Writing config inside a ConfigWatcher callback triggered an infinite reload cycle. Two additional triggers found and removed: `Config::write_key()` inside provider creation, and redundant `create_provider()` on every config reload event
 - **Queued message ordering and Up-arrow dequeue** — Messages queued while the agent was processing could arrive out of order. Up-arrow now correctly dequeues the last queued message instead of the first
 - **E2E test timeouts** — `e2e_opencode_streaming` wrapped with 30s timeout to prevent test suite hang under concurrent load. Gemini fetch tests gracefully skip on API key/network failures instead of crashing the suite
-- **Profile test isolation on Windows** — `test_resolve_profile_home_with_env_var` race condition fixed (OnceLock shared across parallel tests). Token lock test skips alive-PID assertion on Windows where `OpenProcess` fails in restricted CI environments
+
+### Security
+- **Trello API credentials moved from URL interpolation to query builder** — All 24 Trello client methods refactored to use `authed_get/post/put/delete` helpers that pass `key` and `token` via `reqwest::RequestBuilder::query()` instead of string interpolation. Resolves 24 CodeQL alerts
+- **Gemini API key moved to request header** — API key now sent via `x-goog-api-key` header instead of URL query parameter across provider, fetch, and onboarding modules. Resolves 4 CodeQL alerts
+- **Image tool API keys moved to request headers** — `analyze_image` and `generate_image` tools now pass API keys via headers instead of URL query strings. Resolves 2 CodeQL alerts
+- **CI workflow permissions restricted** — Added top-level `permissions: contents: read` to `ci.yml` and `release.yml`, with explicit `contents: write` only on jobs that need it (`build-release`, `create-release`). Resolves 5 CodeQL alerts
+- **Removed API key logging in tests** — Gemini fetch test no longer prints key length or prefix to stderr
 
 ### Changed
-- **Brain file templates updated** — MEMORY.md template restructured as agent scratchpad for rules, corrections, and preferences (not a diary). AGENTS.md template adds mandatory memory triggers: write BEFORE responding when user corrects behavior, states preferences, or shares rules. TOOLS.md template adds 15 missing tools: `notebook_edit`, `parse_document`, `memory_search`, `config_manager`, `tool_manage`, `a2a_send`, `whatsapp_send`, `whatsapp_connect`, and 7 browser automation tools
+- **Brain file templates updated** — MEMORY.md template restructured as agent scratchpad for rules, corrections, and preferences. AGENTS.md template adds mandatory memory triggers. TOOLS.md template adds 15 missing tools
 
-> **Existing users:** Your local brain files (`~/.opencrabs/*.md`) may be outdated. Ask your crab: *"Compare my brain files against the latest templates in `src/docs/reference/templates/` and append anything missing."* This will diff your AGENTS.md, TOOLS.md, and MEMORY.md against the updated templates and add new sections (memory triggers, missing tool docs, profile-aware paths) without overwriting your customizations
+> **Existing users:** Your local brain files (`~/.opencrabs/*.md`) may be outdated. Ask your crab: *"Compare my brain files against the latest templates in `src/docs/reference/templates/` and append anything missing."*
 
 ### Testing
-- **29 token tracking tests** — TokenUsage struct (defaults, total vs billable, serde roundtrip, missing cache fields), cache-aware pricing (default rates, explicit rates, opus/sonnet breakdown, no-cache matches regular, unknown model), CLI→TokenUsage flow (Claude CLI cache separation, OpenCode CLI no-cache), billable accumulation (multi-iteration, API no-cache), cost regression (not-zero with cache, cache write > regular, cache read < regular), provider format deserialization (Anthropic API, Claude CLI, OpenCode CLI, Gemini, OpenAI)
-- **1,689 total tests** (up from 1,605)
+- **29 token tracking tests** — TokenUsage struct, cache-aware pricing, CLI/API flow, billable accumulation, cost regression, provider format deserialization
+- **1,687 total tests** (up from 1,605)
 
 ## [0.2.94] - 2026-03-31
 
