@@ -512,7 +512,7 @@ impl App {
                                         || trimmed.starts_with("warning[")
                                         || trimmed.starts_with("-->")
                                     {
-                                        let _ = tx.send(TuiEvent::SystemMessage(line));
+                                        let _ = tx.send(TuiEvent::BuildLine(line));
                                     }
                                 })
                                 .await

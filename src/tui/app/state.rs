@@ -276,6 +276,11 @@ pub struct App {
     /// Used in complete_response to avoid double-adding the assistant message.
     pub(crate) intermediate_text_received: bool,
 
+    /// Rolling build output lines (last 6, cleared on RestartReady)
+    pub(crate) build_lines: Vec<String>,
+    /// Index of the build-progress DisplayMessage (updated in place)
+    pub(crate) build_msg_idx: Option<usize>,
+
     /// Animation state
     pub animation_frame: usize,
 
@@ -480,6 +485,8 @@ impl App {
             notification_shown_at: None,
             selected_message_idx: None,
             intermediate_text_received: false,
+            build_lines: Vec::new(),
+            build_msg_idx: None,
             animation_frame: 0,
             splash_shown_at: Some(std::time::Instant::now()),
             escape_pending_at: None,
@@ -1534,7 +1541,49 @@ impl App {
                 });
                 // auto_scroll stays true — new messages continue below
             }
+            TuiEvent::BuildLine(line) => {
+                // Keep a rolling window of the last 6 build lines
+                self.build_lines.push(line);
+                if self.build_lines.len() > 6 {
+                    self.build_lines.remove(0);
+                }
+                // Build the display content: header + rolling lines
+                let content = format!(
+                    "🦀 Building OpenCrabs...\n{}",
+                    self.build_lines.join("\n")
+                );
+                if let Some(idx) = self.build_msg_idx {
+                    // Update existing build message in place
+                    if let Some(msg) = self.messages.get_mut(idx) {
+                        msg.content = content;
+                    }
+                } else {
+                    // Create the build progress message
+                    self.messages.push(DisplayMessage {
+                        id: Uuid::new_v4(),
+                        role: "system".to_string(),
+                        content,
+                        timestamp: chrono::Utc::now(),
+                        token_count: None,
+                        cost: None,
+                        approval: None,
+                        approve_menu: None,
+                        details: None,
+                        expanded: false,
+                        tool_group: None,
+                    });
+                    self.build_msg_idx = Some(self.messages.len() - 1);
+                }
+                self.scroll_offset = 0;
+            }
             TuiEvent::RestartReady(_status) => {
+                // Clear build progress
+                if let Some(idx) = self.build_msg_idx.take()
+                    && idx < self.messages.len()
+                {
+                    self.messages.remove(idx);
+                }
+                self.build_lines.clear();
                 self.rebuild_status = None;
                 // Auto exec() restart — no prompt, no permission needed
                 if let Some(session) = &self.current_session {

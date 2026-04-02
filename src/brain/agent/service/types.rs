@@ -67,6 +67,9 @@ pub enum ProgressEvent {
     CompactionSummary {
         summary: String,
     },
+    /// A single build-output line (e.g. "Compiling foo v1.0"). The TUI keeps a
+    /// rolling window of the last few lines and clears them on RestartReady.
+    BuildLine(String),
     /// Build completed — TUI should offer restart
     RestartReady {
         status: String,

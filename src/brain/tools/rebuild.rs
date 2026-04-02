@@ -62,11 +62,11 @@ impl Tool for RebuildTool {
         let cb = self.progress.clone();
         let sid = context.session_id;
 
-        // Stream build progress lines through the progress callback
+        // Stream build progress as rolling build lines (TUI shows last ~6)
         let result = updater
             .build_streaming(move |line| {
                 let trimmed = line.trim();
-                // Forward meaningful cargo lines as intermediate text
+                // Forward meaningful cargo lines as build progress
                 if (trimmed.starts_with("Compiling")
                     || trimmed.starts_with("Finished")
                     || trimmed.starts_with("error")
@@ -74,13 +74,7 @@ impl Tool for RebuildTool {
                     || trimmed.starts_with("-->"))
                     && let Some(ref cb) = cb
                 {
-                    cb(
-                        sid,
-                        ProgressEvent::IntermediateText {
-                            text: line,
-                            reasoning: None,
-                        },
-                    );
+                    cb(sid, ProgressEvent::BuildLine(line));
                 }
             })
             .await;

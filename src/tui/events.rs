@@ -101,6 +101,9 @@ pub enum TuiEvent {
     /// Context was auto-compacted — show the summary to the user
     CompactionSummary { session_id: Uuid, summary: String },
 
+    /// A single build-output line — TUI keeps a rolling window
+    BuildLine(String),
+
     /// Build completed — offer restart to the user
     RestartReady(String), // global, not per-session
 
