@@ -1,9 +1,27 @@
 # Changelog
 
-All notable changes to OpenCrab will be documented in this file.
+All notable changes to OpenCrabs will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.2.96] - 2026-04-02
+
+### Added
+- **OpenRouter reasoning support** — Send `include_reasoning: true` in requests to OpenRouter models. Thinking/reasoning output now displayed in collapsible sections for models that support it (e.g. Qwen 3.6 Plus)
+- **Function calling detection** — Warn users when a model does not support tool use. Detects raw tool call JSON in text responses and appends a visible warning with model switch suggestion
+
+### Fixed
+- **Thinking/reasoning text truncation** — Reasoning content now wraps to screen width instead of truncating at the right edge. Long lines in collapsible thinking sections reflow properly on narrow terminals
+- **LLM artifacts leaking to TUI** — `<!-- reasoning -->` tags, `</invoke>`, `</parameter>` XML fragments no longer rendered as plain text. `strip_llm_artifacts` applied to completed responses, intermediate text, and streaming render
+- **Duplicate agent response on rebuild/evolve restart** — Agent responded twice with identical "Back online" messages because both a wake-up message and evolution message fired at startup. Merged into a single message
+- **Evolution prompt leaked to user** — Internal `[SYSTEM:` instruction for evolution/rebuild was displayed as a visible user message. Now hidden from chat
+- **Windows CI compilation** — `unsafe extern` for FFI blocks (Rust 2024 edition), unreachable code after platform-specific `bail!`, unused `voice_id` variable gated behind `local-tts` feature
+- **browser_test example** — Gated behind `browser` feature flag so `--no-default-features` builds don't fail. Un-ignored `examples/` directory so CI has the file
+- **Flaky concurrent profile test** — `ProfileRegistry::save()` now uses atomic write with file locking to prevent concurrent readers from seeing partially-written TOML
+
+### Changed
+- **`tool_choice: "auto"`** — OpenAI-compatible providers now send `tool_choice: "auto"` when tool definitions are present, enabling function calling on models that require explicit opt-in
 
 ## [0.2.95] - 2026-04-02
 

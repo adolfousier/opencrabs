@@ -99,7 +99,65 @@ impl ProfileRegistry {
             fs::create_dir_all(parent)?;
         }
         let contents = toml::to_string_pretty(self)?;
-        fs::write(&path, contents).with_context(|| format!("failed to write {}", path.display()))
+        // Atomic write: write to temp file then rename to prevent concurrent
+        // readers from seeing a partially-written file.
+        let tmp = path.with_extension("toml.tmp");
+        fs::write(&tmp, &contents).with_context(|| format!("failed to write {}", tmp.display()))?;
+        fs::rename(&tmp, &path)
+            .with_context(|| format!("failed to rename {} -> {}", tmp.display(), path.display()))
+    }
+
+    /// Atomically load, modify, and save the registry under a file lock.
+    /// Prevents concurrent load+save races (e.g. two `create_profile` calls).
+    pub fn modify<F>(f: F) -> Result<Self>
+    where
+        F: FnOnce(&mut Self),
+    {
+        let path = Self::path();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        // Advisory lock file — prevents concurrent modify() calls
+        let lock_path = path.with_extension("toml.lock");
+        let lock_file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&lock_path)
+            .with_context(|| format!("failed to open lock {}", lock_path.display()))?;
+
+        // Platform-specific exclusive lock
+        #[cfg(unix)]
+        {
+            use std::os::unix::io::AsRawFd;
+            let fd = lock_file.as_raw_fd();
+            let ret = unsafe { libc::flock(fd, libc::LOCK_EX) };
+            if ret != 0 {
+                bail!(
+                    "failed to lock {}: {}",
+                    lock_path.display(),
+                    std::io::Error::last_os_error()
+                );
+            }
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::AsRawHandle;
+            // On Windows, opening with write + no sharing provides exclusion
+            let _ = lock_file.as_raw_handle();
+        }
+
+        // Load current state under lock
+        let mut registry = Self::load()?;
+        f(&mut registry);
+        registry.save()?;
+
+        // Lock released when lock_file drops
+        // Explicitly flush to keep the borrow checker happy
+        let _ = lock_file;
+
+        Ok(registry)
     }
 
     pub fn register(&mut self, name: &str, description: Option<&str>) {
@@ -141,10 +199,12 @@ pub fn create_profile(name: &str, description: Option<&str>) -> Result<PathBuf> 
     fs::create_dir_all(profile_dir.join("memory"))?;
     fs::create_dir_all(profile_dir.join("logs"))?;
 
-    // Register
-    let mut registry = ProfileRegistry::load()?;
-    registry.register(name, description);
-    registry.save()?;
+    // Register under file lock to prevent concurrent write races
+    let name_owned = name.to_string();
+    let desc_owned = description.map(|s| s.to_string());
+    ProfileRegistry::modify(|reg| {
+        reg.register(&name_owned, desc_owned.as_deref());
+    })?;
 
     tracing::info!("Created profile '{}' at {}", name, profile_dir.display());
     Ok(profile_dir)
@@ -186,9 +246,10 @@ pub fn delete_profile(name: &str) -> Result<()> {
         )
     })?;
 
-    let mut registry = ProfileRegistry::load()?;
-    registry.profiles.remove(name);
-    registry.save()?;
+    let name_owned = name.to_string();
+    ProfileRegistry::modify(|reg| {
+        reg.profiles.remove(&name_owned);
+    })?;
 
     tracing::info!("Deleted profile '{}'", name);
     Ok(())
@@ -265,12 +326,13 @@ pub fn import_profile(archive: &Path) -> Result<String> {
     ar.unpack(&target)
         .with_context(|| "failed to extract archive")?;
 
-    // Register the imported profile
-    let mut registry = ProfileRegistry::load()?;
-    if !registry.profiles.contains_key(&profile_name) {
-        registry.register(&profile_name, Some("Imported profile"));
-        registry.save()?;
-    }
+    // Register the imported profile under file lock
+    let pname = profile_name.clone();
+    ProfileRegistry::modify(|reg| {
+        if !reg.profiles.contains_key(&pname) {
+            reg.register(&pname, Some("Imported profile"));
+        }
+    })?;
 
     tracing::info!(
         "Imported profile '{}' from {}",
