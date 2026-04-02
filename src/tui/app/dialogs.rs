@@ -287,19 +287,18 @@ impl App {
                 } else if provider_idx >= 10 {
                     // Existing custom provider — populate fields from config
                     let custom_idx = provider_idx - 10;
-                    if let Some(name) = self.ps.custom_names.get(custom_idx).cloned() {
-                        if let Ok(c) = crate::config::Config::load() {
-                            if let Some(cfg) = c.providers.custom_by_name(&name) {
-                                self.ps.custom_name = name;
-                                self.ps.base_url = cfg.base_url.clone().unwrap_or_default();
-                                self.ps.custom_model =
-                                    cfg.default_model.clone().unwrap_or_default();
-                                self.ps.context_window = cfg
-                                    .context_window
-                                    .map(|cw| cw.to_string())
-                                    .unwrap_or_default();
-                            }
-                        }
+                    if let Some(name) = self.ps.custom_names.get(custom_idx).cloned()
+                        && let Ok(c) = crate::config::Config::load()
+                        && let Some(cfg) = c.providers.custom_by_name(&name)
+                    {
+                        self.ps.custom_name = name;
+                        self.ps.base_url = cfg.base_url.clone().unwrap_or_default();
+                        self.ps.custom_model =
+                            cfg.default_model.clone().unwrap_or_default();
+                        self.ps.context_window = cfg
+                            .context_window
+                            .map(|cw| cw.to_string())
+                            .unwrap_or_default();
                     }
                 } else {
                     // Static provider — clear custom fields
