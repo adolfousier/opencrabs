@@ -989,9 +989,10 @@ fn default_profile_isolation_from_named_profiles() {
 
 #[test]
 fn concurrent_writes_to_separate_profiles_are_isolated() {
-    // No fs_lock() here — this test validates concurrent access across profiles.
-    // Uses unique names to avoid collisions with other tests.
+    // Hold lock for entire test — setup and cleanup both touch shared profiles.toml.
+    // The concurrent threads only write to separate profile directories, not the registry.
     use std::thread;
+    let _lock = fs_lock();
 
     let base = base_opencrabs_dir();
     let name_a = "_test_conc_alpha";
@@ -1000,14 +1001,8 @@ fn concurrent_writes_to_separate_profiles_are_isolated() {
     let dir_b = base.join("profiles").join(name_b);
 
     // Force-clean any stale state
-    let _ = fs::remove_dir_all(&dir_a);
-    let _ = fs::remove_dir_all(&dir_b);
-    {
-        let mut reg = ProfileRegistry::load().unwrap_or_default();
-        reg.profiles.remove(name_a);
-        reg.profiles.remove(name_b);
-        let _ = reg.save();
-    }
+    let _ = delete_profile(name_a);
+    let _ = delete_profile(name_b);
 
     create_profile(name_a, Some("concurrent alpha")).unwrap();
     create_profile(name_b, Some("concurrent beta")).unwrap();
