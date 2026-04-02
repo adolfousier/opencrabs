@@ -15,7 +15,11 @@ use crate::services::SessionService;
 /// If the session has its own provider/model stored, restore that — so each
 /// channel keeps its own provider independently of the TUI or other channels.
 /// Only falls back to the global config if the session has no provider set.
-pub fn sync_provider_for_session(agent: &AgentService, session_provider: Option<&str>, session_model: Option<&str>) {
+pub fn sync_provider_for_session(
+    agent: &AgentService,
+    session_provider: Option<&str>,
+    session_model: Option<&str>,
+) {
     let config = match Config::load() {
         Ok(c) => c,
         Err(_) => return,
@@ -592,11 +596,12 @@ pub async fn switch_model(
 
     // Create provider by name (doesn't modify global config enabled flags)
     let new_provider =
-        crate::brain::provider::factory::create_provider_by_name(&config, &provider_name)
-            .map_err(|e| {
+        crate::brain::provider::factory::create_provider_by_name(&config, &provider_name).map_err(
+            |e| {
                 tracing::warn!("Failed to create provider after model switch: {}", e);
                 format!("Model saved but failed to reload provider: {}", e)
-            })?;
+            },
+        )?;
     let display_name = provider_display_name(&provider_name);
     agent.swap_provider(new_provider);
 
@@ -607,8 +612,7 @@ pub async fn switch_model(
 
     // Persist provider + model to session DB record so it survives restarts
     if let Some(sid) = session_id {
-        let session_svc =
-            crate::services::SessionService::new(agent.context().clone());
+        let session_svc = crate::services::SessionService::new(agent.context().clone());
         if let Ok(Some(mut session)) = session_svc.get_session(sid).await {
             session.provider_name = Some(provider_name.clone());
             session.model = Some(model_name.to_string());

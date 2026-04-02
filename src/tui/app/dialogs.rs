@@ -293,8 +293,7 @@ impl App {
                     {
                         self.ps.custom_name = name;
                         self.ps.base_url = cfg.base_url.clone().unwrap_or_default();
-                        self.ps.custom_model =
-                            cfg.default_model.clone().unwrap_or_default();
+                        self.ps.custom_model = cfg.default_model.clone().unwrap_or_default();
                         self.ps.context_window = cfg
                             .context_window
                             .map(|cw| cw.to_string())

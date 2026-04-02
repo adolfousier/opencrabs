@@ -420,9 +420,7 @@ async fn cmd_chat_inner(
                         summary,
                     })
                 }
-                ProgressEvent::BuildLine(line) => {
-                    progress_sender.send(TuiEvent::BuildLine(line))
-                }
+                ProgressEvent::BuildLine(line) => progress_sender.send(TuiEvent::BuildLine(line)),
                 ProgressEvent::RestartReady { status } => {
                     progress_sender.send(TuiEvent::RestartReady(status))
                 }

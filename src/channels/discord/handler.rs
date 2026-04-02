@@ -351,7 +351,9 @@ pub(crate) async fn handle_message(
     let session_meta = session_svc.get_session(session_id).await.ok().flatten();
     crate::channels::commands::sync_provider_for_session(
         &agent,
-        session_meta.as_ref().and_then(|s| s.provider_name.as_deref()),
+        session_meta
+            .as_ref()
+            .and_then(|s| s.provider_name.as_deref()),
         session_meta.as_ref().and_then(|s| s.model.as_deref()),
     );
 

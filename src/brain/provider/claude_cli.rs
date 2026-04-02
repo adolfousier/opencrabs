@@ -912,9 +912,13 @@ impl Provider for ClaudeCliProvider {
 
                         tracing::info!(
                             "CLI token split: context={}+{}+{}={}, billing={}+{}+{}={}",
-                            final_input, ctx_cache_creation, ctx_cache_read,
+                            final_input,
+                            ctx_cache_creation,
+                            ctx_cache_read,
                             final_input + ctx_cache_creation + ctx_cache_read,
-                            final_input, billing_cache_creation, billing_cache_read,
+                            final_input,
+                            billing_cache_creation,
+                            billing_cache_read,
                             final_input + billing_cache_creation + billing_cache_read,
                         );
 
