@@ -498,6 +498,14 @@ impl OpenAIProvider {
             .filter(|t| !t.is_empty())
             .map(|_| serde_json::json!("auto"));
 
+        // Enable reasoning/thinking for OpenRouter models that support it.
+        // Models that don't support it will simply ignore this field.
+        let include_reasoning = if self.base_url.contains("openrouter") {
+            Some(true)
+        } else {
+            None
+        };
+
         OpenAIRequest {
             model: request.model,
             messages,
@@ -508,6 +516,7 @@ impl OpenAIProvider {
             stream_options: None,
             tools,
             tool_choice,
+            include_reasoning,
         }
     }
 
@@ -1421,6 +1430,9 @@ struct OpenAIRequest {
     /// Tells the model whether/how to call tools. "auto" = model decides.
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_choice: Option<serde_json::Value>,
+    /// OpenRouter: request reasoning/thinking tokens in the response.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    include_reasoning: Option<bool>,
 }
 
 impl OpenAIRequest {
