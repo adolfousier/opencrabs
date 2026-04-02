@@ -592,6 +592,28 @@ impl OpenAIProvider {
             }
         }
 
+        // Detect models that dump tool JSON as text instead of structured calls
+        let has_tool_text = content_blocks.iter().any(|b| {
+            if let ContentBlock::Text { text } = b {
+                (text.contains("\"function\"") && text.contains("\"arguments\""))
+                    || (text.contains("tool_call") && text.contains("\"name\""))
+                    || (text.contains("```json") && text.contains("\"command\""))
+            } else {
+                false
+            }
+        });
+        let has_structured_tools = content_blocks
+            .iter()
+            .any(|b| matches!(b, ContentBlock::ToolUse { .. }));
+        if has_tool_text && !has_structured_tools {
+            tracing::warn!(
+                "Model returned tool call JSON as text — likely does not support function calling"
+            );
+            content_blocks.push(ContentBlock::Text {
+                text: "\n\n⚠️ **This model does not support function calling.** Tool requests were returned as text instead of executable calls. Consider switching to a model that supports tool use (e.g. Claude, GPT-4, Gemini).".to_string(),
+            });
+        }
+
         // Map finish_reason to StopReason
         let stop_reason = choice
             .finish_reason
