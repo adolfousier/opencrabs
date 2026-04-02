@@ -1538,6 +1538,11 @@ impl App {
                 .insert(session.id, response.context_tokens);
         }
 
+        // Strip LLM artifacts (<!-- reasoning -->, </invoke>, XML tool blocks)
+        // before displaying in TUI — same sanitization as Telegram/external channels.
+        let mut response = response;
+        response.content = crate::utils::sanitize::strip_llm_artifacts(&response.content);
+
         // Debug: log response content length
         tracing::debug!(
             "Response complete: content_len={}, output_tokens={}",
