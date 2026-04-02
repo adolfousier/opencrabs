@@ -669,6 +669,7 @@ pub async fn try_execute_text_command(cmd: &ChannelCommand) -> Option<String> {
 }
 
 /// Map a provider name to its config section key.
+#[cfg(test)]
 pub(crate) fn provider_section(provider_name: &str) -> Option<String> {
     crate::utils::providers::config_section(provider_name)
 }
