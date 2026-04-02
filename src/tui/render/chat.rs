@@ -288,7 +288,8 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             lines.push(Line::from("")); // separator between reasoning and response
         }
 
-        let streaming_lines = parse_markdown(response);
+        let clean_response = crate::utils::sanitize::strip_llm_artifacts(response);
+        let streaming_lines = parse_markdown(&clean_response);
         for line in streaming_lines {
             let mut padded_spans = vec![Span::raw("  ")];
             padded_spans.extend(line.spans);
