@@ -14,6 +14,10 @@ categories = ["command-line-utilities", "development-tools"]
 readme = "README.md"
 # exclude = ["src/assets/"]
 
+[[example]]
+name = "browser_test"
+required-features = ["browser"]
+
 [dependencies]
 # Async Runtime
 tokio = { version = "1.43", features = ["full"] }
