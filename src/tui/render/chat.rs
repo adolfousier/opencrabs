@@ -17,10 +17,15 @@ use unicode_width::UnicodeWidthStr;
 
 /// Render reasoning/thinking text as plain lines, preserving literal newlines.
 /// Unlike `parse_markdown`, single `\n` is honoured instead of being collapsed.
-pub(crate) fn reasoning_to_lines(text: &str) -> Vec<Line<'static>> {
-    text.split('\n')
-        .map(|l| Line::from(Span::raw(l.to_string())))
-        .collect()
+pub(crate) fn reasoning_to_lines(text: &str, max_width: usize) -> Vec<Line<'static>> {
+    let mut result = Vec::new();
+    for l in text.split('\n') {
+        let line = Line::from(Span::raw(l.to_string()));
+        for wrapped in wrap_line_with_padding(line, max_width, "  ") {
+            result.push(wrapped);
+        }
+    }
+    result
 }
 
 /// Render the chat messages
@@ -223,7 +228,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                 && let Some(ref details) = app.messages[msg_idx].details
             {
                 lines.push(Line::from(""));
-                let reasoning_lines = reasoning_to_lines(details);
+                let reasoning_lines = reasoning_to_lines(details, content_width);
                 let reasoning_style = Style::default()
                     .fg(Color::DarkGray)
                     .add_modifier(Modifier::ITALIC);
@@ -266,7 +271,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                         .add_modifier(Modifier::ITALIC | Modifier::BOLD),
                 ),
             ]));
-            let reasoning_lines = reasoning_to_lines(reasoning);
+            let reasoning_lines = reasoning_to_lines(reasoning, content_width);
             let reasoning_style = Style::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::ITALIC);
@@ -356,7 +361,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                     .add_modifier(Modifier::ITALIC | Modifier::BOLD),
             ),
         ]));
-        let reasoning_lines = reasoning_to_lines(reasoning);
+        let reasoning_lines = reasoning_to_lines(reasoning, content_width);
         let reasoning_style = Style::default()
             .fg(Color::DarkGray)
             .add_modifier(Modifier::ITALIC);
