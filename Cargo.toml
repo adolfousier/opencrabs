@@ -213,8 +213,5 @@ name = "memory"
 harness = false
 path = "src/benches/memory.rs"
 
-[[example]]
-name = "browser_test"
-required-features = ["browser"]
 
 [lints.clippy]
