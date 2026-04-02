@@ -963,8 +963,10 @@ async fn cmd_chat_inner(
     // Spawn cron scheduler — polls every 60s, executes jobs in the user's active session
     {
         let cron_repo = crate::db::CronJobRepository::new(db.pool().clone());
+        let cron_run_repo = crate::db::CronJobRunRepository::new(db.pool().clone());
         let cron_scheduler = crate::cron::CronScheduler::new(
             cron_repo,
+            cron_run_repo,
             channel_factory.clone(),
             service_context.clone(),
             app.shared_session_id(),

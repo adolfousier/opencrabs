@@ -4,6 +4,7 @@
 
 pub mod channel_message;
 pub mod cron_job;
+pub mod cron_job_run;
 pub mod file;
 pub mod message;
 pub mod pending_request;
@@ -13,6 +14,7 @@ pub mod usage_ledger;
 
 pub use channel_message::ChannelMessageRepository;
 pub use cron_job::CronJobRepository;
+pub use cron_job_run::CronJobRunRepository;
 pub use file::FileRepository;
 pub use message::MessageRepository;
 pub use pending_request::PendingRequestRepository;
