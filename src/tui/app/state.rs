@@ -641,6 +641,8 @@ impl App {
             self.mode = AppMode::Chat;
             self.splash_shown_at = None;
             // Send a hidden wake-up message to the agent (not shown in UI)
+            // If we also evolved, merge the evolution context into the same message
+            // to avoid sending two separate prompts that produce duplicate responses.
             self.processing_sessions.insert(session_id);
             self.is_processing = true;
             self.processing_started_at = Some(std::time::Instant::now());
@@ -648,10 +650,30 @@ impl App {
             let event_sender = self.event_sender();
             let token = CancellationToken::new();
             self.cancel_token = Some(token.clone());
+            let evolution_context = std::env::var("OPENCRABS_EVOLVED_FROM")
+                .ok()
+                .filter(|old| old != crate::VERSION)
+                .map(|old| {
+                    // Clear env var so it doesn't fire again
+                    // SAFETY: single-threaded at this point in startup
+                    unsafe { std::env::remove_var("OPENCRABS_EVOLVED_FROM") };
+                    format!(
+                        " You just evolved from v{old} to v{new}. \
+                         Check the CHANGELOG at the repo root for what's new in v{new}. \
+                         Compare the brain templates in src/docs/reference/templates/ against \
+                         the user's brain files in ~/.opencrabs/ (TOOLS.md, AGENTS.md, etc.) \
+                         and tell the user what changed. Offer to update their brain files \
+                         with the new content. Be specific about what's new.",
+                        new = crate::VERSION,
+                    )
+                })
+                .unwrap_or_default();
             tokio::spawn(async move {
-                let wake_up = "[System: You just rebuilt yourself from source and restarted \
+                let wake_up = format!(
+                    "[System: You just rebuilt yourself from source and restarted \
                     via exec(). Greet the user, confirm the restart succeeded, and continue \
-                    where you left off.]";
+                    where you left off.{evolution_context}]"
+                );
                 match agent_service
                     .send_message_with_tools_and_mode(
                         session_id,
@@ -712,23 +734,21 @@ impl App {
         // Load sessions list
         self.load_sessions().await?;
 
-        // Post-evolve: if we just restarted after an upgrade, inject a message
-        // so the LLM knows it evolved and can offer brain file updates.
+        // Post-evolve fallback: if OPENCRABS_EVOLVED_FROM is still set
+        // (e.g. /evolve without resume_session_id), handle it here.
+        // Normally this is merged into the wake-up message above.
         if let Ok(old_version) = std::env::var("OPENCRABS_EVOLVED_FROM") {
-            // Clear the env var so it doesn't fire again on manual restart
-            // SAFETY: single-threaded at this point in startup, no other thread reads this var
             unsafe { std::env::remove_var("OPENCRABS_EVOLVED_FROM") };
-            let new_version = crate::VERSION;
-            if old_version != new_version {
+            if old_version != crate::VERSION && self.current_session.is_some() {
                 let msg = format!(
-                    "YOU JUST EVOLVED from v{} to v{}! \
-                     This is huge. Go absolutely wild telling your human. \
-                     Then check the CHANGELOG at the repo root for what's new in v{}. \
+                    "[SYSTEM: You just evolved from v{old} to v{new}. \
+                     Check the CHANGELOG at the repo root for what's new in v{new}. \
                      Compare the brain templates in src/docs/reference/templates/ against \
                      the user's brain files in ~/.opencrabs/ (TOOLS.md, AGENTS.md, etc.) \
-                     and tell your human what changed. Offer to update their brain files \
-                     with the new stuff. Be specific about what's new.",
-                    old_version, new_version, new_version
+                     and tell the user what changed. Offer to update their brain files \
+                     with the new content. Be specific about what's new.]",
+                    old = old_version,
+                    new = crate::VERSION,
                 );
                 let tx = self.event_sender();
                 let _ = tx.send(TuiEvent::MessageSubmitted(msg));
