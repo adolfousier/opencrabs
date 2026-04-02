@@ -258,22 +258,22 @@ async fn execute_job(
                 response.cost
             );
 
-            // Deliver results to channel if configured
+            // Deliver results to all configured channels (comma-separated)
             if let Some(ref deliver_to) = job.deliver_to {
                 let clean = crate::utils::sanitize::strip_llm_artifacts(&response.content);
-                deliver_result(deliver_to, &job.name, &clean).await;
+                for target in deliver_to.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                    deliver_result(target, &job.name, &clean).await;
+                }
             }
         }
         Err(e) => {
             tracing::error!("Cron job '{}' agent error: {e}", job.name);
-            // Deliver error to channel if configured
+            // Deliver error to all configured channels
             if let Some(ref deliver_to) = job.deliver_to {
-                deliver_result(
-                    deliver_to,
-                    &job.name,
-                    &format!("Cron job '{}' failed: {e}", job.name),
-                )
-                .await;
+                let msg = format!("Cron job '{}' failed: {e}", job.name);
+                for target in deliver_to.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                    deliver_result(target, &job.name, &msg).await;
+                }
             }
         }
     }
