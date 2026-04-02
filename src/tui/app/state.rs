@@ -1819,21 +1819,23 @@ impl App {
                 if let Some(ref mut wizard) = self.onboarding {
                     wizard.tts_voice_download_progress = None;
                     match result {
+                        #[cfg(feature = "local-tts")]
                         Ok(voice_id) => {
                             wizard.tts_voice_downloaded = true;
                             wizard.tts_voice_download_error = None;
-                            // Play voice preview after successful download
-                            #[cfg(feature = "local-tts")]
-                            {
-                                tokio::spawn(async move {
-                                    if let Err(e) =
-                                        crate::channels::voice::local_tts::preview_voice(&voice_id)
-                                            .await
-                                    {
-                                        tracing::warn!("Voice preview failed: {}", e);
-                                    }
-                                });
-                            }
+                            tokio::spawn(async move {
+                                if let Err(e) =
+                                    crate::channels::voice::local_tts::preview_voice(&voice_id)
+                                        .await
+                                {
+                                    tracing::warn!("Voice preview failed: {}", e);
+                                }
+                            });
+                        }
+                        #[cfg(not(feature = "local-tts"))]
+                        Ok(_) => {
+                            wizard.tts_voice_downloaded = true;
+                            wizard.tts_voice_download_error = None;
                         }
                         Err(e) => {
                             wizard.tts_voice_download_error = Some(e);
