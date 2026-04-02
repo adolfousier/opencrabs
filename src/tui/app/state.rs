@@ -1376,6 +1376,7 @@ impl App {
                 }
 
                 // Then add the new intermediate text as a separate assistant message
+                let text = crate::utils::sanitize::strip_llm_artifacts(&text);
                 self.messages.push(DisplayMessage {
                     id: Uuid::new_v4(),
                     role: "assistant".to_string(),
