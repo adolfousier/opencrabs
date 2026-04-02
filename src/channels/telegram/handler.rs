@@ -97,6 +97,9 @@ struct StreamingState {
     status_shown_at: Option<std::time::Instant>,
     /// Intermediate texts already sent — used to dedup final response
     sent_intermediates: Vec<String>,
+    /// True from start until first response text arrives — enables rolling messages for CLI providers
+    /// where tools complete instantly (ToolStarted+ToolCompleted back-to-back)
+    processing: bool,
 }
 
 impl StreamingState {
@@ -951,10 +954,11 @@ pub(crate) async fn handle_message(
         recreate: false,
         status_msg_id: None,
         tool_round_count: 0,
-        tools_started_at: None,
+        tools_started_at: Some(std::time::Instant::now()),
         quip_index: 0,
         status_shown_at: None,
         sent_intermediates: Vec::new(),
+        processing: true,
     }));
 
     let edit_cancel = CancellationToken::new();
@@ -987,6 +991,7 @@ pub(crate) async fn handle_message(
                             tool_edits: Vec<(usize, String, Option<bool>, MessageId)>,
                             has_active_tools: bool,
                             has_intermediates: bool,
+                            processing: bool,
                         }
 
                         let snap = {
@@ -995,7 +1000,9 @@ pub(crate) async fn handle_message(
                             let any_tools_dirty = s.tool_msgs.iter().any(|t| t.dirty);
                             let has_active_tools = s.tool_msgs.iter().any(|t| t.completed.is_none());
 
-                            if !s.dirty && !s.recreate && !any_tools_dirty && !has_display && !has_active_tools { continue; }
+                            let processing = s.processing;
+
+                            if !s.dirty && !s.recreate && !any_tools_dirty && !has_display && !has_active_tools && !processing { continue; }
 
                             // Drain the ordered display queue
                             let display_items: Vec<DisplayItem> = s.display_queue.drain(..).collect();
@@ -1036,6 +1043,7 @@ pub(crate) async fn handle_message(
                                 tool_edits,
                                 has_active_tools,
                                 has_intermediates,
+                                processing,
                             };
 
                             // Pre-clear state that will be handled
@@ -1118,8 +1126,13 @@ pub(crate) async fn handle_message(
                                 .await;
                         }
 
-                        // ── Rolling status quips during long tool execution ──
-                        if snap.has_active_tools {
+                        // ── Rolling status quips during processing ──
+                        // Show quips when: tools are active (non-CLI), OR tools ran but no
+                        // response yet (CLI inter-tool), OR still processing (CLI initial wait).
+                        let show_quips = snap.has_active_tools
+                            || (snap.tool_round_count > 0 && snap.response_text.is_empty())
+                            || snap.processing;
+                        if show_quips {
                             let now = std::time::Instant::now();
                             let shown_elapsed = snap.status_shown_at
                                 .map(|t| now.duration_since(t).as_secs())
@@ -1138,7 +1151,11 @@ pub(crate) async fn handle_message(
                                     .unwrap_or(0);
                                 let quip = TOOL_STATUS_QUIPS[snap.quip_index % TOOL_STATUS_QUIPS.len()];
 
-                                let mut status = format!("{} ({} tools", quip, snap.tool_round_count);
+                                let mut status = if snap.tool_round_count > 0 {
+                                    format!("{} ({} tools", quip, snap.tool_round_count)
+                                } else {
+                                    format!("{} (thinking", quip)
+                                };
                                 if elapsed_total >= 5 {
                                     let mins = elapsed_total / 60;
                                     let secs = elapsed_total % 60;
@@ -1233,6 +1250,7 @@ pub(crate) async fn handle_message(
                         }
                         s.response.push_str(&text);
                         s.dirty = true;
+                        s.processing = false; // first real text = stop rolling messages
                     }
                 }
                 ProgressEvent::ToolStarted {
