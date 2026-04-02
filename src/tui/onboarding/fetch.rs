@@ -284,10 +284,7 @@ pub async fn fetch_provider_models(
                 }
             };
             tracing::info!("[fetch_provider_models] Gemini: fetching models (key present)");
-            let url = format!(
-                "https://generativelanguage.googleapis.com/v1beta/models?key={}",
-                key
-            );
+            let url = "https://generativelanguage.googleapis.com/v1beta/models";
             // Gemini uses a different response shape: { models: [{ name: "models/gemini-..." }] }
             #[derive(serde::Deserialize)]
             #[serde(rename_all = "camelCase")]
@@ -300,7 +297,7 @@ pub async fn fetch_provider_models(
             struct GeminiModelsResponse {
                 models: Vec<GeminiModel>,
             }
-            match client.get(&url).send().await {
+            match client.get(url).header("x-goog-api-key", key).send().await {
                 Ok(resp) if resp.status().is_success() => {
                     match resp.json::<GeminiModelsResponse>().await {
                         Ok(body) => {
