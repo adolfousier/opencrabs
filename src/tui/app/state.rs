@@ -1548,10 +1548,7 @@ impl App {
                     self.build_lines.remove(0);
                 }
                 // Build the display content: header + rolling lines
-                let content = format!(
-                    "🦀 Building OpenCrabs...\n{}",
-                    self.build_lines.join("\n")
-                );
+                let content = format!("🦀 Building OpenCrabs...\n{}", self.build_lines.join("\n"));
                 if let Some(idx) = self.build_msg_idx {
                     // Update existing build message in place
                     if let Some(msg) = self.messages.get_mut(idx) {

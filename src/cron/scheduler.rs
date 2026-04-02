@@ -261,7 +261,11 @@ async fn execute_job(
             // Deliver results to all configured channels (comma-separated)
             if let Some(ref deliver_to) = job.deliver_to {
                 let clean = crate::utils::sanitize::strip_llm_artifacts(&response.content);
-                for target in deliver_to.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                for target in deliver_to
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                {
                     deliver_result(target, &job.name, &clean).await;
                 }
             }
@@ -271,7 +275,11 @@ async fn execute_job(
             // Deliver error to all configured channels
             if let Some(ref deliver_to) = job.deliver_to {
                 let msg = format!("Cron job '{}' failed: {e}", job.name);
-                for target in deliver_to.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                for target in deliver_to
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                {
                     deliver_result(target, &job.name, &msg).await;
                 }
             }
