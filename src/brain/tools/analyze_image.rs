@@ -143,10 +143,7 @@ impl Tool for AnalyzeImageTool {
         };
 
         // Build Gemini vision request
-        let url = format!(
-            "{}/models/{}:generateContent?key={}",
-            GEMINI_BASE_URL, self.model, self.api_key
-        );
+        let url = format!("{}/models/{}:generateContent", GEMINI_BASE_URL, self.model);
 
         let body = serde_json::json!({
             "contents": [{
@@ -165,6 +162,7 @@ impl Tool for AnalyzeImageTool {
         let response = client
             .post(&url)
             .header("Content-Type", "application/json")
+            .header("x-goog-api-key", &self.api_key)
             .json(&body)
             .send()
             .await
