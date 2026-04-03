@@ -770,6 +770,58 @@ impl AgentService {
                 Err(e) => return Err(AgentError::Provider(e)),
             };
 
+            // CLI providers return "Prompt is too long" as a successful response
+            // with is_error=true in the content — detect and re-route to the
+            // same emergency compaction path used for Err cases above.
+            let is_cli_too_long = is_cli_provider
+                && response.content.iter().any(|b| {
+                    if let ContentBlock::Text { text } = b {
+                        text.trim().starts_with("Prompt is too long")
+                            || text.contains("prompt is too long")
+                    } else {
+                        false
+                    }
+                });
+
+            if is_cli_too_long {
+                tracing::warn!(
+                    "CLI returned 'Prompt is too long' as content — triggering emergency compaction"
+                );
+                const PRE_TRUNCATE_TARGET: usize = 170_000;
+                if context.token_count > PRE_TRUNCATE_TARGET {
+                    context.hard_truncate_to(PRE_TRUNCATE_TARGET);
+                }
+                match self
+                    .compact_context(session_id, &mut context, &model_name)
+                    .await
+                {
+                    Ok(summary) => {
+                        let compaction_marker = format!(
+                            "[CONTEXT COMPACTION — The conversation was automatically compacted. \
+                             Below is a structured summary of everything before this point.]\n\n{}",
+                            summary
+                        );
+                        let _ = message_service
+                            .create_message(
+                                session_id,
+                                "user".to_string(),
+                                compaction_marker,
+                            )
+                            .await;
+                    }
+                    Err(e) => {
+                        tracing::error!("Emergency compaction also failed: {} — hard truncating", e);
+                        const KEEP_MESSAGES: usize = 24;
+                        let total = context.messages.len();
+                        if total > KEEP_MESSAGES {
+                            context.messages.drain(..total - KEEP_MESSAGES);
+                        }
+                    }
+                }
+                // Re-run the loop iteration with the compacted context
+                continue;
+            }
+
             // Track token usage — fall back to tiktoken estimate when provider
             // doesn't report usage (e.g. MiniMax streaming ignores include_usage)
             let call_input_tokens = if response.usage.input_tokens > 0 {
