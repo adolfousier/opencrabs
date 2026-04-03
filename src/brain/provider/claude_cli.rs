@@ -430,7 +430,15 @@ impl Provider for ClaudeCliProvider {
             let mut max_block_index_this_round: usize = 0;
 
             loop {
-                let line_result = lines.next_line().await;
+                let line_result = tokio::select! {
+                    biased;
+                    _ = tx.closed() => {
+                        tracing::info!("CLI stream cancelled — killing subprocess");
+                        let _ = child.kill().await;
+                        break;
+                    }
+                    result = lines.next_line() => result,
+                };
                 let line = match line_result {
                     Ok(Some(line)) => line,
                     Ok(None) => {
