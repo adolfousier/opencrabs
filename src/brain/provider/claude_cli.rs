@@ -791,6 +791,18 @@ impl Provider for ClaudeCliProvider {
                                 result.unwrap_or_else(|| "CLI returned an error".to_string());
                             tracing::error!("CLI result is_error=true: {}", error_text);
 
+                            // "Prompt is too long" must be surfaced as ContextLengthExceeded
+                            // so the tool loop can run emergency compaction and retry.
+                            if error_text.contains("prompt is too long")
+                                || error_text.contains("Prompt is too long")
+                                || error_text.contains("too many tokens")
+                            {
+                                let _ = tx
+                                    .send(Err(ProviderError::ContextLengthExceeded(0)))
+                                    .await;
+                                break;
+                            }
+
                             // Ensure message_start was sent
                             if !started {
                                 started = true;
