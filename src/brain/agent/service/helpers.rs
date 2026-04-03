@@ -557,16 +557,13 @@ impl AgentService {
                     .get("command")
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
-                let short: String = cmd.chars().take(60).collect();
-                if cmd.len() > 60 {
-                    format!("bash: {}…", short)
-                } else {
-                    format!("bash: {}", short)
-                }
+                format!("bash: {}", cmd)
             }
             "read_file" | "read" => {
                 let path = tool_input
                     .get("path")
+                    .or_else(|| tool_input.get("file_path"))
+                    .or_else(|| tool_input.get("filePath"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
                 format!("Read {}", path)
@@ -574,6 +571,8 @@ impl AgentService {
             "write_file" | "write" => {
                 let path = tool_input
                     .get("path")
+                    .or_else(|| tool_input.get("file_path"))
+                    .or_else(|| tool_input.get("filePath"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
                 format!("Write {}", path)
@@ -581,6 +580,8 @@ impl AgentService {
             "edit_file" | "edit" => {
                 let path = tool_input
                     .get("path")
+                    .or_else(|| tool_input.get("file_path"))
+                    .or_else(|| tool_input.get("filePath"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
                 format!("Edit {}", path)
@@ -604,7 +605,15 @@ impl AgentService {
                     .get("pattern")
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
-                format!("Grep '{}'", p)
+                let path = tool_input
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if path.is_empty() {
+                    format!("Grep '{}'", p)
+                } else {
+                    format!("Grep '{}' in {}", p, path)
+                }
             }
             "web_search" | "exa_search" | "brave_search" => {
                 let q = tool_input
