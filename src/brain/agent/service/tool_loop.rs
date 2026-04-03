@@ -447,9 +447,9 @@ impl AgentService {
                                     tool_input,
                                 );
                                 let entry = if summary.is_empty() {
-                                    serde_json::json!({"d": desc, "s": success})
+                                    serde_json::json!({"d": desc, "s": success, "i": tool_input})
                                 } else {
-                                    serde_json::json!({"d": desc, "s": success, "o": summary})
+                                    serde_json::json!({"d": desc, "s": success, "o": summary, "i": tool_input})
                                 };
                                 if let Ok(mut acc) = segs.lock() {
                                     acc.push(CliSegment::Tool(entry));

@@ -941,7 +941,7 @@ impl App {
                 let tools_str = after_marker[..end].trim();
 
                 let calls: Vec<ToolCallEntry> = if is_v2 {
-                    // v2: parse JSON array with descriptions, success, and output
+                    // v2: parse JSON array with descriptions, success, output, and tool input
                     serde_json::from_str::<Vec<serde_json::Value>>(tools_str)
                         .unwrap_or_default()
                         .into_iter()
@@ -952,12 +952,16 @@ impl App {
                                 .as_str()
                                 .map(|s| s.to_string())
                                 .filter(|s| !s.is_empty());
+                            let tool_input = entry
+                                .get("i")
+                                .cloned()
+                                .unwrap_or(serde_json::Value::Null);
                             ToolCallEntry {
                                 description: desc,
                                 success,
                                 details: output,
                                 completed: true,
-                                tool_input: serde_json::Value::Null,
+                                tool_input,
                             }
                         })
                         .collect()
