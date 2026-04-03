@@ -1381,7 +1381,7 @@ impl App {
                 "[send_message] Spawning agent task for session {}",
                 session_id
             );
-            let panic_sender = event_sender.clone();
+            let abort_event_sender = event_sender.clone();
             let handle = tokio::spawn(async move {
                 tracing::info!("[agent_task] START calling send_message_with_tools_and_mode");
                 let result = agent_service
@@ -1428,16 +1428,23 @@ impl App {
                     }
                 }
             });
+            // Store abort handle so double-Escape can hard-kill the task
+            self.task_abort_handle = Some(handle.abort_handle());
+
             // Watch for panics — surface them in the UI instead of silent hang
             tokio::spawn(async move {
-                if let Err(e) = handle.await {
-                    tracing::error!("[agent_task] PANICKED: {}", e);
-                    let _ = panic_sender.send(TuiEvent::Error {
-                        session_id,
-                        message: format!(
-                            "Agent task crashed unexpectedly: {e}. You can continue chatting."
-                        ),
-                    });
+                match handle.await {
+                    Err(e) if e.is_panic() => {
+                        tracing::error!("[agent_task] PANICKED: {}", e);
+                        let _ = abort_event_sender.send(TuiEvent::Error {
+                            session_id,
+                            message: format!(
+                                "Agent task crashed unexpectedly: {e}. You can continue chatting."
+                            ),
+                        });
+                    }
+                    // Cancelled or completed — no action needed
+                    _ => {}
                 }
             });
         }
@@ -1481,6 +1488,7 @@ impl App {
         self.streaming_output_tokens = 0;
         let reasoning_details = self.streaming_reasoning.take();
         self.cancel_token = None;
+        self.task_abort_handle = None;
         self.escape_pending_at = None; // Reset so abort hint doesn't leak to input clear
 
         // Clean up stale pending approvals — send deny so agent callbacks don't hang

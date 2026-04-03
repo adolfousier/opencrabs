@@ -716,9 +716,13 @@ impl App {
                 if let Some(pending_at) = self.escape_pending_at {
                     if pending_at.elapsed() < std::time::Duration::from_secs(3) {
                         // Second Escape within 3 seconds — abort
-                        // Cancel the active cancel token
+                        // Cancel the active cancel token (cooperative)
                         if let Some(token) = &self.cancel_token {
                             token.cancel();
+                        }
+                        // Hard-abort the agent task as a backstop
+                        if let Some(handle) = self.task_abort_handle.take() {
+                            handle.abort();
                         }
                         // Also cancel any stashed session token (e.g. from session switch)
                         if let Some(ref session) = self.current_session {

@@ -367,6 +367,9 @@ pub struct App {
     /// Cancellation token for aborting in-progress requests
     pub(crate) cancel_token: Option<CancellationToken>,
 
+    /// Abort handle for the active agent task — hard-kills the tokio task on cancel
+    pub(crate) task_abort_handle: Option<tokio::task::AbortHandle>,
+
     /// Queued message — shared with agent so it can be injected between tool calls
     pub(crate) message_queue: Arc<tokio::sync::Mutex<Option<String>>>,
 
@@ -523,6 +526,7 @@ impl App {
             sessions_with_pending_approval: HashSet::new(),
             provider_cache: HashMap::new(),
             cancel_token: None,
+            task_abort_handle: None,
             message_queue: Arc::new(tokio::sync::Mutex::new(None)),
             queued_message_preview: None,
             shared_session_id: Arc::new(tokio::sync::Mutex::new(None)),
@@ -2203,6 +2207,7 @@ impl App {
         self.streaming_response = None;
         self.streaming_reasoning = None;
         self.cancel_token = None;
+        self.task_abort_handle = None;
         self.escape_pending_at = None;
         // Preserve context token count from real-time updates if we never got a complete response
         if self.last_input_tokens.is_none() && self.display_token_count > 0 {
