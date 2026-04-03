@@ -798,9 +798,7 @@ impl Provider for ClaudeCliProvider {
                                 || error_lower.contains("too many tokens")
                                 || error_lower.contains("context length")
                             {
-                                let _ = tx
-                                    .send(Err(ProviderError::ContextLengthExceeded(0)))
-                                    .await;
+                                let _ = tx.send(Err(ProviderError::ContextLengthExceeded(0))).await;
                                 break;
                             }
 

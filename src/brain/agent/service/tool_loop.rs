@@ -802,15 +802,14 @@ impl AgentService {
                             summary
                         );
                         let _ = message_service
-                            .create_message(
-                                session_id,
-                                "user".to_string(),
-                                compaction_marker,
-                            )
+                            .create_message(session_id, "user".to_string(), compaction_marker)
                             .await;
                     }
                     Err(e) => {
-                        tracing::error!("Emergency compaction also failed: {} — hard truncating", e);
+                        tracing::error!(
+                            "Emergency compaction also failed: {} — hard truncating",
+                            e
+                        );
                         const KEEP_MESSAGES: usize = 24;
                         let total = context.messages.len();
                         if total > KEEP_MESSAGES {
