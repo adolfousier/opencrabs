@@ -498,9 +498,13 @@ impl OpenAIProvider {
             .filter(|t| !t.is_empty())
             .map(|_| serde_json::json!("auto"));
 
-        // Enable reasoning/thinking for OpenRouter models that support it.
-        // Models that don't support it will simply ignore this field.
-        let include_reasoning = if self.base_url.contains("openrouter") {
+        // Enable reasoning/thinking for OpenRouter and compatible endpoints.
+        // Detection is intentionally broad — models that don't support the field ignore it.
+        let base = self.base_url.to_lowercase();
+        let include_reasoning = if base.contains("openrouter")
+            || base.contains("openrouter.ai")
+            || std::env::var("OPENCRABS_ENABLE_REASONING").is_ok()
+        {
             Some(true)
         } else {
             None
