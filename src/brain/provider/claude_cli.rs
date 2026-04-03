@@ -793,9 +793,10 @@ impl Provider for ClaudeCliProvider {
 
                             // "Prompt is too long" must be surfaced as ContextLengthExceeded
                             // so the tool loop can run emergency compaction and retry.
-                            if error_text.contains("prompt is too long")
-                                || error_text.contains("Prompt is too long")
-                                || error_text.contains("too many tokens")
+                            let error_lower = error_text.to_lowercase();
+                            if error_lower.contains("prompt is too long")
+                                || error_lower.contains("too many tokens")
+                                || error_lower.contains("context length")
                             {
                                 let _ = tx
                                     .send(Err(ProviderError::ContextLengthExceeded(0)))
