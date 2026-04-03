@@ -93,13 +93,13 @@ pub(super) fn render_tool_group<'a>(
                                 .add_modifier(Modifier::BOLD),
                         ),
                     ]));
-                    // Value — expand strings line by line, cap at 80 lines
+                    // Value — expand strings line by line, cap at 200 lines
                     let value_lines: Vec<String> = match value {
                         serde_json::Value::String(s) => s.lines().map(|l| l.to_string()).collect(),
                         _ => vec![value.to_string()],
                     };
                     let total = value_lines.len();
-                    for vline in value_lines.iter().take(80) {
+                    for vline in value_lines.iter().take(200) {
                         lines.push(Line::from(vec![
                             Span::styled(
                                 format!("    {}    ", continuation),
@@ -111,14 +111,14 @@ pub(super) fn render_tool_group<'a>(
                             ),
                         ]));
                     }
-                    if total > 80 {
+                    if total > 200 {
                         lines.push(Line::from(vec![
                             Span::styled(
                                 format!("    {}    ", continuation),
                                 Style::default().fg(Color::DarkGray),
                             ),
                             Span::styled(
-                                format!("... ({} more lines)", total - 80),
+                                format!("... ({} more lines)", total - 200),
                                 Style::default()
                                     .fg(Color::Rgb(120, 120, 120))
                                     .add_modifier(Modifier::ITALIC),
@@ -144,7 +144,7 @@ pub(super) fn render_tool_group<'a>(
                 if let Some(ref details) = call.details {
                     let detail_lines = collapse_build_output(details);
                     let default_detail_style = Style::default().fg(Color::Rgb(90, 90, 90));
-                    for detail_line in detail_lines.iter().take(30) {
+                    for detail_line in detail_lines.iter().take(200) {
                         let line_style = if detail_line.starts_with("+ ") {
                             Style::default().fg(Color::Rgb(60, 185, 185))
                         } else if detail_line.starts_with("- ") {
@@ -162,14 +162,14 @@ pub(super) fn render_tool_group<'a>(
                             Span::styled(detail_line.clone(), line_style),
                         ]));
                     }
-                    if detail_lines.len() > 30 {
+                    if detail_lines.len() > 200 {
                         lines.push(Line::from(vec![
                             Span::styled(
                                 format!("    {}  ", continuation),
                                 Style::default().fg(Color::DarkGray),
                             ),
                             Span::styled(
-                                format!("... ({} more lines)", detail_lines.len() - 30),
+                                format!("... ({} more lines)", detail_lines.len() - 200),
                                 Style::default()
                                     .fg(Color::Rgb(120, 120, 120))
                                     .add_modifier(Modifier::ITALIC),
