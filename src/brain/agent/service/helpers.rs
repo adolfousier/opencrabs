@@ -816,9 +816,11 @@ impl AgentService {
         use regex::Regex;
         use std::sync::LazyLock;
 
-        // Match <!-- ... --> (proper) or <!-- ... (unclosed, to end of string)
+        // Match only properly closed <!-- ... --> comments.
+        // Do NOT match unclosed comments — stripping to end-of-string would
+        // silently delete trailing response text mid-stream.
         static HTML_COMMENT_RE: LazyLock<Regex> =
-            LazyLock::new(|| Regex::new(r#"(?s)<!--.*?(?:-->|$)"#).unwrap());
+            LazyLock::new(|| Regex::new(r#"(?s)<!--.*?-->"#).unwrap());
 
         let result = HTML_COMMENT_RE.replace_all(text, "");
         // Collapse any runs of 3+ newlines left by stripping
