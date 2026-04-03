@@ -1566,6 +1566,7 @@ struct StreamingFunctionCall {
 struct OpenAIMessageDelta {
     role: Option<String>,
     content: Option<String>,
+    #[serde(default, alias = "reasoning")]
     reasoning_content: Option<String>,
     tool_calls: Option<Vec<StreamingToolCall>>,
 }
