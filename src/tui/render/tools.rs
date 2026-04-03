@@ -13,6 +13,7 @@ pub(super) fn render_tool_group<'a>(
     group: &super::super::app::ToolCallGroup,
     is_active: bool,
     animation_frame: usize,
+    content_width: usize,
 ) {
     // Header line: ● Processing: <tool> or ● N tool calls
     let header = if is_active {
@@ -66,13 +67,20 @@ pub(super) fn render_tool_group<'a>(
                     .fg(Color::Red)
                     .add_modifier(Modifier::ITALIC)
             };
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("    {} ", connector),
-                    Style::default().fg(Color::DarkGray),
-                ),
-                Span::styled(call.description.clone(), header_style),
-            ]));
+            {
+                let desc_line = Line::from(vec![
+                    Span::styled(
+                        format!("    {} ", connector),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                    Span::styled(call.description.clone(), header_style),
+                ]);
+                for wrapped in
+                    super::utils::wrap_line_with_padding(desc_line, content_width, "       ")
+                {
+                    lines.push(wrapped);
+                }
+            }
 
             // Show full tool input parameters (untruncated) below the header
             let safe_call_input = crate::utils::redact_tool_input(&call.tool_input);
@@ -100,7 +108,7 @@ pub(super) fn render_tool_group<'a>(
                     };
                     let total = value_lines.len();
                     for vline in value_lines.iter().take(200) {
-                        lines.push(Line::from(vec![
+                        let full_line = Line::from(vec![
                             Span::styled(
                                 format!("    {}    ", continuation),
                                 Style::default().fg(Color::DarkGray),
@@ -109,7 +117,12 @@ pub(super) fn render_tool_group<'a>(
                                 vline.clone(),
                                 Style::default().fg(Color::Rgb(170, 170, 170)),
                             ),
-                        ]));
+                        ]);
+                        for wrapped in
+                            super::utils::wrap_line_with_padding(full_line, content_width, "  ")
+                        {
+                            lines.push(wrapped);
+                        }
                     }
                     if total > 200 {
                         lines.push(Line::from(vec![
@@ -154,13 +167,18 @@ pub(super) fn render_tool_group<'a>(
                         } else {
                             default_detail_style
                         };
-                        lines.push(Line::from(vec![
+                        let full_line = Line::from(vec![
                             Span::styled(
                                 format!("    {}  ", continuation),
                                 Style::default().fg(Color::DarkGray),
                             ),
                             Span::styled(detail_line.clone(), line_style),
-                        ]));
+                        ]);
+                        for wrapped in
+                            super::utils::wrap_line_with_padding(full_line, content_width, "  ")
+                        {
+                            lines.push(wrapped);
+                        }
                     }
                     if detail_lines.len() > 200 {
                         lines.push(Line::from(vec![
@@ -191,10 +209,17 @@ pub(super) fn render_tool_group<'a>(
                     .fg(Color::Red)
                     .add_modifier(Modifier::ITALIC)
             };
-            lines.push(Line::from(vec![
-                Span::styled("    └─ ".to_string(), Style::default().fg(Color::DarkGray)),
-                Span::styled(last.description.clone(), style),
-            ]));
+            {
+                let desc_line = Line::from(vec![
+                    Span::styled("    └─ ".to_string(), Style::default().fg(Color::DarkGray)),
+                    Span::styled(last.description.clone(), style),
+                ]);
+                for wrapped in
+                    super::utils::wrap_line_with_padding(desc_line, content_width, "       ")
+                {
+                    lines.push(wrapped);
+                }
+            }
         }
     }
 }
@@ -203,7 +228,7 @@ pub(super) fn render_tool_group<'a>(
 pub(super) fn render_inline_approval<'a>(
     lines: &mut Vec<Line<'a>>,
     approval: &super::super::app::ApprovalData,
-    _content_width: usize,
+    content_width: usize,
 ) {
     use super::super::app::ApprovalState;
 
@@ -254,13 +279,18 @@ pub(super) fn render_inline_approval<'a>(
                         };
                         let total = value_lines.len();
                         for vline in value_lines.iter().take(60) {
-                            lines.push(Line::from(vec![
+                            let full_line = Line::from(vec![
                                 Span::styled("      ", Style::default()),
                                 Span::styled(
                                     vline.clone(),
                                     Style::default().fg(Color::Rgb(200, 200, 200)),
                                 ),
-                            ]));
+                            ]);
+                            for wrapped in
+                                super::utils::wrap_line_with_padding(full_line, content_width, "  ")
+                            {
+                                lines.push(wrapped);
+                            }
                         }
                         if total > 60 {
                             lines.push(Line::from(vec![
