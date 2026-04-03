@@ -646,12 +646,7 @@ impl App {
                 let cmd = ci(tool_input, "command")
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
-                let short: String = cmd.chars().take(80).collect();
-                if cmd.len() > 80 {
-                    format!("bash: {}...", short)
-                } else {
-                    format!("bash: {}", short)
-                }
+                format!("bash: {}", cmd)
             }
             "read_file" | "read" => {
                 let path = ci(tool_input, "path")
