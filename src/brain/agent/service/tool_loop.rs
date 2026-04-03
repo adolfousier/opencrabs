@@ -591,6 +591,24 @@ impl AgentService {
                         ) =>
                 {
                     tracing::warn!("Prompt too long for provider — emergency compaction");
+
+                    // Pre-truncate to 170K so compact_context() can actually run.
+                    // Without this, the compaction LLM call also fails with "too long".
+                    const PRE_TRUNCATE_TARGET: usize = 170_000;
+                    if context.token_count > PRE_TRUNCATE_TARGET {
+                        tracing::warn!(
+                            "Context too large for compaction ({} tokens) — pre-truncating to {}K",
+                            context.token_count,
+                            PRE_TRUNCATE_TARGET / 1000
+                        );
+                        context.hard_truncate_to(PRE_TRUNCATE_TARGET);
+                        tracing::info!(
+                            "Pre-truncated to {} messages ({} tokens) — now attempting compaction",
+                            context.messages.len(),
+                            context.token_count
+                        );
+                    }
+
                     match self
                         .compact_context(session_id, &mut context, &model_name)
                         .await
