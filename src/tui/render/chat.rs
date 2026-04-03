@@ -71,7 +71,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
         // Render tool call groups (finalized)
         if let Some(ref group) = app.messages[msg_idx].tool_group {
-            render_tool_group(&mut lines, group, false, app.animation_frame);
+            render_tool_group(&mut lines, group, false, app.animation_frame, content_width);
             lines.push(Line::from(""));
             line_to_msg.resize(lines.len(), None);
             continue;
@@ -470,7 +470,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     // Render active tool group (live, during processing) — below spinner
     // so it's always visible at the bottom with auto-scroll
     if let Some(ref group) = app.active_tool_group {
-        render_tool_group(&mut lines, group, true, app.animation_frame);
+        render_tool_group(&mut lines, group, true, app.animation_frame, content_width);
     }
 
     // Show error message if present
