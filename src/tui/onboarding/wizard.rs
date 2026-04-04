@@ -598,37 +598,91 @@ impl OnboardingWizard {
         wizard.image_generation_enabled = config.image.generation.enabled;
         wizard.detect_existing_image_key();
 
-        // Load channel tokens/IDs from config (keys.toml is merged in at load time)
-        if let Some(ref token) = config.channels.telegram.token {
-            wizard.telegram_token_input = token.clone();
+        // Mark existing channel data with sentinels so apply_config() won't overwrite.
+        // When the user enters a channel sub-step, detect_existing_* re-checks and
+        // keeps the sentinel; if they clear + re-enter data the sentinel is replaced.
+        use super::types::EXISTING_KEY_SENTINEL;
+        let sentinel = || EXISTING_KEY_SENTINEL.to_string();
+
+        if config
+            .channels
+            .telegram
+            .token
+            .as_ref()
+            .is_some_and(|t| !t.is_empty())
+        {
+            wizard.telegram_token_input = sentinel();
         }
-        if let Some(user_id) = config.channels.telegram.allowed_users.first() {
-            wizard.telegram_user_id_input = user_id.clone();
+        if !config.channels.telegram.allowed_users.is_empty() {
+            wizard.telegram_user_id_input = sentinel();
         }
-        if let Some(ref token) = config.channels.discord.token {
-            wizard.discord_token_input = token.clone();
+        if config
+            .channels
+            .discord
+            .token
+            .as_ref()
+            .is_some_and(|t| !t.is_empty())
+        {
+            wizard.discord_token_input = sentinel();
         }
-        if let Some(channel_id) = config.channels.discord.allowed_channels.first() {
-            wizard.discord_channel_id_input = channel_id.clone();
+        if !config.channels.discord.allowed_channels.is_empty() {
+            wizard.discord_channel_id_input = sentinel();
         }
-        if let Some(ref token) = config.channels.slack.token {
-            wizard.slack_bot_token_input = token.clone();
+        if !config.channels.discord.allowed_users.is_empty() {
+            wizard.discord_allowed_list_input = sentinel();
         }
-        if let Some(ref app_token) = config.channels.slack.app_token {
-            wizard.slack_app_token_input = app_token.clone();
+        if config
+            .channels
+            .slack
+            .token
+            .as_ref()
+            .is_some_and(|t| !t.is_empty())
+        {
+            wizard.slack_bot_token_input = sentinel();
         }
-        if let Some(channel_id) = config.channels.slack.allowed_channels.first() {
-            wizard.slack_channel_id_input = channel_id.clone();
+        if config
+            .channels
+            .slack
+            .app_token
+            .as_ref()
+            .is_some_and(|t| !t.is_empty())
+        {
+            wizard.slack_app_token_input = sentinel();
         }
-        // Trello: load API Key (app_token), API Token (token), board ID
-        if let Some(ref api_key) = config.channels.trello.app_token {
-            wizard.trello_api_key_input = api_key.clone();
+        if !config.channels.slack.allowed_channels.is_empty() {
+            wizard.slack_channel_id_input = sentinel();
         }
-        if let Some(ref token) = config.channels.trello.token {
-            wizard.trello_api_token_input = token.clone();
+        if !config.channels.slack.allowed_users.is_empty() {
+            wizard.slack_allowed_list_input = sentinel();
         }
-        if let Some(board_id) = config.channels.trello.board_ids.first() {
-            wizard.trello_board_id_input = board_id.clone();
+        // Trello
+        if config
+            .channels
+            .trello
+            .app_token
+            .as_ref()
+            .is_some_and(|t| !t.is_empty())
+        {
+            wizard.trello_api_key_input = sentinel();
+        }
+        if config
+            .channels
+            .trello
+            .token
+            .as_ref()
+            .is_some_and(|t| !t.is_empty())
+        {
+            wizard.trello_api_token_input = sentinel();
+        }
+        if !config.channels.trello.board_ids.is_empty() {
+            wizard.trello_board_id_input = sentinel();
+        }
+        if !config.channels.trello.allowed_users.is_empty() {
+            wizard.trello_allowed_users_input = sentinel();
+        }
+        // WhatsApp
+        if !config.channels.whatsapp.allowed_phones.is_empty() {
+            wizard.whatsapp_phone_input = sentinel();
         }
         // WhatsApp: check if session.db exists (means it's paired)
         let wa_session = crate::config::opencrabs_home()
