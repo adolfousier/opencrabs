@@ -5,6 +5,28 @@ All notable changes to OpenCrabs will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.97] - 2026-04-04
+
+### Added
+- **Agent type system** — Typed subagents (`General`, `Explore`, `Plan`, `Code`, `Research`) with filtered tool registries. Each type gets a curated subset of the parent's tools, preventing recursive spawning and dangerous operations via `ALWAYS_EXCLUDED` list
+- **Team orchestration** — `TeamManager` coordinates named groups of agents. New tools: `team_create` (spawn N typed agents as a named team), `team_delete` (cancel and clean up), `team_broadcast` (fan-out messages to all running agents in a team)
+- **Subagent provider/model config** — `[agent]` section in config with `subagent_provider` and `subagent_model` fields. Spawned agents inherit the configured provider instead of always loading from global config
+- **Subagent input loop** — `send_input` now works: spawned/resumed agents wait for input after completing a round instead of exiting. Enables multi-turn conversations with child agents
+
+### Fixed
+- **Tool call descriptions truncating instead of wrapping** — `render_tool_group` now wraps description headers and value lines to terminal width. Removed 80-char pre-truncation of bash commands in `format_tool_description`. Added `file_path`/`filePath` fallbacks for file-related tools
+- **Double-escape cancel losing visible content** — Streaming response and active tool group now persisted to DB *before* `handle.abort()` fires, so cancelled content survives reload
+- **Claude CLI subprocess leak on cancel** — Stream reader loop monitors `tx.closed()` via `tokio::select!` and kills the child process when the receiver is dropped
+- **Telegram duplicate messages on cancel** — Added `cancel_token.is_cancelled()` guard before delivering final response, preventing stale agent results from posting after cancellation
+- **Config overwriting existing channel settings** — `apply_config()` now scopes writes to only the current onboarding step. `from_config()` sets `EXISTING_KEY_SENTINEL` for all existing channel data so untouched fields are never overwritten
+- **Pane switch not updating model display** — Session provider now swaps the agent to match the session's configured provider instead of overwriting the session
+- **Tool input not persisted for CLI segments** — `CliSegment::Tool` now includes `"i"` field for `tool_input`, surviving DB reload
+
+### Testing
+- **84 subagent/team tests** — Manager state machine (27), SendInputTool (6), CloseAgentTool (5), WaitAgentTool (7), lifecycle (8), AgentType filtering (10+), TeamManager (10), TeamDeleteTool (4), TeamBroadcastTool (5), registry exclusion (1)
+- **HTML comment strip tests aligned** — `strips_malformed_close_tag` → `preserves_malformed_close_tag`, `strips_unclosed_comment` → `preserves_unclosed_comment` to match actual (correct) behavior
+- **1,772 total tests** (up from 1,687)
+
 ## [0.2.96] - 2026-04-02
 
 ### Added
@@ -1961,6 +1983,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.2.97]: https://github.com/adolfousier/opencrabs/compare/v0.2.96...v0.2.97
+[0.2.96]: https://github.com/adolfousier/opencrabs/compare/v0.2.95...v0.2.96
 [0.2.95]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.95
 [0.2.94]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.94
 [0.2.93]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.93
