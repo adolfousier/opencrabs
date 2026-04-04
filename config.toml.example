@@ -159,6 +159,16 @@ model = "gpt-4o-mini-tts" # TTS model
 # default_provider = "minimax"
 # default_model = "MiniMax-M2.7"
 
+# ========================================
+# Agent / Sub-Agent Defaults
+# ========================================
+# Default provider/model for spawned sub-agents (e.g., research tasks, parallel tool calls).
+# Priority: subagent_provider > session's active provider.
+# Useful for routing sub-agents to a cheaper/faster model while keeping the main session on a premium one.
+[agent]
+# subagent_provider = "zhipu"
+# subagent_model = "GLM 5"
+
 [image.generation]
 enabled = false
 model = "gemini-3.1-flash-image-preview"   # Gemini image-gen model ("Nano Banana")
