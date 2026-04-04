@@ -770,6 +770,27 @@ pub(crate) async fn cmd_run(
         ),
     ));
 
+    let team_manager = Arc::new(crate::brain::tools::subagent::TeamManager::new());
+    tool_registry.register(Arc::new(
+        crate::brain::tools::subagent::TeamCreateTool::new(
+            subagent_manager.clone(),
+            team_manager.clone(),
+            tool_registry.clone(),
+        ),
+    ));
+    tool_registry.register(Arc::new(
+        crate::brain::tools::subagent::TeamDeleteTool::new(
+            subagent_manager.clone(),
+            team_manager.clone(),
+        ),
+    ));
+    tool_registry.register(Arc::new(
+        crate::brain::tools::subagent::TeamBroadcastTool::new(
+            subagent_manager.clone(),
+            team_manager.clone(),
+        ),
+    ));
+
     // Build dynamic system brain from workspace files
     let brain_path = BrainLoader::resolve_path();
     let brain_loader = BrainLoader::new(brain_path.clone());
@@ -1083,6 +1104,27 @@ pub(crate) async fn cmd_agent_interactive(
         crate::brain::tools::subagent::ResumeAgentTool::new(
             subagent_manager.clone(),
             tool_registry.clone(),
+        ),
+    ));
+
+    let team_manager = Arc::new(crate::brain::tools::subagent::TeamManager::new());
+    tool_registry.register(Arc::new(
+        crate::brain::tools::subagent::TeamCreateTool::new(
+            subagent_manager.clone(),
+            team_manager.clone(),
+            tool_registry.clone(),
+        ),
+    ));
+    tool_registry.register(Arc::new(
+        crate::brain::tools::subagent::TeamDeleteTool::new(
+            subagent_manager.clone(),
+            team_manager.clone(),
+        ),
+    ));
+    tool_registry.register(Arc::new(
+        crate::brain::tools::subagent::TeamBroadcastTool::new(
+            subagent_manager.clone(),
+            team_manager.clone(),
         ),
     ));
 

@@ -225,7 +225,29 @@ async fn cmd_chat_inner(
             tool_registry.clone(),
         ),
     ));
-    tracing::info!("Registered 5 sub-agent orchestration tools");
+
+    // Phase 6: Team orchestration
+    let team_manager = Arc::new(crate::brain::tools::subagent::TeamManager::new());
+    tool_registry.register(Arc::new(
+        crate::brain::tools::subagent::TeamCreateTool::new(
+            subagent_manager.clone(),
+            team_manager.clone(),
+            tool_registry.clone(),
+        ),
+    ));
+    tool_registry.register(Arc::new(
+        crate::brain::tools::subagent::TeamDeleteTool::new(
+            subagent_manager.clone(),
+            team_manager.clone(),
+        ),
+    ));
+    tool_registry.register(Arc::new(
+        crate::brain::tools::subagent::TeamBroadcastTool::new(
+            subagent_manager.clone(),
+            team_manager.clone(),
+        ),
+    ));
+    tracing::info!("Registered 8 sub-agent + team orchestration tools");
 
     // Index existing memory files and warm up embedding engine in the background.
     // Delay startup to avoid concurrent FFI access with resumed agent tasks
