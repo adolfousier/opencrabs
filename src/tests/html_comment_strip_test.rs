@@ -27,18 +27,20 @@ fn strips_lens_marker() {
 }
 
 #[test]
-fn strips_malformed_close_tag() {
-    // LLM hallucinates <!-- /tools-v2> without proper --> close
+fn preserves_malformed_close_tag() {
+    // Unclosed comments are NOT stripped — doing so would silently eat
+    // trailing response text during mid-stream rendering.
     let input = "Some text<!-- /tools-v2>";
     let result = AgentService::strip_html_comments(input);
-    assert_eq!(result, "Some text");
+    assert_eq!(result, input);
 }
 
 #[test]
-fn strips_unclosed_comment() {
+fn preserves_unclosed_comment() {
+    // Same rationale: unclosed comment must not swallow content to end-of-string.
     let input = "Before <!-- unclosed comment that never ends";
     let result = AgentService::strip_html_comments(input);
-    assert_eq!(result, "Before");
+    assert_eq!(result, input);
 }
 
 #[test]
