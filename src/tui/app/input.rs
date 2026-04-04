@@ -716,6 +716,11 @@ impl App {
                 if let Some(pending_at) = self.escape_pending_at {
                     if pending_at.elapsed() < std::time::Duration::from_secs(3) {
                         // Second Escape within 3 seconds — abort
+                        // PERSIST visible streaming content to DB BEFORE killing the task.
+                        // This prevents data loss: everything shown on screen survives cancel.
+                        if let Some(ref session) = self.current_session {
+                            self.persist_streaming_state(session.id).await;
+                        }
                         // Cancel the active cancel token (cooperative)
                         if let Some(token) = &self.cancel_token {
                             token.cancel();

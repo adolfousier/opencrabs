@@ -1676,4 +1676,92 @@ impl App {
 
         Ok(())
     }
+
+    /// Persist current in-memory streaming state to DB so cancel never loses visible content.
+    ///
+    /// Finds the last assistant message (created by tool_loop at start) and appends
+    /// any streaming text + tool call markers that are currently displayed on screen.
+    pub(crate) async fn persist_streaming_state(&self, session_id: Uuid) {
+        // Build content from what's currently visible
+        let mut content = String::new();
+
+        // 1. Collect any intermediate text messages that were already added to self.messages
+        //    during this response cycle (IntermediateText events create DisplayMessages).
+        //    These may not have been persisted if the tool loop was aborted before it could.
+        //    However, the tool loop does persist text per-iteration, so these are likely
+        //    already in DB. We focus on what's NOT yet persisted:
+
+        // 2. Active tool group (tool calls shown on screen but not yet flushed to a message)
+        if let Some(ref group) = self.active_tool_group {
+            let entries: Vec<serde_json::Value> = group
+                .calls
+                .iter()
+                .map(|call| {
+                    serde_json::json!({
+                        "d": call.description,
+                        "s": call.success,
+                        "i": call.tool_input,
+                    })
+                })
+                .collect();
+            if !entries.is_empty() {
+                content.push_str(&format!(
+                    "\n<!-- tools-v2: {} -->\n",
+                    serde_json::to_string(&entries).unwrap_or_default()
+                ));
+            }
+        }
+
+        // 3. Streaming response text (currently being typed out, not yet committed)
+        if let Some(ref text) = self.streaming_response
+            && !text.trim().is_empty()
+        {
+            content.push_str(text);
+            content.push_str("\n\n");
+        }
+
+        if content.is_empty() {
+            return;
+        }
+
+        // Find the last assistant message in this session and append
+        match self.message_service.get_last_message(session_id).await {
+            Ok(Some(msg)) if msg.role == "assistant" => {
+                if let Err(e) = self.message_service.append_content(msg.id, &content).await {
+                    tracing::error!(
+                        "Failed to persist streaming state on cancel: {}",
+                        e
+                    );
+                }
+                tracing::info!(
+                    "Persisted {} chars of streaming state to DB on cancel",
+                    content.len()
+                );
+            }
+            Ok(_) => {
+                // Last message isn't assistant — create one to hold the partial content
+                match self
+                    .message_service
+                    .create_message(session_id, "assistant".to_string(), content.clone())
+                    .await
+                {
+                    Ok(_) => {
+                        tracing::info!(
+                            "Created new assistant message with {} chars of streaming state on cancel",
+                            content.len()
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "Failed to create assistant message for streaming state: {}",
+                            e
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!("Failed to query last message on cancel: {}", e);
+            }
+        }
+    }
 }
