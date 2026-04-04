@@ -13,6 +13,7 @@ pub mod manager;
 mod resume;
 mod send_input;
 mod spawn;
+pub mod team;
 mod wait;
 
 pub use agent_type::AgentType;
@@ -21,4 +22,5 @@ pub use manager::{SubAgent, SubAgentManager, SubAgentState};
 pub use resume::ResumeAgentTool;
 pub use send_input::SendInputTool;
 pub use spawn::SpawnAgentTool;
+pub use team::{TeamBroadcastTool, TeamCreateTool, TeamDeleteTool, TeamManager};
 pub use wait::WaitAgentTool;

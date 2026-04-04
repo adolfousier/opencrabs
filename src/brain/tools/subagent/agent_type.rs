@@ -13,6 +13,9 @@ const ALWAYS_EXCLUDED: &[&str] = &[
     "wait_agent",
     "send_input",
     "close_agent",
+    "team_create",
+    "team_delete",
+    "team_broadcast",
     "rebuild",
     "evolve",
 ];
