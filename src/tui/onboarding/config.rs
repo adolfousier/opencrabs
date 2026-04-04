@@ -301,8 +301,39 @@ impl OnboardingWizard {
     }
 
     /// Apply wizard configuration — creates config.toml, stores API key, seeds workspace
-    /// Merges with existing config to preserve settings not modified in wizard
+    /// Merges with existing config to preserve settings not modified in wizard.
+    ///
+    /// In quick_jump mode, only writes settings relevant to the current step to avoid
+    /// overwriting unrelated channel/provider settings loaded with defaults.
     pub fn apply_config(&self) -> Result<(), String> {
+        // Determine which sections to write based on quick_jump + current step
+        let write_provider = !self.quick_jump
+            || matches!(
+                self.step,
+                OnboardingStep::ProviderAuth | OnboardingStep::Complete
+            );
+        let write_channels = !self.quick_jump
+            || matches!(
+                self.step,
+                OnboardingStep::Channels
+                    | OnboardingStep::TelegramSetup
+                    | OnboardingStep::DiscordSetup
+                    | OnboardingStep::WhatsAppSetup
+                    | OnboardingStep::SlackSetup
+                    | OnboardingStep::TrelloSetup
+                    | OnboardingStep::Complete
+            );
+        let write_voice = !self.quick_jump
+            || matches!(
+                self.step,
+                OnboardingStep::VoiceSetup | OnboardingStep::Complete
+            );
+        let write_image = !self.quick_jump
+            || matches!(
+                self.step,
+                OnboardingStep::ImageSetup | OnboardingStep::Complete
+            );
+
         // Groq key for STT/TTS
         let groq_key = if !self.groq_api_key_input.is_empty() && !self.has_existing_groq_key() {
             Some(self.groq_api_key_input.clone())
@@ -311,26 +342,9 @@ impl OnboardingWizard {
         };
 
         // Write config.toml via merge (write_key) — never overwrite entire file
-        // Disable all providers first, then enable selected one
         let mut write_errors: Vec<String> = Vec::new();
-        {
-            let all_sections = if let Ok(cfg) = Config::load() {
-                crate::utils::providers::all_config_sections(&cfg.providers)
-            } else {
-                crate::utils::providers::KNOWN_PROVIDERS
-                    .iter()
-                    .map(|p| p.config_section.to_string())
-                    .collect()
-            };
-            for section in &all_sections {
-                if let Err(e) = Config::write_key(section, "enabled", "false") {
-                    tracing::warn!("Failed to write {}.enabled: {}", section, e);
-                    write_errors.push(format!("{}.enabled", section));
-                }
-            }
-        }
 
-        // Enable + configure the selected provider
+        // Provider settings — only when relevant step is active
         let custom_section;
         let section = if self.ps.selected_provider < 9 {
             let id = PROVIDERS[self.ps.selected_provider].id;
@@ -341,238 +355,278 @@ impl OnboardingWizard {
             custom_section = format!("providers.custom.{}", self.ps.custom_name);
             &custom_section
         };
-        try_write!(write_errors, section, "enabled", "true");
-        let model = self.ps.selected_model_name().to_string();
-        if !model.is_empty() {
-            try_write!(write_errors, section, "default_model", &model);
-        }
 
-        // Write base_url / extra config for providers that need it
-        match self.ps.provider_id() {
-            "github" => {
-                try_write!(
-                    write_errors,
-                    section,
-                    "base_url",
-                    "https://api.githubcopilot.com/chat/completions"
-                );
-            }
-            "openrouter" => {
-                try_write!(
-                    write_errors,
-                    section,
-                    "base_url",
-                    "https://openrouter.ai/api/v1/chat/completions"
-                );
-            }
-            "minimax" => {
-                try_write!(
-                    write_errors,
-                    section,
-                    "base_url",
-                    "https://api.minimax.io/v1"
-                );
-            }
-            "zhipu" => {
-                let endpoint_type = if self.ps.zhipu_endpoint_type == 1 {
-                    "coding"
+        if write_provider {
+            // Disable all providers first, then enable selected one
+            {
+                let all_sections = if let Ok(cfg) = Config::load() {
+                    crate::utils::providers::all_config_sections(&cfg.providers)
                 } else {
-                    "api"
+                    crate::utils::providers::KNOWN_PROVIDERS
+                        .iter()
+                        .map(|p| p.config_section.to_string())
+                        .collect()
                 };
-                try_write!(write_errors, section, "endpoint_type", endpoint_type);
-            }
-            "" => {
-                if !self.ps.base_url.is_empty() {
-                    try_write!(write_errors, section, "base_url", &self.ps.base_url);
+                for s in &all_sections {
+                    if let Err(e) = Config::write_key(s, "enabled", "false") {
+                        tracing::warn!("Failed to write {}.enabled: {}", s, e);
+                        write_errors.push(format!("{}.enabled", s));
+                    }
                 }
-                if !self.ps.custom_model.is_empty() {
+            }
+
+            // Enable + configure the selected provider
+            let custom_section;
+            let section = if self.ps.selected_provider < 9 {
+                let id = PROVIDERS[self.ps.selected_provider].id;
+                crate::utils::providers::find_provider_meta(id)
+                    .map(|m| m.config_section)
+                    .unwrap_or("providers.anthropic")
+            } else {
+                custom_section = format!("providers.custom.{}", self.ps.custom_name);
+                &custom_section
+            };
+            try_write!(write_errors, section, "enabled", "true");
+            let model = self.ps.selected_model_name().to_string();
+            if !model.is_empty() {
+                try_write!(write_errors, section, "default_model", &model);
+            }
+
+            // Write base_url / extra config for providers that need it
+            match self.ps.provider_id() {
+                "github" => {
                     try_write!(
                         write_errors,
                         section,
-                        "default_model",
-                        &self.ps.custom_model
+                        "base_url",
+                        "https://api.githubcopilot.com/chat/completions"
                     );
                 }
-                if !self.ps.context_window.is_empty() {
+                "openrouter" => {
                     try_write!(
                         write_errors,
                         section,
-                        "context_window",
-                        &self.ps.context_window
+                        "base_url",
+                        "https://openrouter.ai/api/v1/chat/completions"
                     );
                 }
+                "minimax" => {
+                    try_write!(
+                        write_errors,
+                        section,
+                        "base_url",
+                        "https://api.minimax.io/v1"
+                    );
+                }
+                "zhipu" => {
+                    let endpoint_type = if self.ps.zhipu_endpoint_type == 1 {
+                        "coding"
+                    } else {
+                        "api"
+                    };
+                    try_write!(write_errors, section, "endpoint_type", endpoint_type);
+                }
+                "" => {
+                    if !self.ps.base_url.is_empty() {
+                        try_write!(write_errors, section, "base_url", &self.ps.base_url);
+                    }
+                    if !self.ps.custom_model.is_empty() {
+                        try_write!(
+                            write_errors,
+                            section,
+                            "default_model",
+                            &self.ps.custom_model
+                        );
+                    }
+                    if !self.ps.context_window.is_empty() {
+                        try_write!(
+                            write_errors,
+                            section,
+                            "context_window",
+                            &self.ps.context_window
+                        );
+                    }
+                }
+                _ => {}
             }
-            _ => {}
-        }
 
-        // Write models array for providers that have static model lists
-        if !self.ps.config_models.is_empty()
-            && (matches!(self.ps.provider_id(), "github" | "minimax" | "zhipu" | "")
-                || self.ps.selected_provider >= 9)
-        {
-            try_write_array!(write_errors, section, "models", &self.ps.config_models);
-        }
+            // Write models array for providers that have static model lists
+            if !self.ps.config_models.is_empty()
+                && (matches!(self.ps.provider_id(), "github" | "minimax" | "zhipu" | "")
+                    || self.ps.selected_provider >= 9)
+            {
+                try_write_array!(write_errors, section, "models", &self.ps.config_models);
+            }
+        } // end if write_provider
 
-        // Channel enabled flags (from channel_toggles: 0=Telegram, 1=Discord, 2=WhatsApp, 3=Slack)
-        try_write!(
-            write_errors,
-            "channels.telegram",
-            "enabled",
-            &self.is_telegram_enabled().to_string()
-        );
-        try_write!(
-            write_errors,
-            "channels.discord",
-            "enabled",
-            &self.is_discord_enabled().to_string()
-        );
-        try_write!(
-            write_errors,
-            "channels.whatsapp",
-            "enabled",
-            &self.channel_toggles.get(2).is_some_and(|t| t.1).to_string()
-        );
-        try_write!(
-            write_errors,
-            "channels.slack",
-            "enabled",
-            &self.is_slack_enabled().to_string()
-        );
-        try_write!(
-            write_errors,
-            "channels.trello",
-            "enabled",
-            &self.is_trello_enabled().to_string()
-        );
+        if write_channels {
+            // Channel enabled flags (from channel_toggles: 0=Telegram, 1=Discord, 2=WhatsApp, 3=Slack)
+            try_write!(
+                write_errors,
+                "channels.telegram",
+                "enabled",
+                &self.is_telegram_enabled().to_string()
+            );
+            try_write!(
+                write_errors,
+                "channels.discord",
+                "enabled",
+                &self.is_discord_enabled().to_string()
+            );
+            try_write!(
+                write_errors,
+                "channels.whatsapp",
+                "enabled",
+                &self.channel_toggles.get(2).is_some_and(|t| t.1).to_string()
+            );
+            try_write!(
+                write_errors,
+                "channels.slack",
+                "enabled",
+                &self.is_slack_enabled().to_string()
+            );
+            try_write!(
+                write_errors,
+                "channels.trello",
+                "enabled",
+                &self.is_trello_enabled().to_string()
+            );
 
-        // respond_to per channel
-        let respond_to_values = ["all", "dm_only", "mention"];
-        try_write!(
-            write_errors,
-            "channels.telegram",
-            "respond_to",
-            respond_to_values[self.telegram_respond_to.min(2)]
-        );
-        try_write!(
-            write_errors,
-            "channels.discord",
-            "respond_to",
-            respond_to_values[self.discord_respond_to.min(2)]
-        );
-        try_write!(
-            write_errors,
-            "channels.slack",
-            "respond_to",
-            respond_to_values[self.slack_respond_to.min(2)]
-        );
+            // respond_to per channel
+            let respond_to_values = ["all", "dm_only", "mention"];
+            try_write!(
+                write_errors,
+                "channels.telegram",
+                "respond_to",
+                respond_to_values[self.telegram_respond_to.min(2)]
+            );
+            try_write!(
+                write_errors,
+                "channels.discord",
+                "respond_to",
+                respond_to_values[self.discord_respond_to.min(2)]
+            );
+            try_write!(
+                write_errors,
+                "channels.slack",
+                "respond_to",
+                respond_to_values[self.slack_respond_to.min(2)]
+            );
+        } // end if write_channels
 
-        // Voice config (0=Off, 1=API, 2=Local for both STT and TTS)
-        let is_local_stt = self.stt_mode == 2;
-        let is_api_stt = self.stt_mode == 1;
-        let groq_key_exists = !self.groq_api_key_input.is_empty() || self.has_existing_groq_key();
+        if write_voice {
+            // Voice config (0=Off, 1=API, 2=Local for both STT and TTS)
+            let is_local_stt = self.stt_mode == 2;
+            let is_api_stt = self.stt_mode == 1;
+            let groq_key_exists =
+                !self.groq_api_key_input.is_empty() || self.has_existing_groq_key();
 
-        // STT API provider (Groq)
-        try_write!(
-            write_errors,
-            "providers.stt.groq",
-            "enabled",
-            &(is_api_stt && groq_key_exists).to_string()
-        );
-        if is_api_stt && groq_key_exists {
+            // STT API provider (Groq)
             try_write!(
                 write_errors,
                 "providers.stt.groq",
-                "default_model",
-                "whisper-large-v3-turbo"
+                "enabled",
+                &(is_api_stt && groq_key_exists).to_string()
             );
-        }
+            if is_api_stt && groq_key_exists {
+                try_write!(
+                    write_errors,
+                    "providers.stt.groq",
+                    "default_model",
+                    "whisper-large-v3-turbo"
+                );
+            }
 
-        // STT local provider
-        try_write!(
-            write_errors,
-            "providers.stt.local",
-            "enabled",
-            &is_local_stt.to_string()
-        );
-        if is_local_stt {
-            #[cfg(feature = "local-stt")]
-            {
-                use crate::channels::voice::local_whisper::LOCAL_MODEL_PRESETS;
-                if self.selected_local_stt_model < LOCAL_MODEL_PRESETS.len() {
-                    try_write!(
-                        write_errors,
-                        "providers.stt.local",
-                        "model",
-                        LOCAL_MODEL_PRESETS[self.selected_local_stt_model].id
-                    );
+            // STT local provider
+            try_write!(
+                write_errors,
+                "providers.stt.local",
+                "enabled",
+                &is_local_stt.to_string()
+            );
+            if is_local_stt {
+                #[cfg(feature = "local-stt")]
+                {
+                    use crate::channels::voice::local_whisper::LOCAL_MODEL_PRESETS;
+                    if self.selected_local_stt_model < LOCAL_MODEL_PRESETS.len() {
+                        try_write!(
+                            write_errors,
+                            "providers.stt.local",
+                            "model",
+                            LOCAL_MODEL_PRESETS[self.selected_local_stt_model].id
+                        );
+                    }
                 }
             }
-        }
 
-        // TTS API provider (OpenAI)
-        let is_api_tts = self.tts_enabled && self.tts_mode == 1;
-        let is_local_tts = self.tts_enabled && self.tts_mode == 2;
-        try_write!(
-            write_errors,
-            "providers.tts.openai",
-            "enabled",
-            &is_api_tts.to_string()
-        );
-        if is_api_tts {
+            // TTS API provider (OpenAI)
+            let is_api_tts = self.tts_enabled && self.tts_mode == 1;
+            let is_local_tts = self.tts_enabled && self.tts_mode == 2;
             try_write!(
                 write_errors,
                 "providers.tts.openai",
-                "default_model",
-                "gpt-4o-mini-tts"
+                "enabled",
+                &is_api_tts.to_string()
             );
-        }
+            if is_api_tts {
+                try_write!(
+                    write_errors,
+                    "providers.tts.openai",
+                    "default_model",
+                    "gpt-4o-mini-tts"
+                );
+            }
 
-        // TTS local provider (Piper)
-        try_write!(
-            write_errors,
-            "providers.tts.local",
-            "enabled",
-            &is_local_tts.to_string()
-        );
-        if is_local_tts {
-            #[cfg(feature = "local-tts")]
-            {
-                use crate::channels::voice::local_tts::PIPER_VOICES;
-                if self.selected_tts_voice < PIPER_VOICES.len() {
-                    try_write!(
-                        write_errors,
-                        "providers.tts.local",
-                        "voice",
-                        PIPER_VOICES[self.selected_tts_voice].id
-                    );
+            // TTS local provider (Piper)
+            try_write!(
+                write_errors,
+                "providers.tts.local",
+                "enabled",
+                &is_local_tts.to_string()
+            );
+            if is_local_tts {
+                #[cfg(feature = "local-tts")]
+                {
+                    use crate::channels::voice::local_tts::PIPER_VOICES;
+                    if self.selected_tts_voice < PIPER_VOICES.len() {
+                        try_write!(
+                            write_errors,
+                            "providers.tts.local",
+                            "voice",
+                            PIPER_VOICES[self.selected_tts_voice].id
+                        );
+                    }
                 }
             }
-        }
+        } // end if write_voice
 
-        // Image config
-        let image_model = "gemini-3.1-flash-image-preview";
-        if self.image_generation_enabled {
-            try_write!(write_errors, "image.generation", "enabled", "true");
-            try_write!(write_errors, "image.generation", "model", image_model);
-        }
-        if self.image_vision_enabled {
-            try_write!(write_errors, "image.vision", "enabled", "true");
-            try_write!(write_errors, "image.vision", "model", image_model);
-        }
-        // Save image API key to keys.toml (only if newly entered)
-        if !self.image_api_key_input.is_empty()
-            && !self.has_existing_image_key()
-            && let Err(e) = crate::config::write_secret_key(
-                "providers.image.gemini",
-                "api_key",
-                &self.image_api_key_input,
-            )
-        {
-            tracing::warn!("Failed to save image API key to keys.toml: {}", e);
-        }
+        if write_image {
+            // Image config
+            let image_model = "gemini-3.1-flash-image-preview";
+            if self.image_generation_enabled {
+                try_write!(write_errors, "image.generation", "enabled", "true");
+                try_write!(write_errors, "image.generation", "model", image_model);
+            }
+            if self.image_vision_enabled {
+                try_write!(write_errors, "image.vision", "enabled", "true");
+                try_write!(write_errors, "image.vision", "model", image_model);
+            }
+            // Save image API key to keys.toml (only if newly entered)
+            if !self.image_api_key_input.is_empty()
+                && !self.has_existing_image_key()
+                && let Err(e) = crate::config::write_secret_key(
+                    "providers.image.gemini",
+                    "api_key",
+                    &self.image_api_key_input,
+                )
+            {
+                tracing::warn!("Failed to save image API key to keys.toml: {}", e);
+            }
+        } // end if write_image
 
         // Save API key to keys.toml via merge — never overwrite
-        if !self.ps.has_existing_key_sentinel()
+        if write_provider
+            && !self.ps.has_existing_key_sentinel()
             && !self.ps.api_key_input.is_empty()
             && let Err(e) =
                 crate::config::write_secret_key(section, "api_key", &self.ps.api_key_input)
@@ -583,156 +637,164 @@ impl OnboardingWizard {
         // (GitHub Copilot OAuth token is saved directly via the device flow handler)
 
         // Save STT/TTS keys to keys.toml
-        if let Some(ref groq_key) = groq_key
-            && let Err(e) =
-                crate::config::write_secret_key("providers.stt.groq", "api_key", groq_key)
-        {
-            tracing::warn!("Failed to save Groq key to keys.toml: {}", e);
-        }
-        if self.tts_enabled
-            && let Some(ref groq_key) = groq_key
-            && let Err(e) =
-                crate::config::write_secret_key("providers.tts.openai", "api_key", groq_key)
-        {
-            tracing::warn!("Failed to save TTS key to keys.toml: {}", e);
-        }
-
-        // Persist channel tokens to keys.toml (if new)
-        if !self.telegram_token_input.is_empty()
-            && !self.has_existing_telegram_token()
-            && let Err(e) = crate::config::write_secret_key(
-                "channels.telegram",
-                "token",
-                &self.telegram_token_input,
-            )
-        {
-            tracing::warn!("Failed to save Telegram token to keys.toml: {}", e);
-        }
-        if !self.discord_token_input.is_empty()
-            && !self.has_existing_discord_token()
-            && let Err(e) = crate::config::write_secret_key(
-                "channels.discord",
-                "token",
-                &self.discord_token_input,
-            )
-        {
-            tracing::warn!("Failed to save Discord token to keys.toml: {}", e);
-        }
-        if !self.slack_bot_token_input.is_empty()
-            && !self.has_existing_slack_bot_token()
-            && let Err(e) = crate::config::write_secret_key(
-                "channels.slack",
-                "token",
-                &self.slack_bot_token_input,
-            )
-        {
-            tracing::warn!("Failed to save Slack bot token to keys.toml: {}", e);
-        }
-        if !self.slack_app_token_input.is_empty()
-            && !self.has_existing_slack_app_token()
-            && let Err(e) = crate::config::write_secret_key(
-                "channels.slack",
-                "app_token",
-                &self.slack_app_token_input,
-            )
-        {
-            tracing::warn!("Failed to save Slack app token to keys.toml: {}", e);
-        }
-        // Trello API Key (saved as app_token) + API Token
-        if !self.trello_api_key_input.is_empty()
-            && !self.has_existing_trello_api_key()
-            && let Err(e) = crate::config::write_secret_key(
-                "channels.trello",
-                "app_token",
-                &self.trello_api_key_input,
-            )
-        {
-            tracing::warn!("Failed to save Trello API Key to keys.toml: {}", e);
-        }
-        if !self.trello_api_token_input.is_empty()
-            && !self.has_existing_trello_api_token()
-            && let Err(e) = crate::config::write_secret_key(
-                "channels.trello",
-                "token",
-                &self.trello_api_token_input,
-            )
-        {
-            tracing::warn!("Failed to save Trello API Token to keys.toml: {}", e);
-        }
-
-        // Persist channel IDs/user IDs to config.toml (if new)
-        if !self.telegram_user_id_input.is_empty() && !self.has_existing_telegram_user_id() {
-            try_write_array!(
-                write_errors,
-                "channels.telegram",
-                "allowed_users",
-                std::slice::from_ref(&self.telegram_user_id_input)
-            );
-        }
-        if !self.discord_channel_id_input.is_empty() && !self.has_existing_discord_channel_id() {
-            try_write_array!(
-                write_errors,
-                "channels.discord",
-                "allowed_channels",
-                std::slice::from_ref(&self.discord_channel_id_input)
-            );
-        }
-        if !self.slack_channel_id_input.is_empty() && !self.has_existing_slack_channel_id() {
-            try_write_array!(
-                write_errors,
-                "channels.slack",
-                "allowed_channels",
-                std::slice::from_ref(&self.slack_channel_id_input)
-            );
-        }
-        if !self.discord_allowed_list_input.is_empty() && !self.has_existing_discord_allowed_list()
-        {
-            try_write_array!(
-                write_errors,
-                "channels.discord",
-                "allowed_users",
-                std::slice::from_ref(&self.discord_allowed_list_input)
-            );
-        }
-        if !self.slack_allowed_list_input.is_empty() && !self.has_existing_slack_allowed_list() {
-            try_write_array!(
-                write_errors,
-                "channels.slack",
-                "allowed_users",
-                std::slice::from_ref(&self.slack_allowed_list_input)
-            );
-        }
-        if !self.whatsapp_phone_input.is_empty() && !self.has_existing_whatsapp_phone() {
-            try_write_array!(
-                write_errors,
-                "channels.whatsapp",
-                "allowed_phones",
-                std::slice::from_ref(&self.whatsapp_phone_input)
-            );
-        }
-        if !self.trello_board_id_input.is_empty() && !self.has_existing_trello_board_id() {
-            let boards: Vec<String> = self
-                .trello_board_id_input
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-            if !boards.is_empty() {
-                try_write_array!(write_errors, "channels.trello", "board_ids", &boards);
+        if write_voice {
+            if let Some(ref groq_key) = groq_key
+                && let Err(e) =
+                    crate::config::write_secret_key("providers.stt.groq", "api_key", groq_key)
+            {
+                tracing::warn!("Failed to save Groq key to keys.toml: {}", e);
             }
-        }
-        if !self.trello_allowed_users_input.is_empty() && !self.has_existing_trello_allowed_users()
-        {
-            let users: Vec<String> = self
-                .trello_allowed_users_input
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-            if !users.is_empty() {
-                try_write_array!(write_errors, "channels.trello", "allowed_users", &users);
+            if self.tts_enabled
+                && let Some(ref groq_key) = groq_key
+                && let Err(e) =
+                    crate::config::write_secret_key("providers.tts.openai", "api_key", groq_key)
+            {
+                tracing::warn!("Failed to save TTS key to keys.toml: {}", e);
             }
-        }
+        } // end voice keys
+
+        if write_channels {
+            // Persist channel tokens to keys.toml (if new)
+            if !self.telegram_token_input.is_empty()
+                && !self.has_existing_telegram_token()
+                && let Err(e) = crate::config::write_secret_key(
+                    "channels.telegram",
+                    "token",
+                    &self.telegram_token_input,
+                )
+            {
+                tracing::warn!("Failed to save Telegram token to keys.toml: {}", e);
+            }
+            if !self.discord_token_input.is_empty()
+                && !self.has_existing_discord_token()
+                && let Err(e) = crate::config::write_secret_key(
+                    "channels.discord",
+                    "token",
+                    &self.discord_token_input,
+                )
+            {
+                tracing::warn!("Failed to save Discord token to keys.toml: {}", e);
+            }
+            if !self.slack_bot_token_input.is_empty()
+                && !self.has_existing_slack_bot_token()
+                && let Err(e) = crate::config::write_secret_key(
+                    "channels.slack",
+                    "token",
+                    &self.slack_bot_token_input,
+                )
+            {
+                tracing::warn!("Failed to save Slack bot token to keys.toml: {}", e);
+            }
+            if !self.slack_app_token_input.is_empty()
+                && !self.has_existing_slack_app_token()
+                && let Err(e) = crate::config::write_secret_key(
+                    "channels.slack",
+                    "app_token",
+                    &self.slack_app_token_input,
+                )
+            {
+                tracing::warn!("Failed to save Slack app token to keys.toml: {}", e);
+            }
+            // Trello API Key (saved as app_token) + API Token
+            if !self.trello_api_key_input.is_empty()
+                && !self.has_existing_trello_api_key()
+                && let Err(e) = crate::config::write_secret_key(
+                    "channels.trello",
+                    "app_token",
+                    &self.trello_api_key_input,
+                )
+            {
+                tracing::warn!("Failed to save Trello API Key to keys.toml: {}", e);
+            }
+            if !self.trello_api_token_input.is_empty()
+                && !self.has_existing_trello_api_token()
+                && let Err(e) = crate::config::write_secret_key(
+                    "channels.trello",
+                    "token",
+                    &self.trello_api_token_input,
+                )
+            {
+                tracing::warn!("Failed to save Trello API Token to keys.toml: {}", e);
+            }
+
+            // Persist channel IDs/user IDs to config.toml (if new)
+            if !self.telegram_user_id_input.is_empty() && !self.has_existing_telegram_user_id() {
+                try_write_array!(
+                    write_errors,
+                    "channels.telegram",
+                    "allowed_users",
+                    std::slice::from_ref(&self.telegram_user_id_input)
+                );
+            }
+            if !self.discord_channel_id_input.is_empty() && !self.has_existing_discord_channel_id()
+            {
+                try_write_array!(
+                    write_errors,
+                    "channels.discord",
+                    "allowed_channels",
+                    std::slice::from_ref(&self.discord_channel_id_input)
+                );
+            }
+            if !self.slack_channel_id_input.is_empty() && !self.has_existing_slack_channel_id() {
+                try_write_array!(
+                    write_errors,
+                    "channels.slack",
+                    "allowed_channels",
+                    std::slice::from_ref(&self.slack_channel_id_input)
+                );
+            }
+            if !self.discord_allowed_list_input.is_empty()
+                && !self.has_existing_discord_allowed_list()
+            {
+                try_write_array!(
+                    write_errors,
+                    "channels.discord",
+                    "allowed_users",
+                    std::slice::from_ref(&self.discord_allowed_list_input)
+                );
+            }
+            if !self.slack_allowed_list_input.is_empty() && !self.has_existing_slack_allowed_list()
+            {
+                try_write_array!(
+                    write_errors,
+                    "channels.slack",
+                    "allowed_users",
+                    std::slice::from_ref(&self.slack_allowed_list_input)
+                );
+            }
+            if !self.whatsapp_phone_input.is_empty() && !self.has_existing_whatsapp_phone() {
+                try_write_array!(
+                    write_errors,
+                    "channels.whatsapp",
+                    "allowed_phones",
+                    std::slice::from_ref(&self.whatsapp_phone_input)
+                );
+            }
+            if !self.trello_board_id_input.is_empty() && !self.has_existing_trello_board_id() {
+                let boards: Vec<String> = self
+                    .trello_board_id_input
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                if !boards.is_empty() {
+                    try_write_array!(write_errors, "channels.trello", "board_ids", &boards);
+                }
+            }
+            if !self.trello_allowed_users_input.is_empty()
+                && !self.has_existing_trello_allowed_users()
+            {
+                let users: Vec<String> = self
+                    .trello_allowed_users_input
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                if !users.is_empty() {
+                    try_write_array!(write_errors, "channels.trello", "allowed_users", &users);
+                }
+            }
+        } // end if write_channels
 
         // Seed workspace templates (use AI-generated content when available)
         if self.seed_templates {
