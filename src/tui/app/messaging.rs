@@ -1728,10 +1728,7 @@ impl App {
         match self.message_service.get_last_message(session_id).await {
             Ok(Some(msg)) if msg.role == "assistant" => {
                 if let Err(e) = self.message_service.append_content(msg.id, &content).await {
-                    tracing::error!(
-                        "Failed to persist streaming state on cancel: {}",
-                        e
-                    );
+                    tracing::error!("Failed to persist streaming state on cancel: {}", e);
                 }
                 tracing::info!(
                     "Persisted {} chars of streaming state to DB on cancel",
