@@ -931,3 +931,139 @@ mod lifecycle {
         assert!(mgr.get_input_tx("a1").is_none());
     }
 }
+
+// ─── AgentType Tests ───────────────────────────────────────────────────────
+
+mod agent_type {
+    use crate::brain::tools::subagent::AgentType;
+
+    #[test]
+    fn parse_known_types() {
+        assert_eq!(AgentType::parse("explore"), AgentType::Explore);
+        assert_eq!(AgentType::parse("search"), AgentType::Explore);
+        assert_eq!(AgentType::parse("find"), AgentType::Explore);
+        assert_eq!(AgentType::parse("plan"), AgentType::Plan);
+        assert_eq!(AgentType::parse("architect"), AgentType::Plan);
+        assert_eq!(AgentType::parse("code"), AgentType::Code);
+        assert_eq!(AgentType::parse("implement"), AgentType::Code);
+        assert_eq!(AgentType::parse("write"), AgentType::Code);
+        assert_eq!(AgentType::parse("research"), AgentType::Research);
+        assert_eq!(AgentType::parse("web"), AgentType::Research);
+    }
+
+    #[test]
+    fn parse_unknown_defaults_to_general() {
+        assert_eq!(AgentType::parse(""), AgentType::General);
+        assert_eq!(AgentType::parse("foobar"), AgentType::General);
+        assert_eq!(AgentType::parse("random"), AgentType::General);
+    }
+
+    #[test]
+    fn parse_case_insensitive() {
+        assert_eq!(AgentType::parse("EXPLORE"), AgentType::Explore);
+        assert_eq!(AgentType::parse("Plan"), AgentType::Plan);
+        assert_eq!(AgentType::parse("CODE"), AgentType::Code);
+    }
+
+    #[test]
+    fn labels_are_lowercase() {
+        assert_eq!(AgentType::General.label(), "general");
+        assert_eq!(AgentType::Explore.label(), "explore");
+        assert_eq!(AgentType::Plan.label(), "plan");
+        assert_eq!(AgentType::Code.label(), "code");
+        assert_eq!(AgentType::Research.label(), "research");
+    }
+
+    #[test]
+    fn system_prompts_are_nonempty() {
+        for agent_type in &[
+            AgentType::General,
+            AgentType::Explore,
+            AgentType::Plan,
+            AgentType::Code,
+            AgentType::Research,
+        ] {
+            assert!(!agent_type.system_prompt().is_empty());
+        }
+    }
+
+    /// Build a mock parent registry with all common tools for testing filtering.
+    fn mock_parent_registry() -> crate::brain::tools::ToolRegistry {
+        use std::sync::Arc;
+        let reg = crate::brain::tools::ToolRegistry::new();
+        reg.register(Arc::new(crate::brain::tools::read::ReadTool));
+        reg.register(Arc::new(crate::brain::tools::write::WriteTool));
+        reg.register(Arc::new(crate::brain::tools::edit::EditTool));
+        reg.register(Arc::new(crate::brain::tools::bash::BashTool));
+        reg.register(Arc::new(crate::brain::tools::glob::GlobTool));
+        reg.register(Arc::new(crate::brain::tools::grep::GrepTool));
+        reg.register(Arc::new(crate::brain::tools::ls::LsTool));
+        reg.register(Arc::new(crate::brain::tools::web_search::WebSearchTool));
+        reg
+    }
+
+    #[test]
+    fn explore_registry_is_read_only() {
+        let parent = mock_parent_registry();
+        let registry = AgentType::Explore.build_registry(&parent);
+        let tools = registry.list_tools();
+        assert!(tools.contains(&"read_file".to_string()));
+        assert!(tools.contains(&"glob".to_string()));
+        assert!(tools.contains(&"grep".to_string()));
+        assert!(tools.contains(&"ls".to_string()));
+        assert!(!tools.contains(&"write_file".to_string()));
+        assert!(!tools.contains(&"edit_file".to_string()));
+        assert!(!tools.contains(&"bash".to_string()));
+    }
+
+    #[test]
+    fn general_registry_inherits_full_parent() {
+        let parent = mock_parent_registry();
+        let registry = AgentType::General.build_registry(&parent);
+        let tools = registry.list_tools();
+        assert!(tools.contains(&"read_file".to_string()));
+        assert!(tools.contains(&"write_file".to_string()));
+        assert!(tools.contains(&"edit_file".to_string()));
+        assert!(tools.contains(&"bash".to_string()));
+        assert!(tools.contains(&"glob".to_string()));
+        assert!(tools.contains(&"grep".to_string()));
+    }
+
+    #[test]
+    fn general_registry_excludes_recursive_tools() {
+        let parent = mock_parent_registry();
+        // Add a "spawn_agent" to parent — it should be filtered out
+        use std::sync::Arc;
+        let mgr = Arc::new(crate::brain::tools::subagent::SubAgentManager::new());
+        parent.register(Arc::new(
+            crate::brain::tools::subagent::SpawnAgentTool::new(
+                mgr.clone(),
+                Arc::new(crate::brain::tools::ToolRegistry::new()),
+            ),
+        ));
+        let registry = AgentType::General.build_registry(&parent);
+        let tools = registry.list_tools();
+        assert!(!tools.contains(&"spawn_agent".to_string()));
+    }
+
+    #[test]
+    fn research_registry_has_web_no_write() {
+        let parent = mock_parent_registry();
+        let registry = AgentType::Research.build_registry(&parent);
+        let tools = registry.list_tools();
+        assert!(tools.contains(&"web_search".to_string()));
+        assert!(tools.contains(&"read_file".to_string()));
+        assert!(!tools.contains(&"write_file".to_string()));
+        assert!(!tools.contains(&"edit_file".to_string()));
+    }
+
+    #[test]
+    fn plan_registry_has_bash_for_analysis() {
+        let parent = mock_parent_registry();
+        let registry = AgentType::Plan.build_registry(&parent);
+        let tools = registry.list_tools();
+        assert!(tools.contains(&"bash".to_string()));
+        assert!(tools.contains(&"read_file".to_string()));
+        assert!(!tools.contains(&"write_file".to_string()));
+    }
+}

@@ -12,11 +12,18 @@ use tokio_util::sync::CancellationToken;
 /// Tool that spawns a child agent to handle a sub-task.
 pub struct SpawnAgentTool {
     manager: Arc<SubAgentManager>,
+    parent_registry: Arc<crate::brain::tools::ToolRegistry>,
 }
 
 impl SpawnAgentTool {
-    pub fn new(manager: Arc<SubAgentManager>) -> Self {
-        Self { manager }
+    pub fn new(
+        manager: Arc<SubAgentManager>,
+        parent_registry: Arc<crate::brain::tools::ToolRegistry>,
+    ) -> Self {
+        Self {
+            manager,
+            parent_registry,
+        }
     }
 }
 
@@ -43,6 +50,11 @@ impl Tool for SpawnAgentTool {
                 "label": {
                     "type": "string",
                     "description": "Short human-readable label for this sub-agent (e.g., 'refactor-auth', 'test-runner')"
+                },
+                "agent_type": {
+                    "type": "string",
+                    "description": "Agent specialization: 'general' (full tools), 'explore' (read-only), 'plan' (read+bash), 'code' (full write), 'research' (web+read). Default: general",
+                    "enum": ["general", "explore", "plan", "code", "research"]
                 }
             },
             "required": ["prompt"]
@@ -69,6 +81,13 @@ impl Tool for SpawnAgentTool {
             .and_then(|v| v.as_str())
             .unwrap_or("sub-agent")
             .to_string();
+
+        let agent_type = super::AgentType::parse(
+            input
+                .get("agent_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("general"),
+        );
 
         // We need a ServiceContext to create a session for the child
         let service_context = context
@@ -121,18 +140,8 @@ impl Tool for SpawnAgentTool {
                 })?
             };
 
-            // Build tool registry for child (same tools as parent, minus spawn to prevent recursion)
-            let child_registry = crate::brain::tools::ToolRegistry::new();
-
-            // Register essential tools for the child
-            child_registry.register(Arc::new(crate::brain::tools::read::ReadTool));
-            child_registry.register(Arc::new(crate::brain::tools::write::WriteTool));
-            child_registry.register(Arc::new(crate::brain::tools::edit::EditTool));
-            child_registry.register(Arc::new(crate::brain::tools::bash::BashTool));
-            child_registry.register(Arc::new(crate::brain::tools::glob::GlobTool));
-            child_registry.register(Arc::new(crate::brain::tools::grep::GrepTool));
-            child_registry.register(Arc::new(crate::brain::tools::ls::LsTool));
-            child_registry.register(Arc::new(crate::brain::tools::web_search::WebSearchTool));
+            // Build filtered tool registry based on agent type
+            let child_registry = agent_type.build_registry(&self.parent_registry);
 
             let agent =
                 crate::brain::agent::AgentService::new(provider, service_context.clone(), &config)
@@ -143,11 +152,14 @@ impl Tool for SpawnAgentTool {
             Arc::new(agent)
         };
 
+        // Prepend agent type system prompt to the user's task
+        let full_prompt = format!("{}\n\n{}", agent_type.system_prompt(), prompt);
+
         // Spawn background task with input loop
         let cancel_clone = cancel_token.clone();
         let manager = self.manager.clone();
         let agent_id_clone = agent_id.clone();
-        let prompt_clone = prompt.clone();
+        let prompt_clone = full_prompt;
         let mut input_rx = input_rx;
 
         let handle = tokio::spawn(async move {

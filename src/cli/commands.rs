@@ -697,8 +697,8 @@ pub(crate) async fn cmd_run(
     // Select provider based on configuration using factory
     let provider = crate::brain::provider::create_provider(config)?;
 
-    // Create tool registry
-    let tool_registry = ToolRegistry::new();
+    // Create tool registry (Arc-wrapped early so SpawnAgentTool can reference it)
+    let tool_registry = Arc::new(ToolRegistry::new());
     // Phase 1: Essential file operations
     tool_registry.register(Arc::new(ReadTool));
     tool_registry.register(Arc::new(WriteTool));
@@ -749,7 +749,10 @@ pub(crate) async fn cmd_run(
     // Phase 5: Multi-agent orchestration
     let subagent_manager = Arc::new(crate::brain::tools::subagent::SubAgentManager::new());
     tool_registry.register(Arc::new(
-        crate::brain::tools::subagent::SpawnAgentTool::new(subagent_manager.clone()),
+        crate::brain::tools::subagent::SpawnAgentTool::new(
+            subagent_manager.clone(),
+            tool_registry.clone(),
+        ),
     ));
     tool_registry.register(Arc::new(crate::brain::tools::subagent::WaitAgentTool::new(
         subagent_manager.clone(),
@@ -761,7 +764,10 @@ pub(crate) async fn cmd_run(
         crate::brain::tools::subagent::CloseAgentTool::new(subagent_manager.clone()),
     ));
     tool_registry.register(Arc::new(
-        crate::brain::tools::subagent::ResumeAgentTool::new(subagent_manager.clone()),
+        crate::brain::tools::subagent::ResumeAgentTool::new(
+            subagent_manager.clone(),
+            tool_registry.clone(),
+        ),
     ));
 
     // Build dynamic system brain from workspace files
@@ -782,7 +788,7 @@ pub(crate) async fn cmd_run(
     // Create service context and agent service
     let service_context = ServiceContext::new(db.pool().clone());
     let agent_service = AgentService::new(provider.clone(), service_context.clone(), config)
-        .with_tool_registry(Arc::new(tool_registry))
+        .with_tool_registry(tool_registry.clone())
         .with_system_brain(system_brain);
 
     // Create or get session
@@ -1018,7 +1024,7 @@ pub(crate) async fn cmd_agent_interactive(
 
     let provider = crate::brain::provider::create_provider(config)?;
 
-    let tool_registry = ToolRegistry::new();
+    let tool_registry = Arc::new(ToolRegistry::new());
     tool_registry.register(Arc::new(ReadTool));
     tool_registry.register(Arc::new(WriteTool));
     tool_registry.register(Arc::new(EditTool));
@@ -1059,7 +1065,10 @@ pub(crate) async fn cmd_agent_interactive(
 
     let subagent_manager = Arc::new(crate::brain::tools::subagent::SubAgentManager::new());
     tool_registry.register(Arc::new(
-        crate::brain::tools::subagent::SpawnAgentTool::new(subagent_manager.clone()),
+        crate::brain::tools::subagent::SpawnAgentTool::new(
+            subagent_manager.clone(),
+            tool_registry.clone(),
+        ),
     ));
     tool_registry.register(Arc::new(crate::brain::tools::subagent::WaitAgentTool::new(
         subagent_manager.clone(),
@@ -1071,7 +1080,10 @@ pub(crate) async fn cmd_agent_interactive(
         crate::brain::tools::subagent::CloseAgentTool::new(subagent_manager.clone()),
     ));
     tool_registry.register(Arc::new(
-        crate::brain::tools::subagent::ResumeAgentTool::new(subagent_manager.clone()),
+        crate::brain::tools::subagent::ResumeAgentTool::new(
+            subagent_manager.clone(),
+            tool_registry.clone(),
+        ),
     ));
 
     let brain_path = BrainLoader::resolve_path();
@@ -1090,7 +1102,7 @@ pub(crate) async fn cmd_agent_interactive(
 
     let service_context = ServiceContext::new(db.pool().clone());
     let agent_service = AgentService::new(provider.clone(), service_context.clone(), config)
-        .with_tool_registry(Arc::new(tool_registry))
+        .with_tool_registry(tool_registry.clone())
         .with_system_brain(system_brain);
 
     let session_service = SessionService::new(service_context);

@@ -7,6 +7,7 @@
 //! and runs in a background tokio task. The parent can wait, send input,
 //! close, or resume any child by agent_id.
 
+pub mod agent_type;
 mod close;
 pub mod manager;
 mod resume;
@@ -14,6 +15,7 @@ mod send_input;
 mod spawn;
 mod wait;
 
+pub use agent_type::AgentType;
 pub use close::CloseAgentTool;
 pub use manager::{SubAgent, SubAgentManager, SubAgentState};
 pub use resume::ResumeAgentTool;

@@ -12,11 +12,18 @@ use tokio_util::sync::CancellationToken;
 /// Tool that resumes a previously completed or failed sub-agent.
 pub struct ResumeAgentTool {
     manager: Arc<SubAgentManager>,
+    parent_registry: Arc<crate::brain::tools::ToolRegistry>,
 }
 
 impl ResumeAgentTool {
-    pub fn new(manager: Arc<SubAgentManager>) -> Self {
-        Self { manager }
+    pub fn new(
+        manager: Arc<SubAgentManager>,
+        parent_registry: Arc<crate::brain::tools::ToolRegistry>,
+    ) -> Self {
+        Self {
+            manager,
+            parent_registry,
+        }
     }
 }
 
@@ -148,15 +155,9 @@ impl Tool for ResumeAgentTool {
                 })?
             };
 
-            let child_registry = crate::brain::tools::ToolRegistry::new();
-            child_registry.register(Arc::new(crate::brain::tools::read::ReadTool));
-            child_registry.register(Arc::new(crate::brain::tools::write::WriteTool));
-            child_registry.register(Arc::new(crate::brain::tools::edit::EditTool));
-            child_registry.register(Arc::new(crate::brain::tools::bash::BashTool));
-            child_registry.register(Arc::new(crate::brain::tools::glob::GlobTool));
-            child_registry.register(Arc::new(crate::brain::tools::grep::GrepTool));
-            child_registry.register(Arc::new(crate::brain::tools::ls::LsTool));
-            child_registry.register(Arc::new(crate::brain::tools::web_search::WebSearchTool));
+            // Resumed agents get General type (full parent tools minus recursive/dangerous)
+            let child_registry =
+                super::agent_type::AgentType::General.build_registry(&self.parent_registry);
 
             Arc::new(
                 crate::brain::agent::AgentService::new(provider, service_context, &config)

@@ -98,9 +98,9 @@ async fn cmd_chat_inner(
         }
     };
 
-    // Create tool registry
+    // Create tool registry (Arc-wrapped early so SpawnAgentTool can reference it)
     tracing::debug!("Setting up tool registry");
-    let tool_registry = ToolRegistry::new();
+    let tool_registry = Arc::new(ToolRegistry::new());
     // Phase 1: Essential file operations
     tool_registry.register(Arc::new(ReadTool));
     tool_registry.register(Arc::new(WriteTool));
@@ -205,7 +205,10 @@ async fn cmd_chat_inner(
     // Phase 5: Multi-agent orchestration
     let subagent_manager = Arc::new(crate::brain::tools::subagent::SubAgentManager::new());
     tool_registry.register(Arc::new(
-        crate::brain::tools::subagent::SpawnAgentTool::new(subagent_manager.clone()),
+        crate::brain::tools::subagent::SpawnAgentTool::new(
+            subagent_manager.clone(),
+            tool_registry.clone(),
+        ),
     ));
     tool_registry.register(Arc::new(crate::brain::tools::subagent::WaitAgentTool::new(
         subagent_manager.clone(),
@@ -217,7 +220,10 @@ async fn cmd_chat_inner(
         crate::brain::tools::subagent::CloseAgentTool::new(subagent_manager.clone()),
     ));
     tool_registry.register(Arc::new(
-        crate::brain::tools::subagent::ResumeAgentTool::new(subagent_manager.clone()),
+        crate::brain::tools::subagent::ResumeAgentTool::new(
+            subagent_manager.clone(),
+            tool_registry.clone(),
+        ),
     ));
     tracing::info!("Registered 5 sub-agent orchestration tools");
 
@@ -630,7 +636,7 @@ async fn cmd_chat_inner(
 
     // Create agent service with approval callback, progress callback, and message queue
     tracing::debug!("Creating agent service with approval, progress, and message queue callbacks");
-    let shared_tool_registry = Arc::new(tool_registry);
+    let shared_tool_registry = tool_registry;
 
     // Load dynamic tools from ~/.opencrabs/tools.toml
     let tools_toml_path = crate::brain::tools::dynamic::DynamicToolLoader::default_path()
