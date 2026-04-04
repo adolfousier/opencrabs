@@ -97,6 +97,9 @@ impl TelegramAgent {
                     }
                     // Store bot in state for proactive messaging only after successful auth
                     self.telegram_state.set_bot(bot.clone()).await;
+
+                    // Register slash commands so they appear in Telegram's / menu
+                    register_bot_commands(&bot).await;
                 }
                 Err(e) => {
                     tracing::warn!("Telegram: token validation failed: {}. Bot not started.", e);
@@ -479,5 +482,27 @@ impl TelegramAgent {
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             }
         })
+    }
+}
+
+/// Register bot commands with Telegram so they appear in the `/` menu.
+async fn register_bot_commands(bot: &Bot) {
+    use teloxide::types::BotCommand;
+
+    let commands = vec![
+        BotCommand::new("help", "Show available commands"),
+        BotCommand::new("models", "Switch AI model or provider"),
+        BotCommand::new("usage", "Session token and cost stats"),
+        BotCommand::new("new", "Start a new session"),
+        BotCommand::new("sessions", "List and switch sessions"),
+        BotCommand::new("stop", "Cancel the current operation"),
+        BotCommand::new("compact", "Compact conversation context"),
+        BotCommand::new("doctor", "Run connection health check"),
+        BotCommand::new("evolve", "Check for updates"),
+    ];
+
+    match bot.set_my_commands(commands).await {
+        Ok(_) => tracing::info!("Telegram: registered {} bot commands", 9),
+        Err(e) => tracing::warn!("Telegram: failed to register bot commands: {}", e),
     }
 }
