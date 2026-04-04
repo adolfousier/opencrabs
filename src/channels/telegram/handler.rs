@@ -1466,6 +1466,19 @@ pub(crate) async fn handle_message(
         }
     }
 
+    // Guard against stale delivery: if the cancel token was triggered (a newer
+    // message superseded this one), skip delivering so we don't duplicate.
+    if cancel_token.is_cancelled() {
+        tracing::info!(
+            "Telegram: agent call for session {} finished after cancellation — suppressing stale delivery",
+            session_id
+        );
+        if let Some(mid) = streaming_msg_id {
+            let _ = bot.delete_message(msg.chat.id, mid).await;
+        }
+        return Ok(());
+    }
+
     tracing::info!(
         "Telegram: agent call completed for session {} — delivering final response",
         session_id
