@@ -1420,6 +1420,30 @@ pub(crate) async fn handle_message(
     if let Some(mid) = status_msg_id {
         let _ = bot.delete_message(msg.chat.id, mid).await;
     }
+
+    // Guard against stale delivery BEFORE sending remaining display items:
+    // if a newer message cancelled this call, any queued tool/intermediate
+    // messages are stale and must not be sent — otherwise they duplicate
+    // alongside the newer call's messages.
+    if cancel_token.is_cancelled() {
+        tracing::info!(
+            "Telegram: agent call for session {} finished after cancellation — suppressing stale delivery",
+            session_id
+        );
+        // Clean up streaming message and any tool messages already sent
+        if let Some(mid) = streaming_msg_id {
+            let _ = bot.delete_message(msg.chat.id, mid).await;
+        }
+        let tool_msg_ids: Vec<teloxide::types::MessageId> = {
+            let s = streaming.lock().unwrap_or_else(|e| e.into_inner());
+            s.tool_msgs.iter().filter_map(|t| t.msg_id).collect()
+        };
+        for mid in tool_msg_ids {
+            let _ = bot.delete_message(msg.chat.id, mid).await;
+        }
+        return Ok(());
+    }
+
     // Send any remaining display items that weren't flushed by the edit loop
     for item in remaining_display {
         match item {
@@ -1464,19 +1488,6 @@ pub(crate) async fn handle_message(
                 }
             }
         }
-    }
-
-    // Guard against stale delivery: if the cancel token was triggered (a newer
-    // message superseded this one), skip delivering so we don't duplicate.
-    if cancel_token.is_cancelled() {
-        tracing::info!(
-            "Telegram: agent call for session {} finished after cancellation — suppressing stale delivery",
-            session_id
-        );
-        if let Some(mid) = streaming_msg_id {
-            let _ = bot.delete_message(msg.chat.id, mid).await;
-        }
-        return Ok(());
     }
 
     tracing::info!(
