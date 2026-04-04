@@ -119,7 +119,7 @@ https://github.com/user-attachments/assets/7f45c5f8-acdf-48d5-b6a4-0e4811a9ee23
 | **Context Awareness** | Live context usage indicator showing actual token counts (e.g. `ctx: 45K/200K (23%)`); auto-compaction at 70% with tool overhead budgeting; accurate tiktoken-based counting calibrated against API actuals |
 | **3-Tier Memory** | (1) **Brain MEMORY.md** — user-curated durable memory loaded every turn, (2) **Daily Logs** — auto-compaction summaries at `~/.opencrabs/memory/YYYY-MM-DD.md`, (3) **Hybrid Memory Search** — FTS5 keyword search + local vector embeddings (embeddinggemma-300M, 768-dim) combined via Reciprocal Rank Fusion. Runs entirely local — no API key, no cost, works offline |
 | **Dynamic Brain System** | System brain assembled from workspace MD files (SOUL, IDENTITY, USER, AGENTS, TOOLS, MEMORY) — all editable live between turns |
-| **Multi-Agent Orchestration** | Spawn independent child agents for parallel task execution. Five tools: `spawn_agent`, `wait_agent`, `send_input`, `close_agent`, `resume_agent`. Children run in isolated sessions with auto-approve and essential tools — no recursive spawning |
+| **Multi-Agent Orchestration** | Spawn typed child agents (General, Explore, Plan, Code, Research) for parallel task execution. Five tools: `spawn_agent`, `wait_agent`, `send_input`, `close_agent`, `resume_agent`. Each type gets a role-specific system prompt and filtered tool registry. Configurable subagent provider/model. Children run in isolated sessions with auto-approve — no recursive spawning |
 
 ### Multimodal Input
 | Feature | Description |
@@ -1578,13 +1578,38 @@ Auto-detects your default Chromium-based browser and uses its native profile (co
 > **Why no Firefox?** Browser automation uses Chrome DevTools Protocol (CDP). Firefox dropped CDP support entirely — it now uses WebDriver BiDi, which is a different protocol. All Chromium-based browsers speak CDP natively.
 
 #### Multi-Agent Orchestration
+
+OpenCrabs supports spawning specialized sub-agents that run autonomously in isolated sessions. Each sub-agent gets its own context, tool registry, and cancel token.
+
 | Tool | Description |
 |------|-------------|
-| `spawn_agent` | Spawn a child agent to handle a sub-task autonomously in the background |
+| `spawn_agent` | Spawn a typed child agent to handle a sub-task autonomously in the background |
 | `wait_agent` | Wait for a spawned sub-agent to complete and return its output (configurable timeout) |
 | `send_input` | Send follow-up input/instructions to a running sub-agent |
 | `close_agent` | Terminate a running sub-agent and clean up resources |
 | `resume_agent` | Resume a completed or failed sub-agent with a new prompt (preserves prior context) |
+
+**Agent Types** — when spawning, an `agent_type` parameter selects a specialized role:
+
+| Type | Role | Tools |
+|------|------|-------|
+| `general` | Full-capability agent (default) | All parent tools minus recursive/dangerous |
+| `explore` | Fast codebase navigation — read-only | `read_file`, `glob`, `grep`, `ls` |
+| `plan` | Architecture planning — read + analysis | `read_file`, `glob`, `grep`, `ls`, `bash` |
+| `code` | Implementation — full write access | All parent tools minus recursive/dangerous |
+| `research` | Web search + documentation lookup | `read_file`, `glob`, `grep`, `ls`, `web_search`, `http_client` |
+
+Sub-agents never have access to recursive tools (`spawn_agent`, `resume_agent`, `wait_agent`, `send_input`, `close_agent`) or dangerous system tools (`rebuild`, `evolve`).
+
+**Subagent Configuration** — optionally override the provider/model for all spawned sub-agents in `config.toml`:
+
+```toml
+[agent]
+subagent_provider = "openrouter"   # provider for child agents (omit to inherit parent)
+subagent_model = "qwen/qwen3-235b" # model override for child agents (omit to inherit parent)
+```
+
+This lets you run a powerful model for the main session while using a cheaper/faster model for sub-tasks.
 
 ### System CLI Tools
 
