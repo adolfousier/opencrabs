@@ -96,9 +96,26 @@ impl Tool for SpawnAgentTool {
             let config = crate::config::Config::load()
                 .map_err(|e| ToolError::Execution(format!("Config load failed: {}", e)))?;
 
-            // Get provider from parent context
-            let provider = crate::brain::provider::create_provider(&config)
-                .map_err(|e| ToolError::Execution(format!("Failed to create provider: {}", e)))?;
+            // Use subagent-specific provider if configured, otherwise inherit parent's
+            let provider = if let Some(ref provider_name) = config.agent.subagent_provider {
+                match crate::brain::provider::create_provider_by_name(&config, provider_name) {
+                    Ok(p) => {
+                        tracing::info!("Sub-agent using configured provider '{}'", provider_name);
+                        p
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Sub-agent provider '{}' failed: {e}, falling back to parent",
+                            provider_name
+                        );
+                        crate::brain::provider::create_provider(&config)
+                            .map_err(|e| ToolError::Execution(format!("Failed to create provider: {}", e)))?
+                    }
+                }
+            } else {
+                crate::brain::provider::create_provider(&config)
+                    .map_err(|e| ToolError::Execution(format!("Failed to create provider: {}", e)))?
+            };
 
             // Build tool registry for child (same tools as parent, minus spawn to prevent recursion)
             let child_registry = crate::brain::tools::ToolRegistry::new();

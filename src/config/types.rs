@@ -461,6 +461,16 @@ pub struct AgentConfig {
     /// Max output tokens for API calls (default: 65536)
     #[serde(default = "default_max_tokens")]
     pub max_tokens: u32,
+
+    /// Default provider for spawned sub-agents (e.g., "openrouter", "anthropic", "custom:lmstudio").
+    /// If unset, sub-agents inherit the parent session's active provider.
+    #[serde(default)]
+    pub subagent_provider: Option<String>,
+
+    /// Default model for spawned sub-agents (e.g., "claude-sonnet-4-6").
+    /// Only used when subagent_provider is set.
+    #[serde(default)]
+    pub subagent_model: Option<String>,
 }
 
 fn default_approval_policy() -> String {
@@ -486,6 +496,8 @@ impl Default for AgentConfig {
             max_concurrent: default_max_concurrent(),
             context_limit: default_context_limit(),
             max_tokens: default_max_tokens(),
+            subagent_provider: None,
+            subagent_model: None,
         }
     }
 }
