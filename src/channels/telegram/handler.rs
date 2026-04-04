@@ -1510,14 +1510,35 @@ pub(crate) async fn handle_message(
                 let s = streaming.lock().unwrap_or_else(|e| e.into_inner());
                 s.sent_intermediates.clone()
             };
+            tracing::info!(
+                "Telegram dedup: response.content len={}, sent_intermediates count={}, intermediates={:?}",
+                text_only.len(),
+                sent.len(),
+                sent.iter()
+                    .map(|s| format!("{}...", &s[..s.len().min(60)]))
+                    .collect::<Vec<_>>()
+            );
             let text_only = if !sent.is_empty() {
-                let mut remaining = text_only;
+                let mut remaining = text_only.clone();
                 for intermediate in &sent {
-                    // Remove the intermediate text from the final response
                     remaining = remaining.replace(intermediate.as_str(), "");
                 }
-                remaining.trim().to_string()
+                let result = remaining.trim().to_string();
+                if result != text_only {
+                    tracing::info!(
+                        "Telegram dedup: stripped {} chars, remaining len={}",
+                        text_only.len() - result.len(),
+                        result.len()
+                    );
+                } else {
+                    tracing::warn!(
+                        "Telegram dedup: NO MATCH — none of {} intermediates found in response",
+                        sent.len()
+                    );
+                }
+                result
             } else {
+                tracing::info!("Telegram dedup: no intermediates to strip");
                 text_only
             };
 
@@ -1554,6 +1575,24 @@ pub(crate) async fn handle_message(
                         .await
                     {
                         Ok(_) => {}
+                        Err(teloxide::RequestError::RetryAfter(secs)) => {
+                            tracing::warn!(
+                                "Telegram: edit rate-limited, waiting {}s",
+                                secs.seconds()
+                            );
+                            tokio::time::sleep(secs.duration()).await;
+                            if let Err(e) = bot
+                                .edit_message_text(msg.chat.id, mid, &chunks[0])
+                                .parse_mode(ParseMode::Html)
+                                .await
+                            {
+                                tracing::warn!(
+                                    "Telegram: edit retry failed ({e}), falling back to delete+send"
+                                );
+                                let _ = bot.delete_message(msg.chat.id, mid).await;
+                                let _ = send_html_or_plain(&bot, msg.chat.id, &chunks[0]).await;
+                            }
+                        }
                         Err(e) => {
                             tracing::warn!(
                                 "Telegram: edit final failed ({e}), falling back to delete+send"
@@ -1653,23 +1692,46 @@ async fn send_html_or_plain(
         .await
     {
         Ok(_) => Ok(()),
+        Err(teloxide::RequestError::RetryAfter(secs)) => {
+            tracing::warn!(
+                "Telegram: HTML send rate-limited, waiting {}s before retry",
+                secs.seconds()
+            );
+            tokio::time::sleep(secs.duration()).await;
+            // Retry as HTML after waiting
+            match bot
+                .send_message(chat_id, html)
+                .parse_mode(ParseMode::Html)
+                .await
+            {
+                Ok(_) => Ok(()),
+                Err(e) => {
+                    tracing::warn!("Telegram: HTML retry failed ({e}), sending as plain text");
+                    let plain = strip_html_tags(html);
+                    bot.send_message(chat_id, plain).await.map(|_| ())
+                }
+            }
+        }
         Err(e) => {
             tracing::warn!("Telegram: HTML send failed ({e}), retrying as plain text");
-            let plain = html
-                .replace("<b>", "")
-                .replace("</b>", "")
-                .replace("<i>", "")
-                .replace("</i>", "")
-                .replace("<code>", "")
-                .replace("</code>", "")
-                .replace("<pre>", "")
-                .replace("</pre>", "")
-                .replace("&lt;", "<")
-                .replace("&gt;", ">")
-                .replace("&amp;", "&");
+            let plain = strip_html_tags(html);
             bot.send_message(chat_id, plain).await.map(|_| ())
         }
     }
+}
+
+fn strip_html_tags(html: &str) -> String {
+    html.replace("<b>", "")
+        .replace("</b>", "")
+        .replace("<i>", "")
+        .replace("</i>", "")
+        .replace("<code>", "")
+        .replace("</code>", "")
+        .replace("<pre>", "")
+        .replace("</pre>", "")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
 }
 
 /// Convert markdown to Telegram-safe HTML.
