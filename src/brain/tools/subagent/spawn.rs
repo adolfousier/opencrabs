@@ -91,11 +91,13 @@ impl Tool for SpawnAgentTool {
         let cancel_token = CancellationToken::new();
         let (input_tx, _input_rx) = mpsc::unbounded_channel::<String>();
 
+        // Load config and extract model override before entering block scope
+        let config = crate::config::Config::load()
+            .map_err(|e| ToolError::Execution(format!("Config load failed: {}", e)))?;
+        let model_override = config.agent.subagent_model.clone();
+
         // Build a minimal AgentService for the child
         let child_service = {
-            let config = crate::config::Config::load()
-                .map_err(|e| ToolError::Execution(format!("Config load failed: {}", e)))?;
-
             // Use subagent-specific provider if configured, otherwise inherit parent's
             let provider = if let Some(ref provider_name) = config.agent.subagent_provider {
                 match crate::brain::provider::create_provider_by_name(&config, provider_name) {
@@ -152,7 +154,7 @@ impl Tool for SpawnAgentTool {
                 .send_message_with_tools_and_mode(
                     child_session_id,
                     prompt_clone,
-                    None,
+                    model_override.clone(),
                     Some(cancel_clone),
                 )
                 .await;
