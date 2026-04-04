@@ -5,7 +5,18 @@
 use std::path::PathBuf;
 use tracing::Level;
 use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::fmt::time::FormatTime;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
+
+/// Local-time formatter using chrono — matches the system timezone.
+struct LocalTime;
+
+impl FormatTime for LocalTime {
+    fn format_time(&self, w: &mut tracing_subscriber::fmt::format::Writer<'_>) -> std::fmt::Result {
+        let now = chrono::Local::now();
+        write!(w, "{}", now.format("%Y-%m-%dT%H:%M:%S%.6f%:z"))
+    }
+}
 
 /// Logging configuration
 #[derive(Debug, Clone)]
@@ -162,6 +173,7 @@ fn init_debug_logging(config: LogConfig) -> Result<LoggerGuard, Box<dyn std::err
         .with(
             tracing_subscriber::fmt::layer()
                 .with_writer(non_blocking)
+                .with_timer(LocalTime)
                 .with_ansi(false) // No colors in log files
                 .with_target(true)
                 .with_thread_ids(true)
@@ -193,6 +205,7 @@ fn init_minimal_logging(config: LogConfig) -> Result<LoggerGuard, Box<dyn std::e
             .with(
                 tracing_subscriber::fmt::layer()
                     .with_writer(std::io::stderr)
+                    .with_timer(LocalTime)
                     .with_ansi(true)
                     .with_target(false)
                     .compact(),
