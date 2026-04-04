@@ -1652,6 +1652,434 @@ pub(crate) async fn handle_message(
     Ok(())
 }
 
+/// Resume an interrupted session with full streaming (typing, tool messages, edit loop).
+/// Called from ui.rs on startup when pending Telegram requests are detected.
+pub(crate) async fn resume_session(
+    bot: Bot,
+    chat_id: ChatId,
+    session_id: Uuid,
+    prompt: String,
+    agent: Arc<AgentService>,
+    telegram_state: Arc<TelegramState>,
+) -> anyhow::Result<()> {
+    tracing::info!(
+        "Telegram: resume_session {} with full streaming pipeline",
+        session_id
+    );
+
+    // ── Typing indicator ────────────────────────────────────────────────────
+    let typing_cancel = CancellationToken::new();
+    let _typing_guard = TypingGuard(typing_cancel.clone());
+    tokio::spawn({
+        let bot = bot.clone();
+        let cancel = typing_cancel.clone();
+        async move {
+            loop {
+                tokio::select! {
+                    _ = cancel.cancelled() => break,
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(4)) => {
+                        let _ = bot.send_chat_action(chat_id, ChatAction::Typing).await;
+                    }
+                }
+            }
+        }
+    });
+
+    // ── Streaming setup ────────────────────────────────────────────────────
+    let streaming = Arc::new(std::sync::Mutex::new(StreamingState {
+        msg_id: None,
+        thinking: String::new(),
+        tool_msgs: Vec::new(),
+        display_queue: Vec::new(),
+        response: String::new(),
+        dirty: false,
+        recreate: false,
+        status_msg_id: None,
+        tool_round_count: 0,
+        tools_started_at: Some(std::time::Instant::now()),
+        quip_index: 0,
+        status_shown_at: None,
+        sent_intermediates: Vec::new(),
+        processing: true,
+    }));
+
+    let edit_cancel = CancellationToken::new();
+
+    // Edit loop — same as handle_message
+    tokio::spawn({
+        let bot = bot.clone();
+        let st = streaming.clone();
+        let cancel = edit_cancel.clone();
+        async move {
+            loop {
+                tokio::select! {
+                    _ = cancel.cancelled() => break,
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(1500)) => {
+                        struct Snap {
+                            dirty: bool,
+                            recreate: bool,
+                            response_text: String,
+                            msg_id: Option<MessageId>,
+                            display_items: Vec<DisplayItem>,
+                        }
+
+                        let snap = {
+                            let mut s = st.lock().unwrap_or_else(|e| e.into_inner());
+                            let has_display = !s.display_queue.is_empty();
+                            if !s.dirty && !s.recreate && !has_display { continue; }
+                            let items: Vec<DisplayItem> = s.display_queue.drain(..).collect();
+                            let response_text = s.render();
+                            let snap = Snap {
+                                dirty: s.dirty,
+                                recreate: s.recreate,
+                                response_text,
+                                msg_id: s.msg_id,
+                                display_items: items,
+                            };
+                            s.dirty = false;
+                            s.recreate = false;
+                            snap
+                        };
+
+                        // Process display items (tools + intermediates)
+                        for item in snap.display_items {
+                            match item {
+                                DisplayItem::NewTool(idx) => {
+                                    let tool_info = {
+                                        let s = st.lock().unwrap_or_else(|e| e.into_inner());
+                                        s.tool_msgs.get(idx).map(|t| {
+                                            let label = format!("**{}**{}", t.name, t.context);
+                                            (label, t.completed, t.msg_id)
+                                        })
+                                    };
+                                    if let Some((label, completed, existing_mid)) = tool_info {
+                                        let text = match completed {
+                                            None => format!("⚙️ {}", label),
+                                            Some(true) => format!("✅ {}", label),
+                                            Some(false) => format!("❌ {}", label),
+                                        };
+                                        let html = markdown_to_telegram_html(&text);
+                                        if existing_mid.is_none()
+                                            && let Ok(m) = bot
+                                                .send_message(chat_id, &html)
+                                                .parse_mode(ParseMode::Html)
+                                                .await
+                                        {
+                                            let mut s = st.lock().unwrap_or_else(|e| e.into_inner());
+                                            if let Some(tool) = s.tool_msgs.get_mut(idx) {
+                                                tool.msg_id = Some(m.id);
+                                            }
+                                        }
+                                    }
+                                }
+                                DisplayItem::Intermediate(text) => {
+                                    let text = crate::utils::sanitize::strip_llm_artifacts(&text);
+                                    let html = markdown_to_telegram_html(&text);
+                                    if !html.is_empty() {
+                                        let _ = bot
+                                            .send_message(chat_id, &html)
+                                            .parse_mode(ParseMode::Html)
+                                            .await;
+                                        let mut s = st.lock().unwrap_or_else(|e| e.into_inner());
+                                        s.sent_intermediates.push(text.clone());
+                                    }
+                                }
+                            }
+                        }
+
+                        // Response message (streaming)
+                        if snap.dirty || snap.recreate {
+                            if snap.recreate
+                                && let Some(old_mid) = snap.msg_id
+                            {
+                                let _ = bot.delete_message(chat_id, old_mid).await;
+                                let mut s = st.lock().unwrap_or_else(|e| e.into_inner());
+                                s.msg_id = None;
+                            }
+                            if !snap.response_text.is_empty() {
+                                let current_msg_id = {
+                                    let s = st.lock().unwrap_or_else(|e| e.into_inner());
+                                    s.msg_id
+                                };
+                                if current_msg_id.is_none()
+                                    && let Ok(m) = bot.send_message(chat_id, "\u{258b}").await
+                                {
+                                    let mut s = st.lock().unwrap_or_else(|e| e.into_inner());
+                                    s.msg_id = Some(m.id);
+                                }
+                                let msg_id = {
+                                    let s = st.lock().unwrap_or_else(|e| e.into_inner());
+                                    s.msg_id
+                                };
+                                if let Some(mid) = msg_id {
+                                    let html = markdown_to_telegram_html(&snap.response_text);
+                                    let display = format!("{}\u{258b}", html);
+                                    let _ = bot
+                                        .edit_message_text(chat_id, mid, display)
+                                        .parse_mode(ParseMode::Html)
+                                        .await;
+                                }
+                            }
+                        }
+
+                        let _ = bot.send_chat_action(chat_id, ChatAction::Typing).await;
+                    }
+                }
+            }
+        }
+    });
+
+    // Progress callback — same as handle_message
+    let progress_cb: ProgressCallback = {
+        let st = streaming.clone();
+        Arc::new(move |_sid, event| match event {
+            ProgressEvent::ReasoningChunk { text } => {
+                if let Ok(mut s) = st.lock() {
+                    s.thinking.push_str(&text);
+                    s.dirty = true;
+                }
+            }
+            ProgressEvent::StreamingChunk { text } => {
+                if let Ok(mut s) = st.lock() {
+                    if !s.thinking.is_empty() {
+                        s.thinking.clear();
+                    }
+                    s.response.push_str(&text);
+                    s.dirty = true;
+                    s.processing = false;
+                }
+            }
+            ProgressEvent::ToolStarted {
+                tool_name,
+                tool_input,
+            } => {
+                if let Ok(mut s) = st.lock() {
+                    s.thinking.clear();
+                    if s.tools_started_at.is_none() {
+                        s.tools_started_at = Some(std::time::Instant::now());
+                    }
+                    let ctx = tool_context(&tool_name, &tool_input);
+                    let idx = s.tool_msgs.len();
+                    s.tool_msgs.push(ToolMsg {
+                        msg_id: None,
+                        name: tool_name,
+                        context: ctx,
+                        completed: None,
+                        dirty: true,
+                    });
+                    s.display_queue.push(DisplayItem::NewTool(idx));
+                }
+            }
+            ProgressEvent::ToolCompleted {
+                tool_name, success, ..
+            } => {
+                if let Ok(mut s) = st.lock() {
+                    s.tool_round_count += 1;
+                    if let Some(tool) = s
+                        .tool_msgs
+                        .iter_mut()
+                        .rev()
+                        .find(|t| t.name == tool_name && t.completed.is_none())
+                    {
+                        tool.completed = Some(success);
+                        tool.dirty = true;
+                    }
+                    if s.msg_id.is_some() {
+                        s.recreate = true;
+                    }
+                }
+            }
+            ProgressEvent::IntermediateText { text, reasoning } => {
+                if let Ok(mut s) = st.lock() {
+                    s.thinking.clear();
+                    s.response.clear();
+                    if s.msg_id.is_some() {
+                        s.recreate = true;
+                    }
+                    let content = if text.is_empty() {
+                        reasoning.unwrap_or_default()
+                    } else {
+                        text
+                    };
+                    if !content.is_empty() {
+                        s.display_queue.push(DisplayItem::Intermediate(content));
+                    }
+                }
+            }
+            _ => {}
+        })
+    };
+
+    // ── Agent call ──────────────────────────────────────────────────────────
+    let cancel_token = CancellationToken::new();
+    telegram_state
+        .store_cancel_token(session_id, cancel_token.clone())
+        .await;
+
+    let chat_id_str = chat_id.0.to_string();
+    let result = agent
+        .send_message_with_tools_and_callback(
+            session_id,
+            prompt,
+            None,
+            Some(cancel_token.clone()),
+            None, // no approval callback for resume
+            Some(progress_cb),
+            "telegram",
+            Some(&chat_id_str),
+        )
+        .await;
+
+    telegram_state.remove_cancel_token(session_id).await;
+    edit_cancel.cancel();
+
+    // ── Final delivery ─────────────────────────────────────────────────────
+    let (streaming_msg_id, status_msg_id, remaining_display) = {
+        let mut s = streaming.lock().unwrap_or_else(|e| e.into_inner());
+        let display: Vec<DisplayItem> = s.display_queue.drain(..).collect();
+        (s.msg_id, s.status_msg_id, display)
+    };
+    if let Some(mid) = status_msg_id {
+        let _ = bot.delete_message(chat_id, mid).await;
+    }
+
+    if cancel_token.is_cancelled() {
+        tracing::info!(
+            "Telegram: resume for session {} cancelled by new message",
+            session_id
+        );
+        if let Some(mid) = streaming_msg_id {
+            let _ = bot.delete_message(chat_id, mid).await;
+        }
+        return Ok(());
+    }
+
+    // Send remaining display items
+    for item in remaining_display {
+        match item {
+            DisplayItem::NewTool(idx) => {
+                let tool_info = {
+                    let s = streaming.lock().unwrap_or_else(|e| e.into_inner());
+                    s.tool_msgs.get(idx).map(|t| {
+                        let label = format!("**{}**{}", t.name, t.context);
+                        (label, t.completed, t.msg_id)
+                    })
+                };
+                if let Some((label, completed, existing_mid)) = tool_info {
+                    let text = match completed {
+                        None => format!("⚙️ {}", label),
+                        Some(true) => format!("✅ {}", label),
+                        Some(false) => format!("❌ {}", label),
+                    };
+                    let html = markdown_to_telegram_html(&text);
+                    if existing_mid.is_none() {
+                        let _ = bot
+                            .send_message(chat_id, &html)
+                            .parse_mode(ParseMode::Html)
+                            .await;
+                    }
+                }
+            }
+            DisplayItem::Intermediate(text) => {
+                let text = crate::utils::sanitize::strip_llm_artifacts(&text);
+                let html = markdown_to_telegram_html(&text);
+                if !html.is_empty() {
+                    let _ = bot
+                        .send_message(chat_id, &html)
+                        .parse_mode(ParseMode::Html)
+                        .await;
+                    let mut s = streaming.lock().unwrap_or_else(|e| e.into_inner());
+                    s.sent_intermediates.push(text.clone());
+                }
+            }
+        }
+    }
+
+    match result {
+        Ok(response) => {
+            let (text_only, img_paths) = crate::utils::extract_img_markers(&response.content);
+            let text_only = crate::utils::sanitize::strip_llm_artifacts(&text_only);
+            let text_only = redact_secrets(&text_only);
+
+            // Dedup intermediates
+            let sent = {
+                let s = streaming.lock().unwrap_or_else(|e| e.into_inner());
+                s.sent_intermediates.clone()
+            };
+            let text_only = if !sent.is_empty() {
+                let mut remaining = text_only.clone();
+                for intermediate in &sent {
+                    remaining = remaining.replace(intermediate.as_str(), "");
+                }
+                remaining.trim().to_string()
+            } else {
+                text_only
+            };
+
+            for img_path in img_paths {
+                if let Ok(bytes) = tokio::fs::read(&img_path).await {
+                    let _ = bot.send_photo(chat_id, InputFile::memory(bytes)).await;
+                }
+            }
+
+            let html = markdown_to_telegram_html(&text_only);
+            if !html.is_empty() {
+                let chunks: Vec<String> = split_message(&html, 4096)
+                    .into_iter()
+                    .map(|s| s.to_string())
+                    .collect();
+
+                if chunks.len() == 1
+                    && let Some(mid) = streaming_msg_id
+                {
+                    if let Err(e) = bot
+                        .edit_message_text(chat_id, mid, &chunks[0])
+                        .parse_mode(ParseMode::Html)
+                        .await
+                    {
+                        tracing::warn!("Telegram resume: edit failed ({e}), falling back to send");
+                        let _ = bot.delete_message(chat_id, mid).await;
+                        let _ = send_html_or_plain(&bot, chat_id, &chunks[0]).await;
+                    }
+                } else {
+                    if let Some(mid) = streaming_msg_id {
+                        let _ = bot.delete_message(chat_id, mid).await;
+                    }
+                    for chunk in &chunks {
+                        let _ = send_html_or_plain(&bot, chat_id, chunk).await;
+                    }
+                }
+            } else if let Some(mid) = streaming_msg_id {
+                let _ = bot.delete_message(chat_id, mid).await;
+            }
+
+            tracing::info!(
+                "Telegram: resume completed for session {} — {} chars delivered",
+                session_id,
+                response.content.len()
+            );
+        }
+        Err(crate::brain::agent::AgentError::Cancelled) => {
+            tracing::info!("Telegram: resume cancelled for session {}", session_id);
+            if let Some(mid) = streaming_msg_id {
+                let _ = bot.delete_message(chat_id, mid).await;
+            }
+        }
+        Err(e) => {
+            tracing::error!("Telegram: resume error for session {}: {}", session_id, e);
+            if let Some(mid) = streaming_msg_id {
+                let _ = bot
+                    .edit_message_text(chat_id, mid, format!("Error: {}", e))
+                    .await;
+            } else {
+                let _ = bot.send_message(chat_id, format!("Error: {}", e)).await;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Convert simple markdown (`*bold*`, `` `code` ``) to Telegram HTML.
 pub(crate) fn md_to_html(s: &str) -> String {
     // Replace `code` with <code>code</code>, then *bold* with <b>bold</b>
