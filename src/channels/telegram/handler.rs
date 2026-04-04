@@ -1524,44 +1524,43 @@ pub(crate) async fn handle_message(
                 }
             }
 
-            // Tool messages already sent individually — delete streaming placeholder
-            if let Some(mid) = streaming_msg_id {
-                let _ = bot.delete_message(msg.chat.id, mid).await;
-            }
-
-            // Send final response as a clean separate message
+            // Deliver final response — prefer editing the streaming message in-place
+            // to avoid the delete+send race that causes duplicates.
             let html = markdown_to_telegram_html(&text_only);
             if !html.is_empty() {
-                for chunk in split_message(&html, 4096) {
+                let chunks: Vec<String> = split_message(&html, 4096)
+                    .into_iter()
+                    .map(|s| s.to_string())
+                    .collect();
+
+                // If single chunk and we have a streaming message, edit it in-place
+                if chunks.len() == 1 && let Some(mid) = streaming_msg_id {
                     match bot
-                        .send_message(msg.chat.id, chunk.to_string())
+                        .edit_message_text(msg.chat.id, mid, &chunks[0])
                         .parse_mode(ParseMode::Html)
                         .await
                     {
                         Ok(_) => {}
                         Err(e) => {
                             tracing::warn!(
-                                "Telegram: HTML send failed ({e}), retrying as plain text"
+                                "Telegram: edit final failed ({e}), falling back to delete+send"
                             );
-                            // Fallback: send as plain text (strip HTML tags)
-                            let plain = chunk
-                                .replace("<b>", "")
-                                .replace("</b>", "")
-                                .replace("<i>", "")
-                                .replace("</i>", "")
-                                .replace("<code>", "")
-                                .replace("</code>", "")
-                                .replace("<pre>", "")
-                                .replace("</pre>", "")
-                                .replace("&lt;", "<")
-                                .replace("&gt;", ">")
-                                .replace("&amp;", "&");
-                            if let Err(e2) = bot.send_message(msg.chat.id, plain).await {
-                                tracing::error!("Telegram: plain text send also failed: {e2}");
-                            }
+                            let _ = bot.delete_message(msg.chat.id, mid).await;
+                            let _ = send_html_or_plain(&bot, msg.chat.id, &chunks[0]).await;
                         }
                     }
+                } else {
+                    // Multi-chunk or no streaming message — delete old, send new
+                    if let Some(mid) = streaming_msg_id {
+                        let _ = bot.delete_message(msg.chat.id, mid).await;
+                    }
+                    for chunk in &chunks {
+                        let _ = send_html_or_plain(&bot, msg.chat.id, chunk).await;
+                    }
                 }
+            } else if let Some(mid) = streaming_msg_id {
+                // Empty final text — just clean up the streaming placeholder
+                let _ = bot.delete_message(msg.chat.id, mid).await;
             }
 
             // If input was voice AND TTS is enabled, also send voice note after text
@@ -1627,6 +1626,37 @@ pub(crate) fn md_to_html(s: &str) -> String {
 /// Shorthand — delegates to the shared utility in `crate::utils`.
 fn tool_context(name: &str, input: &serde_json::Value) -> String {
     crate::utils::tool_context_hint(name, input)
+}
+
+/// Send an HTML message, falling back to plain text if Telegram rejects the HTML.
+async fn send_html_or_plain(
+    bot: &Bot,
+    chat_id: ChatId,
+    html: &str,
+) -> std::result::Result<(), teloxide::RequestError> {
+    match bot
+        .send_message(chat_id, html)
+        .parse_mode(ParseMode::Html)
+        .await
+    {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            tracing::warn!("Telegram: HTML send failed ({e}), retrying as plain text");
+            let plain = html
+                .replace("<b>", "")
+                .replace("</b>", "")
+                .replace("<i>", "")
+                .replace("</i>", "")
+                .replace("<code>", "")
+                .replace("</code>", "")
+                .replace("<pre>", "")
+                .replace("</pre>", "")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&amp;", "&");
+            bot.send_message(chat_id, plain).await.map(|_| ())
+        }
+    }
 }
 
 /// Convert markdown to Telegram-safe HTML.
