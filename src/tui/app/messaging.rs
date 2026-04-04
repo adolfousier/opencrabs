@@ -178,18 +178,12 @@ impl App {
             if saved_provider != &active_prov {
                 // Try cached provider first, then create fresh
                 if let Some(cached) = self.provider_cache.get(saved_provider).cloned() {
-                    tracing::info!(
-                        "Restoring cached provider '{}' for session",
-                        saved_provider
-                    );
+                    tracing::info!("Restoring cached provider '{}' for session", saved_provider);
                     self.agent_service.swap_provider(cached);
                 } else if let Ok(config) = crate::config::Config::load() {
                     match crate::brain::provider::create_provider_by_name(&config, saved_provider) {
                         Ok(new_provider) => {
-                            tracing::info!(
-                                "Created provider '{}' for session",
-                                saved_provider
-                            );
+                            tracing::info!("Created provider '{}' for session", saved_provider);
                             self.provider_cache
                                 .insert(saved_provider.clone(), new_provider.clone());
                             self.agent_service.swap_provider(new_provider);
@@ -966,10 +960,8 @@ impl App {
                                 .as_str()
                                 .map(|s| s.to_string())
                                 .filter(|s| !s.is_empty());
-                            let tool_input = entry
-                                .get("i")
-                                .cloned()
-                                .unwrap_or(serde_json::Value::Null);
+                            let tool_input =
+                                entry.get("i").cloned().unwrap_or(serde_json::Value::Null);
                             ToolCallEntry {
                                 description: desc,
                                 success,

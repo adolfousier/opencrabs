@@ -103,7 +103,7 @@ impl Tool for ResumeAgentTool {
 
         // Create new cancel token and input channel
         let cancel_token = CancellationToken::new();
-        let (input_tx, _input_rx) = mpsc::unbounded_channel::<String>();
+        let (input_tx, input_rx) = mpsc::unbounded_channel::<String>();
 
         // Prepare the agent for resumption
         let agent_id_str = agent_id.to_string();
@@ -126,7 +126,10 @@ impl Tool for ResumeAgentTool {
             let provider = if let Some(ref provider_name) = config.agent.subagent_provider {
                 match crate::brain::provider::create_provider_by_name(&config, provider_name) {
                     Ok(p) => {
-                        tracing::info!("Resumed sub-agent using configured provider '{}'", provider_name);
+                        tracing::info!(
+                            "Resumed sub-agent using configured provider '{}'",
+                            provider_name
+                        );
                         p
                     }
                     Err(e) => {
@@ -134,13 +137,15 @@ impl Tool for ResumeAgentTool {
                             "Sub-agent provider '{}' failed: {e}, falling back to parent",
                             provider_name
                         );
-                        crate::brain::provider::create_provider(&config)
-                            .map_err(|e| ToolError::Execution(format!("Failed to create provider: {}", e)))?
+                        crate::brain::provider::create_provider(&config).map_err(|e| {
+                            ToolError::Execution(format!("Failed to create provider: {}", e))
+                        })?
                     }
                 }
             } else {
-                crate::brain::provider::create_provider(&config)
-                    .map_err(|e| ToolError::Execution(format!("Failed to create provider: {}", e)))?
+                crate::brain::provider::create_provider(&config).map_err(|e| {
+                    ToolError::Execution(format!("Failed to create provider: {}", e))
+                })?
             };
 
             let child_registry = crate::brain::tools::ToolRegistry::new();
@@ -161,35 +166,63 @@ impl Tool for ResumeAgentTool {
             )
         };
 
-        // Spawn the resumed task
+        // Spawn resumed task with input loop
         let cancel_clone = cancel_token.clone();
         let manager = self.manager.clone();
         let agent_id_clone = agent_id_str.clone();
         let prompt_clone = prompt.clone();
         let model_override = subagent_model;
+        let mut input_rx = input_rx;
 
         let handle = tokio::spawn(async move {
             tracing::info!("Sub-agent {} resuming: {}", agent_id_clone, prompt_clone);
 
-            let result = child_service
-                .send_message_with_tools_and_mode(
-                    session_id,
-                    prompt_clone,
-                    model_override.clone(),
-                    Some(cancel_clone),
-                )
-                .await;
+            let mut current_prompt = prompt_clone;
 
-            match result {
-                Ok(response) => {
-                    tracing::info!("Sub-agent {} resumed and completed", agent_id_clone);
-                    manager.mark_completed(&agent_id_clone, response.content);
+            // Run prompt → wait for input → run again loop
+            let final_output = loop {
+                let result = child_service
+                    .send_message_with_tools_and_mode(
+                        session_id,
+                        current_prompt,
+                        model_override.clone(),
+                        Some(cancel_clone.clone()),
+                    )
+                    .await;
+
+                match result {
+                    Ok(response) => {
+                        manager.update_output(&agent_id_clone, response.content.clone());
+                        tracing::info!(
+                            "Sub-agent {} round complete, waiting for input",
+                            agent_id_clone
+                        );
+
+                        let next = tokio::select! {
+                            msg = input_rx.recv() => msg,
+                            _ = cancel_clone.cancelled() => None,
+                        };
+
+                        match next {
+                            Some(text) => {
+                                tracing::info!(
+                                    "Sub-agent {} received follow-up input",
+                                    agent_id_clone
+                                );
+                                current_prompt = text;
+                            }
+                            None => break response.content,
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("Sub-agent {} resumed and failed: {}", agent_id_clone, e);
+                        manager.mark_failed(&agent_id_clone, e.to_string());
+                        return;
+                    }
                 }
-                Err(e) => {
-                    tracing::error!("Sub-agent {} resumed and failed: {}", agent_id_clone, e);
-                    manager.mark_failed(&agent_id_clone, e.to_string());
-                }
-            }
+            };
+
+            manager.mark_completed(&agent_id_clone, final_output);
         });
 
         self.manager.set_join_handle(&agent_id_str, handle);

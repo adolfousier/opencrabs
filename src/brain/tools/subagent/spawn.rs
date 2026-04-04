@@ -89,7 +89,7 @@ impl Tool for SpawnAgentTool {
 
         // Create cancel token and input channel for the child
         let cancel_token = CancellationToken::new();
-        let (input_tx, _input_rx) = mpsc::unbounded_channel::<String>();
+        let (input_tx, input_rx) = mpsc::unbounded_channel::<String>();
 
         // Load config and extract model override before entering block scope
         let config = crate::config::Config::load()
@@ -110,13 +110,15 @@ impl Tool for SpawnAgentTool {
                             "Sub-agent provider '{}' failed: {e}, falling back to parent",
                             provider_name
                         );
-                        crate::brain::provider::create_provider(&config)
-                            .map_err(|e| ToolError::Execution(format!("Failed to create provider: {}", e)))?
+                        crate::brain::provider::create_provider(&config).map_err(|e| {
+                            ToolError::Execution(format!("Failed to create provider: {}", e))
+                        })?
                     }
                 }
             } else {
-                crate::brain::provider::create_provider(&config)
-                    .map_err(|e| ToolError::Execution(format!("Failed to create provider: {}", e)))?
+                crate::brain::provider::create_provider(&config).map_err(|e| {
+                    ToolError::Execution(format!("Failed to create provider: {}", e))
+                })?
             };
 
             // Build tool registry for child (same tools as parent, minus spawn to prevent recursion)
@@ -141,34 +143,66 @@ impl Tool for SpawnAgentTool {
             Arc::new(agent)
         };
 
-        // Spawn background task
+        // Spawn background task with input loop
         let cancel_clone = cancel_token.clone();
         let manager = self.manager.clone();
         let agent_id_clone = agent_id.clone();
         let prompt_clone = prompt.clone();
+        let mut input_rx = input_rx;
 
         let handle = tokio::spawn(async move {
             tracing::info!("Sub-agent {} starting: {}", agent_id_clone, prompt_clone);
 
-            let result = child_service
-                .send_message_with_tools_and_mode(
-                    child_session_id,
-                    prompt_clone,
-                    model_override.clone(),
-                    Some(cancel_clone),
-                )
-                .await;
+            let mut current_prompt = prompt_clone;
 
-            match result {
-                Ok(response) => {
-                    tracing::info!("Sub-agent {} completed", agent_id_clone);
-                    manager.mark_completed(&agent_id_clone, response.content);
+            // Run prompt → wait for input → run again loop
+            let final_output = loop {
+                let result = child_service
+                    .send_message_with_tools_and_mode(
+                        child_session_id,
+                        current_prompt,
+                        model_override.clone(),
+                        Some(cancel_clone.clone()),
+                    )
+                    .await;
+
+                match result {
+                    Ok(response) => {
+                        manager.update_output(&agent_id_clone, response.content.clone());
+                        tracing::info!(
+                            "Sub-agent {} round complete, waiting for input",
+                            agent_id_clone
+                        );
+
+                        // Wait for follow-up input or shutdown
+                        let next = tokio::select! {
+                            msg = input_rx.recv() => msg,
+                            _ = cancel_clone.cancelled() => {
+                                tracing::info!("Sub-agent {} cancelled while waiting for input", agent_id_clone);
+                                None
+                            }
+                        };
+
+                        match next {
+                            Some(text) => {
+                                tracing::info!(
+                                    "Sub-agent {} received follow-up input",
+                                    agent_id_clone
+                                );
+                                current_prompt = text;
+                            }
+                            None => break response.content,
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("Sub-agent {} failed: {}", agent_id_clone, e);
+                        manager.mark_failed(&agent_id_clone, e.to_string());
+                        return;
+                    }
                 }
-                Err(e) => {
-                    tracing::error!("Sub-agent {} failed: {}", agent_id_clone, e);
-                    manager.mark_failed(&agent_id_clone, e.to_string());
-                }
-            }
+            };
+
+            manager.mark_completed(&agent_id_clone, final_output);
         });
 
         // Register in manager

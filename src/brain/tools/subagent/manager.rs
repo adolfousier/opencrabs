@@ -124,6 +124,14 @@ impl SubAgentManager {
         agents.get_mut(id).and_then(|a| a.join_handle.take())
     }
 
+    /// Update output for a running agent without changing state.
+    pub fn update_output(&self, id: &str, output: String) {
+        let mut agents = self.agents.write().expect("subagent manager lock poisoned");
+        if let Some(agent) = agents.get_mut(id) {
+            agent.output = Some(output);
+        }
+    }
+
     /// Update agent state and output after completion.
     pub fn mark_completed(&self, id: &str, output: String) {
         let mut agents = self.agents.write().expect("subagent manager lock poisoned");
