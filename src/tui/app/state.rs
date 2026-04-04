@@ -1642,20 +1642,12 @@ impl App {
                 if self.is_current_session(session_id) =>
             {
                 self.display_token_count = count;
-                // Only allow context counter to grow during processing.
-                // This prevents the visual drop when a new request rebuilds
-                // context from DB (losing ephemeral tool results from the
-                // previous tool loop). Authoritative decreases come from
-                // ResponseComplete (end of request) or CompactionSummary.
-                let new_val = count as u32;
-                match self.last_input_tokens {
-                    Some(current) if new_val < current => {
-                        // Keep current — don't let DB-rebuild cause a visual drop
-                    }
-                    _ => {
-                        self.last_input_tokens = Some(new_val);
-                    }
-                }
+                // Always reflect the latest token count from the tool loop.
+                // The CLI calibration (tool_loop.rs line ~870) overwrites the
+                // tiktoken estimate with the real value reported by Claude CLI,
+                // so this must be allowed to decrease — otherwise post-compaction
+                // counts get stuck at the pre-calibration tiktoken estimate.
+                self.last_input_tokens = Some(count as u32);
             }
             TuiEvent::StreamingOutputTokens { session_id, tokens }
                 if self.is_current_session(session_id) =>

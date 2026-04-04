@@ -1534,7 +1534,9 @@ pub(crate) async fn handle_message(
                     .collect();
 
                 // If single chunk and we have a streaming message, edit it in-place
-                if chunks.len() == 1 && let Some(mid) = streaming_msg_id {
+                if chunks.len() == 1
+                    && let Some(mid) = streaming_msg_id
+                {
                     match bot
                         .edit_message_text(msg.chat.id, mid, &chunks[0])
                         .parse_mode(ParseMode::Html)
