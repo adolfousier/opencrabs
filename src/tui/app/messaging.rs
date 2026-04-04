@@ -171,33 +171,47 @@ impl App {
         // Persist as last active session so startup restores it
         Self::save_last_session_id(session_id);
 
-        // Sync session metadata to match the active provider from config.
-        // The config-enabled provider is authoritative — session metadata is
-        // only a display hint and must not override what the user configured.
-        {
+        // Swap agent provider to match the session's saved provider/model.
+        // Each session owns its provider choice — switching panes must restore it.
+        if let Some(ref saved_provider) = session.provider_name {
             let active_prov = self.agent_service.provider_name();
-            let active_model = self.agent_service.provider_model();
-            if session
-                .provider_name
-                .as_deref()
-                .is_none_or(|p| p != active_prov)
-                || session.model.as_deref().is_none_or(|m| m != active_model)
-            {
-                tracing::info!(
-                    "Session had provider '{}/{}', active is '{}/{}' — syncing session to config",
-                    session.provider_name.as_deref().unwrap_or("?"),
-                    session.model.as_deref().unwrap_or("?"),
-                    active_prov,
-                    active_model,
-                );
-                if let Some(ref mut s) = self.current_session {
-                    s.provider_name = Some(active_prov);
-                    s.model = Some(active_model);
+            if saved_provider != &active_prov {
+                // Try cached provider first, then create fresh
+                if let Some(cached) = self.provider_cache.get(saved_provider).cloned() {
+                    tracing::info!(
+                        "Restoring cached provider '{}' for session",
+                        saved_provider
+                    );
+                    self.agent_service.swap_provider(cached);
+                } else if let Ok(config) = crate::config::Config::load() {
+                    match crate::brain::provider::create_provider_by_name(&config, saved_provider) {
+                        Ok(new_provider) => {
+                            tracing::info!(
+                                "Created provider '{}' for session",
+                                saved_provider
+                            );
+                            self.provider_cache
+                                .insert(saved_provider.clone(), new_provider.clone());
+                            self.agent_service.swap_provider(new_provider);
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed to restore provider '{}': {e}, keeping current",
+                                saved_provider
+                            );
+                        }
+                    }
                 }
+            }
+        } else {
+            // Legacy session with no saved provider — stamp current provider onto it
+            if let Some(ref mut s) = self.current_session {
+                s.provider_name = Some(self.agent_service.provider_name());
+                s.model = Some(self.agent_service.provider_model());
             }
         }
 
-        // Always update display model name from session record
+        // Display model comes from the session record, falling back to the active provider
         self.default_model_name = session
             .model
             .clone()
