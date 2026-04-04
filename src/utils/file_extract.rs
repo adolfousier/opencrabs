@@ -73,9 +73,26 @@ pub fn classify_file(bytes: &[u8], mime: &str, filename: &str) -> FileContent {
     }
 
     if effective_mime == "application/pdf" {
-        return FileContent::Unsupported(format!(
-            "[File received: {filename} (PDF) — paste the text directly or use the analyze_image tool for image-based PDFs]"
-        ));
+        return match pdf_extract::extract_text_from_mem(bytes) {
+            Ok(text) => {
+                let trimmed = text.trim().to_string();
+                if trimmed.is_empty() {
+                    FileContent::Unsupported(format!(
+                        "[File received: {filename} (PDF) — no extractable text found, may be image-based]"
+                    ))
+                } else {
+                    let truncated = if trimmed.len() > TEXT_LIMIT {
+                        format!("{}…[truncated]", &trimmed[..TEXT_LIMIT])
+                    } else {
+                        trimmed
+                    };
+                    FileContent::Text(format!("[File: {filename}]\n```\n{}\n```", truncated))
+                }
+            }
+            Err(_) => FileContent::Unsupported(format!(
+                "[File received: {filename} (PDF) — failed to extract text, may be corrupted or image-based]"
+            )),
+        };
     }
 
     if is_text_mime(effective_mime) {

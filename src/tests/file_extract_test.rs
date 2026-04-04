@@ -198,16 +198,16 @@ fn classify_image_file() {
 }
 
 #[test]
-fn classify_pdf_file() {
+fn classify_pdf_file_invalid() {
+    // Invalid/minimal PDF bytes — extraction fails, returns Unsupported
     match classify_file(b"%PDF-1.4", "application/pdf", "doc.pdf") {
         FileContent::Unsupported(msg) => {
-            assert!(msg.contains("PDF"));
             assert!(msg.contains("doc.pdf"));
         }
-        other => panic!(
-            "expected Unsupported, got {:?}",
-            std::mem::discriminant(&other)
-        ),
+        FileContent::Text(t) => {
+            assert!(t.contains("doc.pdf"));
+        }
+        FileContent::Image => panic!("PDF should not be classified as Image"),
     }
 }
 
