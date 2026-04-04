@@ -8,14 +8,14 @@
 //! close, or resume any child by agent_id.
 
 mod close;
-mod manager;
+pub mod manager;
 mod resume;
 mod send_input;
 mod spawn;
 mod wait;
 
 pub use close::CloseAgentTool;
-pub use manager::SubAgentManager;
+pub use manager::{SubAgent, SubAgentManager, SubAgentState};
 pub use resume::ResumeAgentTool;
 pub use send_input::SendInputTool;
 pub use spawn::SpawnAgentTool;

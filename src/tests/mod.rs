@@ -41,6 +41,7 @@ pub mod system_continuation_test;
 pub mod profile_test;
 pub mod self_healing_test;
 pub mod split_pane_test;
+pub mod subagent_test;
 pub mod token_tracking_test;
 pub mod tui_error_test;
 pub mod tui_render_clear_test;
