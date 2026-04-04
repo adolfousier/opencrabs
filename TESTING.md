@@ -126,7 +126,10 @@ cargo test --all-features
 | Tests — TUI Render Clear | 4 | `src/tests/tui_render_clear_test.rs` |
 | Tests — Gemini Fetch | 3 | `src/tests/gemini_fetch_test.rs` |
 | Tests — Profiles | 57 | `src/tests/profile_test.rs` |
-| **Total** | **1,660** | |
+| Tests — Subagent / Swarm | 84 | `src/tests/subagent_test.rs` |
+| Tests — Telegram Resume & Helpers | 55 | `src/tests/telegram_resume_test.rs` |
+| Tests — Token Tracking | 8 | `src/tests/token_tracking_test.rs` |
+| **Total** | **1,827** | |
 
 ---
 
