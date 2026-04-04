@@ -1,8 +1,9 @@
 //! Sub-Agent / Swarm System Tests
 //!
-//! Covers SubAgentManager state machine, all 5 tool operations
-//! (spawn, wait, send_input, close, resume), lifecycle transitions,
-//! input channel wiring, cancellation, and concurrent access.
+//! Covers SubAgentManager state machine, all 8 tool operations
+//! (spawn, wait, send_input, close, resume, team_create, team_delete, team_broadcast),
+//! lifecycle transitions, input channel wiring, cancellation, team orchestration,
+//! and concurrent access.
 
 // ─── SubAgentManager Unit Tests ────────────────────────────────────────────
 
@@ -1065,5 +1066,419 @@ mod agent_type {
         assert!(tools.contains(&"bash".to_string()));
         assert!(tools.contains(&"read_file".to_string()));
         assert!(!tools.contains(&"write_file".to_string()));
+    }
+
+    #[test]
+    fn general_registry_excludes_team_tools() {
+        let parent = mock_parent_registry();
+        // Add team tools to parent
+        use std::sync::Arc;
+        let subagent_mgr = Arc::new(crate::brain::tools::subagent::SubAgentManager::new());
+        let team_mgr = Arc::new(crate::brain::tools::subagent::TeamManager::new());
+        parent.register(Arc::new(
+            crate::brain::tools::subagent::TeamCreateTool::new(
+                subagent_mgr.clone(),
+                team_mgr.clone(),
+                Arc::new(crate::brain::tools::ToolRegistry::new()),
+            ),
+        ));
+        parent.register(Arc::new(
+            crate::brain::tools::subagent::TeamDeleteTool::new(
+                subagent_mgr.clone(),
+                team_mgr.clone(),
+            ),
+        ));
+        parent.register(Arc::new(
+            crate::brain::tools::subagent::TeamBroadcastTool::new(
+                subagent_mgr.clone(),
+                team_mgr.clone(),
+            ),
+        ));
+
+        let registry = AgentType::General.build_registry(&parent);
+        let tools = registry.list_tools();
+        assert!(!tools.contains(&"team_create".to_string()));
+        assert!(!tools.contains(&"team_delete".to_string()));
+        assert!(!tools.contains(&"team_broadcast".to_string()));
+    }
+}
+
+// ─── TeamManager Tests ──────────────────────────────────────────────────────
+
+mod team_manager {
+    use crate::brain::tools::subagent::TeamManager;
+
+    #[test]
+    fn new_manager_is_empty() {
+        let mgr = TeamManager::new();
+        assert!(mgr.list_teams().is_empty());
+    }
+
+    #[test]
+    fn default_creates_empty_manager() {
+        let mgr = TeamManager::default();
+        assert!(mgr.list_teams().is_empty());
+    }
+
+    #[test]
+    fn create_team_succeeds() {
+        let mgr = TeamManager::new();
+        assert!(mgr.create_team(
+            "alpha".to_string(),
+            vec!["a1".to_string(), "a2".to_string()]
+        ));
+        assert!(mgr.exists("alpha"));
+    }
+
+    #[test]
+    fn create_duplicate_team_fails() {
+        let mgr = TeamManager::new();
+        assert!(mgr.create_team("alpha".to_string(), vec!["a1".to_string()]));
+        assert!(!mgr.create_team("alpha".to_string(), vec!["a2".to_string()]));
+    }
+
+    #[test]
+    fn get_agent_ids_returns_correct_ids() {
+        let mgr = TeamManager::new();
+        mgr.create_team(
+            "alpha".to_string(),
+            vec!["a1".to_string(), "a2".to_string(), "a3".to_string()],
+        );
+
+        let ids = mgr.get_agent_ids("alpha").unwrap();
+        assert_eq!(ids.len(), 3);
+        assert!(ids.contains(&"a1".to_string()));
+        assert!(ids.contains(&"a2".to_string()));
+        assert!(ids.contains(&"a3".to_string()));
+    }
+
+    #[test]
+    fn get_agent_ids_missing_returns_none() {
+        let mgr = TeamManager::new();
+        assert!(mgr.get_agent_ids("ghost").is_none());
+    }
+
+    #[test]
+    fn delete_team_removes_it() {
+        let mgr = TeamManager::new();
+        mgr.create_team("alpha".to_string(), vec!["a1".to_string()]);
+
+        let team = mgr.delete_team("alpha");
+        assert!(team.is_some());
+        assert_eq!(team.unwrap().name, "alpha");
+        assert!(!mgr.exists("alpha"));
+    }
+
+    #[test]
+    fn delete_nonexistent_returns_none() {
+        let mgr = TeamManager::new();
+        assert!(mgr.delete_team("ghost").is_none());
+    }
+
+    #[test]
+    fn list_teams_returns_names_and_counts() {
+        let mgr = TeamManager::new();
+        mgr.create_team(
+            "alpha".to_string(),
+            vec!["a1".to_string(), "a2".to_string()],
+        );
+        mgr.create_team("beta".to_string(), vec!["b1".to_string()]);
+
+        let list = mgr.list_teams();
+        assert_eq!(list.len(), 2);
+
+        let names: Vec<&str> = list.iter().map(|(n, _)| n.as_str()).collect();
+        assert!(names.contains(&"alpha"));
+        assert!(names.contains(&"beta"));
+    }
+
+    #[test]
+    fn exists_returns_false_for_missing() {
+        let mgr = TeamManager::new();
+        assert!(!mgr.exists("ghost"));
+    }
+
+    #[test]
+    fn concurrent_team_creation() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let mgr = Arc::new(TeamManager::new());
+        let mut handles = vec![];
+
+        for i in 0..10 {
+            let mgr = mgr.clone();
+            handles.push(thread::spawn(move || {
+                mgr.create_team(format!("team-{}", i), vec![format!("agent-{}", i)]);
+            }));
+        }
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        assert_eq!(mgr.list_teams().len(), 10);
+    }
+}
+
+// ─── TeamDeleteTool Tests ───────────────────────────────────────────────────
+
+mod team_delete_tool {
+    use crate::brain::tools::subagent::{
+        SubAgent, SubAgentManager, SubAgentState, TeamDeleteTool, TeamManager,
+    };
+    use crate::brain::tools::{Tool, ToolExecutionContext};
+    use serde_json::json;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use tokio::sync::mpsc;
+    use tokio_util::sync::CancellationToken;
+    use uuid::Uuid;
+
+    fn test_context() -> ToolExecutionContext {
+        ToolExecutionContext {
+            session_id: Uuid::new_v4(),
+            working_directory: std::path::PathBuf::from("/tmp"),
+            env_vars: HashMap::new(),
+            auto_approve: true,
+            timeout_secs: 30,
+            sudo_callback: None,
+            shared_working_directory: None,
+            service_context: None,
+        }
+    }
+
+    fn make_running_agent(id: &str) -> SubAgent {
+        let (tx, _rx) = mpsc::unbounded_channel::<String>();
+        SubAgent {
+            id: id.to_string(),
+            label: "test".to_string(),
+            session_id: Uuid::new_v4(),
+            state: SubAgentState::Running,
+            cancel_token: CancellationToken::new(),
+            join_handle: None,
+            input_tx: Some(tx),
+            output: None,
+            spawned_at: chrono::Utc::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_team_name_returns_error() {
+        let subagent_mgr = Arc::new(SubAgentManager::new());
+        let team_mgr = Arc::new(TeamManager::new());
+        let tool = TeamDeleteTool::new(subagent_mgr, team_mgr);
+        let ctx = test_context();
+
+        let result = tool.execute(json!({}), &ctx).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn delete_nonexistent_team_returns_error() {
+        let subagent_mgr = Arc::new(SubAgentManager::new());
+        let team_mgr = Arc::new(TeamManager::new());
+        let tool = TeamDeleteTool::new(subagent_mgr, team_mgr);
+        let ctx = test_context();
+
+        let result = tool.execute(json!({"team_name": "ghost"}), &ctx).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn delete_team_cancels_running_agents() {
+        let subagent_mgr = Arc::new(SubAgentManager::new());
+        let team_mgr = Arc::new(TeamManager::new());
+
+        // Insert agents
+        let a1 = make_running_agent("a1");
+        let a1_token = a1.cancel_token.clone();
+        let a2 = make_running_agent("a2");
+        let a2_token = a2.cancel_token.clone();
+        subagent_mgr.insert(a1);
+        subagent_mgr.insert(a2);
+
+        // Create team
+        team_mgr.create_team(
+            "test-team".to_string(),
+            vec!["a1".to_string(), "a2".to_string()],
+        );
+
+        let tool = TeamDeleteTool::new(subagent_mgr.clone(), team_mgr.clone());
+        let ctx = test_context();
+
+        let result = tool
+            .execute(json!({"team_name": "test-team"}), &ctx)
+            .await
+            .unwrap();
+        assert!(result.success);
+        assert!(result.output.contains("2 agents cancelled"));
+        assert!(a1_token.is_cancelled());
+        assert!(a2_token.is_cancelled());
+        assert!(!team_mgr.exists("test-team"));
+    }
+
+    #[tokio::test]
+    async fn delete_team_with_completed_agents() {
+        let subagent_mgr = Arc::new(SubAgentManager::new());
+        let team_mgr = Arc::new(TeamManager::new());
+
+        subagent_mgr.insert(make_running_agent("a1"));
+        subagent_mgr.insert(make_running_agent("a2"));
+        subagent_mgr.mark_completed("a2", "done".to_string());
+
+        team_mgr.create_team(
+            "test-team".to_string(),
+            vec!["a1".to_string(), "a2".to_string()],
+        );
+
+        let tool = TeamDeleteTool::new(subagent_mgr.clone(), team_mgr.clone());
+        let ctx = test_context();
+
+        let result = tool
+            .execute(json!({"team_name": "test-team"}), &ctx)
+            .await
+            .unwrap();
+        assert!(result.success);
+        assert!(result.output.contains("1 agents cancelled"));
+        assert!(result.output.contains("1 already completed"));
+    }
+}
+
+// ─── TeamBroadcastTool Tests ────────────────────────────────────────────────
+
+mod team_broadcast_tool {
+    use crate::brain::tools::subagent::{
+        SubAgent, SubAgentManager, SubAgentState, TeamBroadcastTool, TeamManager,
+    };
+    use crate::brain::tools::{Tool, ToolExecutionContext};
+    use serde_json::json;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use tokio::sync::mpsc;
+    use tokio_util::sync::CancellationToken;
+    use uuid::Uuid;
+
+    fn test_context() -> ToolExecutionContext {
+        ToolExecutionContext {
+            session_id: Uuid::new_v4(),
+            working_directory: std::path::PathBuf::from("/tmp"),
+            env_vars: HashMap::new(),
+            auto_approve: true,
+            timeout_secs: 30,
+            sudo_callback: None,
+            shared_working_directory: None,
+            service_context: None,
+        }
+    }
+
+    fn make_agent_with_channel(id: &str) -> (SubAgent, mpsc::UnboundedReceiver<String>) {
+        let (tx, rx) = mpsc::unbounded_channel::<String>();
+        let agent = SubAgent {
+            id: id.to_string(),
+            label: "test".to_string(),
+            session_id: Uuid::new_v4(),
+            state: SubAgentState::Running,
+            cancel_token: CancellationToken::new(),
+            join_handle: None,
+            input_tx: Some(tx),
+            output: None,
+            spawned_at: chrono::Utc::now(),
+        };
+        (agent, rx)
+    }
+
+    #[tokio::test]
+    async fn missing_team_name_returns_error() {
+        let subagent_mgr = Arc::new(SubAgentManager::new());
+        let team_mgr = Arc::new(TeamManager::new());
+        let tool = TeamBroadcastTool::new(subagent_mgr, team_mgr);
+        let ctx = test_context();
+
+        let result = tool.execute(json!({"message": "hi"}), &ctx).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn missing_message_returns_error() {
+        let subagent_mgr = Arc::new(SubAgentManager::new());
+        let team_mgr = Arc::new(TeamManager::new());
+        let tool = TeamBroadcastTool::new(subagent_mgr, team_mgr);
+        let ctx = test_context();
+
+        let result = tool.execute(json!({"team_name": "alpha"}), &ctx).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn broadcast_to_nonexistent_team_returns_error() {
+        let subagent_mgr = Arc::new(SubAgentManager::new());
+        let team_mgr = Arc::new(TeamManager::new());
+        let tool = TeamBroadcastTool::new(subagent_mgr, team_mgr);
+        let ctx = test_context();
+
+        let result = tool
+            .execute(json!({"team_name": "ghost", "message": "hi"}), &ctx)
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn broadcast_delivers_to_all_running_agents() {
+        let subagent_mgr = Arc::new(SubAgentManager::new());
+        let team_mgr = Arc::new(TeamManager::new());
+
+        let (a1, mut rx1) = make_agent_with_channel("a1");
+        let (a2, mut rx2) = make_agent_with_channel("a2");
+        subagent_mgr.insert(a1);
+        subagent_mgr.insert(a2);
+
+        team_mgr.create_team(
+            "alpha".to_string(),
+            vec!["a1".to_string(), "a2".to_string()],
+        );
+
+        let tool = TeamBroadcastTool::new(subagent_mgr.clone(), team_mgr.clone());
+        let ctx = test_context();
+
+        let result = tool
+            .execute(json!({"team_name": "alpha", "message": "sync up"}), &ctx)
+            .await
+            .unwrap();
+        assert!(result.success);
+        assert!(result.output.contains("2 agents received"));
+
+        assert_eq!(rx1.try_recv().unwrap(), "sync up");
+        assert_eq!(rx2.try_recv().unwrap(), "sync up");
+    }
+
+    #[tokio::test]
+    async fn broadcast_skips_completed_agents() {
+        let subagent_mgr = Arc::new(SubAgentManager::new());
+        let team_mgr = Arc::new(TeamManager::new());
+
+        let (a1, mut rx1) = make_agent_with_channel("a1");
+        let (a2, _rx2) = make_agent_with_channel("a2");
+        subagent_mgr.insert(a1);
+        subagent_mgr.insert(a2);
+        subagent_mgr.mark_completed("a2", "done".to_string());
+
+        team_mgr.create_team(
+            "alpha".to_string(),
+            vec!["a1".to_string(), "a2".to_string()],
+        );
+
+        let tool = TeamBroadcastTool::new(subagent_mgr.clone(), team_mgr.clone());
+        let ctx = test_context();
+
+        let result = tool
+            .execute(json!({"team_name": "alpha", "message": "update"}), &ctx)
+            .await
+            .unwrap();
+        assert!(result.success);
+        assert!(result.output.contains("1 agents received"));
+        assert!(result.output.contains("1 skipped"));
+
+        assert_eq!(rx1.try_recv().unwrap(), "update");
     }
 }
