@@ -118,11 +118,30 @@ impl Tool for ResumeAgentTool {
         }
 
         // Build a new AgentService for the resumed run
+        let config = crate::config::Config::load()
+            .map_err(|e| ToolError::Execution(format!("Config load failed: {}", e)))?;
+        let subagent_model = config.agent.subagent_model.clone();
         let child_service = {
-            let config = crate::config::Config::load()
-                .map_err(|e| ToolError::Execution(format!("Config load failed: {}", e)))?;
-            let provider = crate::brain::provider::create_provider(&config)
-                .map_err(|e| ToolError::Execution(format!("Failed to create provider: {}", e)))?;
+            // Use subagent-specific provider if configured, otherwise inherit parent's
+            let provider = if let Some(ref provider_name) = config.agent.subagent_provider {
+                match crate::brain::provider::create_provider_by_name(&config, provider_name) {
+                    Ok(p) => {
+                        tracing::info!("Resumed sub-agent using configured provider '{}'", provider_name);
+                        p
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Sub-agent provider '{}' failed: {e}, falling back to parent",
+                            provider_name
+                        );
+                        crate::brain::provider::create_provider(&config)
+                            .map_err(|e| ToolError::Execution(format!("Failed to create provider: {}", e)))?
+                    }
+                }
+            } else {
+                crate::brain::provider::create_provider(&config)
+                    .map_err(|e| ToolError::Execution(format!("Failed to create provider: {}", e)))?
+            };
 
             let child_registry = crate::brain::tools::ToolRegistry::new();
             child_registry.register(Arc::new(crate::brain::tools::read::ReadTool));
@@ -147,6 +166,7 @@ impl Tool for ResumeAgentTool {
         let manager = self.manager.clone();
         let agent_id_clone = agent_id_str.clone();
         let prompt_clone = prompt.clone();
+        let model_override = subagent_model;
 
         let handle = tokio::spawn(async move {
             tracing::info!("Sub-agent {} resuming: {}", agent_id_clone, prompt_clone);
@@ -155,7 +175,7 @@ impl Tool for ResumeAgentTool {
                 .send_message_with_tools_and_mode(
                     session_id,
                     prompt_clone,
-                    None,
+                    model_override.clone(),
                     Some(cancel_clone),
                 )
                 .await;
