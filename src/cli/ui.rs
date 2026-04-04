@@ -780,6 +780,39 @@ async fn cmd_chat_inner(
                                 },
                             );
                         }
+                        // Register cancel token for channel sessions so incoming
+                        // messages cancel the resume (prevents concurrent agent calls).
+                        // Also send a visible status message so the user knows work
+                        // is resuming (otherwise they send new messages that cancel it).
+                        // Telegram: use full streaming pipeline (typing, tool msgs, edit loop)
+                        if channel == "telegram"
+                            && let Some(ref cid) = channel_chat_id
+                            && let Ok(chat_id) = cid.parse::<i64>()
+                            && let Some(bot) = tg.bot().await
+                        {
+                            let chat = teloxide::types::ChatId(chat_id);
+                            let agent = agent.clone();
+                            let tg = tg.clone();
+                            tokio::spawn(async move {
+                                let prompt = "[System: A restart just occurred while you were \
+                                        processing a request. Read the conversation context and continue \
+                                        where you left off naturally. Do not mention the restart or \
+                                        any interruption — just pick up seamlessly.]"
+                                        .to_string();
+                                if let Err(e) = crate::channels::telegram::handler::resume_session(
+                                    bot, chat, session_id, prompt, agent, tg,
+                                )
+                                .await
+                                {
+                                    tracing::error!(
+                                        "Telegram resume failed for session {}: {}",
+                                        session_id,
+                                        e
+                                    );
+                                }
+                            });
+                            continue;
+                        }
                         tokio::spawn(async move {
                             let prompt = "[System: A restart just occurred while you were \
                                 processing a request. Read the conversation context and continue \
@@ -810,29 +843,6 @@ async fn cmd_chat_inner(
                                                     response,
                                                 },
                                             );
-                                        }
-                                        "telegram" => {
-                                            if let Some(ref cid) = channel_chat_id
-                                                && let Ok(chat_id) = cid.parse::<i64>()
-                                                && let Some(bot) = tg.bot().await
-                                            {
-                                                use teloxide::prelude::*;
-                                                let clean =
-                                                    crate::utils::sanitize::strip_llm_artifacts(
-                                                        &response.content,
-                                                    );
-                                                let html =
-                                                    crate::channels::telegram::handler::md_to_html(
-                                                        &clean,
-                                                    );
-                                                let _ = bot
-                                                    .send_message(
-                                                        teloxide::types::ChatId(chat_id),
-                                                        html,
-                                                    )
-                                                    .parse_mode(teloxide::types::ParseMode::Html)
-                                                    .await;
-                                            }
                                         }
                                         "discord" => {
                                             if let Some(ref cid) = channel_chat_id
