@@ -52,6 +52,11 @@ pub struct AgentService {
     /// the TUI can refresh when a remote channel (Telegram/WhatsApp/…) updates
     /// the shared session.
     pub(super) session_updated_tx: Option<tokio::sync::mpsc::UnboundedSender<uuid::Uuid>>,
+
+    /// Fallback providers for rate-limit recovery (built from config on startup).
+    /// When the primary provider hits a rate/account limit mid-stream, these are
+    /// tried in order.
+    pub(super) fallback_providers: Vec<Arc<dyn Provider>>,
 }
 
 impl AgentService {
@@ -79,6 +84,7 @@ impl AgentService {
             )),
             brain_path: None,
             session_updated_tx: None,
+            fallback_providers: Self::build_fallback_providers(config),
         }
     }
 
@@ -306,5 +312,39 @@ impl AgentService {
     /// Get context window size for a given model
     pub fn context_window_for_model(&self, _model: &str) -> u32 {
         self.context_limit
+    }
+
+    /// Build fallback providers from config for mid-stream rate limit recovery.
+    fn build_fallback_providers(config: &crate::config::Config) -> Vec<Arc<dyn Provider>> {
+        if let Some(fallback) = &config.providers.fallback
+            && fallback.enabled
+        {
+            let chain = crate::brain::provider::factory::fallback_chain(fallback);
+            let mut providers = Vec::new();
+            for name in &chain {
+                match crate::brain::provider::factory::create_provider_by_name(config, name) {
+                    Ok(p) => {
+                        tracing::info!("AgentService: fallback provider '{}' ready", name);
+                        providers.push(p);
+                    }
+                    Err(e) => {
+                        tracing::warn!("AgentService: fallback provider '{}' skipped: {}", name, e);
+                    }
+                }
+            }
+            providers
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Check if any fallback providers are configured
+    pub fn has_fallback_provider(&self) -> bool {
+        !self.fallback_providers.is_empty()
+    }
+
+    /// Get the first available fallback provider
+    pub fn try_get_fallback_provider(&self) -> Option<Arc<dyn Provider>> {
+        self.fallback_providers.first().cloned()
     }
 }
