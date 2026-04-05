@@ -873,3 +873,103 @@ pub fn detect_text_repetition(window: &str, min_match: usize) -> bool {
         false
     }
 }
+
+/// Check if response text shows signs of model degradation / hallucination.
+///
+/// Returns `true` if the text looks like coherent output, `false` if it's
+/// likely garbage (context overflow, provider glitch, etc.).
+///
+/// Heuristics (at least 2 must trigger for a positive garbage detection):
+/// 1. High ratio of non-standard characters (broken syntax artifacts)
+/// 2. No recognizable English words or code keywords
+/// 3. Unbalanced curly braces suggesting mangled output
+/// 4. Repeated short patterns (character-level loops)
+pub fn is_response_coherent(text: &str) -> bool {
+    if text.len() < 30 {
+        return true;
+    }
+
+    let mut garbage_signals = 0u8;
+
+    // Signal 1: High ratio of non-alphanumeric, non-whitespace, non-standard-punctuation chars
+    let special_chars: usize = text
+        .chars()
+        .filter(|c| {
+            !c.is_alphanumeric()
+                && !c.is_whitespace()
+                && !matches!(
+                    c,
+                    '.' | ',' | '!' | '?' | ':' | ';' | '(' | ')' | '[' | ']'
+                        | '{' | '}' | '"' | '\'' | '=' | '+' | '-' | '*' | '/' | '<' | '>'
+                        | '_' | '#' | '@' | '\\' | '|' | '`'
+                )
+        })
+        .count();
+    let total_printable = text.chars().filter(|c| !c.is_whitespace()).count();
+    if total_printable > 0 && (special_chars as f64 / total_printable as f64) > 0.15 {
+        garbage_signals += 1;
+    }
+
+    // Signal 2: No recognizable English words or code keywords
+    let lower = text.to_lowercase();
+    let known_words = [
+        "the", "and", "for", "with", "this", "that", "from", "have", "will", "when",
+        "let", "fn", "pub", "use", "mod", "mut", "if", "else", "return", "match",
+        "ok", "err", "some", "none", "true", "false", "async", "await", "error",
+        "failed", "success", "context", "file", "check", "tool", "message",
+    ];
+    let has_known_word = known_words.iter().any(|w| lower.contains(*w));
+    if !has_known_word {
+        garbage_signals += 1;
+    }
+
+    // Signal 3: Unbalanced curly braces
+    let open_count = text.chars().filter(|c| *c == '{').count();
+    let close_count = text.chars().filter(|c| *c == '}').count();
+    if open_count > 0 || close_count > 0 {
+        let diff = open_count.abs_diff(close_count);
+        let max = open_count.max(close_count);
+        if max > 3 && (diff as f64 / max as f64) > 0.3 {
+            garbage_signals += 1;
+        }
+    }
+
+    // Signal 4: Repeated short character patterns
+    if text.len() >= 60 {
+        for pattern_len in 3..=6 {
+            if text.len() < pattern_len * 4 {
+                continue;
+            }
+            let pattern = &text[..pattern_len];
+            let mut repeats = 0;
+            let mut pos = 0;
+            while pos + pattern_len <= text.len() {
+                if &text[pos..pos + pattern_len] == pattern {
+                    repeats += 1;
+                    pos += pattern_len;
+                } else {
+                    pos += 1;
+                }
+            }
+            if repeats >= 6 {
+                garbage_signals += 1;
+                break;
+            }
+        }
+    }
+
+    // Require at least 2 signals (reduces false positives)
+    garbage_signals >= 2
+}
+
+/// Count how many known English/code words appear in text (debug helper).
+pub fn count_known_words(text: &str) -> usize {
+    let lower = text.to_lowercase();
+    let known_words = [
+        "the", "and", "for", "with", "this", "that", "from", "have", "will", "when",
+        "let", "fn", "pub", "use", "mod", "mut", "if", "else", "return", "match",
+        "ok", "err", "some", "none", "true", "false", "async", "await", "error",
+        "failed", "success", "context", "file", "check", "tool", "message",
+    ];
+    known_words.iter().filter(|w| lower.contains(*w)).count()
+}
