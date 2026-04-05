@@ -3,10 +3,24 @@
 //! Used to stay under provider rate limits (e.g. OpenRouter :free at 20 req/min)
 //! by enforcing a minimum interval between API calls. This is robustness:
 //! preventing rate-limit hits rather than reacting to them.
+//!
+//! ## Global Shared Limiter
+//!
+//! All OpenRouter :free provider instances share a single global limiter
+//! (`OPENROUTER_FREE_LIMITER`). This ensures that the main orchestrator,
+//! subagents, and team members all pace against ONE budget — not per-instance
+//! budgets that would collectively exceed the provider's actual rate limit.
 
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
+
+/// Global rate limiter shared by ALL OpenRouter :free provider instances.
+/// 20 req/min → 3s between requests across the entire process.
+pub static OPENROUTER_FREE_LIMITER: LazyLock<Arc<RateLimiter>> =
+    LazyLock::new(|| Arc::new(RateLimiter::openrouter_free()));
 
 /// Enforces a minimum interval between consecutive calls to `wait()`.
 ///
