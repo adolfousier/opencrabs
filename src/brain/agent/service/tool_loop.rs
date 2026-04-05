@@ -102,7 +102,10 @@ impl AgentService {
         let mut summary_result = None;
         const MAX_ATTEMPTS: u32 = 3;
         for attempt in 1..=MAX_ATTEMPTS {
-            match self.compact_context(session_id, context, model_name, cancel_token).await {
+            match self
+                .compact_context(session_id, context, model_name, cancel_token)
+                .await
+            {
                 Ok(summary) => {
                     summary_result = Some(summary);
                     break;
@@ -126,7 +129,10 @@ impl AgentService {
                 context.token_count,
                 target_tokens,
             );
-            if let Ok(summary) = self.compact_context(session_id, context, model_name, cancel_token).await {
+            if let Ok(summary) = self
+                .compact_context(session_id, context, model_name, cancel_token)
+                .await
+            {
                 summary_result = Some(summary);
             }
         }
@@ -388,8 +394,14 @@ impl AgentService {
         let compaction_result = if is_cli_provider {
             None
         } else {
-            self.enforce_context_budget(session_id, &mut context, &model_name, cancel_token.as_ref(), &progress_callback)
-                .await
+            self.enforce_context_budget(
+                session_id,
+                &mut context,
+                &model_name,
+                cancel_token.as_ref(),
+                &progress_callback,
+            )
+            .await
         };
 
         if let Some(ref summary) = compaction_result {
@@ -653,7 +665,12 @@ impl AgentService {
                     }
 
                     match self
-                        .compact_context(session_id, &mut context, &model_name, cancel_token.as_ref())
+                        .compact_context(
+                            session_id,
+                            &mut context,
+                            &model_name,
+                            cancel_token.as_ref(),
+                        )
                         .await
                     {
                         Ok(summary) => {
@@ -878,8 +895,8 @@ impl AgentService {
                                 fb_req,
                                 cancel_token.as_ref(),
                                 progress_callback.as_ref(),
-                                None, // no CLI queue callback for fallback
-                                None, // no queued messages
+                                None,  // no CLI queue callback for fallback
+                                None,  // no queued messages
                                 false, // suppress_callback: true only for compaction
                             )
                             .await;

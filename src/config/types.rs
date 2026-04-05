@@ -1837,6 +1837,26 @@ impl Config {
         }
 
         if !changed {
+            // Migration 3: inject commented subagent defaults into [agent] section
+            // Uses text-level injection (comments can't survive toml::Value round-trip)
+            let content = fs::read_to_string(path).unwrap_or_default();
+            let has_subagent =
+                content.contains("subagent_provider") || content.contains("subagent_model");
+            if !has_subagent && let Ok(injected) = inject_subagent_defaults(&content) {
+                let _ = fs::write(path, &injected);
+                tracing::info!("Config migrated: injected subagent defaults into [agent]");
+            }
+            return;
+        }
+
+        // Migration 3: also inject subagent defaults when other migrations occurred
+        let final_content = toml::to_string_pretty(&doc).unwrap_or_default();
+        let has_subagent =
+            final_content.contains("subagent_provider") || final_content.contains("subagent_model");
+        if !has_subagent && let Ok(injected) = inject_subagent_defaults(&final_content) {
+            Self::backup_config(path, 7);
+            let _ = fs::write(path, &injected);
+            tracing::info!("Config migrated: [voice] → providers.stt/tts + subagent defaults");
             return;
         }
 
@@ -2160,6 +2180,43 @@ impl Config {
         tracing::info!("Configuration saved to: {:?}", path);
         Ok(())
     }
+}
+
+/// Inject commented-out subagent provider/model defaults into the [agent] section.
+///
+/// Used by migration so users can discover the feature by uncommenting lines in config.toml.
+/// Pure text-level operation — preserves all existing formatting and comments.
+fn inject_subagent_defaults(content: &str) -> Result<String> {
+    let comment_block = "\n# Sub-agent routing — override the parent session's provider for\n# spawned agents, team members, and background workers.\n# subagent_provider = \"anthropic\"    # e.g. openrouter, minimax, custom:ollama\n# subagent_model = \"claude-sonnet-4-6\"  # only used when subagent_provider is set\n";
+
+    // Find [agent] section boundary
+    let marker = "[agent]";
+    let agent_pos = content
+        .find(marker)
+        .ok_or_else(|| anyhow::anyhow!("No [agent] section found"))?;
+
+    let section_start = agent_pos + marker.len();
+
+    // Find end of [agent] section: next section header or EOF
+    let rest = &content[section_start..];
+    let next_section = rest.find("\n[");
+    let section_end = if let Some(pos) = next_section {
+        section_start + pos
+    } else {
+        content.len()
+    };
+
+    // Insert the comment block at the end of the section
+    let mut out = String::with_capacity(content.len() + comment_block.len());
+    out.push_str(&content[..section_end]);
+    let before = &content[..section_end];
+    let ends_with_blank = before.ends_with("\n\n");
+    if !ends_with_blank {
+        out.push('\n');
+    }
+    out.push_str(comment_block);
+    out.push_str(&content[section_end..]);
+    Ok(out)
 }
 
 #[cfg(test)]
