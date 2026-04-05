@@ -3,6 +3,7 @@ use crate::brain::agent::context::AgentContext;
 use crate::brain::agent::error::{AgentError, Result};
 use crate::brain::provider::{LLMRequest, Message};
 use crate::services::{MessageService, SessionService};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 impl AgentService {
@@ -121,6 +122,7 @@ impl AgentService {
         session_id: Uuid,
         context: &mut AgentContext,
         model_name: &str,
+        cancel_token: Option<&CancellationToken>,
     ) -> Result<String> {
         let remaining_budget = context.max_tokens.saturating_sub(context.token_count);
 
@@ -297,7 +299,7 @@ impl AgentService {
         // Use streaming so the TUI shows the summary being written in real-time
         // instead of freezing silently for 2-5 minutes on large contexts
         let (response, _reasoning) = self
-            .stream_complete(session_id, request, None, None, None, None)
+            .stream_complete(session_id, request, cancel_token, None, None, None, true)
             .await
             .map_err(AgentError::Provider)?;
 

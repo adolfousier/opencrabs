@@ -30,6 +30,7 @@ impl AgentService {
         session_id: Uuid,
         context: &mut AgentContext,
         model_name: &str,
+        cancel_token: Option<&tokio_util::sync::CancellationToken>,
         progress_callback: &Option<ProgressCallback>,
     ) -> Option<String> {
         let tool_overhead = self.actual_tool_schema_tokens();
@@ -101,7 +102,7 @@ impl AgentService {
         let mut summary_result = None;
         const MAX_ATTEMPTS: u32 = 3;
         for attempt in 1..=MAX_ATTEMPTS {
-            match self.compact_context(session_id, context, model_name).await {
+            match self.compact_context(session_id, context, model_name, cancel_token).await {
                 Ok(summary) => {
                     summary_result = Some(summary);
                     break;
@@ -125,7 +126,7 @@ impl AgentService {
                 context.token_count,
                 target_tokens,
             );
-            if let Ok(summary) = self.compact_context(session_id, context, model_name).await {
+            if let Ok(summary) = self.compact_context(session_id, context, model_name, cancel_token).await {
                 summary_result = Some(summary);
             }
         }
@@ -297,7 +298,7 @@ impl AgentService {
         // The summary already contains next steps and follow-ups, so it IS the response.
         if is_manual_compact {
             match self
-                .compact_context(session_id, &mut context, &model_name)
+                .compact_context(session_id, &mut context, &model_name, None)
                 .await
             {
                 Ok(summary) => {
@@ -387,7 +388,7 @@ impl AgentService {
         let compaction_result = if is_cli_provider {
             None
         } else {
-            self.enforce_context_budget(session_id, &mut context, &model_name, &progress_callback)
+            self.enforce_context_budget(session_id, &mut context, &model_name, cancel_token.as_ref(), &progress_callback)
                 .await
         };
 
@@ -544,6 +545,7 @@ impl AgentService {
                     session_id,
                     &mut context,
                     &model_name,
+                    cancel_token.as_ref(),
                     &progress_callback,
                 )
                 .await
@@ -615,6 +617,7 @@ impl AgentService {
                     } else {
                         None
                     },
+                    false,
                 )
                 .await
             {
@@ -650,7 +653,7 @@ impl AgentService {
                     }
 
                     match self
-                        .compact_context(session_id, &mut context, &model_name)
+                        .compact_context(session_id, &mut context, &model_name, cancel_token.as_ref())
                         .await
                     {
                         Ok(summary) => {
@@ -803,6 +806,7 @@ impl AgentService {
                         } else {
                             None
                         },
+                        false,
                     )
                     .await
                     .map_err(AgentError::Provider)?
@@ -876,6 +880,7 @@ impl AgentService {
                                 progress_callback.as_ref(),
                                 None, // no CLI queue callback for fallback
                                 None, // no queued messages
+                                false, // suppress_callback: true only for compaction
                             )
                             .await;
                         // Swap back the original provider
@@ -925,7 +930,7 @@ impl AgentService {
                     context.hard_truncate_to(too_long_pre_truncate);
                 }
                 match self
-                    .compact_context(session_id, &mut context, &model_name)
+                    .compact_context(session_id, &mut context, &model_name, cancel_token.as_ref())
                     .await
                 {
                     Ok(summary) => {
@@ -1048,6 +1053,7 @@ impl AgentService {
                     session_id,
                     &mut context,
                     &model_name,
+                    cancel_token.as_ref(),
                     &progress_callback,
                 )
                 .await
@@ -1988,6 +1994,7 @@ impl AgentService {
                     session_id,
                     &mut context,
                     &model_name,
+                    cancel_token.as_ref(),
                     &progress_callback,
                 )
                 .await
