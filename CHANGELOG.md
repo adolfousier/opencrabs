@@ -5,6 +5,33 @@ All notable changes to OpenCrabs will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.98] - 2026-04-05
+
+### Added
+- **Auto-fallback on rate limits** — When the primary provider hits a rate/account limit mid-stream, catches `RateLimitExceeded`, saves state, and resumes the same conversation on a fallback provider configured in `providers.fallback`
+- **Fallback provider chain from config** — Reads `[providers.fallback]` at startup to build an ordered list of fallback providers. `has_fallback_provider()` and `try_get_fallback_provider()` for runtime queries
+- **Telegram resume with full streaming pipeline** — Interrupted Telegram sessions now resume with typing indicator, tool status messages, edit loop, dedup, and rate-limit retry. Previously the user saw silence for minutes
+- **Telegram bot commands autocompletion** — Registers all 9 slash commands (`help`, `models`, `usage`, `new`, `sessions`, `stop`, `compact`, `doctor`, `evolve`) via `setMyCommands` after bot auth. No manual BotFather setup needed
+
+### Fixed
+- **PDF text extraction** — Extract text from PDF files via `pdf_extract` instead of returning `Unsupported`
+- **Context compaction runaway enforcement** — Two-tier budget enforcement: 65% soft trigger (LLM compaction with retries), 90% hard floor (forced truncation to 75%, cannot fail). Pre-truncate target now scales proportionally (85% of max_tokens) instead of hardcoded 170k, supporting custom providers with different context windows. Compaction is now silent to user — summary written to memory log only, no chat spam
+- **Telegram duplicate messages** — Edit streaming message in-place instead of delete+send race; cancel guard moved before display queue to prevent stale messages after cancellation
+- **Telegram dedup diagnostics** — INFO/WARN logging on the dedup path to trace exactly what's being stripped
+- **TUI token counter stuck at 111K** — Removed monotonic guard so CLI-calibrated token count (~41K) reaches display instead of being blocked by the post-compaction tiktoken estimate (~111K)
+- **Local timezone in logs** — Log timestamps now show local timezone with `%:z` offset instead of UTC
+- **Rate limit detection in CLI errors** — Parses "rate limit", "429", "overloaded", "too many requests", "hit your limit" as `ProviderError::RateLimitExceeded`
+- **Telegram resume race on bot auth** — Polls `tg.bot().await` up to 30s before calling `resume_session` to avoid the 328ms startup race
+
+### Refactored
+- **Context budget enforcement** — `enforce_context_budget()` with two-tier enforcement: 65% soft LLM compaction, 90% hard truncation floor. Safety truncation to 80% if compaction exhausts all retries. Removed CompactionSummary/Compacting progress events — compaction fully silent to user
+- **Telegram resume pipeline** — Routes through `handler::resume_session()` instead of bare agent call with no streaming or feedback
+
+### Testing
+- **55 Telegram resume tests** — Cancel tokens, dedup logic, markdown-to-HTML, message splitting, pending approvals, bot wait loop, cancel guard ordering, token counter regression
+
+[0.2.98]: https://github.com/adolfousier/opencrabs/compare/v0.2.97...v0.2.98
+
 ## [0.2.97] - 2026-04-04
 
 ### Added
@@ -2082,3 +2109,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.1.2]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.2
 [0.1.1]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.1
 [0.1.0]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.0
+

@@ -118,7 +118,7 @@ async fn cmd_list(repo: &CronJobRepository) -> Result<()> {
             .unwrap_or_else(|| "never".to_string());
         let deliver = job.deliver_to.as_deref().unwrap_or("none");
         let prompt_preview = if job.prompt.len() > 60 {
-            format!("{}...", &job.prompt[..60])
+            format!("{}...", job.prompt.chars().take(60).collect::<String>())
         } else {
             job.prompt.clone()
         };

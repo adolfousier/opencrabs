@@ -388,7 +388,7 @@ pub(crate) async fn handle_message(
                                         label.clone()
                                     };
                                     let display = if display.len() > 80 {
-                                        format!("{}…", &display[..79])
+                                        format!("{}…", display.chars().take(79).collect::<String>())
                                     } else {
                                         display
                                     };
@@ -457,7 +457,7 @@ pub(crate) async fn handle_message(
                                         label.clone()
                                     };
                                     let display = if display.len() > 80 {
-                                        format!("{}…", &display[..79])
+                                        format!("{}…", display.chars().take(79).collect::<String>())
                                     } else {
                                         display
                                     };

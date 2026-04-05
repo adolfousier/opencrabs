@@ -441,13 +441,9 @@ async fn cmd_chat_inner(
                     progress_sender.send(TuiEvent::ResponseChunk { session_id, text })
                 }
                 ProgressEvent::Thinking => return, // spinner handles this already
-                ProgressEvent::Compacting => progress_sender.send(TuiEvent::AgentProcessing),
-                ProgressEvent::CompactionSummary { summary } => {
-                    progress_sender.send(TuiEvent::CompactionSummary {
-                        session_id,
-                        summary,
-                    })
-                }
+                // Compaction is now fully silent — summary goes to memory log only
+                ProgressEvent::Compacting => return,
+                ProgressEvent::CompactionSummary { .. } => return,
                 ProgressEvent::BuildLine(line) => progress_sender.send(TuiEvent::BuildLine(line)),
                 ProgressEvent::RestartReady { status } => {
                     progress_sender.send(TuiEvent::RestartReady(status))

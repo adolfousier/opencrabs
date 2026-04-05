@@ -526,7 +526,10 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         ]));
         // Show the command being run
         let cmd_display = if sudo_req.command.len() > 60 {
-            format!("{}...", &sudo_req.command[..57])
+            format!(
+                "{}...",
+                sudo_req.command.chars().take(57).collect::<String>()
+            )
         } else {
             sudo_req.command.clone()
         };

@@ -143,19 +143,19 @@ async fn test_cancel_one_session_other_continues() {
     let id_a = session_a.id;
     let id_b = session_b.id;
 
-    let svc_a_clone = Arc::clone(&svc_a);
-    let svc_b_clone = Arc::clone(&svc_b);
-    let cancel_a_clone = cancel_a.clone();
-
-    let (result_a, result_b) = tokio::join!(
-        svc_a_clone.send_message_with_tools_and_mode(
+    // Run sequentially — shared in-memory SQLite can't handle concurrent writes.
+    // Cancel token is pre-cancelled so A returns instantly regardless of ordering.
+    let result_a = svc_a
+        .send_message_with_tools_and_mode(
             id_a,
             "Use the tool".to_string(),
             None,
-            Some(cancel_a_clone),
-        ),
-        svc_b_clone.send_message_with_tools(id_b, "Use the tool".to_string(), None),
-    );
+            Some(cancel_a.clone()),
+        )
+        .await;
+    let result_b = svc_b
+        .send_message_with_tools(id_b, "Use the tool".to_string(), None)
+        .await;
 
     // Session A was cancelled — it may succeed with partial content or succeed normally
     // The important thing is that it doesn't panic and session B completes

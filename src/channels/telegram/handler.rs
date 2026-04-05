@@ -558,13 +558,10 @@ pub(crate) async fn handle_message(
         }
     }
 
-    // Strip @bot_username from text when responding to a mention in groups
-    let text = if !is_dm && respond_to == &RespondTo::Mention {
-        if let Some(ref uname) = telegram_state.bot_username().await {
-            text.replace(&format!("@{}", uname), "").trim().to_string()
-        } else {
-            text
-        }
+    // Strip @bot_username suffix from ALL text (Telegram appends it in menus, even in DMs).
+    // Without this, /stop@opencrabsbot won't match /stop in handle_command.
+    let text = if let Some(ref uname) = telegram_state.bot_username().await {
+        text.replace(&format!("@{}", uname), "").trim().to_string()
     } else {
         text
     };
@@ -1515,7 +1512,7 @@ pub(crate) async fn handle_message(
                 text_only.len(),
                 sent.len(),
                 sent.iter()
-                    .map(|s| format!("{}...", &s[..s.len().min(60)]))
+                    .map(|s| format!("{}...", s.chars().take(60).collect::<String>()))
                     .collect::<Vec<_>>()
             );
             let text_only = if !sent.is_empty() {

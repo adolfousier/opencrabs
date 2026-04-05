@@ -11,13 +11,16 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 impl AgentService {
-    /// Enforce the 65 % context budget rule.
+    /// Enforce context budget with two-tier enforcement.
     ///
-    /// - ≥ 65 %: try LLM compaction (up to 3 retries on error).
-    /// - After compaction (or if all retries fail): hard-truncate to 65 % if still over.
-    /// - Context NEVER exceeds 65 % after this function returns.
+    /// Tier 1 — soft trigger at 65%: try LLM compaction (up to 3 retries),
+    /// then re-compact if still over. Preserves context via summaries.
     ///
-    /// NOTE: 65 % (~130k of 200k) is chosen because MiniMax (and likely other
+    /// Tier 2 — hard floor at 90%: if compaction repeatedly fails and context
+    /// grows to 90%+, emergency truncation kicks in. This path NEVER fails.
+    /// Context is forcibly reduced to ~80% by dropping oldest messages.
+    ///
+    /// NOTE: 65% (~130k of 200k) is chosen because MiniMax (and likely other
     /// models) degrade on function-calling quality well before hitting their
     /// theoretical context limit — tool calls stop around ~133k tokens.
     ///
@@ -45,12 +48,52 @@ impl AgentService {
             usage_pct,
         );
 
+        // ── Tier 2: 90% hard floor — compaction already failed, force truncate ──
+        if usage_pct >= 90.0 {
+            tracing::error!(
+                "🚨 LAST RESORT: Context at {:.0}% ({} tokens) — forcing hard truncation",
+                usage_pct,
+                context.token_count,
+            );
+
+            // Target ~75% to give breathing room after truncation
+            let target = (effective_max as f64 * 0.75) as usize;
+            context.hard_truncate_to(target);
+
+            // Clean up any orphaned tool results left after truncation
+            context.trim_to_fit(0);
+
+            if let Some(cb) = progress_callback {
+                cb(
+                    session_id,
+                    ProgressEvent::SelfHealingAlert {
+                        message: format!(
+                            "⚠️ Emergency truncation: context hit {:.0}% ({:.0} tokens). \
+                             Oldest messages were dropped to bring usage down to ~75%. \
+                             Full history is still searchable in the database.",
+                            usage_pct, context.token_count as f64
+                        ),
+                    },
+                );
+            }
+
+            tracing::info!(
+                "Hard truncation complete: {} messages, {} tokens ({:.0}%)",
+                context.messages.len(),
+                context.token_count,
+                context.token_count as f64 / effective_max as f64 * 100.0,
+            );
+
+            return None;
+        }
+
+        // ── Tier 1: soft trigger at 65% — LLM compaction ──
         if usage_pct <= 65.0 {
             return None;
         }
 
         tracing::warn!(
-            "Context at {:.0}% (>65%) — triggering compaction",
+            "Context at {:.0}% (>65%) — triggering LLM compaction",
             usage_pct
         );
 
@@ -60,15 +103,6 @@ impl AgentService {
         for attempt in 1..=MAX_ATTEMPTS {
             match self.compact_context(session_id, context, model_name).await {
                 Ok(summary) => {
-                    if let Some(cb) = progress_callback {
-                        cb(
-                            session_id,
-                            ProgressEvent::CompactionSummary {
-                                summary: summary.clone(),
-                            },
-                        );
-                        cb(session_id, ProgressEvent::TokenCount(context.token_count));
-                    }
                     summary_result = Some(summary);
                     break;
                 }
@@ -84,7 +118,6 @@ impl AgentService {
         }
 
         // If still over budget after compaction, re-compact with tighter budget.
-        // Never hard-truncate — always use LLM compaction to preserve context.
         let target_tokens = (effective_max as f64 * 0.65) as usize;
         if context.token_count > target_tokens {
             tracing::warn!(
@@ -92,19 +125,24 @@ impl AgentService {
                 context.token_count,
                 target_tokens,
             );
-            // Re-run compaction — the 55% keep_budget should get it under 65%
-            // on the second pass since there's less context now.
             if let Ok(summary) = self.compact_context(session_id, context, model_name).await {
-                if let Some(cb) = progress_callback {
-                    cb(
-                        session_id,
-                        ProgressEvent::CompactionSummary {
-                            summary: summary.clone(),
-                        },
-                    );
-                    cb(session_id, ProgressEvent::TokenCount(context.token_count));
-                }
                 summary_result = Some(summary);
+            }
+        }
+
+        // If LLM compaction totally failed and we're still over 80%,
+        // do a safety truncation to prevent the 90% nuclear option next time.
+        if summary_result.is_none() {
+            let safety_target = (effective_max as f64 * 0.80) as usize;
+            if context.token_count > safety_target {
+                tracing::warn!(
+                    "Compaction exhausted, context at {} tokens (>{:.0}%) — safety truncation to {:.0}%",
+                    context.token_count,
+                    usage_pct,
+                    80.0f64,
+                );
+                context.hard_truncate_to(safety_target);
+                context.trim_to_fit(0);
             }
         }
 
@@ -306,7 +344,7 @@ impl AgentService {
                          - The AI provider returned an error\n\
                          - The database is locked or inaccessible\n\n\
                          Try again, or continue the conversation normally — \
-                         auto-compaction will trigger at 80% context usage.",
+                         auto-compaction will trigger at 65% context usage.",
                         e
                     );
                     message_service
@@ -592,16 +630,18 @@ impl AgentService {
                 {
                     tracing::warn!("Prompt too long for provider — emergency compaction");
 
-                    // Pre-truncate to 170K so compact_context() can actually run.
-                    // Without this, the compaction LLM call also fails with "too long".
-                    const PRE_TRUNCATE_TARGET: usize = 170_000;
-                    if context.token_count > PRE_TRUNCATE_TARGET {
+                    // Pre-truncate to 85% of max so compact_context() can actually run.
+                    // For 200k models: ~170k. For custom providers: scales proportionally.
+                    const PRE_TRUNCATE_PCT: f64 = 0.85;
+                    let pre_truncate_target =
+                        (context.max_tokens as f64 * PRE_TRUNCATE_PCT).max(16_000.0) as usize;
+                    if context.token_count > pre_truncate_target {
                         tracing::warn!(
                             "Context too large for compaction ({} tokens) — pre-truncating to {}K",
                             context.token_count,
-                            PRE_TRUNCATE_TARGET / 1000
+                            pre_truncate_target / 1000
                         );
-                        context.hard_truncate_to(PRE_TRUNCATE_TARGET);
+                        context.hard_truncate_to(pre_truncate_target);
                         tracing::info!(
                             "Pre-truncated to {} messages ({} tokens) — now attempting compaction",
                             context.messages.len(),
@@ -878,9 +918,11 @@ impl AgentService {
                 tracing::warn!(
                     "CLI returned 'Prompt is too long' as content — triggering emergency compaction"
                 );
-                const PRE_TRUNCATE_TARGET: usize = 170_000;
-                if context.token_count > PRE_TRUNCATE_TARGET {
-                    context.hard_truncate_to(PRE_TRUNCATE_TARGET);
+                // Emergency pre-truncate: 85% of max (scales with custom providers)
+                let too_long_pre_truncate =
+                    (context.max_tokens as f64 * 0.85).max(16_000.0) as usize;
+                if context.token_count > too_long_pre_truncate {
+                    context.hard_truncate_to(too_long_pre_truncate);
                 }
                 match self
                     .compact_context(session_id, &mut context, &model_name)

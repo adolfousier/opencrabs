@@ -1,5 +1,4 @@
 use super::builder::AgentService;
-use super::types::ProgressEvent;
 use crate::brain::agent::context::AgentContext;
 use crate::brain::agent::error::{AgentError, Result};
 use crate::brain::provider::{LLMRequest, Message};
@@ -123,11 +122,6 @@ impl AgentService {
         context: &mut AgentContext,
         model_name: &str,
     ) -> Result<String> {
-        // Emit compacting progress
-        if let Some(ref cb) = self.progress_callback {
-            cb(session_id, ProgressEvent::Compacting);
-        }
-
         let remaining_budget = context.max_tokens.saturating_sub(context.token_count);
 
         // Build a summarization request with the full conversation
@@ -349,16 +343,6 @@ impl AgentService {
             context.usage_percentage(),
             context.token_count
         );
-
-        // Show the summary to the user in chat
-        if let Some(ref cb) = self.progress_callback {
-            cb(
-                session_id,
-                ProgressEvent::CompactionSummary {
-                    summary: summary.clone(),
-                },
-            );
-        }
 
         Ok(summary)
     }

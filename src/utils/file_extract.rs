@@ -82,7 +82,8 @@ pub fn classify_file(bytes: &[u8], mime: &str, filename: &str) -> FileContent {
                     ))
                 } else {
                     let truncated = if trimmed.len() > TEXT_LIMIT {
-                        format!("{}…[truncated]", &trimmed[..TEXT_LIMIT])
+                        let safe: String = trimmed.chars().take(TEXT_LIMIT).collect();
+                        format!("{}…[truncated]", safe)
                     } else {
                         trimmed
                     };
@@ -98,7 +99,8 @@ pub fn classify_file(bytes: &[u8], mime: &str, filename: &str) -> FileContent {
     if is_text_mime(effective_mime) {
         let raw = String::from_utf8_lossy(bytes);
         let truncated = if raw.len() > TEXT_LIMIT {
-            format!("{}…[truncated]", &raw[..TEXT_LIMIT])
+            let safe: String = raw.chars().take(TEXT_LIMIT).collect();
+            format!("{}…[truncated]", safe)
         } else {
             raw.into_owned()
         };

@@ -934,7 +934,7 @@ pub(super) fn render_usage_dialog(f: &mut Frame, app: &App, area: Rect) {
             format!("${:.2}", stats.cost)
         };
         let short_model = if model_name.len() > 20 {
-            format!("{}…", &model_name[..19])
+            format!("{}…", model_name.chars().take(19).collect::<String>())
         } else {
             model_name.to_string()
         };

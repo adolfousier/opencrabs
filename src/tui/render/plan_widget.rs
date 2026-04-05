@@ -79,7 +79,7 @@ pub(super) fn render_plan_checklist(f: &mut Frame, app: &App, area: Rect) {
 
         // Truncate task title to 60 chars
         let task_title = if task.title.len() > 60 {
-            format!("{}…", &task.title[..59])
+            format!("{}…", task.title.chars().take(59).collect::<String>())
         } else {
             task.title.clone()
         };

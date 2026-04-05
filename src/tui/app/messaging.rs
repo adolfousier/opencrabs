@@ -1121,7 +1121,8 @@ impl App {
                 if let Ok(content) = std::fs::read_to_string(path) {
                     const LIMIT: usize = 8_000;
                     let truncated = if content.len() > LIMIT {
-                        format!("{}…[truncated]", &content[..LIMIT])
+                        let safe: String = content.chars().take(LIMIT).collect();
+                        format!("{}…[truncated]", safe)
                     } else {
                         content
                     };
@@ -1176,7 +1177,8 @@ impl App {
                         .unwrap_or_else(|| word.to_string());
                     const LIMIT: usize = 8_000;
                     let truncated = if content.len() > LIMIT {
-                        format!("{}…[truncated]", &content[..LIMIT])
+                        let safe: String = content.chars().take(LIMIT).collect();
+                        format!("{}…[truncated]", safe)
                     } else {
                         content
                     };
