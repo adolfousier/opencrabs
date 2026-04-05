@@ -8,6 +8,7 @@
 //! - Any endpoint that speaks the OpenAI chat completions protocol
 
 use super::error::{ProviderError, Result};
+use super::rate_limiter::RateLimiter;
 use super::r#trait::{Provider, ProviderStream};
 use super::types::*;
 use crate::brain::tokenizer::{count_message_tokens, count_tokens};
@@ -17,7 +18,6 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
-
 const DEFAULT_OPENAI_API_URL: &str = "https://api.openai.com/v1/chat/completions";
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(300);
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -172,6 +172,9 @@ pub struct OpenAIProvider {
     configured_context_window: Option<u32>,
     /// Optional dynamic token provider (overrides api_key when set).
     token_fn: Option<TokenFn>,
+    /// Proactive rate limiter — shared via Arc so all clones throttle together.
+    /// Used for OpenRouter `:free` models (~3s between requests).
+    rate_limiter: Option<Arc<RateLimiter>>,
 }
 
 impl OpenAIProvider {
@@ -195,6 +198,7 @@ impl OpenAIProvider {
             extra_headers: vec![],
             configured_context_window: None,
             token_fn: None,
+            rate_limiter: None,
         }
     }
 
@@ -218,6 +222,7 @@ impl OpenAIProvider {
             extra_headers: vec![],
             configured_context_window: None,
             token_fn: None,
+            rate_limiter: None,
         }
     }
 
@@ -241,6 +246,7 @@ impl OpenAIProvider {
             extra_headers: vec![],
             configured_context_window: None,
             token_fn: None,
+            rate_limiter: None,
         }
     }
 
@@ -279,6 +285,13 @@ impl OpenAIProvider {
     /// vision backend when Gemini vision isn't configured.
     pub fn with_vision_model(mut self, model: String) -> Self {
         self.vision_model = Some(model);
+        self
+    }
+
+    /// Set a proactive rate limiter — enforces minimum interval between API
+    /// calls to stay under provider rate limits (e.g. OpenRouter :free at 20/min).
+    pub fn with_rate_limiter(mut self, limiter: RateLimiter) -> Self {
+        self.rate_limiter = Some(Arc::new(limiter));
         self
     }
 
@@ -736,6 +749,17 @@ impl Provider for OpenAIProvider {
             );
         }
 
+        // Proactive pacing: stay under provider rate limits (e.g. OpenRouter :free at 20/min)
+        if let Some(ref limiter) = self.rate_limiter {
+            let waited = limiter.wait().await;
+            if !waited.is_zero() {
+                tracing::debug!(
+                    "Rate limiter: waited {:?} before request to {}",
+                    waited, self.base_url
+                );
+            }
+        }
+
         // Retry the entire API call with exponential backoff
         let result = retry_with_backoff(
             || async {
@@ -810,6 +834,17 @@ impl Provider for OpenAIProvider {
 
         let model = request.model.clone();
         let message_count = request.messages.len();
+
+        // Proactive pacing: stay under provider rate limits
+        if let Some(ref limiter) = self.rate_limiter {
+            let waited = limiter.wait().await;
+            if !waited.is_zero() {
+                tracing::debug!(
+                    "Rate limiter: waited {:?} before streaming request to {}",
+                    waited, self.base_url
+                );
+            }
+        }
 
         tracing::info!(
             "{} streaming request: model={}, messages={}, base_url={}",
