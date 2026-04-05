@@ -811,7 +811,14 @@ async fn handle_message(
     // Process attached files — images as <<IMG:tmp_path>>, text files extracted inline
     let mut content = text.clone();
     if !files.is_empty() {
-        use crate::utils::{FileContent, classify_file};
+        use crate::utils::{inject_file_content, process_file_with_vision};
+        let cfg = match crate::config::Config::load() {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("Slack: failed to load config: {}", e);
+                return;
+            }
+        };
         let http = reqwest::Client::new();
         for file in &files {
             let mime = file.mimetype.as_ref().map(|m| m.0.as_str()).unwrap_or("");
@@ -869,35 +876,13 @@ async fn handle_message(
                 continue;
             }
 
-            match classify_file(&dl_bytes, mime, fname) {
-                FileContent::Image => {
-                    let ext = fname.rsplit('.').next().unwrap_or("png");
-                    let tmp = std::env::temp_dir().join(format!(
-                        "slack_img_{}.{}",
-                        uuid::Uuid::new_v4(),
-                        ext
-                    ));
-                    if tokio::fs::write(&tmp, &dl_bytes).await.is_ok() {
-                        if content.is_empty() {
-                            content = "Describe this image.".to_string();
-                        }
-                        content.push_str(&format!(" <<IMG:{}>>", tmp.display()));
-                        let cleanup = tmp.clone();
-                        tokio::spawn(async move {
-                            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-                            let _ = tokio::fs::remove_file(cleanup).await;
-                        });
-                    }
-                }
-                FileContent::Text(extracted) => {
-                    if content.is_empty() {
-                        content = extracted;
-                    } else {
-                        content.push_str(&format!("\n\n{extracted}"));
-                    }
-                }
-                FileContent::Unsupported(note) => {
-                    content.push_str(&format!("\n\n{note}"));
+            let fc = process_file_with_vision(&dl_bytes, mime, fname, &cfg);
+            let injected = inject_file_content(&fc).0;
+            if !injected.is_empty() {
+                if content.is_empty() {
+                    content = injected;
+                } else {
+                    content.push_str(&format!("\n\n{injected}"));
                 }
             }
         }

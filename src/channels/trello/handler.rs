@@ -124,7 +124,7 @@ pub async fn process_comment(
     // Fetch card attachments and include images/text files in context
     let mut attachment_context = String::new();
     if let Ok(attachments) = client.get_card_attachments(&card_id).await {
-        use crate::utils::{FileContent, classify_file};
+        use crate::utils::{inject_file_content, process_file_with_vision};
         for att in &attachments {
             let url = match att.url.as_deref() {
                 Some(u) if !u.is_empty() => u,
@@ -142,27 +142,12 @@ pub async fn process_comment(
                 }
             };
 
-            match classify_file(&bytes, mime, fname) {
-                FileContent::Image => {
-                    let ext = fname.rsplit('.').next().unwrap_or("png");
-                    let tmp = std::env::temp_dir().join(format!(
-                        "trello_att_{}.{}",
-                        uuid::Uuid::new_v4(),
-                        ext
-                    ));
-                    if tokio::fs::write(&tmp, &bytes).await.is_ok() {
-                        attachment_context.push_str(&format!(" <<IMG:{}>>", tmp.display()));
-                        let cleanup = tmp.clone();
-                        tokio::spawn(async move {
-                            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-                            let _ = tokio::fs::remove_file(cleanup).await;
-                        });
-                    }
+            if let Ok(cfg) = crate::config::Config::load() {
+                let fc = process_file_with_vision(&bytes, mime, fname, &cfg);
+                let injected = inject_file_content(&fc).0;
+                if !injected.is_empty() {
+                    attachment_context.push_str(&format!("\n\n{injected}"));
                 }
-                FileContent::Text(extracted) => {
-                    attachment_context.push_str(&format!("\n\n{extracted}"));
-                }
-                FileContent::Unsupported(_) => {} // skip silently for Trello
             }
         }
     }

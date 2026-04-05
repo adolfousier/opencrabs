@@ -453,32 +453,13 @@ pub(crate) async fn handle_message(
         && !has_img
         && let Some((bytes, mime, fname)) = download_document(&msg, &client).await
     {
-        use crate::utils::{FileContent, classify_file};
-        match classify_file(&bytes, &mime, &fname) {
-            FileContent::Image => {
-                let ext = fname.rsplit('.').next().unwrap_or("jpg");
-                let tmp =
-                    std::env::temp_dir().join(format!("wa_doc_{}.{}", uuid::Uuid::new_v4(), ext));
-                if std::fs::write(&tmp, &bytes).is_ok() {
-                    if content.is_empty() {
-                        content = "Describe this image.".to_string();
-                    }
-                    content.push_str(&format!(" <<IMG:{}>>", tmp.display()));
-                }
-            }
-            FileContent::Text(extracted) => {
-                if content.is_empty() {
-                    content = extracted;
-                } else {
-                    content.push_str(&format!("\n\n{extracted}"));
-                }
-            }
-            FileContent::Unsupported(note) => {
-                if content.is_empty() {
-                    content = note;
-                } else {
-                    content.push_str(&format!("\n\n{note}"));
-                }
+        use crate::utils::{inject_file_content, process_file_with_vision};
+        let cfg = crate::config::Config::load();
+        if let Ok(cfg) = cfg {
+            let fc = process_file_with_vision(&bytes, &mime, &fname, &cfg);
+            let injected = inject_file_content(&fc).0;
+            if !injected.is_empty() {
+                content.push_str(&format!("\n\n{injected}"));
             }
         }
     }

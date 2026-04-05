@@ -466,7 +466,6 @@ pub(crate) async fn handle_message(
     } else if let Some(doc) = msg.document() {
         let fname = doc.file_name.as_deref().unwrap_or("file");
         let mime = doc.mime_type.as_ref().map(|m| m.as_ref()).unwrap_or("");
-        let ext = fname.rsplit('.').next().unwrap_or("bin");
         let caption = msg.caption().unwrap_or("");
 
         tracing::info!(
@@ -501,40 +500,15 @@ pub(crate) async fn handle_message(
             }
         };
 
-        use crate::utils::{FileContent, classify_file};
-        match classify_file(&bytes, mime, fname) {
-            FileContent::Image => {
-                let tmp_path =
-                    std::env::temp_dir().join(format!("tg_doc_{}.{}", Uuid::new_v4(), ext));
-                if let Err(e) = tokio::fs::write(&tmp_path, &bytes).await {
-                    tracing::error!("Telegram: failed to write temp image: {}", e);
-                    bot.send_message(msg.chat.id, "Failed to process file.")
-                        .await?;
-                    return Ok(());
-                }
-                let prompt = if caption.is_empty() {
-                    "Analyze this image."
-                } else {
-                    caption
-                };
-                let result = format!("<<IMG:{}>> {}", tmp_path.display(), prompt);
-                let cleanup = tmp_path.clone();
-                tokio::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-                    let _ = tokio::fs::remove_file(cleanup).await;
-                });
-                (result, false)
-            }
-            FileContent::Text(extracted) => {
-                let result = if caption.is_empty() {
-                    extracted
-                } else {
-                    format!("{caption}\n\n{extracted}")
-                };
-                (result, false)
-            }
-            FileContent::Unsupported(note) => (note, false),
-        }
+        use crate::utils::{inject_file_content, process_file_with_vision};
+        let content = process_file_with_vision(&bytes, mime, fname, &cfg);
+        let result = inject_file_content(&content).0;
+        let result = if caption.is_empty() || result.contains("<<IMG:") {
+            result
+        } else {
+            format!("{caption}\n\n{result}")
+        };
+        (result, false)
     } else {
         // Non-text, non-voice, non-photo message -- ignore
         return Ok(());
