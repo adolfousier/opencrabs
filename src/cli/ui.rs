@@ -182,16 +182,8 @@ async fn cmd_chat_inner(
         )));
         tracing::info!("Registered generate_image tool");
     }
-    // Image vision tool — prefer Gemini, fall back to provider's vision_model
-    if config.image.vision.enabled
-        && let Some(ref key) = config.image.vision.api_key
-    {
-        tool_registry.register(Arc::new(AnalyzeImageTool::new(
-            key.clone(),
-            config.image.vision.model.clone(),
-        )));
-        tracing::info!("Registered analyze_image tool (Gemini)");
-    } else if let Some((api_key, base_url, vision_model)) =
+    // Image vision tool — provider.vision_model takes priority over image.vision (Gemini)
+    if let Some((api_key, base_url, vision_model)) =
         crate::brain::provider::factory::active_provider_vision(config)
     {
         tool_registry.register(Arc::new(ProviderVisionTool::new(
@@ -200,6 +192,14 @@ async fn cmd_chat_inner(
             vision_model,
         )));
         tracing::info!("Registered analyze_image tool (provider vision model)");
+    } else if config.image.vision.enabled
+        && let Some(ref key) = config.image.vision.api_key
+    {
+        tool_registry.register(Arc::new(AnalyzeImageTool::new(
+            key.clone(),
+            config.image.vision.model.clone(),
+        )));
+        tracing::info!("Registered analyze_image tool (Gemini)");
     }
 
     // Phase 5: Multi-agent orchestration
