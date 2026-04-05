@@ -36,14 +36,19 @@ impl AgentService {
         override_cb: Option<&ProgressCallback>,
         queue_cb: Option<&MessageQueueCallback>,
         queued_out: Option<&tokio::sync::Mutex<Option<String>>>,
+        suppress_callback: bool,
     ) -> std::result::Result<(LLMResponse, Option<String>), crate::brain::provider::ProviderError>
     {
         use crate::brain::provider::{ContentDelta, StreamEvent, TokenUsage};
         use futures::StreamExt;
 
-        // Per-call override wins over service-level callback
-        let effective_cb: Option<&ProgressCallback> =
-            override_cb.or(self.progress_callback.as_ref());
+        // suppress_callback=true skips all progress events (used during compaction
+        // to prevent the compaction LLM response from leaking as visible TUI text).
+        let effective_cb: Option<&ProgressCallback> = if suppress_callback {
+            None
+        } else {
+            override_cb.or(self.progress_callback.as_ref())
+        };
 
         let request_model = request.model.clone();
         let provider = self
