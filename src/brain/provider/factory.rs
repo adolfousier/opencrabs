@@ -446,14 +446,15 @@ fn try_create_openrouter(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         openrouter_config,
     );
 
-    // Attach a proactive rate limiter only for `:free` tier models.
+    // Attach a shared rate limiter only for `:free` tier models.
     // OpenRouter's free tier is ~20 req/min (3s spacing).
-    // This makes us robust (prevents 429s) rather than merely resilient (reacting to them).
+    // ALL provider instances (main orchestrator, subagents, team members) share
+    // ONE global static limiter so they collectively stay under the provider limit.
     if model_is_free(&openrouter_config.default_model) {
-        use super::rate_limiter::RateLimiter;
-        provider = provider.with_rate_limiter(RateLimiter::openrouter_free());
+        use super::rate_limiter::OPENROUTER_FREE_LIMITER;
+        provider = provider.with_rate_limiter(OPENROUTER_FREE_LIMITER.clone());
         tracing::info!(
-            "OpenRouter :free model detected — proactive pacing enabled (~3s between requests)"
+            "OpenRouter :free model detected — shared pacing enabled (~3s between requests, process-wide)"
         );
     }
 

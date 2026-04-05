@@ -290,8 +290,9 @@ impl OpenAIProvider {
 
     /// Set a proactive rate limiter — enforces minimum interval between API
     /// calls to stay under provider rate limits (e.g. OpenRouter :free at 20/min).
-    pub fn with_rate_limiter(mut self, limiter: RateLimiter) -> Self {
-        self.rate_limiter = Some(Arc::new(limiter));
+    /// Takes an `Arc<RateLimiter>` so multiple provider instances share ONE limiter.
+    pub fn with_rate_limiter(mut self, limiter: Arc<RateLimiter>) -> Self {
+        self.rate_limiter = Some(limiter);
         self
     }
 
