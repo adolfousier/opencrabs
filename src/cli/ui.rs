@@ -784,16 +784,38 @@ async fn cmd_chat_inner(
                         // messages cancel the resume (prevents concurrent agent calls).
                         // Also send a visible status message so the user knows work
                         // is resuming (otherwise they send new messages that cancel it).
-                        // Telegram: use full streaming pipeline (typing, tool msgs, edit loop)
+                        // Telegram: use full streaming pipeline (typing, tool msgs, edit loop).
+                        // The bot may not be authenticated yet at startup, so we spawn a
+                        // task that waits for it before calling resume_session.
                         if channel == "telegram"
                             && let Some(ref cid) = channel_chat_id
                             && let Ok(chat_id) = cid.parse::<i64>()
-                            && let Some(bot) = tg.bot().await
                         {
                             let chat = teloxide::types::ChatId(chat_id);
                             let agent = agent.clone();
                             let tg = tg.clone();
                             tokio::spawn(async move {
+                                // Wait up to 30s for the Telegram bot to authenticate
+                                let bot = {
+                                    let mut attempts = 0;
+                                    loop {
+                                        if let Some(bot) = tg.bot().await {
+                                            break Some(bot);
+                                        }
+                                        attempts += 1;
+                                        if attempts >= 30 {
+                                            tracing::error!(
+                                                "Telegram resume: bot not available after 30s for session {}",
+                                                session_id
+                                            );
+                                            break None;
+                                        }
+                                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                                    }
+                                };
+                                let Some(bot) = bot else {
+                                    return;
+                                };
                                 let prompt = "[System: A restart just occurred while you were \
                                         processing a request. Read the conversation context and continue \
                                         where you left off naturally. Do not mention the restart or \
