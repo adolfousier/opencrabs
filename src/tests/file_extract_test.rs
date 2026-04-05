@@ -192,7 +192,7 @@ fn classify_json_file() {
 #[test]
 fn classify_image_file() {
     match classify_file(b"fake png bytes", "image/png", "photo.png") {
-        FileContent::Image => {}
+        FileContent::Image(_) => {}
         other => panic!("expected Image, got {:?}", std::mem::discriminant(&other)),
     }
 }
@@ -207,7 +207,10 @@ fn classify_pdf_file_invalid() {
         FileContent::Text(t) => {
             assert!(t.contains("doc.pdf"));
         }
-        FileContent::Image => panic!("PDF should not be classified as Image"),
+        FileContent::Image(_) => panic!("PDF should not be classified as Image"),
+        FileContent::PdfPages { .. } => {
+            panic!("PDF with invalid bytes should not produce PdfPages")
+        }
     }
 }
 
@@ -249,7 +252,7 @@ fn classify_uses_ext_when_mime_is_empty() {
 #[test]
 fn classify_image_via_ext_fallback() {
     match classify_file(b"fake", "application/octet-stream", "photo.jpg") {
-        FileContent::Image => {}
+        FileContent::Image(_) => {}
         other => panic!("expected Image, got {:?}", std::mem::discriminant(&other)),
     }
 }

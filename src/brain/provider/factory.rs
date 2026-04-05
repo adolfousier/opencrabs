@@ -452,7 +452,9 @@ fn try_create_openrouter(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     if model_is_free(&openrouter_config.default_model) {
         use super::rate_limiter::RateLimiter;
         provider = provider.with_rate_limiter(RateLimiter::openrouter_free());
-        tracing::info!("OpenRouter :free model detected — proactive pacing enabled (~3s between requests)");
+        tracing::info!(
+            "OpenRouter :free model detected — proactive pacing enabled (~3s between requests)"
+        );
     }
 
     Ok(Some(Arc::new(provider)))

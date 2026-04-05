@@ -211,16 +211,15 @@ pub(crate) async fn handle_message(
                     content = "Describe this image.".to_string();
                 }
                 content.push_str(&format!(" <<IMG:{}>>", attachment.url));
-            } else if !mime.starts_with("audio/") {
-                if let Ok(resp) = reqwest::get(attachment.url.as_str()).await
-                    && let Ok(bytes) = resp.bytes().await
-                {
-                    let cfg = config_rx.borrow();
-                    let fc = process_file_with_vision(&bytes, mime, fname, &cfg);
-                    let injected = inject_file_content(&fc).0;
-                    if !injected.is_empty() {
-                        content.push_str(&format!("\n\n{injected}"));
-                    }
+            } else if !mime.starts_with("audio/")
+                && let Ok(resp) = reqwest::get(attachment.url.as_str()).await
+                && let Ok(bytes) = resp.bytes().await
+            {
+                let cfg = config_rx.borrow();
+                let fc = process_file_with_vision(&bytes, mime, fname, &cfg);
+                let injected = inject_file_content(&fc).0;
+                if !injected.is_empty() {
+                    content.push_str(&format!("\n\n{injected}"));
                 }
             }
         }

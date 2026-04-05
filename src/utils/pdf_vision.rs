@@ -143,11 +143,7 @@ fn render_with_pdfium(
         }
 
         page_idx = batch_end;
-        tracing::debug!(
-            "Rendered batch: pages {}/{}",
-            page_idx,
-            pages_to_render,
-        );
+        tracing::debug!("Rendered batch: pages {}/{}", page_idx, pages_to_render,);
     }
 
     Ok(rendered)
@@ -172,8 +168,7 @@ fn render_with_pdftoppm(
     output_dir: &Path,
 ) -> Result<Vec<PathBuf>, String> {
     // Check that pdftoppm is available.
-    which::which("pdftoppm")
-        .map_err(|_| "pdftoppm not found in PATH".to_string())?;
+    which::which("pdftoppm").map_err(|_| "pdftoppm not found in PATH".to_string())?;
 
     let pdf_path_str = pdf_path
         .to_str()
@@ -243,6 +238,8 @@ fn cleanup_dir(dir: &Path) {
         let Ok(metadata) = entry.metadata() else {
             continue;
         };
-        if metadata.is_file() { let _ = fs::remove_file(entry.path()); }
+        if metadata.is_file() {
+            let _ = fs::remove_file(entry.path());
+        }
     }
 }

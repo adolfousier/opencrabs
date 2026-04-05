@@ -755,7 +755,8 @@ impl Provider for OpenAIProvider {
             if !waited.is_zero() {
                 tracing::debug!(
                     "Rate limiter: waited {:?} before request to {}",
-                    waited, self.base_url
+                    waited,
+                    self.base_url
                 );
             }
         }
@@ -841,7 +842,8 @@ impl Provider for OpenAIProvider {
             if !waited.is_zero() {
                 tracing::debug!(
                     "Rate limiter: waited {:?} before streaming request to {}",
-                    waited, self.base_url
+                    waited,
+                    self.base_url
                 );
             }
         }

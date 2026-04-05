@@ -16,10 +16,10 @@ pub fn is_vision_available(config: &Config) -> bool {
     if crate::brain::provider::factory::active_provider_vision(config).is_some() {
         return true;
     }
-    if config.image.vision.enabled {
-        if let Some(ref key) = config.image.vision.api_key {
-            return !key.is_empty();
-        }
+    if config.image.vision.enabled
+        && let Some(ref key) = config.image.vision.api_key
+    {
+        return !key.is_empty();
     }
     false
 }
@@ -33,10 +33,7 @@ pub enum FileContent {
     /// Single image — caller should write bytes to the returned temp path
     Image(PathBuf),
     /// PDF rendered to page images (vision path)
-    PdfPages {
-        paths: Vec<PathBuf>,
-        label: String,
-    },
+    PdfPages { paths: Vec<PathBuf>, label: String },
     /// Unsupported format or failed extraction
     Unsupported(String),
 }
@@ -120,7 +117,10 @@ fn extract_pdf_text(bytes: &[u8], filename: &str) -> FileContent {
                 ))
             } else {
                 let truncated = if trimmed.len() > TEXT_LIMIT {
-                    format!("{}…[truncated]", trimmed.chars().take(TEXT_LIMIT).collect::<String>())
+                    format!(
+                        "{}…[truncated]",
+                        trimmed.chars().take(TEXT_LIMIT).collect::<String>()
+                    )
                 } else {
                     trimmed
                 };
@@ -162,7 +162,9 @@ pub fn process_file_with_vision(
         if has_vision {
             return match save_to_temp(bytes, filename) {
                 Ok(path) => FileContent::Image(path),
-                Err(e) => FileContent::Unsupported(format!("[Image attachment: {filename} — failed to save for vision: {e}]")),
+                Err(e) => FileContent::Unsupported(format!(
+                    "[Image attachment: {filename} — failed to save for vision: {e}]"
+                )),
             };
         }
         return FileContent::Unsupported(format!(
@@ -185,7 +187,10 @@ pub fn process_file_with_vision(
     if is_text_mime(effective) {
         let raw = String::from_utf8_lossy(bytes);
         let truncated = if raw.len() > TEXT_LIMIT {
-            format!("{}…[truncated]", raw.chars().take(TEXT_LIMIT).collect::<String>())
+            format!(
+                "{}…[truncated]",
+                raw.chars().take(TEXT_LIMIT).collect::<String>()
+            )
         } else {
             raw.into_owned()
         };
@@ -204,7 +209,7 @@ fn process_pdf_vision(bytes: &[u8], filename: &str) -> FileContent {
         Err(e) => {
             return FileContent::Unsupported(format!(
                 "[PDF received: {filename} — failed to prepare: {e}]"
-            ))
+            ));
         }
     };
 
@@ -242,7 +247,9 @@ pub fn inject_file_content(content: &FileContent) -> (String, bool) {
         FileContent::Image(path) => {
             let path_str = path.to_string_lossy();
             (
-                format!("[User attached an image. Use analyze_image to view it.]\n<<IMG:{path_str}>>"),
+                format!(
+                    "[User attached an image. Use analyze_image to view it.]\n<<IMG:{path_str}>>"
+                ),
                 true,
             )
         }
@@ -284,7 +291,10 @@ pub fn classify_file(bytes: &[u8], mime: &str, filename: &str) -> FileContent {
     if is_text_mime(effective) {
         let raw = String::from_utf8_lossy(bytes);
         let truncated = if raw.len() > TEXT_LIMIT {
-            format!("{}…[truncated]", raw.chars().take(TEXT_LIMIT).collect::<String>())
+            format!(
+                "{}…[truncated]",
+                raw.chars().take(TEXT_LIMIT).collect::<String>()
+            )
         } else {
             raw.into_owned()
         };
