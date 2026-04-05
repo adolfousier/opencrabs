@@ -799,14 +799,33 @@ impl Provider for ClaudeCliProvider {
                                 result.unwrap_or_else(|| "CLI returned an error".to_string());
                             tracing::error!("CLI result is_error=true: {}", error_text);
 
+                            let error_lower = error_text.to_lowercase();
+
                             // "Prompt is too long" must be surfaced as ContextLengthExceeded
                             // so the tool loop can run emergency compaction and retry.
-                            let error_lower = error_text.to_lowercase();
                             if error_lower.contains("prompt is too long")
                                 || error_lower.contains("too many tokens")
                                 || error_lower.contains("context length")
                             {
                                 let _ = tx.send(Err(ProviderError::ContextLengthExceeded(0))).await;
+                                break;
+                            }
+
+                            // Rate/account limits must be surfaced as RateLimitExceeded
+                            // so the FallbackProvider can trigger the next provider in the chain.
+                            if error_lower.contains("rate limit")
+                                || error_lower.contains("hit your limit")
+                                || error_lower.contains("overloaded")
+                                || error_lower.contains("too many requests")
+                                || error_lower.contains("capacity")
+                                || error_lower.contains("429")
+                            {
+                                tracing::warn!(
+                                    "CLI rate/account limit detected — returning RateLimitExceeded for fallback"
+                                );
+                                let _ = tx
+                                    .send(Err(ProviderError::RateLimitExceeded(error_text)))
+                                    .await;
                                 break;
                             }
 
