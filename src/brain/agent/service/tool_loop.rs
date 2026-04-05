@@ -1,4 +1,5 @@
 use super::builder::AgentService;
+use super::helpers::count_known_words;
 use super::types::*;
 use crate::brain::agent::context::AgentContext;
 use crate::brain::agent::error::{AgentError, Result};
@@ -1317,6 +1318,60 @@ impl AgentService {
             // from leaking into Telegram/channel output or the TUI.
             if iteration_text.contains("<!--") {
                 iteration_text = Self::strip_html_comments(&iteration_text);
+            }
+
+            // ── Response coherence check ────────────────────────────────
+            // After context compaction (or under extreme load), some models
+            // produce pure gibberish: broken syntax, phantom variables,
+            // mixed-language fragments. Detect this and force a retry.
+            if tool_uses.is_empty()
+                && !iteration_text.is_empty()
+                && !crate::brain::agent::service::helpers::is_response_coherent(&iteration_text)
+            {
+                tracing::warn!(
+                    "⚠️ Response coherence check FAILED ({} chars total, {} known-word matches). \
+                     Model output appears to be garbage — forcing context compaction + retry.",
+                    iteration_text.len(),
+                    count_known_words(&iteration_text),
+                );
+
+                if let Some(ref cb) = progress_callback {
+                    cb(
+                        session_id,
+                        ProgressEvent::SelfHealingAlert {
+                            message: "⚠️ Model output was degraded (likely context overflow). \
+                                      Forcing re-compaction and retrying..."
+                                .to_string(),
+                        },
+                    );
+                }
+
+                // Force compaction — skip LLM compaction since the model is degraded,
+                // do hard truncate to ~60% to give it breathing room.
+                let emergency_target = (context.max_tokens as f64 * 0.60) as usize;
+                if context.token_count > emergency_target {
+                    context.hard_truncate_to(emergency_target);
+                }
+
+                // Inject a system message telling the model its output was degraded
+                let mut cont_text =
+                    "[SYSTEM: Your previous response was degraded/garbled text (possibly due \
+                     to context overflow). Context has been compacted. Briefly acknowledge \
+                     this, then REPEAT your last intended response from scratch. Do NOT \
+                     continue from the garbage output — start fresh.]"
+                        .to_string();
+                if !self.auto_approve_tools {
+                    cont_text.push_str("\n\nCRITICAL: Tool approval is REQUIRED. You MUST wait for user approval before EVERY tool execution.");
+                }
+                context.add_message(Message::user(cont_text));
+
+                // Don't accumulate the garbage — discard it
+                accumulated_text.truncate(
+                    accumulated_text.len().saturating_sub(iteration_text.len()),
+                );
+
+                // Continue the loop — next iteration will send a fresh request
+                continue;
             }
 
             // ── XML tool-call recovery ──────────────────────────────────
