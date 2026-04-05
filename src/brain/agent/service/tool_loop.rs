@@ -561,7 +561,7 @@ impl AgentService {
             let queued_buf = tokio::sync::Mutex::new(None);
 
             // Send to provider via streaming — retry once after emergency compaction if prompt is too long
-            let (mut response, reasoning_text) = match self
+            let (mut response, reasoning_text): (LLMResponse, Option<String>) = match self
                 .stream_complete(
                     session_id,
                     request,
@@ -766,6 +766,97 @@ impl AgentService {
                     )
                     .await
                     .map_err(AgentError::Provider)?
+                }
+                Err(e)
+                    if matches!(
+                        &e,
+                        crate::brain::provider::ProviderError::RateLimitExceeded(_)
+                    ) || matches!(
+                        &e,
+                        crate::brain::provider::ProviderError::StreamError(s) if s.contains("rate limit") || s.contains("hit your limit")
+                    ) =>
+                {
+                    tracing::warn!("Rate/account limit hit — checking for fallback provider");
+
+                    // Notify user about the rate limit
+                    if let Some(ref cb) = progress_callback {
+                        cb(
+                            session_id,
+                            ProgressEvent::SelfHealingAlert {
+                                message: format!(
+                                    "Rate limit reached on '{}'. {}",
+                                    model_name,
+                                    if self.has_fallback_provider() {
+                                        "Switching to fallback provider..."
+                                    } else {
+                                        "No fallback provider configured — please try again later or configure a fallback in settings."
+                                    }
+                                ),
+                            },
+                        );
+                    }
+
+                    // Try fallback provider if available
+                    if let Some(fallback) = self.try_get_fallback_provider() {
+                        let fb_name = fallback.name().to_string();
+                        let fb_model = fallback.default_model().to_string();
+                        tracing::info!(
+                            "Switching to fallback provider '{}' (model '{}')",
+                            fb_name,
+                            fb_model
+                        );
+
+                        // Build request for fallback with remapped model
+                        let mut fb_req =
+                            LLMRequest::new(fb_model.clone(), context.messages.clone())
+                                .with_max_tokens(self.max_tokens);
+                        fb_req.working_directory =
+                            Some(self.get_working_directory().to_string_lossy().to_string());
+                        fb_req.session_id = Some(session_id);
+                        if let Some(system) = &context.system_brain {
+                            fb_req = fb_req.with_system(system.clone());
+                        }
+                        if self.tool_registry.count() > 0 {
+                            fb_req = fb_req.with_tools(self.tool_registry.get_tool_definitions());
+                        }
+
+                        // Temporarily swap in the fallback provider, stream through
+                        // the same pipeline (stream_complete), then swap back.
+                        let original_provider = {
+                            let mut guard = self.provider.write().expect("provider lock");
+                            let orig = guard.clone();
+                            *guard = fallback.clone();
+                            orig
+                        };
+                        let fb_result = self
+                            .stream_complete(
+                                session_id,
+                                fb_req,
+                                cancel_token.as_ref(),
+                                progress_callback.as_ref(),
+                                None, // no CLI queue callback for fallback
+                                None, // no queued messages
+                            )
+                            .await;
+                        // Swap back the original provider
+                        {
+                            let mut guard = self.provider.write().expect("provider lock");
+                            *guard = original_provider;
+                        }
+                        match fb_result {
+                            Ok(resp) => resp,
+                            Err(fb_err) => {
+                                tracing::error!(
+                                    "Fallback provider '{}' also failed: {}",
+                                    fb_name,
+                                    fb_err
+                                );
+                                return Err(AgentError::Provider(fb_err));
+                            }
+                        }
+                    } else {
+                        return Err(AgentError::Provider(e));
+                    }
                 }
                 Err(e) => return Err(AgentError::Provider(e)),
             };
