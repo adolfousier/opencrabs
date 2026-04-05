@@ -137,6 +137,7 @@ unicode-width = "0.2"
 
 # Document Parsing
 pdf-extract = "0.10"
+pdfium-render = { version = "0.9", optional = true }
 zip = "6.0"
 quick-xml = "0.37"
 tiktoken-rs = "0.9.1"
@@ -185,6 +186,7 @@ slack = ["slack-morphism", "tokio-tungstenite", "rustls"]
 local-stt = ["rwhisper", "rodio", "hound", "rubato", "symphonia", "symphonia-adapter-libopus"]
 local-tts = ["opusic-sys", "rubato"]
 browser = ["chromey"]
+pdfium = ["dep:pdfium-render"]
 
 [profile.dev]
 opt-level = 0

@@ -9,6 +9,7 @@ pub mod providers;
 pub mod retry;
 pub mod sanitize;
 pub mod slack_fmt;
+pub mod pdf_vision;
 mod string;
 mod tool_context;
 
