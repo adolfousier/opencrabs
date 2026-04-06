@@ -5,7 +5,6 @@ use crate::brain::agent::error::{AgentError, Result};
 use crate::brain::provider::{ContentBlock, LLMRequest, LLMResponse, Message};
 use crate::brain::tools::ToolExecutionContext;
 use crate::services::{MessageService, SessionService};
-use crate::utils::sanitize::strip_ansi_escapes;
 use serde_json::Value;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -1775,10 +1774,8 @@ impl AgentService {
                                             );
                                         }
 
-                                        let output_summary: String = strip_ansi_escapes(&content)
-                                            .chars()
-                                            .take(2000)
-                                            .collect();
+                                        let output_summary: String =
+                                            content.chars().take(2000).collect();
                                         tool_outputs.push((success, output_summary.clone()));
                                         if let Some(ref cb) = progress_callback {
                                             cb(
@@ -1805,10 +1802,8 @@ impl AgentService {
                                             tool_name,
                                             err_msg
                                         );
-                                        let output_summary: String = strip_ansi_escapes(&err_msg)
-                                            .chars()
-                                            .take(2000)
-                                            .collect();
+                                        let output_summary: String =
+                                            err_msg.chars().take(2000).collect();
                                         tool_outputs.push((false, output_summary.clone()));
                                         if let Some(ref cb) = progress_callback {
                                             cb(
@@ -1898,8 +1893,7 @@ impl AgentService {
                             );
                         }
 
-                        let output_summary: String =
-                            strip_ansi_escapes(&content).chars().take(2000).collect();
+                        let output_summary: String = content.chars().take(2000).collect();
                         tool_outputs.push((success, output_summary.clone()));
                         if let Some(ref cb) = progress_callback {
                             cb(
@@ -1922,8 +1916,7 @@ impl AgentService {
                         let err_msg = format!("Tool execution error: {}", e);
                         // GRANULAR LOG: Direct tool execution error
                         tracing::error!("[TOOL_EXEC] 💥 Tool '{}' error: {}", tool_name, err_msg);
-                        let output_summary: String =
-                            strip_ansi_escapes(&err_msg).chars().take(2000).collect();
+                        let output_summary: String = err_msg.chars().take(2000).collect();
                         tool_outputs.push((false, output_summary.clone()));
                         if let Some(ref cb) = progress_callback {
                             cb(
