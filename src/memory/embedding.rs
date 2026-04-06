@@ -62,36 +62,53 @@ pub fn engine_if_ready() -> Option<&'static Mutex<EmbeddingEngine>> {
     ENGINE.get()
 }
 
-/// Generate and store an embedding for content. No-ops if engine not yet initialized.
+/// Max bytes we'll send to llama.cpp for embedding.  Anything larger causes
+/// a native `abort()` inside ggml_backend_sched_synchronize, which kills the
+/// whole process.  Must match the constant in `backfill_embeddings`.
+const MAX_EMBED_BYTES: usize = 32_000;
+
+/// Generate and store an embedding for content.
+///
+/// Returns an error if the body is too large or the engine fails.
+/// Never panics or aborts — all llama.cpp failures are caught.
 ///
 /// Lock ordering: engine first (embed), then store (insert). Never both at once.
-pub fn embed_content(store: &Mutex<Store>, body: &str) {
-    let engine_mutex = match engine_if_ready() {
-        Some(e) => e,
-        None => return,
-    };
+pub fn embed_content(store: &Mutex<Store>, body: &str) -> Result<(), String> {
+    if body.is_empty() {
+        return Ok(());
+    }
+    if body.len() > MAX_EMBED_BYTES {
+        return Err(format!(
+            "Body too large for embedding ({} bytes, max {MAX_EMBED_BYTES})",
+            body.len()
+        ));
+    }
+
+    let engine_mutex = engine_if_ready().ok_or("Embedding engine not initialized")?;
 
     let title = Store::extract_title(body);
     let hash = Store::hash_content(body);
 
-    let emb = match engine_mutex.lock() {
-        Ok(mut engine) => match engine.embed_document(body, Some(&title)) {
-            Ok(emb) => emb,
-            Err(e) => {
-                tracing::debug!("Embedding failed: {e}");
-                return;
-            }
-        },
-        Err(_) => return,
+    // catch_unwind guards against Rust-side panics from llama-cpp bindings.
+    // A C-level abort() cannot be caught, so the size guard above is critical.
+    let emb = {
+        let mut engine = engine_mutex
+            .lock()
+            .map_err(|e| format!("Engine lock poisoned: {e}"))?;
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            engine.embed_document(body, Some(&title))
+        }))
+        .map_err(|_| "llama.cpp panicked during embedding".to_string())?
+        .map_err(|e| format!("Embedding failed: {e}"))?
     };
 
     // Store lock → insert → release
     let now = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
-    if let Ok(s) = store.lock()
-        && let Err(e) = s.insert_embedding(&hash, 0, 0, &emb.embedding, &emb.model, &now)
-    {
-        tracing::debug!("Failed to store embedding: {e}");
-    }
+    store
+        .lock()
+        .map_err(|e| format!("Store lock poisoned: {e}"))?
+        .insert_embedding(&hash, 0, 0, &emb.embedding, &emb.model, &now)
+        .map_err(|e| format!("Failed to store embedding: {e}"))
 }
 
 /// Backfill embeddings for all documents that don't have one yet.
@@ -126,11 +143,6 @@ pub(super) fn backfill_embeddings(store: &Mutex<Store>) {
     let now = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
     let mut stored = 0usize;
 
-    // llama-cpp segfaults on very large documents. Cap at 32KB — anything
-    // bigger was likely a session_search index doc that slipped through before
-    // the 64KB cap was added.
-    const MAX_EMBED_BYTES: usize = 32_000;
-
     for (i, (hash, path, body)) in needing.iter().enumerate() {
         tracing::info!(
             "Embedding {}/{}: path={}, body_len={}, hash={}",
@@ -160,12 +172,21 @@ pub(super) fn backfill_embeddings(store: &Mutex<Store>) {
         let title = Store::extract_title(body);
 
         // Engine lock: embed single document → release
+        // catch_unwind guards against panics from llama-cpp bindings.
         let emb = {
             let mut engine = match engine_mutex.lock() {
                 Ok(e) => e,
                 Err(_) => return,
             };
-            engine.embed_document(body, Some(&title)).ok()
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                engine.embed_document(body, Some(&title))
+            })) {
+                Ok(result) => result.ok(),
+                Err(_) => {
+                    tracing::error!("llama.cpp panicked during backfill embed of '{path}'");
+                    continue;
+                }
+            }
         };
 
         // Store lock: insert embedding → release

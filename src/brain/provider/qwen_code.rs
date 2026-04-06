@@ -139,10 +139,7 @@ fn resolve_qwen_path() -> Result<String> {
     }
 
     // Try common install locations (npm global, brew, home install script)
-    for candidate in &[
-        "/opt/homebrew/bin/qwen",
-        "/usr/local/bin/qwen",
-    ] {
+    for candidate in &["/opt/homebrew/bin/qwen", "/usr/local/bin/qwen"] {
         if std::path::Path::new(candidate).exists() {
             return Ok(candidate.to_string());
         }
@@ -159,7 +156,9 @@ fn resolve_qwen_path() -> Result<String> {
     }
 
     // Also try `qwen-code` as the binary name (some installs use this)
-    if let Ok(output) = std::process::Command::new("which").arg("qwen-code").output()
+    if let Ok(output) = std::process::Command::new("which")
+        .arg("qwen-code")
+        .output()
         && output.status.success()
     {
         let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -414,7 +413,11 @@ impl Provider for QwenCodeCliProvider {
                         break;
                     }
                     Err(e) => {
-                        tracing::error!("Qwen CLI stdout read error after {} lines: {}", line_count, e);
+                        tracing::error!(
+                            "Qwen CLI stdout read error after {} lines: {}",
+                            line_count,
+                            e
+                        );
                         break;
                     }
                 };
@@ -424,7 +427,10 @@ impl Provider for QwenCodeCliProvider {
                     continue;
                 }
 
-                tracing::debug!("Qwen CLI stdout raw: {}", &line[..line.floor_char_boundary(300)]);
+                tracing::debug!(
+                    "Qwen CLI stdout raw: {}",
+                    &line[..line.floor_char_boundary(300)]
+                );
 
                 let msg: CliMessage = match serde_json::from_str(&line) {
                     Ok(m) => m,
@@ -923,7 +929,9 @@ impl Provider for QwenCodeCliProvider {
                 }
                 Ok(_) => {
                     if !started {
-                        tracing::warn!("qwen CLI exited successfully but produced no stream events");
+                        tracing::warn!(
+                            "qwen CLI exited successfully but produced no stream events"
+                        );
                     }
                 }
             }
