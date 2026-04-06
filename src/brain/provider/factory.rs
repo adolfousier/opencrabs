@@ -5,7 +5,7 @@
 use super::{
     Provider, anthropic::AnthropicProvider, claude_cli::ClaudeCliProvider,
     custom_openai_compatible::OpenAIProvider, gemini::GeminiProvider,
-    opencode_cli::OpenCodeCliProvider,
+    opencode_cli::OpenCodeCliProvider, qwen_code::QwenCodeCliProvider,
 };
 use crate::config::{Config, ProviderConfig};
 use anyhow::Result;
@@ -32,10 +32,11 @@ pub fn create_provider_with_warning(
     config: &Config,
 ) -> Result<(Arc<dyn Provider>, Option<String>)> {
     // Try the enabled provider. If it fails, warn and try others before giving up.
-    // Priority order: Claude CLI > OpenCode CLI > Anthropic > OpenAI > GitHub > Gemini > OpenRouter > Minimax > zhipu > Custom
+    // Priority order: Claude CLI > OpenCode CLI > Qwen Code > Anthropic > OpenAI > GitHub > Gemini > OpenRouter > Minimax > zhipu > Custom
     let enabled_attempts: Vec<ProviderAttempt<'_>> = vec![
         ("Claude CLI", Box::new(|| try_create_claude_cli(config))),
         ("OpenCode CLI", Box::new(|| try_create_opencode_cli(config))),
+        ("Qwen Code", Box::new(|| try_create_qwen_code(config))),
         ("Anthropic", Box::new(|| try_create_anthropic(config))),
         ("OpenAI", Box::new(|| try_create_openai(config))),
         ("GitHub Copilot", Box::new(|| try_create_github(config))),
@@ -56,6 +57,11 @@ pub fn create_provider_with_warning(
         config
             .providers
             .opencode_cli
+            .as_ref()
+            .is_some_and(|p| p.enabled),
+        config
+            .providers
+            .qwen_code_cli
             .as_ref()
             .is_some_and(|p| p.enabled),
         config
@@ -124,6 +130,7 @@ pub fn create_provider_with_warning(
         let fallback_attempts: Vec<ProviderAttempt<'_>> = vec![
             ("Claude CLI", Box::new(|| try_create_claude_cli(config))),
             ("OpenCode CLI", Box::new(|| try_create_opencode_cli(config))),
+            ("Qwen Code", Box::new(|| try_create_qwen_code(config))),
             ("Anthropic", Box::new(|| try_create_anthropic(config))),
             ("OpenAI", Box::new(|| try_create_openai(config))),
             ("GitHub Copilot", Box::new(|| try_create_github(config))),
@@ -235,6 +242,38 @@ pub fn create_provider_by_name(config: &Config, name: &str) -> Result<Arc<dyn Pr
                     Ok(Arc::new(provider))
                 }
                 Err(e) => Err(anyhow::anyhow!("OpenCode CLI binary not found: {}", e)),
+            }
+        }
+        "qwen-code" | "qwen_code" | "qwen-code-cli" | "qwen_code_cli" => {
+            let model = config
+                .providers
+                .qwen_code_cli
+                .as_ref()
+                .and_then(|c| c.default_model.clone());
+            match QwenCodeCliProvider::new() {
+                Ok(mut provider) => {
+                    if let Some(m) = model {
+                        provider = provider.with_default_model(m);
+                    }
+                    Ok(Arc::new(provider))
+                }
+                Err(e) => Err(anyhow::anyhow!("Qwen Code CLI binary not found: {}", e)),
+            }
+        }
+        "qwen-code" | "qwen_code" | "qwen-code-cli" | "qwen_code_cli" => {
+            let model = config
+                .providers
+                .qwen_code_cli
+                .as_ref()
+                .and_then(|c| c.default_model.clone());
+            match QwenCodeCliProvider::new() {
+                Ok(mut provider) => {
+                    if let Some(m) = model {
+                        provider = provider.with_default_model(m);
+                    }
+                    Ok(Arc::new(provider))
+                }
+                Err(e) => Err(anyhow::anyhow!("Qwen Code CLI binary not found: {}", e)),
             }
         }
         "anthropic" => try_create_anthropic(config)?
