@@ -25,6 +25,7 @@ pub mod factory;
 pub mod fallback;
 pub mod gemini;
 pub mod opencode_cli;
+pub mod qwen_code;
 
 pub use anthropic::AnthropicProvider;
 pub use claude_cli::ClaudeCliProvider;
@@ -33,3 +34,4 @@ pub use factory::{create_provider, create_provider_by_name, create_provider_with
 pub use fallback::FallbackProvider;
 pub use gemini::GeminiProvider;
 pub use opencode_cli::OpenCodeCliProvider;
+pub use qwen_code::QwenCodeCliProvider;
