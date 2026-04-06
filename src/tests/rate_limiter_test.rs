@@ -1,9 +1,8 @@
-/// Tests for the global shared rate limiter.
-///
-/// Verifies that OpenRouter :free pacing is process-wide, not per-instance —
-/// so orchestrator + subagents + team members collectively stay under the
-/// provider's rate limit.
-
+//! Tests for the global shared rate limiter.
+//!
+//! Verifies that OpenRouter :free pacing is process-wide, not per-instance —
+//! so orchestrator + subagents + team members collectively stay under the
+//! provider's rate limit.
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
@@ -22,8 +21,15 @@ async fn first_request_instant() {
     let slept = limiter.wait().await;
     let elapsed = start.elapsed();
 
-    assert_eq!(slept, Duration::ZERO, "first call on fresh limiter should return immediately");
-    assert!(elapsed < Duration::from_millis(10), "wall-clock should also be near-zero");
+    assert_eq!(
+        slept,
+        Duration::ZERO,
+        "first call on fresh limiter should return immediately"
+    );
+    assert!(
+        elapsed < Duration::from_millis(10),
+        "wall-clock should also be near-zero"
+    );
 }
 
 // ── Second request paces ─────────────────────────────────────────────
@@ -133,6 +139,9 @@ async fn instant_after_idle_gap() {
 #[tokio::test]
 async fn openrouter_free_static_exists() {
     let limiter = OPENROUTER_FREE_LIMITER.as_ref();
-    assert!(limiter.min_interval >= Duration::from_secs(2),
-            "openrouter_free should be ~3 s, got {:?}", limiter.min_interval);
+    assert!(
+        limiter.min_interval >= Duration::from_secs(2),
+        "openrouter_free should be ~3 s, got {:?}",
+        limiter.min_interval
+    );
 }

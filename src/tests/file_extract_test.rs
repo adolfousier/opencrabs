@@ -219,7 +219,7 @@ fn classify_binary_file() {
     match classify_file(b"\x00\x01\x02", "application/octet-stream", "data.bin") {
         FileContent::Unsupported(msg) => {
             assert!(msg.contains("data.bin"));
-            assert!(msg.contains("binary format"));
+            assert!(msg.contains("unsupported format"));
         }
         other => panic!(
             "expected Unsupported, got {:?}",

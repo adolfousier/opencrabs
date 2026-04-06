@@ -11,9 +11,9 @@
 //! subagents, and team members all pace against ONE budget — not per-instance
 //! budgets that would collectively exceed the provider's actual rate limit.
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
 
