@@ -1510,17 +1510,10 @@ impl AgentService {
             if is_cli_provider {
                 let mut cli_content = String::new();
 
-                // 1. Reasoning
-                if let Some(ref reasoning) = reasoning_text
-                    && !reasoning.trim().is_empty()
-                {
-                    cli_content.push_str(&format!(
-                        "<!-- reasoning -->\n{}\n<!-- /reasoning -->\n\n",
-                        reasoning
-                    ));
-                }
+                // NOTE: reasoning_text intentionally NOT persisted to DB content —
+                // see non-CLI path comment for rationale.
 
-                // 2. Interleaved text + tool markers from streaming events
+                // Interleaved text + tool markers from streaming events
                 let segments: Vec<CliSegment> = cli_segments
                     .lock()
                     .map(|mut s| s.drain(..).collect())
@@ -1568,16 +1561,10 @@ impl AgentService {
                 }
             } else {
                 // Non-CLI: separate writes (tool execution happens between iterations)
-                if let Some(ref reasoning) = reasoning_text
-                    && !reasoning.trim().is_empty()
-                {
-                    let _ = message_service
-                        .append_content(
-                            assistant_db_msg.id,
-                            &format!("<!-- reasoning -->\n{}\n<!-- /reasoning -->\n\n", reasoning),
-                        )
-                        .await;
-                }
+                // NOTE: reasoning_text is intentionally NOT persisted to DB content.
+                // Writing <!-- reasoning --> markers teaches models (esp. qwen3.6-plus)
+                // to echo them back in the content field, causing reasoning leaks.
+                // Reasoning is already captured separately via reasoning_buf.
 
                 if !iteration_text.is_empty() {
                     if !accumulated_text.is_empty() {

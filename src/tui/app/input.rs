@@ -43,8 +43,7 @@ fn is_mouse_sequence_fragment(c: char, buf: &str, cursor: usize) -> bool {
 
     // Tail ends with `[<` partially built — suppress digits/; that follow
     if tail.ends_with("[<")
-        || tail.ends_with(|ch: char| ch.is_ascii_digit() || ch == ';')
-            && tail.contains("[<")
+        || tail.ends_with(|ch: char| ch.is_ascii_digit() || ch == ';') && tail.contains("[<")
     {
         return matches!(c, '0'..='9' | ';' | 'M' | 'm');
     }

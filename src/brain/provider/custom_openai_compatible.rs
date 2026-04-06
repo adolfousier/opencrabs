@@ -39,7 +39,7 @@ const DEFAULT_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
 const STRIP_OPEN_TAGS: &[&str] = &["<think>", "<!-- reasoning -->", "<!--"];
 const STRIP_CLOSE_TAGS: &[&[&str]] = &[
     &["</think>"],
-    &["<!-- /reasoning -->", "</think>"], // Kimi uses <!-- /reasoning -->, MiniMax uses </think>
+    &["<!-- /reasoning -->", "</think>", "-->"], // Kimi uses <!-- /reasoning -->, MiniMax uses </think>, --> catches split-chunk close tags
     &["-->"],
 ];
 
@@ -51,7 +51,8 @@ const STRIP_CLOSE_TAGS: &[&[&str]] = &[
 /// closing tag will never arrive.  When exceeded we abandon filtering and pass
 /// content through — the model likely hallucinated an open tag (e.g.
 /// `<!-- tools-v2:`) without ever sending `-->`.
-const THINK_BLOCK_MAX_BYTES: usize = 400;
+/// Reasoning blocks from qwen3.6-plus can be 2-10KB, so this must be generous.
+const THINK_BLOCK_MAX_BYTES: usize = 32_000;
 
 fn filter_think_tags(
     text: &str,
