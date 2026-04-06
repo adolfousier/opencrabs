@@ -920,6 +920,158 @@ impl AgentService {
                         return Err(AgentError::Provider(e));
                     }
                 }
+                Err(e)
+                    if matches!(&e, crate::brain::provider::ProviderError::StreamError(_))
+                        && !e.to_string().contains("rate limit")
+                        && !e.to_string().contains("hit your limit") =>
+                {
+                    let err_msg = e.to_string();
+                    tracing::warn!("Mid-stream error: {} — retrying up to 3 times", err_msg);
+
+                    let mut last_err = e;
+                    let mut succeeded = None;
+
+                    for attempt in 1..=3 {
+                        tracing::info!("Stream retry attempt {}/3 after: {}", attempt, last_err);
+
+                        // Brief backoff: 500ms, 1s, 2s
+                        tokio::time::sleep(tokio::time::Duration::from_millis(
+                            500 * (1 << (attempt - 1)),
+                        ))
+                        .await;
+
+                        // Rebuild request
+                        let mut retry_req =
+                            LLMRequest::new(model_name.clone(), context.messages.clone())
+                                .with_max_tokens(self.max_tokens);
+                        retry_req.working_directory =
+                            Some(self.get_working_directory().to_string_lossy().to_string());
+                        retry_req.session_id = Some(session_id);
+                        if let Some(system) = &context.system_brain {
+                            retry_req = retry_req.with_system(system.clone());
+                        }
+                        if self.tool_registry.count() > 0 {
+                            retry_req =
+                                retry_req.with_tools(self.tool_registry.get_tool_definitions());
+                        }
+
+                        match self
+                            .stream_complete(
+                                session_id,
+                                retry_req,
+                                cancel_token.as_ref(),
+                                progress_callback.as_ref(),
+                                if is_cli_provider {
+                                    self.message_queue_callback.as_ref()
+                                } else {
+                                    None
+                                },
+                                if is_cli_provider {
+                                    Some(&queued_buf)
+                                } else {
+                                    None
+                                },
+                                false,
+                            )
+                            .await
+                        {
+                            Ok(resp) => {
+                                tracing::info!("Stream retry {}/3 succeeded", attempt);
+                                succeeded = Some(resp);
+                                break;
+                            }
+                            Err(retry_err) => {
+                                tracing::warn!("Stream retry {}/3 failed: {}", attempt, retry_err);
+                                last_err = retry_err;
+                            }
+                        }
+                    }
+
+                    if let Some(resp) = succeeded {
+                        resp
+                    } else {
+                        // All retries failed — try fallback provider
+                        tracing::warn!(
+                            "All 3 stream retries failed — checking for fallback provider"
+                        );
+
+                        if let Some(ref cb) = progress_callback {
+                            cb(
+                                session_id,
+                                ProgressEvent::SelfHealingAlert {
+                                    message: format!(
+                                        "Stream error on '{}' after 3 retries. {}",
+                                        model_name,
+                                        if self.has_fallback_provider() {
+                                            "Switching to fallback provider..."
+                                        } else {
+                                            "No fallback provider configured."
+                                        }
+                                    ),
+                                },
+                            );
+                        }
+
+                        if let Some(fallback) = self.try_get_fallback_provider() {
+                            let fb_name = fallback.name().to_string();
+                            let fb_model = fallback.default_model().to_string();
+                            tracing::info!(
+                                "Stream fallback to '{}' (model '{}')",
+                                fb_name,
+                                fb_model
+                            );
+
+                            let mut fb_req =
+                                LLMRequest::new(fb_model.clone(), context.messages.clone())
+                                    .with_max_tokens(self.max_tokens);
+                            fb_req.working_directory =
+                                Some(self.get_working_directory().to_string_lossy().to_string());
+                            fb_req.session_id = Some(session_id);
+                            if let Some(system) = &context.system_brain {
+                                fb_req = fb_req.with_system(system.clone());
+                            }
+                            if self.tool_registry.count() > 0 {
+                                fb_req =
+                                    fb_req.with_tools(self.tool_registry.get_tool_definitions());
+                            }
+
+                            let original_provider = {
+                                let mut guard = self.provider.write().expect("provider lock");
+                                let orig = guard.clone();
+                                *guard = fallback.clone();
+                                orig
+                            };
+                            let fb_result = self
+                                .stream_complete(
+                                    session_id,
+                                    fb_req,
+                                    cancel_token.as_ref(),
+                                    progress_callback.as_ref(),
+                                    None,
+                                    None,
+                                    false,
+                                )
+                                .await;
+                            {
+                                let mut guard = self.provider.write().expect("provider lock");
+                                *guard = original_provider;
+                            }
+                            match fb_result {
+                                Ok(resp) => resp,
+                                Err(fb_err) => {
+                                    tracing::error!(
+                                        "Fallback provider '{}' also failed: {}",
+                                        fb_name,
+                                        fb_err
+                                    );
+                                    return Err(AgentError::Provider(fb_err));
+                                }
+                            }
+                        } else {
+                            return Err(AgentError::Provider(last_err));
+                        }
+                    }
+                }
                 Err(e) => return Err(AgentError::Provider(e)),
             };
 
