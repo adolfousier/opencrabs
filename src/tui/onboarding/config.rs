@@ -4,6 +4,7 @@ use crate::config::Config;
 
 use super::types::*;
 use super::wizard::OnboardingWizard;
+use crate::tui::provider_selector::CUSTOM_PROVIDER_IDX;
 
 /// Try to write a config key, collecting errors into a Vec for later reporting.
 macro_rules! try_write {
@@ -346,7 +347,7 @@ impl OnboardingWizard {
 
         // Provider settings — only when relevant step is active
         let custom_section;
-        let section = if self.ps.selected_provider < 9 {
+        let section = if self.ps.selected_provider < CUSTOM_PROVIDER_IDX {
             let id = PROVIDERS[self.ps.selected_provider].id;
             crate::utils::providers::find_provider_meta(id)
                 .map(|m| m.config_section)
@@ -377,7 +378,7 @@ impl OnboardingWizard {
 
             // Enable + configure the selected provider
             let custom_section;
-            let section = if self.ps.selected_provider < 9 {
+            let section = if self.ps.selected_provider < CUSTOM_PROVIDER_IDX {
                 let id = PROVIDERS[self.ps.selected_provider].id;
                 crate::utils::providers::find_provider_meta(id)
                     .map(|m| m.config_section)
@@ -453,7 +454,7 @@ impl OnboardingWizard {
             // Write models array for providers that have static model lists
             if !self.ps.config_models.is_empty()
                 && (matches!(self.ps.provider_id(), "github" | "minimax" | "zhipu" | "")
-                    || self.ps.selected_provider >= 9)
+                    || self.ps.selected_provider >= CUSTOM_PROVIDER_IDX)
             {
                 try_write_array!(write_errors, section, "models", &self.ps.config_models);
             }

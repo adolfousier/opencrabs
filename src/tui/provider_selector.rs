@@ -10,15 +10,21 @@ use crate::config::ProviderConfig;
 pub const EXISTING_KEY_SENTINEL: &str = "__EXISTING_KEY__";
 
 /// Provider definitions (index → info).
-/// 0=Anthropic, 1=OpenAI, 2=GitHub Copilot, 3=Gemini, 4=OpenRouter,
-/// 5=Minimax, 6=z.ai GLM, 7=Claude CLI, 8=OpenCode CLI, 9=Custom
+/// Last entry is always "Custom OpenAI-Compatible".
 pub use crate::tui::onboarding::{PROVIDERS, ProviderInfo};
+
+/// Index of the "Custom OpenAI-Compatible" sentinel (always last in PROVIDERS).
+pub const CUSTOM_PROVIDER_IDX: usize = PROVIDERS.len() - 1;
+
+/// First index used for existing custom provider instances (stored in config).
+pub const CUSTOM_INSTANCES_START: usize = PROVIDERS.len();
 
 /// Shared state for provider + model selection.
 /// Both `/models` dialog and `/onboard` wizard embed this struct.
 #[derive(Default)]
 pub struct ProviderSelectorState {
-    /// Currently selected provider index (0-8 static, 9=new custom, 10+=existing customs)
+    /// Currently selected provider index (0..CUSTOM_PROVIDER_IDX = static,
+    /// CUSTOM_PROVIDER_IDX = new custom, CUSTOM_INSTANCES_START+ = existing customs)
     pub selected_provider: usize,
     /// Cached list of existing custom provider names
     pub custom_names: Vec<String>,
@@ -57,21 +63,21 @@ pub struct ProviderSelectorState {
 impl ProviderSelectorState {
     /// Get provider info for the currently selected provider.
     pub fn current_provider(&self) -> &ProviderInfo {
-        let idx = if self.selected_provider >= 9 {
-            9 // Custom OpenAI-Compatible
+        let idx = if self.selected_provider >= CUSTOM_PROVIDER_IDX {
+            CUSTOM_PROVIDER_IDX
         } else {
             self.selected_provider
         };
-        &PROVIDERS[idx.min(PROVIDERS.len() - 1)]
+        &PROVIDERS[idx]
     }
 
     pub fn is_custom(&self) -> bool {
-        self.selected_provider >= 9
+        self.selected_provider >= CUSTOM_PROVIDER_IDX
     }
 
     pub fn is_cli(&self) -> bool {
         let id = self.provider_id();
-        id == "claude-cli" || id == "opencode-cli"
+        id == "claude-cli" || id == "opencode-cli" || id == "qwen-code-cli"
     }
 
     pub fn is_zhipu(&self) -> bool {
@@ -80,7 +86,7 @@ impl ProviderSelectorState {
 
     /// Get the canonical provider id for the current selection.
     pub fn provider_id(&self) -> &'static str {
-        if self.selected_provider < 9 {
+        if self.selected_provider < CUSTOM_PROVIDER_IDX {
             PROVIDERS[self.selected_provider].id
         } else {
             "" // custom
@@ -91,7 +97,14 @@ impl ProviderSelectorState {
     pub fn supports_model_fetch(&self) -> bool {
         matches!(
             self.provider_id(),
-            "anthropic" | "openai" | "github" | "gemini" | "openrouter" | "zhipu" | "opencode-cli"
+            "anthropic"
+                | "openai"
+                | "github"
+                | "gemini"
+                | "openrouter"
+                | "zhipu"
+                | "opencode-cli"
+                | "qwen-code-cli"
         )
     }
 
@@ -111,16 +124,17 @@ impl ProviderSelectorState {
         self.api_key_input == EXISTING_KEY_SENTINEL
     }
 
-    /// Visual display order: static providers (0-8) sorted alphabetically,
-    /// then existing custom providers (10+), then "+ New Custom" (9) last.
+    /// Visual display order: named providers sorted alphabetically,
+    /// then existing custom instances, then "+ New Custom" last.
     pub fn provider_display_order(&self) -> Vec<usize> {
         let num_customs = self.custom_names.len();
-        let mut static_indices: Vec<usize> = (0..9).collect();
+        // Named providers: everything except the last "Custom" sentinel
+        let mut static_indices: Vec<usize> = (0..CUSTOM_PROVIDER_IDX).collect();
         static_indices.sort_by_key(|&i| PROVIDERS[i].name.to_ascii_lowercase());
         static_indices
             .into_iter()
-            .chain(10..10 + num_customs)
-            .chain(std::iter::once(9))
+            .chain(CUSTOM_INSTANCES_START..CUSTOM_INSTANCES_START + num_customs)
+            .chain(std::iter::once(CUSTOM_PROVIDER_IDX))
             .collect()
     }
 
@@ -136,14 +150,14 @@ impl ProviderSelectorState {
         self.has_existing_key = false;
 
         if let Ok(config) = crate::config::Config::load() {
-            let has_key = if self.selected_provider < 9 {
+            let has_key = if self.selected_provider < CUSTOM_PROVIDER_IDX {
                 let id = PROVIDERS[self.selected_provider].id;
                 if self.is_cli() {
                     false // CLI providers — no API key
                 } else {
                     has_nonempty_key(crate::utils::providers::config_for(&config.providers, id))
                 }
-            } else if self.selected_provider == 9 {
+            } else if self.selected_provider == CUSTOM_PROVIDER_IDX {
                 // New custom — start with blank fields
                 self.custom_name.clear();
                 self.base_url.clear();
@@ -151,8 +165,8 @@ impl ProviderSelectorState {
                 self.context_window.clear();
                 false
             } else {
-                // Existing custom provider (10+)
-                let custom_idx = self.selected_provider - 10;
+                // Existing custom provider
+                let custom_idx = self.selected_provider - CUSTOM_INSTANCES_START;
                 if let Some(cname) = self.custom_names.get(custom_idx).cloned() {
                     if let Some(c) = config.providers.custom_by_name(&cname) {
                         self.custom_name = cname;
@@ -195,13 +209,13 @@ impl ProviderSelectorState {
                 _ => 0,
             };
         }
-        if self.selected_provider == 9 {
+        if self.selected_provider == CUSTOM_PROVIDER_IDX {
             self.custom_name.clear();
             self.base_url.clear();
             self.custom_model.clear();
             self.context_window.clear();
-        } else if self.selected_provider >= 10 {
-            let custom_idx = self.selected_provider - 10;
+        } else if self.selected_provider >= CUSTOM_INSTANCES_START {
+            let custom_idx = self.selected_provider - CUSTOM_INSTANCES_START;
             if let Some(cname) = self.custom_names.get(custom_idx).cloned()
                 && let Ok(config) = crate::config::Config::load()
                 && let Some(c) = config.providers.custom_by_name(&cname)
@@ -224,14 +238,14 @@ impl ProviderSelectorState {
     /// Used when making API calls (fetch models, save config). Returns None if no key.
     pub fn load_api_key_from_config(&self) -> Option<String> {
         let config = crate::config::Config::load().ok()?;
-        if self.selected_provider < 9 {
+        if self.selected_provider < CUSTOM_PROVIDER_IDX {
             crate::utils::providers::config_for(
                 &config.providers,
                 PROVIDERS[self.selected_provider].id,
             )
             .and_then(|p| p.api_key.clone())
-        } else if self.selected_provider >= 10 {
-            let custom_idx = self.selected_provider - 10;
+        } else if self.selected_provider >= CUSTOM_INSTANCES_START {
+            let custom_idx = self.selected_provider - CUSTOM_INSTANCES_START;
             self.custom_names.get(custom_idx).and_then(|name| {
                 config
                     .providers
@@ -278,7 +292,7 @@ impl ProviderSelectorState {
             if self.is_cli() {
                 return; // CLI — static or fetched, no config models
             }
-            if self.selected_provider < 9 {
+            if self.selected_provider < CUSTOM_PROVIDER_IDX {
                 let id = PROVIDERS[self.selected_provider].id;
                 if let Some(p) = crate::utils::providers::config_for(&config.providers, id)
                     && !p.models.is_empty()
@@ -286,7 +300,7 @@ impl ProviderSelectorState {
                     self.config_models = p.models.clone();
                     return;
                 }
-            } else if self.selected_provider >= 9
+            } else if self.selected_provider >= CUSTOM_PROVIDER_IDX
                 && let Some((_name, p)) = config.providers.active_custom()
                 && !p.models.is_empty()
             {
@@ -369,6 +383,7 @@ pub fn load_default_models(provider_id: &str) -> Vec<String> {
         let section_key = match provider_id {
             "claude-cli" => "claude_cli",
             "opencode-cli" => "opencode_cli",
+            "qwen-code-cli" => "qwen_code_cli",
             "" => "custom", // empty id = custom providers
             other => other,
         };

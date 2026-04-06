@@ -263,6 +263,7 @@ pub(super) fn render_directory_picker(f: &mut Frame, app: &App, area: Rect) {
 /// Render the model selector dialog - matches onboarding ProviderAuth style
 pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     use crate::tui::onboarding::PROVIDERS;
+    use crate::tui::provider_selector::{CUSTOM_INSTANCES_START, CUSTOM_PROVIDER_IDX};
 
     const BRAND_BLUE: Color = Color::Rgb(120, 120, 120);
     const BRAND_GOLD: Color = Color::Rgb(215, 100, 20);
@@ -300,9 +301,9 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         .unwrap_or_else(|| app.provider_model());
 
     let custom_extra = app.ps.custom_names.len() as u16;
-    let is_custom_selected = provider_idx >= 9;
-    // 9 static providers + custom_extra + "+ New Custom" + API key line + filter + models + footer + padding
-    let provider_lines = 9 + custom_extra + 1; // static + customs + new custom
+    let is_custom_selected = provider_idx >= CUSTOM_PROVIDER_IDX;
+    // static providers + custom_extra + "+ New Custom" + API key line + filter + models + footer + padding
+    let provider_lines = CUSTOM_PROVIDER_IDX as u16 + custom_extra + 1; // static + customs + new custom
     // Custom providers show text fields instead of model list:
     // Base URL(2) + API Key(2) + Model text(1) + Name(2) + Context Window(1) + spacing(2) + help(2) = 12
     let form_lines: u16 = if is_custom_selected {
@@ -340,12 +341,12 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
 
     // Provider list — static providers sorted alphabetically, then custom names, then "+ New Custom" last.
     let num_customs = app.ps.custom_names.len();
-    let mut static_indices: Vec<usize> = (0..9).collect();
+    let mut static_indices: Vec<usize> = (0..CUSTOM_PROVIDER_IDX).collect();
     static_indices.sort_by_key(|&i| PROVIDERS[i].name.to_ascii_lowercase());
     let display_order: Vec<usize> = static_indices
         .into_iter()
-        .chain(10..10 + num_customs)
-        .chain(std::iter::once(9))
+        .chain(CUSTOM_INSTANCES_START..CUSTOM_INSTANCES_START + num_customs)
+        .chain(std::iter::once(CUSTOM_PROVIDER_IDX))
         .collect();
     for &idx in &display_order {
         let selected = idx == provider_idx;
@@ -354,12 +355,12 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         let prefix = if selected && focused { " > " } else { "   " };
         let marker = if selected { "[*]" } else { "[ ]" };
 
-        let label = if idx == 9 {
+        let label = if idx == CUSTOM_PROVIDER_IDX {
             "+ New Custom Provider".to_string()
         } else if idx < PROVIDERS.len() {
             PROVIDERS[idx].name.to_string()
         } else {
-            let custom_idx = idx - 10;
+            let custom_idx = idx - CUSTOM_INSTANCES_START;
             app.ps
                 .custom_names
                 .get(custom_idx)
@@ -396,7 +397,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
 
     lines.push(Line::from(""));
 
-    let is_custom = provider_idx >= 9; // Custom provider index
+    let is_custom = provider_idx >= CUSTOM_PROVIDER_IDX;
 
     // For Custom provider: show Base URL field first (field 1), then API Key (field 2)
     // For others: show API Key only (field 1)
@@ -473,8 +474,8 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     }
 
     // API Key field (field 1 for non-Custom, field 2 for Custom; field 2 for zhipu since field 1 = endpoint type)
-    // CLI providers (7=Claude CLI, 8=OpenCode CLI) have no API key — skip entirely
-    let is_cli_provider = matches!(provider_idx, 7 | 8);
+    // CLI providers have no API key — skip entirely
+    let is_cli_provider = app.ps.is_cli();
     if !is_cli_provider {
         let is_zhipu = provider_idx == 6;
         let key_focused = (focused_field == 1 && !is_custom && !is_zhipu)
@@ -533,10 +534,10 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(""));
     } else {
         // CLI provider: show "no API key needed" hint
-        let cli_name = if provider_idx == 8 {
-            "opencode"
-        } else {
-            "claude"
+        let cli_name = match app.ps.provider_id() {
+            "opencode-cli" => "opencode",
+            "qwen-code-cli" => "qwen",
+            _ => "claude",
         };
         lines.push(Line::from(Span::styled(
             format!("  No API key needed — uses local {} CLI", cli_name),
