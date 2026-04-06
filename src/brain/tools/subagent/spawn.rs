@@ -160,10 +160,13 @@ impl Tool for SpawnAgentTool {
         let full_prompt = format!("{}\n\n{}", agent_type.system_prompt(), prompt);
 
         // Create the status file in Pending state before spawning.
-        let _agent_status =
-            AgentStatus::new(&agent_id, &label, &child_session_id.to_string(), &full_prompt).map_err(|e| {
-                ToolError::Execution(format!("Failed to create status file: {e}"))
-            })?;
+        let _agent_status = AgentStatus::new(
+            &agent_id,
+            &label,
+            &child_session_id.to_string(),
+            &full_prompt,
+        )
+        .map_err(|e| ToolError::Execution(format!("Failed to create status file: {e}")))?;
 
         // Spawn background task with input loop
         let cancel_clone = cancel_token.clone();
@@ -177,13 +180,22 @@ impl Tool for SpawnAgentTool {
             tracing::info!("Sub-agent {} starting: {}", agent_id_clone, prompt_clone);
 
             // Transition to Running state.
-            let mut status = AgentStatus::read(&agent_id_clone)
-                .unwrap_or_else(|| AgentStatus::new(&agent_id_clone, &label_clone, &child_session_id.to_string(), &prompt_clone).expect("status file"));
-            if !matches!(status.state, super::status::AgentState::Completed | super::status::AgentState::Failed)
-                && let Err(e) = status.mark_running()
+            let mut status = AgentStatus::read(&agent_id_clone).unwrap_or_else(|| {
+                AgentStatus::new(
+                    &agent_id_clone,
+                    &label_clone,
+                    &child_session_id.to_string(),
+                    &prompt_clone,
+                )
+                .expect("status file")
+            });
+            if !matches!(
+                status.state,
+                super::status::AgentState::Completed | super::status::AgentState::Failed
+            ) && let Err(e) = status.mark_running()
             {
-                    tracing::warn!("Failed to write running status: {e}");
-                }
+                tracing::warn!("Failed to write running status: {e}");
+            }
 
             // Reload with correct state.
 
@@ -205,13 +217,16 @@ impl Tool for SpawnAgentTool {
                 match result {
                     Ok(response) => {
                         // Extract a short summary of what the agent did this turn.
-                        let summary = if response.stop_reason == Some(crate::brain::provider::types::StopReason::ToolUse) {
+                        let summary = if response.stop_reason
+                            == Some(crate::brain::provider::types::StopReason::ToolUse)
+                        {
                             "tool call(s) completed".to_string()
                         } else {
                             response.content.chars().take(120).collect::<String>()
                         };
 
-                        status.update_progress(iteration, None, Some(summary))
+                        status
+                            .update_progress(iteration, None, Some(summary))
                             .unwrap_or_else(|e| tracing::warn!("status write failed: {e}"));
 
                         manager.update_output(&agent_id_clone, response.content.clone());
@@ -250,9 +265,7 @@ impl Tool for SpawnAgentTool {
                 }
             };
 
-            let _ = status.mark_completed(
-                final_output.chars().take(200).collect(),
-            );
+            let _ = status.mark_completed(final_output.chars().take(200).collect());
             manager.mark_completed(&agent_id_clone, final_output);
         });
 
