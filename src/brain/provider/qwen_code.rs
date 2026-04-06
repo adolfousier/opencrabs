@@ -20,12 +20,12 @@ use tokio::io::AsyncWriteExt;
 
 /// Qwen Code CLI provider — talks directly to the `qwen` binary.
 #[derive(Clone)]
-pub struct QwenCodeProvider {
+pub struct QwenCodeCliProvider {
     qwen_path: String,
     default_model: String,
 }
 
-impl QwenCodeProvider {
+impl QwenCodeCliProvider {
     /// Create a new provider, auto-detecting the qwen binary.
     pub fn new() -> Result<Self> {
         let path = resolve_qwen_path()?;
@@ -249,7 +249,7 @@ impl CliUsage {
 }
 
 #[async_trait]
-impl Provider for QwenCodeProvider {
+impl Provider for QwenCodeCliProvider {
     async fn complete(&self, request: LLMRequest) -> Result<LLMResponse> {
         let mut stream = self.stream(request).await?;
 

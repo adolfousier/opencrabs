@@ -245,36 +245,9 @@ pub fn create_provider_by_name(config: &Config, name: &str) -> Result<Arc<dyn Pr
             }
         }
         "qwen-code" | "qwen_code" | "qwen-code-cli" | "qwen_code_cli" => {
-            let model = config
-                .providers
-                .qwen_code_cli
-                .as_ref()
-                .and_then(|c| c.default_model.clone());
-            match QwenCodeCliProvider::new() {
-                Ok(mut provider) => {
-                    if let Some(m) = model {
-                        provider = provider.with_default_model(m);
-                    }
-                    Ok(Arc::new(provider))
-                }
-                Err(e) => Err(anyhow::anyhow!("Qwen Code CLI binary not found: {}", e)),
-            }
-        }
-        "qwen-code" | "qwen_code" | "qwen-code-cli" | "qwen_code_cli" => {
-            let model = config
-                .providers
-                .qwen_code_cli
-                .as_ref()
-                .and_then(|c| c.default_model.clone());
-            match QwenCodeCliProvider::new() {
-                Ok(mut provider) => {
-                    if let Some(m) = model {
-                        provider = provider.with_default_model(m);
-                    }
-                    Ok(Arc::new(provider))
-                }
-                Err(e) => Err(anyhow::anyhow!("Qwen Code CLI binary not found: {}", e)),
-            }
+            tracing::info!("Using fallback: Qwen Code");
+            try_create_qwen_code(config)?
+                .ok_or_else(|| anyhow::anyhow!("Qwen Code CLI not available"))
         }
         "anthropic" => try_create_anthropic(config)?
             .ok_or_else(|| anyhow::anyhow!("Anthropic not configured (missing API key)")),
@@ -725,6 +698,28 @@ fn try_create_claude_cli(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         }
         Err(e) => {
             tracing::warn!("Claude CLI enabled but binary not found: {}", e);
+            Ok(None)
+        }
+    }
+}
+
+/// Try to create Qwen Code CLI provider if configured and binary is available.
+fn try_create_qwen_code(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
+    let cli_config = match &config.providers.qwen_code_cli {
+        Some(cfg) if cfg.enabled => cfg,
+        _ => return Ok(None),
+    };
+
+    match QwenCodeCliProvider::new() {
+        Ok(mut provider) => {
+            if let Some(model) = &cli_config.default_model {
+                provider = provider.with_default_model(model.clone());
+            }
+            tracing::info!("Using Qwen Code CLI provider (1k free req/day via Qwen OAuth)");
+            Ok(Some(Arc::new(provider)))
+        }
+        Err(e) => {
+            tracing::warn!("Qwen Code enabled but binary not found: {}", e);
             Ok(None)
         }
     }
