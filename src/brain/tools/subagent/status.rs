@@ -157,8 +157,7 @@ impl AgentStatus {
         let path = status_path(&self.id);
         ensure_dir()?;
         let tmp = path.with_extension("json.tmp");
-        let data = serde_json::to_string_pretty(self)
-            .map_err(std::io::Error::other)?;
+        let data = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
         let mut f = fs::File::create(&tmp)?;
         f.write_all(data.as_bytes())?;
         f.sync_all()?;
@@ -175,9 +174,10 @@ impl AgentStatus {
         for entry in fs::read_dir(&dir)? {
             let entry = entry?;
             if let Some(name) = entry.file_name().to_str()
-                && let Some(id) = name.strip_suffix(".json") {
-                    ids.push(id.to_string());
-                }
+                && let Some(id) = name.strip_suffix(".json")
+            {
+                ids.push(id.to_string());
+            }
         }
         ids.sort();
         Ok(ids)
@@ -212,7 +212,10 @@ pub fn cleanup_stale(max_age: Duration) -> std::io::Result<(usize, usize)> {
 
         let should_delete = if let Ok(data) = fs::read_to_string(&path) {
             if let Ok(status) = serde_json::from_str::<AgentStatus>(&data) {
-                status.completed_at.as_ref().is_some_and(|ts| parse_completed_at(&cutoff, ts))
+                status
+                    .completed_at
+                    .as_ref()
+                    .is_some_and(|ts| parse_completed_at(&cutoff, ts))
                     || status.completed_at.is_none() && file_stale(&path, &cutoff)
             } else {
                 file_stale(&path, &cutoff)
@@ -268,10 +271,7 @@ mod tests {
     #[test]
     fn status_path_ends_with_json() {
         let p = status_path("abc123");
-        assert_eq!(
-            p.file_name().unwrap().to_str().unwrap(),
-            "abc123.json"
-        );
+        assert_eq!(p.file_name().unwrap().to_str().unwrap(), "abc123.json");
     }
 
     #[test]

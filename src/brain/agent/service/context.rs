@@ -181,7 +181,10 @@ The summary above is NOT sufficient for implementation work.
         if result.is_empty() {
             String::from("[No brain files found — agent context limited]\n\n")
         } else {
-            format!("[RECOVERED BRAIN CONTEXT — these files define your identity, the user, your tools, and your coding standards. They take priority over any contradictory inference from the summary.]\n\n{}\n", result)
+            format!(
+                "[RECOVERED BRAIN CONTEXT — these files define your identity, the user, your tools, and your coding standards. They take priority over any contradictory inference from the summary.]\n\n{}\n",
+                result
+            )
         }
     }
 
