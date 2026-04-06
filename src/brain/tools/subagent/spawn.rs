@@ -1,6 +1,10 @@
 //! spawn_agent tool — creates a child agent with forked context.
+//!
+//! Sub-agent progress is streamed to `~/.opencrabs/tmp/subagents/<agent_id>.json`
+//! so the main orchestrator can track status without session_search.
 
 use super::manager::{SubAgent, SubAgentManager, SubAgentState};
+use super::status::AgentStatus;
 use crate::brain::tools::error::{Result, ToolError};
 use crate::brain::tools::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
@@ -155,20 +159,40 @@ impl Tool for SpawnAgentTool {
         // Prepend agent type system prompt to the user's task
         let full_prompt = format!("{}\n\n{}", agent_type.system_prompt(), prompt);
 
+        // Create the status file in Pending state before spawning.
+        let _agent_status =
+            AgentStatus::new(&agent_id, &label, &child_session_id.to_string(), &full_prompt).map_err(|e| {
+                ToolError::Execution(format!("Failed to create status file: {e}"))
+            })?;
+
         // Spawn background task with input loop
         let cancel_clone = cancel_token.clone();
         let manager = self.manager.clone();
         let agent_id_clone = agent_id.clone();
         let prompt_clone = full_prompt;
+        let label_clone = label.clone();
         let mut input_rx = input_rx;
 
         let handle = tokio::spawn(async move {
             tracing::info!("Sub-agent {} starting: {}", agent_id_clone, prompt_clone);
 
+            // Transition to Running state.
+            let mut status = AgentStatus::read(&agent_id_clone)
+                .unwrap_or_else(|| AgentStatus::new(&agent_id_clone, &label_clone, &child_session_id.to_string(), &prompt_clone).expect("status file"));
+            if !matches!(status.state, super::status::AgentState::Completed | super::status::AgentState::Failed)
+                && let Err(e) = status.mark_running()
+            {
+                    tracing::warn!("Failed to write running status: {e}");
+                }
+
+            // Reload with correct state.
+
             let mut current_prompt = prompt_clone;
+            let mut iteration: usize = 0;
 
             // Run prompt → wait for input → run again loop
             let final_output = loop {
+                iteration += 1;
                 let result = child_service
                     .send_message_with_tools_and_mode(
                         child_session_id,
@@ -180,10 +204,21 @@ impl Tool for SpawnAgentTool {
 
                 match result {
                     Ok(response) => {
+                        // Extract a short summary of what the agent did this turn.
+                        let summary = if response.stop_reason == Some(crate::brain::provider::types::StopReason::ToolUse) {
+                            "tool call(s) completed".to_string()
+                        } else {
+                            response.content.chars().take(120).collect::<String>()
+                        };
+
+                        status.update_progress(iteration, None, Some(summary))
+                            .unwrap_or_else(|e| tracing::warn!("status write failed: {e}"));
+
                         manager.update_output(&agent_id_clone, response.content.clone());
                         tracing::info!(
-                            "Sub-agent {} round complete, waiting for input",
-                            agent_id_clone
+                            "Sub-agent {} round {} complete, waiting for input",
+                            agent_id_clone,
+                            iteration
                         );
 
                         // Wait for follow-up input or shutdown
@@ -208,12 +243,16 @@ impl Tool for SpawnAgentTool {
                     }
                     Err(e) => {
                         tracing::error!("Sub-agent {} failed: {}", agent_id_clone, e);
+                        let _ = status.mark_failed(e.to_string());
                         manager.mark_failed(&agent_id_clone, e.to_string());
                         return;
                     }
                 }
             };
 
+            let _ = status.mark_completed(
+                final_output.chars().take(200).collect(),
+            );
             manager.mark_completed(&agent_id_clone, final_output);
         });
 
