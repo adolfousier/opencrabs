@@ -455,12 +455,12 @@ pub(crate) async fn handle_message(
         let caption = msg.caption().unwrap_or("Analyze this image");
         let text_with_img = format!("<<IMG:{}>> {}", tmp_path.display(), caption);
 
-        // Clean up temp file after 15 minutes — long enough for the agent to finish
-        // processing (typical runs: 1-3 min, complex runs: 5-10 min). The OS temp
-        // directory reaper will eventually reclaim these if the daemon is killed.
+        // Clean up temp file after 24h — the agent and follow-up tool calls may
+        // need to re-read the file long after the initial message was processed.
+        // The OS temp reaper handles orphaned files if the daemon is killed.
         let cleanup_path = tmp_path.clone();
         tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_secs(15 * 60)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(24 * 3600)).await;
             let _ = tokio::fs::remove_file(cleanup_path).await;
         });
 
