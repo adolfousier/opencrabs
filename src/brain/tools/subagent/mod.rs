@@ -12,7 +12,8 @@ mod close;
 pub mod manager;
 mod resume;
 mod send_input;
-mod spawn;
+pub mod spawn;
+pub mod status;
 pub mod team;
 mod wait;
 
