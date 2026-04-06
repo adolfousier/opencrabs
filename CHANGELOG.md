@@ -5,6 +5,37 @@ All notable changes to OpenCrabs will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.99] - 2026-04-06
+
+### Added
+- **Vision-first file processing** — All file attachments (PDFs, images) processed via
+  vision model before text extraction, across TUI and all channel handlers
+- **PDF-to-image rendering utility** — High-quality PDF page rendering for vision analysis
+  (`pdf_vision.rs`), replaces plain text extraction with visual inspection
+- **Proactive rate limiting for OpenRouter :free models** — Paces requests automatically
+  to avoid account-level bans; shared global static limiter across all :free instances
+- **File-based subagent progress streaming** — JSON status files (`pending`, `running`,
+  `completed`, `failed`) for real-time sub-agent progress via spawn/status tools
+- **Subagent provider/model defaults in config** — `[agent]` section with
+  `subagent_provider`/`subagent_model`, injected into config.toml on startup
+
+### Fixed
+- **Rate limiter first-call wait** — `last_granted=0` treated as sentinel so first call
+  no longer sleeps unnecessarily
+- **Compaction text leak** — Residual context no longer survives compaction; cancel token
+  threading fixed across session restarts
+- **Vision registration priority** — `provider.vision_model` now takes priority over
+  `image.vision` fallback
+- **CI failures** — Binary test assertion and rate_limiter fmt/clippy errors squashed
+- **Cosmetic cleanup** — Discord, utils, and test module fixes
+
+### Refactored
+- **Brain core injection** — USER.md replaces IDENTITY.md in TUI core brain; IDENTITY.md
+  moved to contextual files for on-demand loading (cron/social sessions only)
+- **Post-compaction brain recovery** — CODE.md injected as ~300-token best-practices
+  summary instead of full 420-line file; explicit `load_brain_file("CODE.md")` directive
+  before any code task
+
 ## [0.2.98] - 2026-04-05
 
 ### Added
@@ -2104,6 +2135,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.1.7]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.7
 [0.1.6]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.6
 [0.1.5]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.5
+[0.2.99]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.99
 [0.1.4]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.4
 [0.1.3]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.3
 [0.1.2]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.2
