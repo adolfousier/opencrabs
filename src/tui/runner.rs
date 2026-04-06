@@ -14,10 +14,7 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{
-    Terminal,
-    backend::{Backend, CrosstermBackend},
-};
+use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 
 /// Run the TUI application
@@ -38,6 +35,13 @@ pub async fn run(mut app: App) -> Result<()> {
 
     // Force a full clear so stale content from a previous exec() restart is wiped
     terminal.clear()?;
+
+    // Drain any stale terminal events (e.g. mouse events queued after a crash
+    // where DisableMouseCapture never ran). Without this, queued escape
+    // sequences leak into the input buffer as raw characters.
+    while crossterm::event::poll(std::time::Duration::from_millis(10))? {
+        let _ = crossterm::event::read();
+    }
 
     // Initialize app
     app.initialize().await?;
@@ -64,10 +68,10 @@ pub async fn run(mut app: App) -> Result<()> {
 }
 
 /// Main event loop
-async fn run_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
-where
-    B::Error: Send + Sync + 'static,
-{
+async fn run_loop(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    app: &mut App,
+) -> Result<()> {
     use super::events::TuiEvent;
 
     loop {
@@ -84,6 +88,17 @@ where
             tokio::time::timeout(tokio::time::Duration::from_millis(100), app.next_event()).await;
 
         if let Ok(Some(event)) = event {
+            // On focus regain, re-sync mouse capture to flush stale escape
+            // sequences that accumulated while the terminal was unfocused
+            // (e.g. tmux pane switch, alt-tab).
+            if matches!(event, TuiEvent::FocusGained) {
+                execute!(
+                    terminal.backend_mut(),
+                    DisableMouseCapture,
+                    EnableMouseCapture
+                )?;
+            }
+
             if let Err(e) = app.handle_event(event).await {
                 app.error_message = Some(e.to_string());
             }
