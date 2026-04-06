@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.99] - 2026-04-06
 
 ### Added
+- **Qwen Code CLI provider** — Full integration of Qwen Code as a CLI backend provider.
+  1,000 free requests/day via Qwen OAuth, no API key required. Supports qwen3-coder-plus,
+  qwen3.5-plus, qwen3.6-plus, and more. 256K context window, streaming, tools.
+  Install: `npm install -g @qwen-code/qwen-code` or `brew install qwen-code`.
+  Config: `[providers.qwen_code_cli] enabled = true`
 - **Vision-first file processing** — All file attachments (PDFs, images) processed via
   vision model before text extraction, across TUI and all channel handlers
 - **PDF-to-image rendering utility** — High-quality PDF page rendering for vision analysis
