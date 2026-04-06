@@ -491,12 +491,12 @@ impl App {
                 self.ps.base_url,
             );
 
-            let is_cli_provider = matches!(self.ps.selected_provider, 7 | 8);
+            let is_cli_provider = matches!(self.ps.selected_provider, 7 | 8 | 9);
 
             if self.ps.focused_field == 0 {
                 // On provider field - save config, DON'T close dialog
-                // Map indices >= 10 back to 9 for save (custom provider)
-                let save_idx = self.ps.selected_provider.min(9);
+                // Map indices >= 11 back to 10 for save (custom provider)
+                let save_idx = self.ps.selected_provider.min(10);
                 if let Err(e) = self
                     .save_provider_selection_internal(save_idx, false, false)
                     .await
@@ -535,7 +535,10 @@ impl App {
                             4 => c.providers.openrouter.and_then(|p| p.api_key),
                             5 => c.providers.minimax.and_then(|p| p.api_key),
                             6 => c.providers.zhipu.and_then(|p| p.api_key),
-                            8 => c
+                            7 => None, // Claude CLI — no API key
+                            8 => None, // OpenCode CLI — no API key
+                            9 => None, // Qwen Code CLI — no API key
+                            10 => c
                                 .providers
                                 .active_custom()
                                 .and_then(|(_, p)| p.api_key.clone()),
@@ -718,7 +721,8 @@ impl App {
                 .cloned(),
             7 => None, // Claude CLI — no API key needed
             8 => None, // OpenCode CLI — no API key needed
-            9 => config
+            9 => None, // Qwen Code CLI — no API key needed
+            10 => config
                 .providers
                 .active_custom()
                 .and_then(|(_, p)| p.api_key.as_ref())
@@ -758,6 +762,7 @@ impl App {
                     6 => c.providers.zhipu.and_then(|p| p.default_model),
                     7 => c.providers.claude_cli.and_then(|p| p.default_model),
                     8 => c.providers.opencode_cli.and_then(|p| p.default_model),
+                    9 => c.providers.qwen_code_cli.and_then(|p| p.default_model),
                     _ => None,
                 })
                 .unwrap_or_else(|| {
@@ -911,7 +916,18 @@ impl App {
                 });
             }
             9 => {
-                // Custom OpenAI-compatible (named provider)
+                // Qwen Code CLI — no API key needed
+                config.providers.qwen_code_cli = Some(ProviderConfig {
+                    enabled: true,
+                    api_key: None,
+                    base_url: None,
+                    default_model: Some(default_model.to_string()),
+                    models: vec![],
+                    vision_model: None,
+                    ..Default::default()
+                });
+            }
+            10 => {
                 let custom_model = self.ps.custom_model.clone();
                 let custom_name = self.ps.custom_name.clone();
                 let mut customs = config.providers.custom.unwrap_or_default();
@@ -946,7 +962,8 @@ impl App {
             6 => "providers.zhipu",
             7 => "providers.claude_cli",
             8 => "providers.opencode_cli",
-            9 => {
+            9 => "providers.qwen_code_cli",
+            10 => {
                 // Resolve custom provider name: UI field > config active > "default"
                 let cname = if !self.ps.custom_name.is_empty() {
                     self.ps.custom_name.clone()
@@ -981,6 +998,7 @@ impl App {
             "providers.zhipu",
             "providers.claude_cli",
             "providers.opencode_cli",
+            "providers.qwen_code_cli",
         ] {
             if s != section {
                 try_write(s, "enabled", "false");
