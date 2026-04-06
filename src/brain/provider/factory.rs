@@ -819,8 +819,8 @@ pub fn active_provider_vision(config: &Config) -> Option<(String, String, String
         _ => None,
     };
 
-    if let Some(cfg) = active_cfg {
-        if let (Some(api_key), Some(vision_model)) = (&cfg.api_key, &cfg.vision_model) {
+    if let Some(cfg) = active_cfg
+        && let (Some(api_key), Some(vision_model)) = (&cfg.api_key, &cfg.vision_model) {
             let base_url = cfg
                 .base_url
                 .clone()
@@ -832,7 +832,6 @@ pub fn active_provider_vision(config: &Config) -> Option<(String, String, String
             };
             return Some((api_key.clone(), base_url, vision_model.clone()));
         }
-    }
     // No provider-native vision — let cli/ui.rs fall back to Gemini if configured
     None
 }
