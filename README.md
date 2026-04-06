@@ -109,7 +109,7 @@ https://github.com/user-attachments/assets/7f45c5f8-acdf-48d5-b6a4-0e4811a9ee23
 ### AI & Providers
 | Feature | Description |
 |---------|-------------|
-| **Multi-Provider** | Anthropic Claude, OpenAI, GitHub Copilot (uses your Copilot subscription), OpenRouter (400+ models), MiniMax, Google Gemini, z.ai GLM (General API + Coding API), Claude CLI, OpenCode CLI, and any OpenAI-compatible API (Ollama, LM Studio, LocalAI). Model lists fetched live from provider APIs — new models available instantly. Each session remembers its provider + model and restores it on switch |
+| **Multi-Provider** | Anthropic Claude, OpenAI, GitHub Copilot (uses your Copilot subscription), OpenRouter (400+ models), MiniMax, Google Gemini, z.ai GLM (General API + Coding API), Claude CLI, OpenCode CLI, Qwen Code CLI (1k free req/day), and any OpenAI-compatible API (Ollama, LM Studio, LocalAI). Model lists fetched live from provider APIs — new models available instantly. Each session remembers its provider + model and restores it on switch |
 | **Fallback Providers** | Configure a chain of fallback providers — if the primary fails, each fallback is tried in sequence automatically. Any configured provider can be a fallback. Config: `[providers.fallback] providers = ["openrouter", "anthropic"]` |
 | **Per-Provider Vision** | Set `vision_model` per provider — the LLM calls `analyze_image` as a tool, which uses the vision model on the same provider API to describe images. The chat model stays the same and gets vision capability via tool call. Gemini vision takes priority when configured. Auto-configured for known providers (e.g. MiniMax) on first run |
 | **Real-time Streaming** | Character-by-character response streaming with animated spinner showing model name and live text |
@@ -297,6 +297,7 @@ Multiple profiles can run as simultaneous daemon services with full isolation.
 | [z.ai GLM](#zai-glm) | API key | GLM-4.5 through GLM-5 Turbo | ✅ | ✅ | General API + Coding API endpoints |
 | [Claude CLI](#claude-code-cli) | CLI auth | Via `claude` binary | ✅ | ✅ | Uses your Claude Code subscription |
 | [OpenCode CLI](#opencode-cli) | None | Free models (Mimo, etc.) | ✅ | ✅ | Free — no API key or subscription needed |
+| [Qwen Code CLI](#qwen-code-cli) | OAuth / API key | Qwen3-Coder-Plus, Qwen3.5-Plus, Qwen3.6-Plus | ✅ | ✅ | 1k free req/day via Qwen OAuth — no API key needed |
 | [Custom](#custom-openai-compatible) | Optional | Any | ✅ | ✅ | Ollama, LM Studio, Groq, NVIDIA, any OpenAI-compatible API |
 
 ### Anthropic Claude
@@ -449,6 +450,24 @@ default_model = "opencode/mimo-v2-pro-free"
 Models are fetched live from `opencode models`. Free models like `mimo-v2-pro-free` work without any authentication.
 
 **Features:** Streaming, tools, extended thinking support, NDJSON event protocol
+
+### Qwen Code CLI
+
+Use the [Qwen Code](https://github.com/qwen-code/qwen-code) CLI as a free LLM backend — **1,000 free requests/day** via Qwen OAuth. OpenCrabs spawns the local `qwen` binary for completions.
+
+**Setup:**
+1. Install Qwen Code CLI (`npm install -g @qwen-code/qwen-code` or `brew install qwen-code`)
+2. Authenticate: run `qwen` and follow the OAuth flow (or set `DASHSCOPE_API_KEY` for API key auth)
+3. Enable in `config.toml`:
+```toml
+[providers.qwen_code_cli]
+enabled = true
+default_model = "qwen3-coder-plus"
+```
+
+**Available models:** `qwen3-coder-plus`, `qwen3.5-plus`, `qwen3.6-plus`, `qwen3-coder-480a35`, `qwen3-coder-30ba3b`, `qwen3-max-2026-01-23`
+
+**Features:** Streaming, tools, 256K context window, NDJSON event protocol (Gemini CLI fork)
 
 ### Custom (OpenAI-Compatible)
 
