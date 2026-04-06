@@ -794,31 +794,32 @@ fn try_create_anthropic(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
 /// that has a `vision_model` configured. Used to register the provider-native
 /// `analyze_image` tool when Gemini vision isn't set up.
 pub fn active_provider_vision(config: &Config) -> Option<(String, String, String)> {
-    // Check providers in priority order (same as create_provider)
-    let candidates: Vec<&ProviderConfig> = [
-        config.providers.minimax.as_ref(),
-        config.providers.zhipu.as_ref(),
-        config.providers.openrouter.as_ref(),
-        config.providers.anthropic.as_ref(),
-        config.providers.openai.as_ref(),
-        config.providers.github.as_ref(),
-        config.providers.gemini.as_ref(),
-    ]
-    .into_iter()
-    .flatten()
-    .filter(|c| c.enabled)
-    .collect();
+    // Get the ACTUAL active provider — don't iterate all providers,
+    // otherwise MiniMax wins just because it's listed before OpenRouter.
+    let (name, _) = config.providers.active_provider_and_model();
 
-    // Also check custom providers
-    let custom_iter = config
-        .providers
-        .custom
-        .as_ref()
-        .into_iter()
-        .flat_map(|m| m.values())
-        .filter(|c| c.enabled);
+    let active_cfg: Option<&ProviderConfig> = match name.as_str() {
+        "minimax" => config.providers.minimax.as_ref(),
+        "zhipu" => config.providers.zhipu.as_ref(),
+        "openrouter" => config.providers.openrouter.as_ref(),
+        "anthropic" => config.providers.anthropic.as_ref(),
+        "openai" => config.providers.openai.as_ref(),
+        "github" => config.providers.github.as_ref(),
+        "gemini" => config.providers.gemini.as_ref(),
+        "claude-cli" | "claude_cli" => config.providers.claude_cli.as_ref(),
+        "opencode" | "opencode-cli" | "opencode_cli" => config.providers.opencode_cli.as_ref(),
+        "qwen-code" | "qwen_code" | "qwen-code-cli" | "qwen_code_cli" => {
+            config.providers.qwen_code_cli.as_ref()
+        }
+        cn if cn.starts_with("custom:") => config
+            .providers
+            .custom
+            .as_ref()
+            .and_then(|m| m.get(&cn["custom:".len()..])),
+        _ => None,
+    };
 
-    for cfg in candidates.into_iter().chain(custom_iter) {
+    if let Some(cfg) = active_cfg {
         if let (Some(api_key), Some(vision_model)) = (&cfg.api_key, &cfg.vision_model) {
             let base_url = cfg
                 .base_url
@@ -832,6 +833,7 @@ pub fn active_provider_vision(config: &Config) -> Option<(String, String, String
             return Some((api_key.clone(), base_url, vision_model.clone()));
         }
     }
+    // No provider-native vision — let cli/ui.rs fall back to Gemini if configured
     None
 }
 
