@@ -117,11 +117,13 @@ impl AgentService {
     /// core identity, user context, tool documentation, and coding standards so it
     /// doesn't wake up with only a lossy LLM summary.
     ///
-    /// Selected files (~3-5k tokens total):
+    /// Full files injected (~1-2k tokens total):
     /// - SOUL.md — personality, tone, hard rules
     /// - USER.md — who the human is, preferences
     /// - TOOLS.md — environment-specific tool notes
-    /// - CODE.md — coding standards (so the agent knows how to write code)
+    ///
+    /// CODE.md is injected as a compact summary only. Before ANY code task the
+    /// agent MUST fetch the full file. Non-code tasks can ignore this section.
     ///
     /// Skipped: MEMORY.md (summary replaces it), BOOT/BOOTSTRAP/HEARTBEAT (rarely
     /// needed mid-task), SECURITY.md/AGENTS.md (loaded on demand if flagged in
@@ -129,17 +131,39 @@ impl AgentService {
     fn build_recovered_brain_context() -> String {
         use std::path::PathBuf;
 
-        let brain_files = [
+        const CODE_MD_SUMMARY: &str =
+"## CODE.md — Coding Standards (SUMMARY)
+**Full file: ~/.opencrabs/CODE.md — use `load_brain_file(\"CODE.md\")` to read it before writing ANY code.**
+If you are NOT doing code tasks, ignore this section entirely.
+
+Best practices:
+- Rust first. Always. (heyiolo is built in Dart/Swift — those are the only exceptions)
+- Max 500 lines per file, target 100-250. Split without hesitation.
+- Types in types.rs, handlers in handler.rs. One responsibility per file.
+- Tests in `src/tests/<module>_test.rs` — never inline in source.
+- `cargo clippy --all-features` + `cargo test --all-features` before every commit.
+- No unwraps on user data, no dead code, no suppressing warnings.
+- No #[allow()] unless you can defend why the lint is wrong.
+- No unsafe without a soundness comment.
+- Validate all external input. No hardcoded secrets. Sanitize output.
+- Never give up on a problem. Never suppress errors.
+- Git diff before commit — match the request exactly, no more, no less.
+
+**CRITICAL: Before handling ANY code task, fetch full CODE.md:**
+Use the `load_brain_file` tool with name=\"CODE.md\" — reads from ~/.opencrabs/CODE.md.
+The summary above is NOT sufficient for implementation work.
+";
+
+        let full_files = [
             ("SOUL.md", "personality"),
             ("USER.md", "user profile"),
             ("TOOLS.md", "tool notes"),
-            ("CODE.md", "coding standards"),
         ];
 
         let opencrabs_home = crate::config::opencrabs_home();
         let mut result = String::new();
 
-        for (filename, label) in brain_files {
+        for (filename, label) in full_files {
             let path: PathBuf = opencrabs_home.join(filename);
             if let Ok(content) = std::fs::read_to_string(&path) {
                 let trimmed = content.trim();
@@ -151,6 +175,8 @@ impl AgentService {
                 }
             }
         }
+
+        result.push_str(CODE_MD_SUMMARY);
 
         if result.is_empty() {
             String::from("[No brain files found — agent context limited]\n\n")
