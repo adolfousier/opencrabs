@@ -79,7 +79,7 @@ impl App {
                     .iter()
                     .position(|n| n == name)
                     .map(|pos| 10 + pos)
-                    .unwrap_or(9);
+                    .unwrap_or(10);
                 (idx, api_key)
             }
         });
@@ -95,7 +95,7 @@ impl App {
             let mut found: Option<(usize, Option<String>)> = None;
 
             // Check known providers (indices 0-8) by iterating PROVIDERS
-            for (idx, info) in PROVIDERS.iter().enumerate().take(9) {
+            for (idx, info) in PROVIDERS.iter().enumerate().take(10) {
                 if let Some(cfg) = prov::config_for(&config.providers, info.id)
                     && cfg.enabled
                 {
@@ -112,7 +112,7 @@ impl App {
                                 found = Some((mi, cfg.api_key.clone()));
                             }
                         } else {
-                            found = Some((9, cfg.api_key.clone())); // custom-like
+                            found = Some((10, cfg.api_key.clone())); // custom-like
                         }
                         break;
                     }
@@ -142,7 +142,7 @@ impl App {
                     .iter()
                     .position(|n| n == name)
                     .map(|pos| 10 + pos)
-                    .unwrap_or(9);
+                    .unwrap_or(10);
                 found = Some((idx, custom_cfg.api_key.clone()));
             }
 
@@ -220,7 +220,7 @@ impl App {
             // - Normal providers: provider(0) -> api_key(1) -> model(2) -> provider(0)
             // - Zhipu: provider(0) -> endpoint_type(1) -> api_key(2) -> model(3) -> provider(0)
             // - Custom provider: provider(0) -> base_url(1) -> api_key(2) -> model(3) -> provider(0)
-            let is_custom = self.ps.selected_provider >= 9; // Custom provider index
+            let is_custom = self.ps.selected_provider >= 10; // Custom provider index
             let max_field = if is_custom {
                 5
             } else if is_zhipu {
@@ -235,12 +235,12 @@ impl App {
             // Provider selection (focused)
             // Navigate using display order: static providers sorted alphabetically, then customs, then "+New"
             let num_customs = self.ps.custom_names.len();
-            let mut static_indices: Vec<usize> = (0..9).collect();
+            let mut static_indices: Vec<usize> = (0..10).collect();
             static_indices.sort_by_key(|&i| PROVIDERS[i].name.to_ascii_lowercase());
             let display_order: Vec<usize> = static_indices
                 .into_iter()
                 .chain(10..10 + num_customs)
-                .chain(std::iter::once(9))
+                .chain(std::iter::once(10))
                 .collect();
             let provider_changed = match event.code {
                 crossterm::event::KeyCode::Up => {
@@ -277,7 +277,7 @@ impl App {
 
                 // Clear/populate custom fields based on selected provider
                 let provider_idx = self.ps.selected_provider;
-                if provider_idx == 9 {
+                if provider_idx == 10 {
                     // "+ New Custom" — clear all custom fields for fresh entry
                     self.ps.custom_name.clear();
                     self.ps.custom_model.clear();
@@ -362,7 +362,7 @@ impl App {
                 }
                 _ => {}
             }
-        } else if self.ps.focused_field == 1 && self.ps.selected_provider >= 9 {
+        } else if self.ps.focused_field == 1 && self.ps.selected_provider >= 10 {
             // Base URL input for Custom provider (field 1)
             match event.code {
                 crossterm::event::KeyCode::Char(c) => {
@@ -375,7 +375,7 @@ impl App {
             }
         } else if (self.ps.focused_field == 1 && self.ps.selected_provider < 7 && !is_zhipu)
             || (self.ps.focused_field == 2 && is_zhipu)
-            || (self.ps.focused_field == 2 && self.ps.selected_provider >= 9)
+            || (self.ps.focused_field == 2 && self.ps.selected_provider >= 10)
         {
             // API key input (field 1 for non-Custom non-zhipu, field 2 for zhipu/Custom)
             match event.code {
@@ -387,7 +387,7 @@ impl App {
                 }
                 _ => {}
             }
-        } else if self.ps.focused_field == 3 && self.ps.selected_provider >= 9 {
+        } else if self.ps.focused_field == 3 && self.ps.selected_provider >= 10 {
             // Custom provider: free-text model name input (field 3)
             match event.code {
                 crossterm::event::KeyCode::Char(c) => {
@@ -398,7 +398,7 @@ impl App {
                 }
                 _ => {}
             }
-        } else if self.ps.focused_field == 4 && self.ps.selected_provider >= 9 {
+        } else if self.ps.focused_field == 4 && self.ps.selected_provider >= 10 {
             // Custom provider: name identifier input (field 4)
             match event.code {
                 crossterm::event::KeyCode::Char(c) => {
@@ -411,7 +411,7 @@ impl App {
                 }
                 _ => {}
             }
-        } else if self.ps.focused_field == 5 && self.ps.selected_provider >= 9 {
+        } else if self.ps.focused_field == 5 && self.ps.selected_provider >= 10 {
             // Custom provider: context window input (field 5 — last before save)
             match event.code {
                 crossterm::event::KeyCode::Char(c) if c.is_ascii_digit() => {
@@ -422,7 +422,7 @@ impl App {
                 }
                 _ => {}
             }
-        } else if (self.ps.focused_field == 2 && self.ps.selected_provider < 9 && !is_zhipu)
+        } else if (self.ps.focused_field == 2 && self.ps.selected_provider < 10 && !is_zhipu)
             || (self.ps.focused_field == 3 && is_zhipu)
         {
             // Non-custom: filter/search model list (field 2, or field 3 for zhipu)
@@ -480,7 +480,7 @@ impl App {
 
         // Enter to confirm - move to next field
         if keys::is_enter(&event) {
-            let is_custom = self.ps.selected_provider >= 9;
+            let is_custom = self.ps.selected_provider >= 10;
 
             tracing::debug!(
                 "[model_selector] Enter pressed: field={}, provider_idx={}, is_custom={}, custom_name='{}', base_url='{}'",
@@ -516,8 +516,8 @@ impl App {
                 || (self.ps.focused_field == 2 && (is_custom || is_zhipu))
             {
                 // On API key field (field 1 for non-Custom non-zhipu, field 2 for zhipu/Custom)
-                // Map >= 10 back to 9 for save (all custom providers use idx 9)
-                let provider_idx = self.ps.selected_provider.min(9);
+                // Map >= 10 back to 10 for save (all custom providers use idx 10+)
+                let provider_idx = self.ps.selected_provider.min(10);
 
                 // User typed a new key — sentinel means key was pre-populated and not changed
                 let key_changed =
@@ -594,11 +594,11 @@ impl App {
                 }
             } else if is_custom && self.ps.focused_field == 5 {
                 // Custom: on context window field — save
-                self.save_provider_selection(self.ps.selected_provider.min(9), false)
+                self.save_provider_selection(self.ps.selected_provider.min(10), false)
                     .await?;
             } else {
                 // Non-custom: on model field — save and close
-                self.save_provider_selection(self.ps.selected_provider.min(9), false)
+                self.save_provider_selection(self.ps.selected_provider.min(10), false)
                     .await?;
             }
         }
@@ -668,7 +668,7 @@ impl App {
         }
 
         // Get existing key from config if not changing
-        // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=z.ai GLM, 7=Claude CLI, 8=OpenCode CLI, 9=Custom
+        // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=z.ai GLM, 7=Claude CLI, 8=OpenCode CLI, 9=Qwen Code, 10=Custom
         let existing_key = match provider_idx {
             0 => config
                 .providers
@@ -772,7 +772,7 @@ impl App {
                         .map(|s| s.to_string())
                         .unwrap_or_else(|| "default".to_string())
                 })
-        } else if provider_idx >= 9 {
+        } else if provider_idx >= 10 {
             self.ps.custom_model.clone()
         } else if !self.ps.models.is_empty() {
             let filter = self.ps.model_filter.to_lowercase();
@@ -796,7 +796,7 @@ impl App {
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| "default".to_string())
         };
-        // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=z.ai GLM, 7=Claude CLI, 8=OpenCode CLI, 9=Custom
+        // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=z.ai GLM, 7=Claude CLI, 8=OpenCode CLI, 9=Qwen Code, 10=Custom
         match provider_idx {
             0 => {
                 // Anthropic
@@ -1043,7 +1043,7 @@ impl App {
                 };
                 try_write(section, "endpoint_type", endpoint_type);
             }
-            9 if !self.ps.base_url.is_empty() => {
+            10 if !self.ps.base_url.is_empty() => {
                 try_write(section, "base_url", &self.ps.base_url);
                 if !self.ps.context_window.is_empty() {
                     try_write(section, "context_window", &self.ps.context_window);
