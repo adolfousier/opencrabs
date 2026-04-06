@@ -1052,19 +1052,33 @@ impl App {
             TuiEvent::Paste(text) => {
                 // Handle paste events in Chat mode or Onboarding mode
                 if self.mode == AppMode::Chat {
-                    // Check if pasted text contains image paths — extract as attachments
-                    let (clean_text, new_attachments) = Self::extract_image_paths(&text);
-                    if !new_attachments.is_empty() {
-                        self.attachments.extend(new_attachments);
-                        if !clean_text.trim().is_empty() {
-                            self.input_buffer
-                                .insert_str(self.cursor_position, &clean_text);
-                            self.cursor_position += clean_text.len();
-                        }
+                    // Filter out terminal escape sequences that leak through on
+                    // focus switch (mouse tracking, SGR mode, etc.).  These look
+                    // like \x1b[<35;118;37M or CSI sequences and should never
+                    // appear in user-typed text.
+                    let filtered = Self::strip_terminal_escapes(&text);
+                    if filtered.trim().is_empty() {
+                        tracing::debug!(
+                            "Paste event contained only escape sequences ({} bytes) — dropped",
+                            text.len()
+                        );
+                        // skip — don't insert garbage into input
                     } else {
-                        self.input_buffer.insert_str(self.cursor_position, &text);
-                        self.cursor_position += text.len();
-                    }
+                        // Check if pasted text contains image paths — extract as attachments
+                        let (clean_text, new_attachments) = Self::extract_image_paths(&filtered);
+                        if !new_attachments.is_empty() {
+                            self.attachments.extend(new_attachments);
+                            if !clean_text.trim().is_empty() {
+                                self.input_buffer
+                                    .insert_str(self.cursor_position, &clean_text);
+                                self.cursor_position += clean_text.len();
+                            }
+                        } else {
+                            self.input_buffer
+                                .insert_str(self.cursor_position, &filtered);
+                            self.cursor_position += filtered.len();
+                        }
+                    } // end else (non-empty after filtering)
                     self.update_slash_suggestions();
                 } else if self.mode == AppMode::Onboarding {
                     // Handle paste in onboarding wizard (for API keys, etc.)

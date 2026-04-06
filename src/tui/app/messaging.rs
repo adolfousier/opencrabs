@@ -10,6 +10,18 @@ use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+/// Return the byte length of a UTF-8 character from its leading byte.
+#[inline]
+fn utf8_char_len(b: u8) -> usize {
+    match b {
+        0x00..=0x7F => 1,
+        0xC0..=0xDF => 2,
+        0xE0..=0xEF => 3,
+        0xF0..=0xF7 => 4,
+        _ => 1, // continuation byte — shouldn't happen on valid str, advance 1
+    }
+}
+
 impl App {
     /// Read the persisted approval policy from config.toml.
     /// Returns `(auto_session, auto_always)` flags.
@@ -1074,6 +1086,72 @@ impl App {
     /// Handles paths with spaces (e.g. `/home/user/My Screenshots/photo.png`)
     /// and image URLs.
     ///
+    /// Strip terminal escape sequences (CSI, SGR mouse, OSC, etc.) from text.
+    ///
+    /// These leak into paste events when switching terminal focus while mouse
+    /// capture is active (e.g. tmux pane switch, alt-tab with iTerm2).
+    pub(crate) fn strip_terminal_escapes(text: &str) -> String {
+        // Fast path: no ESC byte means nothing to strip
+        if !text.as_bytes().contains(&0x1b) {
+            return text.to_string();
+        }
+
+        let mut out = String::with_capacity(text.len());
+        let bytes = text.as_bytes();
+        let len = bytes.len();
+        let mut i = 0;
+        while i < len {
+            if bytes[i] == 0x1b {
+                // ESC — start of escape sequence (always single-byte ASCII)
+                i += 1;
+                if i >= len {
+                    break;
+                }
+                match bytes[i] {
+                    b'[' => {
+                        // CSI sequence: ESC [ ... (final byte in 0x40-0x7E)
+                        i += 1;
+                        while i < len && !(0x40..=0x7E).contains(&bytes[i]) {
+                            i += 1;
+                        }
+                        if i < len {
+                            i += 1; // skip the final byte
+                        }
+                    }
+                    b']' => {
+                        // OSC sequence: ESC ] ... ST (ST = ESC \ or BEL 0x07)
+                        i += 1;
+                        while i < len {
+                            if bytes[i] == 0x07 {
+                                i += 1;
+                                break;
+                            }
+                            if bytes[i] == 0x1b && i + 1 < len && bytes[i + 1] == b'\\' {
+                                i += 2;
+                                break;
+                            }
+                            i += 1;
+                        }
+                    }
+                    _ => {
+                        // Two-byte escape (e.g. ESC =, ESC >)
+                        i += 1;
+                    }
+                }
+            } else {
+                // Normal byte — figure out how many bytes this UTF-8 char is
+                // and copy the whole character to preserve multi-byte (emoji, CJK, etc.)
+                let ch_len = utf8_char_len(bytes[i]);
+                if i + ch_len <= len {
+                    // SAFETY: the input is a valid &str so this slice is a valid char
+                    out.push_str(&text[i..i + ch_len]);
+                }
+                i += ch_len;
+            }
+        }
+        out
+    }
+
     /// Text file paths (`.txt`, `.md`, `.json`, source code, etc.) are read from
     /// disk and inlined into the returned text — no attachment needed.
     pub(crate) fn extract_image_paths(text: &str) -> (String, Vec<ImageAttachment>) {
