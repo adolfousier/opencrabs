@@ -40,8 +40,8 @@ pub async fn index_file(store: &'static Mutex<Store>, path: &Path) -> Result<(),
             index_file_sync(&s, COLLECTION_MEMORY, &path, &body)?
         };
 
-        if indexed {
-            embed_content(store, &body);
+        if indexed && let Err(e) = embed_content(store, &body) {
+            tracing::warn!("Embedding skipped during index: {e}");
         }
 
         Ok(())
