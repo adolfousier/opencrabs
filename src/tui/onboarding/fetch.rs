@@ -146,6 +146,11 @@ pub fn is_first_time() -> bool {
             .opencode_cli
             .as_ref()
             .is_some_and(|p| p.enabled)
+        || config
+            .providers
+            .qwen_code_cli
+            .as_ref()
+            .is_some_and(|p| p.enabled)
         || config.providers.active_custom().is_some();
 
     tracing::debug!(

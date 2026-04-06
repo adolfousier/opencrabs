@@ -1712,11 +1712,29 @@ impl App {
                     if !models.is_empty() {
                         wizard.ps.models = models;
                         wizard.ps.resolve_selected_model_index();
+                    } else {
+                        // Fetch returned empty — fall back to static PROVIDERS models
+                        let provider = wizard.ps.current_provider();
+                        if !provider.models.is_empty() {
+                            wizard.ps.models = provider.models.iter().map(|s| s.to_string()).collect();
+                            wizard.ps.resolve_selected_model_index();
+                        }
                     }
                 }
             }
             TuiEvent::ModelSelectorModelsFetched(provider_idx, models) => {
                 // Discard stale fetches from a previously-selected provider
+                let models = if models.is_empty() {
+                    // Fetch returned empty — fall back to static PROVIDERS models
+                    let provider = self.ps.current_provider();
+                    if !provider.models.is_empty() {
+                        provider.models.iter().map(|s| s.to_string()).collect()
+                    } else {
+                        models
+                    }
+                } else {
+                    models
+                };
                 if self.mode == AppMode::ModelSelector
                     && !models.is_empty()
                     && provider_idx == self.ps.selected_provider

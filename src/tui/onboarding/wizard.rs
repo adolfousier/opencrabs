@@ -228,6 +228,13 @@ impl OnboardingWizard {
                     .is_some_and(|p| p.enabled)
                 {
                     (8, String::new(), String::new(), String::new())
+                } else if config
+                    .providers
+                    .qwen_code_cli
+                    .as_ref()
+                    .is_some_and(|p| p.enabled)
+                {
+                    (9, String::new(), String::new(), String::new())
                 } else if let Some((name, c)) = config.providers.active_custom().or_else(|| {
                     config
                         .providers
@@ -240,13 +247,14 @@ impl OnboardingWizard {
                     let model = c.default_model.clone().unwrap_or_default();
                     custom_provider_name_init = Some(name.to_string());
                     // context_window is set after wizard construction below
-                    // Map to index 10+ for existing custom providers
+                    // Map to CUSTOM_INSTANCES_START+ for existing custom providers
+                    use crate::tui::provider_selector::{CUSTOM_PROVIDER_IDX, CUSTOM_INSTANCES_START};
                     let idx = config
                         .providers
                         .custom
                         .as_ref()
-                        .and_then(|m| m.keys().position(|k| k == name).map(|pos| 10 + pos))
-                        .unwrap_or(9);
+                        .and_then(|m| m.keys().position(|k| k == name).map(|pos| CUSTOM_INSTANCES_START + pos))
+                        .unwrap_or(CUSTOM_PROVIDER_IDX);
                     (idx, EXISTING_KEY_SENTINEL.to_string(), base, model)
                 } else {
                     (0, String::new(), String::new(), String::new())
