@@ -6,6 +6,52 @@ use anyhow::Result;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+/// Detect whether a character is likely part of a mouse tracking CSI sequence
+/// that crossterm failed to parse (e.g. `[<35;116;77M` arriving as individual
+/// chars after ESC was consumed as KeyCode::Esc).
+///
+/// Strategy: scan the recent tail for `[<` — if found, every char after it
+/// that fits the SGR mouse pattern (digits, `;`, `M`, `m`) is garbage.
+/// Also detect `[` at the very end of the tail (CSI about to start).
+fn is_mouse_sequence_fragment(c: char, buf: &str, cursor: usize) -> bool {
+    // Only bother checking chars that actually appear in SGR mouse sequences
+    if !matches!(c, '[' | '<' | '>' | 'M' | 'm' | ';') && !c.is_ascii_digit() {
+        return false;
+    }
+
+    let tail_start = cursor.saturating_sub(30);
+    let tail = &buf[tail_start..cursor];
+
+    // Look for `[<` anywhere in the tail — that's the start of an SGR mouse seq.
+    // Everything after it (digits, ;, M/m) is garbage until a non-matching char.
+    if let Some(csi_pos) = tail.rfind("[<") {
+        let after_csi = &tail[csi_pos + 2..];
+        // If everything after `[<` is digits/semicolons (still in the sequence),
+        // then this next char is part of it too
+        if after_csi
+            .chars()
+            .all(|ch| ch.is_ascii_digit() || matches!(ch, ';' | 'M' | 'm'))
+        {
+            return true;
+        }
+    }
+
+    // `[` at the end of tail = CSI just started, `<` would be next
+    if tail.ends_with('[') && matches!(c, '<' | 'A'..='Z' | 'a'..='z') {
+        return true;
+    }
+
+    // Tail ends with `[<` partially built — suppress digits/; that follow
+    if tail.ends_with("[<")
+        || tail.ends_with(|ch: char| ch.is_ascii_digit() || ch == ';')
+            && tail.contains("[<")
+    {
+        return matches!(c, '0'..='9' | ';' | 'M' | 'm');
+    }
+
+    false
+}
+
 /// Find the byte offset in `text` where the cumulative display width reaches `target_col`.
 fn byte_offset_at_display_col(text: &str, target_col: usize) -> usize {
     let mut width = 0usize;
@@ -19,6 +65,54 @@ fn byte_offset_at_display_col(text: &str, target_col: usize) -> usize {
 }
 
 impl App {
+    /// Remove mouse tracking / CSI escape fragments from `input_buffer`.
+    ///
+    /// When tmux pane-switches while mouse capture is active, raw SGR mouse
+    /// sequences (`\x1b[<35;116;77M`) get split across reads and crossterm
+    /// delivers them as individual `Key(Char(...))` events — digits, `;`,
+    /// `[`, `<`, `M`, etc.  On `FocusGained` we scrub anything that looks
+    /// like these fragments so the user doesn't see garbage.
+    pub fn clear_escape_garbage(&mut self) {
+        if self.input_buffer.is_empty() {
+            return;
+        }
+        // Fast path: if the buffer only contains chars that could be part of
+        // normal text AND doesn't contain the telltale `[<` or `;` + digit
+        // patterns of SGR mouse sequences, skip the work.
+        let dominated_by_garbage = {
+            let total = self.input_buffer.len();
+            let garbage_chars = self
+                .input_buffer
+                .chars()
+                .filter(|c| matches!(c, '\x1b' | '[' | '<' | 'M' | 'm' | '^'))
+                .count();
+            // If >30% of chars are escape-related, the buffer is garbled
+            total > 5 && garbage_chars * 100 / total > 30
+        };
+        if !dominated_by_garbage {
+            return;
+        }
+        // Strip escape sequences via the same helper used for paste events
+        let cleaned = Self::strip_terminal_escapes(&self.input_buffer);
+        // Also remove leftover mouse-sequence fragment chars (digits, semicolons,
+        // M, m, [, <, ^) that arrived as individual key events
+        let cleaned: String = cleaned
+            .chars()
+            .filter(|c| !matches!(c, '[' | '<' | '>' | 'M' | 'm' | '^'))
+            .collect();
+        if cleaned.trim().is_empty() {
+            tracing::debug!(
+                "Cleared {} bytes of escape garbage from input buffer",
+                self.input_buffer.len()
+            );
+            self.input_buffer.clear();
+            self.cursor_position = 0;
+        } else {
+            self.input_buffer = cleaned;
+            self.cursor_position = self.input_buffer.len().min(self.cursor_position);
+        }
+    }
+
     /// Returns (line_start_byte, column_bytes) for the cursor's current logical line.
     /// `line_start_byte` is the byte offset where the current line begins (after `\n`).
     /// `column_bytes` is how many bytes into the line the cursor is.
@@ -1008,14 +1102,16 @@ impl App {
                     if !event.modifiers.contains(KeyModifiers::CONTROL)
                         || event.modifiers.contains(KeyModifiers::ALT) =>
                 {
-                    // Accept character input when:
-                    // - No CONTROL modifier (normal typing, SHIFT, SUPER, etc.)
-                    // - CONTROL+ALT together (AltGr on Windows — needed for / ? @ \
-                    //   on non-US keyboard layouts)
-                    // This excludes CONTROL-only combos (Ctrl+C, Ctrl+N, etc.)
-                    // which are handled earlier in the input chain.
-                    self.input_buffer.insert(self.cursor_position, c);
-                    self.cursor_position += c.len_utf8();
+                    // Reject chars that are fragments of mouse tracking CSI
+                    // sequences leaked through tmux pane switches.  Pattern:
+                    // ESC [ < Ps ; Ps ; Ps M  — the ESC is eaten by crossterm
+                    // as KeyCode::Esc, leaving [, <, digits, ;, M as chars.
+                    if is_mouse_sequence_fragment(c, &self.input_buffer, self.cursor_position) {
+                        // silently drop — not real user input
+                    } else {
+                        self.input_buffer.insert(self.cursor_position, c);
+                        self.cursor_position += c.len_utf8();
+                    }
                 }
                 KeyCode::Backspace if event.modifiers.is_empty() && self.cursor_position > 0 => {
                     // Find the previous char boundary
