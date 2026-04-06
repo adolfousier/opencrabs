@@ -88,15 +88,20 @@ async fn run_loop(
             tokio::time::timeout(tokio::time::Duration::from_millis(100), app.next_event()).await;
 
         if let Ok(Some(event)) = event {
-            // On focus regain, re-sync mouse capture to flush stale escape
-            // sequences that accumulated while the terminal was unfocused
-            // (e.g. tmux pane switch, alt-tab).
-            if matches!(event, TuiEvent::FocusGained) {
-                execute!(
-                    terminal.backend_mut(),
-                    DisableMouseCapture,
-                    EnableMouseCapture
-                )?;
+            // Disable mouse capture when losing focus so the terminal stops
+            // queuing SGR mouse sequences that pile up while unfocused.
+            // Re-enable on focus regain and clear any garbage from input.
+            match &event {
+                TuiEvent::FocusLost => {
+                    execute!(terminal.backend_mut(), DisableMouseCapture)?;
+                }
+                TuiEvent::FocusGained => {
+                    execute!(terminal.backend_mut(), EnableMouseCapture)?;
+                    // Clear any garbage that leaked into the input buffer
+                    // while mouse capture was active in another tmux pane.
+                    app.clear_escape_garbage();
+                }
+                _ => {}
             }
 
             if let Err(e) = app.handle_event(event).await {
