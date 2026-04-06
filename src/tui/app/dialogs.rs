@@ -4,6 +4,7 @@ use super::events::{AppMode, TuiEvent};
 use super::onboarding::{OnboardingStep, WizardAction};
 use super::*;
 use crate::brain::provider::{ContentBlock, LLMRequest};
+use crate::tui::provider_selector::{CUSTOM_INSTANCES_START, CUSTOM_PROVIDER_IDX};
 use anyhow::Result;
 use std::path::PathBuf;
 
@@ -78,8 +79,8 @@ impl App {
                     .custom_names
                     .iter()
                     .position(|n| n == name)
-                    .map(|pos| 10 + pos)
-                    .unwrap_or(10);
+                    .map(|pos| CUSTOM_INSTANCES_START + pos)
+                    .unwrap_or(CUSTOM_PROVIDER_IDX);
                 (idx, api_key)
             }
         });
@@ -94,8 +95,8 @@ impl App {
 
             let mut found: Option<(usize, Option<String>)> = None;
 
-            // Check known providers (indices 0-8) by iterating PROVIDERS
-            for (idx, info) in PROVIDERS.iter().enumerate().take(10) {
+            // Check known providers by iterating PROVIDERS (skip custom sentinel)
+            for (idx, info) in PROVIDERS.iter().enumerate().take(CUSTOM_PROVIDER_IDX) {
                 if let Some(cfg) = prov::config_for(&config.providers, info.id)
                     && cfg.enabled
                 {
@@ -112,7 +113,7 @@ impl App {
                                 found = Some((mi, cfg.api_key.clone()));
                             }
                         } else {
-                            found = Some((10, cfg.api_key.clone())); // custom-like
+                            found = Some((CUSTOM_PROVIDER_IDX, cfg.api_key.clone())); // custom-like
                         }
                         break;
                     }
@@ -141,8 +142,8 @@ impl App {
                     .custom_names
                     .iter()
                     .position(|n| n == name)
-                    .map(|pos| 10 + pos)
-                    .unwrap_or(10);
+                    .map(|pos| CUSTOM_INSTANCES_START + pos)
+                    .unwrap_or(CUSTOM_PROVIDER_IDX);
                 found = Some((idx, custom_cfg.api_key.clone()));
             }
 
@@ -220,7 +221,7 @@ impl App {
             // - Normal providers: provider(0) -> api_key(1) -> model(2) -> provider(0)
             // - Zhipu: provider(0) -> endpoint_type(1) -> api_key(2) -> model(3) -> provider(0)
             // - Custom provider: provider(0) -> base_url(1) -> api_key(2) -> model(3) -> provider(0)
-            let is_custom = self.ps.selected_provider >= 10; // Custom provider index
+            let is_custom = self.ps.selected_provider >= CUSTOM_PROVIDER_IDX; // Custom provider index
             let max_field = if is_custom {
                 5
             } else if is_zhipu {
@@ -235,12 +236,12 @@ impl App {
             // Provider selection (focused)
             // Navigate using display order: static providers sorted alphabetically, then customs, then "+New"
             let num_customs = self.ps.custom_names.len();
-            let mut static_indices: Vec<usize> = (0..10).collect();
+            let mut static_indices: Vec<usize> = (0..CUSTOM_PROVIDER_IDX).collect();
             static_indices.sort_by_key(|&i| PROVIDERS[i].name.to_ascii_lowercase());
             let display_order: Vec<usize> = static_indices
                 .into_iter()
-                .chain(10..10 + num_customs)
-                .chain(std::iter::once(10))
+                .chain(CUSTOM_INSTANCES_START..CUSTOM_INSTANCES_START + num_customs)
+                .chain(std::iter::once(CUSTOM_PROVIDER_IDX))
                 .collect();
             let provider_changed = match event.code {
                 crossterm::event::KeyCode::Up => {
@@ -277,16 +278,16 @@ impl App {
 
                 // Clear/populate custom fields based on selected provider
                 let provider_idx = self.ps.selected_provider;
-                if provider_idx == 10 {
+                if provider_idx == CUSTOM_PROVIDER_IDX {
                     // "+ New Custom" — clear all custom fields for fresh entry
                     self.ps.custom_name.clear();
                     self.ps.custom_model.clear();
                     self.ps.base_url.clear();
                     self.ps.context_window.clear();
                     self.ps.api_key_input.clear();
-                } else if provider_idx >= 10 {
+                } else if provider_idx >= CUSTOM_INSTANCES_START {
                     // Existing custom provider — populate fields from config
-                    let custom_idx = provider_idx - 10;
+                    let custom_idx = provider_idx - CUSTOM_INSTANCES_START;
                     if let Some(name) = self.ps.custom_names.get(custom_idx).cloned()
                         && let Ok(c) = crate::config::Config::load()
                         && let Some(cfg) = c.providers.custom_by_name(&name)
@@ -362,7 +363,7 @@ impl App {
                 }
                 _ => {}
             }
-        } else if self.ps.focused_field == 1 && self.ps.selected_provider >= 10 {
+        } else if self.ps.focused_field == 1 && self.ps.selected_provider >= CUSTOM_PROVIDER_IDX {
             // Base URL input for Custom provider (field 1)
             match event.code {
                 crossterm::event::KeyCode::Char(c) => {
@@ -375,7 +376,7 @@ impl App {
             }
         } else if (self.ps.focused_field == 1 && self.ps.selected_provider < 7 && !is_zhipu)
             || (self.ps.focused_field == 2 && is_zhipu)
-            || (self.ps.focused_field == 2 && self.ps.selected_provider >= 10)
+            || (self.ps.focused_field == 2 && self.ps.selected_provider >= CUSTOM_PROVIDER_IDX)
         {
             // API key input (field 1 for non-Custom non-zhipu, field 2 for zhipu/Custom)
             match event.code {
@@ -387,7 +388,7 @@ impl App {
                 }
                 _ => {}
             }
-        } else if self.ps.focused_field == 3 && self.ps.selected_provider >= 10 {
+        } else if self.ps.focused_field == 3 && self.ps.selected_provider >= CUSTOM_PROVIDER_IDX {
             // Custom provider: free-text model name input (field 3)
             match event.code {
                 crossterm::event::KeyCode::Char(c) => {
@@ -398,7 +399,7 @@ impl App {
                 }
                 _ => {}
             }
-        } else if self.ps.focused_field == 4 && self.ps.selected_provider >= 10 {
+        } else if self.ps.focused_field == 4 && self.ps.selected_provider >= CUSTOM_PROVIDER_IDX {
             // Custom provider: name identifier input (field 4)
             match event.code {
                 crossterm::event::KeyCode::Char(c) => {
@@ -411,7 +412,7 @@ impl App {
                 }
                 _ => {}
             }
-        } else if self.ps.focused_field == 5 && self.ps.selected_provider >= 10 {
+        } else if self.ps.focused_field == 5 && self.ps.selected_provider >= CUSTOM_PROVIDER_IDX {
             // Custom provider: context window input (field 5 — last before save)
             match event.code {
                 crossterm::event::KeyCode::Char(c) if c.is_ascii_digit() => {
@@ -422,7 +423,9 @@ impl App {
                 }
                 _ => {}
             }
-        } else if (self.ps.focused_field == 2 && self.ps.selected_provider < 10 && !is_zhipu)
+        } else if (self.ps.focused_field == 2
+            && self.ps.selected_provider < CUSTOM_PROVIDER_IDX
+            && !is_zhipu)
             || (self.ps.focused_field == 3 && is_zhipu)
         {
             // Non-custom: filter/search model list (field 2, or field 3 for zhipu)
@@ -480,7 +483,7 @@ impl App {
 
         // Enter to confirm - move to next field
         if keys::is_enter(&event) {
-            let is_custom = self.ps.selected_provider >= 10;
+            let is_custom = self.ps.selected_provider >= CUSTOM_PROVIDER_IDX;
 
             tracing::debug!(
                 "[model_selector] Enter pressed: field={}, provider_idx={}, is_custom={}, custom_name='{}', base_url='{}'",
@@ -772,7 +775,7 @@ impl App {
                         .map(|s| s.to_string())
                         .unwrap_or_else(|| "default".to_string())
                 })
-        } else if provider_idx >= 10 {
+        } else if provider_idx >= CUSTOM_PROVIDER_IDX {
             self.ps.custom_model.clone()
         } else if !self.ps.models.is_empty() {
             let filter = self.ps.model_filter.to_lowercase();
@@ -1053,7 +1056,7 @@ impl App {
         }
 
         // Refresh custom provider names list after saving (so new entries appear immediately)
-        if provider_idx == 9
+        if provider_idx == CUSTOM_PROVIDER_IDX
             && let Ok(fresh) = crate::config::Config::load()
         {
             self.ps.custom_names = fresh
@@ -1109,7 +1112,7 @@ impl App {
 
         // Rebuild agent service with new provider (now sees the correct model)
         if let Err(e) = self.rebuild_agent_service().await {
-            if api_key.is_none() && provider_idx == 9 {
+            if api_key.is_none() && provider_idx == CUSTOM_PROVIDER_IDX {
                 self.push_system_message(format!(
                     "API key required for {}. Type it and press Enter.",
                     provider
@@ -1145,17 +1148,18 @@ impl App {
         // Only close dialog if explicitly requested
         if close_dialog {
             // Use user-configured name for custom providers (e.g. "nvidia"), fall back to generic
-            let provider_name = if provider_idx == 9 && !self.ps.custom_name.is_empty() {
-                self.ps.custom_name.clone()
-            } else {
-                provider
-                    .name
-                    .split('(')
-                    .next()
-                    .unwrap_or(provider.name)
-                    .trim()
-                    .to_string()
-            };
+            let provider_name =
+                if provider_idx == CUSTOM_PROVIDER_IDX && !self.ps.custom_name.is_empty() {
+                    self.ps.custom_name.clone()
+                } else {
+                    provider
+                        .name
+                        .split('(')
+                        .next()
+                        .unwrap_or(provider.name)
+                        .trim()
+                        .to_string()
+                };
 
             let change_msg = format!(
                 "[Model changed to {} (provider: {})]",

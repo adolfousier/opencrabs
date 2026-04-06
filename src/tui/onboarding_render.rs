@@ -7,6 +7,7 @@ use super::onboarding::{
     ImageField, OnboardingStep, OnboardingWizard, PROVIDERS, SlackField, TelegramField,
     TrelloField, WizardMode,
 };
+use super::provider_selector::CUSTOM_PROVIDER_IDX;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Flex, Layout, Rect},
@@ -511,7 +512,7 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
         } else if idx < PROVIDERS.len() {
             PROVIDERS[idx].name.to_string()
         } else {
-            let custom_idx = idx - 10;
+            let custom_idx = idx - crate::tui::provider_selector::CUSTOM_INSTANCES_START;
             wizard
                 .ps
                 .custom_names
@@ -821,8 +822,8 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
             lines.push(Line::from(""));
         }
 
-        // CLI providers (Claude CLI, OpenCode CLI) have no API key — skip the field
-        if !matches!(wizard.ps.selected_provider, 7 | 8) {
+        // CLI providers have no API key — skip the field
+        if !wizard.ps.is_cli() {
             let key_focused = wizard.auth_field == AuthField::ApiKey;
             let key_label = provider.key_label;
             let (masked_key, key_hint) = if wizard.ps.has_existing_key_sentinel() {
@@ -2453,7 +2454,9 @@ fn render_complete(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
 
     // Summary
     let provider = &PROVIDERS[wizard.ps.selected_provider.min(PROVIDERS.len() - 1)];
-    let provider_label = if wizard.ps.selected_provider >= 9 && !wizard.ps.custom_name.is_empty() {
+    let provider_label = if wizard.ps.selected_provider >= CUSTOM_PROVIDER_IDX
+        && !wizard.ps.custom_name.is_empty()
+    {
         wizard.ps.custom_name.clone()
     } else {
         provider.name.to_string()

@@ -1736,8 +1736,11 @@ impl App {
                                 7 => c.providers.claude_cli.and_then(|p| p.default_model),
                                 8 => c.providers.opencode_cli.and_then(|p| p.default_model),
                                 9 => c.providers.qwen_code_cli.and_then(|p| p.default_model),
-                                idx if idx >= 11 => {
-                                    let ci = idx - 11;
+                                idx if idx
+                                    >= crate::tui::provider_selector::CUSTOM_INSTANCES_START =>
+                                {
+                                    let ci =
+                                        idx - crate::tui::provider_selector::CUSTOM_INSTANCES_START;
                                     self.ps.custom_names.get(ci).and_then(|name| {
                                         c.providers
                                             .custom_by_name(name)

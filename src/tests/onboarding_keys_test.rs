@@ -20,7 +20,7 @@ fn test_provider_count_matches() {
     assert_eq!(PROVIDERS[6].name, "z.ai GLM");
     assert_eq!(PROVIDERS[7].name, "Claude CLI");
     assert_eq!(PROVIDERS[8].name, "OpenCode CLI");
-    assert_eq!(PROVIDERS[9].name, "Qwen Code");
+    assert_eq!(PROVIDERS[9].name, "Qwen CLI");
     assert_eq!(PROVIDERS[10].name, "Custom OpenAI-Compatible");
 }
 
