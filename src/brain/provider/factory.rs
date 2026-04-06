@@ -245,9 +245,21 @@ pub fn create_provider_by_name(config: &Config, name: &str) -> Result<Arc<dyn Pr
             }
         }
         "qwen-code" | "qwen_code" | "qwen-code-cli" | "qwen_code_cli" => {
-            tracing::info!("Using fallback: Qwen Code");
-            try_create_qwen_code(config)?
-                .ok_or_else(|| anyhow::anyhow!("Qwen Code CLI not available"))
+            // Bypass enabled check — session explicitly requested this provider
+            let model = config
+                .providers
+                .qwen_code_cli
+                .as_ref()
+                .and_then(|c| c.default_model.clone());
+            match QwenCodeCliProvider::new() {
+                Ok(mut provider) => {
+                    if let Some(m) = model {
+                        provider = provider.with_default_model(m);
+                    }
+                    Ok(Arc::new(provider))
+                }
+                Err(e) => Err(anyhow::anyhow!("Qwen Code binary not found: {}", e)),
+            }
         }
         "anthropic" => try_create_anthropic(config)?
             .ok_or_else(|| anyhow::anyhow!("Anthropic not configured (missing API key)")),
@@ -362,6 +374,10 @@ fn create_fallback(config: &Config, fallback_type: &str) -> Result<Arc<dyn Provi
         "gemini" => {
             tracing::info!("Using fallback: Gemini");
             try_create_gemini(config)?.ok_or_else(|| anyhow::anyhow!("Gemini not configured"))
+        }
+        "qwen-code" | "qwen_code" | "qwen-code-cli" | "qwen_code_cli" => {
+            tracing::info!("Using fallback: Qwen Code");
+            try_create_qwen_code(config)?.ok_or_else(|| anyhow::anyhow!("Qwen Code not available"))
         }
         "custom" => {
             tracing::info!("Using fallback: Custom OpenAI-Compatible");

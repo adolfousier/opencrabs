@@ -77,6 +77,16 @@ pub const PROVIDERS: &[ProviderInfo] = &[
         ],
     },
     ProviderInfo {
+        id: "qwen-code-cli",
+        name: "Qwen Code",
+        models: &["qwen3-coder-plus", "qwen3.5-plus"],
+        key_label: "",
+        help_lines: &[
+            "Uses local 'qwen' CLI subprocess — 1k free req/day via Qwen OAuth",
+            "Requires: npm install -g @qwen-code/qwen-code  OR  brew install qwen-code",
+        ],
+    },
+    ProviderInfo {
         id: "", // dynamic — custom providers use runtime names
         name: "Custom OpenAI-Compatible",
         models: &[],
