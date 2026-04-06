@@ -359,6 +359,17 @@ pub fn redact_secrets(text: &str) -> String {
     result
 }
 
+/// Strip ANSI escape sequences from text (CSI sequences, OSC, etc.).
+///
+/// Bash/SSH tool output often contains terminal control codes that corrupt
+/// the TUI when rendered raw. Call this on any tool output before display.
+pub fn strip_ansi_escapes(text: &str) -> String {
+    static ANSI_RE: Lazy<Regex> = Lazy::new(|| {
+        Regex::new(r"\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[()][0-9A-B]|\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]").unwrap()
+    });
+    ANSI_RE.replace_all(text, "").into_owned()
+}
+
 /// Strip LLM-hallucinated artifacts from text before external delivery.
 ///
 /// Removes:
