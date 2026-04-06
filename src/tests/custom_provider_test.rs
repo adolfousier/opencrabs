@@ -350,41 +350,44 @@ fn no_active_custom_when_none() {
 #[test]
 fn wizard_is_custom_for_new_and_existing() {
     use crate::tui::onboarding::OnboardingWizard;
+    use crate::tui::provider_selector::{CUSTOM_PROVIDER_IDX, CUSTOM_INSTANCES_START};
     let mut wizard = OnboardingWizard::new();
-    // Index 9 = "+ New Custom Provider"
-    wizard.ps.selected_provider = 9;
+    // CUSTOM_PROVIDER_IDX = "+ New Custom Provider"
+    wizard.ps.selected_provider = CUSTOM_PROVIDER_IDX;
     assert!(wizard.ps.is_custom());
-    // Index 10+ = existing custom providers
-    wizard.ps.selected_provider = 10;
+    // CUSTOM_INSTANCES_START+ = existing custom providers
+    wizard.ps.selected_provider = CUSTOM_INSTANCES_START;
     assert!(wizard.ps.is_custom());
-    wizard.ps.selected_provider = 11;
+    wizard.ps.selected_provider = CUSTOM_INSTANCES_START + 1;
     assert!(wizard.ps.is_custom());
-    // Index < 9 = not custom
+    // Index < CUSTOM_PROVIDER_IDX = not custom
     wizard.ps.selected_provider = 0;
     assert!(!wizard.ps.is_custom());
-    wizard.ps.selected_provider = 8;
+    wizard.ps.selected_provider = CUSTOM_PROVIDER_IDX - 1;
     assert!(!wizard.ps.is_custom());
 }
 
 #[test]
 fn wizard_current_provider_clamps_for_existing_custom() {
     use crate::tui::onboarding::{OnboardingWizard, PROVIDERS};
+    use crate::tui::provider_selector::{CUSTOM_PROVIDER_IDX, CUSTOM_INSTANCES_START};
     let mut wizard = OnboardingWizard::new();
-    // Index 10 should map to the Custom entry (index 9) in PROVIDERS
-    wizard.ps.selected_provider = 10;
-    assert_eq!(wizard.ps.current_provider().name, PROVIDERS[9].name);
+    // CUSTOM_INSTANCES_START+ should map to the Custom entry in PROVIDERS
+    wizard.ps.selected_provider = CUSTOM_INSTANCES_START;
+    assert_eq!(wizard.ps.current_provider().name, PROVIDERS[CUSTOM_PROVIDER_IDX].name);
     wizard.ps.selected_provider = 99;
-    assert_eq!(wizard.ps.current_provider().name, PROVIDERS[9].name);
+    assert_eq!(wizard.ps.current_provider().name, PROVIDERS[CUSTOM_PROVIDER_IDX].name);
 }
 
 #[test]
 fn wizard_load_custom_fields_clears_for_new() {
     use crate::tui::onboarding::OnboardingWizard;
+    use crate::tui::provider_selector::CUSTOM_PROVIDER_IDX;
     let mut wizard = OnboardingWizard::new();
     wizard.ps.custom_name = "leftover".to_string();
     wizard.ps.base_url = "http://old-url".to_string();
     wizard.ps.custom_model = "old-model".to_string();
-    wizard.ps.selected_provider = 9;
+    wizard.ps.selected_provider = CUSTOM_PROVIDER_IDX;
     wizard.ps.load_custom_fields();
     assert!(wizard.ps.custom_name.is_empty());
     assert!(wizard.ps.base_url.is_empty());
