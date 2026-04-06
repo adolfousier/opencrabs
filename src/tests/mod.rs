@@ -16,6 +16,7 @@ pub mod github_provider_test;
 pub mod html_comment_strip_test;
 pub mod openai_provider_test;
 pub mod opencode_provider_test;
+pub mod rate_limiter_test;
 //pub mod error_scenarios_test;
 pub mod fallback_vision_test;
 pub mod file_extract_test;

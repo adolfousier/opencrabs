@@ -17,6 +17,10 @@ use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
 
+/// Fixed reference point for nanosecond timestamps.
+/// All `last_granted` values are stored as nanoseconds since this Instant.
+static PROCESS_START: LazyLock<Instant> = LazyLock::new(Instant::now);
+
 /// Global rate limiter shared by ALL OpenRouter :free provider instances.
 /// 20 req/min → 3s between requests across the entire process.
 pub static OPENROUTER_FREE_LIMITER: LazyLock<Arc<RateLimiter>> =
@@ -29,8 +33,9 @@ pub static OPENROUTER_FREE_LIMITER: LazyLock<Arc<RateLimiter>> =
 #[derive(Debug)]
 pub struct RateLimiter {
     /// Minimum gap between allowed requests.
-    min_interval: Duration,
-    /// Nanosecond timestamp of the last granted request.
+    pub(crate) min_interval: Duration,
+    /// Nanoseconds since PROCESS_START when the last request was granted.
+    /// 0 = no request yet.
     last_granted: AtomicU64,
 }
 
@@ -39,7 +44,8 @@ impl RateLimiter {
     pub fn new(min_interval: Duration) -> Self {
         Self {
             min_interval,
-            // Start in the past so the very first request never waits.
+            // 0 = no slot claimed yet. First call will always win because
+            // PROCESS_START.elapsed() is always >> 0.
             last_granted: AtomicU64::new(0),
         }
     }
@@ -49,19 +55,36 @@ impl RateLimiter {
         Self::new(Duration::from_secs(3))
     }
 
+    fn now_ns() -> u64 {
+        PROCESS_START.elapsed().as_nanos() as u64
+    }
+
     /// Wait if necessary so that at least `min_interval` has elapsed since the
     /// previous successful call. Returns the duration we actually slept
     /// (zero if we were already within budget).
     pub async fn wait(&self) -> Duration {
-        let now_ns = Instant::now().elapsed().as_nanos() as u64;
+        let now_ns = Self::now_ns();
 
         loop {
             let last = self.last_granted.load(Ordering::Acquire);
+
+            if last == 0 {
+                // No previous grant — first call always wins immediately.
+                // Treat 0 as a sentinel regardless of `now_ns` value.
+                if self
+                    .last_granted
+                    .compare_exchange(0, now_ns, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+                {
+                    return Duration::ZERO;
+                }
+                continue;
+            }
+
             let elapsed_ns = now_ns.saturating_sub(last);
             let elapsed = Duration::from_nanos(elapsed_ns);
 
             if elapsed >= self.min_interval {
-                // CAS to claim this slot. If another thread beat us, retry.
                 if self
                     .last_granted
                     .compare_exchange(last, now_ns, Ordering::AcqRel, Ordering::Acquire)
@@ -69,7 +92,6 @@ impl RateLimiter {
                 {
                     return Duration::ZERO;
                 }
-                // Another thread won — re-check with updated `last`.
                 continue;
             }
 
@@ -84,47 +106,6 @@ impl RateLimiter {
                 sleep(sleep_for).await;
                 return sleep_for;
             }
-            // CAS failed — recalculate with fresh last_granted.
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_first_call_is_free() {
-        let limiter = RateLimiter::new(Duration::from_millis(50));
-        let waited = limiter.wait().await;
-        assert_eq!(waited, Duration::ZERO);
-    }
-
-    #[tokio::test]
-    async fn test_enforces_minimum_gap() {
-        let limiter = RateLimiter::new(Duration::from_millis(50));
-        limiter.wait().await; // first call, instant
-
-        let start = Instant::now();
-        limiter.wait().await;
-        let elapsed = start.elapsed();
-
-        assert!(
-            elapsed >= Duration::from_millis(40),
-            "expected ≥40ms gap, got {:?}",
-            elapsed
-        );
-    }
-
-    #[tokio::test]
-    async fn test_no_wait_after_gap() {
-        let limiter = RateLimiter::new(Duration::from_millis(20));
-        limiter.wait().await;
-        sleep(Duration::from_millis(30)).await;
-
-        let start = Instant::now();
-        let waited = limiter.wait().await;
-        assert_eq!(waited, Duration::ZERO);
-        assert!(start.elapsed() < Duration::from_millis(5));
     }
 }
