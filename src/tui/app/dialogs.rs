@@ -491,7 +491,7 @@ impl App {
                 self.ps.base_url,
             );
 
-            let is_cli_provider = matches!(self.ps.selected_provider, 7 | 8 | 9);
+            let is_cli_provider = matches!(self.ps.selected_provider, 7..=9);
 
             if self.ps.focused_field == 0 {
                 // On provider field - save config, DON'T close dialog
