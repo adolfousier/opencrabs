@@ -69,7 +69,7 @@ pub const KNOWN_PROVIDERS: &[ProviderMeta] = &[
     },
     ProviderMeta {
         id: "qwen-code-cli",
-        display_name: "Qwen Code",
+        display_name: "Qwen CLI",
         config_section: "providers.qwen_code_cli",
         needs_api_key: false,
     },

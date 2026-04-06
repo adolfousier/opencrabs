@@ -78,8 +78,8 @@ pub const PROVIDERS: &[ProviderInfo] = &[
     },
     ProviderInfo {
         id: "qwen-code-cli",
-        name: "Qwen Code",
-        models: &["qwen3-coder-plus", "qwen3.5-plus"],
+        name: "Qwen CLI",
+        models: &["qwen3.6-plus", "qwen3.5-plus", "qwen3-coder-plus"],
         key_label: "",
         help_lines: &[
             "Uses local 'qwen' CLI subprocess — 1k free req/day via Qwen OAuth",
@@ -97,7 +97,7 @@ pub const PROVIDERS: &[ProviderInfo] = &[
 
 pub struct ProviderInfo {
     /// Canonical provider id matching `KNOWN_PROVIDERS` (e.g. "anthropic", "claude-cli")
-    /// Empty string for "Custom OpenAI-Compatible" (index 9) which is dynamic.
+    /// Empty string for "Custom OpenAI-Compatible" (last entry) which is dynamic.
     pub id: &'static str,
     pub name: &'static str,
     pub models: &'static [&'static str],

@@ -2606,7 +2606,7 @@ pub fn resolve_provider_from_config(config: &Config) -> (&str, &str) {
             .as_ref()
             .and_then(|p| p.default_model.as_deref())
             .unwrap_or("qwen3-coder-plus");
-        return ("Qwen Code", model);
+        return ("Qwen CLI", model);
     }
     if let Some((name, cfg)) = config.providers.active_custom() {
         let model = cfg.default_model.as_deref().unwrap_or("default");

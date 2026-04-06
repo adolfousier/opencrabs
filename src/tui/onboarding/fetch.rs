@@ -194,6 +194,11 @@ pub async fn fetch_provider_models(
         return fetch_opencode_models().await;
     }
 
+    // Qwen CLI — fetch models via `qwen models` command
+    if provider_index == 9 {
+        return fetch_qwen_models().await;
+    }
+
     // Handle Minimax specially - no /models API, must use config
     if provider_index == 5 {
         // Minimax — NO /models API endpoint, must use config.models
@@ -430,6 +435,61 @@ async fn fetch_opencode_models() -> Vec<String> {
 }
 
 async fn run_opencode_models(binary: &str) -> Vec<String> {
+    let output = match tokio::process::Command::new(binary)
+        .arg("models")
+        .output()
+        .await
+    {
+        Ok(o) if o.status.success() => o,
+        _ => return Vec::new(),
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut models: Vec<String> = stdout
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty() && !l.starts_with('{'))
+        .map(|l| l.to_string())
+        .collect();
+    models.sort();
+    models
+}
+
+/// Fetch available models from the qwen CLI binary.
+async fn fetch_qwen_models() -> Vec<String> {
+    let home = dirs::home_dir().unwrap_or_default();
+    let candidates = [
+        std::env::var("QWEN_PATH").unwrap_or_default(),
+        home.join(".npm-global/bin/qwen")
+            .to_string_lossy()
+            .to_string(),
+        "/opt/homebrew/bin/qwen".to_string(),
+        "/usr/local/bin/qwen".to_string(),
+    ];
+
+    let binary = candidates
+        .iter()
+        .find(|p| !p.is_empty() && std::path::Path::new(p).exists());
+
+    let Some(binary) = binary else {
+        if let Ok(output) = tokio::process::Command::new("which")
+            .arg("qwen")
+            .output()
+            .await
+            && output.status.success()
+        {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return run_qwen_models(&path).await;
+            }
+        }
+        return Vec::new();
+    };
+
+    run_qwen_models(binary).await
+}
+
+async fn run_qwen_models(binary: &str) -> Vec<String> {
     let output = match tokio::process::Command::new(binary)
         .arg("models")
         .output()

@@ -374,7 +374,7 @@ impl OnboardingWizard {
                         return WizardAction::GitHubDeviceFlow;
                     } else if self.ps.is_custom() {
                         self.auth_field = AuthField::CustomName;
-                    } else if matches!(self.ps.selected_provider, 7 | 8) {
+                    } else if self.ps.is_cli() {
                         // CLI providers (Claude CLI, OpenCode CLI): no API key — skip to model
                         self.auth_field = AuthField::Model;
                         self.ps.models.clear();
@@ -458,7 +458,7 @@ impl OnboardingWizard {
                 KeyCode::Backspace => {
                     if self.ps.model_filter.is_empty() {
                         // CLI providers have no API key — go back to Provider
-                        if matches!(self.ps.selected_provider, 7 | 8) {
+                        if self.ps.is_cli() {
                             self.auth_field = AuthField::Provider;
                         } else {
                             self.auth_field = AuthField::ApiKey;
@@ -472,7 +472,7 @@ impl OnboardingWizard {
                     self.next_step();
                 }
                 KeyCode::BackTab => {
-                    if matches!(self.ps.selected_provider, 7 | 8) {
+                    if self.ps.is_cli() {
                         self.auth_field = AuthField::Provider;
                     } else {
                         self.auth_field = AuthField::ApiKey;
