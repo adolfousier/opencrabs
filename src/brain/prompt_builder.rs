@@ -5,13 +5,14 @@
 
 use std::path::PathBuf;
 
-/// Core brain files — always injected (personality + identity only).
+/// Core brain files — always injected (personality + user context).
 const CORE_BRAIN_FILES: &[(&str, &str)] =
-    &[("SOUL.md", "personality"), ("IDENTITY.md", "identity")];
+    &[("SOUL.md", "personality"), ("USER.md", "user profile")];
 
 /// Contextual brain files — loaded on demand via the `load_brain_file` tool.
+/// IDENTITY.md lives here — only needed for cron jobs and social media replies.
 pub(crate) const CONTEXTUAL_BRAIN_FILES: &[(&str, &str)] = &[
-    ("USER.md", "user profile"),
+    ("IDENTITY.md", "identity — social/cron replies only"),
     ("AGENTS.md", "workspace rules"),
     ("TOOLS.md", "tool notes"),
     ("CODE.md", "coding standards"),
@@ -23,9 +24,9 @@ pub(crate) const CONTEXTUAL_BRAIN_FILES: &[(&str, &str)] = &[
 ];
 
 /// All brain files in assembly order — kept for `build_system_brain` (full mode).
+/// IDENTITY.md excluded — only loaded on-demand for cron/social agent sessions.
 const BRAIN_FILES: &[(&str, &str)] = &[
     ("SOUL.md", "personality"),
-    ("IDENTITY.md", "identity"),
     ("USER.md", "user"),
     ("AGENTS.md", "agents"),
     ("TOOLS.md", "tools"),

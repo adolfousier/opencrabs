@@ -1,7 +1,7 @@
 //! Tests for `BrainLoader::build_core_brain()`.
 //!
-//! Verifies the lean-injection model: only SOUL.md + IDENTITY.md are baked into
-//! every request; all other files appear only as a memory index so the agent can
+//! Verifies the lean-injection model: SOUL.md + USER.md are baked into
+//! every request; all other files appear only as an index so the agent can
 //! retrieve them on demand via `load_brain_file`.
 
 use super::*;
@@ -41,13 +41,13 @@ fn test_soul_md_is_injected_in_core() {
 }
 
 #[test]
-fn test_identity_md_is_injected_in_core() {
+fn test_user_md_is_injected_in_core() {
     let dir = TempDir::new().unwrap();
-    write(&dir, "IDENTITY.md", "I am OpenCrabs the crab.");
+    write(&dir, "USER.md", "Name: Alice\nRole: Engineer");
     let brain = loader(&dir).build_core_brain(None, None);
     assert!(
-        brain.contains("I am OpenCrabs the crab."),
-        "IDENTITY.md must be injected in core brain"
+        brain.contains("Name: Alice"),
+        "USER.md must be injected in core brain"
     );
 }
 
@@ -57,6 +57,17 @@ fn test_identity_md_is_injected_in_core() {
 /// every request. The agent should retrieve them via `load_brain_file` only when
 /// the request actually needs them.
 #[test]
+fn test_identity_md_not_injected_in_core_brain() {
+    let dir = TempDir::new().unwrap();
+    write(&dir, "IDENTITY.md", "I am OpenCrabs the crab.");
+    let brain = loader(&dir).build_core_brain(None, None);
+    assert!(
+        !brain.contains("I am OpenCrabs the crab."),
+        "IDENTITY.md content must NOT be injected inline — used only for cron/social sessions"
+    );
+}
+
+#[test]
 fn test_memory_md_not_injected_in_core_brain() {
     let dir = TempDir::new().unwrap();
     write(&dir, "MEMORY.md", "SECRET_PROJECT_NOTES: do not leak.");
@@ -64,17 +75,6 @@ fn test_memory_md_not_injected_in_core_brain() {
     assert!(
         !brain.contains("SECRET_PROJECT_NOTES"),
         "MEMORY.md content must NOT be injected inline — only listed in the memory index"
-    );
-}
-
-#[test]
-fn test_user_md_not_injected_in_core_brain() {
-    let dir = TempDir::new().unwrap();
-    write(&dir, "USER.md", "Name: Alice\nRole: Engineer");
-    let brain = loader(&dir).build_core_brain(None, None);
-    assert!(
-        !brain.contains("Name: Alice"),
-        "USER.md content must NOT be injected inline"
     );
 }
 
@@ -111,6 +111,17 @@ fn test_security_md_not_injected_in_core_brain() {
     );
 }
 
+#[test]
+fn test_code_md_not_injected_in_core_brain() {
+    let dir = TempDir::new().unwrap();
+    write(&dir, "CODE.md", "RULE: use snake_case");
+    let brain = loader(&dir).build_core_brain(None, None);
+    assert!(
+        !brain.contains("RULE: use snake_case"),
+        "CODE.md content must NOT be injected inline"
+    );
+}
+
 // ── memory index is present when contextual files exist ──────────────────────
 
 /// The memory index tells the agent WHAT is available to retrieve. Without it,
@@ -133,12 +144,12 @@ fn test_memory_index_present_when_contextual_files_exist() {
 #[test]
 fn test_memory_index_lists_existing_files_only() {
     let dir = TempDir::new().unwrap();
-    write(&dir, "USER.md", "hello");
+    write(&dir, "IDENTITY.md", "I am a crab.");
     // MEMORY.md does NOT exist
     let brain = loader(&dir).build_core_brain(None, None);
     assert!(
-        brain.contains("USER.md"),
-        "index must list USER.md (exists)"
+        brain.contains("IDENTITY.md"),
+        "index must list IDENTITY.md (exists)"
     );
     assert!(
         !brain.contains("MEMORY.md"),
@@ -149,8 +160,9 @@ fn test_memory_index_lists_existing_files_only() {
 #[test]
 fn test_memory_index_absent_when_no_contextual_files_exist() {
     let dir = TempDir::new().unwrap();
-    // Only SOUL.md and IDENTITY.md — no contextual files
+    // Only SOUL.md and USER.md — no contextual files
     write(&dir, "SOUL.md", "I am a crab.");
+    write(&dir, "USER.md", "Name: Alice");
     let brain = loader(&dir).build_core_brain(None, None);
     assert!(
         !brain.contains("Available Context Files"),
@@ -164,7 +176,7 @@ fn test_memory_index_absent_when_no_contextual_files_exist() {
 fn test_load_guidance_tells_agent_when_to_retrieve() {
     let dir = TempDir::new().unwrap();
     write(&dir, "MEMORY.md", "notes");
-    write(&dir, "USER.md", "profile");
+    write(&dir, "IDENTITY.md", "identity");
     let brain = loader(&dir).build_core_brain(None, None);
     // Agent must know WHEN to call load_brain_file
     assert!(

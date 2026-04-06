@@ -111,6 +111,54 @@ impl AgentService {
         }
     }
 
+    /// Build a "recovered brain" context string from key brain files.
+    ///
+    /// After compaction wipes the conversation history, this restores the agent's
+    /// core identity, user context, tool documentation, and coding standards so it
+    /// doesn't wake up with only a lossy LLM summary.
+    ///
+    /// Selected files (~3-5k tokens total):
+    /// - SOUL.md — personality, tone, hard rules
+    /// - USER.md — who the human is, preferences
+    /// - TOOLS.md — environment-specific tool notes
+    /// - CODE.md — coding standards (so the agent knows how to write code)
+    ///
+    /// Skipped: MEMORY.md (summary replaces it), BOOT/BOOTSTRAP/HEARTBEAT (rarely
+    /// needed mid-task), SECURITY.md/AGENTS.md (loaded on demand if flagged in
+    /// summary), IDENTITY.md (only for cron/social sessions).
+    fn build_recovered_brain_context() -> String {
+        use std::path::PathBuf;
+
+        let brain_files = [
+            ("SOUL.md", "personality"),
+            ("USER.md", "user profile"),
+            ("TOOLS.md", "tool notes"),
+            ("CODE.md", "coding standards"),
+        ];
+
+        let opencrabs_home = crate::config::opencrabs_home();
+        let mut result = String::new();
+
+        for (filename, label) in brain_files {
+            let path: PathBuf = opencrabs_home.join(filename);
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let trimmed = content.trim();
+                if !trimmed.is_empty() {
+                    result.push_str(&format!(
+                        "--- {} ({}) ---\n{}\n\n",
+                        filename, label, trimmed
+                    ));
+                }
+            }
+        }
+
+        if result.is_empty() {
+            String::from("[No brain files found — agent context limited]\n\n")
+        } else {
+            format!("[RECOVERED BRAIN CONTEXT — these files define your identity, the user, your tools, and your coding standards. They take priority over any contradictory inference from the summary.]\n\n{}\n", result)
+        }
+    }
+
     /// Auto-compact the context when usage is too high.
     ///
     /// Before compaction, calculates the remaining context budget and sends
@@ -324,14 +372,19 @@ impl AgentService {
         // This gives the agent immediate access to recent context without needing
         // an extra session_search call after waking up.
         let recent_snapshot = Self::format_recent_messages(&context.messages, 8);
+
+        // Inject recovered brain files — after compaction the agent needs its
+        // identity, user context, tool docs, and coding standards back in full
+        // fidelity, not just a lossy LLM summary.
+        let brain_context = Self::build_recovered_brain_context();
         let summary_with_context = if recent_snapshot.is_empty() {
-            summary.clone()
+            format!("{}\n\n{}", brain_context, summary)
         } else {
             format!(
-                "{}\n\n## Recent Message Pairs (pre-compaction snapshot)\n\
+                "{}\n\n{}\n\n## Recent Message Pairs (pre-compaction snapshot)\n\
                  The following are the last messages before compaction — use them to \
                  understand the current task state and decide what context to reload.\n\n{}",
-                summary, recent_snapshot
+                brain_context, summary, recent_snapshot
             )
         };
 
