@@ -1721,8 +1721,9 @@ impl App {
                                 6 => c.providers.zhipu.and_then(|p| p.default_model),
                                 7 => c.providers.claude_cli.and_then(|p| p.default_model),
                                 8 => c.providers.opencode_cli.and_then(|p| p.default_model),
-                                idx if idx >= 10 => {
-                                    let ci = idx - 10;
+                                9 => c.providers.qwen_code_cli.and_then(|p| p.default_model),
+                                idx if idx >= 11 => {
+                                    let ci = idx - 11;
                                     self.ps.custom_names.get(ci).and_then(|name| {
                                         c.providers
                                             .custom_by_name(name)
