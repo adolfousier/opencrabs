@@ -820,18 +820,19 @@ pub fn active_provider_vision(config: &Config) -> Option<(String, String, String
     };
 
     if let Some(cfg) = active_cfg
-        && let (Some(api_key), Some(vision_model)) = (&cfg.api_key, &cfg.vision_model) {
-            let base_url = cfg
-                .base_url
-                .clone()
-                .unwrap_or_else(|| "https://api.openai.com/v1/chat/completions".to_string());
-            let base_url = if base_url.contains("/chat/completions") {
-                base_url
-            } else {
-                format!("{}/chat/completions", base_url.trim_end_matches('/'))
-            };
-            return Some((api_key.clone(), base_url, vision_model.clone()));
-        }
+        && let (Some(api_key), Some(vision_model)) = (&cfg.api_key, &cfg.vision_model)
+    {
+        let base_url = cfg
+            .base_url
+            .clone()
+            .unwrap_or_else(|| "https://api.openai.com/v1/chat/completions".to_string());
+        let base_url = if base_url.contains("/chat/completions") {
+            base_url
+        } else {
+            format!("{}/chat/completions", base_url.trim_end_matches('/'))
+        };
+        return Some((api_key.clone(), base_url, vision_model.clone()));
+    }
     // No provider-native vision — let cli/ui.rs fall back to Gemini if configured
     None
 }
