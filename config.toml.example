@@ -169,6 +169,12 @@ model = "gpt-4o-mini-tts" # TTS model
 # subagent_provider = "zhipu"
 # subagent_model = "GLM 5"
 
+# Auto-install new releases on startup (default: true).
+# When true, OpenCrabs checks GitHub on startup and silently installs any
+# new release, then hot-restarts. Set to false if you prefer to be prompted
+# before each update (or to /evolve manually).
+# auto_update = true
+
 [image.generation]
 enabled = false
 model = "gemini-3.1-flash-image-preview"   # Gemini image-gen model ("Nano Banana")

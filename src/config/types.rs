@@ -471,6 +471,11 @@ pub struct AgentConfig {
     /// Only used when subagent_provider is set.
     #[serde(default)]
     pub subagent_model: Option<String>,
+
+    /// Auto-install new releases on startup without prompting (default: true).
+    /// When false, the user is shown an update prompt dialog instead.
+    #[serde(default = "default_auto_update")]
+    pub auto_update: bool,
 }
 
 fn default_approval_policy() -> String {
@@ -489,6 +494,10 @@ fn default_max_tokens() -> u32 {
     65536
 }
 
+fn default_auto_update() -> bool {
+    true
+}
+
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
@@ -498,6 +507,7 @@ impl Default for AgentConfig {
             max_tokens: default_max_tokens(),
             subagent_provider: None,
             subagent_model: None,
+            auto_update: default_auto_update(),
         }
     }
 }

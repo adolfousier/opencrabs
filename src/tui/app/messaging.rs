@@ -575,10 +575,14 @@ impl App {
             "/evolve" => {
                 self.push_system_message("Checking for updates...".to_string());
                 let sender = self.event_sender();
-                let _ = sender.send(TuiEvent::MessageSubmitted(
-                    "Use the `evolve` tool now to check for and install the latest version."
-                        .to_string(),
-                ));
+                let sid = self
+                    .current_session
+                    .as_ref()
+                    .map(|s| s.id)
+                    .unwrap_or(Uuid::nil());
+                tokio::spawn(async move {
+                    run_evolve_directly(sid, sender).await;
+                });
                 true
             }
             "/whisper" => {
@@ -1859,6 +1863,53 @@ impl App {
             Err(e) => {
                 tracing::error!("Failed to query last message on cancel: {}", e);
             }
+        }
+    }
+}
+
+/// Run the evolve tool directly (no LLM involvement) and pipe progress
+/// events into TUI system messages. Used by `/evolve`, the UpdatePrompt
+/// dialog, and the auto-update path on startup.
+pub(crate) async fn run_evolve_directly(
+    session_id: Uuid,
+    sender: tokio::sync::mpsc::UnboundedSender<TuiEvent>,
+) {
+    use crate::brain::agent::ProgressEvent;
+    use crate::brain::tools::evolve::EvolveTool;
+    use crate::brain::tools::{Tool, ToolExecutionContext};
+    use std::sync::Arc;
+
+    // Translate ProgressEvent into TUI events so the user sees live status.
+    let tx = sender.clone();
+    let progress: crate::brain::agent::ProgressCallback = Arc::new(move |_sid, event| match event {
+        ProgressEvent::IntermediateText { text, .. } => {
+            let _ = tx.send(TuiEvent::SystemMessage(text));
+        }
+        ProgressEvent::RestartReady { status } => {
+            let _ = tx.send(TuiEvent::RestartReady(status));
+        }
+        _ => {}
+    });
+
+    let tool = EvolveTool::new(Some(progress));
+    let ctx = ToolExecutionContext::new(session_id);
+    match tool.execute(serde_json::json!({}), &ctx).await {
+        Ok(result) => {
+            if !result.success {
+                if let Some(err) = result.error {
+                    let _ = sender.send(TuiEvent::SystemMessage(format!("Evolve failed: {}", err)));
+                } else {
+                    let _ = sender.send(TuiEvent::SystemMessage(
+                        "Evolve failed (unknown error)".to_string(),
+                    ));
+                }
+            } else if !result.output.is_empty() {
+                // Already on latest, or non-restart success path — surface message.
+                let _ = sender.send(TuiEvent::SystemMessage(result.output));
+            }
+        }
+        Err(e) => {
+            let _ = sender.send(TuiEvent::SystemMessage(format!("Evolve error: {}", e)));
         }
     }
 }
