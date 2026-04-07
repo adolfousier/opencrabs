@@ -84,22 +84,31 @@ fn redact_command(cmd: &str) -> String {
         }
     }
 
-    // Redact inline header values and query params (case-insensitive)
-    let lower = result.to_lowercase();
+    // Redact inline header values and query params (case-insensitive).
+    //
+    // All COMMAND_SENSITIVE_PATTERNS are pure ASCII. We use find_case_insensitive
+    // (below) instead of to_lowercase() to avoid the byte-offset mismatch problem:
+    // to_lowercase() can expand Unicode chars (e.g. 'İ' → 'i̇', 2→3 bytes), causing
+    // positions from the lowered string to misalign with the original string, which
+    // in turn causes wrong redaction or panic on slicing.
     for pattern in COMMAND_SENSITIVE_PATTERNS {
         let mut search_start = 0;
-        while let Some(pos) = lower[search_start..].find(pattern) {
-            let match_pos = search_start + pos + pattern.len();
-            // Find end of the secret: whitespace, quote, or end of string
-            let secret_end = result[match_pos..]
-                .find(['"', '\'', ' ', '&', '\n'])
-                .map(|p| match_pos + p)
-                .unwrap_or(result.len());
-            if secret_end > match_pos {
-                result.replace_range(match_pos..secret_end, "[REDACTED]");
+        while let Some(abs_pos) = find_case_insensitive(&result[search_start..], pattern) {
+            let true_pos = search_start + abs_pos;
+            let after = true_pos + pattern.len();
+            if after > result.len() {
+                break;
             }
-            // Advance past the pattern to avoid infinite loop
-            search_start = match_pos;
+            // Find end of the secret: whitespace, quote, or end of string
+            let secret_end = result[after..]
+                .find(['"', '\'', ' ', '&', '\n'])
+                .map(|p| after + p)
+                .unwrap_or(result.len());
+            if secret_end > after {
+                result.replace_range(after..secret_end, "[REDACTED]");
+            }
+            // Advance past where we just redacted to avoid infinite loop
+            search_start = after.saturating_add("[REDACTED]".len());
             if search_start >= result.len() {
                 break;
             }
@@ -107,6 +116,33 @@ fn redact_command(cmd: &str) -> String {
     }
 
     result
+}
+
+/// Find a case-insensitive ASCII substring in `haystack`, returning the byte
+/// position of the first match. Returns None if not found.
+///
+/// Unlike haystack.to_lowercase().find(), this never expands the haystack,
+/// so returned positions are always valid indices in the original string.
+fn find_case_insensitive(haystack: &str, needle: &str) -> Option<usize> {
+    debug_assert!(needle.chars().all(|c| c.is_ascii()));
+    if needle.is_empty() {
+        return Some(0);
+    }
+    let first = needle.as_bytes()[0];
+    let rest = &needle[1..];
+    let mut pos = 0;
+    for chunk in haystack.as_bytes().windows(needle.len()) {
+        if chunk[0].eq_ignore_ascii_case(&first)
+            && chunk[1..]
+                .iter()
+                .enumerate()
+                .all(|(i, &b)| b.eq_ignore_ascii_case(&rest.as_bytes()[i]))
+        {
+            return Some(pos);
+        }
+        pos += 1;
+    }
+    None
 }
 
 /// Recursively redact sensitive fields from a tool input JSON value.
@@ -283,13 +319,19 @@ pub fn redact_secrets(text: &str) -> String {
     let mut result = text.to_string();
 
     // 1. Redact known key prefixes — keep prefix, replace rest with [REDACTED]
+    // All KEY_PREFIXES are ASCII, so we use find_case_insensitive to avoid
+    // to_lowercase() Unicode-expansion causing byte-offset misalignment.
     for &(prefix, min_suffix_len) in KEY_PREFIXES {
-        let lower = result.to_lowercase();
-        let prefix_lower = prefix.to_lowercase();
         let mut search_from = 0;
-        while let Some(pos) = lower[search_from..].find(&prefix_lower) {
-            let abs_pos = search_from + pos;
-            let after = abs_pos + prefix.len();
+        while let Some(abs_pos) = find_case_insensitive(&result[search_from..], prefix) {
+            let true_pos = search_from + abs_pos;
+            let after = true_pos + prefix.len();
+            // Guard: after can exceed result.len() when Unicode chars in the
+            // prefix region expanded on to_lowercase(). find_case_insensitive
+            // avoids this, but we keep the guard as defence-in-depth.
+            if after > result.len() {
+                break;
+            }
             // Find end of token: next whitespace, quote, comma, backtick, or end
             let end = result[after..]
                 .find(|c: char| {
@@ -306,7 +348,7 @@ pub fn redact_secrets(text: &str) -> String {
                 // Keep prefix visible, redact the rest
                 result.replace_range(after..end, "[REDACTED]");
             }
-            search_from = after + "[REDACTED]".len().min(result.len() - after);
+            search_from = after.saturating_add("[REDACTED]".len());
             if search_from >= result.len() {
                 break;
             }
@@ -335,13 +377,17 @@ pub fn redact_secrets(text: &str) -> String {
         })
         .into_owned();
 
-    // 4. Redact inline "Bearer <token>" patterns
-    let lower = result.to_lowercase();
+    // 4. Redact inline "Bearer <token>" patterns (ASCII-only, same fix as redact_command)
     for pattern in &["bearer ", "authorization: bearer "] {
-        let mut search_from = 0;
-        while let Some(pos) = lower[search_from..].find(pattern) {
-            let abs_pos = search_from + pos;
-            let after = abs_pos + pattern.len();
+        let mut search_start = 0;
+        while let Some(abs_pos) = find_case_insensitive(&result[search_start..], pattern) {
+            let true_pos = search_start + abs_pos;
+            let after = true_pos + pattern.len();
+            // Bounds check: after can exceed result.len() when earlier chars
+            // expanded on to_lowercase() — same Unicode issue as in redact_command.
+            if after > result.len() {
+                break;
+            }
             let end = result[after..]
                 .find(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '`' | ')'))
                 .map(|p| after + p)
@@ -349,8 +395,8 @@ pub fn redact_secrets(text: &str) -> String {
             if end > after {
                 result.replace_range(after..end, "[REDACTED]");
             }
-            search_from = after + "[REDACTED]".len().min(result.len() - after);
-            if search_from >= result.len() {
+            search_start = after.saturating_add("[REDACTED]".len());
+            if search_start >= result.len() {
                 break;
             }
         }
@@ -608,5 +654,73 @@ mod tests {
         let text = "DO_TOKEN=dop_v1_abc123def456ghi789jkl012mno345";
         let out = redact_secrets(text);
         assert!(out.contains("dop_v1_[REDACTED]"), "got: {out}");
+    }
+
+    // --- Unicode-expansion regression tests ---
+    // These verify that to_lowercase() byte-offset mismatch does not cause panic
+    // or wrong redaction when Unicode chars expand on lowercase (e.g. Turkish
+    // 'İ' → 'i̇' adds a combining dot, 2→3 bytes).
+
+    #[test]
+    fn redact_command_unicode_expansion_no_panic() {
+        // 'İ' expands to 'i̇' (2→3 bytes) on to_lowercase().
+        // Before the fix, match_pos exceeded result.len() and panicked.
+        let input = "İİİİİİİİİİauthorization: bearer sk-secret-123";
+        let out = redact_command(input);
+        // Must not panic, and secret must be redacted
+        assert!(out.contains("[REDACTED]"), "secret not redacted: {out}");
+        assert!(!out.contains("sk-secret-123"), "secret leaked: {out}");
+    }
+
+    #[test]
+    fn redact_command_unicode_expansion_api_key() {
+        // Same issue with api_key= prefix
+        let input = "İİİİİİİİİİapi_key=super-secret-key";
+        let out = redact_command(input);
+        assert!(out.contains("[REDACTED]"), "secret not redacted: {out}");
+        assert!(!out.contains("super-secret-key"), "secret leaked: {out}");
+    }
+
+    #[test]
+    fn redact_secrets_unicode_expansion_no_panic() {
+        // Unicode expansion before an sk- key prefix — same panic scenario
+        let input = "İİİİİİİİİİ sk-proj-mrRb3y9swLqHv8ZzB9lPH0_V7RPruzdbnXJf34DxU2RCdQnhCYjS99Tj";
+        let out = redact_secrets(input);
+        assert!(out.contains("[REDACTED]"), "secret not redacted: {out}");
+        assert!(!out.contains("mrRb3y"), "secret leaked: {out}");
+    }
+
+    #[test]
+    fn redact_command_unicode_expansion_bearer() {
+        // Unicode before "bearer " pattern
+        let input = "İİİİİİİİİİ bearer eyJhbGc...";
+        let out = redact_command(input);
+        assert!(out.contains("[REDACTED]"), "token not redacted: {out}");
+        assert!(!out.contains("eyJhbGc"), "token leaked: {out}");
+    }
+
+    #[test]
+    fn redact_secrets_unicode_expansion_bearer() {
+        // Bearer pattern in redact_secrets with Unicode expansion
+        let input = "İİİİİİİİİİbearer eyJhbGciOiJIUzI1NiJ9.test";
+        let out = redact_secrets(input);
+        assert!(out.contains("[REDACTED]"), "token not redacted: {out}");
+        assert!(!out.contains("eyJhbGc"), "token leaked: {out}");
+    }
+
+    #[test]
+    fn redact_command_unicode_normal_text() {
+        // Normal text with no secrets — should be unchanged
+        let input = "Normal text with İstanbul and Größe and Ñoño";
+        let out = redact_command(input);
+        assert_eq!(out, input, "normal text should not change");
+    }
+
+    #[test]
+    fn redact_secrets_unicode_normal_text() {
+        // Normal text with no secrets — should be unchanged
+        let input = "Hello world, İstanbul, München, Ñoño";
+        let out = redact_secrets(input);
+        assert_eq!(out, input, "normal text should not change");
     }
 }
