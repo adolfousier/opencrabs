@@ -254,6 +254,10 @@ pub struct App {
     /// When true, new streaming content auto-scrolls to bottom.
     /// Set to false when user scrolls up; re-enabled when they scroll back to bottom or send a message.
     pub auto_scroll: bool,
+    /// When false, the runner releases terminal mouse capture so the user can
+    /// drag-select text natively (terminal handles selection + clipboard).
+    /// Toggled with F12. Defaults to true (mouse capture on).
+    pub mouse_capture_enabled: bool,
     pub selected_session_index: usize,
     pub should_quit: bool,
 
@@ -476,6 +480,7 @@ impl App {
             focused_attachment: None,
             scroll_offset: 0,
             auto_scroll: true,
+            mouse_capture_enabled: true,
             selected_session_index: 0,
             should_quit: false,
             is_processing: false,
@@ -1926,6 +1931,20 @@ impl App {
     async fn handle_key_event(&mut self, event: crossterm::event::KeyEvent) -> Result<()> {
         use super::events::keys;
         use crossterm::event::{KeyCode, KeyModifiers};
+
+        // F12 toggles mouse capture so the user can drag-select text natively.
+        // Handled before everything else (including modal dialogs) so it always
+        // works as an escape hatch when the TUI is hogging mouse events.
+        if event.code == KeyCode::F(12) {
+            self.mouse_capture_enabled = !self.mouse_capture_enabled;
+            self.notification = Some(if self.mouse_capture_enabled {
+                "Mouse capture ON (F12 to enable text selection)".to_string()
+            } else {
+                "Mouse capture OFF — drag to select, F12 to re-enable".to_string()
+            });
+            self.notification_shown_at = Some(std::time::Instant::now());
+            return Ok(());
+        }
 
         // Sudo password dialog intercepts all keys when active
         if self.sudo_pending.is_some() {

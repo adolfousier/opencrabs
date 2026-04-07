@@ -104,11 +104,25 @@ async fn run_loop(
 ) -> Result<()> {
     use super::events::TuiEvent;
 
+    // Tracks the last applied mouse-capture state so we only call
+    // Enable/DisableMouseCapture when the app's desired state changes.
+    let mut mouse_capture_applied = true;
+
     loop {
         // Check SIGINT flag (redundant safety — the handler already exits,
         // but this catches the race where the flag is set before exit)
         if sigint_flag.load(Ordering::SeqCst) {
             break;
+        }
+
+        // Sync mouse-capture state if the user toggled it via F12.
+        if app.mouse_capture_enabled != mouse_capture_applied {
+            if app.mouse_capture_enabled {
+                execute!(terminal.backend_mut(), EnableMouseCapture)?;
+            } else {
+                execute!(terminal.backend_mut(), DisableMouseCapture)?;
+            }
+            mouse_capture_applied = app.mouse_capture_enabled;
         }
 
         // Render
@@ -130,9 +144,15 @@ async fn run_loop(
             match &event {
                 TuiEvent::FocusLost => {
                     execute!(terminal.backend_mut(), DisableMouseCapture)?;
+                    mouse_capture_applied = false;
                 }
                 TuiEvent::FocusGained => {
-                    execute!(terminal.backend_mut(), EnableMouseCapture)?;
+                    // Only re-enable mouse capture if the user hasn't
+                    // explicitly turned it off via F12 (selection mode).
+                    if app.mouse_capture_enabled {
+                        execute!(terminal.backend_mut(), EnableMouseCapture)?;
+                        mouse_capture_applied = true;
+                    }
                     // Clear any garbage that leaked into the input buffer
                     // while mouse capture was active in another tmux pane.
                     app.clear_escape_garbage();
