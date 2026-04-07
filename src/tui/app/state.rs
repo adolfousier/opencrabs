@@ -1716,7 +1716,8 @@ impl App {
                         // Fetch returned empty — fall back to static PROVIDERS models
                         let provider = wizard.ps.current_provider();
                         if !provider.models.is_empty() {
-                            wizard.ps.models = provider.models.iter().map(|s| s.to_string()).collect();
+                            wizard.ps.models =
+                                provider.models.iter().map(|s| s.to_string()).collect();
                             wizard.ps.resolve_selected_model_index();
                         }
                     }

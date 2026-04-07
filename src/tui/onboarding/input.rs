@@ -382,6 +382,10 @@ impl OnboardingWizard {
                         if self.ps.supports_model_fetch() {
                             return WizardAction::FetchModels;
                         }
+                        // No live fetch (e.g. Qwen CLI) — load static models immediately
+                        self.ps.config_models = crate::tui::provider_selector::load_default_models(
+                            self.ps.provider_id(),
+                        );
                     } else if self.ps.selected_provider == 6 {
                         // z.ai GLM: endpoint type first, then API key
                         self.auth_field = AuthField::ZhipuEndpointType;

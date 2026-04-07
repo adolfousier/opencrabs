@@ -350,7 +350,7 @@ fn no_active_custom_when_none() {
 #[test]
 fn wizard_is_custom_for_new_and_existing() {
     use crate::tui::onboarding::OnboardingWizard;
-    use crate::tui::provider_selector::{CUSTOM_PROVIDER_IDX, CUSTOM_INSTANCES_START};
+    use crate::tui::provider_selector::{CUSTOM_INSTANCES_START, CUSTOM_PROVIDER_IDX};
     let mut wizard = OnboardingWizard::new();
     // CUSTOM_PROVIDER_IDX = "+ New Custom Provider"
     wizard.ps.selected_provider = CUSTOM_PROVIDER_IDX;
@@ -370,13 +370,19 @@ fn wizard_is_custom_for_new_and_existing() {
 #[test]
 fn wizard_current_provider_clamps_for_existing_custom() {
     use crate::tui::onboarding::{OnboardingWizard, PROVIDERS};
-    use crate::tui::provider_selector::{CUSTOM_PROVIDER_IDX, CUSTOM_INSTANCES_START};
+    use crate::tui::provider_selector::{CUSTOM_INSTANCES_START, CUSTOM_PROVIDER_IDX};
     let mut wizard = OnboardingWizard::new();
     // CUSTOM_INSTANCES_START+ should map to the Custom entry in PROVIDERS
     wizard.ps.selected_provider = CUSTOM_INSTANCES_START;
-    assert_eq!(wizard.ps.current_provider().name, PROVIDERS[CUSTOM_PROVIDER_IDX].name);
+    assert_eq!(
+        wizard.ps.current_provider().name,
+        PROVIDERS[CUSTOM_PROVIDER_IDX].name
+    );
     wizard.ps.selected_provider = 99;
-    assert_eq!(wizard.ps.current_provider().name, PROVIDERS[CUSTOM_PROVIDER_IDX].name);
+    assert_eq!(
+        wizard.ps.current_provider().name,
+        PROVIDERS[CUSTOM_PROVIDER_IDX].name
+    );
 }
 
 #[test]

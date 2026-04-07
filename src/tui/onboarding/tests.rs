@@ -465,8 +465,8 @@ fn test_supports_model_fetch() {
     assert!(!wizard.ps.supports_model_fetch());
     wizard.ps.selected_provider = 8; // OpenCode CLI (supports fetch)
     assert!(wizard.ps.supports_model_fetch());
-    wizard.ps.selected_provider = 9; // Qwen CLI (supports fetch)
-    assert!(wizard.ps.supports_model_fetch());
+    wizard.ps.selected_provider = 9; // Qwen CLI — static models only, no live fetch
+    assert!(!wizard.ps.supports_model_fetch());
     wizard.ps.selected_provider = 10; // Custom
     assert!(!wizard.ps.supports_model_fetch());
 }
