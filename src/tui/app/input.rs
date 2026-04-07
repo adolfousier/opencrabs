@@ -762,6 +762,60 @@ impl App {
                 return Ok(());
             }
 
+            // Bang operator: `!cmd args` runs a shell command directly in the
+            // current working directory and pushes stdout/stderr as a system
+            // message — no LLM, no tool approval. Mirrors Claude Code's `!`.
+            if let Some(shell_cmd) = content.trim().strip_prefix('!') {
+                let shell_cmd = shell_cmd.trim().to_string();
+                if !shell_cmd.is_empty() {
+                    self.push_system_message(format!("$ {}", shell_cmd));
+                    let cwd = self.working_directory.clone();
+                    let sender = self.event_sender();
+                    tokio::spawn(async move {
+                        let output = tokio::process::Command::new("sh")
+                            .arg("-c")
+                            .arg(&shell_cmd)
+                            .current_dir(&cwd)
+                            .output()
+                            .await;
+                        let msg = match output {
+                            Ok(out) => {
+                                let stdout = String::from_utf8_lossy(&out.stdout);
+                                let stderr = String::from_utf8_lossy(&out.stderr);
+                                let mut combined = String::new();
+                                if !stdout.is_empty() {
+                                    combined.push_str(stdout.trim_end());
+                                }
+                                if !stderr.is_empty() {
+                                    if !combined.is_empty() {
+                                        combined.push('\n');
+                                    }
+                                    combined.push_str(stderr.trim_end());
+                                }
+                                if combined.is_empty() {
+                                    if out.status.success() {
+                                        "(no output)".to_string()
+                                    } else {
+                                        format!("(no output, exit {})", out.status)
+                                    }
+                                } else if !out.status.success() {
+                                    format!("{}\n(exit {})", combined, out.status)
+                                } else {
+                                    combined
+                                }
+                            }
+                            Err(e) => format!("Failed to run command: {}", e),
+                        };
+                        let _ = sender.send(TuiEvent::SystemMessage(msg));
+                    });
+                }
+                self.input_buffer.clear();
+                self.cursor_position = 0;
+                self.slash_suggestions_active = false;
+                self.dismiss_emoji_picker();
+                return Ok(());
+            }
+
             // Also scan typed input for image paths at submit time
             let (clean_text, typed_attachments) = Self::extract_image_paths(&content);
             let mut all_attachments = std::mem::take(&mut self.attachments);
