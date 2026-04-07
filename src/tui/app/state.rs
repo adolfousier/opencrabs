@@ -1209,10 +1209,17 @@ impl App {
             }
             TuiEvent::ReasoningChunk { session_id, text } => {
                 if self.is_current_session(session_id) {
-                    if let Some(ref mut existing) = self.streaming_reasoning {
-                        existing.push_str(&text);
-                    } else {
-                        self.streaming_reasoning = Some(text);
+                    // Skip empty chunks so we never end up with `Some("")`,
+                    // which renders a "Thinking" label with no content.
+                    // Also skip pure-whitespace chunks (e.g. "\n\n" separators)
+                    // when no real reasoning has been accumulated yet.
+                    let is_whitespace = text.trim().is_empty();
+                    if !text.is_empty() {
+                        if let Some(ref mut existing) = self.streaming_reasoning {
+                            existing.push_str(&text);
+                        } else if !is_whitespace {
+                            self.streaming_reasoning = Some(text);
+                        }
                     }
                     if self.auto_scroll {
                         self.scroll_offset = 0;
