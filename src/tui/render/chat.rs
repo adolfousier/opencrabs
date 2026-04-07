@@ -208,8 +208,15 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             }
         }
 
-        // Render reasoning details on assistant messages (collapsible)
-        if !is_user && app.messages[msg_idx].details.is_some() {
+        // Render reasoning details on assistant messages (collapsible).
+        // Only show the label when details actually contain visible content —
+        // an empty/whitespace `Some("")` produces a phantom Thinking label
+        // that the user can't ever expand into anything useful.
+        let has_reasoning = app.messages[msg_idx]
+            .details
+            .as_ref()
+            .is_some_and(|d| !d.trim().is_empty());
+        if !is_user && has_reasoning {
             lines.push(Line::from(""));
             let hint_text = if app.messages[msg_idx].expanded {
                 "  ▾ Thinking (ctrl+o to collapse)"
