@@ -394,10 +394,6 @@ impl Provider for QwenCodeCliProvider {
             // logged at EOF for diagnostics. Qwen CLI never emits a `result`
             // envelope, so MessageStop is synthesized on EOF.
             let mut saw_tool_use_in_message = false;
-            // Block indexes from qwen that we suppress (tool_use). We need to
-            // remember them so we can also suppress their content_block_stop.
-            let mut suppressed_block_indexes: std::collections::HashSet<usize> =
-                std::collections::HashSet::new();
 
             loop {
                 let line_result = tokio::select! {
@@ -547,41 +543,28 @@ impl Provider for QwenCodeCliProvider {
                                     .and_then(|t| t.as_str())
                                     == Some("tool_use") =>
                             {
-                                // SUPPRESS — qwen CLI executes its own tools in
-                                // --yolo mode. Forwarding tool_use to the agent
-                                // loop would cause double execution and confuse
-                                // stop_reason handling. We only stream final text
-                                // output to the user.
+                                // Track that we saw a tool_use, but DO forward
+                                // the block downstream so it gets persisted to
+                                // the DB and rendered in the TUI. The agent
+                                // loop short-circuits actual execution via
+                                // `cli_handles_tools()`.
                                 saw_tool_use_in_message = true;
-                                let suppressed_idx =
-                                    event.get("index").and_then(|i| i.as_u64()).unwrap_or(0)
-                                        as usize;
-                                suppressed_block_indexes.insert(suppressed_idx);
-                                tracing::debug!(
-                                    "Qwen CLI → suppressing tool_use block at index {}",
-                                    suppressed_idx
-                                );
-                            }
-                            "content_block_delta"
-                                if event
-                                    .get("delta")
-                                    .and_then(|d| d.get("type"))
-                                    .and_then(|t| t.as_str())
-                                    == Some("input_json_delta") =>
-                            {
-                                // SUPPRESS — partial input for a tool_use block
-                                // we're already hiding from the agent loop.
-                            }
-                            "content_block_stop"
-                                if event
-                                    .get("index")
-                                    .and_then(|i| i.as_u64())
-                                    .map(|i| suppressed_block_indexes.contains(&(i as usize)))
-                                    .unwrap_or(false) =>
-                            {
-                                let idx = event.get("index").and_then(|i| i.as_u64()).unwrap_or(0)
-                                    as usize;
-                                suppressed_block_indexes.remove(&idx);
+                                match serde_json::from_value::<StreamEvent>(event.clone()) {
+                                    Ok(se) => {
+                                        if let StreamEvent::ContentBlockStart { index, .. } = &se {
+                                            max_block_index_this_round =
+                                                max_block_index_this_round.max(index + 1);
+                                        }
+                                        let se = offset_block_index(se, block_index_offset);
+                                        let se = normalize_stream_event(se);
+                                        if tx.send(Ok(se)).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::debug!("tool_use content_block_start: {}", e);
+                                    }
+                                }
                             }
                             _ => match serde_json::from_value::<StreamEvent>(event.clone()) {
                                 Ok(se) => {
