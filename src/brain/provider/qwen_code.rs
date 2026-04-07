@@ -460,6 +460,13 @@ impl Provider for QwenCodeCliProvider {
                             "message_start" => {
                                 if !started {
                                     started = true;
+                                    // Qwen's `message_start` often ships WITHOUT a
+                                    // `usage` field, which makes the strict
+                                    // `StreamEvent::MessageStart` deserializer fail.
+                                    // Build the event manually so missing/loose
+                                    // fields can't break the stream header — without
+                                    // it, the agent loop never sees a stream begin
+                                    // and treats the whole turn as dropped.
                                     if let Some(msg) = event.get("message")
                                         && let Some(u) = msg.get("usage")
                                         && let Ok(cli_u) =
@@ -467,20 +474,34 @@ impl Provider for QwenCodeCliProvider {
                                     {
                                         input_tokens = cli_u.total_input();
                                     }
-                                    match serde_json::from_value::<StreamEvent>(event) {
-                                        Ok(mut se) => {
-                                            if let StreamEvent::MessageStart { ref mut message } =
-                                                se
-                                            {
-                                                message.usage.input_tokens = input_tokens;
-                                            }
-                                            if tx.send(Ok(se)).await.is_err() {
-                                                break;
-                                            }
-                                        }
-                                        Err(e) => {
-                                            tracing::warn!("Failed to parse message_start: {}", e);
-                                        }
+                                    let id = event
+                                        .get("message")
+                                        .and_then(|m| m.get("id"))
+                                        .and_then(|v| v.as_str())
+                                        .map(str::to_string)
+                                        .unwrap_or_else(|| {
+                                            format!("msg_{}", uuid::Uuid::new_v4().simple())
+                                        });
+                                    let model_name = event
+                                        .get("message")
+                                        .and_then(|m| m.get("model"))
+                                        .and_then(|v| v.as_str())
+                                        .map(str::to_string)
+                                        .unwrap_or_else(|| request.model.clone());
+                                    let se = StreamEvent::MessageStart {
+                                        message: StreamMessage {
+                                            id,
+                                            model: model_name,
+                                            role: Role::Assistant,
+                                            usage: TokenUsage {
+                                                input_tokens,
+                                                output_tokens: 0,
+                                                ..Default::default()
+                                            },
+                                        },
+                                    };
+                                    if tx.send(Ok(se)).await.is_err() {
+                                        break;
                                     }
                                 }
                             }
