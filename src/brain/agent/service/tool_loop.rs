@@ -1510,8 +1510,18 @@ impl AgentService {
             if is_cli_provider {
                 let mut cli_content = String::new();
 
-                // NOTE: reasoning_text intentionally NOT persisted to DB content —
-                // see non-CLI path comment for rationale.
+                // CLI providers (opencode, claude, qwen-cli) maintain their own
+                // conversation history server-side via session IDs, so writing
+                // reasoning markers into our DB content doesn't feed back into
+                // the model's context — no leak risk like the non-CLI path.
+                if let Some(ref reasoning) = reasoning_text
+                    && !reasoning.trim().is_empty()
+                {
+                    cli_content.push_str(&format!(
+                        "<!-- reasoning -->\n{}\n<!-- /reasoning -->\n\n",
+                        reasoning
+                    ));
+                }
 
                 // Interleaved text + tool markers from streaming events
                 let segments: Vec<CliSegment> = cli_segments

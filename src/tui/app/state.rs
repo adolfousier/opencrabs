@@ -1386,11 +1386,16 @@ impl App {
                 self.streaming_reasoning = None;
                 self.intermediate_text_received = true;
 
-                // Flush previous iteration's tool group FIRST, so tools appear
-                // before the next iteration's text (matches DB order).
-                if let Some(group) = self.active_tool_group.take() {
+                let text_clean = crate::utils::sanitize::strip_llm_artifacts(&text);
+                let has_text = !text_clean.trim().is_empty();
+                let has_reasoning = reasoning_details
+                    .as_ref()
+                    .is_some_and(|r| !r.trim().is_empty());
+
+                // Build a tool_group message helper
+                let make_tool_group = |group: ToolCallGroup| {
                     let count = group.calls.len();
-                    self.messages.push(DisplayMessage {
+                    DisplayMessage {
                         id: Uuid::new_v4(),
                         role: "tool_group".to_string(),
                         content: format!(
@@ -1406,24 +1411,53 @@ impl App {
                         details: None,
                         expanded: false,
                         tool_group: Some(group),
-                    });
-                }
+                    }
+                };
 
-                // Then add the new intermediate text as a separate assistant message
-                let text = crate::utils::sanitize::strip_llm_artifacts(&text);
-                self.messages.push(DisplayMessage {
-                    id: Uuid::new_v4(),
-                    role: "assistant".to_string(),
-                    content: text,
-                    timestamp: chrono::Utc::now(),
-                    token_count: None,
-                    cost: None,
-                    approval: None,
-                    approve_menu: None,
-                    details: reasoning_details,
-                    expanded: false,
-                    tool_group: None,
-                });
+                if has_text {
+                    // Standard case: previous tool group → new text+reasoning message
+                    if let Some(group) = self.active_tool_group.take() {
+                        self.messages.push(make_tool_group(group));
+                    }
+                    self.messages.push(DisplayMessage {
+                        id: Uuid::new_v4(),
+                        role: "assistant".to_string(),
+                        content: text_clean,
+                        timestamp: chrono::Utc::now(),
+                        token_count: None,
+                        cost: None,
+                        approval: None,
+                        approve_menu: None,
+                        details: reasoning_details,
+                        expanded: false,
+                        tool_group: None,
+                    });
+                } else if has_reasoning {
+                    // CLI step boundary with reasoning only — push thinking msg
+                    // BEFORE the tool group so order is: think → tools → next.
+                    self.messages.push(DisplayMessage {
+                        id: Uuid::new_v4(),
+                        role: "assistant".to_string(),
+                        content: String::new(),
+                        timestamp: chrono::Utc::now(),
+                        token_count: None,
+                        cost: None,
+                        approval: None,
+                        approve_menu: None,
+                        details: reasoning_details,
+                        expanded: false,
+                        tool_group: None,
+                    });
+                    if let Some(group) = self.active_tool_group.take() {
+                        self.messages.push(make_tool_group(group));
+                    }
+                } else {
+                    // Pure flush trigger (CLI Ping with no pending content) —
+                    // just flush the tool group if any.
+                    if let Some(group) = self.active_tool_group.take() {
+                        self.messages.push(make_tool_group(group));
+                    }
+                }
 
                 if self.auto_scroll {
                     self.scroll_offset = 0;

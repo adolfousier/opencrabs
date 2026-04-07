@@ -403,12 +403,16 @@ pub(super) fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
         .as_ref()
         .and_then(|s| s.provider_name.clone())
         .unwrap_or_else(|| app.agent_service.provider_name());
-    let model_str = app
-        .current_session
-        .as_ref()
-        .and_then(|s| s.model.as_deref())
-        .unwrap_or(&app.default_model_name)
-        .to_string();
+    let model_str = {
+        let raw = app
+            .current_session
+            .as_ref()
+            .and_then(|s| s.model.as_deref())
+            .unwrap_or(&app.default_model_name);
+        // Strip redundant "{provider}/" prefix so we don't render "opencode / opencode/foo"
+        let prefix = format!("{}/", provider_str);
+        raw.strip_prefix(&prefix).unwrap_or(raw).to_string()
+    };
 
     // Working directory — collapse $HOME to ~, then truncate if still long
     let raw_dir = app.working_directory.to_string_lossy();

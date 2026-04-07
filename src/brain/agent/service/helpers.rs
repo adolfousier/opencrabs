@@ -93,11 +93,7 @@ impl AgentService {
         }
         let mut block_states: Vec<BlockState> = Vec::new();
         let mut reasoning_buf = String::new();
-        // CLI: after the first tool completes, stop forwarding reasoning
-        // chunks to TUI so thinking doesn't bloat across 100+ tool iterations.
-        // Reasoning still accumulates in reasoning_buf for DB persistence.
         let is_cli = provider.cli_handles_tools();
-        let mut seen_tool = false;
         // CLI: track unflushed text so we can emit IntermediateText at tool
         // boundaries, giving the TUI real-time text→tools→text interleaving
         // during streaming instead of one massive wall after stream ends.
@@ -184,10 +180,7 @@ impl AgentService {
                     {
                         reasoning_buf.push_str("\n\n");
                         // Also emit separator to TUI so streaming display stays in sync
-                        // (skip for CLI after first tool — prevents thinking bloat)
-                        if !(is_cli && seen_tool)
-                            && let Some(cb) = effective_cb
-                        {
+                        if let Some(cb) = effective_cb {
                             cb(
                                 session_id,
                                 ProgressEvent::ReasoningChunk {
@@ -252,10 +245,7 @@ impl AgentService {
                                 block_states[index].json_buf.push_str(&partial_json);
                             }
                             ContentDelta::ReasoningDelta { text } => {
-                                // Forward reasoning to TUI (skip for CLI after first tool)
-                                if !(is_cli && seen_tool)
-                                    && let Some(cb) = effective_cb
-                                {
+                                if let Some(cb) = effective_cb {
                                     cb(
                                         session_id,
                                         ProgressEvent::ReasoningChunk { text: text.clone() },
@@ -266,9 +256,7 @@ impl AgentService {
                             }
                             ContentDelta::ThinkingDelta { thinking } => {
                                 // Anthropic native thinking_delta — same as reasoning
-                                if !(is_cli && seen_tool)
-                                    && let Some(cb) = effective_cb
-                                {
+                                if let Some(cb) = effective_cb {
                                     cb(
                                         session_id,
                                         ProgressEvent::ReasoningChunk {
@@ -291,10 +279,6 @@ impl AgentService {
                         {
                             *input = parsed;
                         }
-                        // Mark that we've seen a tool (CLI: stops reasoning forwarding)
-                        if matches!(state.block, ContentBlock::ToolUse { .. }) {
-                            seen_tool = true;
-                        }
                         // CLI: flush accumulated text as IntermediateText before
                         // emitting tool events, so TUI shows text→tools sequentially
                         // during streaming instead of one wall after stream ends.
@@ -307,7 +291,9 @@ impl AgentService {
                                 session_id,
                                 ProgressEvent::IntermediateText {
                                     text: cli_unflushed_text.clone(),
-                                    reasoning: Some(String::new()),
+                                    // None lets the TUI pull from its
+                                    // accumulated streaming_reasoning
+                                    reasoning: None,
                                 },
                             );
                             cli_unflushed_text.clear();
@@ -397,7 +383,24 @@ impl AgentService {
                     }
                 }
                 StreamEvent::MessageStop => break,
-                StreamEvent::Ping => {}
+                StreamEvent::Ping => {
+                    // CLI providers (opencode, claude-cli, qwen-cli) emit Ping
+                    // at step_finish / tool_result boundaries. Use them as flush
+                    // points so the TUI shows each step's tool calls + thinking
+                    // live, instead of batching everything into one giant group
+                    // at end-of-stream. The TUI handler is content-gated so this
+                    // is a no-op if there's nothing pending to flush.
+                    if is_cli && let Some(cb) = effective_cb {
+                        let pending_text = std::mem::take(&mut cli_unflushed_text);
+                        cb(
+                            session_id,
+                            ProgressEvent::IntermediateText {
+                                text: pending_text,
+                                reasoning: None,
+                            },
+                        );
+                    }
+                }
                 StreamEvent::Error { error } => {
                     crate::config::health::record_failure(provider.name(), &error);
                     return Err(crate::brain::provider::ProviderError::StreamError(error));
@@ -414,7 +417,7 @@ impl AgentService {
                 session_id,
                 ProgressEvent::IntermediateText {
                     text: cli_unflushed_text,
-                    reasoning: Some(String::new()),
+                    reasoning: None,
                 },
             );
         }
