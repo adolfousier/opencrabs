@@ -892,6 +892,11 @@ impl App {
                         self.active_tool_group = None;
                         self.streaming_output_tokens = 0;
                         self.intermediate_text_received = false;
+                        // Drop any queued user message — otherwise it would
+                        // survive the cancel and get injected into the NEXT
+                        // unrelated turn, appearing as a duplicate in chat.
+                        *self.message_queue.lock().await = None;
+                        self.queued_message_preview = None;
                         // Deny any pending approvals so agent callbacks don't hang
                         for msg in &mut self.messages {
                             if let Some(ref mut approval) = msg.approval
