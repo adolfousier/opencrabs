@@ -16,8 +16,8 @@ use crossterm::{
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Force-restore terminal state. Safe to call from signal handlers and panic hooks.
 fn force_restore_terminal() {
