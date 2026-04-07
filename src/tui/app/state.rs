@@ -769,13 +769,26 @@ impl App {
         }
 
         // Spawn background release check (immediately on startup, then daily).
-        // No initial delay — if an update exists the prompt appears before/during splash.
+        // No initial delay — if an update exists, behavior depends on
+        // `agent.auto_update` (default true): silently install + restart.
+        // When false, show the UpdatePrompt dialog so the user can confirm.
         {
             let tx = self.event_sender();
+            let auto_update = crate::config::Config::load()
+                .map(|c| c.agent.auto_update)
+                .unwrap_or(true);
             tokio::spawn(async move {
                 loop {
                     if let Some(latest) = crate::brain::tools::evolve::check_for_update().await {
-                        let _ = tx.send(TuiEvent::UpdateAvailable(latest));
+                        if auto_update {
+                            let _ = tx.send(TuiEvent::SystemMessage(format!(
+                                "Auto-updating to v{}...",
+                                latest
+                            )));
+                            super::messaging::run_evolve_directly(Uuid::nil(), tx.clone()).await;
+                        } else {
+                            let _ = tx.send(TuiEvent::UpdateAvailable(latest));
+                        }
                     }
                     // Check again in 24 hours
                     tokio::time::sleep(std::time::Duration::from_secs(86400)).await;
@@ -2280,10 +2293,14 @@ impl App {
                     if let Some(v) = version {
                         self.push_system_message(format!("Updating to v{}...", v));
                         let tx = self.event_sender();
-                        let _ = tx.send(TuiEvent::MessageSubmitted(
-                            "Use the `evolve` tool now to check for and install the latest version."
-                                .to_string(),
-                        ));
+                        let sid = self
+                            .current_session
+                            .as_ref()
+                            .map(|s| s.id)
+                            .unwrap_or(Uuid::nil());
+                        tokio::spawn(async move {
+                            super::messaging::run_evolve_directly(sid, tx).await;
+                        });
                     }
                 }
             }
