@@ -831,7 +831,62 @@ async fn cmd_chat_inner(
                             });
                             continue;
                         }
+                        let pool = db.pool().clone();
                         tokio::spawn(async move {
+                            // Restore the session's own provider BEFORE running
+                            // the resume — otherwise the shared agent_service may
+                            // still hold the startup default (or a different
+                            // session's provider), and the resume will hit the
+                            // wrong backend with a model it doesn't recognize.
+                            let session_repo =
+                                crate::db::repository::session::SessionRepository::new(pool);
+                            match session_repo.find_by_id(session_id).await {
+                                Ok(Some(sess)) => {
+                                    if let Some(saved_provider) = sess.provider_name.as_deref() {
+                                        let active = agent.provider_name();
+                                        if saved_provider != active
+                                            && let Ok(config) = crate::config::Config::load()
+                                        {
+                                            match crate::brain::provider::create_provider_by_name(
+                                                &config,
+                                                saved_provider,
+                                            ) {
+                                                Ok(new_provider) => {
+                                                    tracing::info!(
+                                                        "Resume: swapping provider '{}' -> '{}' for session {}",
+                                                        active,
+                                                        saved_provider,
+                                                        session_id
+                                                    );
+                                                    agent.swap_provider(new_provider);
+                                                }
+                                                Err(e) => {
+                                                    tracing::warn!(
+                                                        "Resume: failed to create provider '{}' for session {}: {} — keeping current",
+                                                        saved_provider,
+                                                        session_id,
+                                                        e
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                Ok(None) => {
+                                    tracing::warn!(
+                                        "Resume: session {} not found in DB",
+                                        session_id
+                                    );
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "Resume: failed to load session {}: {}",
+                                        session_id,
+                                        e
+                                    );
+                                }
+                            }
+
                             let prompt = "[System: A restart just occurred while you were \
                                 processing a request. Read the conversation context and continue \
                                 where you left off naturally. Do not mention the restart or \
