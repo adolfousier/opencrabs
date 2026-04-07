@@ -53,6 +53,55 @@ struct EditInput {
     operation: EditOperation,
 }
 
+impl EditTool {
+    /// Normalize the incoming JSON so the model can call us with the
+    /// Claude-style `{path, old_text, new_text}` shape without the
+    /// explicit `operation` tag. Also accepts legacy aliases
+    /// (`old_string`/`new_string`).
+    fn normalize_input(mut value: Value) -> Value {
+        let Some(obj) = value.as_object_mut() else {
+            return value;
+        };
+
+        // Accept `old_string`/`new_string` aliases (Anthropic Edit tool).
+        if !obj.contains_key("old_text")
+            && let Some(v) = obj.remove("old_string")
+        {
+            obj.insert("old_text".to_string(), v);
+        }
+        if !obj.contains_key("new_text")
+            && let Some(v) = obj.remove("new_string")
+        {
+            obj.insert("new_text".to_string(), v);
+        }
+
+        // Infer `operation` when the model omitted it.
+        if !obj.contains_key("operation") {
+            let inferred = if obj.contains_key("old_text") && obj.contains_key("new_text") {
+                Some("replace")
+            } else if obj.contains_key("start_line")
+                && obj.contains_key("end_line")
+                && obj.contains_key("new_text")
+            {
+                Some("replace_lines")
+            } else if obj.contains_key("line") && obj.contains_key("text") {
+                Some("insert_line")
+            } else if obj.contains_key("start_line") && obj.contains_key("end_line") {
+                Some("delete_lines")
+            } else if obj.contains_key("pattern") && obj.contains_key("replacement") {
+                Some("regex_replace")
+            } else {
+                None
+            };
+            if let Some(op) = inferred {
+                obj.insert("operation".to_string(), Value::String(op.to_string()));
+            }
+        }
+
+        value
+    }
+}
+
 #[async_trait]
 impl Tool for EditTool {
     fn name(&self) -> &str {
@@ -112,7 +161,8 @@ impl Tool for EditTool {
                     "description": "Replacement text (for 'regex_replace')"
                 },
             },
-            "required": ["path", "operation"]
+            "required": ["path"],
+            "description": "If 'operation' is omitted but 'old_text' and 'new_text' are provided, 'replace' is inferred (Claude-style Edit shape)."
         })
     }
 
@@ -129,13 +179,14 @@ impl Tool for EditTool {
     }
 
     fn validate_input(&self, input: &Value) -> Result<()> {
-        let _: EditInput = serde_json::from_value(input.clone())
+        let normalized = Self::normalize_input(input.clone());
+        let _: EditInput = serde_json::from_value(normalized)
             .map_err(|e| ToolError::InvalidInput(format!("Invalid input: {}", e)))?;
         Ok(())
     }
 
     async fn execute(&self, input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
-        let input: EditInput = serde_json::from_value(input)?;
+        let input: EditInput = serde_json::from_value(Self::normalize_input(input))?;
 
         // Validate path: safety check, existence, and file type
         let path = match validate_file_path(&input.path, &context.working_directory) {
