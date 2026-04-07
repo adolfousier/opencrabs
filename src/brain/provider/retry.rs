@@ -143,8 +143,35 @@ where
                     return Err(last_error.unwrap_or(err));
                 }
 
-                // Calculate delay for this attempt
-                let delay = config.calculate_delay(attempt);
+                // Rate-limit errors need much longer delays than transient
+                // network errors. The default 100ms base is useless against
+                // a provider's req/min cap that needs whole seconds to clear.
+                // Honor Retry-After header if present; otherwise use a 3s base
+                // with exponential backoff capped at 30s.
+                let is_rate_limit = matches!(&err, ProviderError::RateLimitExceeded(_))
+                    || matches!(
+                        &err,
+                        ProviderError::ApiError { status, .. } if *status == 429
+                    );
+                let delay = if is_rate_limit {
+                    // Try parsing Retry-After from the error message; if absent
+                    // fall back to 3s/6s/12s exponential to give the provider's
+                    // rolling-window cap time to drain.
+                    let parsed = match &err {
+                        ProviderError::RateLimitExceeded(m) => parse_retry_seconds(m),
+                        ProviderError::ApiError { message, .. } => parse_retry_seconds(message),
+                        _ => None,
+                    };
+                    if let Some(secs) = parsed {
+                        Duration::from_secs(secs.min(30))
+                    } else {
+                        let base_ms = 3000u64;
+                        let ms = base_ms.saturating_mul(1u64 << attempt).min(30_000);
+                        Duration::from_millis(ms)
+                    }
+                } else {
+                    config.calculate_delay(attempt)
+                };
 
                 tracing::info!(
                     "Retry attempt {} after {}ms for error: {}",

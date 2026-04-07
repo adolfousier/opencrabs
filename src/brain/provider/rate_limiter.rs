@@ -22,7 +22,8 @@ use tokio::time::sleep;
 static PROCESS_START: LazyLock<Instant> = LazyLock::new(Instant::now);
 
 /// Global rate limiter shared by ALL OpenRouter :free provider instances.
-/// 20 req/min → 3s between requests across the entire process.
+/// 20 req/min cap → 3.5s between requests (with 0.5s headroom over the
+/// strict 3s minimum) to absorb clock drift and parallel subagent bursts.
 pub static OPENROUTER_FREE_LIMITER: LazyLock<Arc<RateLimiter>> =
     LazyLock::new(|| Arc::new(RateLimiter::openrouter_free()));
 
@@ -50,9 +51,11 @@ impl RateLimiter {
         }
     }
 
-    /// OpenRouter :free tier rate — 20 req/min → 3s between requests.
+    /// OpenRouter :free tier rate — 20 req/min cap. Pace at 3.5s between
+    /// requests (0.5s headroom over the strict 3s minimum) so transient
+    /// bursts from parallel subagents don't tip us over the moving window.
     pub fn openrouter_free() -> Self {
-        Self::new(Duration::from_secs(3))
+        Self::new(Duration::from_millis(3500))
     }
 
     fn now_ns() -> u64 {
