@@ -271,19 +271,27 @@ impl AgentService {
                 }
                 StreamEvent::ContentBlockStop { index } => {
                     if index < block_states.len() {
-                        let state = &mut block_states[index];
                         // Finalize tool use blocks: parse accumulated JSON
-                        if let ContentBlock::ToolUse { ref mut input, .. } = state.block
-                            && !state.json_buf.is_empty()
-                            && let Ok(parsed) = serde_json::from_str(&state.json_buf)
                         {
-                            *input = parsed;
+                            let state = &mut block_states[index];
+                            if let ContentBlock::ToolUse { ref mut input, .. } = state.block
+                                && !state.json_buf.is_empty()
+                                && let Ok(parsed) = serde_json::from_str(&state.json_buf)
+                            {
+                                *input = parsed;
+                            }
                         }
                         // CLI: flush accumulated text as IntermediateText before
                         // emitting tool events, so TUI shows text→tools sequentially
                         // during streaming instead of one wall after stream ends.
+                        // Also clear the text from prior text blocks so the final
+                        // response.content only contains text emitted AFTER the
+                        // last flush (preventing complete_response from
+                        // overwriting the last intermediate msg with duplicate text).
+                        let is_tool =
+                            matches!(block_states[index].block, ContentBlock::ToolUse { .. });
                         if is_cli
-                            && matches!(state.block, ContentBlock::ToolUse { .. })
+                            && is_tool
                             && !cli_unflushed_text.is_empty()
                             && let Some(cb) = effective_cb
                         {
@@ -297,10 +305,16 @@ impl AgentService {
                                 },
                             );
                             cli_unflushed_text.clear();
+                            for bs in block_states.iter_mut() {
+                                if let ContentBlock::Text { text: ref mut t } = bs.block {
+                                    t.clear();
+                                }
+                            }
                         }
                         // Emit ToolStarted + ToolCompleted with fully parsed input
                         // so the TUI shows real tool context (command, file path, etc.)
                         // CLI: lowercase names so format_tool_summary matches ("Bash" → "bash")
+                        let state = &mut block_states[index];
                         if let ContentBlock::ToolUse {
                             ref name,
                             ref input,
@@ -388,17 +402,28 @@ impl AgentService {
                     // at step_finish / tool_result boundaries. Use them as flush
                     // points so the TUI shows each step's tool calls + thinking
                     // live, instead of batching everything into one giant group
-                    // at end-of-stream. The TUI handler is content-gated so this
-                    // is a no-op if there's nothing pending to flush.
-                    if is_cli && let Some(cb) = effective_cb {
-                        let pending_text = std::mem::take(&mut cli_unflushed_text);
+                    // at end-of-stream. Skip if there's nothing pending — empty
+                    // flushes inflate the message count and waste vertical space.
+                    if is_cli
+                        && !cli_unflushed_text.is_empty()
+                        && let Some(cb) = effective_cb
+                    {
                         cb(
                             session_id,
                             ProgressEvent::IntermediateText {
-                                text: pending_text,
+                                text: std::mem::take(&mut cli_unflushed_text),
                                 reasoning: None,
                             },
                         );
+                        // Clear text from prior text blocks so the final
+                        // response.content only contains text emitted AFTER
+                        // this flush — prevents complete_response from
+                        // overwriting the last intermediate msg with duplicate text.
+                        for bs in block_states.iter_mut() {
+                            if let ContentBlock::Text { text: ref mut t } = bs.block {
+                                t.clear();
+                            }
+                        }
                     }
                 }
                 StreamEvent::Error { error } => {
