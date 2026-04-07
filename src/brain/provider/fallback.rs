@@ -134,6 +134,10 @@ impl Provider for FallbackProvider {
         self.primary.context_window(model)
     }
 
+    fn configured_context_window(&self) -> Option<u32> {
+        self.primary.configured_context_window()
+    }
+
     fn calculate_cost(&self, model: &str, input_tokens: u32, output_tokens: u32) -> f64 {
         self.primary
             .calculate_cost(model, input_tokens, output_tokens)

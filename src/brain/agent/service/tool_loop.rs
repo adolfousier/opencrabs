@@ -255,7 +255,7 @@ impl AgentService {
                 .default_model()
                 .to_string()
         });
-        let context_window = self.context_limit;
+        let context_window = self.context_limit();
 
         // Load from last compaction point — find the last CONTEXT COMPACTION marker
         // and only load messages from there forward. No arbitrary trimming.

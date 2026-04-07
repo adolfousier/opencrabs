@@ -1395,6 +1395,10 @@ impl Provider for OpenAIProvider {
         }
     }
 
+    fn configured_context_window(&self) -> Option<u32> {
+        self.configured_context_window
+    }
+
     fn context_window(&self, model: &str) -> Option<u32> {
         // User-configured value takes priority over model-name heuristics
         if let Some(cw) = self.configured_context_window {

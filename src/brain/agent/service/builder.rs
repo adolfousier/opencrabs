@@ -99,9 +99,14 @@ impl AgentService {
         &self.context
     }
 
-    /// Get context limit from config
+    /// Effective context-window budget. Returns the active provider's
+    /// `configured_context_window()` when set (only custom OpenAI-compatible
+    /// providers expose one, via `providers.<name>.context_window` in
+    /// `config.toml`); otherwise the static `agent.context_limit`.
     pub fn context_limit(&self) -> u32 {
-        self.context_limit
+        self.provider()
+            .configured_context_window()
+            .unwrap_or(self.context_limit)
     }
 
     /// Get max tokens from config

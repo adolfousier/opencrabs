@@ -39,7 +39,7 @@ impl AgentService {
                 .default_model()
                 .to_string()
         });
-        let context_window = self.context_limit;
+        let context_window = self.context_limit();
 
         // Load from last compaction point — no arbitrary trimming
         let db_messages = Self::messages_from_last_compaction(all_db_messages);

@@ -73,6 +73,14 @@ pub trait Provider: Send + Sync {
     /// Get context window size for a model
     fn context_window(&self, model: &str) -> Option<u32>;
 
+    /// User-configured context window override from `config.toml`
+    /// (`providers.<name>.context_window`). Only custom OpenAI-compatible
+    /// providers expose this; everything else inherits the agent's static
+    /// `context_limit`. When set, this becomes the compaction budget.
+    fn configured_context_window(&self) -> Option<u32> {
+        None
+    }
+
     /// Calculate cost for token usage (in USD)
     fn calculate_cost(&self, model: &str, input_tokens: u32, output_tokens: u32) -> f64;
 
