@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
 
-use crate::brain::provider::rate_limiter::{OPENROUTER_FREE_LIMITER, RateLimiter};
+use crate::brain::provider::rate_limiter::{OPENROUTER_FREE_LIMITERS, RateLimiter};
 
 // ── First-call-free ──────────────────────────────────────────────────
 // A newly created limiter grants the first slot immediately.
@@ -137,14 +137,14 @@ async fn instant_after_idle_gap() {
     );
 }
 
-// ── Global OPENROUTER_FREE_LIMITER is usable ────────────────────────
+// ── Global OPENROUTER_FREE_LIMITERS is usable ────────────────────────
 
 #[tokio::test]
 async fn openrouter_free_static_exists() {
-    let limiter = OPENROUTER_FREE_LIMITER.as_ref();
+    let limiter = OPENROUTER_FREE_LIMITERS.get("qwen/qwen3.6-plus:free");
     assert!(
         limiter.min_interval >= Duration::from_secs(2),
-        "openrouter_free should be ~3 s, got {:?}",
+        "openrouter_free should be ~4 s, got {:?}",
         limiter.min_interval
     );
 }

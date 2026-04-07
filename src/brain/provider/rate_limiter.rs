@@ -4,33 +4,35 @@
 //! by enforcing a minimum interval between API calls. This is robustness:
 //! preventing rate-limit hits rather than reacting to them.
 //!
-//! ## Global Shared Limiter
+//! ## Per-Model Global Limiters
 //!
-//! All OpenRouter :free provider instances share a single global limiter
-//! (`OPENROUTER_FREE_LIMITER`). This ensures that the main orchestrator,
-//! subagents, and team members all pace against ONE budget — not per-instance
-//! budgets that would collectively exceed the provider's actual rate limit.
+//! Each `:free` model gets its own independent rate limiter bucket, shared
+//! across all provider instances and sessions using that exact model.
+//! This prevents 429s from concurrent sessions hammering the same endpoint.
 
-use std::sync::Arc;
-use std::sync::LazyLock;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::time::sleep;
 
 /// Fixed reference point for nanosecond timestamps.
 /// All `last_granted` values are stored as nanoseconds since this Instant.
-static PROCESS_START: LazyLock<Instant> = LazyLock::new(Instant::now);
+static PROCESS_START: std::sync::LazyLock<std::time::Instant> =
+    std::sync::LazyLock::new(std::time::Instant::now);
 
-/// Global rate limiter shared by ALL OpenRouter :free provider instances.
-/// 20 req/min cap → 3.5s between requests (with 0.5s headroom over the
-/// strict 3s minimum) to absorb clock drift and parallel subagent bursts.
-pub static OPENROUTER_FREE_LIMITER: LazyLock<Arc<RateLimiter>> =
-    LazyLock::new(|| Arc::new(RateLimiter::openrouter_free()));
+/// Interval between requests for OpenRouter :free models.
+/// 4.0s = 15 req/min, safely under the 20 req/min window with 25% headroom.
+const OPENROUTER_FREE_INTERVAL: Duration = Duration::from_millis(4000);
 
-/// Enforces a minimum interval between consecutive calls to `wait()`.
-///
-/// Thread-safe and clone-friendly — multiple provider clones share the same
-/// limiter, so pacing is process-wide, not per-instance.
+/// Global registry of per-model rate limiters for OpenRouter :free tier.
+/// Keyed by exact model string (e.g. "qwen/qwen3.6-plus:free").
+/// Lazily creates a new limiter on first use for each model.
+pub static OPENROUTER_FREE_LIMITERS: std::sync::LazyLock<GlobalRateLimiter> =
+    std::sync::LazyLock::new(GlobalRateLimiter::new);
+
+/// Enforces a minimum interval between consecutive calls to `wait()` for a
+/// single `:free` model. Thread-safe and clone-friendly.
 #[derive(Debug)]
 pub struct RateLimiter {
     /// Minimum gap between allowed requests.
@@ -41,21 +43,11 @@ pub struct RateLimiter {
 }
 
 impl RateLimiter {
-    /// Create a new rate limiter with the given minimum interval.
     pub fn new(min_interval: Duration) -> Self {
         Self {
             min_interval,
-            // 0 = no slot claimed yet. First call will always win because
-            // PROCESS_START.elapsed() is always >> 0.
             last_granted: AtomicU64::new(0),
         }
-    }
-
-    /// OpenRouter :free tier rate — 20 req/min cap. Pace at 3.5s between
-    /// requests (0.5s headroom over the strict 3s minimum) so transient
-    /// bursts from parallel subagents don't tip us over the moving window.
-    pub fn openrouter_free() -> Self {
-        Self::new(Duration::from_millis(3500))
     }
 
     fn now_ns() -> u64 {
@@ -72,8 +64,6 @@ impl RateLimiter {
             let last = self.last_granted.load(Ordering::Acquire);
 
             if last == 0 {
-                // No previous grant — first call always wins immediately.
-                // Treat 0 as a sentinel regardless of `now_ns` value.
                 if self
                     .last_granted
                     .compare_exchange(0, now_ns, Ordering::AcqRel, Ordering::Acquire)
@@ -110,5 +100,77 @@ impl RateLimiter {
                 return sleep_for;
             }
         }
+    }
+}
+
+/// Global registry that hands out per-model rate limiters.
+/// Each unique model string gets its own independent RateLimiter.
+/// Thread-safe — multiple threads can call `get(model)` concurrently.
+pub struct GlobalRateLimiter {
+    limiters: Arc<Mutex<HashMap<String, Arc<RateLimiter>>>>,
+}
+
+impl GlobalRateLimiter {
+    fn new() -> Self {
+        Self {
+            limiters: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Get (or create) the per-model rate limiter for a given model string.
+    /// Sync — safe to call from anywhere without async context.
+    pub fn get(&self, model: &str) -> Arc<RateLimiter> {
+        {
+            let map = self.limiters.lock().unwrap();
+            if let Some(limiter) = map.get(model) {
+                return Arc::clone(limiter);
+            }
+        }
+        // Double-checked locking: another thread may have created it while we
+        // were waiting for the lock after the first lookup.
+        let mut map = self.limiters.lock().unwrap();
+        // Check again under the write lock
+        if let Some(limiter) = map.get(model) {
+            return Arc::clone(limiter);
+        }
+        let limiter = Arc::new(RateLimiter::new(OPENROUTER_FREE_INTERVAL));
+        map.insert(model.to_string(), limiter.clone());
+        limiter
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_rate_limiter_allows_first_request_immediately() {
+        let limiter = RateLimiter::new(Duration::from_millis(100));
+        let wait = limiter.wait().await;
+        assert!(wait.is_zero());
+    }
+
+    #[tokio::test]
+    async fn test_rate_limiter_enforces_interval() {
+        let limiter = RateLimiter::new(Duration::from_millis(50));
+        limiter.wait().await; // first, instant
+        let wait = limiter.wait().await; // second, should wait ~50ms
+        assert!(wait.as_millis() >= 40); // allow some scheduling jitter
+    }
+
+    #[tokio::test]
+    async fn test_global_limiter_returns_same_limiter_for_same_model() {
+        let global = GlobalRateLimiter::new();
+        let a = global.get("qwen/qwen3.6-plus:free");
+        let b = global.get("qwen/qwen3.6-plus:free");
+        assert!(Arc::ptr_eq(&a, &b));
+    }
+
+    #[tokio::test]
+    async fn test_global_limiter_returns_different_limiter_for_different_model() {
+        let global = GlobalRateLimiter::new();
+        let a = global.get("qwen/qwen3.6-plus:free");
+        let b = global.get("google/gemma-3-27b-it:free");
+        assert!(!Arc::ptr_eq(&a, &b));
     }
 }
