@@ -658,7 +658,7 @@ impl ProviderConfigs {
                 .default_model
                 .clone()
                 .unwrap_or_else(|| "qwen3-coder-plus".to_string());
-            return ("qwen-code".to_string(), model);
+            return ("qwen-cli".to_string(), model);
         }
         let candidates: &[(&str, Option<&ProviderConfig>)] = &[
             ("minimax", self.minimax.as_ref()),

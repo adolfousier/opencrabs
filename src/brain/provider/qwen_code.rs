@@ -325,11 +325,10 @@ impl Provider for QwenCodeCliProvider {
             .arg("-p")
             .arg("--output-format")
             .arg("stream-json")
-            .arg("--verbose")
             .arg("--include-partial-messages")
             .arg("--session-id")
             .arg(&session_id_str)
-            .arg("--dangerously-skip-permissions")
+            .arg("--yolo")
             .arg("--model")
             .arg(&model)
             .current_dir(&cwd)
@@ -391,6 +390,10 @@ impl Provider for QwenCodeCliProvider {
             let mut line_count = 0u32;
             let mut block_index_offset: usize = 0;
             let mut max_block_index_this_round: usize = 0;
+            // Tracks whether the current message contains a tool_use block, so we
+            // can emit the correct stop_reason on message_stop. Qwen CLI does NOT
+            // emit a `result` envelope, so we synthesize MessageStop ourselves.
+            let mut saw_tool_use_in_message = false;
 
             loop {
                 let line_result = tokio::select! {
@@ -520,9 +523,42 @@ impl Provider for QwenCodeCliProvider {
                                 }
                             }
                             "message_stop" => {
-                                if tx.send(Ok(StreamEvent::Ping)).await.is_err() {
-                                    break;
+                                // Qwen CLI never emits a `result` envelope like
+                                // Claude CLI, so synthesize the terminating
+                                // MessageDelta + MessageStop here. Without this,
+                                // the agent loop sees no stop_reason, retries the
+                                // request, and loops the same response.
+                                if current_block_started {
+                                    let _ = tx
+                                        .send(Ok(StreamEvent::ContentBlockStop {
+                                            index: completed_blocks + block_index_offset,
+                                        }))
+                                        .await;
                                 }
+                                let stop_reason = if saw_tool_use_in_message {
+                                    StopReason::ToolUse
+                                } else {
+                                    StopReason::EndTurn
+                                };
+                                let _ = tx
+                                    .send(Ok(StreamEvent::MessageDelta {
+                                        delta: MessageDelta {
+                                            stop_reason: Some(stop_reason),
+                                            stop_sequence: None,
+                                        },
+                                        usage: TokenUsage {
+                                            input_tokens,
+                                            output_tokens,
+                                            cache_creation_tokens: cache_creation_tokens_last,
+                                            cache_read_tokens: cache_read_tokens_last,
+                                            billing_cache_creation: cache_creation_tokens_billing,
+                                            billing_cache_read: cache_read_tokens_billing,
+                                        },
+                                    }))
+                                    .await;
+                                let _ = tx.send(Ok(StreamEvent::MessageStop)).await;
+                                result_received = true;
+                                break;
                             }
                             "content_block_start"
                                 if event
@@ -531,6 +567,7 @@ impl Provider for QwenCodeCliProvider {
                                     .and_then(|t| t.as_str())
                                     == Some("tool_use") =>
                             {
+                                saw_tool_use_in_message = true;
                                 match serde_json::from_value::<StreamEvent>(event.clone()) {
                                     Ok(se) => {
                                         if let StreamEvent::ContentBlockStart { index, .. } = &se {
@@ -944,7 +981,7 @@ impl Provider for QwenCodeCliProvider {
     }
 
     fn name(&self) -> &str {
-        "qwen-code"
+        "qwen-cli"
     }
 
     fn default_model(&self) -> &str {
@@ -1075,6 +1112,7 @@ async fn emit_full_block(
 
 fn normalize_cli_tool_name(name: &str) -> String {
     match name {
+        // Claude-CLI style (capitalized)
         "Bash" => "bash".to_string(),
         "Read" => "read_file".to_string(),
         "Write" => "write_file".to_string(),
@@ -1086,6 +1124,14 @@ fn normalize_cli_tool_name(name: &str) -> String {
         "WebFetch" => "http_request".to_string(),
         "Agent" => "agent".to_string(),
         "NotebookEdit" => "notebook_edit".to_string(),
+        // Qwen Code CLI built-in tool names → opencrabs equivalents
+        "run_shell_command" => "bash".to_string(),
+        "search_file_content" => "grep".to_string(),
+        "replace" => "edit_file".to_string(),
+        "web_fetch" => "http_request".to_string(),
+        "google_web_search" => "web_search".to_string(),
+        "list_directory" => "glob".to_string(),
+        "read_many_files" => "read_file".to_string(),
         other => other.to_string(),
     }
 }

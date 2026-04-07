@@ -244,7 +244,7 @@ pub fn create_provider_by_name(config: &Config, name: &str) -> Result<Arc<dyn Pr
                 Err(e) => Err(anyhow::anyhow!("OpenCode CLI binary not found: {}", e)),
             }
         }
-        "qwen-code" | "qwen_code" | "qwen-code-cli" | "qwen_code_cli" => {
+        "qwen-cli" | "qwen-code" | "qwen_code" | "qwen-code-cli" | "qwen_code_cli" => {
             // Bypass enabled check — session explicitly requested this provider
             let model = config
                 .providers
@@ -375,7 +375,7 @@ fn create_fallback(config: &Config, fallback_type: &str) -> Result<Arc<dyn Provi
             tracing::info!("Using fallback: Gemini");
             try_create_gemini(config)?.ok_or_else(|| anyhow::anyhow!("Gemini not configured"))
         }
-        "qwen-code" | "qwen_code" | "qwen-code-cli" | "qwen_code_cli" => {
+        "qwen-cli" | "qwen-code" | "qwen_code" | "qwen-code-cli" | "qwen_code_cli" => {
             tracing::info!("Using fallback: Qwen Code");
             try_create_qwen_code(config)?.ok_or_else(|| anyhow::anyhow!("Qwen Code not available"))
         }
@@ -808,7 +808,7 @@ pub fn active_provider_vision(config: &Config) -> Option<(String, String, String
         "gemini" => config.providers.gemini.as_ref(),
         "claude-cli" | "claude_cli" => config.providers.claude_cli.as_ref(),
         "opencode" | "opencode-cli" | "opencode_cli" => config.providers.opencode_cli.as_ref(),
-        "qwen-code" | "qwen_code" | "qwen-code-cli" | "qwen_code_cli" => {
+        "qwen-cli" | "qwen-code" | "qwen_code" | "qwen-code-cli" | "qwen_code_cli" => {
             config.providers.qwen_code_cli.as_ref()
         }
         cn if cn.starts_with("custom:") => config

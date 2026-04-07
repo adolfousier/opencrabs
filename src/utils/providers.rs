@@ -94,7 +94,11 @@ pub fn find_provider_meta(name: &str) -> Option<&'static ProviderMeta> {
                 "claude-cli" => n == "claude_cli",
                 "opencode-cli" => n == "opencode_cli" || n == "opencode",
                 "qwen-code-cli" => {
-                    n == "qwen_code_cli" || n == "qwen_code" || n == "qwen-code" || n == "qwen"
+                    n == "qwen_code_cli"
+                        || n == "qwen_code"
+                        || n == "qwen-code"
+                        || n == "qwen-cli"
+                        || n == "qwen"
                 }
                 _ => false,
             }
