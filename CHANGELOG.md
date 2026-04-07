@@ -26,6 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Onboarding brain generation** — Run brain file generation as a background task instead of blocking the UI
 - **Onboarding Home Base tab cycling** — Tab key now cycles between path and seed inputs
 - **Whisper download stderr suppression** — Suppress hf-hub progress bar noise during local whisper model download
+- **Sanitize Unicode panic** — Eliminate `to_lowercase()` Unicode-expansion panic in `redact_secrets` and `redact_command` (#61)
+- **API streaming think block** — Revert THINK_BLOCK buffer and strip echoed markers from API context
+- **Rate-limit handling** — Drop pacer, relax retries to 10/20/30s with exponential backoff for 429s, name fallback in toast
+- **Resume provider restore** — Restore session's own provider before running resume to avoid wrong provider selection
+- **Message queue on cancel** — Clear message queue on cancel to prevent duplicate user messages
 
 ## [0.3.0] - 2026-04-07
 
@@ -2203,11 +2208,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.1.7]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.7
 [0.1.6]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.6
 [0.1.5]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.5
-[0.2.99]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.99
 [0.1.4]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.4
 [0.1.3]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.3
 [0.1.2]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.2
 [0.1.1]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.1
 [0.1.0]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.0
-[0.3.01]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.01
+[0.3.1]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.1
+[0.3.0]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.0
+[0.2.99]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.99
 
