@@ -31,7 +31,7 @@ pub use anthropic::AnthropicProvider;
 pub use claude_cli::ClaudeCliProvider;
 pub use custom_openai_compatible::OpenAIProvider;
 pub use factory::{create_provider, create_provider_by_name, create_provider_with_warning};
-pub use fallback::FallbackProvider;
+pub use fallback::{FallbackProvider, SwapEvent};
 pub use gemini::GeminiProvider;
 pub use opencode_cli::OpenCodeCliProvider;
 pub use qwen_code::QwenCodeCliProvider;

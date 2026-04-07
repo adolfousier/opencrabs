@@ -81,6 +81,27 @@ pub trait Provider: Send + Sync {
         None
     }
 
+    /// Take any pending swap event from a sticky fallback wrapper.
+    /// Returns `None` for non-fallback providers; only `FallbackProvider`
+    /// implements this. Called once per turn by the agent service so it
+    /// can surface a UI alert when the active sub-provider changes.
+    fn take_swap_event(&self) -> Option<super::fallback::SwapEvent> {
+        None
+    }
+
+    /// Name of the currently-active sub-provider when wrapped in a sticky
+    /// fallback. Returns `None` when on the primary (or for non-fallback
+    /// providers). Used by the footer/splash to show the live target.
+    fn active_subprovider_name(&self) -> Option<String> {
+        None
+    }
+
+    /// Default model of the currently-active sub-provider, paired with
+    /// `active_subprovider_name()`.
+    fn active_subprovider_model(&self) -> Option<String> {
+        None
+    }
+
     /// Calculate cost for token usage (in USD)
     fn calculate_cost(&self, model: &str, input_tokens: u32, output_tokens: u32) -> f64;
 
