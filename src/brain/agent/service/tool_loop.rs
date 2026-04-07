@@ -235,7 +235,7 @@ impl AgentService {
     ) -> Result<AgentResponse> {
         // Get or create session
         let session_service = SessionService::new(self.context.clone());
-        let _session = session_service
+        let session = session_service
             .get_session(session_id)
             .await
             .map_err(|e| AgentError::Database(e.to_string()))?
@@ -248,13 +248,21 @@ impl AgentService {
             .await
             .map_err(|e| AgentError::Database(e.to_string()))?;
 
-        let model_name = model.unwrap_or_else(|| {
-            self.provider
-                .read()
-                .expect("provider lock poisoned")
-                .default_model()
-                .to_string()
-        });
+        // Resolve model name: explicit caller arg > session's saved model >
+        // current provider's default. The session.model fallback is critical
+        // for restart-recovery: when the resume task races with TUI session
+        // restore, reading provider.default_model() can capture the wrong
+        // (pre-swap) provider's model. session.model is read from DB and is
+        // always provider-correct.
+        let model_name = model
+            .or_else(|| session.model.clone())
+            .unwrap_or_else(|| {
+                self.provider
+                    .read()
+                    .expect("provider lock poisoned")
+                    .default_model()
+                    .to_string()
+            });
         let context_window = self.context_limit();
 
         // Load from last compaction point — find the last CONTEXT COMPACTION marker
