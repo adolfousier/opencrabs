@@ -509,10 +509,15 @@ impl Provider for OpenCodeCliProvider {
                     }
 
                     CliEvent::StepFinish { part } => {
-                        let is_final = part
-                            .reason
-                            .as_deref()
-                            .is_none_or(|r| r != "tool-calls" && r != "tool_use");
+                        // Only "stop"/"end_turn"/"max_tokens" are truly terminal.
+                        // "tool-calls"/"tool_use" → opencode is about to run tools.
+                        // "unknown" or other reasons → empty/intermediate step;
+                        // treat as mid-loop or opencode will drop the response
+                        // before any text gets generated.
+                        let is_final = matches!(
+                            part.reason.as_deref(),
+                            Some("stop") | Some("end_turn") | Some("max_tokens")
+                        );
 
                         if is_final {
                             let reason = part.reason.map(|r| match r.as_str() {
