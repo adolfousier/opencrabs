@@ -15,11 +15,32 @@ use std::time::{Duration, SystemTime};
 
 /// Base directory for all sub-agent status files.
 pub fn status_dir() -> PathBuf {
+    #[cfg(test)]
+    {
+        if let Some(p) = test_override::get() {
+            return p;
+        }
+    }
     dirs::home_dir()
         .unwrap_or_default()
         .join(".opencrabs")
         .join("tmp")
         .join("subagents")
+}
+
+#[cfg(test)]
+mod test_override {
+    use std::cell::RefCell;
+    use std::path::PathBuf;
+    thread_local! {
+        static DIR: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+    }
+    pub fn set(p: PathBuf) {
+        DIR.with(|d| *d.borrow_mut() = Some(p));
+    }
+    pub fn get() -> Option<PathBuf> {
+        DIR.with(|d| d.borrow().clone())
+    }
 }
 
 /// Ensure the status directory exists.
@@ -261,8 +282,22 @@ fn now_rfc3339() -> String {
 mod tests {
     use super::*;
 
+    /// Point this test thread at a unique tempdir so it cannot collide
+    /// with sibling tests (especially `cleanup_removes_old_files`, which
+    /// nukes its dir).
+    fn isolate(tag: &str) {
+        let dir = std::env::temp_dir().join(format!(
+            "opencrabs-subagent-test-{}-{}",
+            tag,
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        test_override::set(dir);
+    }
+
     #[test]
     fn status_dir_returns_correct_path() {
+        // No isolation: this test verifies the *default* path.
         let home = dirs::home_dir().unwrap_or_default();
         let expected = home.join(".opencrabs").join("tmp").join("subagents");
         assert_eq!(status_dir(), expected);
@@ -276,6 +311,7 @@ mod tests {
 
     #[test]
     fn new_status_is_pending() {
+        isolate("new_pending");
         let s = AgentStatus::new("test-1", "test", "sess-1", "do things").unwrap();
         assert_eq!(s.state, AgentState::Pending);
         assert_eq!(s.id, "test-1");
@@ -284,6 +320,7 @@ mod tests {
 
     #[test]
     fn status_transitions_to_running() {
+        isolate("running");
         let mut s = AgentStatus::new("test-2", "test", "sess-1", "do things").unwrap();
         s.mark_running().unwrap();
         assert_eq!(s.state, AgentState::Running);
@@ -291,6 +328,7 @@ mod tests {
 
     #[test]
     fn status_progress_snapshot() {
+        isolate("progress");
         let mut s = AgentStatus::new("test-3", "test", "sess-1", "do things").unwrap();
         s.mark_running().unwrap();
         s.update_progress(1, Some("bash".into()), Some("cargo check ok".into()))
@@ -304,6 +342,7 @@ mod tests {
 
     #[test]
     fn status_completed_sets_timestamp() {
+        isolate("completed");
         let mut s = AgentStatus::new("test-4", "test", "sess-1", "do things").unwrap();
         s.mark_completed("done".into()).unwrap();
         assert_eq!(s.state, AgentState::Completed);
@@ -313,6 +352,7 @@ mod tests {
 
     #[test]
     fn status_failed_sets_error() {
+        isolate("failed");
         let mut s = AgentStatus::new("test-5", "test", "sess-1", "do things").unwrap();
         s.mark_failed("something broke".into()).unwrap();
         assert_eq!(s.state, AgentState::Failed);
@@ -322,6 +362,7 @@ mod tests {
 
     #[test]
     fn status_read_roundtrip() {
+        isolate("roundtrip");
         let mut s = AgentStatus::new("test-6", "test", "sess-1", "do things").unwrap();
         s.mark_running().unwrap();
         s.update_progress(2, Some("write_file".into()), None)
@@ -335,7 +376,7 @@ mod tests {
 
     #[test]
     fn cleanup_removes_old_files() {
-        let _ = fs::remove_dir_all(status_dir()); // start clean
+        isolate("cleanup");
         let mut s = AgentStatus::new("old-1", "old", "sess", "task").unwrap();
         s.mark_completed("done".into()).unwrap();
 
