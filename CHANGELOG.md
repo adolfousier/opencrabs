@@ -5,6 +5,28 @@ All notable changes to OpenCrabs will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-04-07
+
+### Added
+- **F12 mouse capture toggle** — Toggle mouse capture on/off for native terminal text selection without exiting the TUI
+- **Bang operator (`!cmd`)** — Run shell commands directly from the TUI input without an LLM round-trip; output shown as a system message (#58)
+- **Auto-update on startup** — New `[agent] auto_update` config flag (default `true`) silently installs new releases on startup and hot-restarts; set to `false` to keep the prompt dialog (#59)
+
+### Changed
+- **`/evolve` is now programmatic** — Runs the EvolveTool directly instead of going through the LLM, so it can no longer be dropped or refused by a provider (#59)
+
+### Fixed
+- **`/new` slash command** — Wire up session creation via `/new` from within the TUI
+- **Phantom Thinking label** — Hide Thinking label when reasoning content is empty
+- **Compaction marker collapse** — Collapse stored compaction markers into system notices on reload; hide entirely when not applicable
+- **OpenCode CLI live tool/text interleaving** — Proper interleaving of tool calls and text responses with footer deduplication
+- **OpenCode CLI mid-stream text block dedup** — Clear text blocks on mid-stream flush to prevent duplication
+- **OpenCode CLI dropped requests** — Use allow-list of terminal `step_finish` reasons (`stop`/`end_turn`/`max_tokens`); previously an `unknown` reason would prematurely terminate the response
+- **Resume provider race fix** — Use `session.model` instead of provider default on resume to avoid wrong model selection
+- **Onboarding brain generation** — Run brain file generation as a background task instead of blocking the UI
+- **Onboarding Home Base tab cycling** — Tab key now cycles between path and seed inputs
+- **Whisper download stderr suppression** — Suppress hf-hub progress bar noise during local whisper model download
+
 ## [0.3.0] - 2026-04-07
 
 ### Added
@@ -2187,4 +2209,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.1.2]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.2
 [0.1.1]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.1
 [0.1.0]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.0
+[0.3.01]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.01
 

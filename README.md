@@ -172,6 +172,8 @@ Images are passed to the active model's vision pipeline if it supports multimoda
 | **Tool Context Persistence** | Tool call groups saved to DB and reconstructed on session reload — no vanishing tool history |
 | **Multi-line Input** | Alt+Enter / Shift+Enter for newlines; Enter to send |
 | **Abort Processing** | Escape×2 within 3 seconds to cancel any in-progress request |
+| **Bang Operator (`!cmd`)** | Run any shell command directly from the input — no LLM round-trip. Output is shown as a system message in the working directory context |
+| **Auto-Update** | Checks GitHub for new releases on startup and once every 24h in the background. When a new version is found it silently installs and hot-restarts. Disable via `[agent] auto_update = false` in `config.toml` to be prompted instead |
 
 ### Agent Capabilities
 | Feature | Description |
@@ -1576,7 +1578,7 @@ OpenCrabs includes 30+ built-in tools. The AI can use these during conversation:
 | `cron_manage` | Schedule recurring jobs — create, list, enable/disable, delete. Deliver results to any channel |
 | `a2a_send` | Send tasks to remote A2A-compatible agents via JSON-RPC 2.0 |
 | `tool_manage` | Manage runtime tools — list, add, remove, enable, disable, reload (`tools.toml`) |
-| `evolve` | Download latest release binary from GitHub and hot-restart (no Rust toolchain needed) |
+| `evolve` | Download latest release binary from GitHub and hot-restart (no Rust toolchain needed). Also runs automatically on startup and every 24h when `[agent] auto_update = true` (default), and via the `/evolve` slash command — both paths invoke the tool directly without the LLM, so they can't be dropped or refused by a provider |
 | `rebuild` | Build from source (`cargo build --release`) and hot-restart |
 
 #### Browser Automation (feature: `browser`)
