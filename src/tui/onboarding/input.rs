@@ -611,6 +611,16 @@ impl OnboardingWizard {
     }
 
     pub(super) fn handle_workspace_key(&mut self, event: KeyEvent) -> WizardAction {
+        // Workspace step has exactly 2 focusable fields:
+        //   0 = path input
+        //   1 = seed templates toggle
+        // Tab/BackTab cycle between them; previously the handler let
+        // focused_field reach a phantom 3rd "Next button" that wasn't
+        // rendered, leaving the user stuck (#52).
+        if self.focused_field > 1 {
+            self.focused_field = 0;
+        }
+
         match self.focused_field {
             0 => {
                 // Editing workspace path
@@ -624,6 +634,9 @@ impl OnboardingWizard {
                     KeyCode::Tab => {
                         self.focused_field = 1;
                     }
+                    KeyCode::BackTab => {
+                        self.focused_field = 1;
+                    }
                     KeyCode::Enter => {
                         self.workspace_path = self.workspace_path.trim().to_string();
                         self.next_step();
@@ -632,30 +645,19 @@ impl OnboardingWizard {
                     _ => {}
                 }
             }
-            1 => {
-                // Seed templates toggle
+            _ => {
+                // Seed templates toggle (field 1)
                 match event.code {
-                    KeyCode::Char(' ') | KeyCode::Enter => {
+                    KeyCode::Char(' ') => {
                         self.seed_templates = !self.seed_templates;
                     }
-                    KeyCode::Tab => {
-                        self.focused_field = 2;
-                    }
-                    KeyCode::BackTab => {
-                        self.focused_field = 0;
-                    }
-                    _ => {}
-                }
-            }
-            _ => {
-                // "Next" button
-                match event.code {
                     KeyCode::Enter => {
+                        self.workspace_path = self.workspace_path.trim().to_string();
                         self.next_step();
                         return self.maybe_fetch_models();
                     }
-                    KeyCode::BackTab => {
-                        self.focused_field = 1;
+                    KeyCode::Tab | KeyCode::BackTab => {
+                        self.focused_field = 0;
                     }
                     _ => {}
                 }
