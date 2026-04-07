@@ -889,6 +889,26 @@ impl App {
     }
 
     fn expand_message(msg: crate::db::models::Message) -> Vec<DisplayMessage> {
+        // Compaction markers are stored as a user message containing the full
+        // structured summary the LLM uses to recover context. Don't dump that
+        // wall of text into the chat on reload — replace it with the same
+        // brief system notice the live CompactionSummary handler shows.
+        if msg.content.starts_with("[CONTEXT COMPACTION") {
+            return vec![DisplayMessage {
+                id: msg.id,
+                role: "system".to_string(),
+                content: "⚡ Context compacted — summary saved to daily memory log".to_string(),
+                timestamp: msg.created_at,
+                token_count: None,
+                cost: None,
+                approval: None,
+                approve_menu: None,
+                details: None,
+                expanded: false,
+                tool_group: None,
+            }];
+        }
+
         if msg.role != "assistant"
             || (!msg.content.contains("<!-- tools") && !msg.content.contains("<!-- reasoning -->"))
         {
