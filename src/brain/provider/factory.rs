@@ -460,15 +460,23 @@ fn try_create_openrouter(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         .clone()
         .unwrap_or_else(|| "https://openrouter.ai/api/v1/chat/completions".to_string());
 
-    tracing::info!("Using OpenRouter at: {}", base_url);
-    // Proactive pacing was tried for `:free` models but couldn't actually
-    // prevent 429s (OpenRouter's free-tier window is shared across the whole
-    // API key, including other clients/machines we can't see). Retry+fallback
-    // already handles the failure case, so we no longer pay the cold-start
-    // latency cost up front.
-    let provider = configure_openai_compatible(
+    let model = openrouter_config
+        .default_model
+        .clone()
+        .unwrap_or_else(|| "openai/gpt-4o".to_string());
+
+    let is_free = model.ends_with(":free");
+
+    tracing::info!(
+        "Using OpenRouter at: {} (model={}, free={})",
+        base_url,
+        model,
+        is_free
+    );
+    let mut provider = configure_openai_compatible(
         OpenAIProvider::with_base_url(api_key.clone(), base_url)
             .with_name("openrouter")
+            .with_default_model(model.clone())
             .with_extra_headers(vec![
                 ("X-Title".to_string(), "Open Crabs".to_string()),
                 (
@@ -478,6 +486,15 @@ fn try_create_openrouter(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
             ]),
         openrouter_config,
     );
+
+    // Proactive pacing for :free models — per-model rate limiter shared across
+    // all provider instances. Enforces 4s between requests per model (~15 req/min,
+    // safely under OpenRouter's 20 req/min window with 25% headroom).
+    if is_free {
+        let limiter = super::rate_limiter::OPENROUTER_FREE_LIMITERS.get(&model);
+        provider = provider.with_rate_limiter(limiter);
+        tracing::info!("Rate limiter attached for :free model: {}", model);
+    }
 
     Ok(Some(Arc::new(provider)))
 }
