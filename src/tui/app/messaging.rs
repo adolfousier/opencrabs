@@ -474,6 +474,10 @@ impl App {
                 self.mode = AppMode::Onboarding;
                 true
             }
+            "/new" => {
+                let _ = self.event_sender().send(TuiEvent::NewSession);
+                true
+            }
             "/sessions" => {
                 self.mode = AppMode::Sessions;
                 let _ = self

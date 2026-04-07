@@ -78,6 +78,10 @@ pub const SLASH_COMMANDS: &[SlashCommand] = &[
         description: "Run connection health check",
     },
     SlashCommand {
+        name: "/new",
+        description: "Start a new session",
+    },
+    SlashCommand {
         name: "/sessions",
         description: "List all sessions",
     },

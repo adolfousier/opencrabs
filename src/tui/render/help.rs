@@ -78,6 +78,7 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
         kv("/onboard:image", "Jump to image handling setup", cyan),
         kv("/onboard:brain", "Jump to brain/persona setup", cyan),
         kv("/doctor", "Run connection health check", cyan),
+        kv("/new", "Start a new session", cyan),
         kv("/sessions", "Session manager", cyan),
         kv("/approve", "Tool approval policy", cyan),
         kv("/compact", "Compact context now", cyan),
