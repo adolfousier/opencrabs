@@ -334,6 +334,29 @@ impl OpenAIProvider {
             "application/json".parse().expect("valid content-type"),
         );
 
+        // OpenRouter-specific optimization headers
+        if self.base_url.to_lowercase().contains("openrouter") {
+            if let (Ok(k1), Ok(v1)) = (
+                "HTTP-Referer".parse::<reqwest::header::HeaderName>(),
+                "https://opencrabs.com".parse::<reqwest::header::HeaderValue>(),
+            ) {
+                headers.insert(k1, v1);
+            }
+            if let (Ok(k2), Ok(v2)) = (
+                "X-Title".parse::<reqwest::header::HeaderName>(),
+                "OpenCrabs".parse::<reqwest::header::HeaderValue>(),
+            ) {
+                headers.insert(k2, v2);
+            }
+            if let (Ok(k3), Ok(v3)) = (
+                "X-OpenRouter-Category".parse::<reqwest::header::HeaderName>(),
+                "cli-agent,personal-agent,programming-app".parse::<reqwest::header::HeaderValue>(),
+            ) {
+                headers.insert(k3, v3);
+            }
+            tracing::debug!("OpenRouter optimization headers attached");
+        }
+
         for (key, value) in &self.extra_headers {
             if let (Ok(k), Ok(v)) = (
                 key.parse::<reqwest::header::HeaderName>(),
