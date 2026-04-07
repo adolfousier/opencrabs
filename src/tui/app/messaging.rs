@@ -1881,15 +1881,16 @@ pub(crate) async fn run_evolve_directly(
 
     // Translate ProgressEvent into TUI events so the user sees live status.
     let tx = sender.clone();
-    let progress: crate::brain::agent::ProgressCallback = Arc::new(move |_sid, event| match event {
-        ProgressEvent::IntermediateText { text, .. } => {
-            let _ = tx.send(TuiEvent::SystemMessage(text));
-        }
-        ProgressEvent::RestartReady { status } => {
-            let _ = tx.send(TuiEvent::RestartReady(status));
-        }
-        _ => {}
-    });
+    let progress: crate::brain::agent::ProgressCallback =
+        Arc::new(move |_sid, event| match event {
+            ProgressEvent::IntermediateText { text, .. } => {
+                let _ = tx.send(TuiEvent::SystemMessage(text));
+            }
+            ProgressEvent::RestartReady { status } => {
+                let _ = tx.send(TuiEvent::RestartReady(status));
+            }
+            _ => {}
+        });
 
     let tool = EvolveTool::new(Some(progress));
     let ctx = ToolExecutionContext::new(session_id);
