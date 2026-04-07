@@ -553,11 +553,9 @@ impl Provider for QwenCodeCliProvider {
                                 // stop_reason handling. We only stream final text
                                 // output to the user.
                                 saw_tool_use_in_message = true;
-                                let suppressed_idx = event
-                                    .get("index")
-                                    .and_then(|i| i.as_u64())
-                                    .unwrap_or(0)
-                                    as usize;
+                                let suppressed_idx =
+                                    event.get("index").and_then(|i| i.as_u64()).unwrap_or(0)
+                                        as usize;
                                 suppressed_block_indexes.insert(suppressed_idx);
                                 tracing::debug!(
                                     "Qwen CLI → suppressing tool_use block at index {}",
@@ -578,15 +576,10 @@ impl Provider for QwenCodeCliProvider {
                                 if event
                                     .get("index")
                                     .and_then(|i| i.as_u64())
-                                    .map(|i| {
-                                        suppressed_block_indexes.contains(&(i as usize))
-                                    })
+                                    .map(|i| suppressed_block_indexes.contains(&(i as usize)))
                                     .unwrap_or(false) =>
                             {
-                                let idx = event
-                                    .get("index")
-                                    .and_then(|i| i.as_u64())
-                                    .unwrap_or(0)
+                                let idx = event.get("index").and_then(|i| i.as_u64()).unwrap_or(0)
                                     as usize;
                                 suppressed_block_indexes.remove(&idx);
                             }
