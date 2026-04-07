@@ -1847,6 +1847,22 @@ impl App {
                     };
                 }
             }
+            TuiEvent::BrainGenerationResult { result } => {
+                if let Some(ref mut wizard) = self.onboarding {
+                    match result {
+                        Ok(text) => {
+                            wizard.apply_generated_brain(&text);
+                            if wizard.brain_generated {
+                                wizard.step = super::onboarding::OnboardingStep::Complete;
+                            }
+                        }
+                        Err(e) => {
+                            wizard.brain_generating = false;
+                            wizard.brain_error = Some(e);
+                        }
+                    }
+                }
+            }
             TuiEvent::WhisperDownloadProgress(progress) => {
                 if let Some(ref mut wizard) = self.onboarding {
                     wizard.stt_model_download_progress = Some(progress);

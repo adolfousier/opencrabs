@@ -6,8 +6,14 @@ use super::wizard::OnboardingWizard;
 
 impl OnboardingWizard {
     pub(super) fn handle_brain_setup_key(&mut self, event: KeyEvent) -> WizardAction {
-        // Don't accept input while generating
+        // While generating: only allow Esc to cancel and skip to Complete.
+        // All other keys are ignored so the user can't corrupt input mid-stream.
         if self.brain_generating {
+            if event.code == KeyCode::Esc {
+                self.brain_generating = false;
+                self.step = OnboardingStep::Complete;
+                return WizardAction::Complete;
+            }
             return WizardAction::None;
         }
 

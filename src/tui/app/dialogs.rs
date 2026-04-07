@@ -1594,7 +1594,7 @@ impl App {
                     });
                 }
                 WizardAction::GenerateBrain => {
-                    self.generate_brain_files().await;
+                    self.generate_brain_files();
                 }
                 WizardAction::DownloadWhisperModel => {
                     #[cfg(feature = "local-stt")]
@@ -1712,7 +1712,10 @@ impl App {
     }
 
     /// Generate personalized brain files via the AI provider
-    async fn generate_brain_files(&mut self) {
+    /// Kick off brain-file generation in a background task so the TUI stays
+    /// responsive (Esc cancels, render keeps ticking). The result is delivered
+    /// via `TuiEvent::BrainGenerationResult` and applied in `state.rs`.
+    fn generate_brain_files(&mut self) {
         // Extract what we need before borrowing wizard mutably
         let prompt = {
             let Some(ref wizard) = self.onboarding else {
@@ -1730,43 +1733,36 @@ impl App {
         // Get provider and model from the wizard's selected provider
         let provider = self.agent_service.provider().clone();
         let model = self.agent_service.provider_model().to_string();
+        let sender = self.event_sender();
 
         // Build LLM request
         let request = LLMRequest::new(model, vec![crate::brain::provider::Message::user(prompt)])
             .with_max_tokens(65536);
 
-        // Call the provider
-        match provider.complete(request).await {
-            Ok(response) => {
-                // Extract text from response
-                let text: String = response
-                    .content
-                    .iter()
-                    .filter_map(|block| {
-                        if let ContentBlock::Text { text } = block {
-                            Some(text.as_str())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-
-                if let Some(ref mut wizard) = self.onboarding {
-                    wizard.apply_generated_brain(&text);
-                    // Auto-advance to Complete if generation succeeded
-                    if wizard.brain_generated {
-                        wizard.step = super::onboarding::OnboardingStep::Complete;
-                    }
+        // Spawn the LLM call so the TUI event loop keeps running.
+        tokio::spawn(async move {
+            let result: Result<String, String> = match provider.complete(request).await {
+                Ok(response) => {
+                    let text: String = response
+                        .content
+                        .iter()
+                        .filter_map(|block| {
+                            if let ContentBlock::Text { text } = block {
+                                Some(text.as_str())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    Ok(text)
                 }
-            }
-            Err(e) => {
-                tracing::warn!("Brain generation failed: {}", e);
-                if let Some(ref mut wizard) = self.onboarding {
-                    wizard.brain_generating = false;
-                    wizard.brain_error = Some(format!("Generation failed: {}", e));
+                Err(e) => {
+                    tracing::warn!("Brain generation failed: {}", e);
+                    Err(format!("Generation failed: {}", e))
                 }
-            }
-        }
+            };
+            let _ = sender.send(TuiEvent::BrainGenerationResult { result });
+        });
     }
 
     /// Open file picker and populate file list

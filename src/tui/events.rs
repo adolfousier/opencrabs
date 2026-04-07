@@ -149,6 +149,10 @@ pub enum TuiEvent {
         error: Option<String>,
     },
 
+    /// Brain generation completed during onboarding (last step).
+    /// Either Ok with the LLM response text or Err with the failure reason.
+    BrainGenerationResult { result: Result<String, String> },
+
     /// Sudo password requested by bash tool
     SudoPasswordRequested(SudoPasswordRequest),
 
