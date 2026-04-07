@@ -358,6 +358,13 @@ impl Provider for ClaudeCliProvider {
             .arg("--session-id")
             .arg(&session_id_str)
             .arg("--dangerously-skip-permissions")
+            // Disable Claude's default `Co-Authored-By: Claude` trailer on git
+            // commits. Uses the newer `attribution` setting (empty strings =
+            // hide attribution) which takes precedence over the deprecated
+            // `includeCoAuthoredBy` flag. Passed as an inline JSON override so
+            // we don't touch the user's ~/.claude/settings.json.
+            .arg("--settings")
+            .arg(r#"{"attribution":{"commit":"","pr":""},"includeCoAuthoredBy":false}"#)
             .arg("--model")
             .arg(&model)
             .current_dir(&cwd)

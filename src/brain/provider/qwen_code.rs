@@ -329,6 +329,19 @@ impl Provider for QwenCodeCliProvider {
             .arg("--session-id")
             .arg(&session_id_str)
             .arg("--yolo")
+            // Qwen Code CLI has no `--settings` flag and no env var to
+            // disable the `Co-authored-by: Qwen-Coder` git-commit trailer
+            // (the `general.gitCoAuthor` setting is only configurable via
+            // ~/.qwen/settings.json). Force it off at the system-prompt
+            // level so every spawn — including brand-new installs — never
+            // ships an attribution trailer we didn't authorize.
+            .arg("--append-system-prompt")
+            .arg(
+                "HARD RULE: When creating git commits, NEVER append any \
+                 `Co-authored-by:` trailer (Qwen-Coder, Qwen, or otherwise) \
+                 and NEVER add `Generated with Qwen Code` footers. Commit \
+                 messages must contain only the user-authored content.",
+            )
             .arg("--model")
             .arg(&model)
             .current_dir(&cwd)
