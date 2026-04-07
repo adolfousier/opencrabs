@@ -254,15 +254,13 @@ impl AgentService {
         // restore, reading provider.default_model() can capture the wrong
         // (pre-swap) provider's model. session.model is read from DB and is
         // always provider-correct.
-        let model_name = model
-            .or_else(|| session.model.clone())
-            .unwrap_or_else(|| {
-                self.provider
-                    .read()
-                    .expect("provider lock poisoned")
-                    .default_model()
-                    .to_string()
-            });
+        let model_name = model.or_else(|| session.model.clone()).unwrap_or_else(|| {
+            self.provider
+                .read()
+                .expect("provider lock poisoned")
+                .default_model()
+                .to_string()
+        });
         let context_window = self.context_limit();
 
         // Load from last compaction point — find the last CONTEXT COMPACTION marker
