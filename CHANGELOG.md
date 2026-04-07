@@ -5,6 +5,47 @@ All notable changes to OpenCrabs will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-04-07
+
+### Added
+- **Qwen Code CLI provider (full TUI)** — Complete integration with model fetch, CLI
+  detection, display name, streaming, tool_use forwarding, and 1k free req/day via
+  Qwen OAuth. Supports qwen3-coder-plus, qwen3.5-plus, qwen3.6-plus, and more.
+  Install: `brew install qwen-code` or `npm install -g @qwen-code/qwen-code`
+- **SIGINT handler + panic hook** — Proper terminal restoration on crash or Ctrl+C
+  (no more garbled terminal after interrupt)
+- **Mid-stream decode retry** — 3x backoff retry before provider fallback, reducing
+  transient stream errors
+- **Named provider index constants** — Replaced hardcoded 9/10/11 throughout TUI
+  dialogs for maintainability
+
+### Fixed
+- **Qwen tool_use persistence** — Forward tool_use blocks so they get persisted and
+  rendered correctly in session history
+- **Qwen stop_reason looping** — Default missing stop_reason to EndTurn to prevent
+  response loops
+- **Qwen spawn args + display name** — Correct process arguments, tool mapping, and
+  suppress internal tool blocks
+- **Qwen static models** — Never invoke qwen subprocess for model list (uses hardcoded
+  supported_models)
+- **Active provider vision** — Now uses actual active provider instead of iterating
+  priority order (was grabbing MiniMax before OpenRouter)
+- **Streaming marker leak** — Stop reasoning/tool markers from leaking into visible
+  response text
+- **TUI input defense** — Stronger protection against mouse escape garbage and focus
+  switch escape sequences
+- **Telegram photo cleanup** — Extended temp file retention to 24h (images may be
+  re-read hours later by analyze_image tool)
+- **Custom provider context_window** — Honor custom provider's context_window override
+  in compaction budget calculation
+- **Subagent test isolation** — Per-thread dir override prevents cross-test pollution
+
+### Changed
+- Replaced all hardcoded provider boundary indices (9/10/11) with named constants
+  throughout TUI dialogs and onboarding render
+- Cargo.toml version 0.3.0
+- CHANGELOG entries for 0.3.0
+
 ## [0.2.99] - 2026-04-06
 
 ### Added
