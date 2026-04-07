@@ -809,12 +809,20 @@ impl Provider for QwenCodeCliProvider {
                             }
                         }
 
-                        let reason = stop_reason.map(|r| match r.as_str() {
-                            "end_turn" => StopReason::EndTurn,
-                            "tool_use" => StopReason::ToolUse,
-                            "max_tokens" => StopReason::MaxTokens,
-                            _ => StopReason::EndTurn,
-                        });
+                        // Qwen CLI's `result` envelope often omits `stop_reason`
+                        // entirely on success. Default to EndTurn so the agent
+                        // loop doesn't treat the stream as dropped and retry,
+                        // which manifested as the same response looping 5–6 times.
+                        let reason = Some(
+                            stop_reason
+                                .map(|r| match r.as_str() {
+                                    "end_turn" => StopReason::EndTurn,
+                                    "tool_use" => StopReason::ToolUse,
+                                    "max_tokens" => StopReason::MaxTokens,
+                                    _ => StopReason::EndTurn,
+                                })
+                                .unwrap_or(StopReason::EndTurn),
+                        );
 
                         let final_output = usage
                             .as_ref()
