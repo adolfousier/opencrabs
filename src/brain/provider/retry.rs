@@ -165,9 +165,11 @@ where
                     if let Some(secs) = parsed {
                         Duration::from_secs(secs.min(30))
                     } else {
-                        let base_ms = 3000u64;
-                        let ms = base_ms.saturating_mul(1u64 << attempt).min(30_000);
-                        Duration::from_millis(ms)
+                        // Linear schedule 10s / 20s / 30s — gives the
+                        // provider's rolling-window cap real time to drain
+                        // before we give up and fall back.
+                        let secs = 10u64.saturating_mul((attempt as u64) + 1).min(30);
+                        Duration::from_secs(secs)
                     }
                 } else {
                     config.calculate_delay(attempt)

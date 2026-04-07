@@ -863,26 +863,29 @@ impl AgentService {
                 {
                     tracing::warn!("Rate/account limit hit — checking for fallback provider");
 
-                    // Notify user about the rate limit
+                    // Look up fallback BEFORE notifying so the user sees which
+                    // provider/model we're switching to, and so it's clear that
+                    // the retries already ran and failed before we gave up.
+                    let fallback_opt = self.try_get_fallback_provider();
+
                     if let Some(ref cb) = progress_callback {
-                        cb(
-                            session_id,
-                            ProgressEvent::SelfHealingAlert {
-                                message: format!(
-                                    "Rate limit reached on '{}'. {}",
-                                    model_name,
-                                    if self.has_fallback_provider() {
-                                        "Switching to fallback provider..."
-                                    } else {
-                                        "No fallback provider configured — please try again later or configure a fallback in settings."
-                                    }
-                                ),
-                            },
-                        );
+                        let message = match &fallback_opt {
+                            Some(fb) => format!(
+                                "Rate limit on '{}' (retries exhausted). Switching to '{}/{}'...",
+                                model_name,
+                                fb.name(),
+                                fb.default_model()
+                            ),
+                            None => format!(
+                                "Rate limit on '{}' (retries exhausted). No fallback provider configured — please try again later or configure a fallback in settings.",
+                                model_name
+                            ),
+                        };
+                        cb(session_id, ProgressEvent::SelfHealingAlert { message });
                     }
 
                     // Try fallback provider if available
-                    if let Some(fallback) = self.try_get_fallback_provider() {
+                    if let Some(fallback) = fallback_opt {
                         let fb_name = fallback.name().to_string();
                         let fb_model = fallback.default_model().to_string();
                         tracing::info!(
