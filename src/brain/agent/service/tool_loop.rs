@@ -265,7 +265,32 @@ impl AgentService {
 
         // Load from last compaction point — find the last CONTEXT COMPACTION marker
         // and only load messages from there forward. No arbitrary trimming.
-        let db_messages = Self::messages_from_last_compaction(all_db_messages);
+        let mut db_messages = Self::messages_from_last_compaction(all_db_messages);
+
+        // Detect CLI provider once (doesn't change during the loop)
+        let is_cli_provider = self
+            .provider
+            .read()
+            .map(|p| p.cli_handles_tools())
+            .unwrap_or(false);
+
+        // For API providers ONLY: strip persisted `<!-- tools-v2: ... -->` and
+        // `<!-- reasoning -->` markers from DB content before loading into the
+        // LLM context. These markers exist for TUI replay/cancel-persist, but
+        // feeding them back to the model teaches it to echo the JSON tool-result
+        // format verbatim in its responses (a closed feedback loop that produces
+        // raw JSON dumps and dropped streaming responses for API providers like
+        // qwen3.6-plus on OpenRouter).
+        //
+        // CLI providers MUST keep markers — their DB content drives session
+        // resume/replay and the CLI subprocess never sees this content.
+        if !is_cli_provider {
+            for msg in db_messages.iter_mut() {
+                if msg.content.contains("<!--") {
+                    msg.content = crate::utils::sanitize::strip_llm_artifacts(&msg.content);
+                }
+            }
+        }
 
         let mut context =
             AgentContext::from_db_messages(session_id, db_messages, context_window as usize);
@@ -381,13 +406,6 @@ impl AgentService {
                 }
             }
         }
-
-        // Detect CLI provider once (doesn't change during the loop)
-        let is_cli_provider = self
-            .provider
-            .read()
-            .map(|p| p.cli_handles_tools())
-            .unwrap_or(false);
 
         // CLI providers manage their own context window internally.
         // Keep our tiktoken estimate from DB messages as-is — it's a reasonable

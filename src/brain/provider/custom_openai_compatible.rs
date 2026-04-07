@@ -50,9 +50,10 @@ const STRIP_CLOSE_TAGS: &[&[&str]] = &[
 /// Maximum bytes to consume inside a `<!-- ... -->` block before assuming the
 /// closing tag will never arrive.  When exceeded we abandon filtering and pass
 /// content through — the model likely hallucinated an open tag (e.g.
-/// `<!-- tools-v2:`) without ever sending `-->`.
-/// Reasoning blocks from qwen3.6-plus can be 2-10KB, so this must be generous.
-const THINK_BLOCK_MAX_BYTES: usize = 32_000;
+/// `<!-- tools-v2:`) without ever sending `-->`. Kept small (v0.2.99 value) so
+/// the filter never holds large amounts of API streaming text hostage waiting
+/// for a close tag that is not coming.
+const THINK_BLOCK_MAX_BYTES: usize = 400;
 
 fn filter_think_tags(
     text: &str,
