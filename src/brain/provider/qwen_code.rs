@@ -390,10 +390,14 @@ impl Provider for QwenCodeCliProvider {
             let mut line_count = 0u32;
             let mut block_index_offset: usize = 0;
             let mut max_block_index_this_round: usize = 0;
-            // Tracks whether the current message contains a tool_use block, so we
-            // can emit the correct stop_reason on message_stop. Qwen CLI does NOT
-            // emit a `result` envelope, so we synthesize MessageStop ourselves.
+            // Tracks whether any tool_use block was seen during the entire stream,
+            // logged at EOF for diagnostics. Qwen CLI never emits a `result`
+            // envelope, so MessageStop is synthesized on EOF.
             let mut saw_tool_use_in_message = false;
+            // Block indexes from qwen that we suppress (tool_use). We need to
+            // remember them so we can also suppress their content_block_stop.
+            let mut suppressed_block_indexes: std::collections::HashSet<usize> =
+                std::collections::HashSet::new();
 
             loop {
                 let line_result = tokio::select! {
@@ -523,42 +527,18 @@ impl Provider for QwenCodeCliProvider {
                                 }
                             }
                             "message_stop" => {
-                                // Qwen CLI never emits a `result` envelope like
-                                // Claude CLI, so synthesize the terminating
-                                // MessageDelta + MessageStop here. Without this,
-                                // the agent loop sees no stop_reason, retries the
-                                // request, and loops the same response.
-                                if current_block_started {
-                                    let _ = tx
-                                        .send(Ok(StreamEvent::ContentBlockStop {
-                                            index: completed_blocks + block_index_offset,
-                                        }))
-                                        .await;
+                                // NOT the end of conversation — qwen CLI in --yolo
+                                // mode runs its own tools and continues with more
+                                // assistant messages. Each `message_stop` just
+                                // marks the end of one assistant turn. The real
+                                // termination is process EOF (handled below).
+                                tracing::debug!(
+                                    "Qwen CLI → message_stop (saw_tool_use={})",
+                                    saw_tool_use_in_message
+                                );
+                                if tx.send(Ok(StreamEvent::Ping)).await.is_err() {
+                                    break;
                                 }
-                                let stop_reason = if saw_tool_use_in_message {
-                                    StopReason::ToolUse
-                                } else {
-                                    StopReason::EndTurn
-                                };
-                                let _ = tx
-                                    .send(Ok(StreamEvent::MessageDelta {
-                                        delta: MessageDelta {
-                                            stop_reason: Some(stop_reason),
-                                            stop_sequence: None,
-                                        },
-                                        usage: TokenUsage {
-                                            input_tokens,
-                                            output_tokens,
-                                            cache_creation_tokens: cache_creation_tokens_last,
-                                            cache_read_tokens: cache_read_tokens_last,
-                                            billing_cache_creation: cache_creation_tokens_billing,
-                                            billing_cache_read: cache_read_tokens_billing,
-                                        },
-                                    }))
-                                    .await;
-                                let _ = tx.send(Ok(StreamEvent::MessageStop)).await;
-                                result_received = true;
-                                break;
                             }
                             "content_block_start"
                                 if event
@@ -567,25 +547,22 @@ impl Provider for QwenCodeCliProvider {
                                     .and_then(|t| t.as_str())
                                     == Some("tool_use") =>
                             {
+                                // SUPPRESS — qwen CLI executes its own tools in
+                                // --yolo mode. Forwarding tool_use to the agent
+                                // loop would cause double execution and confuse
+                                // stop_reason handling. We only stream final text
+                                // output to the user.
                                 saw_tool_use_in_message = true;
-                                match serde_json::from_value::<StreamEvent>(event.clone()) {
-                                    Ok(se) => {
-                                        if let StreamEvent::ContentBlockStart { index, .. } = &se {
-                                            max_block_index_this_round =
-                                                max_block_index_this_round.max(index + 1);
-                                        }
-                                        let se = offset_block_index(se, block_index_offset);
-                                        if tx.send(Ok(se)).await.is_err() {
-                                            break;
-                                        }
-                                    }
-                                    Err(e) => {
-                                        tracing::debug!(
-                                            "Skipping tool_use content_block_start: {}",
-                                            e
-                                        );
-                                    }
-                                }
+                                let suppressed_idx = event
+                                    .get("index")
+                                    .and_then(|i| i.as_u64())
+                                    .unwrap_or(0)
+                                    as usize;
+                                suppressed_block_indexes.insert(suppressed_idx);
+                                tracing::debug!(
+                                    "Qwen CLI → suppressing tool_use block at index {}",
+                                    suppressed_idx
+                                );
                             }
                             "content_block_delta"
                                 if event
@@ -594,17 +571,24 @@ impl Provider for QwenCodeCliProvider {
                                     .and_then(|t| t.as_str())
                                     == Some("input_json_delta") =>
                             {
-                                match serde_json::from_value::<StreamEvent>(event.clone()) {
-                                    Ok(se) => {
-                                        let se = offset_block_index(se, block_index_offset);
-                                        if tx.send(Ok(se)).await.is_err() {
-                                            break;
-                                        }
-                                    }
-                                    Err(e) => {
-                                        tracing::debug!("Skipping input_json_delta: {}", e);
-                                    }
-                                }
+                                // SUPPRESS — partial input for a tool_use block
+                                // we're already hiding from the agent loop.
+                            }
+                            "content_block_stop"
+                                if event
+                                    .get("index")
+                                    .and_then(|i| i.as_u64())
+                                    .map(|i| {
+                                        suppressed_block_indexes.contains(&(i as usize))
+                                    })
+                                    .unwrap_or(false) =>
+                            {
+                                let idx = event
+                                    .get("index")
+                                    .and_then(|i| i.as_u64())
+                                    .unwrap_or(0)
+                                    as usize;
+                                suppressed_block_indexes.remove(&idx);
                             }
                             _ => match serde_json::from_value::<StreamEvent>(event.clone()) {
                                 Ok(se) => {
@@ -930,7 +914,24 @@ impl Provider for QwenCodeCliProvider {
                 }
             }
 
-            if started && !result_received && (input_tokens > 0 || output_tokens > 0) {
+            // Synthesize MessageStop on EOF if qwen never sent a `result` envelope.
+            // This is the normal path for qwen CLI (it does not emit a result like
+            // claude CLI does). Always emit so the agent loop sees a valid
+            // stop_reason and doesn't retry the request.
+            if started && !result_received {
+                if current_block_started {
+                    let _ = tx
+                        .send(Ok(StreamEvent::ContentBlockStop {
+                            index: completed_blocks + block_index_offset,
+                        }))
+                        .await;
+                }
+                tracing::info!(
+                    "Qwen CLI EOF — synthesizing MessageStop (saw_tool_use={}, in={}, out={})",
+                    saw_tool_use_in_message,
+                    input_tokens,
+                    output_tokens
+                );
                 let _ = tx
                     .send(Ok(StreamEvent::MessageDelta {
                         delta: MessageDelta {
@@ -942,7 +943,8 @@ impl Provider for QwenCodeCliProvider {
                             output_tokens,
                             cache_creation_tokens: cache_creation_tokens_last,
                             cache_read_tokens: cache_read_tokens_last,
-                            ..Default::default()
+                            billing_cache_creation: cache_creation_tokens_billing,
+                            billing_cache_read: cache_read_tokens_billing,
                         },
                     }))
                     .await;
