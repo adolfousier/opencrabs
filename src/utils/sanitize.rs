@@ -124,14 +124,13 @@ fn redact_command(cmd: &str) -> String {
 /// Unlike haystack.to_lowercase().find(), this never expands the haystack,
 /// so returned positions are always valid indices in the original string.
 fn find_case_insensitive(haystack: &str, needle: &str) -> Option<usize> {
-    debug_assert!(needle.chars().all(|c| c.is_ascii()));
+    debug_assert!(needle.is_ascii());
     if needle.is_empty() {
         return Some(0);
     }
     let first = needle.as_bytes()[0];
     let rest = &needle[1..];
-    let mut pos = 0;
-    for chunk in haystack.as_bytes().windows(needle.len()) {
+    for (pos, chunk) in haystack.as_bytes().windows(needle.len()).enumerate() {
         if chunk[0].eq_ignore_ascii_case(&first)
             && chunk[1..]
                 .iter()
@@ -140,7 +139,6 @@ fn find_case_insensitive(haystack: &str, needle: &str) -> Option<usize> {
         {
             return Some(pos);
         }
-        pos += 1;
     }
     None
 }
