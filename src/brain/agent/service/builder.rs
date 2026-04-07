@@ -246,13 +246,13 @@ impl AgentService {
         self.session_updated_tx.clone()
     }
 
-    /// Get the provider name
+    /// Get the provider name. When a sticky FallbackProvider has swapped to
+    /// a fallback, this returns the *active* sub-provider's name so the
+    /// footer/splash reflects what's actually serving requests.
     pub fn provider_name(&self) -> String {
-        self.provider
-            .read()
-            .expect("provider lock poisoned")
-            .name()
-            .to_string()
+        let p = self.provider.read().expect("provider lock poisoned");
+        p.active_subprovider_name()
+            .unwrap_or_else(|| p.name().to_string())
     }
 
     /// Get the system brain
@@ -274,13 +274,12 @@ impl AgentService {
         (system_tokens + tool_tokens) as u32
     }
 
-    /// Get the default model for this provider
+    /// Get the default model for this provider. Mirrors `provider_name()`
+    /// — returns the sticky-fallback active model when swapped.
     pub fn provider_model(&self) -> String {
-        self.provider
-            .read()
-            .expect("provider lock poisoned")
-            .default_model()
-            .to_string()
+        let p = self.provider.read().expect("provider lock poisoned");
+        p.active_subprovider_model()
+            .unwrap_or_else(|| p.default_model().to_string())
     }
 
     /// Get the list of supported models for this provider (hardcoded fallback)

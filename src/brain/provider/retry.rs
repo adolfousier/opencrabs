@@ -133,6 +133,24 @@ where
                     return Err(err);
                 }
 
+                // Rate-limit errors must NOT be retried in-place. Retrying
+                // hammers the same dead route while the upstream window stays
+                // closed (often shared across the whole API key) and burns
+                // tens of seconds before fallback. Bail immediately so the
+                // FallbackProvider can swap to a healthy chain in milliseconds.
+                let is_rate_limit = matches!(&err, ProviderError::RateLimitExceeded(_))
+                    || matches!(
+                        &err,
+                        ProviderError::ApiError { status, .. } if *status == 429
+                    );
+                if is_rate_limit {
+                    tracing::warn!(
+                        "Rate limit hit — skipping retries, bailing to fallback: {}",
+                        err
+                    );
+                    return Err(err);
+                }
+
                 // Check if we've exhausted attempts
                 if attempt >= config.max_attempts {
                     tracing::warn!(
@@ -143,37 +161,7 @@ where
                     return Err(last_error.unwrap_or(err));
                 }
 
-                // Rate-limit errors need much longer delays than transient
-                // network errors. The default 100ms base is useless against
-                // a provider's req/min cap that needs whole seconds to clear.
-                // Honor Retry-After header if present; otherwise use a 3s base
-                // with exponential backoff capped at 30s.
-                let is_rate_limit = matches!(&err, ProviderError::RateLimitExceeded(_))
-                    || matches!(
-                        &err,
-                        ProviderError::ApiError { status, .. } if *status == 429
-                    );
-                let delay = if is_rate_limit {
-                    // Try parsing Retry-After from the error message; if absent
-                    // fall back to 3s/6s/12s exponential to give the provider's
-                    // rolling-window cap time to drain.
-                    let parsed = match &err {
-                        ProviderError::RateLimitExceeded(m) => parse_retry_seconds(m),
-                        ProviderError::ApiError { message, .. } => parse_retry_seconds(message),
-                        _ => None,
-                    };
-                    if let Some(secs) = parsed {
-                        Duration::from_secs(secs.min(30))
-                    } else {
-                        // Linear schedule 10s / 20s / 30s — gives the
-                        // provider's rolling-window cap real time to drain
-                        // before we give up and fall back.
-                        let secs = 10u64.saturating_mul((attempt as u64) + 1).min(30);
-                        Duration::from_secs(secs)
-                    }
-                } else {
-                    config.calculate_delay(attempt)
-                };
+                let delay = config.calculate_delay(attempt);
 
                 tracing::info!(
                     "Retry attempt {} after {}ms for error: {}",

@@ -1102,6 +1102,31 @@ impl AgentService {
                 Err(e) => return Err(AgentError::Provider(e)),
             };
 
+            // Surface any sticky-fallback swap that the FallbackProvider
+            // performed during this turn so the user sees which provider/model
+            // is now active. Fires at most once per swap.
+            if let Some(swap) = self.provider().take_swap_event()
+                && let Some(ref cb) = progress_callback
+            {
+                cb(
+                    session_id,
+                    ProgressEvent::SelfHealingAlert {
+                        message: format!(
+                            "Switched to {}/{} — {}/{} {}",
+                            swap.to_name,
+                            swap.to_model,
+                            swap.from_name,
+                            swap.from_model,
+                            if swap.reason.is_empty() {
+                                "unavailable".to_string()
+                            } else {
+                                swap.reason
+                            }
+                        ),
+                    },
+                );
+            }
+
             // CLI providers return "Prompt is too long" as a successful response
             // with is_error=true in the content — detect and re-route to the
             // same emergency compaction path used for Err cases above.
