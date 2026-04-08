@@ -165,6 +165,22 @@ pub type TokenFn = Arc<dyn Fn() -> String + Send + Sync>;
 pub type BodyTransformFn =
     Arc<dyn Fn(serde_json::Value) -> serde_json::Value + Send + Sync>;
 
+/// Optional dynamic base-URL provider. When set, `send_url()` will call
+/// this on every request instead of using the stored `base_url`. Used by
+/// qwen where `resource_url` can change mid-session after a token refresh.
+pub type BaseUrlFn = Arc<dyn Fn() -> String + Send + Sync>;
+
+/// Optional async auth-refresh hook called after a 401/403 response. The
+/// hook is expected to refresh the bearer token (so the next `token_fn()`
+/// call returns a new one) and return `Ok(())` on success. The provider
+/// then retries the failed request exactly once.
+pub type AuthRefreshFn = Arc<
+    dyn Fn() -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = std::result::Result<(), String>> + Send>,
+        > + Send
+        + Sync,
+>;
+
 /// OpenAI provider for GPT models
 #[derive(Clone)]
 pub struct OpenAIProvider {
@@ -188,6 +204,12 @@ pub struct OpenAIProvider {
     /// right before it is sent. Used by providers (e.g. qwen) that need a
     /// vendor-specific dialect on top of the standard OpenAI shape.
     body_transform: Option<BodyTransformFn>,
+    /// Optional dynamic base-URL provider. When set, each outgoing request
+    /// uses the value returned by this callback instead of `base_url`.
+    base_url_fn: Option<BaseUrlFn>,
+    /// Optional async auth-refresh hook. When set, a 401/403 response
+    /// triggers a single retry after calling this hook.
+    auth_refresh_fn: Option<AuthRefreshFn>,
 }
 
 impl OpenAIProvider {
@@ -218,6 +240,8 @@ impl OpenAIProvider {
             token_fn: None,
             rate_limiter: None,
             body_transform: None,
+            base_url_fn: None,
+            auth_refresh_fn: None,
         }
     }
 
@@ -243,6 +267,8 @@ impl OpenAIProvider {
             token_fn: None,
             rate_limiter: None,
             body_transform: None,
+            base_url_fn: None,
+            auth_refresh_fn: None,
         }
     }
 
@@ -268,6 +294,8 @@ impl OpenAIProvider {
             token_fn: None,
             rate_limiter: None,
             body_transform: None,
+            base_url_fn: None,
+            auth_refresh_fn: None,
         }
     }
 
@@ -326,6 +354,22 @@ impl OpenAIProvider {
         self
     }
 
+    /// Install a dynamic base-URL provider. When set, every outgoing request
+    /// resolves its URL via this callback instead of the stored `base_url`.
+    /// Used by qwen where `resource_url` can change after a token refresh.
+    pub fn with_base_url_fn(mut self, f: BaseUrlFn) -> Self {
+        self.base_url_fn = Some(f);
+        self
+    }
+
+    /// Install an async auth-refresh hook. On a 401/403 response the
+    /// provider will call this once, wait for it to resolve, and then
+    /// retry the failed request exactly once with the refreshed token.
+    pub fn with_auth_refresh_fn(mut self, f: AuthRefreshFn) -> Self {
+        self.auth_refresh_fn = Some(f);
+        self
+    }
+
     /// Serialize a request body to JSON, applying the optional body_transform
     /// hook. Returns a `serde_json::Value` ready to pass to `.json(&value)`.
     fn encode_body<T: Serialize>(&self, body: &T) -> Result<serde_json::Value> {
@@ -334,6 +378,32 @@ impl OpenAIProvider {
             v = f(v);
         }
         Ok(v)
+    }
+
+    /// Resolve the URL to POST this request to. Uses `base_url_fn` when set
+    /// (for providers whose endpoint can change mid-session), otherwise
+    /// returns the stored `base_url`.
+    fn send_url(&self) -> String {
+        if let Some(ref f) = self.base_url_fn {
+            let u = f();
+            if !u.is_empty() {
+                return u;
+            }
+        }
+        self.base_url.clone()
+    }
+
+    /// Returns true if a ProviderError represents an auth failure that
+    /// should trigger an auth-refresh retry (401/403).
+    fn is_auth_error(err: &ProviderError) -> bool {
+        matches!(
+            err,
+            ProviderError::InvalidApiKey
+                | ProviderError::ApiError {
+                    status: 401 | 403,
+                    ..
+                }
+        )
     }
 
     /// Get the configured vision model name (if any).
@@ -913,7 +983,7 @@ impl OpenAIProvider {
                 let body = self.encode_body(&anthropic_request)?;
                 let response = self
                     .client
-                    .post(&self.base_url)
+                    .post(self.send_url())
                     .headers(self.headers()?)
                     .json(&body)
                     .send()
@@ -1003,7 +1073,7 @@ impl OpenAIProvider {
                 let body = self.encode_body(&anthropic_request)?;
                 let response = self
                     .client
-                    .post(&self.base_url)
+                    .post(self.send_url())
                     .headers(self.headers()?)
                     .json(&body)
                     .send()
@@ -1258,7 +1328,7 @@ impl Provider for OpenAIProvider {
                 let body = self.encode_body(&openai_request)?;
                 let response = self
                     .client
-                    .post(&self.base_url)
+                    .post(self.send_url())
                     .headers(self.headers()?)
                     .json(&body)
                     .send()
@@ -1301,7 +1371,7 @@ impl Provider for OpenAIProvider {
                         let body = self.encode_body(&openai_request)?;
                         let response = self
                             .client
-                            .post(&self.base_url)
+                            .post(self.send_url())
                             .headers(self.headers()?)
                             .json(&body)
                             .send()
@@ -1316,6 +1386,42 @@ impl Provider for OpenAIProvider {
                 )
                 .await;
             }
+
+            // Auth-refresh fallback: on 401/403, call the refresh hook once
+            // (if installed) and retry the request a single time with the
+            // rotated token. Used by qwen where OAuth tokens expire mid-session.
+            if Self::is_auth_error(e)
+                && let Some(ref refresh) = self.auth_refresh_fn
+            {
+                tracing::warn!("{} auth error — refreshing and retrying", self.name);
+                match refresh().await {
+                    Ok(()) => {
+                        return retry_with_backoff(
+                            || async {
+                                let body = self.encode_body(&openai_request)?;
+                                let response = self
+                                    .client
+                                    .post(self.send_url())
+                                    .headers(self.headers()?)
+                                    .json(&body)
+                                    .send()
+                                    .await?;
+                                if !response.status().is_success() {
+                                    return Err(self.handle_error(response).await);
+                                }
+                                let openai_response: OpenAIResponse = response.json().await?;
+                                Ok(self.from_openai_response(openai_response))
+                            },
+                            &retry_config,
+                        )
+                        .await;
+                    }
+                    Err(msg) => {
+                        tracing::error!("{} auth refresh failed: {}", self.name, msg);
+                    }
+                }
+            }
+
             tracing::error!("OpenAI API request failed: {}", e);
         }
 
@@ -1409,7 +1515,7 @@ impl Provider for OpenAIProvider {
                 let body = self.encode_body(&openai_request)?;
                 let response = self
                     .client
-                    .post(&self.base_url)
+                    .post(self.send_url())
                     .headers(self.headers()?)
                     .json(&body)
                     .send()
@@ -1442,7 +1548,7 @@ impl Provider for OpenAIProvider {
                     let body = self.encode_body(&openai_request)?;
                     let r = self
                         .client
-                        .post(&self.base_url)
+                        .post(self.send_url())
                         .headers(self.headers()?)
                         .json(&body)
                         .send()
@@ -1455,6 +1561,43 @@ impl Provider for OpenAIProvider {
                 &retry_config,
             )
             .await;
+        }
+
+        // Auth-refresh fallback: on 401/403, call the refresh hook once and
+        // retry a single time. Mirrors the non-streaming path.
+        if let Err(ref e) = response
+            && Self::is_auth_error(e)
+            && let Some(ref refresh) = self.auth_refresh_fn
+        {
+            tracing::warn!(
+                "{} stream auth error — refreshing and retrying",
+                self.name
+            );
+            match refresh().await {
+                Ok(()) => {
+                    response = retry_with_backoff(
+                        || async {
+                            let body = self.encode_body(&openai_request)?;
+                            let r = self
+                                .client
+                                .post(self.send_url())
+                                .headers(self.headers()?)
+                                .json(&body)
+                                .send()
+                                .await?;
+                            if !r.status().is_success() {
+                                return Err(self.handle_error(r).await);
+                            }
+                            Ok(r)
+                        },
+                        &retry_config,
+                    )
+                    .await;
+                }
+                Err(msg) => {
+                    tracing::error!("{} stream auth refresh failed: {}", self.name, msg);
+                }
+            }
         }
         let response = response?;
 
