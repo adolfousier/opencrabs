@@ -933,6 +933,235 @@ impl OpenAIProvider {
 
         result
     }
+
+    /// Execute an Anthropic-format streaming request to OpenRouter.
+    /// OpenRouter returns OpenAI-format SSE responses even when sent Anthropic format.
+    async fn stream_with_anthropic_format(
+        &self,
+        model: String,
+        message_count: usize,
+        anthropic_request: AnthropicORRequest,
+    ) -> Result<ProviderStream> {
+        use super::retry::{RetryConfig, retry_with_backoff};
+
+        let tool_count = anthropic_request
+            .tools
+            .as_ref()
+            .map(|t| t.len())
+            .unwrap_or(0);
+        tracing::info!(
+            "OpenRouter stream (Anthropic format): model={}, messages={}, tools={}, cache_control=system+last_tool",
+            model,
+            message_count,
+            tool_count
+        );
+
+        // Proactive pacing
+        if let Some(ref limiter) = self.rate_limiter {
+            let waited = limiter.wait().await;
+            if !waited.is_zero() {
+                tracing::debug!("Rate limiter: waited {:?} before streaming request", waited);
+            }
+        }
+
+        let response = retry_with_backoff(
+            || async {
+                let response = self
+                    .client
+                    .post(&self.base_url)
+                    .headers(self.headers()?)
+                    .json(&anthropic_request)
+                    .send()
+                    .await?;
+
+                let status = response.status();
+                if !status.is_success() {
+                    return Err(self.handle_error(response).await);
+                }
+
+                Ok(response)
+            },
+            &RetryConfig::default(),
+        )
+        .await?;
+
+        // Parse the SSE stream — OpenRouter returns OpenAI-format SSE.
+        // total_input_tokens=0 since we don't have tiktoken counts for Anthropic format.
+        self.parse_openai_stream(response, 0)
+    }
+
+    /// Parse an OpenAI-compatible SSE stream into a ProviderStream.
+    /// `total_input_tokens` is used as fallback usage on stream end if no real usage arrives.
+    fn parse_openai_stream(
+        &self,
+        response: reqwest::Response,
+        total_input_tokens: usize,
+    ) -> Result<ProviderStream> {
+        use futures::stream::StreamExt;
+
+        let byte_stream = response.bytes_stream();
+        let buffer = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+
+        // Accumulated state for a single streamed tool call
+        #[derive(Debug, Clone, Default)]
+        struct ToolCallAccum {
+            id: String,
+            name: String,
+            arguments: String,
+        }
+
+        /// State persisted across SSE chunks via Arc<Mutex<_>>
+        struct StreamState {
+            emitted_message_start: bool,
+            emitted_content_start: bool,
+            seen_delta_content: bool,
+            tool_calls: std::collections::HashMap<usize, ToolCallAccum>,
+            pending_stop_reason: Option<crate::brain::provider::types::StopReason>,
+        }
+
+        let state = std::sync::Arc::new(std::sync::Mutex::new(StreamState {
+            emitted_message_start: false,
+            emitted_content_start: false,
+            seen_delta_content: false,
+            tool_calls: std::collections::HashMap::new(),
+            pending_stop_reason: None,
+        }));
+
+        let event_stream = byte_stream
+            .map(move |chunk_result| -> Vec<std::result::Result<StreamEvent, ProviderError>> {
+                match chunk_result {
+                    Err(e) => vec![Err(ProviderError::StreamError(e.to_string()))],
+                    Ok(chunk) => {
+                        let raw_text = String::from_utf8_lossy(&chunk);
+                        let mut buf = buffer.lock().expect("SSE buffer lock poisoned");
+                        buf.push_str(&raw_text);
+
+                        let mut events = Vec::new();
+                        let mut st = state.lock().expect("SSE state lock");
+
+                        while let Some(newline_pos) = buf.find('\n') {
+                            let line = buf[..newline_pos].trim().to_string();
+                            buf.drain(..=newline_pos);
+
+                            if let Some(json_str) = line.strip_prefix("data: ") {
+                                if json_str == "[DONE]" {
+                                    for (_idx, accum) in st.tool_calls.drain() {
+                                        let input = serde_json::from_str(&accum.arguments)
+                                            .unwrap_or_else(|_| serde_json::json!({}));
+                                        events.push(Ok(StreamEvent::ContentBlockStart {
+                                            index: _idx + 1,
+                                            content_block: ContentBlock::ToolUse {
+                                                id: accum.id,
+                                                name: accum.name,
+                                                input,
+                                            },
+                                        }));
+                                    }
+                                    if let Some(stop_reason) = st.pending_stop_reason.take() {
+                                        events.push(Ok(StreamEvent::MessageDelta {
+                                            delta: crate::brain::provider::types::MessageDelta {
+                                                stop_reason: Some(stop_reason),
+                                                stop_sequence: None,
+                                            },
+                                            usage: crate::brain::provider::types::TokenUsage {
+                                                input_tokens: total_input_tokens as u32,
+                                                output_tokens: 0, ..Default::default() },
+                                        }));
+                                    }
+                                    events.push(Ok(StreamEvent::MessageStop));
+                                    continue;
+                                }
+
+                                match serde_json::from_str::<OpenAIStreamChunk>(json_str) {
+                                    Ok(chunk) => {
+                                        if !st.emitted_message_start && !chunk.id.is_empty() {
+                                            st.emitted_message_start = true;
+                                            let model = chunk.model.clone().unwrap_or_default();
+                                            events.push(Ok(StreamEvent::MessageStart {
+                                                message: crate::brain::provider::types::StreamMessage {
+                                                    id: chunk.id,
+                                                    model,
+                                                    role: Role::Assistant,
+                                                    usage: crate::brain::provider::types::TokenUsage {
+                                                        input_tokens: 0,
+                                                        output_tokens: 0, ..Default::default() },
+                                                },
+                                            }));
+                                        }
+
+                                        let delta_content = chunk.choices.first()
+                                            .and_then(|c| c.delta.as_ref())
+                                            .and_then(|d| d.content.as_ref());
+
+                                        let is_finish = chunk.choices.first()
+                                            .map(|c| c.finish_reason.is_some())
+                                            .unwrap_or(false);
+
+                                        if is_finish {
+                                            if let Some(usage) = chunk.usage.as_ref() {
+                                                let input = usage.prompt_tokens.unwrap_or(0);
+                                                let output = usage.completion_tokens.unwrap_or(0);
+                                                let mut token_usage = crate::brain::provider::types::TokenUsage {
+                                                    input_tokens: input,
+                                                    output_tokens: output,
+                                                    ..Default::default()
+                                                };
+                                                if let Some(cache_create) = usage.cache_creation_input_tokens {
+                                                    token_usage.cache_creation_tokens = cache_create;
+                                                }
+                                                if let Some(cache_read) = usage.cache_read_input_tokens {
+                                                    token_usage.cache_read_tokens = cache_read;
+                                                }
+                                                events.push(Ok(StreamEvent::MessageDelta {
+                                                    delta: crate::brain::provider::types::MessageDelta {
+                                                        stop_reason: None,
+                                                        stop_sequence: None,
+                                                    },
+                                                    usage: token_usage,
+                                                }));
+                                            }
+                                            continue;
+                                        }
+
+                                        if let Some(text) = delta_content {
+                                            if !st.emitted_content_start {
+                                                st.emitted_content_start = true;
+                                                st.seen_delta_content = true;
+                                                events.push(Ok(StreamEvent::ContentBlockStart {
+                                                    index: 0,
+                                                    content_block: ContentBlock::Text { text: text.clone() },
+                                                }));
+                                            } else {
+                                                events.push(Ok(StreamEvent::ContentBlockDelta {
+                                                    index: 0,
+                                                    delta: ContentDelta::TextDelta { text: text.clone() },
+                                                }));
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::debug!("[STREAM_PARSE] Failed to parse SSE chunk: {}", e);
+                                    }
+                                }
+                            }
+                        }
+
+                        if events.is_empty() {
+                            vec![]
+                        } else {
+                            events
+                        }
+                    }
+                }
+            })
+            .filter(|events| {
+                let non_empty = !events.is_empty();
+                async move { non_empty }
+            })
+            .flat_map(futures::stream::iter);
+
+        Ok(Box::pin(event_stream))
+    }
 }
 
 #[async_trait]
@@ -1081,6 +1310,14 @@ impl Provider for OpenAIProvider {
             message_count,
             self.base_url
         );
+
+        // For OpenRouter, use Anthropic format with cache_control for prompt caching.
+        if self.is_openrouter() {
+            let anthropic_request = self.to_anthropic_or_request(request);
+            return self
+                .stream_with_anthropic_format(model, message_count, anthropic_request)
+                .await;
+        }
 
         let mut openai_request = self.to_openai_request(request);
         openai_request.stream = Some(true);
