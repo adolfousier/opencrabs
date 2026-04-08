@@ -998,7 +998,8 @@ impl App {
             .with_progress_callback(progress_callback)
             .with_message_queue_callback(message_queue_callback)
             .with_sudo_callback(sudo_callback)
-            .with_working_directory(working_dir);
+            .with_working_directory(working_dir)
+            .with_auto_approve_tools(self.approval_auto_always);
 
         if let Some(tx) = session_updated_tx {
             new_agent_service = new_agent_service.with_session_updated_tx(tx);
