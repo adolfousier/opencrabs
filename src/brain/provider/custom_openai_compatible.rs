@@ -180,6 +180,11 @@ pub struct OpenAIProvider {
 }
 
 impl OpenAIProvider {
+    /// Returns true if this provider targets OpenRouter (detected by base_url).
+    fn is_openrouter(&self) -> bool {
+        self.base_url.to_lowercase().contains("openrouter")
+    }
+
     /// Create a new OpenAI provider with official API
     pub fn new(api_key: String) -> Self {
         let client = Client::builder()
@@ -563,6 +568,94 @@ impl OpenAIProvider {
         }
     }
 
+    /// Convert to Anthropic-format request for OpenRouter with prompt caching.
+    /// OpenRouter accepts this format and passes cache_control through to Anthropic
+    /// models, caching the system prompt and tools across turns.
+    fn to_anthropic_or_request(&self, request: LLMRequest) -> AnthropicORRequest {
+        let cache = AnthropicORCacheControl {
+            r#type: "ephemeral".to_string(),
+        };
+
+        // System prompt as cached content blocks
+        let system = request.system.map(|s| {
+            vec![AnthropicORSystemBlock {
+                r#type: "text".to_string(),
+                text: s,
+                cache_control: Some(cache.clone()),
+            }]
+        });
+
+        // Messages with content blocks
+        let messages: Vec<AnthropicORMessage> = request
+            .messages
+            .into_iter()
+            .map(|msg| {
+                let role = match msg.role {
+                    Role::User => "user",
+                    Role::Assistant => "assistant",
+                    Role::System => "user", // system → user for Anthropic
+                };
+
+                let content: Vec<AnthropicORContentBlock> = msg
+                    .content
+                    .into_iter()
+                    .filter_map(|block| match block {
+                        ContentBlock::Text { text } => Some(AnthropicORContentBlock::Text {
+                            text,
+                            cache_control: None,
+                        }),
+                        ContentBlock::ToolUse { id, name, input } => {
+                            Some(AnthropicORContentBlock::ToolUse { id, name, input })
+                        }
+                        ContentBlock::ToolResult {
+                            tool_use_id,
+                            content,
+                            ..
+                        } => Some(AnthropicORContentBlock::ToolResult {
+                            tool_use_id,
+                            content,
+                        }),
+                        ContentBlock::Thinking { .. } | ContentBlock::Image { .. } => None,
+                    })
+                    .collect();
+
+                AnthropicORMessage {
+                    role: role.to_string(),
+                    content,
+                }
+            })
+            .collect();
+
+        // Tools with cache_control on the last one
+        let tools = request.tools.map(|tools| {
+            let len = tools.len();
+            tools
+                .into_iter()
+                .enumerate()
+                .map(|(i, t)| AnthropicORTool {
+                    name: t.name,
+                    description: t.description,
+                    input_schema: t.input_schema,
+                    cache_control: if i == len - 1 {
+                        Some(cache.clone())
+                    } else {
+                        None
+                    },
+                })
+                .collect()
+        });
+
+        AnthropicORRequest {
+            model: request.model,
+            messages,
+            system,
+            max_tokens: request.max_tokens.unwrap_or(16384),
+            temperature: request.temperature,
+            tools,
+            stream: Some(request.stream),
+        }
+    }
+
     /// Convert OpenAI response to our generic format
     #[allow(clippy::wrong_self_convention)]
     fn from_openai_response(&self, response: OpenAIResponse) -> LLMResponse {
@@ -684,6 +777,8 @@ impl OpenAIProvider {
             usage: TokenUsage {
                 input_tokens: response.usage.prompt_tokens.unwrap_or(0),
                 output_tokens: response.usage.completion_tokens.unwrap_or(0),
+                cache_creation_tokens: response.usage.cache_creation_input_tokens.unwrap_or(0),
+                cache_read_tokens: response.usage.cache_read_input_tokens.unwrap_or(0),
                 ..Default::default()
             },
         }
@@ -748,6 +843,84 @@ impl OpenAIProvider {
             }
         }
     }
+
+    /// Execute an Anthropic-format request (used for OpenRouter prompt caching).
+    /// OpenRouter returns OpenAI-format responses even when sent Anthropic format.
+    async fn complete_with_anthropic_format(
+        &self,
+        model: String,
+        message_count: usize,
+        anthropic_request: AnthropicORRequest,
+        retry_config: super::retry::RetryConfig,
+    ) -> Result<LLMResponse> {
+        use super::retry::retry_with_backoff;
+
+        let tool_count = anthropic_request.tools.as_ref().map(|t| t.len()).unwrap_or(0);
+        tracing::info!(
+            "OpenRouter (Anthropic format): model={}, messages={}, tools={}, cache_control=system+last_tool",
+            model, message_count, tool_count
+        );
+
+        // Proactive pacing
+        if let Some(ref limiter) = self.rate_limiter {
+            let waited = limiter.wait().await;
+            if !waited.is_zero() {
+                tracing::debug!("Rate limiter: waited {:?} before request", waited);
+            }
+        }
+
+        let result = retry_with_backoff(
+            || async {
+                let response = self
+                    .client
+                    .post(&self.base_url)
+                    .headers(self.headers()?)
+                    .json(&anthropic_request)
+                    .send()
+                    .await?;
+
+                let status = response.status();
+                if !status.is_success() {
+                    return Err(self.handle_error(response).await);
+                }
+
+                let openai_response: OpenAIResponse = response.json().await?;
+                let llm_response = self.from_openai_response(openai_response);
+
+                // Log cache tokens if present
+                if llm_response.usage.cache_creation_tokens > 0
+                    || llm_response.usage.cache_read_tokens > 0
+                {
+                    tracing::info!(
+                        "Cache: creation={}, read={}, total_cached={}",
+                        llm_response.usage.cache_creation_tokens,
+                        llm_response.usage.cache_read_tokens,
+                        llm_response.usage.cache_creation_tokens
+                            + llm_response.usage.cache_read_tokens
+                    );
+                }
+
+                Ok(llm_response)
+            },
+            &retry_config,
+        )
+        .await;
+
+        // Handle 400 token field mismatch — retry with swapped fields
+        if let Err(ref e) = result
+            && let ProviderError::ApiError { status: 400, message, .. } = e
+            && is_token_field_mismatch(message)
+        {
+            tracing::warn!(
+                "Retrying with swapped max_tokens/max_completion_tokens"
+            );
+            return Box::pin(self.complete_with_anthropic_format(
+                model, message_count, anthropic_request, retry_config,
+            )).await;
+        }
+
+        result
+    }
 }
 
 #[async_trait]
@@ -757,8 +930,18 @@ impl Provider for OpenAIProvider {
 
         let model = request.model.clone();
         let message_count = request.messages.len();
-        let mut openai_request = self.to_openai_request(request);
         let retry_config = RetryConfig::default();
+
+        // For OpenRouter, use Anthropic format with cache_control for prompt caching.
+        // For all other providers, use standard OpenAI format.
+        if self.is_openrouter() {
+            let anthropic_request = self.to_anthropic_or_request(request.clone());
+            return self.complete_with_anthropic_format(
+                model, message_count, anthropic_request, retry_config,
+            ).await;
+        }
+
+        let mut openai_request = self.to_openai_request(request);
 
         let tool_count = openai_request.tools.as_ref().map(|t| t.len()).unwrap_or(0);
         tracing::info!(
@@ -1479,6 +1662,81 @@ pub(crate) fn uses_max_completion_tokens(model: &str) -> bool {
 // ============================================================================
 // OpenAI API Types
 // ============================================================================
+// Anthropic-format request for OpenRouter (enables prompt caching)
+// ============================================================================
+
+/// Anthropic-style request for OpenRouter when routing to Anthropic models.
+/// OpenRouter accepts this format and passes cache_control through to Anthropic.
+#[derive(Debug, Clone, Serialize)]
+struct AnthropicORRequest {
+    model: String,
+    messages: Vec<AnthropicORMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    system: Option<Vec<AnthropicORSystemBlock>>,
+    max_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<Vec<AnthropicORTool>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream: Option<bool>,
+}
+
+/// System content block with cache_control support.
+#[derive(Debug, Clone, Serialize)]
+struct AnthropicORSystemBlock {
+    r#type: String,
+    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_control: Option<AnthropicORCacheControl>,
+}
+
+/// Message in Anthropic format with content blocks.
+#[derive(Debug, Clone, Serialize)]
+struct AnthropicORMessage {
+    role: String,
+    content: Vec<AnthropicORContentBlock>,
+}
+
+/// Content block for messages (text, tool_use, tool_result).
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum AnthropicORContentBlock {
+    Text {
+        text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<AnthropicORCacheControl>,
+    },
+    ToolUse {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
+    ToolResult {
+        tool_use_id: String,
+        content: String,
+    },
+}
+
+/// Tool definition with cache_control support.
+#[derive(Debug, Clone, Serialize)]
+struct AnthropicORTool {
+    name: String,
+    description: String,
+    input_schema: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_control: Option<AnthropicORCacheControl>,
+}
+
+/// Ephemeral cache control marker.
+#[derive(Debug, Clone, Serialize)]
+struct AnthropicORCacheControl {
+    r#type: String,
+}
+
+// ============================================================================
+// OpenAI-compatible request/response types
+// ============================================================================
 
 #[derive(Debug, Clone, Serialize)]
 struct OpenAIRequest {
@@ -1587,6 +1845,11 @@ struct OpenAIUsage {
     prompt_tokens: Option<u32>,
     #[serde(rename = "completion_tokens")]
     completion_tokens: Option<u32>,
+    /// Anthropic-style cache tokens — passed through by OpenRouter for Anthropic models.
+    #[serde(default)]
+    cache_creation_input_tokens: Option<u32>,
+    #[serde(default)]
+    cache_read_input_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
