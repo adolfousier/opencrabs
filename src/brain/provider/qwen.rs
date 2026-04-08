@@ -1069,4 +1069,134 @@ mod tests {
         assert!(names.contains(&"X-DashScope-AuthType"));
         assert!(names.contains(&"User-Agent"));
     }
+
+    /// Baseline body resembling what OpenAIRequest serializes to for a small
+    /// chat turn with one tool. The transform must convert it into the exact
+    /// qwen-cli dialect captured in `/tmp/qwen-req.json`.
+    fn sample_body() -> serde_json::Value {
+        serde_json::json!({
+            "model": "coder-model",
+            "messages": [
+                { "role": "system", "content": "sys prompt" },
+                { "role": "user", "content": "first user" },
+                { "role": "assistant", "content": "asst reply" },
+                { "role": "user", "content": "last user" }
+            ],
+            "temperature": 0.7,
+            "top_p": 0.95,
+            "tool_choice": "auto",
+            "max_completion_tokens": 8192,
+            "include_reasoning": true,
+            "stream": true,
+            "stream_options": { "include_usage": true },
+            "tools": [
+                {
+                    "type": "function",
+                    "function": { "name": "first_tool", "description": "", "parameters": {} }
+                },
+                {
+                    "type": "function",
+                    "function": { "name": "last_tool", "description": "", "parameters": {} }
+                }
+            ]
+        })
+    }
+
+    #[test]
+    fn body_transform_rewrites_user_and_system_to_array_form() {
+        let out = qwen_body_transform(sample_body());
+        let msgs = out.get("messages").and_then(|v| v.as_array()).unwrap();
+        // system: array with cache_control
+        let sys = &msgs[0];
+        assert_eq!(sys["role"], "system");
+        assert!(sys["content"].is_array());
+        assert_eq!(sys["content"][0]["type"], "text");
+        assert_eq!(sys["content"][0]["cache_control"]["type"], "ephemeral");
+        // first user: array, NO cache_control (not the last)
+        let u1 = &msgs[1];
+        assert!(u1["content"].is_array());
+        assert!(u1["content"][0].get("cache_control").is_none());
+        // assistant: stays as plain string
+        let asst = &msgs[2];
+        assert!(asst["content"].is_string());
+        // last user: array WITH cache_control
+        let u2 = &msgs[3];
+        assert!(u2["content"].is_array());
+        assert_eq!(u2["content"][0]["cache_control"]["type"], "ephemeral");
+    }
+
+    #[test]
+    fn body_transform_strips_disallowed_fields() {
+        let out = qwen_body_transform(sample_body());
+        let obj = out.as_object().unwrap();
+        assert!(!obj.contains_key("temperature"));
+        assert!(!obj.contains_key("top_p"));
+        assert!(!obj.contains_key("tool_choice"));
+        assert!(!obj.contains_key("max_completion_tokens"));
+        assert!(!obj.contains_key("include_reasoning"));
+    }
+
+    #[test]
+    fn body_transform_adds_metadata_and_vl_flag_and_max_tokens() {
+        let out = qwen_body_transform(sample_body());
+        let meta = out.get("metadata").unwrap();
+        assert!(meta["sessionId"].is_string());
+        assert!(meta["promptId"].is_string());
+        assert_eq!(out["vl_high_resolution_images"], true);
+        assert_eq!(out["max_tokens"], 32000);
+    }
+
+    #[test]
+    fn body_transform_tags_only_last_tool_with_cache_control() {
+        let out = qwen_body_transform(sample_body());
+        let tools = out.get("tools").and_then(|v| v.as_array()).unwrap();
+        assert!(tools[0].get("cache_control").is_none());
+        assert_eq!(tools[1]["cache_control"]["type"], "ephemeral");
+    }
+
+    #[test]
+    fn body_transform_preserves_existing_max_tokens() {
+        let mut body = sample_body();
+        body["max_tokens"] = serde_json::json!(4096);
+        let out = qwen_body_transform(body);
+        assert_eq!(out["max_tokens"], 4096);
+    }
+
+    #[test]
+    fn body_transform_leaves_multimodal_user_untouched() {
+        // If a user message is already an array (multi-modal with image parts),
+        // the transform must not rewrite it.
+        let body = serde_json::json!({
+            "model": "coder-model",
+            "messages": [
+                { "role": "system", "content": "sys" },
+                {
+                    "role": "user",
+                    "content": [
+                        { "type": "text", "text": "look at this" },
+                        { "type": "image_url", "image_url": { "url": "data:..." } }
+                    ]
+                }
+            ]
+        });
+        let out = qwen_body_transform(body);
+        let msgs = out["messages"].as_array().unwrap();
+        let u = &msgs[1];
+        assert_eq!(u["content"].as_array().unwrap().len(), 2);
+        assert_eq!(u["content"][1]["type"], "image_url");
+    }
+
+    #[test]
+    fn session_id_is_stable_within_process() {
+        let a = qwen_session_id();
+        let b = qwen_session_id();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn prompt_id_is_13_hex_chars() {
+        let id = qwen_prompt_id();
+        assert_eq!(id.len(), 13);
+        assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+    }
 }
