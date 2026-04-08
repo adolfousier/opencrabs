@@ -313,54 +313,64 @@ impl AgentService {
                         }
                         // Emit ToolStarted + ToolCompleted with fully parsed input
                         // so the TUI shows real tool context (command, file path, etc.)
-                        // CLI: lowercase names so format_tool_summary matches ("Bash" → "bash")
-                        let state = &mut block_states[index];
-                        if let ContentBlock::ToolUse {
-                            ref name,
-                            ref input,
-                            ..
-                        } = state.block
-                            && let Some(cb) = effective_cb
-                        {
-                            let emit_name = if is_cli {
-                                name.to_lowercase()
-                            } else {
-                                name.clone()
-                            };
-                            cb(
-                                session_id,
-                                ProgressEvent::ToolStarted {
-                                    tool_name: emit_name.clone(),
-                                    tool_input: input.clone(),
-                                },
-                            );
-                            cb(
-                                session_id,
-                                ProgressEvent::ToolCompleted {
-                                    tool_name: emit_name,
-                                    tool_input: input.clone(),
-                                    success: true,
-                                    summary: String::new(),
-                                },
-                            );
-
-                            // CLI only: check if user queued a message during
-                            // tool execution. Consume it and break the stream
-                            // so tool_loop can inject it into context.
-                            if let Some(qcb) = queue_cb
-                                && let Some(queued) = qcb().await
+                        //
+                        // CLI-ONLY: for CLI providers (claude-cli, qwen-cli, opencode),
+                        // the CLI runs tools itself and the stream-close is the ONLY
+                        // signal we get — so we synthesize the lifecycle here.
+                        //
+                        // For non-CLI providers (OpenAI-compatible, Anthropic, etc.)
+                        // tool_loop owns the full lifecycle: it fires ToolStarted
+                        // before invoking the tool and ToolCompleted with the real
+                        // output. Firing here too would DOUBLE every event, bloat
+                        // the tool-call count in the TUI, and leave a phantom
+                        // "Processing: <tool>" indicator because the premature
+                        // fake completion races the real one. See the 6-in-85µs
+                        // duplication observed in logs.
+                        if is_cli {
+                            let state = &mut block_states[index];
+                            if let ContentBlock::ToolUse {
+                                ref name,
+                                ref input,
+                                ..
+                            } = state.block
+                                && let Some(cb) = effective_cb
                             {
-                                tracing::info!(
-                                    "Queued user message at CLI tool boundary — storing for tool_loop"
+                                let emit_name = name.to_lowercase();
+                                cb(
+                                    session_id,
+                                    ProgressEvent::ToolStarted {
+                                        tool_name: emit_name.clone(),
+                                        tool_input: input.clone(),
+                                    },
                                 );
-                                // Only store — don't emit QueuedUserMessage here.
-                                // tool_loop emits it AFTER CLI interleaving so it
-                                // appears in the correct position (after all tools).
-                                if let Some(buf) = queued_out {
-                                    *buf.lock().await = Some(queued);
+                                cb(
+                                    session_id,
+                                    ProgressEvent::ToolCompleted {
+                                        tool_name: emit_name,
+                                        tool_input: input.clone(),
+                                        success: true,
+                                        summary: String::new(),
+                                    },
+                                );
+
+                                // CLI only: check if user queued a message during
+                                // tool execution. Consume it and break the stream
+                                // so tool_loop can inject it into context.
+                                if let Some(qcb) = queue_cb
+                                    && let Some(queued) = qcb().await
+                                {
+                                    tracing::info!(
+                                        "Queued user message at CLI tool boundary — storing for tool_loop"
+                                    );
+                                    // Only store — don't emit QueuedUserMessage here.
+                                    // tool_loop emits it AFTER CLI interleaving so it
+                                    // appears in the correct position (after all tools).
+                                    if let Some(buf) = queued_out {
+                                        *buf.lock().await = Some(queued);
+                                    }
+                                    stop_reason = Some(StopReason::EndTurn);
+                                    break;
                                 }
-                                stop_reason = Some(StopReason::EndTurn);
-                                break;
                             }
                         }
                     }
