@@ -473,10 +473,95 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(""));
     }
 
+    // Qwen native (idx 10) uses OAuth device flow instead of an API key.
+    // Render the same status block as `/onboard` so the user gets a
+    // consistent experience across the two surfaces.
+    if provider_idx == 10 {
+        use crate::tui::onboarding::QwenDeviceFlowStatus;
+        if app.ps.has_existing_key {
+            lines.push(Line::from(Span::styled(
+                "  ● Authenticated with Qwen",
+                Style::default().fg(Color::Green),
+            )));
+            lines.push(Line::from(Span::styled(
+                "  Press Enter to continue, or re-authenticate",
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
+            )));
+        } else {
+            match &app.ps.qwen_device_flow_status {
+                QwenDeviceFlowStatus::Idle => {
+                    lines.push(Line::from(Span::styled(
+                        "  Free tier: 60 req/min, 1000 req/day",
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::ITALIC),
+                    )));
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled(
+                        "  Press Enter to sign in with qwen.ai",
+                        Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
+                    )));
+                }
+                QwenDeviceFlowStatus::WaitingForUser { verification_uri } => {
+                    if !verification_uri.is_empty() {
+                        lines.push(Line::from(Span::styled(
+                            format!("  1. Open: {}", verification_uri),
+                            Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
+                        )));
+                    } else {
+                        lines.push(Line::from(Span::styled(
+                            "  1. Requesting device code...",
+                            Style::default().fg(BRAND_BLUE),
+                        )));
+                    }
+                    if let Some(ref code) = app.ps.qwen_user_code {
+                        lines.push(Line::from(Span::styled(
+                            format!("  2. Enter code: {}", code),
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                        )));
+                    }
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled(
+                        "  Waiting for authorization...",
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::ITALIC),
+                    )));
+                }
+                QwenDeviceFlowStatus::Complete => {
+                    lines.push(Line::from(Span::styled(
+                        "  ● Authenticated successfully!",
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    )));
+                }
+                QwenDeviceFlowStatus::Failed(err) => {
+                    lines.push(Line::from(Span::styled(
+                        format!("  ✗ {}", err),
+                        Style::default().fg(Color::Red),
+                    )));
+                    lines.push(Line::from(Span::styled(
+                        "  Press Enter to try again",
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::ITALIC),
+                    )));
+                }
+            }
+        }
+        lines.push(Line::from(""));
+    }
+
     // API Key field (field 1 for non-Custom, field 2 for Custom; field 2 for zhipu since field 1 = endpoint type)
-    // CLI providers have no API key — skip entirely
+    // CLI providers have no API key — skip entirely.
+    // Qwen native (idx 10) handled above via OAuth device flow.
     let is_cli_provider = app.ps.is_cli();
-    if !is_cli_provider {
+    if !is_cli_provider && provider_idx != 10 {
         let is_zhipu = provider_idx == 6;
         let key_focused = (focused_field == 1 && !is_custom && !is_zhipu)
             || (focused_field == 2 && (is_custom || is_zhipu));
@@ -532,7 +617,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
         }
 
         lines.push(Line::from(""));
-    } else {
+    } else if is_cli_provider {
         // CLI provider: show "no API key needed" hint
         let cli_name = match app.ps.provider_id() {
             "opencode-cli" => "opencode",

@@ -709,7 +709,7 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
                     .add_modifier(Modifier::ITALIC),
             )));
         } else {
-            match &wizard.qwen_device_flow_status {
+            match &wizard.ps.qwen_device_flow_status {
                 QwenDeviceFlowStatus::Idle => {
                     lines.push(Line::from(Span::styled(
                         "  Free tier: 60 req/min, 1000 req/day",
@@ -735,7 +735,7 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
                             Style::default().fg(BRAND_BLUE),
                         )));
                     }
-                    if let Some(ref code) = wizard.qwen_user_code {
+                    if let Some(ref code) = wizard.ps.qwen_user_code {
                         lines.push(Line::from(Span::styled(
                             format!("  2. Enter code: {}", code),
                             Style::default()

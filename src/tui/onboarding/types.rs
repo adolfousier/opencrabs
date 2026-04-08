@@ -365,9 +365,10 @@ pub enum GitHubDeviceFlowStatus {
 }
 
 /// Qwen native OAuth device flow status
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum QwenDeviceFlowStatus {
     /// Not started
+    #[default]
     Idle,
     /// Device code obtained — show user_code + verification URL, polling token endpoint
     WaitingForUser { verification_uri: String },

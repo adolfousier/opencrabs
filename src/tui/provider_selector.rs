@@ -23,6 +23,13 @@ pub const CUSTOM_INSTANCES_START: usize = PROVIDERS.len();
 /// Both `/models` dialog and `/onboard` wizard embed this struct.
 #[derive(Default)]
 pub struct ProviderSelectorState {
+    /// Qwen OAuth device flow status. Lives here (not on OnboardingWizard) so
+    /// both the `/onboard` wizard and the `/models` dialog can share the same
+    /// rendering path and event handlers. `Idle` when no flow is active.
+    pub qwen_device_flow_status: crate::tui::onboarding::QwenDeviceFlowStatus,
+    /// User-facing device code shown during Qwen OAuth device flow.
+    pub qwen_user_code: Option<String>,
+
     /// Currently selected provider index (0..CUSTOM_PROVIDER_IDX = static,
     /// CUSTOM_PROVIDER_IDX = new custom, CUSTOM_INSTANCES_START+ = existing customs)
     pub selected_provider: usize,

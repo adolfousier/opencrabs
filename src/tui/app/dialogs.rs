@@ -9,6 +9,53 @@ use anyhow::Result;
 use std::path::PathBuf;
 
 impl App {
+    /// Spawn the Qwen OAuth device flow task. Shared by `/onboard` (wizard)
+    /// and `/models` (dialog). Emits `TuiEvent::QwenDeviceCode` /
+    /// `QwenOAuthComplete` / `QwenOAuthError` which both rendering paths
+    /// consume via `self.ps.qwen_device_flow_status`.
+    pub(crate) fn spawn_qwen_device_flow(&self) {
+        use crate::brain::provider::qwen;
+        let sender = self.event_sender();
+        tokio::spawn(async move {
+            let pkce = qwen::PkcePair::generate();
+            let device = match qwen::start_device_flow(&pkce).await {
+                Ok(d) => d,
+                Err(e) => {
+                    let _ = sender.send(TuiEvent::QwenOAuthError(e.to_string()));
+                    return;
+                }
+            };
+
+            let url = device
+                .verification_uri_complete
+                .clone()
+                .unwrap_or_else(|| device.verification_uri.clone());
+            // Best-effort browser open — never blocks the flow.
+            let _ = qwen::open_browser(&url);
+
+            let _ = sender.send(TuiEvent::QwenDeviceCode {
+                user_code: device.user_code.clone(),
+                verification_uri: url,
+            });
+
+            match qwen::poll_for_token(&device.device_code, &pkce).await {
+                Ok(creds) => {
+                    if let Err(e) = creds.persist_to_keys() {
+                        let _ = sender.send(TuiEvent::QwenOAuthError(format!(
+                            "Authorized but failed to save credentials: {}",
+                            e
+                        )));
+                        return;
+                    }
+                    let _ = sender.send(TuiEvent::QwenOAuthComplete);
+                }
+                Err(e) => {
+                    let _ = sender.send(TuiEvent::QwenOAuthError(e.to_string()));
+                }
+            }
+        });
+    }
+
     /// Detect existing API key for the currently selected provider in model selector.
     /// Delegates to `ProviderSelectorState::detect_existing_key()`.
     pub(crate) fn detect_model_selector_key_for_provider(&mut self) {
@@ -497,6 +544,20 @@ impl App {
             let is_cli_provider = matches!(self.ps.selected_provider, 7..=9);
 
             if self.ps.focused_field == 0 {
+                // Qwen native (idx 10) uses OAuth device flow instead of an
+                // API-key text field. If no credentials exist yet, kick off
+                // the device flow and don't advance focus — the user watches
+                // the status overlay and the QwenOAuthComplete event will
+                // populate the existing-key sentinel for us.
+                if self.ps.selected_provider == 10 && !self.ps.has_existing_key {
+                    self.ps.qwen_device_flow_status =
+                        super::onboarding::QwenDeviceFlowStatus::WaitingForUser {
+                            verification_uri: String::new(),
+                        };
+                    self.spawn_qwen_device_flow();
+                    return Ok(());
+                }
+
                 // On provider field - save config, DON'T close dialog
                 // Map indices >= 12 back to 11 for save (custom provider)
                 let save_idx = self.ps.selected_provider.min(11);
@@ -1368,50 +1429,11 @@ impl App {
                     });
                 }
                 WizardAction::QwenDeviceFlow => {
-                    use crate::brain::provider::qwen;
-                    wizard.qwen_device_flow_status =
+                    wizard.ps.qwen_device_flow_status =
                         super::onboarding::QwenDeviceFlowStatus::WaitingForUser {
                             verification_uri: String::new(),
                         };
-                    let sender = self.event_sender();
-                    tokio::spawn(async move {
-                        let pkce = qwen::PkcePair::generate();
-                        let device = match qwen::start_device_flow(&pkce).await {
-                            Ok(d) => d,
-                            Err(e) => {
-                                let _ = sender.send(TuiEvent::QwenOAuthError(e.to_string()));
-                                return;
-                            }
-                        };
-
-                        let url = device
-                            .verification_uri_complete
-                            .clone()
-                            .unwrap_or_else(|| device.verification_uri.clone());
-                        // Best-effort browser open — never blocks the flow.
-                        let _ = qwen::open_browser(&url);
-
-                        let _ = sender.send(TuiEvent::QwenDeviceCode {
-                            user_code: device.user_code.clone(),
-                            verification_uri: url,
-                        });
-
-                        match qwen::poll_for_token(&device.device_code, &pkce).await {
-                            Ok(creds) => {
-                                if let Err(e) = creds.persist_to_keys() {
-                                    let _ = sender.send(TuiEvent::QwenOAuthError(format!(
-                                        "Authorized but failed to save credentials: {}",
-                                        e
-                                    )));
-                                    return;
-                                }
-                                let _ = sender.send(TuiEvent::QwenOAuthComplete);
-                            }
-                            Err(e) => {
-                                let _ = sender.send(TuiEvent::QwenOAuthError(e.to_string()));
-                            }
-                        }
-                    });
+                    self.spawn_qwen_device_flow();
                 }
                 WizardAction::GitHubDeviceFlow => {
                     wizard.github_device_flow_status =
