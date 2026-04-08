@@ -50,7 +50,40 @@ impl OnboardingWizard {
 
     /// Handle paste event - inserts text at current cursor position
     pub fn handle_paste(&mut self, text: &str) {
-        // Sanitize pasted text: take first line only, strip \r\n and whitespace
+        // Brain setup accepts full multi-line markdown paste — handle it
+        // before the single-line sanitizer so the user can dump a whole
+        // markdown document (or raw prose) into the About fields.
+        if self.step == OnboardingStep::BrainSetup {
+            // Normalize CRLF → LF so Windows clipboards don't leave stray \r.
+            let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+            let trimmed = normalized.trim();
+            if trimmed.is_empty() {
+                return;
+            }
+            match self.brain_field {
+                BrainField::AboutMe => {
+                    if self.about_me.is_empty() {
+                        self.about_me = trimmed.to_string();
+                    } else {
+                        self.about_me.push('\n');
+                        self.about_me.push_str(trimmed);
+                    }
+                }
+                BrainField::AboutAgent => {
+                    if self.about_opencrabs.is_empty() {
+                        self.about_opencrabs = trimmed.to_string();
+                    } else {
+                        self.about_opencrabs.push('\n');
+                        self.about_opencrabs.push_str(trimmed);
+                    }
+                }
+            }
+            return;
+        }
+
+        // All other steps expect single-line input (API keys, channel IDs,
+        // etc.). Collapse the paste to its first non-empty line and strip
+        // surrounding whitespace to defend against trailing newlines.
         let clean = text.split(['\r', '\n']).next().unwrap_or("").trim();
         if clean.is_empty() {
             return;

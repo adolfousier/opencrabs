@@ -719,7 +719,9 @@ impl OnboardingWizard {
             }
 
             // Persist channel IDs/user IDs to config.toml (if new)
-            if !self.telegram_user_id_input.is_empty() && !self.has_existing_telegram_user_id() {
+            // telegram_user_id_input is never a sentinel — write whatever
+            // the user left in the field (empty = "allow any user").
+            if !self.telegram_user_id_input.is_empty() {
                 try_write_array!(
                     write_errors,
                     "channels.telegram",

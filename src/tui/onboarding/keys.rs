@@ -130,18 +130,22 @@ impl OnboardingWizard {
         self.telegram_token_input == EXISTING_KEY_SENTINEL
     }
 
-    /// Detect existing Telegram user ID from config.toml
+    /// Load the first existing Telegram allowed_user from config.toml
+    /// directly into the input field. Unlike secret fields, this is a
+    /// plain numeric chat ID — no sentinel masking so the user can see
+    /// and edit what's actually stored.
     pub(super) fn detect_existing_telegram_user_id(&mut self) {
         if let Ok(config) = crate::config::Config::load()
-            && !config.channels.telegram.allowed_users.is_empty()
+            && let Some(first) = config.channels.telegram.allowed_users.first()
         {
-            self.telegram_user_id_input = EXISTING_KEY_SENTINEL.to_string();
+            self.telegram_user_id_input = first.clone();
         }
     }
 
-    /// Check if telegram user ID holds a pre-existing value
+    /// Telegram user IDs are never masked — this always returns false.
+    /// Kept for API compatibility with the onboarding render/config code.
     pub fn has_existing_telegram_user_id(&self) -> bool {
-        self.telegram_user_id_input == EXISTING_KEY_SENTINEL
+        false
     }
 
     /// Detect existing WhatsApp allowed phones from config.toml
