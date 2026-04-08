@@ -162,8 +162,7 @@ pub type TokenFn = Arc<dyn Fn() -> String + Send + Sync>;
 /// chat-completions request is serialized. Lets a provider mutate the JSON
 /// body to match a vendor-specific dialect (e.g. qwen-cli's content-array
 /// shape + metadata fields) without polluting the generic OpenAI path.
-pub type BodyTransformFn =
-    Arc<dyn Fn(serde_json::Value) -> serde_json::Value + Send + Sync>;
+pub type BodyTransformFn = Arc<dyn Fn(serde_json::Value) -> serde_json::Value + Send + Sync>;
 
 /// Optional dynamic base-URL provider. When set, `send_url()` will call
 /// this on every request instead of using the stored `base_url`. Used by
@@ -440,6 +439,14 @@ impl OpenAIProvider {
         headers.insert(
             reqwest::header::CONTENT_TYPE,
             "application/json".parse().expect("valid content-type"),
+        );
+        // Explicit Accept — matches what the `openai` npm SDK sends. Without
+        // this, reqwest falls back to `accept: */*` which is a visible
+        // fingerprint difference from qwen-cli / most SDK clients and at
+        // least one gateway (portal.qwen.ai DashScope) rate-limits on it.
+        headers.insert(
+            reqwest::header::ACCEPT,
+            "application/json".parse().expect("valid accept"),
         );
 
         // OpenRouter-specific optimization headers
@@ -1570,10 +1577,7 @@ impl Provider for OpenAIProvider {
             && Self::is_auth_error(e)
             && let Some(ref refresh) = self.auth_refresh_fn
         {
-            tracing::warn!(
-                "{} stream auth error — refreshing and retrying",
-                self.name
-            );
+            tracing::warn!("{} stream auth error — refreshing and retrying", self.name);
             match refresh().await {
                 Ok(()) => {
                     response = retry_with_backoff(
@@ -2353,7 +2357,11 @@ impl OpenAIUsage {
     /// OpenAI/DashScope `prompt_tokens_details.cached_tokens` field.
     fn effective_cache_read(&self) -> u32 {
         self.cache_read_input_tokens
-            .or_else(|| self.prompt_tokens_details.as_ref().and_then(|d| d.cached_tokens))
+            .or_else(|| {
+                self.prompt_tokens_details
+                    .as_ref()
+                    .and_then(|d| d.cached_tokens)
+            })
             .unwrap_or(0)
     }
 
