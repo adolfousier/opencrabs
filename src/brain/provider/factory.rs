@@ -564,6 +564,16 @@ fn try_create_qwen(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         effective_config.default_model = Some(QWEN_OAUTH_MODEL.to_string());
     }
 
+    // Proactive pacing: the Qwen free tier is 60 req/min (1 req/s sustained).
+    // Our tool loop bursts well past that on multi-tool turns, which triggers
+    // instant 429s from portal.qwen.ai even with a valid token. 1500ms =
+    // 40 req/min, leaves 33% headroom under the quota, and still fires fast
+    // enough to keep interactive latency reasonable. qwen-cli gets this
+    // pacing for free from the openai npm SDK; we have to wire it explicitly.
+    let qwen_limiter = Arc::new(super::rate_limiter::RateLimiter::new(
+        std::time::Duration::from_millis(1500),
+    ));
+
     let provider = configure_openai_compatible(
         OpenAIProvider::with_base_url("qwen-managed".to_string(), base_url)
             .with_name("qwen")
@@ -571,7 +581,8 @@ fn try_create_qwen(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
             .with_base_url_fn(base_url_fn)
             .with_auth_refresh_fn(auth_refresh_fn)
             .with_extra_headers(qwen_extra_headers())
-            .with_body_transform(Arc::new(qwen_body_transform)),
+            .with_body_transform(Arc::new(qwen_body_transform))
+            .with_rate_limiter(qwen_limiter),
         &effective_config,
     );
     Ok(Some(Arc::new(provider)))
