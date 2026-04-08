@@ -944,6 +944,14 @@ pub struct ProviderConfig {
     /// No scheme, no path — used to derive the chat completions URL.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resource_url: Option<String>,
+
+    /// Opt-in toggle for Qwen3 hybrid thinking mode.
+    /// Qwen3 is a single model with a runtime switch — set `enable_thinking =
+    /// true` in `[providers.qwen]` to ask the gateway to emit reasoning
+    /// tokens. Unset / false keeps the model in non-thinking (fast) mode.
+    /// Currently only honoured by the native Qwen provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enable_thinking: Option<bool>,
 }
 
 fn default_enabled() -> bool {
