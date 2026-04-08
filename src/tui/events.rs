@@ -51,6 +51,11 @@ pub enum TuiEvent {
     /// Agent sent a response chunk (streaming)
     ResponseChunk { session_id: Uuid, text: String },
 
+    /// Wipe the in-progress streaming buffer for a session — used when a
+    /// gaslighting refusal preamble has been detected mid-turn and must
+    /// not stay on screen while the tools it contradicted actually execute.
+    StripStreamedContent { session_id: Uuid, reason: String },
+
     /// Agent completed response
     ResponseComplete {
         session_id: Uuid,

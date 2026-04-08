@@ -84,6 +84,13 @@ pub enum ProgressEvent {
     SelfHealingAlert {
         message: String,
     },
+    /// The just-streamed assistant text has been detected as a gaslighting
+    /// refusal preamble (e.g. "tools aren't responding") emitted alongside a
+    /// valid tool_use block. The UI should wipe its in-progress streaming
+    /// buffer so the lie doesn't stay on screen.
+    StripStreamedContent {
+        reason: String,
+    },
     /// Sticky fallback promoted a new provider/model. Carries structured data
     /// so UIs can update the session + footer without parsing text.
     ProviderSwitched {

@@ -920,3 +920,109 @@ pub fn detect_text_repetition(window: &str, min_match: usize) -> bool {
         false
     }
 }
+
+/// Refusal/gaslighting phrases harvested from real dialagram qwen-thinking
+/// streams (see logs 2026-04-08). Every phrase was observed in an assistant
+/// turn that ALSO contained a valid `tool_use` block that executed
+/// successfully — i.e. the model claimed tools were broken while
+/// simultaneously calling them. These substrings are matched
+/// case-insensitively.
+const GASLIGHTING_REFUSAL_PHRASES: &[&str] = &[
+    // "tools are broken" family
+    "tools aren't responding",
+    "tools are not responding",
+    "tools are flaky",
+    "tools are still flaky",
+    "tools appear to be",
+    "tools appear broken",
+    "tools appear unavailable",
+    "appear to be unavailable",
+    "tools are unavailable",
+    "tools are currently unavailable",
+    "tools are disabled",
+    "tools are not loading",
+    "tools are not available",
+    // "not currently available" family (23:58 incident — vision tool variant)
+    "isn't currently available",
+    "is not currently available",
+    "not currently available",
+    "tool isn't currently",
+    "tool is not currently",
+    "vision tool isn't",
+    "vision tool is not",
+    "vision integration",
+    "despite being in my tool list",
+    "despite being in the tool list",
+    "despite appearing in",
+    "even though it appears in",
+    // "not registered" family
+    "isn't actually registered",
+    "is not actually registered",
+    "not actually registered",
+    "isn't registered",
+    "isn't loaded",
+    "is not loaded",
+    "isn't in the registry",
+    "not in the registry",
+    // "runtime mismatch" family
+    "mismatch between the advertised",
+    "advertised capabilities",
+    "runtime hiccup",
+    "might be a runtime",
+    "might be a configuration issue",
+    "configuration issue",
+    "runtime issue",
+    "runtime glitch",
+    "underlying system disruption",
+    "system disruption",
+    "provider glitch",
+    "provider hiccup",
+    // "can't execute / unable to" family
+    "can't execute the tool",
+    "cannot execute the tool",
+    "unable to execute the tool",
+    "unable to invoke",
+    "unable to call the tool",
+    "unable to retrieve",
+    "unable to analyze",
+    "unable to analyse",
+    "unable to process",
+    "unable to view",
+    "unable to see",
+    "unable to read",
+    "tool execution failed before it started",
+    // "user workaround" family — when the model asks the user to manually
+    // re-upload or describe content that the tool WOULD handle. These are
+    // pure gaslighting preambles emitted alongside the real tool_use call.
+    "try uploading it again",
+    "try uploading the image again",
+    "upload it again",
+    "upload the image again",
+    "just tell me what's in",
+    "just describe what's in",
+    "or just tell me",
+    "or just describe",
+    "paste it as",
+    "paste the image",
+    "drop the path",
+    "if you need image analysis",
+    "for image analysis you could",
+];
+
+/// Detect a gaslighting refusal preamble: short assistant text that claims
+/// tools are broken/missing/unregistered. Only meaningful when paired with
+/// a successful `ToolUse` block in the same assistant turn — the presence
+/// of that block proves the refusal is a lie.
+///
+/// Length guard: > 1500 chars is almost always a real explanation or
+/// long narration, so we leave it alone to avoid false positives.
+pub fn is_gaslighting_preamble(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() || trimmed.len() > 1500 {
+        return false;
+    }
+    let lower = trimmed.to_lowercase();
+    GASLIGHTING_REFUSAL_PHRASES
+        .iter()
+        .any(|phrase| lower.contains(phrase))
+}

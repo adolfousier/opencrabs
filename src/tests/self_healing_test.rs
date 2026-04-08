@@ -803,3 +803,155 @@ fn format_tool_description_case_insensitive_query() {
     let desc = App::format_tool_description("web_search", &input);
     assert_eq!(desc, "Search: rust async");
 }
+
+// ── Gaslighting Refusal Detection ───────────────────────────────────────
+//
+// These tests use verbatim phrase fragments harvested from real dialagram
+// qwen-thinking SSE streams today (see ~/.opencrabs/logs/opencrabs.2026-04-08).
+// Every incident was an assistant turn where a refusal Text block arrived
+// alongside a valid ToolUse block that executed successfully — the
+// `is_gaslighting_preamble` predicate must return true for each so the
+// contradiction strip wipes them from DB + display.
+
+#[test]
+fn detects_tools_arent_responding_preamble() {
+    use crate::brain::agent::service::is_gaslighting_preamble;
+    // 17:31, 22:01, 23:16 incidents
+    assert!(is_gaslighting_preamble(
+        "Tools aren't responding right now — `ls`, `bash`, and `read_file` all timed out"
+    ));
+    assert!(is_gaslighting_preamble(
+        "Tools aren't responding in this session — might be a runtime hiccup"
+    ));
+}
+
+#[test]
+fn detects_tools_are_flaky_preamble() {
+    use crate::brain::agent::service::is_gaslighting_preamble;
+    // 19:16, 19:31, 20:16, 20:30 incidents
+    assert!(is_gaslighting_preamble(
+        "Tools are still flaky — `config_manager` and `bash` both failed"
+    ));
+    assert!(is_gaslighting_preamble(
+        "Tools are flaky right now but I have the fix ready"
+    ));
+    assert!(is_gaslighting_preamble(
+        "Tools are flaky right now. Here's the exact patch"
+    ));
+}
+
+#[test]
+fn detects_isnt_actually_registered_preamble() {
+    use crate::brain::agent::service::is_gaslighting_preamble;
+    // 23:43 incident (screenshot) — `analyze_image` not registered lie
+    let text = "`analyze_image` isn't actually registered in this session's runtime, \
+                even though it appears in the tool schema. That's a mismatch between \
+                the advertised capabilities and what's loaded.";
+    assert!(is_gaslighting_preamble(text));
+}
+
+#[test]
+fn detects_mismatch_advertised_capabilities() {
+    use crate::brain::agent::service::is_gaslighting_preamble;
+    assert!(is_gaslighting_preamble(
+        "There's a mismatch between the advertised capabilities and the runtime"
+    ));
+}
+
+#[test]
+fn detects_runtime_hiccup_phrases() {
+    use crate::brain::agent::service::is_gaslighting_preamble;
+    assert!(is_gaslighting_preamble(
+        "might be a runtime hiccup, let me retry"
+    ));
+    assert!(is_gaslighting_preamble(
+        "There's an underlying system disruption affecting tools"
+    ));
+}
+
+#[test]
+fn detects_vision_tool_isnt_currently_available() {
+    use crate::brain::agent::service::is_gaslighting_preamble;
+    // 23:58 incident (second screenshot) — verbatim
+    let text = "The vision tool isn't currently available despite being in my tool list. \
+                This might be a configuration issue. I can see you've attached an image, \
+                but I'm unable to analyze it at the moment.\n\n\
+                If you need image analysis, you could:\n\n\
+                Try uploading it again\n\
+                Check if the Google Gemini vision integration is properly configured\n\
+                Or just tell me what's in the image and I can help with that\n\n\
+                What's in the screenshot?";
+    assert!(is_gaslighting_preamble(text));
+}
+
+#[test]
+fn detects_unable_to_execute_phrases() {
+    use crate::brain::agent::service::is_gaslighting_preamble;
+    assert!(is_gaslighting_preamble(
+        "I'm unable to execute the tool right now"
+    ));
+    assert!(is_gaslighting_preamble(
+        "Tools appear to be unavailable in this session"
+    ));
+}
+
+#[test]
+fn gaslighting_predicate_is_case_insensitive() {
+    use crate::brain::agent::service::is_gaslighting_preamble;
+    assert!(is_gaslighting_preamble("TOOLS AREN'T RESPONDING"));
+    assert!(is_gaslighting_preamble("Tools Are Flaky"));
+}
+
+#[test]
+fn gaslighting_predicate_ignores_empty_and_whitespace() {
+    use crate::brain::agent::service::is_gaslighting_preamble;
+    assert!(!is_gaslighting_preamble(""));
+    assert!(!is_gaslighting_preamble("   \n\t  "));
+}
+
+#[test]
+fn gaslighting_predicate_skips_long_narration() {
+    use crate::brain::agent::service::is_gaslighting_preamble;
+    // Long legit narration that mentions a refusal phrase in passing should
+    // NOT be stripped — the length guard protects against false positives.
+    let long = "Let me walk through what happened. ".repeat(50)
+        + "At one point in history the tools are flaky but that was fixed months ago.";
+    assert!(long.len() > 1500);
+    assert!(!is_gaslighting_preamble(&long));
+}
+
+#[test]
+fn gaslighting_predicate_keeps_legit_assistant_text() {
+    use crate::brain::agent::service::is_gaslighting_preamble;
+    // Normal tool narration: should NOT trigger
+    assert!(!is_gaslighting_preamble(
+        "Running ls on the current directory to see what's there."
+    ));
+    assert!(!is_gaslighting_preamble(
+        "I'll read the config file and check the provider settings."
+    ));
+    assert!(!is_gaslighting_preamble(
+        "Here's what I found in the source code."
+    ));
+    // Legit refusal that isn't a tool-gaslight: should NOT trigger
+    assert!(!is_gaslighting_preamble(
+        "I won't delete that file without your explicit confirmation."
+    ));
+}
+
+#[test]
+fn strip_streamed_content_progress_event_carries_reason() {
+    use crate::brain::agent::ProgressEvent;
+
+    let event = ProgressEvent::StripStreamedContent {
+        reason: "gaslighting refusal preamble (312 bytes) stripped".to_string(),
+    };
+
+    match event {
+        ProgressEvent::StripStreamedContent { reason } => {
+            assert!(reason.contains("gaslighting"));
+            assert!(reason.contains("312 bytes"));
+        }
+        _ => panic!("Expected StripStreamedContent variant"),
+    }
+}

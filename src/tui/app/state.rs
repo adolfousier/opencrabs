@@ -1251,6 +1251,22 @@ impl App {
                     self.append_streaming_chunk(text);
                 }
             }
+            TuiEvent::StripStreamedContent { session_id, reason } => {
+                if self.is_current_session(session_id) {
+                    let prior_len = self
+                        .streaming_response
+                        .as_ref()
+                        .map(|s| s.len())
+                        .unwrap_or(0);
+                    tracing::warn!(
+                        "[TUI] StripStreamedContent: wiping {} bytes of streaming buffer — {}",
+                        prior_len,
+                        reason
+                    );
+                    self.streaming_response = None;
+                    self.streaming_reasoning = None;
+                }
+            }
             TuiEvent::ReasoningChunk { session_id, text } => {
                 if self.is_current_session(session_id) {
                     // Skip empty chunks so we never end up with `Some("")`,
