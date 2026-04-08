@@ -1907,6 +1907,23 @@ impl Provider for OpenAIProvider {
 
                                         // Emit text content, filtering <think>...</think> reasoning blocks
                                         if let Some(ref c) = content {
+                                            // Defensive: qwen-3.6-plus-thinking (and other thinking
+                                            // models) occasionally hallucinate OpenAI tool_call
+                                            // envelopes as plain text content (e.g.
+                                            // `{"tool_calls":[{"id"...`). The real tool calls come
+                                            // through `delta.tool_calls` — any such text in
+                                            // `delta.content` is pure noise. Drop it outright.
+                                            // Use a guard (not `continue`) so reasoning_content
+                                            // and finish_reason handling below still runs.
+                                            let c_trimmed = c.trim_start();
+                                            let is_tool_calls_leak = c_trimmed.starts_with("{\"tool_calls\"")
+                                                || c_trimmed.starts_with("{ \"tool_calls\"");
+                                            if is_tool_calls_leak {
+                                                tracing::warn!(
+                                                    "[STREAM_FILTER] Dropping hallucinated tool_calls JSON in content delta ({} chars)",
+                                                    c.len()
+                                                );
+                                            } else {
                                             let (mut inside, mut close_idx, mut consumed) =
                                                 (st.inside_think, st.active_close_tag, st.think_bytes_consumed);
                                             let filtered = filter_think_tags(c, &mut inside, &mut close_idx, &mut consumed);
@@ -1936,6 +1953,7 @@ impl Provider for OpenAIProvider {
                                                     content_block: ContentBlock::Text { text: String::new() },
                                                 }));
                                             }
+                                            } // end else (not tool_calls leak)
                                         }
 
                                         // Extract reasoning_content (MiniMax/dialagram thinking process).
