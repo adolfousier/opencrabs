@@ -313,9 +313,17 @@ impl AgentService {
         *self.provider.write().expect("provider lock poisoned") = new_provider;
     }
 
-    /// Get context window size for a given model
+    /// Get context window size for a given model.
+    ///
+    /// Delegates to `context_limit()` so custom OpenAI-compatible providers
+    /// that declare a `providers.custom.<name>.context_window` are honored
+    /// here too. Without this, the TUI header reads the static
+    /// `agent.context_limit` fallback (typically 200k) while the actual
+    /// budget enforcer uses the provider-configured window — producing a
+    /// misleading "202k/200k" when the engine is still safely inside its
+    /// real limit.
     pub fn context_window_for_model(&self, _model: &str) -> u32 {
-        self.context_limit
+        self.context_limit()
     }
 
     /// Build fallback providers from config for mid-stream rate limit recovery.
