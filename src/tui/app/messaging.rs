@@ -82,15 +82,15 @@ impl App {
             .await?
             .ok_or_else(|| anyhow::anyhow!("Session not found"))?;
 
-        let all_messages = self
+        let messages = self
             .message_service
             .list_messages_for_session(session_id)
             .await?;
 
-        // Only load messages from the last compaction point forward —
-        // matches what the agent actually sees in its context window.
-        let messages =
-            crate::brain::agent::AgentService::messages_from_last_compaction(all_messages);
+        // TUI scrollback shows the FULL session history. The agent applies
+        // its own compaction window when building the LLM prompt — that's
+        // independent of what the human sees. Trimming here was wiping the
+        // visible chat after every auto-compaction.
 
         // Stash old session's cancel token before switching so background
         // processing can still be cancelled from the sessions screen.
@@ -265,13 +265,11 @@ impl App {
 
     /// Pre-load a session's messages into the pane cache (for restored split panes).
     pub(crate) async fn preload_pane_session(&mut self, session_id: Uuid) {
-        let all_messages = self
+        let messages = self
             .message_service
             .list_messages_for_session(session_id)
             .await
             .unwrap_or_default();
-        let messages =
-            crate::brain::agent::AgentService::messages_from_last_compaction(all_messages);
         let (display, _) = Self::trim_messages_to_display_budget(&messages, 200_000);
         let expanded: Vec<DisplayMessage> =
             display.into_iter().flat_map(Self::expand_message).collect();
