@@ -267,12 +267,21 @@ impl AgentService {
         // and only load messages from there forward. No arbitrary trimming.
         let mut db_messages = Self::messages_from_last_compaction(all_db_messages);
 
-        // Detect CLI provider once (doesn't change during the loop)
-        let is_cli_provider = self
+        // Detect CLI provider once (doesn't change during the loop).
+        //
+        // `is_cli_provider` controls TWO unrelated behaviors:
+        //   1. Skip local tool execution (CLI runs tools internally)
+        //   2. Skip OpenCrabs-side context compaction (CLI persists session)
+        //
+        // Both used to read `cli_handles_tools()`, but qwen-code-cli runs tools
+        // internally yet has NO persistent session — every spawn is cold and
+        // we re-send the entire history. For qwen we still want the local
+        // compaction; only the tool-execution skip applies.
+        let (is_cli_provider, cli_owns_context) = self
             .provider
             .read()
-            .map(|p| p.cli_handles_tools())
-            .unwrap_or(false);
+            .map(|p| (p.cli_handles_tools(), p.cli_manages_context()))
+            .unwrap_or((false, false));
 
         // For API providers ONLY: strip persisted `<!-- tools-v2: ... -->` and
         // `<!-- reasoning -->` markers from DB content before loading into the
@@ -573,8 +582,10 @@ impl AgentService {
                 cb(session_id, ProgressEvent::Thinking);
             }
 
-            // Enforce 65% budget before every API call (skip for CLI — it manages its own context)
-            if let Some(ref summary) = if is_cli_provider {
+            // Enforce 65% budget before every API call. Skip ONLY when the
+            // CLI manages its own session (claude-cli with --resume). Qwen
+            // is spawned cold every turn so we MUST compact for it.
+            if let Some(ref summary) = if cli_owns_context {
                 None
             } else {
                 self.enforce_context_budget(
@@ -1289,9 +1300,10 @@ impl AgentService {
                 cb(session_id, ProgressEvent::TokenCount(context.token_count));
             }
 
-            // Post-calibration compaction check (API providers only).
-            // CLI providers handle their own context — no compaction needed from us.
-            if let Some(ref summary) = if is_cli_provider {
+            // Post-calibration compaction check. Skip ONLY when the CLI
+            // owns its session (claude-cli with --resume). Qwen is spawned
+            // cold every turn so we MUST compact for it.
+            if let Some(ref summary) = if cli_owns_context {
                 None
             } else {
                 self.enforce_context_budget(
@@ -2228,8 +2240,10 @@ impl AgentService {
                 cb(session_id, ProgressEvent::TokenCount(context.token_count));
             }
 
-            // Enforce 65% budget after tool results (skip for CLI — it manages its own context)
-            if let Some(ref summary) = if is_cli_provider {
+            // Enforce 65% budget after tool results. Skip ONLY when the CLI
+            // owns its session (claude-cli with --resume). Qwen is spawned
+            // cold every turn so we MUST compact for it.
+            if let Some(ref summary) = if cli_owns_context {
                 None
             } else {
                 self.enforce_context_budget(
