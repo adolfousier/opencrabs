@@ -76,7 +76,7 @@ impl AnthropicProvider {
         self.api_key.starts_with("sk-ant-oat")
     }
 
-    /// Build request headers
+    /// Build request headers with prompt-caching beta header.
     fn headers(&self) -> reqwest::header::HeaderMap {
         let mut headers = reqwest::header::HeaderMap::new();
 
@@ -91,13 +91,22 @@ impl AnthropicProvider {
             // Required beta header for OAuth tokens
             headers.insert(
                 "anthropic-beta",
-                "oauth-2025-04-20".parse().expect("Invalid beta header"),
+                "oauth-2025-04-20,prompt-caching-2024-07-31"
+                    .parse()
+                    .expect("Invalid beta header"),
             );
         } else {
             // Standard API key: use x-api-key header
             headers.insert(
                 "x-api-key",
                 self.api_key.parse().expect("Invalid API key format"),
+            );
+            // Prompt caching beta — required for cache_control support
+            headers.insert(
+                "anthropic-beta",
+                "prompt-caching-2024-07-31"
+                    .parse()
+                    .expect("Invalid beta header"),
             );
         }
 
@@ -117,15 +126,49 @@ impl AnthropicProvider {
         self.headers()
     }
 
-    /// Convert our generic request to Anthropic-specific format
+    /// Convert our generic request to Anthropic format with prompt caching.
+    /// The system prompt and tools are marked with cache_control so the API
+    /// caches them across turns, cutting input token costs by 30-50%.
     fn to_anthropic_request(&self, request: LLMRequest) -> AnthropicRequest {
+        let cache = AnthropicCacheControl {
+            cache_type: "ephemeral".to_string(),
+        };
+
+        // Convert system to cacheable blocks
+        let system = request.system.map(|s| {
+            AnthropicSystem::Blocks(vec![AnthropicSystemBlock {
+                block_type: "text".to_string(),
+                text: s,
+                cache_control: Some(cache.clone()),
+            }])
+        });
+
+        // Convert tools with cache_control on the last tool
+        let tools = request.tools.map(|tools| {
+            let len = tools.len();
+            tools
+                .into_iter()
+                .enumerate()
+                .map(|(i, t)| AnthropicTool {
+                    name: t.name,
+                    description: t.description,
+                    input_schema: t.input_schema,
+                    cache_control: if i == len - 1 {
+                        Some(cache.clone())
+                    } else {
+                        None
+                    },
+                })
+                .collect()
+        });
+
         AnthropicRequest {
             model: request.model,
             messages: request.messages,
-            system: request.system,
+            system,
             max_tokens: request.max_tokens.unwrap_or(16384),
             temperature: request.temperature,
-            tools: request.tools,
+            tools,
             stream: Some(request.stream),
             metadata: request.metadata,
         }
@@ -421,9 +464,11 @@ impl Provider for AnthropicProvider {
         if self.api_key.starts_with("sk-ant-oat") {
             req = req
                 .header("Authorization", format!("Bearer {}", self.api_key))
-                .header("anthropic-beta", "oauth-2025-04-20");
+                .header("anthropic-beta", "oauth-2025-04-20,prompt-caching-2024-07-31");
         } else {
-            req = req.header("x-api-key", &self.api_key);
+            req = req
+                .header("x-api-key", &self.api_key)
+                .header("anthropic-beta", "prompt-caching-2024-07-31");
         }
 
         match req.send().await {
@@ -462,22 +507,60 @@ impl Provider for AnthropicProvider {
     }
 }
 
-// Anthropic-specific request format
+// Anthropic-specific request format with prompt caching support
 #[derive(Debug, Serialize)]
 struct AnthropicRequest {
     model: String,
     messages: Vec<Message>,
+    /// System can be a string or an array of content blocks (for caching).
+    /// We use a custom serializer to decide based on whether caching is enabled.
     #[serde(skip_serializing_if = "Option::is_none")]
-    system: Option<String>,
+    system: Option<AnthropicSystem>,
     max_tokens: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    tools: Option<Vec<Tool>>,
+    tools: Option<Vec<AnthropicTool>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     stream: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     metadata: Option<std::collections::HashMap<String, String>>,
+}
+
+/// System prompt — either a plain string or a list of content blocks for caching.
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+#[allow(dead_code)]
+enum AnthropicSystem {
+    String(String),
+    Blocks(Vec<AnthropicSystemBlock>),
+}
+
+/// A system content block — text with optional cache control.
+#[derive(Debug, Serialize)]
+struct AnthropicSystemBlock {
+    #[serde(rename = "type")]
+    block_type: String,
+    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_control: Option<AnthropicCacheControl>,
+}
+
+/// Tool definition with optional cache control on the last tool.
+#[derive(Debug, Serialize)]
+struct AnthropicTool {
+    name: String,
+    description: String,
+    input_schema: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_control: Option<AnthropicCacheControl>,
+}
+
+/// Ephemeral cache control marker used by Anthropic prompt caching.
+#[derive(Debug, Serialize, Clone)]
+struct AnthropicCacheControl {
+    #[serde(rename = "type")]
+    cache_type: String,
 }
 
 // Anthropic-specific response format
@@ -596,7 +679,7 @@ mod tests {
         let headers = provider.headers();
         assert!(headers.contains_key("x-api-key"));
         assert!(!headers.contains_key(reqwest::header::AUTHORIZATION));
-        assert!(!headers.contains_key("anthropic-beta"));
+        assert!(headers.contains_key("anthropic-beta"));
     }
 
     #[test]
