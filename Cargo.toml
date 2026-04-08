@@ -71,6 +71,7 @@ tracing-appender = "0.2"
 
 # Encoding
 base64 = "0.22.1"
+sha2 = "0.10"
 
 # Utilities
 libc = "0.2.182"

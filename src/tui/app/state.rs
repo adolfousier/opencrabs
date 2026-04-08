@@ -1597,51 +1597,17 @@ impl App {
             }
             TuiEvent::CompactionSummary {
                 session_id,
-                summary,
+                summary: _,
             } if self.is_current_session(session_id) => {
-                // Agent has summarized history — clear the TUI view for a fresh start.
-                self.messages.clear();
-                self.render_cache.clear();
-                self.hidden_older_messages = 0;
-                self.oldest_displayed_sequence = 0;
-                self.display_token_count = 0;
-                // Reset streaming state so post-compaction tool calls render cleanly
+                // Compaction shrinks the AGENT's prompt budget. It is fully
+                // transparent to the user — no scrollback wipe, no divider,
+                // no notice. Only reset internal streaming state so the next
+                // assistant turn renders cleanly.
                 self.streaming_response = None;
                 self.streaming_reasoning = None;
                 self.active_tool_group = None;
                 // Allow post-compaction TokenCountUpdated to set a lower value
                 self.last_input_tokens = None;
-
-                // Brief status notice
-                self.messages.push(DisplayMessage {
-                    id: Uuid::new_v4(),
-                    role: "system".to_string(),
-                    content: "⚡ Context compacted — summary saved to daily memory log".to_string(),
-                    timestamp: chrono::Utc::now(),
-                    token_count: None,
-                    cost: None,
-                    approval: None,
-                    approve_menu: None,
-                    details: None,
-                    expanded: false,
-                    tool_group: None,
-                });
-
-                // Summary rendered as a real assistant message in chat — tool calls follow below
-                self.messages.push(DisplayMessage {
-                    id: Uuid::new_v4(),
-                    role: "assistant".to_string(),
-                    content: summary,
-                    timestamp: chrono::Utc::now(),
-                    token_count: None,
-                    cost: None,
-                    approval: None,
-                    approve_menu: None,
-                    details: None,
-                    expanded: false,
-                    tool_group: None,
-                });
-                // auto_scroll stays true — new messages continue below
             }
             TuiEvent::BuildLine(line) => {
                 // Keep a rolling window of the last 6 build lines
@@ -1818,6 +1784,7 @@ impl App {
                                 7 => c.providers.claude_cli.and_then(|p| p.default_model),
                                 8 => c.providers.opencode_cli.and_then(|p| p.default_model),
                                 9 => c.providers.qwen_code_cli.and_then(|p| p.default_model),
+                                10 => c.providers.qwen.and_then(|p| p.default_model),
                                 idx if idx
                                     >= crate::tui::provider_selector::CUSTOM_INSTANCES_START =>
                                 {
@@ -1875,6 +1842,42 @@ impl App {
                     wizard.github_device_flow_status =
                         super::onboarding::GitHubDeviceFlowStatus::Failed(err);
                     wizard.github_user_code = None;
+                }
+            }
+            TuiEvent::QwenDeviceCode {
+                user_code,
+                verification_uri,
+            } => {
+                if let Some(ref mut wizard) = self.onboarding {
+                    wizard.qwen_user_code = Some(user_code);
+                    wizard.qwen_device_flow_status =
+                        super::onboarding::QwenDeviceFlowStatus::WaitingForUser {
+                            verification_uri,
+                        };
+                }
+            }
+            TuiEvent::QwenOAuthComplete => {
+                if let Some(ref mut wizard) = self.onboarding {
+                    wizard.qwen_device_flow_status =
+                        super::onboarding::QwenDeviceFlowStatus::Complete;
+                    // Credentials already persisted via persist_to_keys() in the spawn task.
+                    // Mark key as existing and advance to model selection.
+                    wizard.ps.api_key_input = super::onboarding::EXISTING_KEY_SENTINEL.to_string();
+                    wizard.ps.has_existing_key = true;
+                    wizard.auth_field = super::onboarding::AuthField::Model;
+                    wizard.ps.config_models =
+                        crate::tui::provider_selector::load_default_models("qwen");
+                    if wizard.ps.config_models.is_empty() {
+                        wizard.ps.config_models = vec!["coder-model".to_string()];
+                    }
+                    wizard.ps.selected_model = 0;
+                }
+            }
+            TuiEvent::QwenOAuthError(err) => {
+                if let Some(ref mut wizard) = self.onboarding {
+                    wizard.qwen_device_flow_status =
+                        super::onboarding::QwenDeviceFlowStatus::Failed(err);
+                    wizard.qwen_user_code = None;
                 }
             }
             TuiEvent::WhatsAppQrCode(qr_data) => {

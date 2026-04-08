@@ -136,6 +136,16 @@ pub enum TuiEvent {
     /// GitHub Copilot device flow: failed
     GitHubOAuthError(String),
 
+    /// Qwen native device flow: user_code + verification URI to display
+    QwenDeviceCode {
+        user_code: String,
+        verification_uri: String,
+    },
+    /// Qwen native device flow: credentials obtained and persisted
+    QwenOAuthComplete,
+    /// Qwen native device flow: failed
+    QwenOAuthError(String),
+
     /// A system message to display in chat
     SystemMessage(String),
 

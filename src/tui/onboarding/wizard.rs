@@ -120,6 +120,10 @@ pub struct OnboardingWizard {
     pub github_user_code: Option<String>,
     pub github_device_flow_status: GitHubDeviceFlowStatus,
 
+    /// Qwen native OAuth device flow state
+    pub qwen_user_code: Option<String>,
+    pub qwen_device_flow_status: super::QwenDeviceFlowStatus,
+
     /// Navigation
     pub focused_field: usize,
     pub error_message: Option<String>,
@@ -235,6 +239,13 @@ impl OnboardingWizard {
                     .is_some_and(|p| p.enabled)
                 {
                     (9, String::new(), String::new(), String::new())
+                } else if config.providers.qwen.as_ref().is_some_and(|p| p.enabled) {
+                    (
+                        10,
+                        EXISTING_KEY_SENTINEL.to_string(),
+                        String::new(),
+                        String::new(),
+                    )
                 } else if let Some((name, c)) = config.providers.active_custom().or_else(|| {
                     config
                         .providers
@@ -383,6 +394,9 @@ impl OnboardingWizard {
 
             github_user_code: None,
             github_device_flow_status: GitHubDeviceFlowStatus::Idle,
+
+            qwen_user_code: None,
+            qwen_device_flow_status: super::QwenDeviceFlowStatus::Idle,
 
             focused_field: 0,
             error_message: None,

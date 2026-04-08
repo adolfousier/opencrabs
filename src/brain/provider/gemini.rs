@@ -28,6 +28,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::Duration;
 
+use std::sync::Arc;
+
 const GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(300);
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -39,6 +41,7 @@ pub struct GeminiProvider {
     api_key: String,
     client: Client,
     model: String,
+    cached_content_name: Arc<std::sync::Mutex<Option<String>>>,
 }
 
 impl GeminiProvider {
@@ -56,6 +59,7 @@ impl GeminiProvider {
             api_key,
             client,
             model: "gemini-2.0-flash".to_string(),
+            cached_content_name: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -187,6 +191,13 @@ impl GeminiProvider {
                 "maxOutputTokens": request.max_tokens.unwrap_or(65536)
             }
         });
+
+        // Reuse a previously created cachedContents resource if one is set.
+        if let Ok(guard) = self.cached_content_name.lock()
+            && let Some(name) = guard.as_ref()
+        {
+            body["cachedContent"] = serde_json::Value::String(name.clone());
+        }
 
         // System instruction
         if let Some(ref system) = request.system {

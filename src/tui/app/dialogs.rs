@@ -498,8 +498,8 @@ impl App {
 
             if self.ps.focused_field == 0 {
                 // On provider field - save config, DON'T close dialog
-                // Map indices >= 11 back to 10 for save (custom provider)
-                let save_idx = self.ps.selected_provider.min(10);
+                // Map indices >= 12 back to 11 for save (custom provider)
+                let save_idx = self.ps.selected_provider.min(11);
                 if let Err(e) = self
                     .save_provider_selection_internal(save_idx, false, false)
                     .await
@@ -519,8 +519,8 @@ impl App {
                 || (self.ps.focused_field == 2 && (is_custom || is_zhipu))
             {
                 // On API key field (field 1 for non-Custom non-zhipu, field 2 for zhipu/Custom)
-                // Map >= 10 back to 10 for save (all custom providers use idx 10+)
-                let provider_idx = self.ps.selected_provider.min(10);
+                // Map >= 11 back to 11 for save (all custom providers use idx 11+)
+                let provider_idx = self.ps.selected_provider.min(11);
 
                 // User typed a new key — sentinel means key was pre-populated and not changed
                 let key_changed =
@@ -541,7 +541,8 @@ impl App {
                             7 => None, // Claude CLI — no API key
                             8 => None, // OpenCode CLI — no API key
                             9 => None, // Qwen Code CLI — no API key
-                            10 => c
+                            10 => c.providers.qwen.and_then(|p| p.api_key),
+                            11 => c
                                 .providers
                                 .active_custom()
                                 .and_then(|(_, p)| p.api_key.clone()),
@@ -597,11 +598,11 @@ impl App {
                 }
             } else if is_custom && self.ps.focused_field == 5 {
                 // Custom: on context window field — save
-                self.save_provider_selection(self.ps.selected_provider.min(10), false)
+                self.save_provider_selection(self.ps.selected_provider.min(11), false)
                     .await?;
             } else {
                 // Non-custom: on model field — save and close
-                self.save_provider_selection(self.ps.selected_provider.min(10), false)
+                self.save_provider_selection(self.ps.selected_provider.min(11), false)
                     .await?;
             }
         }
@@ -671,7 +672,7 @@ impl App {
         }
 
         // Get existing key from config if not changing
-        // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=z.ai GLM, 7=Claude CLI, 8=OpenCode CLI, 9=Qwen Code, 10=Custom
+        // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=z.ai GLM, 7=Claude CLI, 8=OpenCode CLI, 9=Qwen Code, 10=Qwen (native), 11=Custom
         let existing_key = match provider_idx {
             0 => config
                 .providers
@@ -727,6 +728,13 @@ impl App {
             9 => None, // Qwen Code CLI — no API key needed
             10 => config
                 .providers
+                .qwen
+                .as_ref()
+                .and_then(|p| p.api_key.as_ref())
+                .filter(|k| !k.is_empty())
+                .cloned(),
+            11 => config
+                .providers
                 .active_custom()
                 .and_then(|(_, p)| p.api_key.as_ref())
                 .filter(|k| !k.is_empty())
@@ -766,6 +774,7 @@ impl App {
                     7 => c.providers.claude_cli.and_then(|p| p.default_model),
                     8 => c.providers.opencode_cli.and_then(|p| p.default_model),
                     9 => c.providers.qwen_code_cli.and_then(|p| p.default_model),
+                    10 => c.providers.qwen.and_then(|p| p.default_model),
                     _ => None,
                 })
                 .unwrap_or_else(|| {
@@ -799,7 +808,7 @@ impl App {
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| "default".to_string())
         };
-        // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=z.ai GLM, 7=Claude CLI, 8=OpenCode CLI, 9=Qwen Code, 10=Custom
+        // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=z.ai GLM, 7=Claude CLI, 8=OpenCode CLI, 9=Qwen Code, 10=Qwen (native), 11=Custom
         match provider_idx {
             0 => {
                 // Anthropic
@@ -931,6 +940,17 @@ impl App {
                 });
             }
             10 => {
+                // Qwen (native) — OAuth credentials already stored in keys.toml
+                // by the device flow handler. Here we just ensure the config
+                // section exists and is enabled with the chosen default model.
+                let merged = config.providers.qwen.clone().unwrap_or_default();
+                config.providers.qwen = Some(ProviderConfig {
+                    enabled: true,
+                    default_model: Some(default_model.to_string()),
+                    ..merged
+                });
+            }
+            11 => {
                 let custom_model = self.ps.custom_model.clone();
                 let custom_name = self.ps.custom_name.clone();
                 let mut customs = config.providers.custom.unwrap_or_default();
@@ -966,7 +986,8 @@ impl App {
             7 => "providers.claude_cli",
             8 => "providers.opencode_cli",
             9 => "providers.qwen_code_cli",
-            10 => {
+            10 => "providers.qwen",
+            11 => {
                 // Resolve custom provider name: UI field > config active > "default"
                 let cname = if !self.ps.custom_name.is_empty() {
                     self.ps.custom_name.clone()
@@ -1002,6 +1023,7 @@ impl App {
             "providers.claude_cli",
             "providers.opencode_cli",
             "providers.qwen_code_cli",
+            "providers.qwen",
         ] {
             if s != section {
                 try_write(s, "enabled", "false");
@@ -1077,11 +1099,11 @@ impl App {
                     .iter()
                     .position(|n| n == &self.ps.custom_name)
             {
-                self.ps.selected_provider = 10 + pos;
+                self.ps.selected_provider = CUSTOM_INSTANCES_START + pos;
                 tracing::debug!(
                     "[save_provider] mapped custom '{}' to idx={}",
                     self.ps.custom_name,
-                    10 + pos,
+                    CUSTOM_INSTANCES_START + pos,
                 );
             }
         }
@@ -1343,6 +1365,52 @@ impl App {
                         )
                         .await;
                         let _ = sender.send(TuiEvent::OnboardingModelsFetched(models));
+                    });
+                }
+                WizardAction::QwenDeviceFlow => {
+                    use crate::brain::provider::qwen;
+                    wizard.qwen_device_flow_status =
+                        super::onboarding::QwenDeviceFlowStatus::WaitingForUser {
+                            verification_uri: String::new(),
+                        };
+                    let sender = self.event_sender();
+                    tokio::spawn(async move {
+                        let pkce = qwen::PkcePair::generate();
+                        let device = match qwen::start_device_flow(&pkce).await {
+                            Ok(d) => d,
+                            Err(e) => {
+                                let _ = sender.send(TuiEvent::QwenOAuthError(e.to_string()));
+                                return;
+                            }
+                        };
+
+                        let url = device
+                            .verification_uri_complete
+                            .clone()
+                            .unwrap_or_else(|| device.verification_uri.clone());
+                        // Best-effort browser open — never blocks the flow.
+                        let _ = qwen::open_browser(&url);
+
+                        let _ = sender.send(TuiEvent::QwenDeviceCode {
+                            user_code: device.user_code.clone(),
+                            verification_uri: url,
+                        });
+
+                        match qwen::poll_for_token(&device.device_code, &pkce).await {
+                            Ok(creds) => {
+                                if let Err(e) = creds.persist_to_keys() {
+                                    let _ = sender.send(TuiEvent::QwenOAuthError(format!(
+                                        "Authorized but failed to save credentials: {}",
+                                        e
+                                    )));
+                                    return;
+                                }
+                                let _ = sender.send(TuiEvent::QwenOAuthComplete);
+                            }
+                            Err(e) => {
+                                let _ = sender.send(TuiEvent::QwenOAuthError(e.to_string()));
+                            }
+                        }
                     });
                 }
                 WizardAction::GitHubDeviceFlow => {

@@ -372,6 +372,18 @@ impl OnboardingWizard {
                         }
                         // Not yet authenticated — start device flow
                         return WizardAction::GitHubDeviceFlow;
+                    } else if self.ps.selected_provider == 10 {
+                        // Qwen native: if already authenticated, advance to model
+                        if self.ps.has_existing_key_sentinel() {
+                            self.auth_field = AuthField::Model;
+                            self.ps.models.clear();
+                            self.ps.selected_model = 0;
+                            self.ps.config_models =
+                                crate::tui::provider_selector::load_default_models("qwen");
+                            return WizardAction::None;
+                        }
+                        // Not yet authenticated — start device flow
+                        return WizardAction::QwenDeviceFlow;
                     } else if self.ps.is_custom() {
                         self.auth_field = AuthField::CustomName;
                     } else if self.ps.is_cli() {

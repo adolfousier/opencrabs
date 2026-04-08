@@ -642,13 +642,10 @@ impl Provider for QwenCodeCliProvider {
                                 // ctx % by num_turns (e.g. 2700% on 19 turns).
                                 output_tokens = u.output_tokens;
                                 input_tokens = u.input_tokens;
-                                cache_creation_tokens_last =
-                                    u.cache_creation_input_tokens;
+                                cache_creation_tokens_last = u.cache_creation_input_tokens;
                                 cache_read_tokens_last = u.cache_read_input_tokens;
-                                cache_creation_tokens_billing +=
-                                    u.cache_creation_input_tokens;
-                                cache_read_tokens_billing +=
-                                    u.cache_read_input_tokens;
+                                cache_creation_tokens_billing += u.cache_creation_input_tokens;
+                                cache_read_tokens_billing += u.cache_read_input_tokens;
                                 tracing::info!(
                                     "Qwen per-round usage: in={}, out={}, cc={}, cr={}",
                                     u.input_tokens,

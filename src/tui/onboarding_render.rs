@@ -693,6 +693,86 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
                 }),
             ),
         ]));
+    } else if wizard.ps.selected_provider == 10 {
+        // Qwen native — OAuth device flow
+        use crate::tui::onboarding::QwenDeviceFlowStatus;
+
+        if wizard.ps.has_existing_key_sentinel() {
+            lines.push(Line::from(Span::styled(
+                "  ● Authenticated with Qwen",
+                Style::default().fg(Color::Green),
+            )));
+            lines.push(Line::from(Span::styled(
+                "  Press Enter to continue, or re-authenticate below",
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
+            )));
+        } else {
+            match &wizard.qwen_device_flow_status {
+                QwenDeviceFlowStatus::Idle => {
+                    lines.push(Line::from(Span::styled(
+                        "  Free tier: 60 req/min, 1000 req/day",
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::ITALIC),
+                    )));
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled(
+                        "  Press Enter to sign in with qwen.ai",
+                        Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
+                    )));
+                }
+                QwenDeviceFlowStatus::WaitingForUser { verification_uri } => {
+                    if !verification_uri.is_empty() {
+                        lines.push(Line::from(Span::styled(
+                            format!("  1. Open: {}", verification_uri),
+                            Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
+                        )));
+                    } else {
+                        lines.push(Line::from(Span::styled(
+                            "  1. Requesting device code...",
+                            Style::default().fg(BRAND_BLUE),
+                        )));
+                    }
+                    if let Some(ref code) = wizard.qwen_user_code {
+                        lines.push(Line::from(Span::styled(
+                            format!("  2. Enter code: {}", code),
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                        )));
+                    }
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled(
+                        "  Waiting for authorization...",
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::ITALIC),
+                    )));
+                }
+                QwenDeviceFlowStatus::Complete => {
+                    lines.push(Line::from(Span::styled(
+                        "  ● Authenticated successfully!",
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    )));
+                }
+                QwenDeviceFlowStatus::Failed(err) => {
+                    lines.push(Line::from(Span::styled(
+                        format!("  ✗ {}", err),
+                        Style::default().fg(Color::Red),
+                    )));
+                    lines.push(Line::from(Span::styled(
+                        "  Press Enter to try again",
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::ITALIC),
+                    )));
+                }
+            }
+        }
     } else if wizard.ps.selected_provider == 2 {
         // GitHub Copilot — OAuth device flow
         use crate::tui::onboarding::GitHubDeviceFlowStatus;

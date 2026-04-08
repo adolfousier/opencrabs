@@ -25,6 +25,7 @@ pub mod factory;
 pub mod fallback;
 pub mod gemini;
 pub mod opencode_cli;
+pub mod qwen;
 pub mod qwen_code;
 
 pub use anthropic::AnthropicProvider;

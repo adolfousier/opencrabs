@@ -87,6 +87,16 @@ pub const PROVIDERS: &[ProviderInfo] = &[
         ],
     },
     ProviderInfo {
+        id: "qwen",
+        name: "Qwen",
+        models: &["coder-model"],
+        key_label: "OAuth",
+        help_lines: &[
+            "Sign in with qwen.ai — OpenCrabs orchestrates tools and context natively",
+            "Free tier: 60 req/min, 1000 req/day",
+        ],
+    },
+    ProviderInfo {
         id: "", // dynamic — custom providers use runtime names
         name: "Custom OpenAI-Compatible",
         models: &[],
@@ -354,6 +364,19 @@ pub enum GitHubDeviceFlowStatus {
     Failed(String),
 }
 
+/// Qwen native OAuth device flow status
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QwenDeviceFlowStatus {
+    /// Not started
+    Idle,
+    /// Device code obtained — show user_code + verification URL, polling token endpoint
+    WaitingForUser { verification_uri: String },
+    /// User authorized, credentials persisted
+    Complete,
+    /// Flow failed
+    Failed(String),
+}
+
 /// Which text area is focused in BrainSetup step
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrainField {
@@ -392,6 +415,8 @@ pub enum WizardAction {
     DownloadPiperVoice,
     /// Trigger GitHub Copilot OAuth device flow
     GitHubDeviceFlow,
+    /// Trigger Qwen native OAuth device flow
+    QwenDeviceFlow,
     /// Quick-jump step completed — save config and close wizard
     QuickJumpDone,
 }

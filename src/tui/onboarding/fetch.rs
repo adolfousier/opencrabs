@@ -151,6 +151,7 @@ pub fn is_first_time() -> bool {
             .qwen_code_cli
             .as_ref()
             .is_some_and(|p| p.enabled)
+        || config.providers.qwen.as_ref().is_some_and(|p| p.enabled)
         || config.providers.active_custom().is_some();
 
     tracing::debug!(
@@ -212,6 +213,15 @@ pub async fn fetch_provider_models(
             "qwen3.5-plus".to_string(),
             "qwen3-coder-plus".to_string(),
         ];
+    }
+
+    // Qwen native — OAuth path only exposes `coder-model` on the free tier.
+    if provider_index == 10 {
+        let models = crate::tui::provider_selector::load_default_models("qwen");
+        if !models.is_empty() {
+            return models;
+        }
+        return vec!["coder-model".to_string()];
     }
 
     // Handle Minimax specially - no /models API, must use config
