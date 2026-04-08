@@ -284,9 +284,7 @@ impl App {
 
         // Content starts one cell in (Padding left = 1).
         let content_left = chat_left + 1;
-        let col_in_line = |col: u16| -> usize {
-            col.saturating_sub(content_left) as usize
-        };
+        let col_in_line = |col: u16| -> usize { col.saturating_sub(content_left) as usize };
 
         let start_line = row_to_line(start.1);
         let end_line = row_to_line(end.1);

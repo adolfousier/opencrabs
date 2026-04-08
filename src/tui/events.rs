@@ -399,9 +399,9 @@ impl EventHandler {
                                 MouseEventKind::Drag(crossterm::event::MouseButton::Left) => tx
                                     .send(TuiEvent::MouseDrag(mouse.column, mouse.row))
                                     .is_err(),
-                                MouseEventKind::Up(crossterm::event::MouseButton::Left) => tx
-                                    .send(TuiEvent::MouseUp(mouse.column, mouse.row))
-                                    .is_err(),
+                                MouseEventKind::Up(crossterm::event::MouseButton::Left) => {
+                                    tx.send(TuiEvent::MouseUp(mouse.column, mouse.row)).is_err()
+                                }
                                 _ => false,
                             }
                         }

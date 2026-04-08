@@ -57,8 +57,11 @@ pub const QWEN_DEFAULT_API_HOST: &str = "dashscope.aliyuncs.com/compatible-mode/
 pub const QWEN_DEFAULT_CHAT_URL: &str = "https://portal.qwen.ai/v1/chat/completions";
 
 /// Free-tier model id (the only model available on the OAuth path).
-/// API id is `coder-model`; display label is "Qwen 3.6 Plus".
-pub const QWEN_OAUTH_MODEL: &str = "coder-model";
+/// Wire id is `qwen3-coder-plus`; display label is "Qwen 3.6 Plus". This
+/// MUST match exactly what qwen-code-cli sends — DashScope keys quota
+/// per model id, and our previous value (`coder-model`) hit a deprecated
+/// bucket that returned instant "quota exceeded" even on a fresh token.
+pub const QWEN_OAUTH_MODEL: &str = "qwen3-coder-plus";
 
 /// Refresh tokens this many ms before they expire (matches qwen-cli's 30s).
 const REFRESH_BUFFER_MS: u64 = 30_000;
@@ -721,9 +724,7 @@ impl QwenTokenManager {
                     let snap = self.snapshot();
                     !snap.is_valid()
                 };
-                if should_refresh
-                    && let Err(e) = self.ensure_fresh().await
-                {
+                if should_refresh && let Err(e) = self.ensure_fresh().await {
                     tracing::warn!("Qwen background token refresh failed: {}", e);
                     tokio::time::sleep(Duration::from_secs(30)).await;
                 }
