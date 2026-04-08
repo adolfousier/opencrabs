@@ -5,6 +5,219 @@ All notable changes to OpenCrabs will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-04-08
+
+Big release focused on **making `providers.custom.*` a first-class citizen** —
+dozens of OpenAI-compatible backends (dialagram, nvidia, z.ai, lm-studio,
+ollama, vllm, any self-hosted endpoint) now stream thinking tokens, tool
+calls, and intermediate text to the TUI exactly like the native providers.
+Also ships the **native Qwen OAuth provider** with opt-in Qwen3 hybrid
+thinking mode and a full round of prompt caching across Anthropic /
+OpenRouter / Gemini / Qwen DashScope.
+
+> ⚠️ **Known limitations**
+>
+> - **Qwen OAuth** still hits upstream rate limits intermittently even with
+>   the global singleton limiter and per-model fingerprint headers. The
+>   free 1k-req/day tier is fragile — expect occasional 429s that the
+>   sticky-fallback chain will swap out of. **Qwen Code CLI** works great
+>   today as an alternative, but inherits the CLI's own tool surface and
+>   memory model (no native OpenCrabs tool bridge, separate scratch state).
+> - **Custom OpenAI-compatible routers that rewrite the stream** (e.g.
+>   dialagram's `qwen-3.6-plus-thinking`) can inject sanitized boilerplate
+>   reasoning that doesn't reflect the real model's thinking. Not an
+>   OpenCrabs bug — prefer native Qwen OAuth, OpenRouter, or Alibaba
+>   DashScope for Qwen3.
+
+### Added
+
+#### Native Qwen OAuth provider
+- **OAuth device-code flow** — Sign in with a Qwen account directly from
+  onboarding (`/onboard`) or the runtime model switcher (`/models`); the
+  wizard and model dialog now share a single device-flow state machine
+  (`d16a88d`).
+- **Qwen3 hybrid thinking toggle** — Qwen3 is a single-weights hybrid
+  model that runs in thinking or non-thinking mode depending on a runtime
+  flag. Set `enable_thinking = true` in `[providers.qwen]` to opt in when
+  you want reasoning tokens; leave unset for fast output. Only the native
+  Qwen provider honours the flag (`cf76e49`).
+- **Full token lifecycle** — mtime-based credential reload, 401 → refresh
+  retry, dynamic `resource_url` → base URL switching, background refresh
+  well before expiry (`a306e22`).
+- **Prompt caching** via `cache_control` on the last tool definition and
+  session-stable metadata headers — keeps the free tier viable for longer
+  conversations (`0aa65dc`).
+- **Request body parity with `qwen-cli`** — body transform rewrites user /
+  system messages to array form, tags only the last tool with cache
+  control, adds the required VL flag and metadata, preserves existing
+  `max_tokens`, and strips disallowed fields. Tested against a real
+  `qwen-cli` HTTP capture (`b2e2c50`, `ee9b1c7`).
+- **Gateway fingerprint headers** — `x-stainless-*` SDK identity, stable
+  session id, 13-hex prompt id, and `Accept` header matching the official
+  client so Qwen's gateway accepts requests as first-party SDK traffic
+  (`11f314f`, `a7b3c35`, `c09a8bf`).
+- **Global singleton rate limiter** (`QWEN_OAUTH_LIMITER`) — a single
+  `LazyLock<Arc<RateLimiter>>` shared across every request regardless of
+  provider rebuild / session swap, so the second request no longer
+  instantly trips the per-second limit (`488480b`).
+- **Sticky fallback swap UI** — the footer and session header now show the
+  *active* sub-provider name + model when a rate limit forces a swap, so
+  users can see which backend is actually serving them (`c736856`).
+
+#### Prompt caching across providers
+- **Anthropic native** — `cache_control` on system prompt and tool
+  definitions (`a0e5f68`).
+- **OpenRouter** — cache_control forwarded for Anthropic-family models
+  routed through OpenRouter (`4752abf`).
+- **Gemini** — full `cachedContent` API integration (`ee24e68`).
+- **Qwen DashScope** — cache_control on last tool (`0aa65dc`).
+- **Cache token accounting** — provider responses now parse OpenAI /
+  DashScope cache + reasoning token fields, so the context window display
+  reflects real usage across cache-aware providers (`d973808`).
+
+#### TUI
+- **Drag-to-select text with auto-copy to clipboard** — native mouse
+  selection in the TUI, auto-copies the selection on release (`40e9279`).
+
+### Changed
+
+- **Custom providers now feel like native providers.** This was the
+  headline investigation of the release — see *Fixed* below for the
+  `ContentBlockStop` / reasoning fixes that make tool cards and thinking
+  tokens actually reach the TUI on every OpenAI-compatible backend.
+- **Per-model rate limiters** — rate limit state is now keyed by the exact
+  model id instead of the provider name, so swapping models on the same
+  provider no longer drags a stale limiter between them (`1238573`).
+- **Zero retries on hard rate limits** — a 429 goes straight to the
+  sticky-fallback swap instead of spinning retry backoffs that would burn
+  quota on every sub-provider in the chain (`8d8607f`).
+- **OpenRouter app-identity headers on every request** — `HTTP-Referer`
+  and `X-Title` are attached for every call so OpenRouter's dashboard
+  attributes usage correctly (`580a225`).
+- **Anthropic OAuth removed** — Anthropic banned OAuth-based third-party
+  clients; all dead OAuth code paths and docs are gone (`777d87e`).
+- **CLI context management split** — `cli_handles_tools` is now separate
+  from `cli_manages_context`, so providers that delegate tool execution
+  to an external CLI (Qwen Code, OpenCode, Claude CLI) can still have
+  OpenCrabs manage compaction and the context budget (`34b59f2`).
+- **Tool path resolution centralized** — every filesystem tool now goes
+  through `resolve_tool_path()`, normalising tilde expansion,
+  relative-to-working-dir, and symlink handling in one place instead of
+  eight copies (`9898aee`).
+
+### Fixed
+
+#### Custom providers (the headline)
+- **Tool cards no longer get stuck "in-flight" forever** — the OpenAI-compatible
+  SSE parser never emitted `ContentBlockStop` events. `helpers.rs` fires
+  `ToolStarted` / `ToolCompleted` progress events *exclusively* inside
+  `ContentBlockStop`, so without them tool cards stayed visually pending
+  even though `tool_loop` had already executed the tool cleanly. Every
+  other provider (Anthropic, Gemini, Claude CLI, OpenCode CLI, Qwen Code)
+  emits Start/Stop pairs — custom was the only outlier (`f86c0e6`).
+- **Thinking / reasoning tokens now reach the TUI** — providers like
+  dialagram's `qwen-3.6-plus-thinking` stream `delta.reasoning_content`
+  *before* any regular text content. The parser emitted `ReasoningDelta`
+  at index 0 without opening a block at that index, and `helpers.rs`'s
+  range check silently dropped every reasoning chunk. The parser now
+  opens a zero-length text block at index 0 on the first reasoning
+  delta so `ReasoningChunk` progress events forward through to the UI
+  (`f86c0e6`).
+- **Intermediate text no longer vanishes mid-response** — same root
+  cause; the text block now receives a matching `ContentBlockStop` before
+  tool flushes and before the final `MessageDelta`, so helpers finalizes
+  the block and emits `IntermediateText` events in the correct order
+  (`f86c0e6`).
+- **Duplicate tool lifecycle events on non-CLI providers** — `helpers.rs`
+  was firing `ToolStarted` / `ToolCompleted` inside `ContentBlockStop` for
+  every provider, not just CLIs. `tool_loop` already owns the full
+  lifecycle for non-CLI providers, so every tool event was double-emitted
+  (6 events in 85µs for 3 real tool calls observed in logs), bloating the
+  TUI tool-call count and leaving phantom "Processing: <tool>" indicators
+  when the premature fake completion raced the real one. The emit block
+  is now gated behind `if is_cli` (`98afb47`).
+- **Hallucinated `{"tool_calls":[...]}` JSON in content deltas** — some
+  thinking models echo an OpenAI tool_call envelope as plain text inside
+  `delta.content` while *also* emitting the real tool calls through
+  `delta.tool_calls`. The text version was polluting assistant messages
+  in the TUI. The parser now drops content deltas that start with
+  `{"tool_calls"` while still processing `reasoning_content` and
+  `finish_reason` on the same chunk (`45181df`).
+- **Mid-stream quota / rate-limit errors are handled** — DashScope / Qwen
+  / OpenAI all emit `{error: {message, type, code}}` shapes inline in an
+  otherwise-200 SSE stream when quota is hit mid-flight. The parser now
+  recognises these, maps 429 / "rate limit" / "quota" wording to
+  `RateLimitExceeded`, and triggers the sticky-fallback swap instead of
+  silently dropping the stream (`3f175a2`).
+- **Provider-configured context window honored in the TUI header** — custom
+  providers that set `providers.custom.<name>.context_window = 262144`
+  were showing "202k/200k" in the ctx display because the header read
+  the static `agent.context_limit` fallback while the enforcer used the
+  real provider window. `context_window_for_model()` now delegates to
+  `context_limit()` so both agree (`6129a88`).
+
+#### Tool layer
+- **`execute_code` now returns actionable error messages** — serde's
+  cryptic `missing field 'code'` was being picked up by reasoning models
+  as evidence that the whole tool layer was broken, seeding feedback
+  loops where the model kept claiming tools were failing regardless of
+  real output. The tool now pre-checks required fields and returns
+  hints that name the tool + expected shape so the model can correct
+  its next call instead of giving up (`cbe9081`).
+
+#### Qwen native
+- **`keys.toml` no longer accumulates non-secret config fields** — the
+  background token refresher was writing `enabled = true` and
+  `default_model = "coder-model"` to `[providers.qwen]` on every refresh,
+  causing config drift and overwriting user-edited defaults. Only OAuth
+  credentials live in `keys.toml` now, and existing installs self-heal
+  on next refresh (`9bb5a80`).
+- **Coder model id reverted** — OAuth flow uses the canonical
+  `coder-model` id after an earlier mis-rename (`fcdd6af`).
+- **Re-authed credentials sync into the running session** — the footer
+  updates and the active sub-provider swap reflects the new credentials
+  immediately instead of on next restart (`c736856`).
+
+#### Qwen Code CLI
+- **Real-time DB persistence of text + tool markers** — intermediate
+  streaming state is now written to the session DB as it arrives, so
+  resumes never lose partial turns (`0bb166c`).
+- **Per-round usage drives ctx %** — the CLI envelope's cumulative
+  usage field was inflating the ctx percentage across rounds; now uses
+  the per-round delta (`6070960`).
+
+#### Auto-approve propagation
+- **`approval_policy = "auto-always"` now actually reaches `tool_loop`** —
+  the TUI silently approved in its callback but `tool_loop.auto_approve_tools`
+  stayed `false`, and `context.rs` would inject "AUTO-APPROVE OFF — tool
+  approval is REQUIRED" into the compaction system prompt, which the LLM
+  then echoed back. The flag is now propagated at `AgentService::new()`
+  and again on `/approve` toggle via `rebuild_agent_service()` (`90748af`).
+
+#### Onboarding
+- **Brain onboarding auto-format + preview flow** — the wizard now
+  auto-formats brain files and shows a preview before writing, catching
+  mis-pasted or malformed content before it lands in `~/.opencrabs`
+  (`69c87e2`).
+- **Telegram test message delivery** — the onboarding Telegram test
+  actually sends the message now, and the brain normalize hook runs on
+  the delivered content so it matches what the wizard previewed
+  (`5634c51`).
+- **hf-hub stderr progress bar suppressed** — the initial embedding model
+  download no longer dumps a raw hf-hub progress bar over the TUI
+  (`29893b5`).
+
+#### TUI
+- **Don't wipe streamed reply when `response.content` is empty** — some
+  providers return an empty `content` array on the final complete
+  envelope after streaming; the TUI was overwriting the already-streamed
+  reply with nothing (`3900c31`).
+- **Full scrollback preserved during compaction** — compaction no longer
+  truncates the visible scrollback buffer, only the LLM's in-context
+  history (`bf6f5f9`).
+
+
+
 ## [0.3.1] - 2026-04-07
 
 ### Added
@@ -2114,6 +2327,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.3.2]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.2
+[0.3.1]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.1
+[0.3.0]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.0
+[0.2.99]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.99
+[0.2.98]: https://github.com/adolfousier/opencrabs/compare/v0.2.97...v0.2.98
 [0.2.97]: https://github.com/adolfousier/opencrabs/compare/v0.2.96...v0.2.97
 [0.2.96]: https://github.com/adolfousier/opencrabs/compare/v0.2.95...v0.2.96
 [0.2.95]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.95
@@ -2213,7 +2431,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.1.2]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.2
 [0.1.1]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.1
 [0.1.0]: https://github.com/adolfousier/opencrabs/releases/tag/v0.1.0
-[0.3.1]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.1
-[0.3.0]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.0
-[0.2.99]: https://github.com/adolfousier/opencrabs/releases/tag/v0.2.99
 
