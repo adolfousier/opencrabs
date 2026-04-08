@@ -2,7 +2,7 @@
 //!
 //! List contents of directories for exploration.
 
-use super::error::{Result, ToolError};
+use super::error::{Result, ToolError, resolve_tool_path};
 use super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -86,13 +86,10 @@ impl Tool for LsTool {
     async fn execute(&self, input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
         let input: LsInput = serde_json::from_value(input)?;
 
-        // Resolve path
+        // Resolve path (expands leading `~`, absolutes pass through,
+        // relatives join to the session working directory).
         let path = if let Some(ref p) = input.path {
-            if PathBuf::from(p).is_absolute() {
-                PathBuf::from(p)
-            } else {
-                context.working_directory.join(p)
-            }
+            resolve_tool_path(p, &context.working_directory)
         } else {
             context.working_directory.clone()
         };

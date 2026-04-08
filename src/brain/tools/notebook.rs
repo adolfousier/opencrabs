@@ -7,7 +7,6 @@ use super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::path::PathBuf;
 use tokio::fs;
 
 /// Jupyter notebook edit tool
@@ -161,12 +160,8 @@ impl Tool for NotebookEditTool {
     async fn execute(&self, input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
         let input: NotebookInput = serde_json::from_value(input)?;
 
-        // Resolve path
-        let path = if PathBuf::from(&input.path).is_absolute() {
-            PathBuf::from(&input.path)
-        } else {
-            context.working_directory.join(&input.path)
-        };
+        // Resolve path (tilde expansion + absolute/relative resolution).
+        let path = super::error::resolve_tool_path(&input.path, &context.working_directory);
 
         // Check if file exists and is a notebook
         if !path.exists() {

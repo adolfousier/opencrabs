@@ -91,13 +91,9 @@ impl Tool for GlobTool {
     async fn execute(&self, input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
         let input: GlobInput = serde_json::from_value(input)?;
 
-        // Resolve base directory
+        // Resolve base directory (tilde expansion + absolute/relative resolution).
         let base_dir = if let Some(ref dir) = input.base_dir {
-            if PathBuf::from(dir).is_absolute() {
-                PathBuf::from(dir)
-            } else {
-                context.working_directory.join(dir)
-            }
+            super::error::resolve_tool_path(dir, &context.working_directory)
         } else {
             context.working_directory.clone()
         };
