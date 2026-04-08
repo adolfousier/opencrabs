@@ -1,8 +1,7 @@
 //! Anthropic (Claude) Provider Implementation
 //!
 //! Implements the Provider trait for Anthropic's Claude models.
-//! Supports both standard API key auth (`x-api-key`) and OAuth Bearer tokens
-//! (detected via `sk-ant-oat` prefix).
+//! Uses standard API key auth via `x-api-key` header.
 //!
 //! ## Supported Models
 //! - claude-opus-4-6
@@ -71,45 +70,20 @@ impl AnthropicProvider {
         self
     }
 
-    /// Check if the API key is an OAuth token (starts with sk-ant-oat)
-    fn is_oauth_token(&self) -> bool {
-        self.api_key.starts_with("sk-ant-oat")
-    }
-
     /// Build request headers with prompt-caching beta header.
     fn headers(&self) -> reqwest::header::HeaderMap {
         let mut headers = reqwest::header::HeaderMap::new();
 
-        if self.is_oauth_token() {
-            // OAuth token: use Authorization: Bearer header
-            headers.insert(
-                reqwest::header::AUTHORIZATION,
-                format!("Bearer {}", self.api_key)
-                    .parse()
-                    .expect("Invalid OAuth token format"),
-            );
-            // Required beta header for OAuth tokens
-            headers.insert(
-                "anthropic-beta",
-                "oauth-2025-04-20,prompt-caching-2024-07-31"
-                    .parse()
-                    .expect("Invalid beta header"),
-            );
-        } else {
-            // Standard API key: use x-api-key header
-            headers.insert(
-                "x-api-key",
-                self.api_key.parse().expect("Invalid API key format"),
-            );
-            // Prompt caching beta — required for cache_control support
-            headers.insert(
-                "anthropic-beta",
-                "prompt-caching-2024-07-31"
-                    .parse()
-                    .expect("Invalid beta header"),
-            );
-        }
-
+        headers.insert(
+            "x-api-key",
+            self.api_key.parse().expect("Invalid API key format"),
+        );
+        headers.insert(
+            "anthropic-beta",
+            "prompt-caching-2024-07-31"
+                .parse()
+                .expect("Invalid beta header"),
+        );
         headers.insert(
             "anthropic-version",
             ANTHROPIC_VERSION.parse().expect("Invalid version"),
@@ -456,20 +430,12 @@ impl Provider for AnthropicProvider {
             data: Vec<ModelEntry>,
         }
 
-        let mut req = self
+        let req = self
             .client
             .get(ANTHROPIC_MODELS_URL)
-            .header("anthropic-version", ANTHROPIC_VERSION);
-
-        if self.api_key.starts_with("sk-ant-oat") {
-            req = req
-                .header("Authorization", format!("Bearer {}", self.api_key))
-                .header("anthropic-beta", "oauth-2025-04-20,prompt-caching-2024-07-31");
-        } else {
-            req = req
-                .header("x-api-key", &self.api_key)
-                .header("anthropic-beta", "prompt-caching-2024-07-31");
-        }
+            .header("anthropic-version", ANTHROPIC_VERSION)
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-beta", "prompt-caching-2024-07-31");
 
         match req.send().await {
             Ok(resp) if resp.status().is_success() => match resp.json::<ModelsResponse>().await {
@@ -653,24 +619,6 @@ mod tests {
         // Test legacy Haiku pricing
         let cost = provider.calculate_cost("claude-3-haiku-20240307", 1_000_000, 1_000_000);
         assert_eq!(cost, 1.5); // $0.25 input + $1.25 output
-    }
-
-    #[test]
-    fn test_oauth_token_detection() {
-        let standard = AnthropicProvider::new("sk-ant-api-key".to_string());
-        assert!(!standard.is_oauth_token());
-
-        let oauth = AnthropicProvider::new("sk-ant-oat01-something".to_string());
-        assert!(oauth.is_oauth_token());
-    }
-
-    #[test]
-    fn test_oauth_headers() {
-        let provider = AnthropicProvider::new("sk-ant-oat01-test-token".to_string());
-        let headers = provider.headers();
-        assert!(headers.contains_key(reqwest::header::AUTHORIZATION));
-        assert!(headers.contains_key("anthropic-beta"));
-        assert!(!headers.contains_key("x-api-key"));
     }
 
     #[test]
