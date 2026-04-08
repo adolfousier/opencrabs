@@ -581,7 +581,27 @@ fn try_create_qwen(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
             .with_base_url_fn(base_url_fn)
             .with_auth_refresh_fn(auth_refresh_fn)
             .with_extra_headers(qwen_extra_headers())
-            .with_body_transform(Arc::new(qwen_body_transform))
+            .with_body_transform({
+                // Qwen3 is a hybrid-thinking model: the same weights run in
+                // thinking or non-thinking mode depending on a runtime flag.
+                // Only inject `enable_thinking` when the user explicitly
+                // opts in via `[providers.qwen] enable_thinking = true`
+                // in config.toml; otherwise leave the field absent so the
+                // gateway defaults to fast (non-thinking) output.
+                let enable_thinking = effective_config.enable_thinking;
+                Arc::new(move |body| {
+                    let mut body = qwen_body_transform(body);
+                    if let Some(enable) = enable_thinking
+                        && let Some(obj) = body.as_object_mut()
+                    {
+                        obj.insert(
+                            "enable_thinking".to_string(),
+                            serde_json::Value::Bool(enable),
+                        );
+                    }
+                    body
+                })
+            })
             .with_rate_limiter(qwen_limiter),
         &effective_config,
     );
