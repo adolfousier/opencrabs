@@ -1221,12 +1221,36 @@ impl AgentService {
             if is_cli_provider {
                 let cli_context = response.usage.context_input() as usize;
                 if cli_context > 0 {
-                    tracing::info!(
-                        "CLI context calibration: {} → {} (from per-call cache tokens)",
-                        context.token_count,
-                        cli_context,
-                    );
-                    context.token_count = cli_context;
+                    // Sanity guard: if the CLI's reported context is more
+                    // than 10× the local tiktoken estimate AND the estimate
+                    // is non-trivial, the CLI is almost certainly reporting
+                    // a cumulative-across-rounds figure rather than the
+                    // last round's prompt size. Don't trust it — keep the
+                    // local estimate so the ctx % display stays sane.
+                    let estimate = context.token_count;
+                    if estimate >= 1000 && cli_context > estimate.saturating_mul(10) {
+                        tracing::warn!(
+                            "CLI context calibration REJECTED: {} → {} ({}× estimate, \
+                             likely cumulative/inflated; keeping local estimate). \
+                             Provider: {}, model: {}",
+                            estimate,
+                            cli_context,
+                            cli_context / estimate.max(1),
+                            self.provider
+                                .read()
+                                .ok()
+                                .map(|p| p.name().to_string())
+                                .unwrap_or_default(),
+                            model_name,
+                        );
+                    } else {
+                        tracing::info!(
+                            "CLI context calibration: {} → {} (from per-call cache tokens)",
+                            context.token_count,
+                            cli_context,
+                        );
+                        context.token_count = cli_context;
+                    }
                 }
             } else {
                 let api_input = response.usage.input_tokens as usize;

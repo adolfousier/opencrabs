@@ -445,7 +445,7 @@ impl Provider for QwenCodeCliProvider {
 
                 tracing::debug!(
                     "Qwen CLI stdout raw: {}",
-                    &line[..line.floor_char_boundary(300)]
+                    &line[..line.floor_char_boundary(2000)]
                 );
 
                 let msg: CliMessage = match serde_json::from_str(&line) {
@@ -631,7 +631,31 @@ impl Provider for QwenCodeCliProvider {
                     CliMessage::Assistant { message } => {
                         if streaming_via_events {
                             if let Some(u) = &message.usage {
+                                // Each `assistant` envelope reports the usage
+                                // for ONE agentic round (one model call). Track
+                                // per-round LAST values for context-window
+                                // display, and accumulate billing separately.
+                                // Without this, the per-round counters stay 0
+                                // for qwen (it never emits `message_delta`),
+                                // and the calibration falls back to the
+                                // cumulative `result.usage` which inflates
+                                // ctx % by num_turns (e.g. 2700% on 19 turns).
                                 output_tokens = u.output_tokens;
+                                input_tokens = u.input_tokens;
+                                cache_creation_tokens_last =
+                                    u.cache_creation_input_tokens;
+                                cache_read_tokens_last = u.cache_read_input_tokens;
+                                cache_creation_tokens_billing +=
+                                    u.cache_creation_input_tokens;
+                                cache_read_tokens_billing +=
+                                    u.cache_read_input_tokens;
+                                tracing::info!(
+                                    "Qwen per-round usage: in={}, out={}, cc={}, cr={}",
+                                    u.input_tokens,
+                                    u.output_tokens,
+                                    u.cache_creation_input_tokens,
+                                    u.cache_read_input_tokens,
+                                );
                             }
                             continue;
                         }
@@ -862,15 +886,34 @@ impl Provider for QwenCodeCliProvider {
                             .as_ref()
                             .map(|u| u.output_tokens)
                             .unwrap_or(output_tokens);
-                        let final_input = usage
-                            .as_ref()
-                            .map(|u| u.total_input())
-                            .unwrap_or(input_tokens);
+                        // Prefer the per-round-tracked LAST input_tokens
+                        // (set by the Assistant envelope handler) over
+                        // result.usage.input_tokens — the result envelope
+                        // is a CUMULATIVE sum across all agentic rounds and
+                        // is the wrong value for context-window display.
+                        // Only fall back to result.usage when we never saw
+                        // a per-round assistant usage block.
+                        let final_input = if input_tokens > 0 {
+                            input_tokens
+                        } else {
+                            usage.as_ref().map(|u| u.total_input()).unwrap_or(0)
+                        };
 
                         let (result_cc, result_cr) = usage
                             .as_ref()
                             .map(|u| (u.cache_creation_input_tokens, u.cache_read_input_tokens))
                             .unwrap_or((0, 0));
+                        tracing::info!(
+                            "Qwen result envelope: cumulative in={} out={} cc={} cr={} \
+                             | per-round LAST in={} cc={} cr={} (using per-round for ctx)",
+                            usage.as_ref().map(|u| u.input_tokens).unwrap_or(0),
+                            final_output,
+                            result_cc,
+                            result_cr,
+                            input_tokens,
+                            cache_creation_tokens_last,
+                            cache_read_tokens_last,
+                        );
 
                         let ctx_cache_creation = if cache_creation_tokens_last > 0 {
                             cache_creation_tokens_last
