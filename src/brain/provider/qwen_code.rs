@@ -629,8 +629,7 @@ impl Provider for QwenCodeCliProvider {
                                         // tools-v2 marker for this tool call.
                                         if let StreamEvent::ContentBlockStart {
                                             index: abs_index,
-                                            content_block:
-                                                ContentBlock::ToolUse { name, input, .. },
+                                            content_block: ContentBlock::ToolUse { name, input, .. },
                                         } = &se
                                             && persisted_tool_blocks.insert(*abs_index)
                                         {
@@ -640,8 +639,8 @@ impl Provider for QwenCodeCliProvider {
                                                     std::mem::take(&mut text_persist_buf)
                                                 ));
                                             }
-                                            let _ = persist_tx
-                                                .send(format_tool_marker(name, input));
+                                            let _ =
+                                                persist_tx.send(format_tool_marker(name, input));
                                         }
                                         if tx.send(Ok(se)).await.is_err() {
                                             break;
@@ -675,9 +674,8 @@ impl Provider for QwenCodeCliProvider {
                                     {
                                         text_persist_buf.push_str(text);
                                         if text_persist_buf.len() >= FLUSH_SIZE {
-                                            let _ = persist_tx.send(std::mem::take(
-                                                &mut text_persist_buf,
-                                            ));
+                                            let _ = persist_tx
+                                                .send(std::mem::take(&mut text_persist_buf));
                                         }
                                     }
                                     if tx.send(Ok(se)).await.is_err() {
@@ -1062,8 +1060,7 @@ impl Provider for QwenCodeCliProvider {
             // Flush any trailing buffered text before synthesizing MessageStop,
             // so the final chunk lands in DB even on clean EOF or cancel.
             if !text_persist_buf.is_empty() {
-                let _ =
-                    persist_tx.send(format!("{}\n\n", std::mem::take(&mut text_persist_buf)));
+                let _ = persist_tx.send(format!("{}\n\n", std::mem::take(&mut text_persist_buf)));
             }
 
             // Synthesize MessageStop on EOF if qwen never sent a `result` envelope.

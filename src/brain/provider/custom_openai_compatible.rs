@@ -158,6 +158,13 @@ fn strip_think_blocks(text: &str) -> String {
 /// Used by Copilot provider where the token rotates every ~30 minutes.
 pub type TokenFn = Arc<dyn Fn() -> String + Send + Sync>;
 
+/// Optional request-body transform hook — called just before each outgoing
+/// chat-completions request is serialized. Lets a provider mutate the JSON
+/// body to match a vendor-specific dialect (e.g. qwen-cli's content-array
+/// shape + metadata fields) without polluting the generic OpenAI path.
+pub type BodyTransformFn =
+    Arc<dyn Fn(serde_json::Value) -> serde_json::Value + Send + Sync>;
+
 /// OpenAI provider for GPT models
 #[derive(Clone)]
 pub struct OpenAIProvider {
@@ -177,6 +184,10 @@ pub struct OpenAIProvider {
     /// Proactive rate limiter — shared via Arc so all clones throttle together.
     /// Used for OpenRouter `:free` models (~3s between requests).
     rate_limiter: Option<Arc<RateLimiter>>,
+    /// Optional body-transform hook applied to the serialized request body
+    /// right before it is sent. Used by providers (e.g. qwen) that need a
+    /// vendor-specific dialect on top of the standard OpenAI shape.
+    body_transform: Option<BodyTransformFn>,
 }
 
 impl OpenAIProvider {
@@ -206,6 +217,7 @@ impl OpenAIProvider {
             configured_context_window: None,
             token_fn: None,
             rate_limiter: None,
+            body_transform: None,
         }
     }
 
@@ -230,6 +242,7 @@ impl OpenAIProvider {
             configured_context_window: None,
             token_fn: None,
             rate_limiter: None,
+            body_transform: None,
         }
     }
 
@@ -254,6 +267,7 @@ impl OpenAIProvider {
             configured_context_window: None,
             token_fn: None,
             rate_limiter: None,
+            body_transform: None,
         }
     }
 
@@ -301,6 +315,25 @@ impl OpenAIProvider {
     pub fn with_rate_limiter(mut self, limiter: Arc<RateLimiter>) -> Self {
         self.rate_limiter = Some(limiter);
         self
+    }
+
+    /// Install a body-transform hook. The hook receives the fully-serialized
+    /// JSON body just before it is sent and returns a (possibly modified)
+    /// JSON value that will be serialized in its place. Used by providers
+    /// that need a vendor-specific dialect on top of the OpenAI shape.
+    pub fn with_body_transform(mut self, f: BodyTransformFn) -> Self {
+        self.body_transform = Some(f);
+        self
+    }
+
+    /// Serialize a request body to JSON, applying the optional body_transform
+    /// hook. Returns a `serde_json::Value` ready to pass to `.json(&value)`.
+    fn encode_body<T: Serialize>(&self, body: &T) -> Result<serde_json::Value> {
+        let mut v = serde_json::to_value(body)?;
+        if let Some(ref f) = self.body_transform {
+            v = f(v);
+        }
+        Ok(v)
     }
 
     /// Get the configured vision model name (if any).
@@ -877,11 +910,12 @@ impl OpenAIProvider {
 
         let result = retry_with_backoff(
             || async {
+                let body = self.encode_body(&anthropic_request)?;
                 let response = self
                     .client
                     .post(&self.base_url)
                     .headers(self.headers()?)
-                    .json(&anthropic_request)
+                    .json(&body)
                     .send()
                     .await?;
 
@@ -966,11 +1000,12 @@ impl OpenAIProvider {
 
         let response = retry_with_backoff(
             || async {
+                let body = self.encode_body(&anthropic_request)?;
                 let response = self
                     .client
                     .post(&self.base_url)
                     .headers(self.headers()?)
-                    .json(&anthropic_request)
+                    .json(&body)
                     .send()
                     .await?;
 
@@ -1220,11 +1255,12 @@ impl Provider for OpenAIProvider {
         let result = retry_with_backoff(
             || async {
                 tracing::debug!("Sending request to OpenAI API: {}", self.base_url);
+                let body = self.encode_body(&openai_request)?;
                 let response = self
                     .client
                     .post(&self.base_url)
                     .headers(self.headers()?)
-                    .json(&openai_request)
+                    .json(&body)
                     .send()
                     .await?;
 
@@ -1262,11 +1298,12 @@ impl Provider for OpenAIProvider {
                 openai_request.swap_token_fields();
                 return retry_with_backoff(
                     || async {
+                        let body = self.encode_body(&openai_request)?;
                         let response = self
                             .client
                             .post(&self.base_url)
                             .headers(self.headers()?)
-                            .json(&openai_request)
+                            .json(&body)
                             .send()
                             .await?;
                         if !response.status().is_success() {
@@ -1369,11 +1406,12 @@ impl Provider for OpenAIProvider {
         // Retry the stream connection establishment
         let mut response = retry_with_backoff(
             || async {
+                let body = self.encode_body(&openai_request)?;
                 let response = self
                     .client
                     .post(&self.base_url)
                     .headers(self.headers()?)
-                    .json(&openai_request)
+                    .json(&body)
                     .send()
                     .await?;
 
@@ -1401,11 +1439,12 @@ impl Provider for OpenAIProvider {
             openai_request.swap_token_fields();
             response = retry_with_backoff(
                 || async {
+                    let body = self.encode_body(&openai_request)?;
                     let r = self
                         .client
                         .post(&self.base_url)
                         .headers(self.headers()?)
-                        .json(&openai_request)
+                        .json(&body)
                         .send()
                         .await?;
                     if !r.status().is_success() {
