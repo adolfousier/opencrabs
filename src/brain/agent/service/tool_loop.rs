@@ -1507,6 +1507,60 @@ impl AgentService {
 
             // Separate text blocks and tool use blocks from the response
             tracing::debug!("Response has {} content blocks", response.content.len());
+
+            // ── Contradiction strip ─────────────────────────────────────
+            // Some providers (notably dialagram qwen-thinking) emit a canned
+            // "tools aren't responding / isn't registered" refusal preamble
+            // in the SAME assistant turn that also contains a valid tool_use
+            // block. The tool fires and succeeds; the text is objectively a
+            // lie. If we persist it, the model pattern-matches its own past
+            // lies on the next turn and the bug compounds forever.
+            //
+            // Strip the refusal text from response.content BEFORE we build
+            // iteration_text, tell the TUI to wipe its streaming buffer, and
+            // log a [CONTRADICTION_STRIP] warning so we can see how often
+            // this fires per provider.
+            let has_valid_tool_use = response
+                .content
+                .iter()
+                .any(|b| matches!(b, ContentBlock::ToolUse { .. }));
+            if has_valid_tool_use {
+                let mut stripped_bytes = 0usize;
+                let mut stripped_preview = String::new();
+                response.content.retain(|b| match b {
+                    ContentBlock::Text { text }
+                        if super::helpers::is_gaslighting_preamble(text) =>
+                    {
+                        stripped_bytes += text.len();
+                        if stripped_preview.is_empty() {
+                            stripped_preview = text.chars().take(80).collect::<String>();
+                        }
+                        false
+                    }
+                    _ => true,
+                });
+                if stripped_bytes > 0 {
+                    tracing::warn!(
+                        "[CONTRADICTION_STRIP] dropped {} bytes of gaslighting refusal (tools fired in same turn) — preview: {:?}",
+                        stripped_bytes,
+                        stripped_preview
+                    );
+                    // Wipe the TUI's in-progress streaming buffer so the
+                    // lie doesn't stay on screen while tools execute.
+                    if let Some(ref cb) = progress_callback {
+                        cb(
+                            session_id,
+                            ProgressEvent::StripStreamedContent {
+                                reason: format!(
+                                    "gaslighting refusal preamble ({} bytes) stripped — tools fired in same turn",
+                                    stripped_bytes
+                                ),
+                            },
+                        );
+                    }
+                }
+            }
+
             let mut iteration_text = String::new();
             let mut tool_uses: Vec<(String, String, Value)> = Vec::new();
 

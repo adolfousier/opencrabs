@@ -471,6 +471,9 @@ async fn cmd_chat_inner(
                 ProgressEvent::SelfHealingAlert { message } => {
                     progress_sender.send(TuiEvent::SystemMessage(format!("🔧 {}", message)))
                 }
+                ProgressEvent::StripStreamedContent { reason } => {
+                    progress_sender.send(TuiEvent::StripStreamedContent { session_id, reason })
+                }
                 ProgressEvent::ProviderSwitched {
                     to_name,
                     to_model,
