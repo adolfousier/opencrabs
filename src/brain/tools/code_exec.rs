@@ -91,11 +91,33 @@ impl Tool for CodeExecTool {
     }
 
     fn validate_input(&self, input: &Value) -> Result<()> {
+        // Pre-check required fields so the error tells the model exactly which
+        // field is missing (serde's default "missing field `code`" is cryptic
+        // and has historically caused reasoning models to hallucinate that the
+        // whole tool layer is broken). Keep the hint actionable.
+        let obj = input.as_object().ok_or_else(|| {
+            ToolError::InvalidInput(
+                "execute_code expects a JSON object with `language` and `code` fields".to_string(),
+            )
+        })?;
+        if !obj.contains_key("language") {
+            return Err(ToolError::InvalidInput(
+                "execute_code requires a `language` field (e.g. \"python\", \"bash\", \"node\", \"rust\") alongside the `code` field".to_string(),
+            ));
+        }
+        if !obj.contains_key("code") {
+            return Err(ToolError::InvalidInput(
+                "execute_code requires a `code` field containing the source to run. Example: {\"language\":\"python\",\"code\":\"print('hi')\"}".to_string(),
+            ));
+        }
+
         let input: CodeExecInput = serde_json::from_value(input.clone())
-            .map_err(|e| ToolError::InvalidInput(format!("Invalid input: {}", e)))?;
+            .map_err(|e| ToolError::InvalidInput(format!("execute_code input did not match the expected schema ({}). Required fields: `language` (string) and `code` (string).", e)))?;
 
         if input.code.trim().is_empty() {
-            return Err(ToolError::InvalidInput("Code cannot be empty".to_string()));
+            return Err(ToolError::InvalidInput(
+                "execute_code `code` field is empty — provide the source to run".to_string(),
+            ));
         }
 
         if input.timeout_secs == 0 || input.timeout_secs > 60 {
