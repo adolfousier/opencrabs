@@ -570,8 +570,17 @@ impl AgentService {
                     }
                 }
 
-                // Remove marker from text
-                clean_text = format!("{}{}", &clean_text[..start], &clean_text[marker_end..]);
+                // Replace marker with a path hint so any model (vision or text-only) can
+                // route the image through analyze_image / other vision tools. Vision-capable
+                // providers also get the base64 image block below; text-only models rely on
+                // this path to call analyze_image directly.
+                let hint = format!("[image attached: {}]", img_path);
+                clean_text = format!(
+                    "{}{}{}",
+                    &clean_text[..start],
+                    hint,
+                    &clean_text[marker_end..]
+                );
             } else {
                 break; // Malformed marker
             }
