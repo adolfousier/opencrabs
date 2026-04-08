@@ -109,6 +109,10 @@ pub struct OnboardingWizard {
     pub brain_generating: bool,
     pub brain_generated: bool,
     pub brain_error: Option<String>,
+    /// Auto-format preview state
+    pub preview_shown: bool,
+    pub formatted_about_me: String,
+    pub formatted_about_agent: String,
     pub generated_soul: Option<String>,
     pub generated_identity: Option<String>,
     pub generated_user: Option<String>,
@@ -381,6 +385,9 @@ impl OnboardingWizard {
             brain_generating: false,
             brain_generated: false,
             brain_error: None,
+            preview_shown: false,
+            formatted_about_me: String::new(),
+            formatted_about_agent: String::new(),
             generated_soul: None,
             generated_identity: None,
             generated_user: None,
@@ -634,8 +641,11 @@ impl OnboardingWizard {
         {
             wizard.telegram_token_input = sentinel();
         }
-        if !config.channels.telegram.allowed_users.is_empty() {
-            wizard.telegram_user_id_input = sentinel();
+        // Telegram user ID is NOT a secret — show the real stored value so the
+        // user can see what's configured instead of a misleading "exists"
+        // sentinel that makes them think an ID materialised from nowhere.
+        if let Some(first) = config.channels.telegram.allowed_users.first() {
+            wizard.telegram_user_id_input = first.clone();
         }
         if config
             .channels

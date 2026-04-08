@@ -1281,27 +1281,18 @@ fn render_telegram_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWiza
         )));
     }
 
-    // User ID input
+    // User ID input — NOT a secret, always show the real value.
     let uid_focused = wizard.telegram_field == TelegramField::UserID;
-    let (uid_display, uid_hint) = if wizard.has_existing_telegram_user_id() {
-        (
-            "**********".to_string(),
-            " (already configured)".to_string(),
-        )
-    } else if wizard.telegram_user_id_input.is_empty() {
-        ("your numeric user ID".to_string(), String::new())
+    let uid_display = if wizard.telegram_user_id_input.is_empty() {
+        "your numeric chat ID".to_string()
     } else {
-        (wizard.telegram_user_id_input.clone(), String::new())
+        wizard.telegram_user_id_input.clone()
     };
-    let uid_cursor = if uid_focused && !wizard.has_existing_telegram_user_id() {
-        "\u{2588}"
-    } else {
-        ""
-    };
+    let uid_cursor = if uid_focused { "\u{2588}" } else { "" };
 
     lines.push(Line::from(vec![
         Span::styled(
-            "  User ID:   ",
+            "  Chat ID:   ",
             Style::default().fg(if uid_focused {
                 BRAND_BLUE
             } else {
@@ -1310,34 +1301,31 @@ fn render_telegram_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWiza
         ),
         Span::styled(
             format!("{}{}", uid_display, uid_cursor),
-            Style::default().fg(if wizard.has_existing_telegram_user_id() {
-                Color::Cyan
-            } else if uid_focused {
+            Style::default().fg(if uid_focused {
                 Color::White
-            } else {
+            } else if wizard.telegram_user_id_input.is_empty() {
                 Color::DarkGray
+            } else {
+                Color::Cyan
             }),
         ),
     ]));
 
-    if !uid_hint.is_empty() && uid_focused {
-        lines.push(Line::from(Span::styled(
-            format!("  {}", uid_hint.trim()),
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::ITALIC),
-        )));
-    }
-
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "  Send /start to your bot to get your user ID",
+        "  To get your chat ID: open Telegram, message @userinfobot",
         Style::default()
             .fg(Color::DarkGray)
             .add_modifier(Modifier::ITALIC),
     )));
     lines.push(Line::from(Span::styled(
-        "  User ID is optional — leave empty to allow all users",
+        "  — it replies with your numeric ID. Paste it above.",
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::ITALIC),
+    )));
+    lines.push(Line::from(Span::styled(
+        "  (Leave empty to allow any user to message the bot.)",
         Style::default()
             .fg(Color::DarkGray)
             .add_modifier(Modifier::ITALIC),
@@ -2404,6 +2392,12 @@ fn render_brain_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard)
         )));
         return;
     }
+
+    // Preview block intentionally omitted from the editing view — the
+    // auto-formatted markdown is only built at the moment generation kicks
+    // off (via `normalize_brain_inputs`) and is surfaced by the generating /
+    // generated states above. Showing it here would conflict with the
+    // live-edit text areas below and has no actionable UI left.
 
     // "About You" text area
     let me_focused = wizard.brain_field == BrainField::AboutMe;

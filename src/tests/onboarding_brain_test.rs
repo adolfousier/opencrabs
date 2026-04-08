@@ -221,3 +221,29 @@ fn apply_empty_response_sets_error() {
     w.apply_generated_brain("");
     assert!(w.brain_error.is_some());
 }
+
+#[test]
+fn test_plain_text_auto_formats_into_markdown() {
+    // User pastes plain prose (not markdown) into both fields.
+    // Pressing Enter on the AboutAgent field should silently auto-format
+    // the inputs into a minimal markdown skeleton, populate
+    // `formatted_about_me` / `formatted_about_agent`, and kick off
+    // generation (no intrusive Y/N preview prompt).
+    let mut w = make_wizard_at_brain();
+    w.brain_field = BrainField::AboutAgent;
+    w.about_me = "I build Rust TUIs".to_string();
+    w.about_opencrabs = "Be direct, ship fast".to_string();
+    let action = w.handle_key(key(KeyCode::Enter));
+    assert_eq!(action, WizardAction::GenerateBrain);
+    assert!(w.formatted_about_me.contains("# About Me"));
+    assert!(w.formatted_about_agent.contains("# About The Agent"));
+}
+
+#[test]
+fn test_enter_advances_after_generation() {
+    let mut w = make_wizard_at_brain();
+    w.brain_generated = true;
+    let action = w.handle_key(key(KeyCode::Enter));
+    assert_eq!(w.step, OnboardingStep::Complete);
+    assert_eq!(action, WizardAction::Complete);
+}
