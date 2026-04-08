@@ -216,6 +216,8 @@ pub async fn fetch_provider_models(
     }
 
     // Qwen native — OAuth path only exposes `coder-model` on the free tier.
+    // (qwen-cli hardcodes a single model `coder-model` for the qwen-oauth
+    // authType — there is no live /models endpoint to fetch.)
     if provider_index == 10 {
         let models = crate::tui::provider_selector::load_default_models("qwen");
         if !models.is_empty() {

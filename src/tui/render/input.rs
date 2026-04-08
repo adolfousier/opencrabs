@@ -411,7 +411,8 @@ pub(super) fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
             .unwrap_or(&app.default_model_name);
         // Strip redundant "{provider}/" prefix so we don't render "opencode / opencode/foo"
         let prefix = format!("{}/", provider_str);
-        raw.strip_prefix(&prefix).unwrap_or(raw).to_string()
+        let stripped = raw.strip_prefix(&prefix).unwrap_or(raw);
+        crate::tui::provider_selector::model_display_label(stripped).to_string()
     };
 
     // Working directory — collapse $HOME to ~, then truncate if still long

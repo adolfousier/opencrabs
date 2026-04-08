@@ -1119,21 +1119,30 @@ impl AgentService {
             if let Some(swap) = self.provider().take_swap_event()
                 && let Some(ref cb) = progress_callback
             {
+                let reason = if swap.reason.is_empty() {
+                    "unavailable".to_string()
+                } else {
+                    swap.reason.clone()
+                };
                 cb(
                     session_id,
                     ProgressEvent::SelfHealingAlert {
                         message: format!(
                             "Switched to {}/{} — {}/{} {}",
-                            swap.to_name,
-                            swap.to_model,
-                            swap.from_name,
-                            swap.from_model,
-                            if swap.reason.is_empty() {
-                                "unavailable".to_string()
-                            } else {
-                                swap.reason
-                            }
+                            swap.to_name, swap.to_model, swap.from_name, swap.from_model, reason
                         ),
+                    },
+                );
+                // Structured follow-up so UIs can update the session footer
+                // without parsing the alert text above.
+                cb(
+                    session_id,
+                    ProgressEvent::ProviderSwitched {
+                        from_name: swap.from_name,
+                        from_model: swap.from_model,
+                        to_name: swap.to_name,
+                        to_model: swap.to_model,
+                        reason,
                     },
                 );
             }

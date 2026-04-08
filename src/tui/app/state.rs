@@ -1857,6 +1857,26 @@ impl App {
                 }
             }
             TuiEvent::QwenOAuthComplete => {
+                // Persist enabled flag to config.toml and disable all other providers,
+                // mirroring what /models save_provider_selection_internal does. The
+                // OAuth credentials live in keys.toml; without this, config.toml never
+                // sees `[providers.qwen] enabled = true` and Qwen never becomes the
+                // active provider on next load.
+                if let Ok(cfg) = crate::config::Config::load() {
+                    let sections = crate::utils::providers::all_config_sections(&cfg.providers);
+                    for s in &sections {
+                        if s != "providers.qwen" {
+                            let _ = crate::config::Config::write_key(s, "enabled", "false");
+                        }
+                    }
+                }
+                let _ = crate::config::Config::write_key("providers.qwen", "enabled", "true");
+                let _ = crate::config::Config::write_key(
+                    "providers.qwen",
+                    "default_model",
+                    "coder-model",
+                );
+
                 if let Some(ref mut wizard) = self.onboarding {
                     wizard.qwen_device_flow_status =
                         super::onboarding::QwenDeviceFlowStatus::Complete;
@@ -1871,6 +1891,11 @@ impl App {
                         wizard.ps.config_models = vec!["coder-model".to_string()];
                     }
                     wizard.ps.selected_model = 0;
+                }
+
+                // Reload the agent service so the running session picks up Qwen.
+                if let Err(e) = self.rebuild_agent_service().await {
+                    tracing::warn!("Failed to rebuild agent service after Qwen OAuth: {}", e);
                 }
             }
             TuiEvent::QwenOAuthError(err) => {
@@ -1985,6 +2010,26 @@ impl App {
             }
             TuiEvent::SystemMessage(msg) => {
                 self.push_system_message(msg);
+            }
+            TuiEvent::ProviderSwitched {
+                to_name,
+                to_model,
+                reason: _,
+            } => {
+                // Sticky fallback happened mid-request. Update the footer +
+                // session record so the user sees which provider is now live.
+                self.default_model_name = to_model.clone();
+                if let Some(ref mut session) = self.current_session {
+                    session.provider_name = Some(to_name.clone());
+                    session.model = Some(to_model.clone());
+                    let session_copy = session.clone();
+                    if let Err(e) = self.session_service.update_session(&session_copy).await {
+                        tracing::warn!(
+                            "Failed to persist provider swap to session: {}",
+                            e
+                        );
+                    }
+                }
             }
             TuiEvent::UpdateAvailable(version) => {
                 self.update_available_version = Some(version);

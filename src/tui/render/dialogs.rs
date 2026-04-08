@@ -646,10 +646,11 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
             };
 
             let suffix = if active { " (active)" } else { "" };
+            let label = crate::tui::provider_selector::model_display_label(model);
 
             lines.push(Line::from(vec![
                 Span::styled(prefix, style),
-                Span::styled(*model, style),
+                Span::styled(label.to_string(), style),
                 Span::styled(suffix, Style::default().fg(Color::DarkGray)),
             ]));
         }
