@@ -197,7 +197,11 @@ impl QwenCredentials {
             .as_table_mut()
             .context("[providers.qwen] is not a table")?;
 
-        qwen.insert("enabled".to_string(), toml::Value::Boolean(true));
+        // Only OAuth credentials live in keys.toml. `enabled` and
+        // `default_model` are non-secret config concerns and belong in
+        // config.toml (the onboarding flow writes them there). Persisting
+        // them here pollutes keys.toml and causes config drift every time
+        // the background refresher rewrites the access token.
         qwen.insert(
             "api_key".to_string(),
             toml::Value::String(self.access_token.clone()),
@@ -216,13 +220,9 @@ impl QwenCredentials {
                 toml::Value::String(self.resource_url.clone()),
             );
         }
-        // Seed default_model on first write so the user sees what's in use.
-        if !qwen.contains_key("default_model") {
-            qwen.insert(
-                "default_model".to_string(),
-                toml::Value::String(QWEN_OAUTH_MODEL.to_string()),
-            );
-        }
+        // Scrub any legacy non-secret fields from prior versions.
+        qwen.remove("enabled");
+        qwen.remove("default_model");
 
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
