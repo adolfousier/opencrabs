@@ -1578,14 +1578,8 @@ impl App {
                     } else {
                         wizard.telegram_token_input.clone()
                     };
-                    let user_id_str = if wizard.has_existing_telegram_user_id() {
-                        crate::config::Config::load()
-                            .ok()
-                            .and_then(|c| c.channels.telegram.allowed_users.into_iter().next())
-                            .unwrap_or_default()
-                    } else {
-                        wizard.telegram_user_id_input.clone()
-                    };
+                    // telegram_user_id_input is never a sentinel — always the real value.
+                    let user_id_str = wizard.telegram_user_id_input.clone();
                     let sender = self.event_sender();
                     let agent = self.agent_service.clone();
                     tokio::spawn(async move {
@@ -1806,11 +1800,15 @@ impl App {
     /// responsive (Esc cancels, render keeps ticking). The result is delivered
     /// via `TuiEvent::BrainGenerationResult` and applied in `state.rs`.
     fn generate_brain_files(&mut self) {
-        // Extract what we need before borrowing wizard mutably
+        // Extract what we need before borrowing wizard mutably.
+        // Normalize the user-provided free-form text into valid markdown
+        // first so the model sees a consistent structure even if the user
+        // pasted plain prose instead of markdown.
         let prompt = {
-            let Some(ref wizard) = self.onboarding else {
+            let Some(ref mut wizard) = self.onboarding else {
                 return;
             };
+            wizard.normalize_brain_inputs();
             wizard.build_brain_prompt()
         };
 
@@ -2173,14 +2171,51 @@ async fn test_telegram_connection(
 ) -> Result<(), String> {
     use teloxide::prelude::Requester;
 
-    let user_id: i64 = user_id_str
+    let trimmed = user_id_str.trim();
+    if trimmed.is_empty() {
+        return Err("Chat ID is empty — paste your numeric chat ID \
+                    (message @userinfobot on Telegram to get it)."
+            .to_string());
+    }
+    let user_id: i64 = trimmed
         .parse()
-        .map_err(|_| format!("Invalid user ID: {}", user_id_str))?;
+        .map_err(|_| format!("Invalid chat ID '{}': must be a numeric ID.", trimmed))?;
+
+    // Reject the bot's own numeric ID. Telegram bot tokens are
+    // `<bot_id>:<secret>`, so users sometimes paste the bot id into the
+    // chat id field by mistake. sendMessage to that id returns success
+    // on some paths but never delivers a message anywhere visible.
+    if let Some((bot_id_prefix, _)) = token.split_once(':')
+        && let Ok(bot_id) = bot_id_prefix.trim().parse::<i64>()
+        && bot_id == user_id
+    {
+        return Err(
+            "That's the bot's own ID, not yours. Open Telegram, message \
+             @userinfobot, and paste the numeric ID it replies with."
+                .to_string(),
+        );
+    }
+
     let bot = teloxide::Bot::new(token);
     let greeting = crate::channels::generate_connection_greeting(&agent, "Telegram").await;
     bot.send_message(teloxide::types::ChatId(user_id), greeting)
         .await
-        .map_err(|e| format!("Telegram API error: {}", e))?;
+        .map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("chat not found") {
+                format!(
+                    "Telegram says 'chat not found'. You must message your bot \
+                     at least once first so it can deliver messages to you. \
+                     Open Telegram, find your bot, send it any message, then retry. \
+                     (raw: {})",
+                    msg
+                )
+            } else if msg.contains("bot was blocked") {
+                "You blocked the bot — unblock it in Telegram and retry.".to_string()
+            } else {
+                format!("Telegram API error: {}", msg)
+            }
+        })?;
     Ok(())
 }
 
