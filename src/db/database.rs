@@ -4,10 +4,23 @@ use anyhow::{Context, Result};
 use deadpool_sqlite::{Config, Hook, InteractError, Pool as DeadPool, Runtime};
 use rusqlite_migration::{M, Migrations};
 use std::path::Path;
+use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
 
 /// Flag set when the startup integrity check detects corruption.
 static DB_INTEGRITY_FAILED: AtomicBool = AtomicBool::new(false);
+
+/// Global pool handle set once on startup. Used by components that can't
+/// otherwise receive a pool via dependency injection (e.g. CLI providers
+/// that need to persist streaming progress directly to the DB without
+/// waiting for tool_loop to batch-write at end of iteration).
+static GLOBAL_POOL: OnceLock<Pool> = OnceLock::new();
+
+/// Get the global DB pool if it has been set. Returns `None` before the
+/// first `Database::connect` call (e.g. in unit tests).
+pub fn global_pool() -> Option<&'static Pool> {
+    GLOBAL_POOL.get()
+}
 
 /// Returns true (once) if the last startup integrity check detected corruption.
 pub fn db_integrity_failed() -> bool {
@@ -82,6 +95,10 @@ impl Database {
             "Connected to database: {} (WAL, pool=16, busy_timeout=30s)",
             path_str
         );
+        // Publish pool globally so components without DI access (e.g. qwen-cli
+        // provider streaming persistence) can still write to the DB. Safe to
+        // ignore the error — only the first connect wins.
+        let _ = GLOBAL_POOL.set(pool.clone());
         Ok(Self { pool })
     }
 
