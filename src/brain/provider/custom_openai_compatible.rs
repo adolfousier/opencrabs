@@ -1126,6 +1126,7 @@ impl OpenAIProvider {
         struct StreamState {
             emitted_message_start: bool,
             emitted_content_start: bool,
+            emitted_content_stop: bool,
             seen_delta_content: bool,
             tool_calls: std::collections::HashMap<usize, ToolCallAccum>,
             pending_stop_reason: Option<crate::brain::provider::types::StopReason>,
@@ -1134,6 +1135,7 @@ impl OpenAIProvider {
         let state = std::sync::Arc::new(std::sync::Mutex::new(StreamState {
             emitted_message_start: false,
             emitted_content_start: false,
+            emitted_content_stop: false,
             seen_delta_content: false,
             tool_calls: std::collections::HashMap::new(),
             pending_stop_reason: None,
@@ -1157,17 +1159,23 @@ impl OpenAIProvider {
 
                             if let Some(json_str) = line.strip_prefix("data: ") {
                                 if json_str == "[DONE]" {
+                                    if st.emitted_content_start && !st.emitted_content_stop {
+                                        events.push(Ok(StreamEvent::ContentBlockStop { index: 0 }));
+                                        st.emitted_content_stop = true;
+                                    }
                                     for (_idx, accum) in st.tool_calls.drain() {
                                         let input = serde_json::from_str(&accum.arguments)
                                             .unwrap_or_else(|_| serde_json::json!({}));
+                                        let tool_index = _idx + 1;
                                         events.push(Ok(StreamEvent::ContentBlockStart {
-                                            index: _idx + 1,
+                                            index: tool_index,
                                             content_block: ContentBlock::ToolUse {
                                                 id: accum.id,
                                                 name: accum.name,
                                                 input,
                                             },
                                         }));
+                                        events.push(Ok(StreamEvent::ContentBlockStop { index: tool_index }));
                                     }
                                     if let Some(stop_reason) = st.pending_stop_reason.take() {
                                         events.push(Ok(StreamEvent::MessageDelta {
@@ -1210,6 +1218,10 @@ impl OpenAIProvider {
                                             .unwrap_or(false);
 
                                         if is_finish {
+                                            if st.emitted_content_start && !st.emitted_content_stop {
+                                                events.push(Ok(StreamEvent::ContentBlockStop { index: 0 }));
+                                                st.emitted_content_stop = true;
+                                            }
                                             if let Some(usage) = chunk.usage.as_ref() {
                                                 let input = usage.prompt_tokens.unwrap_or(0);
                                                 let output = usage.completion_tokens.unwrap_or(0);
@@ -1622,6 +1634,8 @@ impl Provider for OpenAIProvider {
         struct StreamState {
             emitted_message_start: bool,
             emitted_content_start: bool,
+            /// Matching ContentBlockStop for the text block at index 0 has been emitted
+            emitted_content_stop: bool,
             /// True once we've received real content via `delta` field
             seen_delta_content: bool,
             /// Index -> accumulated tool call
@@ -1643,6 +1657,7 @@ impl Provider for OpenAIProvider {
         let state = std::sync::Arc::new(std::sync::Mutex::new(StreamState {
             emitted_message_start: false,
             emitted_content_start: false,
+            emitted_content_stop: false,
             seen_delta_content: false,
             tool_calls: std::collections::HashMap::new(),
             inside_think: false,
@@ -1676,7 +1691,17 @@ impl Provider for OpenAIProvider {
 
                             if let Some(json_str) = line.strip_prefix("data: ") {
                                 if json_str == "[DONE]" {
-                                    // Flush any accumulated tool calls before DONE
+                                    // Close the text block first, if one is still open,
+                                    // so helpers.rs can finalize it before tool events.
+                                    if st.emitted_content_start && !st.emitted_content_stop {
+                                        events.push(Ok(StreamEvent::ContentBlockStop { index: 0 }));
+                                        st.emitted_content_stop = true;
+                                    }
+                                    // Flush any accumulated tool calls before DONE.
+                                    // Emit a matching ContentBlockStop after every Start so
+                                    // helpers.rs fires ToolStarted/ToolCompleted progress
+                                    // events to the TUI (otherwise the tool cards stay
+                                    // visually "stuck" forever).
                                     for (_idx, accum) in st.tool_calls.drain() {
                                         let input = serde_json::from_str(&accum.arguments)
                                             .unwrap_or_else(|_| serde_json::json!({}));
@@ -1684,14 +1709,16 @@ impl Provider for OpenAIProvider {
                                             "[TOOL_EMIT] Flushing tool on DONE: id={}, name={}, args={}",
                                             accum.id, accum.name, &accum.arguments.chars().take(200).collect::<String>()
                                         );
+                                        let tool_index = _idx + 1; // Offset to avoid collision with text block at index 0
                                         events.push(Ok(StreamEvent::ContentBlockStart {
-                                            index: _idx + 1, // Offset to avoid collision with text block at index 0
+                                            index: tool_index,
                                             content_block: ContentBlock::ToolUse {
                                                 id: accum.id,
                                                 name: accum.name,
                                                 input,
                                             },
                                         }));
+                                        events.push(Ok(StreamEvent::ContentBlockStop { index: tool_index }));
                                     }
                                     // If we still have a pending stop_reason (no usage-only chunk
                                     // arrived), emit MessageDelta with fallback usage now.
@@ -1842,7 +1869,16 @@ impl Provider for OpenAIProvider {
                                         // Flush accumulated tool calls on any terminal finish_reason.
                                         // Some providers (MiniMax) send "stop" even with tool_calls.
                                         if finish_reason_str.is_some() && !st.tool_calls.is_empty() {
-                                                // Emit all accumulated tool calls
+                                                // Close the text block first if one is still open so
+                                                // helpers.rs finalizes it before the tool blocks.
+                                                if st.emitted_content_start && !st.emitted_content_stop {
+                                                    events.push(Ok(StreamEvent::ContentBlockStop { index: 0 }));
+                                                    st.emitted_content_stop = true;
+                                                }
+                                                // Emit all accumulated tool calls. Each Start MUST be
+                                                // followed by a matching Stop so helpers.rs can fire
+                                                // ToolStarted/ToolCompleted progress events — otherwise
+                                                // the TUI tool cards stay visually stuck forever.
                                                 for (idx, accum) in st.tool_calls.drain() {
                                                     let input = serde_json::from_str(&accum.arguments)
                                                         .unwrap_or_else(|e| {
@@ -1856,14 +1892,16 @@ impl Provider for OpenAIProvider {
                                                         "[TOOL_EMIT] Emitting tool call: idx={}, id={}, name={}, args_len={}",
                                                         idx, accum.id, accum.name, accum.arguments.len()
                                                     );
+                                                    let tool_index = idx + 1; // Offset by 1 to avoid collision with text block at index 0
                                                     events.push(Ok(StreamEvent::ContentBlockStart {
-                                                        index: idx + 1, // Offset by 1 to avoid collision with text block at index 0
+                                                        index: tool_index,
                                                         content_block: ContentBlock::ToolUse {
                                                             id: accum.id,
                                                             name: accum.name,
                                                             input,
                                                         },
                                                     }));
+                                                    events.push(Ok(StreamEvent::ContentBlockStop { index: tool_index }));
                                                 }
                                             }
 
@@ -1900,15 +1938,25 @@ impl Provider for OpenAIProvider {
                                             }
                                         }
 
-                                        // Extract reasoning_content (MiniMax thinking process).
-                                        // MiniMax sends incremental deltas in `delta.reasoning_content`,
-                                        // and the full accumulated string in `message.reasoning_content`.
-                                        // Use delta first (incremental), skip message to avoid duplication.
+                                        // Extract reasoning_content (MiniMax/dialagram thinking process).
+                                        // Providers like dialagram `qwen-3.6-plus-thinking` stream the entire
+                                        // reasoning BEFORE any text content arrives. helpers.rs silently drops
+                                        // ContentBlockDelta at an index with no matching ContentBlockStart, so
+                                        // we must open the text block at index 0 first — even if nothing has
+                                        // been written to it yet — so the ReasoningDelta is actually forwarded
+                                        // to the TUI via the ReasoningChunk progress event.
                                         let reasoning = chunk.choices.first()
                                             .and_then(|c| c.delta.as_ref())
                                             .and_then(|d| d.reasoning_content.as_ref())
                                             .cloned();
                                         if let Some(rc) = reasoning && !rc.is_empty() {
+                                            if !st.emitted_content_start {
+                                                st.emitted_content_start = true;
+                                                events.push(Ok(StreamEvent::ContentBlockStart {
+                                                    index: 0,
+                                                    content_block: ContentBlock::Text { text: String::new() },
+                                                }));
+                                            }
                                             events.push(Ok(StreamEvent::ContentBlockDelta {
                                                 index: 0,
                                                 delta: ContentDelta::ReasoningDelta {
@@ -1923,6 +1971,12 @@ impl Provider for OpenAIProvider {
                                         // final usage-only chunk AFTER this one. We handle
                                         // MessageStop on [DONE] or the usage-only chunk below.
                                         if let Some(reason) = finish_reason_str {
+                                            // Close the text block (no tool path above will have
+                                            // handled this if there were no tool calls to flush).
+                                            if st.emitted_content_start && !st.emitted_content_stop {
+                                                events.push(Ok(StreamEvent::ContentBlockStop { index: 0 }));
+                                                st.emitted_content_stop = true;
+                                            }
                                             let (raw_input, raw_output, raw_cache_read, raw_cache_create) = if let Some(ref usage) = chunk.usage {
                                                 (
                                                     usage.prompt_tokens.unwrap_or(0),
