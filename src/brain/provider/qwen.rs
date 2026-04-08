@@ -105,6 +105,47 @@ impl QwenCredentials {
         Some(creds)
     }
 
+    /// Last-modified time of `~/.qwen/oauth_creds.json` in whole seconds
+    /// since UNIX epoch, or 0 if the file is missing / unreadable. Used by
+    /// `QwenTokenManager` to detect when qwen-cli has rotated the token on
+    /// disk so we can live-reload without restarting.
+    pub fn qwen_cli_mtime() -> u64 {
+        let path = Self::qwen_cli_path();
+        std::fs::metadata(&path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    }
+
+    /// Write credentials back to `~/.qwen/oauth_creds.json` so qwen-cli
+    /// running alongside us sees the refreshed token and doesn't burn
+    /// its own refresh. Best-effort: logs a warning on failure instead
+    /// of propagating it.
+    pub fn write_back_to_qwen_cli(&self) {
+        let path = Self::qwen_cli_path();
+        let Ok(json) = serde_json::to_vec_pretty(self) else {
+            tracing::warn!("Failed to serialize Qwen creds for qwen-cli write-back");
+            return;
+        };
+        if let Some(parent) = path.parent()
+            && let Err(e) = std::fs::create_dir_all(parent)
+        {
+            tracing::warn!("Failed to create {} parent dir: {}", parent.display(), e);
+            return;
+        }
+        if let Err(e) = std::fs::write(&path, &json) {
+            tracing::warn!("Failed to write back to {}: {}", path.display(), e);
+            return;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+
     /// Build credentials from a `ProviderConfig` (loaded from keys.toml).
     /// Returns `None` if the config doesn't have the required OAuth fields.
     pub fn from_provider_config(cfg: &crate::config::ProviderConfig) -> Option<Self> {
@@ -502,12 +543,16 @@ pub fn open_browser(url: &str) -> bool {
 /// task can rotate it before expiry.
 pub struct QwenTokenManager {
     state: RwLock<QwenCredentials>,
+    /// Last observed mtime (seconds since epoch) of `~/.qwen/oauth_creds.json`.
+    /// Used by the background task to detect out-of-band refreshes by qwen-cli.
+    last_cli_mtime: RwLock<u64>,
 }
 
 impl QwenTokenManager {
     pub fn new(creds: QwenCredentials) -> Self {
         Self {
             state: RwLock::new(creds),
+            last_cli_mtime: RwLock::new(QwenCredentials::qwen_cli_mtime()),
         }
     }
 
@@ -543,6 +588,12 @@ impl QwenTokenManager {
 
     /// Refresh the token if it's about to expire. Persists the new creds on success.
     pub async fn ensure_fresh(&self) -> anyhow::Result<()> {
+        // First, check if qwen-cli has rotated the token on disk. If its
+        // mtime moved forward, import the new creds before deciding whether
+        // we still need to refresh — avoids burning our refresh_token when
+        // qwen-cli already did the work.
+        self.reload_from_qwen_cli_if_changed();
+
         let needs_refresh = {
             let c = self
                 .state
@@ -558,8 +609,14 @@ impl QwenTokenManager {
         if let Err(e) = new_creds.persist_to_keys() {
             tracing::warn!("Failed to persist refreshed Qwen credentials: {}", e);
         }
+        // Write back to ~/.qwen/oauth_creds.json so qwen-cli sees the new
+        // token too. Keeps the two clients from fighting over refreshes.
+        new_creds.write_back_to_qwen_cli();
         if let Ok(mut w) = self.state.write() {
             *w = new_creds;
+        }
+        if let Ok(mut m) = self.last_cli_mtime.write() {
+            *m = QwenCredentials::qwen_cli_mtime();
         }
         tracing::debug!("Qwen access token refreshed");
         Ok(())
@@ -567,19 +624,67 @@ impl QwenTokenManager {
 
     /// Force refresh regardless of current expiry. Used after a 401/403.
     pub async fn force_refresh(&self) -> anyhow::Result<()> {
+        // Check qwen-cli's file first — if it rotated the token since we
+        // last looked, we can avoid burning our own refresh quota.
+        if self.reload_from_qwen_cli_if_changed() {
+            tracing::info!("Qwen: picked up rotated token from qwen-cli — no refresh needed");
+            return Ok(());
+        }
         let snap = self.snapshot();
         let new_creds = refresh_credentials(&snap).await?;
         if let Err(e) = new_creds.persist_to_keys() {
             tracing::warn!("Failed to persist force-refreshed Qwen credentials: {}", e);
         }
+        new_creds.write_back_to_qwen_cli();
         if let Ok(mut w) = self.state.write() {
             *w = new_creds;
+        }
+        if let Ok(mut m) = self.last_cli_mtime.write() {
+            *m = QwenCredentials::qwen_cli_mtime();
         }
         Ok(())
     }
 
+    /// Check `~/.qwen/oauth_creds.json` mtime; if it moved forward since we
+    /// last looked, re-import the credentials from disk. Returns `true` if
+    /// creds were reloaded.
+    fn reload_from_qwen_cli_if_changed(&self) -> bool {
+        let current_mtime = QwenCredentials::qwen_cli_mtime();
+        if current_mtime == 0 {
+            return false;
+        }
+        let last = self.last_cli_mtime.read().map(|g| *g).unwrap_or(0);
+        if current_mtime <= last {
+            return false;
+        }
+        match QwenCredentials::import_from_qwen_cli() {
+            Some(fresh) => {
+                tracing::info!(
+                    "Qwen: detected oauth_creds.json update (mtime {} -> {}) — reloading",
+                    last,
+                    current_mtime
+                );
+                if let Err(e) = fresh.persist_to_keys() {
+                    tracing::warn!("Failed to persist reloaded Qwen creds to keys.toml: {}", e);
+                }
+                if let Ok(mut w) = self.state.write() {
+                    *w = fresh;
+                }
+                if let Ok(mut m) = self.last_cli_mtime.write() {
+                    *m = current_mtime;
+                }
+                true
+            }
+            None => {
+                tracing::warn!("Qwen: oauth_creds.json changed but could not be parsed");
+                false
+            }
+        }
+    }
+
     /// Spawn a background task that proactively refreshes the token before
-    /// it expires. Mirrors the Copilot manager's pattern.
+    /// it expires AND polls `~/.qwen/oauth_creds.json` every 30s for
+    /// out-of-band updates from qwen-cli.
     pub fn start_background_refresh(self: Arc<Self>) {
         tokio::spawn(async move {
             // Initial check on startup
@@ -588,8 +693,8 @@ impl QwenTokenManager {
             }
 
             loop {
-                // Sleep until ~60s before expiry (min 60s between attempts).
-                let sleep_secs = {
+                // Compute time until ~60s before expiry.
+                let deadline_secs = {
                     let snap = self.snapshot();
                     let now_ms = SystemTime::now()
                         .duration_since(UNIX_EPOCH)
@@ -597,11 +702,28 @@ impl QwenTokenManager {
                         .unwrap_or(0);
                     let remaining_ms = snap.expiry_date.saturating_sub(now_ms);
                     let remaining_secs = remaining_ms / 1000;
-                    remaining_secs.saturating_sub(60).max(60)
+                    remaining_secs.saturating_sub(60).max(30)
                 };
-                tokio::time::sleep(Duration::from_secs(sleep_secs)).await;
 
-                if let Err(e) = self.ensure_fresh().await {
+                // Wake every 30s (or at the refresh deadline, whichever is
+                // sooner) to check qwen-cli's mtime.
+                let tick_secs = deadline_secs.min(30);
+                tokio::time::sleep(Duration::from_secs(tick_secs)).await;
+
+                // Out-of-band pickup: if qwen-cli rotated its token, import
+                // it instead of burning our own refresh.
+                if self.reload_from_qwen_cli_if_changed() {
+                    continue;
+                }
+
+                // Normal proactive refresh window?
+                let should_refresh = {
+                    let snap = self.snapshot();
+                    !snap.is_valid()
+                };
+                if should_refresh
+                    && let Err(e) = self.ensure_fresh().await
+                {
                     tracing::warn!("Qwen background token refresh failed: {}", e);
                     tokio::time::sleep(Duration::from_secs(30)).await;
                 }

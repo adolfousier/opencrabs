@@ -510,9 +510,41 @@ fn try_create_qwen(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     let manager = Arc::new(QwenTokenManager::new(creds));
     manager.clone().start_background_refresh();
 
-    let mgr_clone = manager.clone();
+    let mgr_for_token = manager.clone();
     let token_fn: super::custom_openai_compatible::TokenFn =
-        Arc::new(move || mgr_clone.current_access_token());
+        Arc::new(move || mgr_for_token.current_access_token());
+
+    // Dynamic base-URL callback — qwen's `resource_url` can change after a
+    // token refresh, so we resolve the chat endpoint on every request
+    // instead of freezing it at startup.
+    let mgr_for_url = manager.clone();
+    let qwen_override_url = qwen_config.base_url.clone();
+    let base_url_fn: super::custom_openai_compatible::BaseUrlFn = Arc::new(move || {
+        if let Some(ref u) = qwen_override_url
+            && !u.is_empty()
+        {
+            return u.clone();
+        }
+        let live = mgr_for_url.current_chat_url();
+        if live.is_empty() {
+            QWEN_DEFAULT_CHAT_URL.to_string()
+        } else {
+            live
+        }
+    });
+
+    // Auth-refresh callback — on 401/403, force-refresh the token before
+    // retrying. The returned token_fn closure picks up the new access_token
+    // automatically.
+    let mgr_for_auth = manager.clone();
+    let auth_refresh_fn: super::custom_openai_compatible::AuthRefreshFn = Arc::new(move || {
+        let mgr = mgr_for_auth.clone();
+        Box::pin(async move {
+            mgr.force_refresh()
+                .await
+                .map_err(|e| format!("qwen force_refresh failed: {}", e))
+        })
+    });
 
     let base_url = qwen_config
         .base_url
@@ -536,6 +568,8 @@ fn try_create_qwen(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         OpenAIProvider::with_base_url("qwen-managed".to_string(), base_url)
             .with_name("qwen")
             .with_token_fn(token_fn)
+            .with_base_url_fn(base_url_fn)
+            .with_auth_refresh_fn(auth_refresh_fn)
             .with_extra_headers(qwen_extra_headers())
             .with_body_transform(Arc::new(qwen_body_transform)),
         &effective_config,
