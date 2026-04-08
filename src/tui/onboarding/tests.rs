@@ -952,10 +952,10 @@ fn test_provider_display_order_no_customs() {
     let mut wizard = clean_wizard();
     wizard.ps.custom_names.clear();
     let order = wizard.ps.provider_display_order();
-    // Named providers (0-9) sorted alphabetically, then 10 ("+ New Custom") last
+    // Named providers (0-10) sorted alphabetically, then 11 ("+ New Custom") last
     // Alphabetical: Anthropic(0), Claude CLI(7), GitHub Copilot(2), Google Gemini(3),
-    //               Minimax(5), OpenAI(1), OpenCode CLI(8), OpenRouter(4), Qwen CLI(9), z.ai GLM(6)
-    assert_eq!(order, vec![0, 7, 2, 3, 5, 1, 8, 4, 9, 6, 10]);
+    //               Minimax(5), OpenAI(1), OpenCode CLI(8), OpenRouter(4), Qwen(10), Qwen CLI(9), z.ai GLM(6)
+    assert_eq!(order, vec![0, 7, 2, 3, 5, 1, 8, 4, 10, 9, 6, 11]);
 }
 
 #[test]
