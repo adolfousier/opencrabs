@@ -732,7 +732,7 @@ fn qwen_prompt_id() -> String {
     x ^= x << 13;
     x ^= x >> 7;
     x ^= x << 17;
-    format!("{:013x}", x & 0xFFFF_FFFF_FFFF_F)
+    format!("{:013x}", x & 0x000F_FFFF_FFFF_FFFF)
 }
 
 /// Convert a string `content` field into qwen-cli's array form
