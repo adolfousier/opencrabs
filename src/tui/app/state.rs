@@ -2024,10 +2024,7 @@ impl App {
                     session.model = Some(to_model.clone());
                     let session_copy = session.clone();
                     if let Err(e) = self.session_service.update_session(&session_copy).await {
-                        tracing::warn!(
-                            "Failed to persist provider swap to session: {}",
-                            e
-                        );
+                        tracing::warn!("Failed to persist provider swap to session: {}", e);
                     }
                 }
             }

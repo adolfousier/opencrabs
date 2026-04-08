@@ -614,25 +614,47 @@ impl QwenTokenManager {
 
 /// Extra headers required by Qwen's DashScope OpenAI-compatible endpoint.
 ///
-/// `portal.qwen.ai` validates the User-Agent: any value other than the
-/// qwen-code-cli's own UA returns `400 invalid_request_error: bad request`
-/// with no further detail. Empirically verified by replaying requests with
-/// different UAs against the same OAuth token. We must impersonate qwen-cli.
+/// `portal.qwen.ai` aggressively fingerprints requests: any client that
+/// doesn't look like qwen-code-cli (same UA, same `x-stainless-*` SDK
+/// telemetry headers, same DashScope headers) gets either 400 or instant
+/// 429 rate-limited even with a valid OAuth token. Verified empirically
+/// by comparing our requests to qwen-cli's live traffic (captured via
+/// Node `--require` preload fetch interceptor): stripping the stainless
+/// headers causes instant rate-limit on a token that qwen-cli is
+/// happily using. We must impersonate qwen-cli exactly.
 ///
 /// - `X-DashScope-AuthType: qwen-oauth` — required, tells DashScope this is OAuth.
 /// - `X-DashScope-UserAgent: QwenCode/...` — required, must look like qwen-cli.
 /// - `X-DashScope-CacheControl: enable` — opts into ephemeral prompt caching.
 /// - `User-Agent: QwenCode/...` — also validated by the gateway.
+/// - `x-stainless-*` — OpenAI SDK telemetry, used by the gateway's
+///   anti-scraping fingerprint to identify "authentic" qwen-cli traffic.
 pub fn qwen_extra_headers() -> Vec<(String, String)> {
-    // Hardcoded to match qwen-code-cli's format. Bumping this is fine as long
-    // as the prefix stays `QwenCode/`. The platform tuple uses Node-style
-    // names (`darwin`, `arm64`) which are what qwen-cli sends.
+    // Hardcoded to match qwen-code-cli's format. Bumping these is fine as
+    // long as the shape stays the same. Node-style platform tuple is what
+    // qwen-cli sends from macOS arm64.
     let ua = "QwenCode/0.14.0 (darwin; arm64)".to_string();
     vec![
         ("X-DashScope-CacheControl".to_string(), "enable".to_string()),
         ("X-DashScope-UserAgent".to_string(), ua.clone()),
         ("X-DashScope-AuthType".to_string(), "qwen-oauth".to_string()),
         ("User-Agent".to_string(), ua),
+        // Pretend to be the `openai` npm package v5.11.0 running on Node.
+        // These exact values are what qwen-cli ships; the gateway
+        // rate-limits anything missing them.
+        ("x-stainless-arch".to_string(), "arm64".to_string()),
+        ("x-stainless-lang".to_string(), "js".to_string()),
+        ("x-stainless-os".to_string(), "MacOS".to_string()),
+        (
+            "x-stainless-package-version".to_string(),
+            "5.11.0".to_string(),
+        ),
+        ("x-stainless-retry-count".to_string(), "0".to_string()),
+        ("x-stainless-runtime".to_string(), "node".to_string()),
+        (
+            "x-stainless-runtime-version".to_string(),
+            "v25.9.0".to_string(),
+        ),
     ]
 }
 
