@@ -277,6 +277,8 @@ impl GeminiProvider {
         let usage_meta = &json["usageMetadata"];
         let input_tokens = usage_meta["promptTokenCount"].as_u64().unwrap_or(0) as u32;
         let output_tokens = usage_meta["candidatesTokenCount"].as_u64().unwrap_or(0) as u32;
+        let cache_read_tokens = usage_meta["cachedContentTokenCount"].as_u64().unwrap_or(0) as u32;
+        let cache_creation_tokens = usage_meta["cacheTokenCount"].as_u64().unwrap_or(0) as u32;
 
         LLMResponse {
             id: format!("gemini-{}", uuid::Uuid::new_v4().simple()),
@@ -286,6 +288,8 @@ impl GeminiProvider {
             usage: TokenUsage {
                 input_tokens,
                 output_tokens,
+                cache_read_tokens,
+                cache_creation_tokens,
                 ..Default::default()
             },
         }
@@ -314,6 +318,85 @@ impl GeminiProvider {
             error_type: None,
         }
     }
+
+    /// Create or reuse a cachedContents resource for prompt caching.
+    /// Gemini prompt caching works by creating a named cachedContents resource
+    /// via a separate API call, then referencing it in subsequent generateContent requests.
+    async fn ensure_cached_content(&self, system: &str, tools: &[Tool]) -> Result<()> {
+        // Check if we already have a cached content name
+        {
+            let guard = self.cached_content_name.lock().unwrap();
+            if guard.is_some() {
+                return Ok(());
+            }
+        }
+
+        let cached_content_req = CachedContentRequest {
+            model: format!("models/{}", self.model),
+            system_instruction: CachedContentSystemInstruction {
+                parts: vec![GeminiPart {
+                    text: system.to_string(),
+                }],
+            },
+            tools: if tools.is_empty() {
+                None
+            } else {
+                Some(
+                    tools
+                        .iter()
+                        .map(|t| CachedContentTool {
+                            function_declarations: vec![CachedContentFunctionDecl {
+                                name: t.name.clone(),
+                                description: t.description.clone(),
+                                parameters: t.input_schema.clone(),
+                            }],
+                        })
+                        .collect(),
+                )
+            },
+            ttl: Some("3600s".to_string()), // 1 hour TTL
+        };
+
+        let url = format!("{}/cachedContents", GEMINI_BASE_URL);
+
+        let response = self
+            .client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .header("x-goog-api-key", &self.api_key)
+            .json(&cached_content_req)
+            .send()
+            .await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            // Non-fatal: log the error and return without caching
+            let error_text = response.text().await.unwrap_or_default();
+            tracing::warn!(
+                "Failed to create cachedContent for Gemini (status={}): {}",
+                status,
+                error_text
+            );
+            return Ok(());
+        }
+
+        let cached_response: CachedContentResponse = response.json().await?;
+
+        // Store the cached content name for future requests
+        if let Ok(mut guard) = self.cached_content_name.lock() {
+            // The name comes back as "cachedContents/xxxxxx" — use it as-is
+            tracing::info!(
+                "Gemini cachedContent created: name={}, tokens={:?}",
+                cached_response.name,
+                cached_response
+                    .usage_metadata
+                    .and_then(|u| u.total_token_count)
+            );
+            *guard = Some(cached_response.name);
+        }
+
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -328,6 +411,13 @@ impl Provider for GeminiProvider {
             model,
             message_count
         );
+
+        // Create cachedContent on first request if system prompt exists
+        if let (Some(system), Some(tools)) = (&request.system, &request.tools)
+            && !tools.is_empty()
+        {
+            let _ = self.ensure_cached_content(system, tools).await;
+        }
 
         let body = self.build_gemini_request(&request);
         let url = self.generate_url(&model, false);
@@ -383,6 +473,13 @@ impl Provider for GeminiProvider {
             message_count
         );
 
+        // Create cachedContent on first request if system prompt exists
+        if let (Some(system), Some(tools)) = (&request.system, &request.tools)
+            && !tools.is_empty()
+        {
+            let _ = self.ensure_cached_content(system, tools).await;
+        }
+
         let body = self.build_gemini_request(&request);
         let url = self.generate_url(&model, true);
         let retry_config = RetryConfig::default();
@@ -419,6 +516,8 @@ impl Provider for GeminiProvider {
             tool_calls: std::collections::HashMap::new(),
             input_tokens: 0,
             output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
         }));
 
         let event_stream = byte_stream
@@ -549,6 +648,12 @@ impl Provider for GeminiProvider {
                                     }
                                     if let Some(v) = usage.get("candidatesTokenCount") {
                                         st.output_tokens = v.as_u64().unwrap_or(0) as u32;
+                                    }
+                                    if let Some(v) = usage.get("cachedContentTokenCount") {
+                                        st.cache_read_tokens = v.as_u64().unwrap_or(0) as u32;
+                                    }
+                                    if let Some(v) = usage.get("cacheTokenCount") {
+                                        st.cache_creation_tokens = v.as_u64().unwrap_or(0) as u32;
                                     }
                                 }
                             }
@@ -687,6 +792,8 @@ struct GeminiStreamState {
     tool_calls: std::collections::HashMap<usize, GeminiToolCall>,
     input_tokens: u32,
     output_tokens: u32,
+    cache_read_tokens: u32,
+    cache_creation_tokens: u32,
 }
 
 /// Accumulated tool call from streaming chunks
@@ -717,4 +824,53 @@ struct GeminiErrorDetail {
 #[derive(Serialize)]
 struct GeminiPart {
     text: String,
+}
+
+// ── Prompt caching structs ──────────────────────────────────────────────
+
+/// Request body for POST /v1beta/cachedContents
+#[derive(Serialize)]
+struct CachedContentRequest {
+    model: String,
+    system_instruction: CachedContentSystemInstruction,
+    tools: Option<Vec<CachedContentTool>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ttl: Option<String>,
+}
+
+#[derive(Serialize)]
+struct CachedContentSystemInstruction {
+    parts: Vec<GeminiPart>,
+}
+
+#[derive(Serialize)]
+struct CachedContentTool {
+    function_declarations: Vec<CachedContentFunctionDecl>,
+}
+
+#[derive(Serialize)]
+struct CachedContentFunctionDecl {
+    name: String,
+    description: String,
+    parameters: Value,
+}
+
+/// Response from POST /v1beta/cachedContents
+#[derive(Deserialize)]
+#[allow(dead_code)]
+struct CachedContentResponse {
+    name: String,
+    #[serde(rename = "usageMetadata")]
+    usage_metadata: Option<CachedContentUsageMetadata>,
+    #[serde(rename = "createTime")]
+    create_time: Option<String>,
+    #[serde(rename = "expireTime")]
+    expire_time: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[allow(dead_code)]
+struct CachedContentUsageMetadata {
+    #[serde(rename = "totalTokenCount")]
+    total_token_count: Option<u32>,
 }
