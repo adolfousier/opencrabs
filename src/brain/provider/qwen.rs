@@ -612,6 +612,55 @@ impl QwenTokenManager {
 
 // ── DashScope headers ─────────────────────────────────────────────────────
 
+/// Version string sent in `User-Agent` and `X-DashScope-UserAgent`.
+/// Must stay `QwenCode/<semver>` — the gateway validates the prefix.
+const QWEN_CLI_VERSION: &str = "0.14.0";
+/// `openai` npm SDK version sent in `x-stainless-package-version`.
+const OPENAI_SDK_VERSION: &str = "5.11.0";
+/// Node runtime version sent in `x-stainless-runtime-version`. qwen-cli
+/// ships its own bundled Node and the gateway just wants a plausible
+/// `v<major>.<minor>.<patch>` string.
+const NODE_RUNTIME_VERSION: &str = "v22.11.0";
+
+/// Map Rust's `std::env::consts::OS` to the Node-style OS string that
+/// qwen-cli (via the `openai` npm SDK) sends in `x-stainless-os`.
+fn stainless_os() -> &'static str {
+    match std::env::consts::OS {
+        "macos" => "MacOS",
+        "linux" => "Linux",
+        "windows" => "Windows",
+        "freebsd" => "FreeBSD",
+        "openbsd" => "OpenBSD",
+        "android" => "Android",
+        _ => "Unknown",
+    }
+}
+
+/// Map Rust's `std::env::consts::ARCH` to the Node-style arch string that
+/// qwen-cli sends in `x-stainless-arch`.
+fn stainless_arch() -> &'static str {
+    match std::env::consts::ARCH {
+        "x86_64" => "x64",
+        "aarch64" => "arm64",
+        "arm" => "arm",
+        "x86" => "ia32",
+        other => other,
+    }
+}
+
+/// Platform tuple baked into `User-Agent` and `X-DashScope-UserAgent`.
+/// qwen-cli uses the raw Node values here: `darwin`, `linux`, `win32`
+/// for OS and `arm64`, `x64`, `ia32` for arch.
+fn user_agent_platform() -> String {
+    let os = match std::env::consts::OS {
+        "macos" => "darwin",
+        "windows" => "win32",
+        other => other, // linux, freebsd, openbsd, android stay as-is
+    };
+    let arch = stainless_arch();
+    format!("{}; {}", os, arch)
+}
+
 /// Extra headers required by Qwen's DashScope OpenAI-compatible endpoint.
 ///
 /// `portal.qwen.ai` aggressively fingerprints requests: any client that
@@ -621,7 +670,7 @@ impl QwenTokenManager {
 /// by comparing our requests to qwen-cli's live traffic (captured via
 /// Node `--require` preload fetch interceptor): stripping the stainless
 /// headers causes instant rate-limit on a token that qwen-cli is
-/// happily using. We must impersonate qwen-cli exactly.
+/// happily using. We must match qwen-cli's header set exactly.
 ///
 /// - `X-DashScope-AuthType: qwen-oauth` — required, tells DashScope this is OAuth.
 /// - `X-DashScope-UserAgent: QwenCode/...` — required, must look like qwen-cli.
@@ -629,31 +678,31 @@ impl QwenTokenManager {
 /// - `User-Agent: QwenCode/...` — also validated by the gateway.
 /// - `x-stainless-*` — OpenAI SDK telemetry, used by the gateway's
 ///   anti-scraping fingerprint to identify "authentic" qwen-cli traffic.
+///
+/// Platform-specific values (`arch`, `os`, UA tuple) are derived at
+/// runtime from `std::env::consts::{ARCH, OS}` so Linux/Windows/x86
+/// users don't present a macOS-arm64 fingerprint (which would still
+/// likely work but looks suspicious and could be filtered later).
 pub fn qwen_extra_headers() -> Vec<(String, String)> {
-    // Hardcoded to match qwen-code-cli's format. Bumping these is fine as
-    // long as the shape stays the same. Node-style platform tuple is what
-    // qwen-cli sends from macOS arm64.
-    let ua = "QwenCode/0.14.0 (darwin; arm64)".to_string();
+    let ua = format!("QwenCode/{} ({})", QWEN_CLI_VERSION, user_agent_platform());
     vec![
         ("X-DashScope-CacheControl".to_string(), "enable".to_string()),
         ("X-DashScope-UserAgent".to_string(), ua.clone()),
         ("X-DashScope-AuthType".to_string(), "qwen-oauth".to_string()),
         ("User-Agent".to_string(), ua),
-        // Pretend to be the `openai` npm package v5.11.0 running on Node.
-        // These exact values are what qwen-cli ships; the gateway
-        // rate-limits anything missing them.
-        ("x-stainless-arch".to_string(), "arm64".to_string()),
+        // SDK telemetry headers matching `openai` npm package on Node.
+        ("x-stainless-arch".to_string(), stainless_arch().to_string()),
         ("x-stainless-lang".to_string(), "js".to_string()),
-        ("x-stainless-os".to_string(), "MacOS".to_string()),
+        ("x-stainless-os".to_string(), stainless_os().to_string()),
         (
             "x-stainless-package-version".to_string(),
-            "5.11.0".to_string(),
+            OPENAI_SDK_VERSION.to_string(),
         ),
         ("x-stainless-retry-count".to_string(), "0".to_string()),
         ("x-stainless-runtime".to_string(), "node".to_string()),
         (
             "x-stainless-runtime-version".to_string(),
-            "v25.9.0".to_string(),
+            NODE_RUNTIME_VERSION.to_string(),
         ),
     ]
 }
