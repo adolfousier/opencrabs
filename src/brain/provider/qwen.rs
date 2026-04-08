@@ -707,6 +707,148 @@ pub fn qwen_extra_headers() -> Vec<(String, String)> {
     ]
 }
 
+// ── DashScope body shape ──────────────────────────────────────────────────
+
+/// Stable per-process session id, mirroring qwen-cli's `metadata.sessionId`.
+/// DashScope appears to use this for per-session quota tracking; reusing one
+/// id for the lifetime of the process keeps us inside a single quota bucket
+/// instead of looking like a fresh client every request.
+fn qwen_session_id() -> &'static str {
+    use std::sync::OnceLock;
+    static SESSION: OnceLock<String> = OnceLock::new();
+    SESSION.get_or_init(|| uuid::Uuid::new_v4().to_string())
+}
+
+/// Per-request id, mirroring qwen-cli's `metadata.promptId`. qwen-cli uses
+/// a short hex string; we use 12 hex chars derived from a random u64.
+fn qwen_prompt_id() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    // Simple xorshift for variability without pulling in `rand`.
+    let mut x = nanos as u64 ^ 0x9E37_79B9_7F4A_7C15;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    format!("{:013x}", x & 0xFFFF_FFFF_FFFF_F)
+}
+
+/// Convert a string `content` field into qwen-cli's array form
+/// `[{type: "text", text: "..."}]`, optionally tagging the part with
+/// `cache_control: {type: "ephemeral"}` for prompt caching.
+fn text_part_array(text: &str, cache_control: bool) -> serde_json::Value {
+    let mut part = serde_json::json!({ "type": "text", "text": text });
+    if cache_control {
+        part["cache_control"] = serde_json::json!({ "type": "ephemeral" });
+    }
+    serde_json::Value::Array(vec![part])
+}
+
+/// Rewrite a serialized OpenAI chat-completions body into the exact dialect
+/// that qwen-code-cli speaks against `portal.qwen.ai`. Verified by capturing
+/// qwen-cli's live traffic via a Node `--require` preload fetch interceptor
+/// and diffing field by field.
+///
+/// Differences vs. vanilla OpenAI:
+///   1. `messages[].content` for `system` / `user` / `tool` is an array of
+///      `{type: "text", text: ...}` parts, not a string. Assistant messages
+///      keep `content` as a plain string (matches qwen-cli exactly).
+///   2. The system message's text part and the LAST user message's text part
+///      carry `cache_control: {type: "ephemeral"}` to opt into DashScope
+///      prompt caching. Without this we burn fresh-prompt quota every call.
+///   3. Top-level `metadata: {sessionId, promptId}` is added — qwen-cli
+///      includes these on every request and the gateway uses them for
+///      session quota and dedup.
+///   4. Top-level `vl_high_resolution_images: true` is added — qwen-cli
+///      always sets this even for text-only requests.
+///   5. Fields qwen-cli never sends are stripped: `temperature`, `top_p`,
+///      `tool_choice`, `max_completion_tokens`, `include_reasoning`. The
+///      gateway tolerates them but every extra field widens the fingerprint
+///      gap from qwen-cli and risks tighter rate limiting.
+pub fn qwen_body_transform(mut body: serde_json::Value) -> serde_json::Value {
+    let obj = match body.as_object_mut() {
+        Some(o) => o,
+        None => return body,
+    };
+
+    // 1+2. Rewrite messages.
+    if let Some(serde_json::Value::Array(messages)) = obj.get_mut("messages") {
+        // Find the index of the LAST user message so we can tag it with
+        // cache_control. Iterate from the back.
+        let last_user_idx = messages
+            .iter()
+            .rposition(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"));
+
+        for (i, msg) in messages.iter_mut().enumerate() {
+            let Some(msg_obj) = msg.as_object_mut() else {
+                continue;
+            };
+            let role = msg_obj
+                .get("role")
+                .and_then(|r| r.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            // Assistant content stays as a plain string (or null if absent).
+            if role == "assistant" {
+                continue;
+            }
+
+            // Pull current content text out, defaulting to empty.
+            let current_text = match msg_obj.get("content") {
+                Some(serde_json::Value::String(s)) => s.clone(),
+                Some(serde_json::Value::Array(_)) => {
+                    // Already in array form (e.g. multi-modal user message);
+                    // leave it alone — converting twice would be lossy.
+                    continue;
+                }
+                _ => String::new(),
+            };
+
+            let cache = match role.as_str() {
+                "system" => true,
+                "user" => Some(i) == last_user_idx,
+                _ => false, // tool messages: no cache_control marker
+            };
+
+            msg_obj.insert(
+                "content".to_string(),
+                text_part_array(&current_text, cache),
+            );
+        }
+    }
+
+    // 3. metadata
+    obj.insert(
+        "metadata".to_string(),
+        serde_json::json!({
+            "sessionId": qwen_session_id(),
+            "promptId": qwen_prompt_id(),
+        }),
+    );
+
+    // 4. vl_high_resolution_images
+    obj.insert(
+        "vl_high_resolution_images".to_string(),
+        serde_json::Value::Bool(true),
+    );
+
+    // 5. Strip fields qwen-cli never sends.
+    for k in [
+        "temperature",
+        "top_p",
+        "tool_choice",
+        "max_completion_tokens",
+        "include_reasoning",
+    ] {
+        obj.remove(k);
+    }
+
+    body
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
