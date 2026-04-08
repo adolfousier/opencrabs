@@ -384,6 +384,25 @@ impl Provider for QwenCodeCliProvider {
 
         let (tx, rx) = tokio::sync::mpsc::channel::<Result<StreamEvent>>(64);
 
+        // Spawn a dedicated serial writer task for streaming DB persistence.
+        // qwen-cli runs its entire yolo agentic loop (100s of tool calls) in a
+        // single subprocess invocation = one tool_loop iteration. The normal
+        // CLI persistence path in tool_loop only writes once at iteration end,
+        // so a mid-run cancel (double-Esc) loses everything accumulated in
+        // memory. We bypass that here by streaming text + tool markers straight
+        // to the assistant message row as the qwen subprocess emits them,
+        // matching the per-tool real-time persistence non-CLI providers get
+        // via tool_loop.rs:2210.
+        let persist_session = request.session_id;
+        let (persist_tx, mut persist_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        tokio::spawn(async move {
+            while let Some(chunk) = persist_rx.recv().await {
+                if let Some(sid) = persist_session {
+                    persist_qwen_chunk(sid, &chunk).await;
+                }
+            }
+        });
+
         tokio::spawn(async move {
             let reader = tokio::io::BufReader::new(stdout);
             let mut lines = reader.lines();
@@ -407,6 +426,18 @@ impl Provider for QwenCodeCliProvider {
             // logged at EOF for diagnostics. Qwen CLI never emits a `result`
             // envelope, so MessageStop is synthesized on EOF.
             let mut saw_tool_use_in_message = false;
+
+            // Buffer for streaming text deltas — flushed to DB whenever a tool
+            // block arrives, on subprocess EOF, or when the buffer grows past
+            // FLUSH_SIZE. Text is written as plain content so it survives
+            // cancel / session reload exactly like non-CLI providers.
+            let mut text_persist_buf = String::new();
+            const FLUSH_SIZE: usize = 256;
+            // Deduplicate tool markers per (block_index, offset) so we don't
+            // double-write when qwen-cli re-emits the same tool_use on every
+            // streaming update of a block.
+            let mut persisted_tool_blocks: std::collections::HashSet<usize> =
+                std::collections::HashSet::new();
 
             loop {
                 let line_result = tokio::select! {
@@ -591,6 +622,27 @@ impl Provider for QwenCodeCliProvider {
                                         }
                                         let se = offset_block_index(se, block_index_offset);
                                         let se = normalize_stream_event(se);
+                                        // ── Real-time DB persistence ──
+                                        // Flush any accumulated text first so
+                                        // the on-disk order matches the stream
+                                        // (text → tools → text), then write a
+                                        // tools-v2 marker for this tool call.
+                                        if let StreamEvent::ContentBlockStart {
+                                            index: abs_index,
+                                            content_block:
+                                                ContentBlock::ToolUse { name, input, .. },
+                                        } = &se
+                                            && persisted_tool_blocks.insert(*abs_index)
+                                        {
+                                            if !text_persist_buf.is_empty() {
+                                                let _ = persist_tx.send(format!(
+                                                    "{}\n\n",
+                                                    std::mem::take(&mut text_persist_buf)
+                                                ));
+                                            }
+                                            let _ = persist_tx
+                                                .send(format_tool_marker(name, input));
+                                        }
                                         if tx.send(Ok(se)).await.is_err() {
                                             break;
                                         }
@@ -613,6 +665,21 @@ impl Provider for QwenCodeCliProvider {
                                     }
                                     let se = offset_block_index(se, block_index_offset);
                                     let se = normalize_stream_event(se);
+                                    // Capture streaming text deltas for direct
+                                    // DB persistence — flush on tool boundary,
+                                    // buffer overflow, or subprocess EOF.
+                                    if let StreamEvent::ContentBlockDelta {
+                                        delta: ContentDelta::TextDelta { text },
+                                        ..
+                                    } = &se
+                                    {
+                                        text_persist_buf.push_str(text);
+                                        if text_persist_buf.len() >= FLUSH_SIZE {
+                                            let _ = persist_tx.send(std::mem::take(
+                                                &mut text_persist_buf,
+                                            ));
+                                        }
+                                    }
                                     if tx.send(Ok(se)).await.is_err() {
                                         break;
                                     }
@@ -992,6 +1059,13 @@ impl Provider for QwenCodeCliProvider {
                 }
             }
 
+            // Flush any trailing buffered text before synthesizing MessageStop,
+            // so the final chunk lands in DB even on clean EOF or cancel.
+            if !text_persist_buf.is_empty() {
+                let _ =
+                    persist_tx.send(format!("{}\n\n", std::mem::take(&mut text_persist_buf)));
+            }
+
             // Synthesize MessageStop on EOF if qwen never sent a `result` envelope.
             // This is the normal path for qwen CLI (it does not emit a result like
             // claude CLI does). Always emit so the agent loop sees a valid
@@ -1261,5 +1335,90 @@ fn normalize_stream_event(event: StreamEvent) -> StreamEvent {
             },
         },
         other => other,
+    }
+}
+
+/// Append a chunk directly to the latest assistant message for a session.
+///
+/// Uses the global DB pool published by `Database::connect` so qwen-cli can
+/// persist streaming progress (text and tool markers) as they arrive, rather
+/// than waiting for tool_loop.rs to batch-write at end of iteration. This
+/// gives qwen-cli the same mid-run durability as non-CLI providers, which
+/// persist per-tool at tool_loop.rs:2210.
+///
+/// Silent best-effort: any DB error is logged at debug level and swallowed.
+/// Persistence failures must not break the streaming pipeline.
+async fn persist_qwen_chunk(session_id: uuid::Uuid, chunk: &str) {
+    let Some(pool) = crate::db::global_pool() else {
+        return;
+    };
+    let session_str = session_id.to_string();
+    let chunk_owned = chunk.to_string();
+    let Ok(conn) = pool.get().await else {
+        return;
+    };
+    let _ = conn
+        .interact(move |conn| -> rusqlite::Result<()> {
+            // Find the latest assistant message for this session.
+            let mut stmt = conn.prepare(
+                "SELECT id FROM messages \
+                 WHERE session_id = ?1 AND role = 'assistant' \
+                 ORDER BY created_at DESC LIMIT 1",
+            )?;
+            let id: Option<String> = stmt
+                .query_row(rusqlite::params![session_str], |row| row.get(0))
+                .ok();
+            if let Some(id) = id {
+                conn.execute(
+                    "UPDATE messages SET content = content || ?1 WHERE id = ?2",
+                    rusqlite::params![chunk_owned, id],
+                )?;
+            }
+            Ok(())
+        })
+        .await;
+}
+
+/// Build a tools-v2 marker block for a single tool call in the same format
+/// tool_loop.rs writes (see tool_loop.rs:2200-2212). Keeping the format
+/// identical means session reload and TUI expansion code works unchanged.
+fn format_tool_marker(name: &str, input: &serde_json::Value) -> String {
+    let desc = format!("{}({})", name, shorten_tool_input(input));
+    let entry = serde_json::json!({
+        "d": desc,
+        "s": true,
+        "i": input,
+    });
+    format!(
+        "\n<!-- tools-v2: [{}] -->\n",
+        serde_json::to_string(&entry).unwrap_or_default()
+    )
+}
+
+/// Short one-line summary of a tool's input for the `d` (description) field.
+/// Mirrors the spirit of helpers::format_tool_summary without coupling across
+/// module boundaries — the exact text is cosmetic, reload parses `i` for the
+/// authoritative input.
+fn shorten_tool_input(input: &serde_json::Value) -> String {
+    let s = match input {
+        serde_json::Value::Object(map) => {
+            if let Some(cmd) = map.get("command").and_then(|v| v.as_str()) {
+                cmd.to_string()
+            } else if let Some(path) = map.get("file_path").and_then(|v| v.as_str()) {
+                path.to_string()
+            } else if let Some(pattern) = map.get("pattern").and_then(|v| v.as_str()) {
+                pattern.to_string()
+            } else if let Some(query) = map.get("query").and_then(|v| v.as_str()) {
+                query.to_string()
+            } else {
+                serde_json::to_string(input).unwrap_or_default()
+            }
+        }
+        _ => serde_json::to_string(input).unwrap_or_default(),
+    };
+    if s.len() > 120 {
+        format!("{}…", &s[..s.floor_char_boundary(120)])
+    } else {
+        s
     }
 }
