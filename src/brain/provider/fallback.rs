@@ -245,6 +245,10 @@ impl Provider for FallbackProvider {
         self.primary.cli_handles_tools()
     }
 
+    fn cli_manages_context(&self) -> bool {
+        self.primary.cli_manages_context()
+    }
+
     fn name(&self) -> &str {
         // Persistence and config-display name stays as the originally-configured
         // primary, even after a sticky swap. Use `active_subprovider_name()` for

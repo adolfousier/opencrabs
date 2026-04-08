@@ -50,6 +50,21 @@ pub trait Provider: Send + Sync {
         false
     }
 
+    /// Whether the CLI subprocess persists conversation context across
+    /// invocations on its own (e.g. claude-cli's `--session-id`/`--resume`).
+    ///
+    /// When `true`, the agent service skips its own context-budget
+    /// enforcement and trusts the CLI to compact/manage history. When
+    /// `false`, OpenCrabs sends the full message history on every spawn
+    /// and MUST run its own compaction to stay within the model's window.
+    ///
+    /// Defaults to `cli_handles_tools()` for backwards compatibility — but
+    /// providers like qwen-code-cli that re-spawn cold every turn override
+    /// this to `false` so we compact for them.
+    fn cli_manages_context(&self) -> bool {
+        self.cli_handles_tools()
+    }
+
     /// Get the provider name
     fn name(&self) -> &str;
 

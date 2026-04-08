@@ -882,50 +882,52 @@ impl Provider for QwenCodeCliProvider {
                                 .unwrap_or(StopReason::EndTurn),
                         );
 
+                        // Output tokens from result.usage are cumulative across
+                        // all agentic rounds — correct for billing/display of
+                        // "tokens generated this turn".
                         let final_output = usage
                             .as_ref()
                             .map(|u| u.output_tokens)
                             .unwrap_or(output_tokens);
-                        // Prefer the per-round-tracked LAST input_tokens
-                        // (set by the Assistant envelope handler) over
-                        // result.usage.input_tokens — the result envelope
-                        // is a CUMULATIVE sum across all agentic rounds and
-                        // is the wrong value for context-window display.
-                        // Only fall back to result.usage when we never saw
-                        // a per-round assistant usage block.
-                        let final_input = if input_tokens > 0 {
-                            input_tokens
-                        } else {
-                            usage.as_ref().map(|u| u.total_input()).unwrap_or(0)
-                        };
 
-                        let (result_cc, result_cr) = usage
+                        // Pull cumulative billing values from result.usage.
+                        // These represent the TOTAL tokens consumed across all
+                        // sub-rounds — the right thing for cost calculation.
+                        let (result_input, result_cc, result_cr) = usage
                             .as_ref()
-                            .map(|u| (u.cache_creation_input_tokens, u.cache_read_input_tokens))
-                            .unwrap_or((0, 0));
-                        tracing::info!(
-                            "Qwen result envelope: cumulative in={} out={} cc={} cr={} \
-                             | per-round LAST in={} cc={} cr={} (using per-round for ctx)",
-                            usage.as_ref().map(|u| u.input_tokens).unwrap_or(0),
-                            final_output,
-                            result_cc,
-                            result_cr,
-                            input_tokens,
-                            cache_creation_tokens_last,
-                            cache_read_tokens_last,
-                        );
+                            .map(|u| {
+                                (
+                                    u.input_tokens,
+                                    u.cache_creation_input_tokens,
+                                    u.cache_read_input_tokens,
+                                )
+                            })
+                            .unwrap_or((0, 0, 0));
 
-                        let ctx_cache_creation = if cache_creation_tokens_last > 0 {
-                            cache_creation_tokens_last
-                        } else {
-                            result_cc
-                        };
-                        let ctx_cache_read = if cache_read_tokens_last > 0 {
-                            cache_read_tokens_last
-                        } else {
-                            result_cr
-                        };
+                        // CRITICAL: result.usage is CUMULATIVE across rounds
+                        // (verified from logs: num_turns=1 → 136K input, but
+                        // num_turns=19 → 4.8M input — ~36× because each round
+                        // re-includes the growing context AND tool/file content
+                        // which is also pulled in cumulatively). It is the
+                        // WRONG value for context-window display, which needs
+                        // the size of the LAST round's prompt only.
+                        //
+                        // The per-round trackers (input_tokens, *_last) are
+                        // populated by the Assistant envelope handler when
+                        // qwen-cli ships per-round usage on its assistant
+                        // messages. If those are present, use them. Otherwise,
+                        // emit ZERO for context fields so tool_loop's
+                        // calibration is skipped entirely and the local
+                        // tiktoken estimate of context.token_count is kept
+                        // (which matches what the user sees after restart).
+                        let ctx_input = input_tokens;
+                        let ctx_cache_creation = cache_creation_tokens_last;
+                        let ctx_cache_read = cache_read_tokens_last;
 
+                        // Billing accumulates across rounds for cost tracking.
+                        // Prefer the cumulative tracker; if we never received
+                        // per-round assistant usage, fall back to result.usage
+                        // (which is also cumulative).
                         let billing_cache_creation = if cache_creation_tokens_billing > 0 {
                             cache_creation_tokens_billing
                         } else {
@@ -937,6 +939,24 @@ impl Provider for QwenCodeCliProvider {
                             result_cr
                         };
 
+                        tracing::info!(
+                            "Qwen result envelope: cumulative result in={} cc={} cr={} \
+                             out={} num_turns_seen | per-round LAST in={} cc={} cr={} \
+                             (ctx: {})",
+                            result_input,
+                            result_cc,
+                            result_cr,
+                            final_output,
+                            input_tokens,
+                            cache_creation_tokens_last,
+                            cache_read_tokens_last,
+                            if ctx_input + ctx_cache_creation + ctx_cache_read > 0 {
+                                "using per-round LAST"
+                            } else {
+                                "skipped — falling back to local tiktoken estimate"
+                            },
+                        );
+
                         let _ = tx
                             .send(Ok(StreamEvent::MessageDelta {
                                 delta: MessageDelta {
@@ -944,7 +964,7 @@ impl Provider for QwenCodeCliProvider {
                                     stop_sequence: None,
                                 },
                                 usage: TokenUsage {
-                                    input_tokens: final_input,
+                                    input_tokens: ctx_input,
                                     output_tokens: final_output,
                                     cache_creation_tokens: ctx_cache_creation,
                                     cache_read_tokens: ctx_cache_read,
@@ -1080,6 +1100,14 @@ impl Provider for QwenCodeCliProvider {
 
     fn cli_handles_tools(&self) -> bool {
         true
+    }
+
+    /// Qwen CLI is spawned cold on every turn with a fresh `--session-id`,
+    /// and the entire message history is re-serialized into the `-p` prompt
+    /// (see `build_prompt`). It has zero persistent state across our calls,
+    /// so OpenCrabs must compact context itself to stay under the window.
+    fn cli_manages_context(&self) -> bool {
+        false
     }
 }
 
