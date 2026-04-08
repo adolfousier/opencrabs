@@ -44,7 +44,8 @@ fn provider_order_after_github_insertion() {
     assert_eq!(PROVIDERS[7].name, "Claude CLI");
     assert_eq!(PROVIDERS[8].name, "OpenCode CLI");
     assert_eq!(PROVIDERS[9].name, "Qwen CLI");
-    assert_eq!(PROVIDERS[10].name, "Custom OpenAI-Compatible");
+    assert_eq!(PROVIDERS[10].name, "Qwen");
+    assert_eq!(PROVIDERS[11].name, "Custom OpenAI-Compatible");
 }
 
 // ── Config struct ───────────────────────────────────────────────
