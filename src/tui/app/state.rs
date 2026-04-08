@@ -1878,9 +1878,17 @@ impl App {
                 user_code,
                 verification_uri,
             } => {
+                // Update both the model-selector ps (used by `/models`) and
+                // the onboarding wizard ps (used by `/onboard`). Only one is
+                // actively visible at a time, but they share the render path.
+                self.ps.qwen_user_code = Some(user_code.clone());
+                self.ps.qwen_device_flow_status =
+                    super::onboarding::QwenDeviceFlowStatus::WaitingForUser {
+                        verification_uri: verification_uri.clone(),
+                    };
                 if let Some(ref mut wizard) = self.onboarding {
-                    wizard.qwen_user_code = Some(user_code);
-                    wizard.qwen_device_flow_status =
+                    wizard.ps.qwen_user_code = Some(user_code);
+                    wizard.ps.qwen_device_flow_status =
                         super::onboarding::QwenDeviceFlowStatus::WaitingForUser {
                             verification_uri,
                         };
@@ -1907,8 +1915,21 @@ impl App {
                     "coder-model",
                 );
 
+                // Mirror to the model-selector ps so `/models` shows the
+                // authenticated state without a mode switch.
+                self.ps.qwen_device_flow_status = super::onboarding::QwenDeviceFlowStatus::Complete;
+                self.ps.api_key_input = super::onboarding::EXISTING_KEY_SENTINEL.to_string();
+                self.ps.has_existing_key = true;
+                if self.ps.config_models.is_empty() {
+                    self.ps.config_models =
+                        crate::tui::provider_selector::load_default_models("qwen");
+                    if self.ps.config_models.is_empty() {
+                        self.ps.config_models = vec!["coder-model".to_string()];
+                    }
+                }
+
                 if let Some(ref mut wizard) = self.onboarding {
-                    wizard.qwen_device_flow_status =
+                    wizard.ps.qwen_device_flow_status =
                         super::onboarding::QwenDeviceFlowStatus::Complete;
                     // Credentials already persisted via persist_to_keys() in the spawn task.
                     // Mark key as existing and advance to model selection.
@@ -1929,10 +1950,13 @@ impl App {
                 }
             }
             TuiEvent::QwenOAuthError(err) => {
+                self.ps.qwen_device_flow_status =
+                    super::onboarding::QwenDeviceFlowStatus::Failed(err.clone());
+                self.ps.qwen_user_code = None;
                 if let Some(ref mut wizard) = self.onboarding {
-                    wizard.qwen_device_flow_status =
+                    wizard.ps.qwen_device_flow_status =
                         super::onboarding::QwenDeviceFlowStatus::Failed(err);
-                    wizard.qwen_user_code = None;
+                    wizard.ps.qwen_user_code = None;
                 }
             }
             TuiEvent::WhatsAppQrCode(qr_data) => {

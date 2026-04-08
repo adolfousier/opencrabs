@@ -120,10 +120,6 @@ pub struct OnboardingWizard {
     pub github_user_code: Option<String>,
     pub github_device_flow_status: GitHubDeviceFlowStatus,
 
-    /// Qwen native OAuth device flow state
-    pub qwen_user_code: Option<String>,
-    pub qwen_device_flow_status: super::QwenDeviceFlowStatus,
-
     /// Navigation
     pub focused_field: usize,
     pub error_message: Option<String>,
@@ -394,9 +390,6 @@ impl OnboardingWizard {
 
             github_user_code: None,
             github_device_flow_status: GitHubDeviceFlowStatus::Idle,
-
-            qwen_user_code: None,
-            qwen_device_flow_status: super::QwenDeviceFlowStatus::Idle,
 
             focused_field: 0,
             error_message: None,
