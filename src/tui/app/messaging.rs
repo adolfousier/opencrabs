@@ -1677,7 +1677,14 @@ impl App {
                 .find(|m| m.role == "assistant")
             {
                 let old_len = last_assistant.content.len();
-                last_assistant.content = response.content.clone();
+                // Only overwrite if the aggregated response actually has text.
+                // CLI providers (qwen-cli, opencode-cli) stream their full text
+                // through IntermediateText progress events and return an empty
+                // `response.content` at the end — blindly assigning would wipe
+                // the streamed text and make the reply vanish from the UI.
+                if !response.content.is_empty() {
+                    last_assistant.content = response.content.clone();
+                }
                 last_assistant.token_count = Some(response.usage.output_tokens as i32);
                 last_assistant.cost = Some(response.cost);
                 if reasoning_details.is_some() {
@@ -1686,7 +1693,7 @@ impl App {
                 tracing::debug!(
                     "Updated intermediate assistant message: old_len={}, new_len={}",
                     old_len,
-                    response.content.len()
+                    last_assistant.content.len()
                 );
             } else {
                 // No intermediate message found (shouldn't happen), add as new
