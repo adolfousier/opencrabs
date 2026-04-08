@@ -115,7 +115,8 @@ impl FallbackProvider {
 
     /// Decide whether an error justifies trying the next provider in the
     /// chain. Rate-limit, transient HTTP errors and 5xx warrant a swap.
-    /// Hard errors (auth, malformed request) do not.
+    /// Hard errors (auth, malformed request) surface directly — trying
+    /// a different provider won't fix bad credentials.
     fn should_try_next(err: &ProviderError) -> bool {
         err.is_retryable()
     }
