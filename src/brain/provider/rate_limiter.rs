@@ -31,6 +31,17 @@ const OPENROUTER_FREE_INTERVAL: Duration = Duration::from_millis(4000);
 pub static OPENROUTER_FREE_LIMITERS: std::sync::LazyLock<GlobalRateLimiter> =
     std::sync::LazyLock::new(GlobalRateLimiter::new);
 
+/// Interval between requests for Qwen OAuth free tier.
+/// Portal reports 60 req/min (1/s sustained). 1500ms = 40 req/min, 33% headroom.
+const QWEN_OAUTH_INTERVAL: Duration = Duration::from_millis(1500);
+
+/// Global singleton limiter for the Qwen OAuth endpoint. Must outlive any
+/// individual provider instance, because `try_create_qwen` is called on every
+/// sticky-fallback resolve — a per-provider limiter would reset each request
+/// and let the second call bypass pacing entirely.
+pub static QWEN_OAUTH_LIMITER: std::sync::LazyLock<Arc<RateLimiter>> =
+    std::sync::LazyLock::new(|| Arc::new(RateLimiter::new(QWEN_OAUTH_INTERVAL)));
+
 /// Enforces a minimum interval between consecutive calls to `wait()` for a
 /// single `:free` model. Thread-safe and clone-friendly.
 #[derive(Debug)]
