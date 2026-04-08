@@ -315,11 +315,20 @@ async fn cmd_chat_inner(
 
     let system_brain = brain_loader.build_core_brain(Some(&runtime_info), Some(&commands_section));
 
+    // Propagate persisted auto-always approval policy to the agent service so
+    // the tool loop bypasses approval entirely. Without this, the TUI silently
+    // approves in its callback but `tool_loop.auto_approve_tools` stays false,
+    // and `context.rs` injects "AUTO-APPROVE OFF — tool approval is REQUIRED"
+    // into the compaction/continuation system prompt — which the LLM then
+    // echoes back telling the user to enable auto-approve.
+    let auto_approve_tools = config.agent.approval_policy.as_str() == "auto-always";
+
     // Create agent service with dynamic system brain
     let agent_service = Arc::new(
         AgentService::new(provider.clone(), service_context.clone(), config)
             .with_system_brain(system_brain.clone())
-            .with_working_directory(working_directory.clone()),
+            .with_working_directory(working_directory.clone())
+            .with_auto_approve_tools(auto_approve_tools),
     );
 
     // Shared WhatsApp state — single bot instance, shared between agent + onboarding

@@ -602,6 +602,14 @@ impl App {
                     tracing::warn!("Failed to persist approval policy: {}", e);
                 }
 
+                // Rebuild the agent service so tool_loop.auto_approve_tools
+                // matches the new policy — otherwise the compaction/continuation
+                // system prompt keeps injecting "AUTO-APPROVE OFF" even after
+                // the user switches to yolo mode.
+                if let Err(e) = self.rebuild_agent_service().await {
+                    tracing::warn!("Failed to rebuild agent service after /approve: {}", e);
+                }
+
                 self.push_system_message(format!("Approval policy set to: {}", label));
                 return Ok(());
             } else if keys::is_cancel(&event) {
