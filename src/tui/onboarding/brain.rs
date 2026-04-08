@@ -111,8 +111,7 @@ impl OnboardingWizard {
     /// Called right before generation kicks off.
     pub fn normalize_brain_inputs(&mut self) {
         self.formatted_about_me = auto_format_markdown(&self.about_me, "About Me");
-        self.formatted_about_agent =
-            auto_format_markdown(&self.about_opencrabs, "About The Agent");
+        self.formatted_about_agent = auto_format_markdown(&self.about_opencrabs, "About The Agent");
     }
 
     /// Build the prompt sent to the AI to generate personalized brain files.
@@ -335,10 +334,17 @@ fn header_line_matches(line: &str, name: &str) -> bool {
 /// Detect if text looks like markdown
 fn looks_like_markdown(text: &str) -> bool {
     let t = text.trim();
-    t.contains('#') || t.contains("```") || t.contains("- ") ||
-    t.contains("* ") || t.contains("##") || t.contains("[") ||
-    t.contains("![]") || t.contains("__") || t.contains("**") ||
-    t.starts_with("> ") || t.contains("|")
+    t.contains('#')
+        || t.contains("```")
+        || t.contains("- ")
+        || t.contains("* ")
+        || t.contains("##")
+        || t.contains("[")
+        || t.contains("![]")
+        || t.contains("__")
+        || t.contains("**")
+        || t.starts_with("> ")
+        || t.contains("|")
 }
 
 /// Auto-wrap plain text in markdown template
@@ -347,5 +353,8 @@ fn auto_format_markdown(input: &str, section_title: &str) -> String {
     if trimmed.is_empty() || looks_like_markdown(trimmed) {
         return trimmed.to_string();
     }
-    format!("# {}\n\n{}\n\n## Preferences\n\n- \n\n## Boundaries\n\n- ", section_title, trimmed)
+    format!(
+        "# {}\n\n{}\n\n## Preferences\n\n- \n\n## Boundaries\n\n- ",
+        section_title, trimmed
+    )
 }
