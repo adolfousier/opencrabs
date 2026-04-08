@@ -570,9 +570,9 @@ fn try_create_qwen(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     // 40 req/min, leaves 33% headroom under the quota, and still fires fast
     // enough to keep interactive latency reasonable. qwen-cli gets this
     // pacing for free from the openai npm SDK; we have to wire it explicitly.
-    let qwen_limiter = Arc::new(super::rate_limiter::RateLimiter::new(
-        std::time::Duration::from_millis(1500),
-    ));
+    // Global singleton — survives across `try_create_qwen` invocations so
+    // sticky-fallback re-creates don't reset the limiter between requests.
+    let qwen_limiter = Arc::clone(&super::rate_limiter::QWEN_OAUTH_LIMITER);
 
     let provider = configure_openai_compatible(
         OpenAIProvider::with_base_url("qwen-managed".to_string(), base_url)
