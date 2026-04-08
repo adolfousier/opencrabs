@@ -881,7 +881,7 @@ impl OpenAIProvider {
                 input_tokens: response.usage.prompt_tokens.unwrap_or(0),
                 output_tokens: response.usage.completion_tokens.unwrap_or(0),
                 cache_creation_tokens: response.usage.cache_creation_input_tokens.unwrap_or(0),
-                cache_read_tokens: response.usage.cache_read_input_tokens.unwrap_or(0),
+                cache_read_tokens: response.usage.effective_cache_read(),
                 ..Default::default()
             },
         }
@@ -1214,7 +1214,8 @@ impl OpenAIProvider {
                                                 if let Some(cache_create) = usage.cache_creation_input_tokens {
                                                     token_usage.cache_creation_tokens = cache_create;
                                                 }
-                                                if let Some(cache_read) = usage.cache_read_input_tokens {
+                                                let cache_read = usage.effective_cache_read();
+                                                if cache_read > 0 {
                                                     token_usage.cache_read_tokens = cache_read;
                                                 }
                                                 events.push(Ok(StreamEvent::MessageDelta {
@@ -1918,10 +1919,15 @@ impl Provider for OpenAIProvider {
                                         // final usage-only chunk AFTER this one. We handle
                                         // MessageStop on [DONE] or the usage-only chunk below.
                                         if let Some(reason) = finish_reason_str {
-                                            let (raw_input, raw_output) = if let Some(ref usage) = chunk.usage {
-                                                (usage.prompt_tokens.unwrap_or(0), usage.completion_tokens.unwrap_or(0))
+                                            let (raw_input, raw_output, raw_cache_read, raw_cache_create) = if let Some(ref usage) = chunk.usage {
+                                                (
+                                                    usage.prompt_tokens.unwrap_or(0),
+                                                    usage.completion_tokens.unwrap_or(0),
+                                                    usage.effective_cache_read(),
+                                                    usage.cache_creation_input_tokens.unwrap_or(0),
+                                                )
                                             } else {
-                                                (0, 0)
+                                                (0, 0, 0, 0)
                                             };
 
                                             let stop_reason = Some(match reason.as_str() {
@@ -1934,7 +1940,10 @@ impl Provider for OpenAIProvider {
                                             // If this chunk already carries real usage (some
                                             // providers inline it), emit immediately + stop.
                                             if raw_input > 0 || raw_output > 0 {
-                                                tracing::info!("[STREAM_USAGE] Final usage (inline): input={}, output={}", raw_input, raw_output);
+                                                tracing::info!(
+                                                    "[STREAM_USAGE] Final usage (inline): input={}, output={}, cache_read={}, cache_create={}",
+                                                    raw_input, raw_output, raw_cache_read, raw_cache_create
+                                                );
                                                 events.push(Ok(StreamEvent::MessageDelta {
                                                     delta: crate::brain::provider::types::MessageDelta {
                                                         stop_reason,
@@ -1942,7 +1951,11 @@ impl Provider for OpenAIProvider {
                                                     },
                                                     usage: crate::brain::provider::types::TokenUsage {
                                                         input_tokens: raw_input,
-                                                        output_tokens: raw_output, ..Default::default() },
+                                                        output_tokens: raw_output,
+                                                        cache_creation_tokens: raw_cache_create,
+                                                        cache_read_tokens: raw_cache_read,
+                                                        ..Default::default()
+                                                    },
                                                 }));
                                                 events.push(Ok(StreamEvent::MessageStop));
                                             } else {
@@ -1959,8 +1972,14 @@ impl Provider for OpenAIProvider {
                                             && let Some(ref usage) = chunk.usage {
                                                 let input = usage.prompt_tokens.unwrap_or(0);
                                                 let output = usage.completion_tokens.unwrap_or(0);
+                                                let cache_read = usage.effective_cache_read();
+                                                let cache_create = usage.cache_creation_input_tokens.unwrap_or(0);
+                                                let reasoning = usage.reasoning_tokens();
                                                 if input > 0 || output > 0 {
-                                                    tracing::info!("[STREAM_USAGE] Final usage: input={}, output={}", input, output);
+                                                    tracing::info!(
+                                                        "[STREAM_USAGE] Final usage: input={}, output={}, cache_read={}, cache_create={}, reasoning={}",
+                                                        input, output, cache_read, cache_create, reasoning
+                                                    );
                                                     events.push(Ok(StreamEvent::MessageDelta {
                                                         delta: crate::brain::provider::types::MessageDelta {
                                                             stop_reason: st.pending_stop_reason.take(),
@@ -1968,7 +1987,11 @@ impl Provider for OpenAIProvider {
                                                         },
                                                         usage: crate::brain::provider::types::TokenUsage {
                                                             input_tokens: input,
-                                                            output_tokens: output, ..Default::default() },
+                                                            output_tokens: output,
+                                                            cache_creation_tokens: cache_create,
+                                                            cache_read_tokens: cache_read,
+                                                            ..Default::default()
+                                                        },
                                                     }));
                                                     events.push(Ok(StreamEvent::MessageStop));
                                                 }
@@ -2315,6 +2338,44 @@ struct OpenAIUsage {
     cache_creation_input_tokens: Option<u32>,
     #[serde(default)]
     cache_read_input_tokens: Option<u32>,
+    /// OpenAI/DashScope-style cache hit reporting:
+    /// `usage.prompt_tokens_details.cached_tokens`.
+    #[serde(default)]
+    prompt_tokens_details: Option<OpenAIPromptTokensDetails>,
+    /// OpenAI/DashScope-style reasoning token reporting:
+    /// `usage.completion_tokens_details.reasoning_tokens`.
+    #[serde(default)]
+    completion_tokens_details: Option<OpenAICompletionTokensDetails>,
+}
+
+impl OpenAIUsage {
+    /// Effective cache-read tokens, merging the Anthropic field and the
+    /// OpenAI/DashScope `prompt_tokens_details.cached_tokens` field.
+    fn effective_cache_read(&self) -> u32 {
+        self.cache_read_input_tokens
+            .or_else(|| self.prompt_tokens_details.as_ref().and_then(|d| d.cached_tokens))
+            .unwrap_or(0)
+    }
+
+    /// Reasoning tokens from `completion_tokens_details.reasoning_tokens`.
+    fn reasoning_tokens(&self) -> u32 {
+        self.completion_tokens_details
+            .as_ref()
+            .and_then(|d| d.reasoning_tokens)
+            .unwrap_or(0)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct OpenAIPromptTokensDetails {
+    #[serde(default)]
+    cached_tokens: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct OpenAICompletionTokensDetails {
+    #[serde(default)]
+    reasoning_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
