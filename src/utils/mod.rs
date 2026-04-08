@@ -2,6 +2,7 @@
 
 pub mod approval;
 pub mod config_watcher;
+pub mod fd_suppress;
 pub mod file_extract;
 pub mod image;
 pub mod install;

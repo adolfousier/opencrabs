@@ -26,6 +26,11 @@ pub fn get_engine() -> Result<&'static Mutex<EmbeddingEngine>, String> {
         check_cpu_features()?;
         silence_llama_logs();
 
+        // Suppress hf-hub's indicatif progress bar (stderr) and any llama.cpp /
+        // kalosm-common startup prints (stdout) while the TUI owns the terminal.
+        // Progress is still logged via tracing, so no UX regression.
+        let _fd_guard = crate::utils::fd_suppress::suppress_stdio();
+
         let pull = pull_model(qmd::llm::DEFAULT_EMBED_MODEL_URI, false)
             .map_err(|e| format!("Failed to pull embedding model: {e}"))?;
 
