@@ -1013,13 +1013,15 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
                     let is_sel = i == selected;
                     let prefix = if is_sel && focused { " > " } else { "   " };
                     let marker = if is_sel { "(*)" } else { "( )" };
+                    let label =
+                        crate::tui::provider_selector::model_display_label(model).to_string();
                     lines.push(Line::from(vec![
                         Span::styled(
                             format!("  {}{} ", prefix, marker),
                             Style::default().fg(if is_sel { ACCENT_GOLD } else { Color::DarkGray }),
                         ),
                         Span::styled(
-                            model.to_string(),
+                            label,
                             Style::default().fg(if is_sel {
                                 Color::White
                             } else {

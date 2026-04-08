@@ -89,7 +89,7 @@ pub const PROVIDERS: &[ProviderInfo] = &[
     ProviderInfo {
         id: "qwen",
         name: "Qwen",
-        models: &["coder-model"],
+        models: &["qwen3.6-plus"],
         key_label: "OAuth",
         help_lines: &[
             "Sign in with qwen.ai — OpenCrabs orchestrates tools and context natively",

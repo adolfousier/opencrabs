@@ -471,21 +471,31 @@ fn try_create_qwen(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     // 1) Try keys.toml directly.
     let mut creds = QwenCredentials::from_provider_config(qwen_config);
 
-    // 2) Fall back to importing from qwen-code-cli's shared file.
-    if creds.is_none()
-        && let Some(imported) = QwenCredentials::import_from_qwen_cli()
-    {
-        if let Err(e) = imported.persist_to_keys() {
-            tracing::warn!(
-                "Failed to migrate ~/.qwen/oauth_creds.json into keys.toml: {}",
-                e
-            );
-        } else {
-            tracing::info!(
-                "Imported Qwen credentials from ~/.qwen/oauth_creds.json into keys.toml"
-            );
+    // 2) Also peek at qwen-code-cli's shared file. If it has a NEWER expiry
+    //    than keys.toml (i.e. the user reauthed via `qwen` cli since our last
+    //    import), prefer it and overwrite keys.toml. This makes reauth "just
+    //    work" without requiring the user to re-run onboarding in opencrabs.
+    if let Some(imported) = QwenCredentials::import_from_qwen_cli() {
+        let should_use_file = match &creds {
+            None => true,
+            Some(existing) => imported.expiry_date > existing.expiry_date,
+        };
+        if should_use_file {
+            if let Err(e) = imported.persist_to_keys() {
+                tracing::warn!(
+                    "Failed to sync ~/.qwen/oauth_creds.json into keys.toml: {}",
+                    e
+                );
+            } else {
+                tracing::info!(
+                    "Synced Qwen credentials from ~/.qwen/oauth_creds.json into keys.toml \
+                     (file expiry={}, keys.toml expiry={:?})",
+                    imported.expiry_date,
+                    creds.as_ref().map(|c| c.expiry_date)
+                );
+            }
+            creds = Some(imported);
         }
-        creds = Some(imported);
     }
 
     let Some(creds) = creds else {

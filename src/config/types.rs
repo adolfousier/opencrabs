@@ -2653,7 +2653,7 @@ pub fn resolve_provider_from_config(config: &Config) -> (&str, &str) {
             .qwen
             .as_ref()
             .and_then(|p| p.default_model.as_deref())
-            .unwrap_or("coder-model");
+            .unwrap_or("qwen3.6-plus");
         return ("Qwen", model);
     }
     if config

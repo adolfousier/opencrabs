@@ -149,6 +149,14 @@ pub enum TuiEvent {
     /// A system message to display in chat
     SystemMessage(String),
 
+    /// Sticky fallback just swapped the active provider/model.
+    /// The TUI should update the session + footer to reflect the new choice.
+    ProviderSwitched {
+        to_name: String,
+        to_model: String,
+        reason: String,
+    },
+
     /// Update available — show prompt dialog with version string
     UpdateAvailable(String),
 

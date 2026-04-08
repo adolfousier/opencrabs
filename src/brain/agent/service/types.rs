@@ -84,6 +84,15 @@ pub enum ProgressEvent {
     SelfHealingAlert {
         message: String,
     },
+    /// Sticky fallback promoted a new provider/model. Carries structured data
+    /// so UIs can update the session + footer without parsing text.
+    ProviderSwitched {
+        from_name: String,
+        from_model: String,
+        to_name: String,
+        to_model: String,
+        reason: String,
+    },
 }
 
 /// Callback for reporting progress during agent execution.

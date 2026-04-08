@@ -462,6 +462,16 @@ async fn cmd_chat_inner(
                 ProgressEvent::SelfHealingAlert { message } => {
                     progress_sender.send(TuiEvent::SystemMessage(format!("🔧 {}", message)))
                 }
+                ProgressEvent::ProviderSwitched {
+                    to_name,
+                    to_model,
+                    reason,
+                    ..
+                } => progress_sender.send(TuiEvent::ProviderSwitched {
+                    to_name,
+                    to_model,
+                    reason,
+                }),
             };
             if let Err(e) = result {
                 tracing::error!("Progress event channel closed: {}", e);

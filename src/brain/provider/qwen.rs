@@ -57,6 +57,7 @@ pub const QWEN_DEFAULT_API_HOST: &str = "dashscope.aliyuncs.com/compatible-mode/
 pub const QWEN_DEFAULT_CHAT_URL: &str = "https://portal.qwen.ai/v1/chat/completions";
 
 /// Free-tier model id (the only model available on the OAuth path).
+/// API id is `coder-model`; display label is "Qwen 3.6 Plus".
 pub const QWEN_OAUTH_MODEL: &str = "coder-model";
 
 /// Refresh tokens this many ms before they expire (matches qwen-cli's 30s).
@@ -612,15 +613,21 @@ impl QwenTokenManager {
 // ── DashScope headers ─────────────────────────────────────────────────────
 
 /// Extra headers required by Qwen's DashScope OpenAI-compatible endpoint.
-/// `X-DashScope-CacheControl: enable` activates ephemeral prompt caching;
-/// `X-DashScope-AuthType: qwen-oauth` tells DashScope this is an OAuth token.
+///
+/// `portal.qwen.ai` validates the User-Agent: any value other than the
+/// qwen-code-cli's own UA returns `400 invalid_request_error: bad request`
+/// with no further detail. Empirically verified by replaying requests with
+/// different UAs against the same OAuth token. We must impersonate qwen-cli.
+///
+/// - `X-DashScope-AuthType: qwen-oauth` — required, tells DashScope this is OAuth.
+/// - `X-DashScope-UserAgent: QwenCode/...` — required, must look like qwen-cli.
+/// - `X-DashScope-CacheControl: enable` — opts into ephemeral prompt caching.
+/// - `User-Agent: QwenCode/...` — also validated by the gateway.
 pub fn qwen_extra_headers() -> Vec<(String, String)> {
-    let ua = format!(
-        "OpenCrabs/{} ({}; {})",
-        env!("CARGO_PKG_VERSION"),
-        std::env::consts::OS,
-        std::env::consts::ARCH,
-    );
+    // Hardcoded to match qwen-code-cli's format. Bumping this is fine as long
+    // as the prefix stays `QwenCode/`. The platform tuple uses Node-style
+    // names (`darwin`, `arm64`) which are what qwen-cli sends.
+    let ua = "QwenCode/0.14.0 (darwin; arm64)".to_string();
     vec![
         ("X-DashScope-CacheControl".to_string(), "enable".to_string()),
         ("X-DashScope-UserAgent".to_string(), ua.clone()),

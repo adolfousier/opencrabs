@@ -363,6 +363,17 @@ impl ProviderSelectorState {
     }
 }
 
+/// Map an API model id to a human-readable display label.
+/// Returns the id itself when no special label is defined.
+/// Used by /models, onboarding, and the footer to show friendly names
+/// for models whose API id is an opaque alias (e.g. qwen-oauth's `coder-model`).
+pub fn model_display_label(model_id: &str) -> &str {
+    match model_id {
+        "coder-model" => "Qwen 3.6 Plus",
+        other => other,
+    }
+}
+
 /// Load default models from embedded config.toml.example for a provider.
 pub fn load_default_models(provider_id: &str) -> Vec<String> {
     let config_content = include_str!("../../config.toml.example");
