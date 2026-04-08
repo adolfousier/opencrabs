@@ -167,13 +167,9 @@ impl Tool for GrepTool {
         }
         .map_err(|e| ToolError::InvalidInput(format!("Invalid pattern: {}", e)))?;
 
-        // Resolve search path
+        // Resolve search path (tilde expansion + absolute/relative resolution).
         let search_path = if let Some(ref p) = input.path {
-            if PathBuf::from(p).is_absolute() {
-                PathBuf::from(p)
-            } else {
-                context.working_directory.join(p)
-            }
+            super::error::resolve_tool_path(p, &context.working_directory)
         } else {
             context.working_directory.clone()
         };

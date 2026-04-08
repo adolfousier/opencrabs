@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Document Parser Tool - extracts text from various document formats
 pub struct DocParserTool;
@@ -102,12 +102,8 @@ impl Tool for DocParserTool {
     async fn execute(&self, input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
         let input: DocParserInput = serde_json::from_value(input)?;
 
-        // Resolve path relative to working directory
-        let path = if PathBuf::from(&input.path).is_absolute() {
-            PathBuf::from(&input.path)
-        } else {
-            context.working_directory.join(&input.path)
-        };
+        // Resolve path (tilde expansion + absolute/relative resolution).
+        let path = super::error::resolve_tool_path(&input.path, &context.working_directory);
 
         // Check if file exists
         if !path.exists() {
