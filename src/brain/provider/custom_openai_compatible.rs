@@ -1722,6 +1722,35 @@ impl Provider for OpenAIProvider {
                                     }
                                 }
 
+                                // Check for generic `{error: {message, type, code}}` mid-stream.
+                                // DashScope/qwen emits these when quota is hit mid-flight, and
+                                // OpenAI uses the same shape for policy/tos violations.
+                                if let Ok(raw) = serde_json::from_str::<serde_json::Value>(json_str)
+                                    && let Some(err_obj) = raw.get("error").and_then(|v| v.as_object())
+                                {
+                                    let message = err_obj.get("message").and_then(|v| v.as_str()).unwrap_or("stream error").to_string();
+                                    let err_type = err_obj.get("type").and_then(|v| v.as_str()).map(|s| s.to_string());
+                                    let code = err_obj.get("code").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
+                                    tracing::error!("[STREAM_ERROR] Inline SSE error: type={:?}, code={}, msg={}", err_type, code, message);
+                                    // Map 429/quota-style messages to RateLimitExceeded so the
+                                    // fallback chain kicks in immediately instead of retrying.
+                                    let is_rate_limit = code == 429
+                                        || err_type.as_deref() == Some("rate_limit_exceeded")
+                                        || message.to_lowercase().contains("rate limit")
+                                        || message.to_lowercase().contains("quota");
+                                    let pe = if is_rate_limit {
+                                        ProviderError::RateLimitExceeded(message)
+                                    } else {
+                                        ProviderError::ApiError {
+                                            status: if code == 0 { 500 } else { code },
+                                            message,
+                                            error_type: err_type,
+                                        }
+                                    };
+                                    events.push(Err(pe));
+                                    continue;
+                                }
+
                                 match serde_json::from_str::<OpenAIStreamChunk>(json_str) {
                                     Ok(chunk) => {
                                         // Emit MessageStart on first chunk with id
