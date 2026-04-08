@@ -419,6 +419,20 @@ pub struct App {
     pub chat_render_scroll: usize,
     /// The top-left Y coordinate of the chat area in the terminal
     pub chat_area_y: u16,
+    /// The top-left X coordinate of the chat area in the terminal
+    pub chat_area_x: u16,
+    /// The width of the chat area in the terminal
+    pub chat_area_width: u16,
+    /// The height of the chat area in the terminal
+    pub chat_area_height: u16,
+    /// Plain-text snapshot of rendered chat lines (for drag-select text extraction).
+    /// Indexed by logical line (matches `chat_line_to_msg` / `chat_render_scroll`).
+    pub chat_rendered_lines: Vec<String>,
+
+    /// Drag selection: anchor point in terminal-screen coords (col, row), set on first drag event.
+    pub drag_anchor: Option<(u16, u16)>,
+    /// Drag selection: current point in terminal-screen coords (col, row), updated during drag.
+    pub drag_current: Option<(u16, u16)>,
 
     /// History paging — how many DB messages are hidden above the current view
     pub hidden_older_messages: usize,
@@ -553,6 +567,12 @@ impl App {
             chat_line_to_msg: Vec::new(),
             chat_render_scroll: 0,
             chat_area_y: 0,
+            chat_area_x: 0,
+            chat_area_width: 0,
+            chat_area_height: 0,
+            chat_rendered_lines: Vec::new(),
+            drag_anchor: None,
+            drag_current: None,
             hidden_older_messages: 0,
             oldest_displayed_sequence: 0,
             display_token_count: 0,
@@ -1069,6 +1089,16 @@ impl App {
             TuiEvent::MouseRightClick(_col, row) => {
                 if self.mode == AppMode::Chat {
                     self.handle_right_click_copy(row);
+                }
+            }
+            TuiEvent::MouseDrag(col, row) => {
+                if self.mode == AppMode::Chat {
+                    self.handle_mouse_drag(col, row);
+                }
+            }
+            TuiEvent::MouseUp(col, row) => {
+                if self.mode == AppMode::Chat {
+                    self.handle_mouse_up(col, row);
                 }
             }
             TuiEvent::Paste(text) => {

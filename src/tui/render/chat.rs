@@ -582,9 +582,22 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     let max_scroll = total_lines.saturating_sub(visible_height);
     let actual_scroll_offset = max_scroll.saturating_sub(app.scroll_offset);
 
-    // Store render info for click-to-copy coordinate mapping
+    // Store render info for click-to-copy + drag-selection coordinate mapping
     app.chat_render_scroll = actual_scroll_offset;
     app.chat_area_y = area.y;
+    app.chat_area_x = area.x;
+    app.chat_area_width = area.width;
+    app.chat_area_height = area.height;
+    // Snapshot plain-text of each rendered line for drag-select extraction.
+    app.chat_rendered_lines = lines
+        .iter()
+        .map(|l| {
+            l.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        })
+        .collect();
 
     let chat = Paragraph::new(lines)
         .block(
@@ -599,4 +612,49 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     // ends or below the last line retain old content from the double-buffer.
     f.render_widget(Clear, area);
     f.render_widget(chat, area);
+
+    // Drag-selection highlight overlay: invert fg/bg for cells inside the
+    // selection rectangle (reading-order), clipped to the chat area.
+    if let (Some(a), Some(b)) = (app.drag_anchor, app.drag_current) {
+        let (start, end) = if (a.1, a.0) <= (b.1, b.0) {
+            (a, b)
+        } else {
+            (b, a)
+        };
+        let buf = f.buffer_mut();
+        let x0 = area.x;
+        let y0 = area.y;
+        let x1 = area.x.saturating_add(area.width);
+        let y1 = area.y.saturating_add(area.height);
+        let highlight = Style::default().add_modifier(Modifier::REVERSED);
+        if start.1 == end.1 {
+            let y = start.1;
+            if y >= y0 && y < y1 {
+                let sx = start.0.max(x0);
+                let ex = end.0.min(x1.saturating_sub(1));
+                for x in sx..=ex {
+                    if let Some(cell) = buf.cell_mut((x, y)) {
+                        cell.set_style(highlight);
+                    }
+                }
+            }
+        } else {
+            for y in start.1..=end.1 {
+                if y < y0 || y >= y1 {
+                    continue;
+                }
+                let sx = if y == start.1 { start.0 } else { x0 };
+                let ex = if y == end.1 {
+                    end.0.min(x1.saturating_sub(1))
+                } else {
+                    x1.saturating_sub(1)
+                };
+                for x in sx.max(x0)..=ex {
+                    if let Some(cell) = buf.cell_mut((x, y)) {
+                        cell.set_style(highlight);
+                    }
+                }
+            }
+        }
+    }
 }

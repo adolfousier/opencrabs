@@ -206,6 +206,9 @@ impl App {
 
     /// Left-click: select/highlight a message
     pub(crate) fn handle_click_select(&mut self, row: u16) {
+        // A fresh click clears any in-flight drag selection and message highlight.
+        self.drag_anchor = None;
+        self.drag_current = None;
         let msg_idx = self.row_to_msg_idx(row);
         // Toggle: click same message deselects, click different selects
         if self.selected_message_idx == msg_idx {
@@ -213,6 +216,149 @@ impl App {
         } else {
             self.selected_message_idx = msg_idx;
         }
+    }
+
+    /// Left-button drag — update the live drag selection.
+    /// The anchor is the click position (captured on the first drag event
+    /// because crossterm does not deliver drags until the pointer moves).
+    pub(crate) fn handle_mouse_drag(&mut self, col: u16, row: u16) {
+        if self.drag_anchor.is_none() {
+            self.drag_anchor = Some((col, row));
+            // While drag-selecting we suppress the message highlight so the
+            // two visual cues don't fight.
+            self.selected_message_idx = None;
+        }
+        self.drag_current = Some((col, row));
+    }
+
+    /// Left-button released — finalize selection, extract text, copy, notify.
+    pub(crate) fn handle_mouse_up(&mut self, col: u16, row: u16) {
+        // If this was a plain click (no drag motion), treat it as a click-select.
+        let Some(anchor) = self.drag_anchor.take() else {
+            self.drag_current = None;
+            self.handle_click_select(row);
+            return;
+        };
+        let end = (col, row);
+        self.drag_current = None;
+
+        let text = self.extract_drag_selection(anchor, end);
+        if text.trim().is_empty() {
+            return;
+        }
+        if Self::copy_to_clipboard(&text) {
+            self.notification = Some("Copied to clipboard".to_string());
+            self.notification_shown_at = Some(std::time::Instant::now());
+        }
+    }
+
+    /// Turn a pair of terminal-screen coordinates into the plain-text that was
+    /// drawn between them. Strips leading chat padding and code-block gutter
+    /// (e.g. `"  1 │ "`) so the copied text matches what the user visually sees.
+    fn extract_drag_selection(&self, a: (u16, u16), b: (u16, u16)) -> String {
+        // Normalize so (start) precedes (end) in reading order.
+        let (start, end) = if (a.1, a.0) <= (b.1, b.0) {
+            (a, b)
+        } else {
+            (b, a)
+        };
+
+        let chat_left = self.chat_area_x;
+        let chat_top = self.chat_area_y;
+        let chat_height = self.chat_area_height as usize;
+        if chat_height == 0 {
+            return String::new();
+        }
+
+        // Screen row → logical line index in `chat_rendered_lines`.
+        // Render uses `Padding::new(1,1,1,0)` on the inner block, so the first
+        // line of text is drawn at `chat_top + 1`.
+        let top_pad = 1u16;
+        let row_to_line = |row: u16| -> Option<usize> {
+            let row_in_chat = row.checked_sub(chat_top + top_pad)? as usize;
+            if row_in_chat >= chat_height.saturating_sub(top_pad as usize) {
+                return None;
+            }
+            Some(self.chat_render_scroll + row_in_chat)
+        };
+
+        // Content starts one cell in (Padding left = 1).
+        let content_left = chat_left + 1;
+        let col_in_line = |col: u16| -> usize {
+            col.saturating_sub(content_left) as usize
+        };
+
+        let start_line = row_to_line(start.1);
+        let end_line = row_to_line(end.1);
+        let (Some(start_line), Some(end_line)) = (start_line, end_line) else {
+            return String::new();
+        };
+
+        let strip_gutter = |s: &str| -> String {
+            // Trim leading spaces first.
+            let trimmed = s.trim_start();
+            // Code-block lines look like "  1 │ fn main()" → after trim_start:
+            // "1 │ fn main()". Strip the "<digits> │ " prefix if present.
+            if let Some(rest) = trimmed.strip_prefix(|c: char| c.is_ascii_digit()) {
+                let rest = rest.trim_start_matches(|c: char| c.is_ascii_digit());
+                if let Some(after_bar) = rest.strip_prefix(" │ ") {
+                    return after_bar.to_string();
+                }
+                if let Some(after_bar) = rest.strip_prefix("│ ") {
+                    return after_bar.to_string();
+                }
+            }
+            trimmed.to_string()
+        };
+
+        // Helper to slice a line by display-column range (char-based is fine
+        // for monospaced ASCII; for multi-byte we fall back to char indices).
+        let slice_line = |line: &str, from: usize, to: usize| -> String {
+            let chars: Vec<char> = line.chars().collect();
+            let from = from.min(chars.len());
+            let to = to.min(chars.len());
+            if from >= to {
+                return String::new();
+            }
+            chars[from..to].iter().collect()
+        };
+
+        let mut out = String::new();
+        if start_line == end_line {
+            let Some(line) = self.chat_rendered_lines.get(start_line) else {
+                return String::new();
+            };
+            let from = col_in_line(start.0);
+            let to = col_in_line(end.0).max(from);
+            let piece = slice_line(line, from, to + 1);
+            out.push_str(&strip_gutter(&piece));
+        } else {
+            for (i, line_idx) in (start_line..=end_line).enumerate() {
+                let Some(line) = self.chat_rendered_lines.get(line_idx) else {
+                    continue;
+                };
+                let piece = if i == 0 {
+                    // First line: from start.col to EOL
+                    let from = col_in_line(start.0);
+                    slice_line(line, from, line.chars().count())
+                } else if line_idx == end_line {
+                    // Last line: from 0 to end.col (inclusive)
+                    let to = col_in_line(end.0) + 1;
+                    slice_line(line, 0, to)
+                } else {
+                    line.clone()
+                };
+                let cleaned = strip_gutter(&piece);
+                // Skip purely-whitespace lines to match opencode's "no empty lines" UX.
+                if !cleaned.trim().is_empty() {
+                    if !out.is_empty() {
+                        out.push('\n');
+                    }
+                    out.push_str(&cleaned);
+                }
+            }
+        }
+        out
     }
 
     /// Right-click: copy the clicked (or selected) message to clipboard

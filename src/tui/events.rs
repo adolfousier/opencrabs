@@ -24,6 +24,12 @@ pub enum TuiEvent {
     /// Mouse right-click at (column, row) — copy message
     MouseRightClick(u16, u16),
 
+    /// Mouse left-button drag to (column, row) — extend text selection
+    MouseDrag(u16, u16),
+
+    /// Mouse left-button released at (column, row) — finalize selection + copy
+    MouseUp(u16, u16),
+
     /// Terminal gained focus
     FocusGained,
 
@@ -389,6 +395,12 @@ impl EventHandler {
                                     .is_err(),
                                 MouseEventKind::Down(crossterm::event::MouseButton::Right) => tx
                                     .send(TuiEvent::MouseRightClick(mouse.column, mouse.row))
+                                    .is_err(),
+                                MouseEventKind::Drag(crossterm::event::MouseButton::Left) => tx
+                                    .send(TuiEvent::MouseDrag(mouse.column, mouse.row))
+                                    .is_err(),
+                                MouseEventKind::Up(crossterm::event::MouseButton::Left) => tx
+                                    .send(TuiEvent::MouseUp(mouse.column, mouse.row))
                                     .is_err(),
                                 _ => false,
                             }
