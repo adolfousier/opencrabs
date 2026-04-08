@@ -2,6 +2,9 @@
 //!
 //! Creates providers based on config.toml settings.
 
+use super::qwen::{
+    QWEN_DEFAULT_CHAT_URL, QWEN_OAUTH_MODEL, QwenCredentials, QwenTokenManager, qwen_extra_headers,
+};
 use super::{
     Provider, anthropic::AnthropicProvider, claude_cli::ClaudeCliProvider,
     custom_openai_compatible::OpenAIProvider, gemini::GeminiProvider,
@@ -37,6 +40,7 @@ pub fn create_provider_with_warning(
         ("Claude CLI", Box::new(|| try_create_claude_cli(config))),
         ("OpenCode CLI", Box::new(|| try_create_opencode_cli(config))),
         ("Qwen CLI", Box::new(|| try_create_qwen_code(config))),
+        ("Qwen", Box::new(|| try_create_qwen(config))),
         ("Anthropic", Box::new(|| try_create_anthropic(config))),
         ("OpenAI", Box::new(|| try_create_openai(config))),
         ("GitHub Copilot", Box::new(|| try_create_github(config))),
@@ -64,6 +68,7 @@ pub fn create_provider_with_warning(
             .qwen_code_cli
             .as_ref()
             .is_some_and(|p| p.enabled),
+        config.providers.qwen.as_ref().is_some_and(|p| p.enabled),
         config
             .providers
             .anthropic
@@ -131,6 +136,7 @@ pub fn create_provider_with_warning(
             ("Claude CLI", Box::new(|| try_create_claude_cli(config))),
             ("OpenCode CLI", Box::new(|| try_create_opencode_cli(config))),
             ("Qwen CLI", Box::new(|| try_create_qwen_code(config))),
+            ("Qwen", Box::new(|| try_create_qwen(config))),
             ("Anthropic", Box::new(|| try_create_anthropic(config))),
             ("OpenAI", Box::new(|| try_create_openai(config))),
             ("GitHub Copilot", Box::new(|| try_create_github(config))),
@@ -275,6 +281,8 @@ pub fn create_provider_by_name(config: &Config, name: &str) -> Result<Arc<dyn Pr
             .ok_or_else(|| anyhow::anyhow!("GitHub not configured (missing token)")),
         "gemini" => try_create_gemini(config)?
             .ok_or_else(|| anyhow::anyhow!("Gemini not configured (missing API key)")),
+        "qwen" => try_create_qwen(config)?
+            .ok_or_else(|| anyhow::anyhow!("Qwen not configured (run /onboard:provider)")),
         n if n.starts_with("custom:") => {
             let custom_name = &n["custom:".len()..];
             try_create_custom_by_name(config, custom_name)?
@@ -379,6 +387,10 @@ fn create_fallback(config: &Config, fallback_type: &str) -> Result<Arc<dyn Provi
             tracing::info!("Using fallback: Qwen Code");
             try_create_qwen_code(config)?.ok_or_else(|| anyhow::anyhow!("Qwen Code not available"))
         }
+        "qwen" => {
+            tracing::info!("Using fallback: Qwen native");
+            try_create_qwen(config)?.ok_or_else(|| anyhow::anyhow!("Qwen native not configured"))
+        }
         "custom" => {
             tracing::info!("Using fallback: Custom OpenAI-Compatible");
             try_create_custom(config)?
@@ -439,6 +451,82 @@ fn try_create_github(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
             .with_token_fn(token_fn)
             .with_extra_headers(copilot_extra_headers()),
         github_config,
+    );
+    Ok(Some(Arc::new(provider)))
+}
+
+/// Try to create the native **Qwen** provider (OAuth + DashScope OpenAI-compatible).
+///
+/// Reads credentials from `keys.toml [providers.qwen]`. If they're missing
+/// but the user has a `~/.qwen/oauth_creds.json` left behind by `qwen-code-cli`,
+/// imports that into keys.toml on first use so the migration is invisible.
+///
+/// On 401/403, the token is force-refreshed once via the background manager.
+fn try_create_qwen(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
+    let qwen_config = match &config.providers.qwen {
+        Some(cfg) => cfg,
+        None => return Ok(None),
+    };
+
+    // 1) Try keys.toml directly.
+    let mut creds = QwenCredentials::from_provider_config(qwen_config);
+
+    // 2) Fall back to importing from qwen-code-cli's shared file.
+    if creds.is_none()
+        && let Some(imported) = QwenCredentials::import_from_qwen_cli()
+    {
+        if let Err(e) = imported.persist_to_keys() {
+            tracing::warn!(
+                "Failed to migrate ~/.qwen/oauth_creds.json into keys.toml: {}",
+                e
+            );
+        } else {
+            tracing::info!(
+                "Imported Qwen credentials from ~/.qwen/oauth_creds.json into keys.toml"
+            );
+        }
+        creds = Some(imported);
+    }
+
+    let Some(creds) = creds else {
+        tracing::warn!(
+            "Qwen enabled but no OAuth credentials found in keys.toml \
+             or ~/.qwen/oauth_creds.json. Run /onboard:provider to authenticate."
+        );
+        return Ok(None);
+    };
+
+    let manager = Arc::new(QwenTokenManager::new(creds));
+    manager.clone().start_background_refresh();
+
+    let mgr_clone = manager.clone();
+    let token_fn: super::custom_openai_compatible::TokenFn =
+        Arc::new(move || mgr_clone.current_access_token());
+
+    let base_url = qwen_config
+        .base_url
+        .clone()
+        .unwrap_or_else(|| manager.current_chat_url());
+    let base_url = if base_url.is_empty() {
+        QWEN_DEFAULT_CHAT_URL.to_string()
+    } else {
+        base_url
+    };
+
+    tracing::info!("Using Qwen native provider at: {}", base_url);
+
+    // Default to the free-tier OAuth model unless the user pinned another one.
+    let mut effective_config = qwen_config.clone();
+    if effective_config.default_model.is_none() {
+        effective_config.default_model = Some(QWEN_OAUTH_MODEL.to_string());
+    }
+
+    let provider = configure_openai_compatible(
+        OpenAIProvider::with_base_url("qwen-managed".to_string(), base_url)
+            .with_name("qwen")
+            .with_token_fn(token_fn)
+            .with_extra_headers(qwen_extra_headers()),
+        &effective_config,
     );
     Ok(Some(Arc::new(provider)))
 }
@@ -814,6 +902,7 @@ pub fn active_provider_vision(config: &Config) -> Option<(String, String, String
         "qwen-cli" | "qwen-code" | "qwen_code" | "qwen-code-cli" | "qwen_code_cli" => {
             config.providers.qwen_code_cli.as_ref()
         }
+        "qwen" => config.providers.qwen.as_ref(),
         cn if cn.starts_with("custom:") => config
             .providers
             .custom

@@ -594,6 +594,11 @@ pub struct ProviderConfigs {
     #[serde(default)]
     pub qwen_code_cli: Option<ProviderConfig>,
 
+    /// Qwen native API — direct OAuth device flow against chat.qwen.ai,
+    /// OpenCrabs orchestrates tools and context. No CLI subprocess.
+    #[serde(default)]
+    pub qwen: Option<ProviderConfig>,
+
     /// AWS Bedrock configuration
     #[serde(default)]
     pub bedrock: Option<ProviderConfig>,
@@ -671,6 +676,7 @@ impl ProviderConfigs {
             return ("qwen-cli".to_string(), model);
         }
         let candidates: &[(&str, Option<&ProviderConfig>)] = &[
+            ("qwen", self.qwen.as_ref()),
             ("minimax", self.minimax.as_ref()),
             ("zhipu", self.zhipu.as_ref()),
             ("openrouter", self.openrouter.as_ref()),
@@ -923,6 +929,21 @@ pub struct ProviderConfig {
     /// TTS model override (e.g. "gpt-4o-mini-tts") — only used by TTS providers
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+
+    // ── OAuth fields (currently used by [providers.qwen]) ────────────────
+    /// OAuth refresh token. Only set for providers using a device-code flow
+    /// where OpenCrabs handles refresh itself (currently: Qwen native).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh_token: Option<String>,
+
+    /// OAuth bearer token expiry as ms since UNIX epoch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expiry_date: Option<u64>,
+
+    /// API host returned by the OAuth provider (e.g. `portal.qwen.ai`).
+    /// No scheme, no path — used to derive the chat completions URL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource_url: Option<String>,
 }
 
 fn default_enabled() -> bool {
@@ -1321,6 +1342,28 @@ fn merge_provider_keys(mut base: ProviderConfigs, keys: ProviderConfigs) -> Prov
     {
         let entry = base.zhipu.get_or_insert_with(ProviderConfig::default);
         entry.api_key = Some(key);
+    }
+    // Merge qwen native (OAuth) — copies api_key + refresh_token + expiry + resource_url.
+    // Auto-enables and creates the entry if keys.toml has credentials but config.toml doesn't,
+    // since the user explicitly authenticated through onboarding.
+    if let Some(k) = keys.qwen {
+        let has_credentials = k.api_key.as_ref().map(|s| is_real_key(s)).unwrap_or(false)
+            && k.refresh_token.as_ref().is_some_and(|s| !s.is_empty());
+        if has_credentials {
+            let entry = base.qwen.get_or_insert_with(|| ProviderConfig {
+                enabled: true,
+                ..Default::default()
+            });
+            entry.api_key = k.api_key;
+            entry.refresh_token = k.refresh_token;
+            entry.expiry_date = k.expiry_date;
+            if k.resource_url.is_some() {
+                entry.resource_url = k.resource_url;
+            }
+            if entry.default_model.is_none() && k.default_model.is_some() {
+                entry.default_model = k.default_model;
+            }
+        }
     }
     if let Some(custom_keys) = keys.custom
         && let Some(ref mut base_customs) = base.custom
@@ -2603,6 +2646,15 @@ pub fn resolve_provider_from_config(config: &Config) -> (&str, &str) {
             .and_then(|p| p.default_model.as_deref())
             .unwrap_or("opencode/gpt-5-nano");
         return ("OpenCode CLI", model);
+    }
+    if config.providers.qwen.as_ref().is_some_and(|p| p.enabled) {
+        let model = config
+            .providers
+            .qwen
+            .as_ref()
+            .and_then(|p| p.default_model.as_deref())
+            .unwrap_or("coder-model");
+        return ("Qwen", model);
     }
     if config
         .providers

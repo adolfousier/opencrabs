@@ -68,6 +68,12 @@ pub const KNOWN_PROVIDERS: &[ProviderMeta] = &[
         needs_api_key: true,
     },
     ProviderMeta {
+        id: "qwen",
+        display_name: "Qwen",
+        config_section: "providers.qwen",
+        needs_api_key: true,
+    },
+    ProviderMeta {
         id: "qwen-code-cli",
         display_name: "Qwen CLI",
         config_section: "providers.qwen_code_cli",
@@ -94,11 +100,7 @@ pub fn find_provider_meta(name: &str) -> Option<&'static ProviderMeta> {
                 "claude-cli" => n == "claude_cli",
                 "opencode-cli" => n == "opencode_cli" || n == "opencode",
                 "qwen-code-cli" => {
-                    n == "qwen_code_cli"
-                        || n == "qwen_code"
-                        || n == "qwen-code"
-                        || n == "qwen-cli"
-                        || n == "qwen"
+                    n == "qwen_code_cli" || n == "qwen_code" || n == "qwen-code" || n == "qwen-cli"
                 }
                 _ => false,
             }
@@ -160,6 +162,7 @@ pub fn config_for<'a>(providers: &'a ProviderConfigs, name: &str) -> Option<&'a 
         Some("claude-cli") => providers.claude_cli.as_ref(),
         Some("opencode-cli") => providers.opencode_cli.as_ref(),
         Some("qwen-code-cli") => providers.qwen_code_cli.as_ref(),
+        Some("qwen") => providers.qwen.as_ref(),
         _ => {
             let custom_name = name.strip_prefix("custom:")?;
             providers.custom.as_ref()?.get(custom_name)

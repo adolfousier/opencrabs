@@ -855,10 +855,16 @@ impl OpenAIProvider {
     ) -> Result<LLMResponse> {
         use super::retry::retry_with_backoff;
 
-        let tool_count = anthropic_request.tools.as_ref().map(|t| t.len()).unwrap_or(0);
+        let tool_count = anthropic_request
+            .tools
+            .as_ref()
+            .map(|t| t.len())
+            .unwrap_or(0);
         tracing::info!(
             "OpenRouter (Anthropic format): model={}, messages={}, tools={}, cache_control=system+last_tool",
-            model, message_count, tool_count
+            model,
+            message_count,
+            tool_count
         );
 
         // Proactive pacing
@@ -908,15 +914,21 @@ impl OpenAIProvider {
 
         // Handle 400 token field mismatch — retry with swapped fields
         if let Err(ref e) = result
-            && let ProviderError::ApiError { status: 400, message, .. } = e
+            && let ProviderError::ApiError {
+                status: 400,
+                message,
+                ..
+            } = e
             && is_token_field_mismatch(message)
         {
-            tracing::warn!(
-                "Retrying with swapped max_tokens/max_completion_tokens"
-            );
+            tracing::warn!("Retrying with swapped max_tokens/max_completion_tokens");
             return Box::pin(self.complete_with_anthropic_format(
-                model, message_count, anthropic_request, retry_config,
-            )).await;
+                model,
+                message_count,
+                anthropic_request,
+                retry_config,
+            ))
+            .await;
         }
 
         result
@@ -936,9 +948,14 @@ impl Provider for OpenAIProvider {
         // For all other providers, use standard OpenAI format.
         if self.is_openrouter() {
             let anthropic_request = self.to_anthropic_or_request(request.clone());
-            return self.complete_with_anthropic_format(
-                model, message_count, anthropic_request, retry_config,
-            ).await;
+            return self
+                .complete_with_anthropic_format(
+                    model,
+                    message_count,
+                    anthropic_request,
+                    retry_config,
+                )
+                .await;
         }
 
         let mut openai_request = self.to_openai_request(request);
