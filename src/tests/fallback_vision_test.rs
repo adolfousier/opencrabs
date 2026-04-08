@@ -146,7 +146,10 @@ mod fallback_runtime {
         ) -> crate::brain::provider::error::Result<LLMResponse> {
             let count = self.fail_count.fetch_add(1, Ordering::SeqCst);
             if count < self.max_failures {
-                Err(ProviderError::Internal(format!(
+                // Use RateLimitExceeded so FallbackProvider's should_try_next
+                // guard (is_retryable) falls through to the next provider.
+                // Internal errors are intentionally treated as hard failures.
+                Err(ProviderError::RateLimitExceeded(format!(
                     "{} mock failure #{}",
                     self.name,
                     count + 1
@@ -172,7 +175,7 @@ mod fallback_runtime {
         ) -> crate::brain::provider::error::Result<ProviderStream> {
             let count = self.fail_count.fetch_add(1, Ordering::SeqCst);
             if count < self.max_failures {
-                Err(ProviderError::Internal(format!(
+                Err(ProviderError::RateLimitExceeded(format!(
                     "{} stream mock failure #{}",
                     self.name,
                     count + 1
@@ -252,15 +255,16 @@ mod fallback_runtime {
     }
 
     #[tokio::test]
-    async fn all_fail_returns_primary_error() {
+    async fn all_fail_returns_last_error() {
         let primary = Arc::new(MockProvider::always_fail("primary"));
         let fb1 = Arc::new(MockProvider::always_fail("fallback1"));
         let fb2 = Arc::new(MockProvider::always_fail("fallback2"));
         let provider = FallbackProvider::new(primary, vec![fb1, fb2]);
 
         let err = provider.complete(mock_request()).await.unwrap_err();
-        // Should return the primary error
-        assert!(err.to_string().contains("primary"));
+        // Sticky fallback tries in order; when all fail, the last error
+        // (from the final fallback tried) is surfaced.
+        assert!(err.to_string().contains("fallback2"));
     }
 
     #[tokio::test]
@@ -290,7 +294,7 @@ mod fallback_runtime {
 
         match provider.stream(mock_request()).await {
             Ok(_) => panic!("Expected error when all providers fail"),
-            Err(e) => assert!(e.to_string().contains("primary")),
+            Err(e) => assert!(e.to_string().contains("fallback1")),
         }
     }
 
