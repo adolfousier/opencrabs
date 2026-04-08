@@ -3,7 +3,8 @@
 //! Creates providers based on config.toml settings.
 
 use super::qwen::{
-    QWEN_DEFAULT_CHAT_URL, QWEN_OAUTH_MODEL, QwenCredentials, QwenTokenManager, qwen_extra_headers,
+    QWEN_DEFAULT_CHAT_URL, QWEN_OAUTH_MODEL, QwenCredentials, QwenTokenManager,
+    qwen_body_transform, qwen_extra_headers,
 };
 use super::{
     Provider, anthropic::AnthropicProvider, claude_cli::ClaudeCliProvider,
@@ -535,7 +536,8 @@ fn try_create_qwen(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         OpenAIProvider::with_base_url("qwen-managed".to_string(), base_url)
             .with_name("qwen")
             .with_token_fn(token_fn)
-            .with_extra_headers(qwen_extra_headers()),
+            .with_extra_headers(qwen_extra_headers())
+            .with_body_transform(Arc::new(qwen_body_transform)),
         &effective_config,
     );
     Ok(Some(Arc::new(provider)))

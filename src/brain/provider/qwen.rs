@@ -813,10 +813,7 @@ pub fn qwen_body_transform(mut body: serde_json::Value) -> serde_json::Value {
                 _ => false, // tool messages: no cache_control marker
             };
 
-            msg_obj.insert(
-                "content".to_string(),
-                text_part_array(&current_text, cache),
-            );
+            msg_obj.insert("content".to_string(), text_part_array(&current_text, cache));
         }
     }
 
@@ -844,6 +841,28 @@ pub fn qwen_body_transform(mut body: serde_json::Value) -> serde_json::Value {
         "include_reasoning",
     ] {
         obj.remove(k);
+    }
+
+    // 6. Force max_tokens = 32000 when absent. qwen-cli always sends this
+    //    exact value; omitting it widens the fingerprint gap.
+    if !obj.contains_key("max_tokens") {
+        obj.insert(
+            "max_tokens".to_string(),
+            serde_json::Value::Number(32000.into()),
+        );
+    }
+
+    // 7. Tag the LAST tool with cache_control: {type: "ephemeral"}. qwen-cli
+    //    uses this as the third prompt-cache breakpoint (system + last-user +
+    //    last-tool). Without it we miss a cache tier on every tool-heavy call.
+    if let Some(serde_json::Value::Array(tools)) = obj.get_mut("tools")
+        && let Some(last) = tools.last_mut()
+        && let Some(tool_obj) = last.as_object_mut()
+    {
+        tool_obj.insert(
+            "cache_control".to_string(),
+            serde_json::json!({ "type": "ephemeral" }),
+        );
     }
 
     body
