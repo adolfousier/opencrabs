@@ -740,6 +740,33 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
                             .add_modifier(Modifier::ITALIC),
                     )));
                     lines.push(Line::from(""));
+                    // Rotation toggle
+                    let rotation_marker = if wizard.ps.qwen_rotation_enabled {
+                        "[*]"
+                    } else {
+                        "[ ]"
+                    };
+                    lines.push(Line::from(Span::styled(
+                        format!(
+                            "  {} Account rotation (Space to toggle){}",
+                            rotation_marker,
+                            if wizard.ps.qwen_rotation_enabled {
+                                format!("  Accounts: {}", wizard.ps.qwen_rotation_count)
+                            } else {
+                                String::new()
+                            }
+                        ),
+                        Style::default().fg(Color::Cyan),
+                    )));
+                    if wizard.ps.qwen_rotation_enabled {
+                        lines.push(Line::from(Span::styled(
+                            "  Press 2-9 to set account count (1 for 10)",
+                            Style::default()
+                                .fg(Color::DarkGray)
+                                .add_modifier(Modifier::ITALIC),
+                        )));
+                    }
+                    lines.push(Line::from(""));
                     lines.push(Line::from(Span::styled(
                         "  Press Enter to sign in with qwen.ai",
                         Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
@@ -791,6 +818,50 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
                         Style::default()
                             .fg(Color::DarkGray)
                             .add_modifier(Modifier::ITALIC),
+                    )));
+                }
+                QwenDeviceFlowStatus::RotationStep { current, total } => {
+                    lines.push(Line::from(Span::styled(
+                        format!("  Authenticating account {} of {}...", current + 1, total),
+                        Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
+                    )));
+                    if let Some(ref code) = wizard.ps.qwen_user_code {
+                        lines.push(Line::from(Span::styled(
+                            format!("  Enter code: {}", code),
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                        )));
+                    }
+                    lines.push(Line::from(Span::styled(
+                        "  Waiting for authorization...",
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::ITALIC),
+                    )));
+                }
+                QwenDeviceFlowStatus::RotationSignout { current, total } => {
+                    lines.push(Line::from(Span::styled(
+                        format!("  Account {} of {} authenticated!", current, total),
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    )));
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled(
+                        "  Sign out of Qwen in your browser, then press Enter",
+                        Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
+                    )));
+                }
+                QwenDeviceFlowStatus::RotationComplete => {
+                    lines.push(Line::from(Span::styled(
+                        format!(
+                            "  ● {} Qwen accounts configured for rotation!",
+                            wizard.ps.qwen_rotation_count
+                        ),
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
                     )));
                 }
             }

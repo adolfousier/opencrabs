@@ -376,6 +376,12 @@ pub enum QwenDeviceFlowStatus {
     Complete,
     /// Flow failed
     Failed(String),
+    /// Rotation: authenticating account N of M
+    RotationStep { current: usize, total: usize },
+    /// Rotation: waiting for user to sign out before next account
+    RotationSignout { current: usize, total: usize },
+    /// Rotation: all accounts collected and persisted
+    RotationComplete,
 }
 
 /// Which text area is focused in BrainSetup step
@@ -418,6 +424,10 @@ pub enum WizardAction {
     GitHubDeviceFlow,
     /// Trigger Qwen native OAuth device flow
     QwenDeviceFlow,
+    /// Trigger Qwen rotation multi-account setup flow
+    QwenRotationFlow,
+    /// User confirmed signout — advance to next rotation account
+    QwenRotationNext,
     /// Quick-jump step completed — save config and close wizard
     QuickJumpDone,
 }

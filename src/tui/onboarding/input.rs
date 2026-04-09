@@ -406,7 +406,14 @@ impl OnboardingWizard {
                         // Not yet authenticated — start device flow
                         return WizardAction::GitHubDeviceFlow;
                     } else if self.ps.selected_provider == 10 {
-                        // Qwen native: if already authenticated, advance to model
+                        // Qwen native: handle rotation signout confirmation
+                        if matches!(
+                            self.ps.qwen_device_flow_status,
+                            crate::tui::onboarding::QwenDeviceFlowStatus::RotationSignout { .. }
+                        ) {
+                            return WizardAction::QwenRotationNext;
+                        }
+                        // If already authenticated, advance to model
                         if self.ps.has_existing_key_sentinel() {
                             self.auth_field = AuthField::Model;
                             self.ps.models.clear();
@@ -415,7 +422,10 @@ impl OnboardingWizard {
                                 crate::tui::provider_selector::load_default_models("qwen");
                             return WizardAction::None;
                         }
-                        // Not yet authenticated — start device flow
+                        // Not yet authenticated — start rotation or single flow
+                        if self.ps.qwen_rotation_enabled && self.ps.qwen_rotation_count >= 2 {
+                            return WizardAction::QwenRotationFlow;
+                        }
                         return WizardAction::QwenDeviceFlow;
                     } else if self.ps.is_custom() {
                         self.auth_field = AuthField::CustomName;
@@ -437,6 +447,24 @@ impl OnboardingWizard {
                     } else {
                         self.auth_field = AuthField::ApiKey;
                     }
+                }
+                KeyCode::Char(' ') if self.ps.selected_provider == 10 => {
+                    // Toggle Qwen rotation
+                    self.ps.qwen_rotation_enabled = !self.ps.qwen_rotation_enabled;
+                    if self.ps.qwen_rotation_enabled && self.ps.qwen_rotation_count < 2 {
+                        self.ps.qwen_rotation_count = 2;
+                    }
+                }
+                KeyCode::Char(c @ '2'..='9')
+                    if self.ps.selected_provider == 10 && self.ps.qwen_rotation_enabled =>
+                {
+                    self.ps.qwen_rotation_count = (c as usize) - ('0' as usize);
+                }
+                KeyCode::Char('1')
+                    if self.ps.selected_provider == 10 && self.ps.qwen_rotation_enabled =>
+                {
+                    // "10" — append 0 to make 10 if currently single digit
+                    self.ps.qwen_rotation_count = 10;
                 }
                 _ => {}
             },
