@@ -667,18 +667,29 @@ impl App {
         self.shared_session_id.clone()
     }
 
-    /// Initialize the app by loading or creating a session
-    pub async fn initialize(&mut self) -> Result<()> {
-        // First-run onboarding takes over before any session work
+    /// Fast synchronous init: decide mode (Onboarding vs Chat) and arm the
+    /// header card overlay. Does no DB work, so the first frame can render
+    /// immediately. The actual session load happens in `initialize_async`.
+    ///
+    /// Returns `true` if the caller should render a first frame before
+    /// running `initialize_async` (i.e. we're going to Chat and want the
+    /// card visible while the session loads).
+    pub fn initialize_sync(&mut self) -> bool {
         let is_first = super::onboarding::is_first_time();
         if self.force_onboard || is_first {
             self.force_onboard = false;
             tracing::info!("[init] Starting onboarding wizard");
             self.onboarding = Some(OnboardingWizard::new());
             self.mode = AppMode::Onboarding;
-            return Ok(());
+            return false;
         }
+        self.mode = AppMode::Chat;
+        self.header_card_shown_at = Some(std::time::Instant::now());
+        true
+    }
 
+    /// Initialize the app by loading or creating a session
+    pub async fn initialize(&mut self) -> Result<()> {
         // Resume a specific session (e.g. after /rebuild restart) or load the most recent
         if let Some(session_id) = self.resume_session_id.take() {
             self.load_session(session_id).await?;
@@ -852,9 +863,6 @@ impl App {
                     .to_string(),
             );
         }
-
-        // Arm the header card overlay — vanishes on 500ms timeout, Enter, or scroll.
-        self.header_card_shown_at = Some(std::time::Instant::now());
 
         Ok(())
     }

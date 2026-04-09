@@ -80,7 +80,20 @@ pub async fn run(mut app: App) -> Result<()> {
         let _ = crossterm::event::read();
     }
 
-    // Initialize app
+    // Fast sync init: decide mode and arm the header card. If we're going
+    // to Chat, draw a first frame immediately so the user sees the header
+    // card + empty chat + input *before* the blocking session load runs.
+    // Onboarding skips the first frame so the wizard renders on first paint.
+    let draw_first_frame = app.initialize_sync();
+    if draw_first_frame {
+        let app_ref: &mut App = &mut app;
+        terminal.draw(move |f| render::render(f, app_ref))?;
+    }
+
+    // Now do the slow async init: load last session, sessions list, pane
+    // preload, update check, DB integrity warnings. The header card stays
+    // visible during this and vanishes on the 500ms timer from its arming
+    // point inside `initialize_sync`.
     app.initialize().await?;
 
     // Start terminal event listener
