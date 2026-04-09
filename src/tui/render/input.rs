@@ -72,9 +72,15 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
             let padded = if cursor_in_line {
                 let local_pos = cursor_pos - line_start;
                 let before = &line[..local_pos];
+                // Extract the full grapheme cluster under the cursor, not just
+                // one codepoint — ZWJ-joined emoji sequences (🏳️‍🌈, 👨‍👩‍👧, flags)
+                // are multiple codepoints glued together and splitting them
+                // leaves orphan codepoints that render as fallback glyphs and
+                // overflow past the border.
                 let (ch, after) = if local_pos < line.len() {
+                    use unicode_segmentation::UnicodeSegmentation;
                     let next_boundary = line[local_pos..]
-                        .char_indices()
+                        .grapheme_indices(true)
                         .nth(1)
                         .map(|(i, _)| local_pos + i)
                         .unwrap_or(line.len());

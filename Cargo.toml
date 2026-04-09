@@ -135,6 +135,7 @@ chromey = { version = "2.42", optional = true, default-features = false }
 
 # Misc
 unicode-width = "0.2"
+unicode-segmentation = "1.12"
 
 # Document Parsing
 pdf-extract = "0.10"
