@@ -15,6 +15,9 @@ use ratatui::{
 pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
     let input_content_width = area.width.saturating_sub(2) as usize; // borders
     let mut input_lines: Vec<Line> = Vec::new();
+    // Visual row (into input_lines) that contains the cursor. Used below
+    // to scroll the paragraph so the cursor is always visible.
+    let mut cursor_row: usize = 0;
 
     // Build input text with cursor highlight on the character (not inserting a block)
     let cursor_style = Style::default()
@@ -28,47 +31,34 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(" ", cursor_style),
         ]));
     } else {
-        // Split input into lines, apply cursor highlight on the char at cursor_position
+        // Walk the buffer by logical lines, tracking the byte offset of each
+        // line start so the O(lines²) "take().sum()" per-line recount is gone.
         let buf = &app.input_buffer;
         let cursor_pos = app.cursor_position;
+        let is_queued = app.queued_message_preview.is_some();
 
-        // Find which char the cursor is on
-        let (before_cursor, cursor_char, after_cursor) = if cursor_pos >= buf.len() {
-            // Cursor at end — highlight a space
-            (buf.as_str(), None, "")
-        } else {
-            let next = buf[cursor_pos..]
-                .char_indices()
-                .nth(1)
-                .map(|(i, _)| cursor_pos + i)
-                .unwrap_or(buf.len());
-            (
-                &buf[..cursor_pos],
-                Some(&buf[cursor_pos..next]),
-                &buf[next..],
-            )
-        };
+        // Manually split on '\n' so we preserve the exact byte offsets
+        // (buf.lines() strips newlines but its iteration order/positioning
+        // makes accumulated offset tracking awkward).
+        let mut line_start = 0usize;
+        let mut line_idx = 0usize;
+        let buf_len = buf.len();
+        while line_start <= buf_len {
+            let line_end = buf[line_start..]
+                .find('\n')
+                .map(|i| line_start + i)
+                .unwrap_or(buf_len);
+            let line = &buf[line_start..line_end];
+            let next_start = line_end + 1;
+            let is_last_line = line_end == buf_len;
 
-        // Build full string with spans per line
-        let full_text = format!(
-            "{}{}{}",
-            before_cursor,
-            cursor_char.unwrap_or(""),
-            after_cursor
-        );
+            // Does the cursor sit in this line?
+            // - strictly within: cursor_pos in [line_start, line_end)
+            // - at end of buffer's last line: cursor_pos == buf_len and this
+            //   is the last line
+            let cursor_in_line = cursor_pos >= line_start && cursor_pos < line_end;
+            let cursor_at_end_of_last_line = cursor_pos >= buf_len && is_last_line;
 
-        for (line_idx, line) in full_text.lines().enumerate() {
-            // Calculate where this line sits in the overall buffer
-            let line_start_in_full: usize =
-                full_text.lines().take(line_idx).map(|l| l.len() + 1).sum();
-            let line_end_in_full = line_start_in_full + line.len();
-
-            // Check if cursor falls within this line
-            let cursor_in_line = cursor_pos >= line_start_in_full && cursor_pos < line_end_in_full;
-            let cursor_at_end_of_last_line =
-                cursor_pos >= buf.len() && line_idx == full_text.lines().count() - 1;
-
-            let is_queued = app.queued_message_preview.is_some();
             let prefix = if line_idx == 0 {
                 if is_queued {
                     Span::styled("⏳", Style::default().fg(Color::Rgb(215, 100, 20)))
@@ -79,8 +69,8 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
                 Span::raw("  ")
             };
 
-            if cursor_in_line {
-                let local_pos = cursor_pos - line_start_in_full;
+            let padded = if cursor_in_line {
+                let local_pos = cursor_pos - line_start;
                 let before = &line[..local_pos];
                 let (ch, after) = if local_pos < line.len() {
                     let next_boundary = line[local_pos..]
@@ -92,38 +82,47 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
                 } else {
                     (" ", "")
                 };
-                let padded = Line::from(vec![
+                Line::from(vec![
                     prefix,
                     Span::raw(before.to_string()),
                     Span::styled(ch.to_string(), cursor_style),
                     Span::raw(after.to_string()),
-                ]);
-                for wrapped in wrap_line_with_padding(padded, input_content_width, "  ") {
-                    input_lines.push(wrapped);
-                }
+                ])
             } else if cursor_at_end_of_last_line {
-                let padded = Line::from(vec![
+                Line::from(vec![
                     prefix,
                     Span::raw(line.to_string()),
                     Span::styled(" ", cursor_style),
-                ]);
-                for wrapped in wrap_line_with_padding(padded, input_content_width, "  ") {
-                    input_lines.push(wrapped);
-                }
+                ])
             } else {
-                let padded = Line::from(vec![prefix, Span::raw(line.to_string())]);
-                for wrapped in wrap_line_with_padding(padded, input_content_width, "  ") {
-                    input_lines.push(wrapped);
-                }
+                Line::from(vec![prefix, Span::raw(line.to_string())])
+            };
+
+            let before_push = input_lines.len();
+            for wrapped in wrap_line_with_padding(padded, input_content_width, "  ") {
+                input_lines.push(wrapped);
             }
+            if cursor_in_line || cursor_at_end_of_last_line {
+                // Land on the LAST wrapped row of this logical line so the
+                // cursor is visible when the line soft-wraps past one row.
+                cursor_row = input_lines.len().saturating_sub(1).max(before_push);
+            }
+
+            if is_last_line {
+                break;
+            }
+            line_start = next_start;
+            line_idx += 1;
         }
 
-        // If cursor is at end of buffer and buffer ends with newline, add cursor on new line
-        if cursor_pos >= buf.len() && buf.ends_with('\n') {
+        // If cursor is at end of buffer and buffer ends with newline, add
+        // cursor on a fresh visual row.
+        if cursor_pos >= buf_len && buf.ends_with('\n') {
             input_lines.push(Line::from(vec![
                 Span::raw("  "),
                 Span::styled(" ", cursor_style),
             ]));
+            cursor_row = input_lines.len() - 1;
         }
     }
 
@@ -237,8 +236,22 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
         block = block.title(attach_title);
     }
 
+    // Compute a vertical scroll so the cursor row is always inside the
+    // visible viewport (area.height - 2 for top/bottom borders).
+    let inner_rows = area.height.saturating_sub(2) as usize;
+    let total_rows = input_lines.len();
+    let scroll_y: u16 = if inner_rows == 0 || total_rows <= inner_rows {
+        0
+    } else if cursor_row >= inner_rows {
+        // Keep cursor on the last visible row.
+        (cursor_row + 1 - inner_rows) as u16
+    } else {
+        0
+    };
+
     let input = Paragraph::new(input_lines)
         .style(Style::default().fg(Color::Reset))
+        .scroll((scroll_y, 0))
         .block(block);
 
     f.render_widget(input, area);

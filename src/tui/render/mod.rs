@@ -69,24 +69,27 @@ pub fn render(f: &mut Frame, app: &mut App) {
         return;
     }
 
-    // Dynamic input height: grows with content, capped at 10
-    let input_line_count = if app.input_buffer.is_empty() {
-        1
+    // Dynamic input height: grows with content, capped at 10.
+    // Early-exit once we hit the cap so huge pastes don't walk every line.
+    let input_height = if app.input_buffer.is_empty() {
+        3 // 1 content row + 2 borders
     } else {
-        let terminal_width = f.area().width.saturating_sub(4) as usize;
-        app.input_buffer
-            .lines()
-            .map(|line| {
-                if line.is_empty() {
-                    1
-                } else {
-                    (UnicodeWidthStr::width(line) + 2).div_ceil(terminal_width.max(1))
-                }
-            })
-            .sum::<usize>()
-            .max(1)
+        let terminal_width = (f.area().width.saturating_sub(4) as usize).max(1);
+        const MAX_CONTENT_ROWS: usize = 8; // 10 cap - 2 borders
+        let mut rows = 0usize;
+        for line in app.input_buffer.lines() {
+            rows += if line.is_empty() {
+                1
+            } else {
+                (UnicodeWidthStr::width(line) + 2).div_ceil(terminal_width)
+            };
+            if rows >= MAX_CONTENT_ROWS {
+                rows = MAX_CONTENT_ROWS;
+                break;
+            }
+        }
+        (rows.max(1) as u16 + 2).min(10)
     };
-    let input_height = (input_line_count as u16 + 2).min(10);
 
     // Show the plan checklist only while tasks are actively executing.
     // Any other status means the plan is not running (user moved on, cancelled, etc.).
