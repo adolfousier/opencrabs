@@ -3,46 +3,53 @@
 //! Replaces the old blocking splash screen. Rendered as a centered
 //! bordered block on top of the chat area on launch, showing the
 //! OpenCrabs logo, version, provider/model, available tools, quick
-//! commands, and tips. Vanishes after 500ms, on Enter, or on scroll
-//! — whichever comes first. Does not block input: the user can type
-//! (and submit) while it's visible.
+//! commands, and tips. Vanishes after the timeout (see state.rs), on
+//! Enter, or on scroll — whichever comes first. Does not block input:
+//! the user can type (and submit) while it's visible.
+//!
+//! The card is fully responsive to the chat area it's handed. Resize
+//! events (terminal resize, pane split, etc.) flow through the normal
+//! render loop and the card recomputes its geometry on the next frame.
+//! Long lines (tool list, tips) wrap onto additional rows.
 
 use super::super::app::App;
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, Borders, Clear, Padding, Paragraph, Wrap},
 };
 
 /// Render the header card centered within the given area (the chat region).
 pub(super) fn render_header_card(f: &mut Frame, app: &App, area: Rect) {
-    // Logo is 5 rows, plus ~15 rows of content/tips = ~22 rows including borders.
-    // Cap by actual area height so narrow terminals still render something.
-    let desired_height: u16 = 22;
-    let card_height = desired_height.min(area.height.saturating_sub(2).max(5));
-    let desired_width: u16 = 76;
-    let card_width = desired_width.min(area.width.saturating_sub(2).max(20));
+    // Outer margin: the card floats inside the chat area with a small
+    // visible gap on each side so the surrounding chat still peeks
+    // through. Margins shrink on tiny terminals so we always render
+    // something rather than collapsing to nothing.
+    let h_margin: u16 = if area.width >= 60 {
+        4
+    } else if area.width >= 30 {
+        2
+    } else {
+        1
+    };
+    let v_margin: u16 = if area.height >= 24 {
+        2
+    } else if area.height >= 12 {
+        1
+    } else {
+        0
+    };
 
-    // Center within area
-    let v_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(0),
-            Constraint::Length(card_height),
-            Constraint::Min(0),
-        ])
-        .split(area);
-    let h_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Min(0),
-            Constraint::Length(card_width),
-            Constraint::Min(0),
-        ])
-        .split(v_chunks[1]);
-    let card_area = h_chunks[1];
+    let card_area = area.inner(Margin {
+        horizontal: h_margin,
+        vertical: v_margin,
+    });
+
+    if card_area.width < 20 || card_area.height < 8 {
+        return; // too small to render meaningfully
+    }
 
     // Wipe whatever chat was rendered underneath so the card reads cleanly.
     f.render_widget(Clear, card_area);
@@ -51,10 +58,6 @@ pub(super) fn render_header_card(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_card_content(f: &mut Frame, area: Rect, app: &App) {
-    let version = env!("CARGO_PKG_VERSION");
-    let provider = app.agent_service.provider_name();
-    let model = app.default_model_name.as_str();
-
     let accent = Style::default()
         .fg(Color::Rgb(215, 100, 20))
         .add_modifier(Modifier::BOLD);
@@ -64,30 +67,46 @@ fn render_card_content(f: &mut Frame, area: Rect, app: &App) {
         .fg(Color::Rgb(90, 110, 150))
         .add_modifier(Modifier::BOLD);
 
-    // 5-line ASCII logo, padded to equal width so Alignment::Center doesn't
-    // fragment the letters across rows.
-    let logo_lines: Vec<&str> = vec![
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Rgb(120, 120, 120)))
+        // Inner padding: 2 columns horizontal, 1 row top/bottom
+        .padding(Padding::new(2, 2, 1, 1));
+
+    // Inner content area (inside borders + padding)
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    // ── Logo ─────────────────────────────────────────────────────────────
+    // The ASCII art is ~48 columns wide; on very narrow cards we skip it.
+    let logo_lines: &[&str] = &[
         "   ___                    ___           _",
         "  / _ \\ _ __  ___ _ _    / __|_ _ __ _| |__  ___",
         " | (_) | '_ \\/ -_) ' \\  | (__| '_/ _` | '_ \\(_-<",
         r"  \___/| .__/\___|_||_|  \___|_| \__,_|_.__//__/",
         "       |_|",
     ];
-    let max_logo = logo_lines
+    let logo_width: u16 = logo_lines
         .iter()
         .map(|l| l.chars().count())
         .max()
-        .unwrap_or(0);
+        .unwrap_or(0) as u16;
+    let show_logo = inner.width >= logo_width;
 
-    let mut text: Vec<Line> = Vec::with_capacity(22);
-    for line in &logo_lines {
-        text.push(Line::from(Span::styled(
-            format!("{:<width$}", line, width = max_logo),
-            accent,
-        )));
+    // ── Build the content lines ─────────────────────────────────────────
+    let version = env!("CARGO_PKG_VERSION");
+    let provider = app.agent_service.provider_name();
+    let model = app.default_model_name.as_str();
+
+    let mut text: Vec<Line> = Vec::new();
+
+    if show_logo {
+        for line in logo_lines {
+            text.push(Line::from(Span::styled((*line).to_string(), accent)));
+        }
+        text.push(Line::from(""));
     }
 
-    text.push(Line::from(""));
     text.push(Line::from(Span::styled(
         "The autonomous AI agent. Self-improving. Every channel.",
         Style::default()
@@ -107,60 +126,90 @@ fn render_card_content(f: &mut Frame, area: Rect, app: &App) {
     ]));
     text.push(Line::from(""));
 
-    // Available Tools — first few tool names from the registry
+    // ── Available Tools ─────────────────────────────────────────────────
     let tool_count = app.agent_service.tool_registry().count();
-    let mut tool_names: Vec<String> = app
-        .agent_service
-        .tool_registry()
-        .list_tools()
-        .into_iter()
-        .collect();
-    tool_names.sort();
-    let preview = tool_names
-        .iter()
-        .take(10)
-        .cloned()
-        .collect::<Vec<_>>()
-        .join(", ");
-    let tools_line = if tool_count > 10 {
-        format!("{preview}  (and {} more)", tool_count - 10)
-    } else {
-        preview
-    };
-    text.push(Line::from(vec![Span::styled("Available Tools", header)]));
-    text.push(Line::from(Span::styled(tools_line, dim)));
-    text.push(Line::from(""));
-
-    // Quick Commands — built-in slash commands that matter most + user commands
-    let builtin = "/help  /sessions  /model  /settings  /usage  /approve  /rebuild";
-    text.push(Line::from(vec![Span::styled("Quick Commands", header)]));
-    text.push(Line::from(Span::styled(builtin, dim)));
-    if !app.user_commands.is_empty() {
-        let user_cmds = app
-            .user_commands
-            .iter()
-            .take(8)
-            .map(|c| c.name.clone())
-            .collect::<Vec<_>>()
-            .join("  ");
-        text.push(Line::from(Span::styled(user_cmds, dim)));
+    if tool_count > 0 {
+        let mut tool_names: Vec<String> = app.agent_service.tool_registry().list_tools();
+        tool_names.sort();
+        // Show all tool names — Paragraph::Wrap will break them onto as
+        // many rows as needed so nothing gets truncated at the border.
+        let tools_line = tool_names.join(", ");
+        text.push(Line::from(Span::styled("Available Tools", header)));
+        text.push(Line::from(Span::styled(tools_line, dim)));
+        text.push(Line::from(""));
     }
+
+    // ── Quick Commands ──────────────────────────────────────────────────
+    // Built-in slash commands that matter most. User-defined commands
+    // are intentionally omitted here because they often duplicate the
+    // builtins and are already discoverable via `/help`.
+    let builtins = "/help  /sessions  /model  /settings  /usage  /approve  /rebuild  /doctor";
+    text.push(Line::from(Span::styled("Quick Commands", header)));
+    text.push(Line::from(Span::styled(builtins, dim)));
     text.push(Line::from(""));
 
-    // Tips
-    text.push(Line::from(vec![Span::styled("Tips", header)]));
+    // ── Tips ─────────────────────────────────────────────────────────────
+    text.push(Line::from(Span::styled("Tips", header)));
     text.push(Line::from(Span::styled(
-        "@ for files  ·  ! for shell  ·  Shift+Enter for newline  ·  Ctrl+O older messages",
+        "@ for files  ·  ! for shell  ·  Shift+Enter for newline  ·  Ctrl+O for older messages",
         dim,
     )));
 
-    let widget = Paragraph::new(text)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Rgb(120, 120, 120))),
-        )
-        .alignment(Alignment::Center);
+    // The logo block is centered, but wrapping text (tools/commands/tips)
+    // reads much better left-aligned. Split the render into two passes:
+    // top half (logo + tagline + version) centered, bottom half (tools,
+    // commands, tips) left-aligned with wrap enabled.
+    let (centered_text, wrapped_text) = split_centered_and_wrapped(text, show_logo);
 
-    f.render_widget(widget, area);
+    let centered_rows = centered_text.len() as u16;
+    let wrap_rows = inner.height.saturating_sub(centered_rows);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(centered_rows.min(inner.height)),
+            Constraint::Length(wrap_rows),
+        ])
+        .split(inner);
+
+    let centered = Paragraph::new(centered_text).alignment(Alignment::Center);
+    f.render_widget(centered, chunks[0]);
+
+    if wrap_rows > 0 {
+        let wrapped = Paragraph::new(wrapped_text)
+            .alignment(Alignment::Left)
+            .wrap(Wrap { trim: false });
+        f.render_widget(wrapped, chunks[1]);
+    }
+}
+
+/// Split the card's content into the top (centered) block and the bottom
+/// (left-aligned, wrapping) block. The split point is right before the
+/// "Available Tools" header line.
+fn split_centered_and_wrapped(
+    all: Vec<Line<'static>>,
+    _show_logo: bool,
+) -> (Vec<Line<'static>>, Vec<Line<'static>>) {
+    let mut centered: Vec<Line<'static>> = Vec::new();
+    let mut wrapped: Vec<Line<'static>> = Vec::new();
+    let mut crossed = false;
+    for line in all {
+        if !crossed {
+            // The "Available Tools" header starts the wrapping section.
+            let is_tools_header = line
+                .spans
+                .first()
+                .map(|s| s.content == "Available Tools")
+                .unwrap_or(false);
+            if is_tools_header {
+                crossed = true;
+                wrapped.push(line);
+                continue;
+            }
+            centered.push(line);
+        } else {
+            wrapped.push(line);
+        }
+    }
+    (centered, wrapped)
 }
