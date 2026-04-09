@@ -448,10 +448,11 @@ impl App {
         let before = &self.input_buffer[..self.cursor_position];
         // Skip trailing whitespace
         let trimmed = before.trim_end();
-        // Find the last whitespace boundary in the trimmed portion
+        // Find the last whitespace boundary in the trimmed portion.
+        // Use ceil_char_boundary to handle multi-byte whitespace safely.
         let word_start = trimmed
             .rfind(char::is_whitespace)
-            .map(|pos| pos + 1)
+            .map(|pos| trimmed.ceil_char_boundary(pos + 1))
             .unwrap_or(0);
         // Remove from word_start to cursor_position
         self.input_buffer.drain(word_start..self.cursor_position);
