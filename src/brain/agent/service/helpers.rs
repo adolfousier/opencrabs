@@ -1070,6 +1070,26 @@ const GASLIGHTING_REFUSAL_PHRASES: &[&str] = &[
     "have the issue context from the earlier",
     "from the earlier fetch, so let me break",
     "so let me break this down directly",
+    // "tool registry / completely offline" family (2026-04-09 third
+    // incident — model insists tools are "completely offline" and the
+    // tool registry failed to load post-restart, while drafting the real
+    // answer right after. Only phrases unique to the gaslighting script.
+    "tools are completely offline",
+    "tools completely offline",
+    "every call returns \"does not exists\"",
+    "every call returns 'does not exists'",
+    "every call returns \"does not exist\"",
+    "this isn't just session state",
+    "this is not just session state",
+    "tool registry itself isn't loading",
+    "tool registry itself is not loading",
+    "tool registry isn't loading post-restart",
+    "tool registry is not loading post-restart",
+    "isn't loading post-restart",
+    "not loading post-restart",
+    "ping me when you're back in",
+    "ping me when you are back in",
+    "once tools are back",
 ];
 
 /// Detect a gaslighting refusal preamble: short assistant text that lies
