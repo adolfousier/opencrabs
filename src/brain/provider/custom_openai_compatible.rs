@@ -268,16 +268,23 @@ impl OpenAIProvider {
         self.base_url.to_lowercase().contains("openrouter")
     }
 
-    /// Pick a retry config tuned for this provider. Qwen OAuth matches
-    /// qwen-cli's DEFAULT_RETRY_OPTIONS (retry 429s in-place, Retry-After
-    /// honored) because its shared upstream window closes briefly after
-    /// 2–3 tool calls then reopens within seconds — falling back on the
-    /// first 429 is what drops the session into the fallback chain
-    /// unnecessarily. All other providers keep the default (bail-to-
-    /// fallback on 429) which is the right move for OpenRouter-style
-    /// pools.
-    fn retry_config(&self) -> super::retry::RetryConfig {
-        if self.name == "qwen" {
+    /// Pick a retry config tuned for this (provider, model) pair.
+    ///
+    /// - Qwen OAuth matches qwen-cli's DEFAULT_RETRY_OPTIONS (retry 429s
+    ///   in-place, Retry-After honored) because its shared upstream window
+    ///   closes briefly after 2–3 tool calls then reopens within seconds —
+    ///   falling back on the first 429 drops the session into the fallback
+    ///   chain unnecessarily.
+    /// - OpenRouter `:free` models get the same treatment: the 20 req/min
+    ///   window is shared across the key and reopens quickly, and the
+    ///   proactive rate_limiter already paces requests to ~15/min, so any
+    ///   429 that does leak through is almost certainly a transient window
+    ///   flip rather than a true quota exhaustion. Retrying in-place keeps
+    ///   the user on the free tier instead of silently burning paid credits
+    ///   on the fallback chain.
+    /// - All other providers keep the default (bail-to-fallback on 429).
+    fn retry_config(&self, model: &str) -> super::retry::RetryConfig {
+        if self.name == "qwen" || model.ends_with(":free") {
             super::retry::RetryConfig::qwen_cli_match()
         } else {
             super::retry::RetryConfig::default()
@@ -1160,7 +1167,7 @@ impl OpenAIProvider {
 
                 Ok(response)
             },
-            &self.retry_config(),
+            &self.retry_config(&model),
         )
         .await?;
 
@@ -1363,7 +1370,7 @@ impl Provider for OpenAIProvider {
 
         let model = request.model.clone();
         let message_count = request.messages.len();
-        let retry_config = self.retry_config();
+        let retry_config = self.retry_config(&model);
 
         // For OpenRouter, use Anthropic format with cache_control for prompt caching.
         // For all other providers, use standard OpenAI format.
@@ -1594,7 +1601,7 @@ impl Provider for OpenAIProvider {
             tools_count
         );
 
-        let retry_config = self.retry_config();
+        let retry_config = self.retry_config(&model);
 
         // Retry the stream connection establishment
         let mut response = retry_with_backoff(
