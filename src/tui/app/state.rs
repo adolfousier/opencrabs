@@ -1383,9 +1383,9 @@ impl App {
                     wizard.tick_health_check();
                 }
 
-                // Auto-dismiss header card after 500ms
+                // Auto-dismiss header card after 2.5 seconds
                 if let Some(shown_at) = self.header_card_shown_at
-                    && shown_at.elapsed() >= std::time::Duration::from_millis(500)
+                    && shown_at.elapsed() >= std::time::Duration::from_millis(2500)
                 {
                     self.header_card_shown_at = None;
                 }
