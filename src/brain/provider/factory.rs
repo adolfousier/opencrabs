@@ -465,26 +465,127 @@ fn try_create_github(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     Ok(Some(Arc::new(provider)))
 }
 
+/// Build a single Qwen OpenAI-compatible provider from credentials and config.
+/// Extracted so both single-account and rotation paths can reuse it.
+fn build_single_qwen_provider(
+    creds: QwenCredentials,
+    qwen_config: &ProviderConfig,
+) -> Arc<dyn Provider> {
+    let manager = Arc::new(QwenTokenManager::new(creds));
+    manager.clone().start_background_refresh();
+
+    let mgr_for_token = manager.clone();
+    let token_fn: super::custom_openai_compatible::TokenFn =
+        Arc::new(move || mgr_for_token.current_access_token());
+
+    let mgr_for_url = manager.clone();
+    let qwen_override_url = qwen_config.base_url.clone();
+    let base_url_fn: super::custom_openai_compatible::BaseUrlFn = Arc::new(move || {
+        if let Some(ref u) = qwen_override_url
+            && !u.is_empty()
+        {
+            return u.clone();
+        }
+        let live = mgr_for_url.current_chat_url();
+        if live.is_empty() {
+            QWEN_DEFAULT_CHAT_URL.to_string()
+        } else {
+            live
+        }
+    });
+
+    let mgr_for_auth = manager.clone();
+    let auth_refresh_fn: super::custom_openai_compatible::AuthRefreshFn = Arc::new(move || {
+        let mgr = mgr_for_auth.clone();
+        Box::pin(async move {
+            mgr.force_refresh()
+                .await
+                .map_err(|e| format!("qwen force_refresh failed: {}", e))
+        })
+    });
+
+    let base_url = qwen_config
+        .base_url
+        .clone()
+        .unwrap_or_else(|| manager.current_chat_url());
+    let base_url = if base_url.is_empty() {
+        QWEN_DEFAULT_CHAT_URL.to_string()
+    } else {
+        base_url
+    };
+
+    let mut effective_config = qwen_config.clone();
+    if effective_config.default_model.is_none() {
+        effective_config.default_model = Some(QWEN_OAUTH_MODEL.to_string());
+    }
+
+    let qwen_limiter = Arc::clone(&super::rate_limiter::QWEN_OAUTH_LIMITER);
+
+    let provider = configure_openai_compatible(
+        OpenAIProvider::with_base_url("qwen-managed".to_string(), base_url)
+            .with_name("qwen")
+            .with_token_fn(token_fn)
+            .with_base_url_fn(base_url_fn)
+            .with_auth_refresh_fn(auth_refresh_fn)
+            .with_extra_headers(qwen_extra_headers())
+            .with_body_transform({
+                let enable_thinking = effective_config.enable_thinking;
+                Arc::new(move |body| {
+                    let mut body = qwen_body_transform(body);
+                    if let Some(enable) = enable_thinking
+                        && let Some(obj) = body.as_object_mut()
+                    {
+                        obj.insert(
+                            "enable_thinking".to_string(),
+                            serde_json::Value::Bool(enable),
+                        );
+                    }
+                    body
+                })
+            })
+            .with_rate_limiter(qwen_limiter),
+        &effective_config,
+    );
+    Arc::new(provider)
+}
+
 /// Try to create the native **Qwen** provider (OAuth + DashScope OpenAI-compatible).
 ///
-/// Reads credentials from `keys.toml [providers.qwen]`. If they're missing
-/// but the user has a `~/.qwen/oauth_creds.json` left behind by `qwen-code-cli`,
-/// imports that into keys.toml on first use so the migration is invisible.
+/// If `[[providers.qwen_accounts]]` has ≥ 2 entries, builds a
+/// `RotatingQwenProvider` that round-robins on rate-limit instead of
+/// immediately falling to the outer fallback chain.
 ///
-/// On 401/403, the token is force-refreshed once via the background manager.
+/// Otherwise falls back to the single-account path from `[providers.qwen]`
+/// (including transparent import from `~/.qwen/oauth_creds.json`).
 fn try_create_qwen(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     let qwen_config = match &config.providers.qwen {
         Some(cfg) => cfg,
         None => return Ok(None),
     };
 
-    // 1) Try keys.toml directly.
+    // ── Rotation path: [[providers.qwen_accounts]] with ≥ 2 entries ─────
+    if let Some(account_cfgs) = &config.providers.qwen_accounts {
+        let accounts_creds = QwenCredentials::from_account_configs(account_cfgs);
+        if accounts_creds.len() >= 2 {
+            tracing::info!(
+                "Building RotatingQwenProvider with {} accounts",
+                accounts_creds.len()
+            );
+            let providers: Vec<Arc<dyn Provider>> = accounts_creds
+                .into_iter()
+                .enumerate()
+                .map(|(i, creds)| {
+                    tracing::info!("  Qwen rotation account {} ready", i);
+                    build_single_qwen_provider(creds, qwen_config)
+                })
+                .collect();
+            return Ok(Some(Arc::new(super::RotatingQwenProvider::new(providers))));
+        }
+    }
+
+    // ── Single-account path ─────────────────────────────────────────────
     let mut creds = QwenCredentials::from_provider_config(qwen_config);
 
-    // 2) Also peek at qwen-code-cli's shared file. If it has a NEWER expiry
-    //    than keys.toml (i.e. the user reauthed via `qwen` cli since our last
-    //    import), prefer it and overwrite keys.toml. This makes reauth "just
-    //    work" without requiring the user to re-run onboarding in opencrabs.
     if let Some(imported) = QwenCredentials::import_from_qwen_cli() {
         let should_use_file = match &creds {
             None => true,
@@ -516,105 +617,8 @@ fn try_create_qwen(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         return Ok(None);
     };
 
-    let manager = Arc::new(QwenTokenManager::new(creds));
-    manager.clone().start_background_refresh();
-
-    let mgr_for_token = manager.clone();
-    let token_fn: super::custom_openai_compatible::TokenFn =
-        Arc::new(move || mgr_for_token.current_access_token());
-
-    // Dynamic base-URL callback — qwen's `resource_url` can change after a
-    // token refresh, so we resolve the chat endpoint on every request
-    // instead of freezing it at startup.
-    let mgr_for_url = manager.clone();
-    let qwen_override_url = qwen_config.base_url.clone();
-    let base_url_fn: super::custom_openai_compatible::BaseUrlFn = Arc::new(move || {
-        if let Some(ref u) = qwen_override_url
-            && !u.is_empty()
-        {
-            return u.clone();
-        }
-        let live = mgr_for_url.current_chat_url();
-        if live.is_empty() {
-            QWEN_DEFAULT_CHAT_URL.to_string()
-        } else {
-            live
-        }
-    });
-
-    // Auth-refresh callback — on 401/403, force-refresh the token before
-    // retrying. The returned token_fn closure picks up the new access_token
-    // automatically.
-    let mgr_for_auth = manager.clone();
-    let auth_refresh_fn: super::custom_openai_compatible::AuthRefreshFn = Arc::new(move || {
-        let mgr = mgr_for_auth.clone();
-        Box::pin(async move {
-            mgr.force_refresh()
-                .await
-                .map_err(|e| format!("qwen force_refresh failed: {}", e))
-        })
-    });
-
-    let base_url = qwen_config
-        .base_url
-        .clone()
-        .unwrap_or_else(|| manager.current_chat_url());
-    let base_url = if base_url.is_empty() {
-        QWEN_DEFAULT_CHAT_URL.to_string()
-    } else {
-        base_url
-    };
-
-    tracing::info!("Using Qwen native provider at: {}", base_url);
-
-    // Default to the free-tier OAuth model unless the user pinned another one.
-    let mut effective_config = qwen_config.clone();
-    if effective_config.default_model.is_none() {
-        effective_config.default_model = Some(QWEN_OAUTH_MODEL.to_string());
-    }
-
-    // Proactive pacing: the Qwen free tier is 60 req/min (1 req/s sustained).
-    // Our tool loop bursts well past that on multi-tool turns, which triggers
-    // instant 429s from portal.qwen.ai even with a valid token. 1500ms =
-    // 40 req/min, leaves 33% headroom under the quota, and still fires fast
-    // enough to keep interactive latency reasonable. qwen-cli gets this
-    // pacing for free from the openai npm SDK; we have to wire it explicitly.
-    // Global singleton — survives across `try_create_qwen` invocations so
-    // sticky-fallback re-creates don't reset the limiter between requests.
-    let qwen_limiter = Arc::clone(&super::rate_limiter::QWEN_OAUTH_LIMITER);
-
-    let provider = configure_openai_compatible(
-        OpenAIProvider::with_base_url("qwen-managed".to_string(), base_url)
-            .with_name("qwen")
-            .with_token_fn(token_fn)
-            .with_base_url_fn(base_url_fn)
-            .with_auth_refresh_fn(auth_refresh_fn)
-            .with_extra_headers(qwen_extra_headers())
-            .with_body_transform({
-                // Qwen3 is a hybrid-thinking model: the same weights run in
-                // thinking or non-thinking mode depending on a runtime flag.
-                // Only inject `enable_thinking` when the user explicitly
-                // opts in via `[providers.qwen] enable_thinking = true`
-                // in config.toml; otherwise leave the field absent so the
-                // gateway defaults to fast (non-thinking) output.
-                let enable_thinking = effective_config.enable_thinking;
-                Arc::new(move |body| {
-                    let mut body = qwen_body_transform(body);
-                    if let Some(enable) = enable_thinking
-                        && let Some(obj) = body.as_object_mut()
-                    {
-                        obj.insert(
-                            "enable_thinking".to_string(),
-                            serde_json::Value::Bool(enable),
-                        );
-                    }
-                    body
-                })
-            })
-            .with_rate_limiter(qwen_limiter),
-        &effective_config,
-    );
-    Ok(Some(Arc::new(provider)))
+    tracing::info!("Using Qwen native provider (single account)");
+    Ok(Some(build_single_qwen_provider(creds, qwen_config)))
 }
 
 /// Try to create OpenRouter provider if configured

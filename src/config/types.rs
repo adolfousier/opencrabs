@@ -599,6 +599,12 @@ pub struct ProviderConfigs {
     #[serde(default)]
     pub qwen: Option<ProviderConfig>,
 
+    /// Multiple Qwen OAuth accounts for rotation. When present (len >= 2),
+    /// the factory builds a `RotatingQwenProvider` that round-robins on 429
+    /// before falling to the outer FallbackProvider chain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qwen_accounts: Option<Vec<ProviderConfig>>,
+
     /// AWS Bedrock configuration
     #[serde(default)]
     pub bedrock: Option<ProviderConfig>,
