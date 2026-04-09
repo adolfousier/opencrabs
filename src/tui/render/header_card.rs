@@ -15,7 +15,7 @@
 use super::super::app::App;
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Padding, Paragraph, Wrap},
@@ -23,33 +23,34 @@ use ratatui::{
 
 /// Render the header card centered within the given area (the chat region).
 pub(super) fn render_header_card(f: &mut Frame, app: &App, area: Rect) {
-    // Outer margin: the card floats inside the chat area with a small
-    // visible gap on each side so the surrounding chat still peeks
-    // through. Margins shrink on tiny terminals so we always render
-    // something rather than collapsing to nothing.
-    let h_margin: u16 = if area.width >= 60 {
-        4
-    } else if area.width >= 30 {
-        2
-    } else {
-        1
-    };
-    let v_margin: u16 = if area.height >= 24 {
-        2
-    } else if area.height >= 12 {
-        1
-    } else {
-        0
-    };
+    // The card has a target size — wide enough to fit the logo + tagline
+    // comfortably, but capped so it doesn't balloon to fill a large
+    // terminal. On tiny terminals we shrink instead.
+    const MAX_W: u16 = 88;
+    const MAX_H: u16 = 22;
+    const MIN_W: u16 = 20;
+    const MIN_H: u16 = 8;
 
-    let card_area = area.inner(Margin {
-        horizontal: h_margin,
-        vertical: v_margin,
-    });
+    // Leave a breathing gap so surrounding chat still peeks through.
+    let avail_w = area.width.saturating_sub(4);
+    let avail_h = area.height.saturating_sub(2);
 
-    if card_area.width < 20 || card_area.height < 8 {
+    let card_w = avail_w.min(MAX_W).max(MIN_W.min(avail_w));
+    let card_h = avail_h.min(MAX_H).max(MIN_H.min(avail_h));
+
+    if card_w < MIN_W || card_h < MIN_H {
         return; // too small to render meaningfully
     }
+
+    // Center within the area.
+    let x = area.x + area.width.saturating_sub(card_w) / 2;
+    let y = area.y + area.height.saturating_sub(card_h) / 2;
+    let card_area = Rect {
+        x,
+        y,
+        width: card_w,
+        height: card_h,
+    };
 
     // Wipe whatever chat was rendered underneath so the card reads cleanly.
     f.render_widget(Clear, card_area);
