@@ -43,7 +43,16 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
     // ── LEFT COLUMN ──
     let cyan = Color::Cyan;
 
+    let version_line = format!("v{}", env!("CARGO_PKG_VERSION"));
+    let provider_name = app.agent_service.provider_name().to_string();
+    let model_name = app.default_model_name.clone();
+
     let mut left = vec![
+        Line::from(""),
+        section_header("ABOUT"),
+        kv("Version", &version_line, cyan),
+        kv("Provider", &provider_name, cyan),
+        kv("Model", &model_name, cyan),
         Line::from(""),
         section_header("GLOBAL"),
         kv("Ctrl+C", "Clear input / quit (2x)", cyan),
