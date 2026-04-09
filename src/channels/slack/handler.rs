@@ -781,7 +781,12 @@ async fn handle_message(
                 if let Err(e) = state.session_svc.archive_session(session.id).await {
                     tracing::error!("Slack: failed to archive session {}: {}", session.id, e);
                 }
-                match crate::channels::session_init::create_channel_session(&state.session_svc, Some(session_title)).await {
+                match crate::channels::session_init::create_channel_session(
+                    &state.session_svc,
+                    Some(session_title),
+                )
+                .await
+                {
                     Ok(new_session) => new_session.id,
                     Err(e) => {
                         tracing::error!("Slack: failed to create session: {}", e);
@@ -792,7 +797,12 @@ async fn handle_message(
                 session.id
             }
         } else {
-            match crate::channels::session_init::create_channel_session(&state.session_svc, Some(session_title)).await {
+            match crate::channels::session_init::create_channel_session(
+                &state.session_svc,
+                Some(session_title),
+            )
+            .await
+            {
                 Ok(session) => {
                     tracing::info!(
                         "Slack: created new channel session {} for {}",
@@ -976,7 +986,12 @@ async fn handle_message(
                 {
                     tracing::error!("Slack: failed to archive old session {}: {}", old.id, e);
                 }
-                match crate::channels::session_init::create_channel_session(&state.session_svc, Some(session_title)).await {
+                match crate::channels::session_init::create_channel_session(
+                    &state.session_svc,
+                    Some(session_title),
+                )
+                .await
+                {
                     Ok(new_session) => {
                         if is_owner && is_dm {
                             *state.shared_session.lock().await = Some(new_session.id);

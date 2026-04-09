@@ -273,7 +273,12 @@ pub(crate) async fn handle_message(
                     Some(id) => id,
                     None => {
                         tracing::info!("Discord: no existing session, creating one for owner");
-                        match crate::channels::session_init::create_channel_session(&session_svc, Some("Chat".to_string())).await {
+                        match crate::channels::session_init::create_channel_session(
+                            &session_svc,
+                            Some("Chat".to_string()),
+                        )
+                        .await
+                        {
                             Ok(session) => session.id,
                             Err(e) => {
                                 tracing::error!("Discord: failed to create session: {}", e);
@@ -308,7 +313,12 @@ pub(crate) async fn handle_message(
                 if let Err(e) = session_svc.archive_session(session.id).await {
                     tracing::error!("Discord: failed to archive session {}: {}", session.id, e);
                 }
-                match crate::channels::session_init::create_channel_session(&session_svc, Some(session_title)).await {
+                match crate::channels::session_init::create_channel_session(
+                    &session_svc,
+                    Some(session_title),
+                )
+                .await
+                {
                     Ok(new_session) => new_session.id,
                     Err(e) => {
                         tracing::error!("Discord: failed to create session: {}", e);
@@ -319,7 +329,12 @@ pub(crate) async fn handle_message(
                 session.id
             }
         } else {
-            match crate::channels::session_init::create_channel_session(&session_svc, Some(session_title)).await {
+            match crate::channels::session_init::create_channel_session(
+                &session_svc,
+                Some(session_title),
+            )
+            .await
+            {
                 Ok(session) => {
                     tracing::info!(
                         "Discord: created new channel session {} for #{}",
@@ -405,7 +420,12 @@ pub(crate) async fn handle_message(
                 {
                     tracing::error!("Discord: failed to archive old session {}: {}", old.id, e);
                 }
-                match crate::channels::session_init::create_channel_session(&session_svc, Some(session_title)).await {
+                match crate::channels::session_init::create_channel_session(
+                    &session_svc,
+                    Some(session_title),
+                )
+                .await
+                {
                     Ok(new_session) => {
                         if is_owner && is_dm {
                             *shared_session.lock().await = Some(new_session.id);

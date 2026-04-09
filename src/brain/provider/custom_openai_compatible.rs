@@ -1855,16 +1855,52 @@ impl Provider for OpenAIProvider {
                                 {
                                     let message = err_obj.get("message").and_then(|v| v.as_str()).unwrap_or("stream error").to_string();
                                     let err_type = err_obj.get("type").and_then(|v| v.as_str()).map(|s| s.to_string());
-                                    let code = err_obj.get("code").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
+                                    // Status can arrive as `code` (OpenAI) or `http_code`
+                                    // (qwen portal), and qwen serializes it as a string.
+                                    // Parse both, preferring whichever is non-zero.
+                                    let read_status = |key: &str| -> u16 {
+                                        err_obj
+                                            .get(key)
+                                            .and_then(|v| {
+                                                v.as_u64().map(|n| n as u16).or_else(|| {
+                                                    v.as_str().and_then(|s| s.parse::<u16>().ok())
+                                                })
+                                            })
+                                            .unwrap_or(0)
+                                    };
+                                    let code = {
+                                        let c = read_status("code");
+                                        if c != 0 { c } else { read_status("http_code") }
+                                    };
                                     tracing::error!("[STREAM_ERROR] Inline SSE error: type={:?}, code={}, msg={}", err_type, code, message);
                                     // Map 429/quota-style messages to RateLimitExceeded so the
                                     // fallback chain kicks in immediately instead of retrying.
+                                    let msg_lc = message.to_lowercase();
                                     let is_rate_limit = code == 429
                                         || err_type.as_deref() == Some("rate_limit_exceeded")
-                                        || message.to_lowercase().contains("rate limit")
-                                        || message.to_lowercase().contains("quota");
+                                        || msg_lc.contains("rate limit")
+                                        || msg_lc.contains("quota");
+                                    // Qwen portal (and Cloudflare-fronted upstreams in general)
+                                    // emits 529 / `overloaded_error` / 503 when the shared
+                                    // cluster is temporarily saturated. It's the exact case
+                                    // tool_loop's StreamError retry-then-fallback path exists
+                                    // for: retry 3x with backoff, then swap to a healthy
+                                    // provider. Mapping to StreamError routes it there —
+                                    // mapping to ApiError{500} sent it to the catch-all that
+                                    // bubbled straight to the TUI.
+                                    let is_overloaded = code == 529
+                                        || code == 503
+                                        || err_type.as_deref() == Some("overloaded_error")
+                                        || msg_lc.contains("overloaded")
+                                        || msg_lc.contains("server cluster")
+                                        || msg_lc.contains("high load");
                                     let pe = if is_rate_limit {
                                         ProviderError::RateLimitExceeded(message)
+                                    } else if is_overloaded {
+                                        ProviderError::StreamError(format!(
+                                            "upstream overloaded ({}): {}",
+                                            code, message
+                                        ))
                                     } else {
                                         ProviderError::ApiError {
                                             status: if code == 0 { 500 } else { code },
