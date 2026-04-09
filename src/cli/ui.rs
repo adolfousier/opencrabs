@@ -46,29 +46,6 @@ async fn cmd_chat_inner(
         tui,
     };
 
-    {
-        const STARTS: &[&str] = &[
-            "🦀 Crabs assemble!",
-            "🦀 *sideways scuttling intensifies*",
-            "🦀 Booting crab consciousness...",
-            "🦀 Who summoned the crabs?",
-            "🦀 Crab rave initiated.",
-            "🦀 The crabs have awakened.",
-            "🦀 Emerging from the deep...",
-            "🦀 All systems crabby.",
-            "🦀 Let's get cracking.",
-            "🦀 Rustacean reporting for duty.",
-        ];
-        let i = (std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .subsec_nanos() as usize)
-            % STARTS.len();
-        let orange = "\x1b[38;2;215;100;20m";
-        let reset = "\x1b[0m";
-        println!("\n{}{}{}", orange, STARTS[i], reset);
-    }
-
     // Initialize database
     tracing::info!("Connecting to database: {}", config.database.path.display());
     let db = Database::connect(&config.database.path)
@@ -1144,6 +1121,19 @@ async fn cmd_chat_inner(
         crate::config::profile::release_all_locks();
         return Ok(());
     }
+    // Capture provider/model/tools for the banner; we need these again on
+    // exit after `app` is moved into `tui::run`.
+    let banner_provider = provider.name().to_string();
+    let banner_model = provider.default_model().to_string();
+    let banner_tools = shared_tool_registry.list_tools();
+
+    print_terminal_banner(
+        &banner_provider,
+        &banner_model,
+        &banner_tools,
+        BannerKind::Start,
+    );
+
     tracing::debug!("Launching TUI");
     let tui_result = tui::run(app).await;
 
@@ -1177,40 +1167,144 @@ async fn cmd_chat_inner(
         return tui_result.context("TUI error");
     }
 
-    // Print shutdown logo and rolling message
-    {
-        const BYES: &[&str] = &[
-            "🦀 Back to the ocean...",
-            "🦀 *scuttles into the sunset*",
-            "🦀 Until next tide!",
-            "🦀 Gone crabbing. BRB never.",
-            "🦀 The crabs retreat... for now.",
-            "🦀 Shell ya later!",
-            "🦀 Logging off. Don't forget to hydrate.",
-            "🦀 Peace out, landlubber.",
-            "🦀 Crab rave: paused.",
-            "🦀 See you on the other tide.",
-        ];
-        let i = (std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .subsec_nanos() as usize)
-            % BYES.len();
+    print_terminal_banner(
+        &banner_provider,
+        &banner_model,
+        &banner_tools,
+        BannerKind::Exit,
+    );
 
-        // Print logo
-        let logo_style = "\x1b[38;2;215;100;20m"; // Muted orange
-        let reset = "\x1b[0m";
-        let logo = r"   ___                    ___           _
+    Ok(())
+}
+
+#[derive(Copy, Clone)]
+enum BannerKind {
+    Start,
+    Exit,
+}
+
+/// Print the OpenCrabs banner (logo + tagline + version/provider/model +
+/// tools + quick commands + tips) to the terminal before the TUI takes
+/// over and again after it exits. Mirrors the in-TUI header card so the
+/// user has a persistent record in their terminal scrollback.
+fn print_terminal_banner(provider: &str, model: &str, tools: &[String], kind: BannerKind) {
+    // ANSI color codes (24-bit).
+    const ORANGE: &str = "\x1b[38;2;215;100;20m";
+    const ORANGE_IT: &str = "\x1b[3;38;2;215;100;20m";
+    const CYAN: &str = "\x1b[1;36m";
+    const DIM: &str = "\x1b[2;37m";
+    const BOLD: &str = "\x1b[1m";
+    const RESET: &str = "\x1b[0m";
+
+    const STARTS: &[&str] = &[
+        "🦀 Crabs assemble!",
+        "🦀 *sideways scuttling intensifies*",
+        "🦀 Booting crab consciousness...",
+        "🦀 Who summoned the crabs?",
+        "🦀 Crab rave initiated.",
+        "🦀 The crabs have awakened.",
+        "🦀 Emerging from the deep...",
+        "🦀 All systems crabby.",
+        "🦀 Let's get cracking.",
+        "🦀 Rustacean reporting for duty.",
+    ];
+    const BYES: &[&str] = &[
+        "🦀 Back to the ocean...",
+        "🦀 *scuttles into the sunset*",
+        "🦀 Until next tide!",
+        "🦀 Gone crabbing. BRB never.",
+        "🦀 The crabs retreat... for now.",
+        "🦀 Shell ya later!",
+        "🦀 Logging off. Don't forget to hydrate.",
+        "🦀 Peace out, landlubber.",
+        "🦀 Crab rave: paused.",
+        "🦀 See you on the other tide.",
+    ];
+
+    let pool: &[&str] = match kind {
+        BannerKind::Start => STARTS,
+        BannerKind::Exit => BYES,
+    };
+    let idx = (std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos() as usize)
+        % pool.len();
+    let tagline_msg = pool[idx];
+
+    let logo = r"   ___                    ___           _
   / _ \ _ __  ___ _ _    / __|_ _ __ _| |__  ___
  | (_) | '_ \/ -_) ' \  | (__| '_/ _` | '_ \(_-<
   \___/| .__/\___|_||_|  \___|_| \__,_|_.__//__/
        |_|";
-        println!();
-        println!("{}{}{}", logo_style, logo, reset);
-        println!();
-        println!("{}{}{}", logo_style, BYES[i], reset);
+
+    let version = env!("CARGO_PKG_VERSION");
+
+    println!();
+    println!("{}{}{}{}", BOLD, ORANGE, logo, RESET);
+    println!();
+    println!(
+        "{}🦀 The autonomous AI agent. Self-improving. Every channel.{}",
+        ORANGE_IT, RESET
+    );
+    println!();
+    println!(
+        "  {bold}{orange}v{version}{reset}  {dim}·{reset}  {cyan}{provider}{reset}  {dim}·{reset}  {cyan}{model}{reset}",
+        bold = BOLD,
+        orange = ORANGE,
+        cyan = CYAN,
+        dim = DIM,
+        reset = RESET,
+    );
+    println!();
+
+    if !tools.is_empty() {
+        let mut sorted: Vec<&str> = tools.iter().map(|s| s.as_str()).collect();
+        sorted.sort();
+        println!("  {}Available Tools{}", CYAN, RESET);
+        // Word-wrap tools list to ~80 visible columns.
+        let joined = sorted.join(", ");
+        for line in wrap_plain(&joined, 80) {
+            println!("  {}{}{}", DIM, line, RESET);
+        }
         println!();
     }
 
-    Ok(())
+    println!("  {}Quick Commands{}", CYAN, RESET);
+    println!(
+        "  {}/help  /sessions  /model  /settings  /usage  /approve  /rebuild  /doctor{}",
+        DIM, RESET
+    );
+    println!();
+
+    println!("  {}Tips{}", CYAN, RESET);
+    println!(
+        "  {}@ for files  ·  ! for shell  ·  Shift+Enter for newline  ·  Ctrl+O for older messages{}",
+        DIM, RESET
+    );
+    println!();
+
+    println!("{}{}{}", ORANGE, tagline_msg, RESET);
+    println!();
+}
+
+/// Whitespace word-wrap to `width` visible columns.
+fn wrap_plain(text: &str, width: usize) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for word in text.split(' ') {
+        if cur.is_empty() {
+            cur.push_str(word);
+        } else if cur.len() + 1 + word.len() <= width {
+            cur.push(' ');
+            cur.push_str(word);
+        } else {
+            out.push(std::mem::take(&mut cur));
+            cur.push_str(word);
+        }
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
 }

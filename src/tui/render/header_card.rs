@@ -36,7 +36,7 @@ pub(super) fn render_header_card(f: &mut Frame, app: &App, area: Rect) {
     let muted = Style::default().fg(Color::Rgb(120, 120, 120));
     let dim = Style::default().fg(Color::DarkGray);
     let header = Style::default()
-        .fg(Color::Rgb(90, 110, 150))
+        .fg(Color::Cyan)
         .add_modifier(Modifier::BOLD);
 
     // Leave a 2-cell gutter on each side of the chat area.
@@ -45,13 +45,12 @@ pub(super) fn render_header_card(f: &mut Frame, app: &App, area: Rect) {
 
     let (centered, wrapped) = build_content(app, accent, muted, dim, header);
 
-    // Natural width = widest line across both sections, clamped to max.
-    let natural_w: u16 = centered
-        .iter()
-        .chain(wrapped.iter())
-        .map(display_width)
-        .max()
-        .unwrap_or(40);
+    // Natural width is driven by the centered block (logo + tagline +
+    // version line). The wrapped block (tool list, commands, tips) will
+    // soft-wrap to this width — we deliberately don't let it drag the
+    // card out to the widest single tool-list line, or the card ends up
+    // extremely wide and short. Add a little breathing room.
+    let natural_w: u16 = centered.iter().map(display_width).max().unwrap_or(40) + 4;
     let inner_w = natural_w.clamp(20, max_inner_w.max(20));
 
     // Height = centered rows + wrapped rows (after soft-wrap to inner_w).
@@ -93,7 +92,7 @@ pub(super) fn render_header_card(f: &mut Frame, app: &App, area: Rect) {
 
     if chunks[1].height > 0 {
         let wrapped_para = Paragraph::new(wrapped)
-            .alignment(Alignment::Left)
+            .alignment(Alignment::Center)
             .wrap(Wrap { trim: false });
         f.render_widget(wrapped_para, chunks[1]);
     }
@@ -119,20 +118,30 @@ fn build_content(
     let provider = app.agent_service.provider_name().to_string();
     let model = app.default_model_name.clone();
 
+    // Pad every logo line to the widest one so when each line is centered
+    // individually, the glyph columns still line up vertically.
+    let logo_max = logo_lines
+        .iter()
+        .map(|l| l.chars().count())
+        .max()
+        .unwrap_or(0);
+
     let mut centered: Vec<Line<'static>> = Vec::new();
     for line in logo_lines {
-        centered.push(Line::from(Span::styled((*line).to_string(), accent)));
+        centered.push(Line::from(Span::styled(
+            format!("{:<width$}", line, width = logo_max),
+            accent,
+        )));
     }
     centered.push(Line::from(""));
     centered.push(Line::from(Span::styled(
-        "The autonomous AI agent. Self-improving. Every channel.",
+        "🦀 The autonomous AI agent. Self-improving. Every channel.",
         Style::default()
             .fg(Color::Rgb(215, 100, 20))
             .add_modifier(Modifier::ITALIC),
     )));
     centered.push(Line::from(""));
     centered.push(Line::from(vec![
-        Span::styled("🦀 OpenCrabs ", accent),
         Span::styled(format!("v{version}"), accent),
         Span::styled("  ·  ", muted),
         Span::styled(provider, header),
