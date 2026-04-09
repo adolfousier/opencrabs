@@ -5,6 +5,34 @@ All notable changes to OpenCrabs will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-04-09
+
+Focused fix release: **Qwen OAuth time-to-first-token drops from 60-70s to
+8-15s** by matching the exact retry parameters the Qwen Code CLI uses
+internally. Also ships browser auto-screenshot and a couple of UX fixes.
+
+### Fixed
+
+- **Qwen OAuth retry timing** — `qwen_cli_match()` now mirrors the actual
+  OpenAI Node SDK defaults used by qwen-code-cli v0.14: 500ms initial delay,
+  8s max delay, 3 retries, 25% jitter (was 1.5s/30s/7/30%). Unparseable
+  Retry-After headers no longer default to 60s — exponential backoff decides
+  instead. Combined effect: TTFB **60-70s → 8-15s** (`e42d46a`).
+- **TUI execute_code collapsed card** — now shows the actual code content
+  instead of generic "Execute bash" text (`34c4b39`).
+
+### Added
+
+- **Browser auto-screenshot** — `navigate`, `click`, and `type_text` browser
+  tools now automatically capture a PNG screenshot after each action and
+  attach it as a vision image alongside the tool result. The model can "see"
+  the page without a separate `screenshot` call (`1ac8f91`).
+
+### Changed
+
+- **CI release workflow** — release jobs now poll for CI to pass before
+  starting builds, preventing releases from broken commits (`182a005`).
+
 ## [0.3.2] - 2026-04-08
 
 Big release focused on **making `providers.custom.*` a first-class citizen** —
@@ -2408,6 +2436,7 @@ fixes.
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.3.3]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.3
 [0.3.2]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.2
 [0.3.1]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.1
 [0.3.0]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.0
