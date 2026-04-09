@@ -268,6 +268,22 @@ impl OpenAIProvider {
         self.base_url.to_lowercase().contains("openrouter")
     }
 
+    /// Pick a retry config tuned for this provider. Qwen OAuth matches
+    /// qwen-cli's DEFAULT_RETRY_OPTIONS (retry 429s in-place, Retry-After
+    /// honored) because its shared upstream window closes briefly after
+    /// 2–3 tool calls then reopens within seconds — falling back on the
+    /// first 429 is what drops the session into the fallback chain
+    /// unnecessarily. All other providers keep the default (bail-to-
+    /// fallback on 429) which is the right move for OpenRouter-style
+    /// pools.
+    fn retry_config(&self) -> super::retry::RetryConfig {
+        if self.name == "qwen" {
+            super::retry::RetryConfig::qwen_cli_match()
+        } else {
+            super::retry::RetryConfig::default()
+        }
+    }
+
     /// Create a new OpenAI provider with official API
     pub fn new(api_key: String) -> Self {
         let client = Client::builder()
@@ -1104,7 +1120,7 @@ impl OpenAIProvider {
         message_count: usize,
         anthropic_request: AnthropicORRequest,
     ) -> Result<ProviderStream> {
-        use super::retry::{RetryConfig, retry_with_backoff};
+        use super::retry::retry_with_backoff;
 
         let tool_count = anthropic_request
             .tools
@@ -1144,7 +1160,7 @@ impl OpenAIProvider {
 
                 Ok(response)
             },
-            &RetryConfig::default(),
+            &self.retry_config(),
         )
         .await?;
 
@@ -1343,11 +1359,11 @@ impl OpenAIProvider {
 #[async_trait]
 impl Provider for OpenAIProvider {
     async fn complete(&self, request: LLMRequest) -> Result<LLMResponse> {
-        use super::retry::{RetryConfig, retry_with_backoff};
+        use super::retry::retry_with_backoff;
 
         let model = request.model.clone();
         let message_count = request.messages.len();
-        let retry_config = RetryConfig::default();
+        let retry_config = self.retry_config();
 
         // For OpenRouter, use Anthropic format with cache_control for prompt caching.
         // For all other providers, use standard OpenAI format.
@@ -1500,7 +1516,7 @@ impl Provider for OpenAIProvider {
     }
 
     async fn stream(&self, request: LLMRequest) -> Result<ProviderStream> {
-        use super::retry::{RetryConfig, retry_with_backoff};
+        use super::retry::retry_with_backoff;
 
         let model = request.model.clone();
         let message_count = request.messages.len();
@@ -1578,7 +1594,7 @@ impl Provider for OpenAIProvider {
             tools_count
         );
 
-        let retry_config = RetryConfig::default();
+        let retry_config = self.retry_config();
 
         // Retry the stream connection establishment
         let mut response = retry_with_backoff(
