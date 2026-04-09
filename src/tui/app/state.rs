@@ -292,9 +292,6 @@ pub struct App {
     /// Animation state
     pub animation_frame: usize,
 
-    /// Splash screen state
-    pub(crate) splash_shown_at: Option<std::time::Instant>,
-
     /// Escape confirmation state (double-press to clear)
     pub(crate) escape_pending_at: Option<std::time::Instant>,
 
@@ -491,7 +488,7 @@ impl App {
             messages: Vec::new(),
             sessions: Vec::new(),
             usage_ledger_stats: Vec::new(),
-            mode: AppMode::Splash,
+            mode: AppMode::Chat,
             input_buffer: String::new(),
             cursor_position: 0,
             attachments: Vec::new(),
@@ -514,7 +511,6 @@ impl App {
             build_lines: Vec::new(),
             build_msg_idx: None,
             animation_frame: 0,
-            splash_shown_at: Some(std::time::Instant::now()),
             escape_pending_at: None,
             ctrl_c_pending_at: None,
             help_scroll_offset: 0,
@@ -667,12 +663,20 @@ impl App {
 
     /// Initialize the app by loading or creating a session
     pub async fn initialize(&mut self) -> Result<()> {
+        // First-run onboarding takes over before any session work
+        let is_first = super::onboarding::is_first_time();
+        if self.force_onboard || is_first {
+            self.force_onboard = false;
+            tracing::info!("[init] Starting onboarding wizard");
+            self.onboarding = Some(OnboardingWizard::new());
+            self.mode = AppMode::Onboarding;
+            return Ok(());
+        }
+
         // Resume a specific session (e.g. after /rebuild restart) or load the most recent
         if let Some(session_id) = self.resume_session_id.take() {
             self.load_session(session_id).await?;
-            // Skip splash — go straight to chat
             self.mode = AppMode::Chat;
-            self.splash_shown_at = None;
             // Send a hidden wake-up message to the agent (not shown in UI)
             // If we also evolved, merge the evolution context into the same message
             // to avoid sending two separate prompts that produce duplicate responses.
@@ -1368,22 +1372,6 @@ impl App {
                 {
                     self.error_message = None;
                     self.error_message_shown_at = None;
-                }
-
-                // Auto-close splash screen after 3 seconds
-                if self.mode == AppMode::Splash
-                    && let Some(shown_at) = self.splash_shown_at
-                    && shown_at.elapsed() >= std::time::Duration::from_secs(3)
-                {
-                    self.splash_shown_at = None;
-                    let is_first = super::onboarding::is_first_time();
-                    if self.force_onboard || is_first {
-                        self.force_onboard = false;
-                        self.onboarding = Some(OnboardingWizard::new());
-                        self.switch_mode(AppMode::Onboarding).await?;
-                    } else {
-                        self.switch_mode(AppMode::Chat).await?;
-                    }
                 }
             }
             TuiEvent::ToolApprovalRequested(request) => {
@@ -2340,31 +2328,6 @@ impl App {
         // Mode-specific handling
         tracing::trace!("Current mode: {:?}", self.mode);
         match self.mode {
-            AppMode::Splash => {
-                // Check if minimum display time (3 seconds) has elapsed
-                if let Some(shown_at) = self.splash_shown_at
-                    && shown_at.elapsed() >= std::time::Duration::from_secs(3)
-                {
-                    self.splash_shown_at = None;
-                    // Check if onboarding should be shown
-                    let is_first = super::onboarding::is_first_time();
-                    tracing::debug!(
-                        "[Splash] force_onboard={}, is_first_time={}",
-                        self.force_onboard,
-                        is_first
-                    );
-                    if self.force_onboard || is_first {
-                        self.force_onboard = false;
-                        tracing::info!("[Splash] Starting onboarding wizard");
-                        self.onboarding = Some(OnboardingWizard::new());
-                        self.switch_mode(AppMode::Onboarding).await?;
-                    } else {
-                        tracing::debug!("[Splash] Skipping onboarding, going to Chat");
-                        self.switch_mode(AppMode::Chat).await?;
-                    }
-                }
-                // If not enough time has elapsed, ignore the key press
-            }
             AppMode::Chat => self.handle_chat_key(event).await?,
             AppMode::Sessions => self.handle_sessions_key(event).await?,
             AppMode::FilePicker => self.handle_file_picker_key(event).await?,
@@ -2395,19 +2358,11 @@ impl App {
             }
             AppMode::UpdatePrompt => {
                 if keys::is_cancel(&event) {
-                    // Decline — return to splash so user sees current version
+                    // Decline — return to chat so user keeps working on current version
                     self.update_available_version = None;
-                    if self.splash_shown_at.is_some() {
-                        // Reset splash timer so it shows for the full duration
-                        self.splash_shown_at = Some(std::time::Instant::now());
-                        self.switch_mode(AppMode::Splash).await?;
-                    } else {
-                        self.switch_mode(AppMode::Chat).await?;
-                    }
+                    self.switch_mode(AppMode::Chat).await?;
                 } else if keys::is_enter(&event) {
                     let version = self.update_available_version.take();
-                    // Dismiss splash so update progress is visible
-                    self.splash_shown_at = None;
                     self.switch_mode(AppMode::Chat).await?;
                     if let Some(v) = version {
                         self.push_system_message(format!("Updating to v{}...", v));
