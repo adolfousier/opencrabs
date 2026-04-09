@@ -735,30 +735,10 @@ impl QwenTokenManager {
 /// Version string sent in `User-Agent` and `X-DashScope-UserAgent`.
 /// Must stay `QwenCode/<semver>` — the gateway validates the prefix.
 const QWEN_CLI_VERSION: &str = "0.14.0";
-/// `openai` npm SDK version sent in `x-stainless-package-version`.
-const OPENAI_SDK_VERSION: &str = "5.11.0";
-/// Node runtime version sent in `x-stainless-runtime-version`. qwen-cli
-/// ships its own bundled Node and the gateway just wants a plausible
-/// `v<major>.<minor>.<patch>` string.
-const NODE_RUNTIME_VERSION: &str = "v22.11.0";
 
-/// Map Rust's `std::env::consts::OS` to the Node-style OS string that
-/// qwen-cli (via the `openai` npm SDK) sends in `x-stainless-os`.
-fn stainless_os() -> &'static str {
-    match std::env::consts::OS {
-        "macos" => "MacOS",
-        "linux" => "Linux",
-        "windows" => "Windows",
-        "freebsd" => "FreeBSD",
-        "openbsd" => "OpenBSD",
-        "android" => "Android",
-        _ => "Unknown",
-    }
-}
-
-/// Map Rust's `std::env::consts::ARCH` to the Node-style arch string that
-/// qwen-cli sends in `x-stainless-arch`.
-fn stainless_arch() -> &'static str {
+/// Node-style arch token for `User-Agent` / `X-DashScope-UserAgent`.
+/// qwen-cli uses Node's `process.arch` values directly.
+fn node_arch() -> &'static str {
     match std::env::consts::ARCH {
         "x86_64" => "x64",
         "aarch64" => "arm64",
@@ -769,61 +749,46 @@ fn stainless_arch() -> &'static str {
 }
 
 /// Platform tuple baked into `User-Agent` and `X-DashScope-UserAgent`.
-/// qwen-cli uses the raw Node values here: `darwin`, `linux`, `win32`
-/// for OS and `arm64`, `x64`, `ia32` for arch.
+/// qwen-cli constructs these as `${process.platform}; ${process.arch}`
+/// where `platform` is `darwin` / `linux` / `win32`.
 fn user_agent_platform() -> String {
     let os = match std::env::consts::OS {
         "macos" => "darwin",
         "windows" => "win32",
         other => other, // linux, freebsd, openbsd, android stay as-is
     };
-    let arch = stainless_arch();
-    format!("{}; {}", os, arch)
+    format!("{}; {}", os, node_arch())
 }
 
-/// Extra headers required by Qwen's DashScope OpenAI-compatible endpoint.
+/// Extra headers sent with every request to `portal.qwen.ai`.
 ///
-/// `portal.qwen.ai` aggressively fingerprints requests: any client that
-/// doesn't look like qwen-code-cli (same UA, same `x-stainless-*` SDK
-/// telemetry headers, same DashScope headers) gets either 400 or instant
-/// 429 rate-limited even with a valid OAuth token. Verified empirically
-/// by comparing our requests to qwen-cli's live traffic (captured via
-/// Node `--require` preload fetch interceptor): stripping the stainless
-/// headers causes instant rate-limit on a token that qwen-cli is
-/// happily using. We must match qwen-cli's header set exactly.
+/// These are the **exact four** headers that
+/// `DashScopeOpenAICompatibleProvider.buildHeaders()` emits in
+/// `@qwen-code/qwen-code`'s bundle (verified against
+/// `packages/core/dist/src/core/openaiContentGenerator/provider/dashscope.js`):
 ///
-/// - `X-DashScope-AuthType: qwen-oauth` — required, tells DashScope this is OAuth.
-/// - `X-DashScope-UserAgent: QwenCode/...` — required, must look like qwen-cli.
-/// - `X-DashScope-CacheControl: enable` — opts into ephemeral prompt caching.
-/// - `User-Agent: QwenCode/...` — also validated by the gateway.
-/// - `x-stainless-*` — OpenAI SDK telemetry, used by the gateway's
-///   anti-scraping fingerprint to identify "authentic" qwen-cli traffic.
+/// ```text
+/// User-Agent: QwenCode/<version> (<platform>; <arch>)
+/// X-DashScope-CacheControl: enable
+/// X-DashScope-UserAgent: QwenCode/<version> (<platform>; <arch>)
+/// X-DashScope-AuthType: qwen-oauth
+/// ```
 ///
-/// Platform-specific values (`arch`, `os`, UA tuple) are derived at
-/// runtime from `std::env::consts::{ARCH, OS}` so Linux/Windows/x86
-/// users don't present a macOS-arm64 fingerprint (which would still
-/// likely work but looks suspicious and could be filtered later).
+/// The `openai` npm SDK auto-injects its own `x-stainless-*` telemetry
+/// at runtime. We used to hardcode those values, but any byte-level
+/// mismatch with what the real node+openai-v5.x combo produces gets
+/// fingerprinted by the gateway and downgraded to a tight rate-limit
+/// bucket — even on a token the CLI is happily using. The safest
+/// behavior is to **not** send those headers at all and let the HTTP
+/// stack emit its natural defaults. DashScope only gates on the four
+/// headers above.
 pub fn qwen_extra_headers() -> Vec<(String, String)> {
     let ua = format!("QwenCode/{} ({})", QWEN_CLI_VERSION, user_agent_platform());
     vec![
+        ("User-Agent".to_string(), ua.clone()),
         ("X-DashScope-CacheControl".to_string(), "enable".to_string()),
-        ("X-DashScope-UserAgent".to_string(), ua.clone()),
+        ("X-DashScope-UserAgent".to_string(), ua),
         ("X-DashScope-AuthType".to_string(), "qwen-oauth".to_string()),
-        ("User-Agent".to_string(), ua),
-        // SDK telemetry headers matching `openai` npm package on Node.
-        ("x-stainless-arch".to_string(), stainless_arch().to_string()),
-        ("x-stainless-lang".to_string(), "js".to_string()),
-        ("x-stainless-os".to_string(), stainless_os().to_string()),
-        (
-            "x-stainless-package-version".to_string(),
-            OPENAI_SDK_VERSION.to_string(),
-        ),
-        ("x-stainless-retry-count".to_string(), "0".to_string()),
-        ("x-stainless-runtime".to_string(), "node".to_string()),
-        (
-            "x-stainless-runtime-version".to_string(),
-            NODE_RUNTIME_VERSION.to_string(),
-        ),
     ]
 }
 
@@ -855,89 +820,125 @@ fn qwen_prompt_id() -> String {
     format!("{:013x}", x & 0x000F_FFFF_FFFF_FFFF)
 }
 
-/// Convert a string `content` field into qwen-cli's array form
-/// `[{type: "text", text: "..."}]`, optionally tagging the part with
-/// `cache_control: {type: "ephemeral"}` for prompt caching.
-fn text_part_array(text: &str, cache_control: bool) -> serde_json::Value {
-    let mut part = serde_json::json!({ "type": "text", "text": text });
-    if cache_control {
-        part["cache_control"] = serde_json::json!({ "type": "ephemeral" });
+/// Vision-capable model identifiers recognized by qwen-cli's
+/// `DashScopeOpenAICompatibleProvider.isVisionModel()`. The exact set
+/// lives in the bundled CLI (`packages/core/.../provider/dashscope.js`):
+/// exact match on `coder-model`, or prefix on `qwen-vl`, `qwen3-vl-plus`,
+/// `qwen3.5-plus`.
+fn is_vision_model(model: &str) -> bool {
+    let m = model.to_ascii_lowercase();
+    if m == "coder-model" {
+        return true;
     }
-    serde_json::Value::Array(vec![part])
+    for prefix in ["qwen-vl", "qwen3-vl-plus", "qwen3.5-plus"] {
+        if m.starts_with(prefix) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Normalize an OpenAI `content` field to the array form qwen-cli uses
+/// when attaching cache control. Mirrors `normalizeContentToArray`:
+///   - `"hello"` → `[{"type":"text","text":"hello"}]`
+///   - existing array → returned as-is (multi-modal user messages)
+fn normalize_content_to_array(content: &serde_json::Value) -> Vec<serde_json::Value> {
+    match content {
+        serde_json::Value::String(s) => {
+            vec![serde_json::json!({ "type": "text", "text": s })]
+        }
+        serde_json::Value::Array(arr) => arr.clone(),
+        _ => Vec::new(),
+    }
+}
+
+/// Apply `cache_control: {type: "ephemeral"}` to the LAST part of the
+/// content array. Mirrors `addCacheControlToContentArray`.
+fn add_cache_control_to_content(content: &serde_json::Value) -> serde_json::Value {
+    let mut arr = normalize_content_to_array(content);
+    if let Some(last) = arr.last_mut()
+        && let Some(obj) = last.as_object_mut()
+    {
+        obj.insert(
+            "cache_control".to_string(),
+            serde_json::json!({ "type": "ephemeral" }),
+        );
+    }
+    serde_json::Value::Array(arr)
 }
 
 /// Rewrite a serialized OpenAI chat-completions body into the exact dialect
-/// that qwen-code-cli speaks against `portal.qwen.ai`. Verified by capturing
-/// qwen-cli's live traffic via a Node `--require` preload fetch interceptor
-/// and diffing field by field.
+/// that qwen-cli's `DashScopeOpenAICompatibleProvider.buildRequest` emits
+/// against `portal.qwen.ai`.
 ///
-/// Differences vs. vanilla OpenAI:
-///   1. `messages[].content` for `system` / `user` / `tool` is an array of
-///      `{type: "text", text: ...}` parts, not a string. Assistant messages
-///      keep `content` as a plain string (matches qwen-cli exactly).
-///   2. The system message's text part and the LAST user message's text part
-///      carry `cache_control: {type: "ephemeral"}` to opt into DashScope
-///      prompt caching. Without this we burn fresh-prompt quota every call.
-///   3. Top-level `metadata: {sessionId, promptId}` is added — qwen-cli
-///      includes these on every request and the gateway uses them for
-///      session quota and dedup.
-///   4. Top-level `vl_high_resolution_images: true` is added — qwen-cli
-///      always sets this even for text-only requests.
-///   5. Fields qwen-cli never sends are stripped: `temperature`, `top_p`,
-///      `tool_choice`, `max_completion_tokens`, `include_reasoning`. The
-///      gateway tolerates them but every extra field widens the fingerprint
-///      gap from qwen-cli and risks tighter rate limiting.
+/// Byte-for-byte behavior reference:
+/// `packages/core/dist/src/core/openaiContentGenerator/provider/dashscope.js`
+///
+/// Transforms applied:
+///   1. **Cache control** — `addDashScopeCacheControl(request, stream ? "all" : "system_only")`:
+///      - System message (if any): content array-ified, last part tagged
+///        `cache_control: {type: "ephemeral"}`.
+///      - If `stream === true`: the **last message regardless of role**
+///        gets the same treatment.
+///      - If `stream === true` AND there are tools: the **last tool** gets
+///        `cache_control: {type: "ephemeral"}` appended at the top level.
+///      - All other messages are left untouched (plain strings stay strings).
+///   2. **metadata** — `{sessionId, promptId}` added at the top level.
+///      (qwen-cli also includes `channel` if it has one; OpenCrabs doesn't
+///      surface a channel at this layer, so we omit it — the field is
+///      optional in the CLI too.)
+///   3. **vl_high_resolution_images: true** — added **only** when the
+///      model is in the vision list. Previously we added this unconditionally,
+///      which flagged text-only requests as non-cli traffic.
+///   4. **No field stripping.** `temperature`, `top_p`, `tool_choice`,
+///      `max_completion_tokens`, `include_reasoning` etc. pass through.
+///      DashScope's fingerprint expects these to be present when the
+///      client supplies them.
+///   5. **No forced max_tokens.** qwen-cli runs `applyOutputTokenLimit`
+///      which caps but never synthesizes the field. We leave it absent
+///      when the caller didn't provide one.
 pub fn qwen_body_transform(mut body: serde_json::Value) -> serde_json::Value {
     let obj = match body.as_object_mut() {
         Some(o) => o,
         None => return body,
     };
 
-    // 1+2. Rewrite messages.
+    // Streaming flag drives the cache-control scope: "all" (system + last
+    // message + last tool) vs. "system_only" (system only).
+    let is_streaming = obj.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    // ── 1. Cache control on messages ────────────────────────────────────
     if let Some(serde_json::Value::Array(messages)) = obj.get_mut("messages") {
-        // Find the index of the LAST user message so we can tag it with
-        // cache_control. Iterate from the back.
-        let last_user_idx = messages
-            .iter()
-            .rposition(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"));
+        let msg_count = messages.len();
+        if msg_count > 0 {
+            let system_idx = messages
+                .iter()
+                .position(|m| m.get("role").and_then(|r| r.as_str()) == Some("system"));
+            let last_idx = msg_count - 1;
 
-        for (i, msg) in messages.iter_mut().enumerate() {
-            let Some(msg_obj) = msg.as_object_mut() else {
-                continue;
-            };
-            let role = msg_obj
-                .get("role")
-                .and_then(|r| r.as_str())
-                .unwrap_or("")
-                .to_string();
-
-            // Assistant content stays as a plain string (or null if absent).
-            if role == "assistant" {
-                continue;
-            }
-
-            // Pull current content text out, defaulting to empty.
-            let current_text = match msg_obj.get("content") {
-                Some(serde_json::Value::String(s)) => s.clone(),
-                Some(serde_json::Value::Array(_)) => {
-                    // Already in array form (e.g. multi-modal user message);
-                    // leave it alone — converting twice would be lossy.
+            for (i, msg) in messages.iter_mut().enumerate() {
+                let should_cache = (Some(i) == system_idx) || (is_streaming && i == last_idx);
+                if !should_cache {
                     continue;
                 }
-                _ => String::new(),
-            };
-
-            let cache = match role.as_str() {
-                "system" => true,
-                "user" => Some(i) == last_user_idx,
-                _ => false, // tool messages: no cache_control marker
-            };
-
-            msg_obj.insert("content".to_string(), text_part_array(&current_text, cache));
+                let Some(msg_obj) = msg.as_object_mut() else {
+                    continue;
+                };
+                // Skip messages with null / missing content — qwen-cli
+                // returns them unchanged.
+                let content = match msg_obj.get("content") {
+                    Some(c) if !c.is_null() => c.clone(),
+                    _ => continue,
+                };
+                msg_obj.insert(
+                    "content".to_string(),
+                    add_cache_control_to_content(&content),
+                );
+            }
         }
     }
 
-    // 3. metadata
+    // ── 2. Metadata ─────────────────────────────────────────────────────
     obj.insert(
         "metadata".to_string(),
         serde_json::json!({
@@ -946,36 +947,22 @@ pub fn qwen_body_transform(mut body: serde_json::Value) -> serde_json::Value {
         }),
     );
 
-    // 4. vl_high_resolution_images
-    obj.insert(
-        "vl_high_resolution_images".to_string(),
-        serde_json::Value::Bool(true),
-    );
-
-    // 5. Strip fields qwen-cli never sends.
-    for k in [
-        "temperature",
-        "top_p",
-        "tool_choice",
-        "max_completion_tokens",
-        "include_reasoning",
-    ] {
-        obj.remove(k);
-    }
-
-    // 6. Force max_tokens = 32000 when absent. qwen-cli always sends this
-    //    exact value; omitting it widens the fingerprint gap.
-    if !obj.contains_key("max_tokens") {
+    // ── 3. vl_high_resolution_images (only for vision models) ───────────
+    let model = obj
+        .get("model")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if is_vision_model(&model) {
         obj.insert(
-            "max_tokens".to_string(),
-            serde_json::Value::Number(32000.into()),
+            "vl_high_resolution_images".to_string(),
+            serde_json::Value::Bool(true),
         );
     }
 
-    // 7. Tag the LAST tool with cache_control: {type: "ephemeral"}. qwen-cli
-    //    uses this as the third prompt-cache breakpoint (system + last-user +
-    //    last-tool). Without it we miss a cache tier on every tool-heavy call.
-    if let Some(serde_json::Value::Array(tools)) = obj.get_mut("tools")
+    // ── 4. Cache control on LAST tool (streaming only) ──────────────────
+    if is_streaming
+        && let Some(serde_json::Value::Array(tools)) = obj.get_mut("tools")
         && let Some(last) = tools.last_mut()
         && let Some(tool_obj) = last.as_object_mut()
     {
@@ -1060,12 +1047,37 @@ mod tests {
     }
 
     #[test]
-    fn extra_headers_include_dashscope() {
+    fn extra_headers_match_qwen_cli_exactly() {
+        // qwen-cli's DashScopeOpenAICompatibleProvider.buildHeaders() emits
+        // exactly these 4 headers. Any extras (x-stainless-*, etc.) were
+        // getting fingerprinted and downgraded to a tight rate-limit bucket.
         let h = qwen_extra_headers();
         let names: Vec<&str> = h.iter().map(|(k, _)| k.as_str()).collect();
-        assert!(names.contains(&"X-DashScope-CacheControl"));
-        assert!(names.contains(&"X-DashScope-AuthType"));
+        assert_eq!(h.len(), 4, "expected exactly 4 headers, got {:?}", names);
         assert!(names.contains(&"User-Agent"));
+        assert!(names.contains(&"X-DashScope-CacheControl"));
+        assert!(names.contains(&"X-DashScope-UserAgent"));
+        assert!(names.contains(&"X-DashScope-AuthType"));
+        // UA and X-DashScope-UserAgent must be identical byte strings.
+        let ua = h
+            .iter()
+            .find(|(k, _)| k == "User-Agent")
+            .map(|(_, v)| v.clone())
+            .unwrap();
+        let ds_ua = h
+            .iter()
+            .find(|(k, _)| k == "X-DashScope-UserAgent")
+            .map(|(_, v)| v.clone())
+            .unwrap();
+        assert_eq!(ua, ds_ua);
+        assert!(ua.starts_with("QwenCode/"));
+        // X-DashScope-AuthType: qwen-oauth
+        let auth = h
+            .iter()
+            .find(|(k, _)| k == "X-DashScope-AuthType")
+            .map(|(_, v)| v.clone())
+            .unwrap();
+        assert_eq!(auth, "qwen-oauth");
     }
 
     /// Baseline body resembling what OpenAIRequest serializes to for a small
@@ -1101,55 +1113,127 @@ mod tests {
     }
 
     #[test]
-    fn body_transform_rewrites_user_and_system_to_array_form() {
+    fn body_transform_cache_control_streaming_system_and_last_message() {
+        // Streaming body → cacheControl = "all". System gets cache_control
+        // on its last content part; the LAST message (index 3, a user)
+        // also gets cache_control. First user (index 1) and assistant
+        // (index 2) are left untouched as plain strings — qwen-cli does
+        // NOT array-ify non-cached messages.
         let out = qwen_body_transform(sample_body());
         let msgs = out.get("messages").and_then(|v| v.as_array()).unwrap();
-        // system: array with cache_control
+
+        // [0] system — array with cache_control on last part
         let sys = &msgs[0];
         assert_eq!(sys["role"], "system");
         assert!(sys["content"].is_array());
         assert_eq!(sys["content"][0]["type"], "text");
         assert_eq!(sys["content"][0]["cache_control"]["type"], "ephemeral");
-        // first user: array, NO cache_control (not the last)
+
+        // [1] first user — UNTOUCHED, still a plain string
         let u1 = &msgs[1];
-        assert!(u1["content"].is_array());
-        assert!(u1["content"][0].get("cache_control").is_none());
-        // assistant: stays as plain string
+        assert!(
+            u1["content"].is_string(),
+            "first user should stay as plain string, got {:?}",
+            u1["content"]
+        );
+
+        // [2] assistant — UNTOUCHED, still a plain string
         let asst = &msgs[2];
         assert!(asst["content"].is_string());
-        // last user: array WITH cache_control
+
+        // [3] last user (== last message overall) — array with cache_control
         let u2 = &msgs[3];
         assert!(u2["content"].is_array());
         assert_eq!(u2["content"][0]["cache_control"]["type"], "ephemeral");
     }
 
     #[test]
-    fn body_transform_strips_disallowed_fields() {
-        let out = qwen_body_transform(sample_body());
-        let obj = out.as_object().unwrap();
-        assert!(!obj.contains_key("temperature"));
-        assert!(!obj.contains_key("top_p"));
-        assert!(!obj.contains_key("tool_choice"));
-        assert!(!obj.contains_key("max_completion_tokens"));
-        assert!(!obj.contains_key("include_reasoning"));
+    fn body_transform_non_streaming_only_tags_system() {
+        // Non-streaming → cacheControl = "system_only". Last message is
+        // left untouched even though it's a user message.
+        let mut body = sample_body();
+        body["stream"] = serde_json::json!(false);
+        let out = qwen_body_transform(body);
+        let msgs = out.get("messages").and_then(|v| v.as_array()).unwrap();
+
+        // system still gets tagged
+        assert!(msgs[0]["content"].is_array());
+        assert_eq!(msgs[0]["content"][0]["cache_control"]["type"], "ephemeral");
+
+        // last message (user) untouched
+        assert!(msgs[3]["content"].is_string());
     }
 
     #[test]
-    fn body_transform_adds_metadata_and_vl_flag_and_max_tokens() {
+    fn body_transform_preserves_all_fields() {
+        // Verify we no longer strip temperature, top_p, tool_choice,
+        // max_completion_tokens, include_reasoning — DashScope expects
+        // these to pass through when the caller supplies them.
+        let out = qwen_body_transform(sample_body());
+        let obj = out.as_object().unwrap();
+        assert_eq!(obj.get("temperature"), Some(&serde_json::json!(0.7)));
+        assert_eq!(obj.get("top_p"), Some(&serde_json::json!(0.95)));
+        assert_eq!(obj.get("tool_choice"), Some(&serde_json::json!("auto")));
+        assert_eq!(
+            obj.get("max_completion_tokens"),
+            Some(&serde_json::json!(8192))
+        );
+        assert_eq!(obj.get("include_reasoning"), Some(&serde_json::json!(true)));
+    }
+
+    #[test]
+    fn body_transform_adds_metadata_with_session_and_prompt_ids() {
         let out = qwen_body_transform(sample_body());
         let meta = out.get("metadata").unwrap();
         assert!(meta["sessionId"].is_string());
         assert!(meta["promptId"].is_string());
-        assert_eq!(out["vl_high_resolution_images"], true);
-        assert_eq!(out["max_tokens"], 32000);
     }
 
     #[test]
-    fn body_transform_tags_only_last_tool_with_cache_control() {
+    fn body_transform_vl_flag_only_for_vision_models() {
+        // coder-model is in the vision list → flag present
+        let out = qwen_body_transform(sample_body());
+        assert_eq!(out["vl_high_resolution_images"], true);
+
+        // A non-vision model → flag absent (previously we forced it on)
+        let mut body = sample_body();
+        body["model"] = serde_json::json!("qwen3-32b");
+        let out = qwen_body_transform(body);
+        assert!(
+            out.as_object()
+                .unwrap()
+                .get("vl_high_resolution_images")
+                .is_none(),
+            "text-only model should not carry vl_high_resolution_images"
+        );
+    }
+
+    #[test]
+    fn body_transform_does_not_force_max_tokens() {
+        // qwen-cli never synthesizes max_tokens. Body without it should
+        // stay without it — previously we forced 32000 and widened the
+        // fingerprint gap.
+        let mut body = sample_body();
+        body.as_object_mut().unwrap().remove("max_tokens");
+        let out = qwen_body_transform(body);
+        assert!(out.as_object().unwrap().get("max_tokens").is_none());
+    }
+
+    #[test]
+    fn body_transform_tags_last_tool_only_when_streaming() {
+        // Streaming → last tool gets cache_control
         let out = qwen_body_transform(sample_body());
         let tools = out.get("tools").and_then(|v| v.as_array()).unwrap();
         assert!(tools[0].get("cache_control").is_none());
         assert_eq!(tools[1]["cache_control"]["type"], "ephemeral");
+
+        // Non-streaming → tools untouched
+        let mut body = sample_body();
+        body["stream"] = serde_json::json!(false);
+        let out = qwen_body_transform(body);
+        let tools = out.get("tools").and_then(|v| v.as_array()).unwrap();
+        assert!(tools[0].get("cache_control").is_none());
+        assert!(tools[1].get("cache_control").is_none());
     }
 
     #[test]
@@ -1161,11 +1245,13 @@ mod tests {
     }
 
     #[test]
-    fn body_transform_leaves_multimodal_user_untouched() {
-        // If a user message is already an array (multi-modal with image parts),
-        // the transform must not rewrite it.
+    fn body_transform_cache_control_on_multimodal_last_message() {
+        // Last message is already an array (multi-modal image+text user).
+        // Streaming → cache_control should be added to the LAST content
+        // part of that array, not destroy the existing structure.
         let body = serde_json::json!({
             "model": "coder-model",
+            "stream": true,
             "messages": [
                 { "role": "system", "content": "sys" },
                 {
@@ -1180,8 +1266,26 @@ mod tests {
         let out = qwen_body_transform(body);
         let msgs = out["messages"].as_array().unwrap();
         let u = &msgs[1];
-        assert_eq!(u["content"].as_array().unwrap().len(), 2);
-        assert_eq!(u["content"][1]["type"], "image_url");
+        let content = u["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2);
+        // original image_url part preserved + tagged with cache_control
+        // because it's the LAST part of the LAST message
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[1]["type"], "image_url");
+        assert_eq!(content[1]["cache_control"]["type"], "ephemeral");
+    }
+
+    #[test]
+    fn is_vision_model_matches_qwen_cli_list() {
+        assert!(is_vision_model("coder-model"));
+        assert!(is_vision_model("qwen-vl-max"));
+        assert!(is_vision_model("qwen-vl-max-latest"));
+        assert!(is_vision_model("qwen3-vl-plus"));
+        assert!(is_vision_model("qwen3.5-plus"));
+        assert!(is_vision_model("CODER-MODEL")); // case-insensitive
+        assert!(!is_vision_model("qwen3-32b"));
+        assert!(!is_vision_model("qwen-max"));
+        assert!(!is_vision_model(""));
     }
 
     #[test]
