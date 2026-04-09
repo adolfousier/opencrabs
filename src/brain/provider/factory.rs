@@ -313,10 +313,19 @@ fn try_create_custom_by_name(config: &Config, name: &str) -> Result<Option<Arc<d
     // API key is optional for local providers (LM Studio, Ollama, etc.)
     let api_key = custom_config.api_key.clone().unwrap_or_default();
 
-    let mut base_url = custom_config
-        .base_url
-        .clone()
-        .unwrap_or_else(|| "http://localhost:1234/v1/chat/completions".to_string());
+    // base_url is REQUIRED. Silently defaulting to localhost:1234 (LM Studio)
+    // produced channel-side errors like "failed to connect to localhost:1234"
+    // whenever a session had a stale/missing custom provider entry — the user
+    // saw the bot trying to reach a server they weren't running. Refuse to
+    // construct the provider without an explicit base_url so the caller can
+    // fall through to the next option (e.g. the global active provider).
+    let Some(mut base_url) = custom_config.base_url.clone() else {
+        tracing::warn!(
+            "Custom provider '{}' has no base_url configured — skipping (run /onboard:provider)",
+            name
+        );
+        return Ok(None);
+    };
 
     if !base_url.contains("/chat/completions") {
         base_url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
@@ -759,10 +768,16 @@ fn try_create_custom(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     // API key is optional for local providers (LM Studio, Ollama, etc.)
     let api_key = custom_config.api_key.clone().unwrap_or_default();
 
-    let mut base_url = custom_config
-        .base_url
-        .clone()
-        .unwrap_or_else(|| "http://localhost:1234/v1/chat/completions".to_string());
+    // Same rationale as try_create_custom_by_name: refuse to silently default
+    // to localhost:1234 so Discord / other channels don't hit a dead
+    // LM Studio URL the user never configured.
+    let Some(mut base_url) = custom_config.base_url.clone() else {
+        tracing::warn!(
+            "Custom provider '{}' has no base_url configured — skipping (run /onboard:provider)",
+            name
+        );
+        return Ok(None);
+    };
 
     // Auto-append /chat/completions if missing — all OpenAI-compatible APIs need it
     if !base_url.contains("/chat/completions") {
