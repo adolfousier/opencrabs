@@ -1527,15 +1527,32 @@ impl AgentService {
             if is_dialagram {
                 let mut stripped_bytes = 0usize;
                 let mut stripped_preview = String::new();
-                response.content.retain(|b| match b {
-                    ContentBlock::Text { text }
-                        if super::helpers::is_gaslighting_preamble(text) =>
-                    {
-                        stripped_bytes += text.len();
-                        if stripped_preview.is_empty() {
-                            stripped_preview = text.chars().take(80).collect::<String>();
+                response.content.retain_mut(|b| match b {
+                    ContentBlock::Text { text } => {
+                        // First try stripping just a leading preamble so
+                        // we keep any legitimate draft that follows the
+                        // gaslighting opener in the same block.
+                        if let Some(remainder) = super::helpers::strip_gaslighting_preamble(text) {
+                            let removed = text.len().saturating_sub(remainder.len());
+                            stripped_bytes += removed;
+                            if stripped_preview.is_empty() {
+                                stripped_preview = text.chars().take(80).collect::<String>();
+                            }
+                            if remainder.trim().is_empty() {
+                                return false;
+                            }
+                            *text = remainder;
+                            return true;
                         }
-                        false
+                        // Fallback: whole-block match (small pure refusals)
+                        if super::helpers::is_gaslighting_preamble(text) {
+                            stripped_bytes += text.len();
+                            if stripped_preview.is_empty() {
+                                stripped_preview = text.chars().take(80).collect::<String>();
+                            }
+                            return false;
+                        }
+                        true
                     }
                     _ => true,
                 });
