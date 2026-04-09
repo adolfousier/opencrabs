@@ -577,6 +577,15 @@ impl App {
                 // Qwen native: field 1 is auth/rotation area
                 use super::onboarding::QwenDeviceFlowStatus;
 
+                // Device flow in progress — ignore Enter
+                if matches!(
+                    self.ps.qwen_device_flow_status,
+                    QwenDeviceFlowStatus::RotationStep { .. }
+                        | QwenDeviceFlowStatus::WaitingForUser { .. }
+                ) {
+                    return Ok(());
+                }
+
                 // Handle signout confirmation during rotation
                 if matches!(
                     self.ps.qwen_device_flow_status,
@@ -592,18 +601,18 @@ impl App {
                     return Ok(());
                 }
 
-                // Already authenticated (single or rotation complete) → advance to model
+                // Rotation complete → advance to model
                 if matches!(
                     self.ps.qwen_device_flow_status,
-                    QwenDeviceFlowStatus::Complete | QwenDeviceFlowStatus::RotationComplete
-                ) || self.ps.has_existing_key
-                {
+                    QwenDeviceFlowStatus::RotationComplete
+                ) {
                     self.ps.focused_field = 2;
                     self.ps.selected_model = 0;
                     return Ok(());
                 }
 
-                // Start rotation or single auth flow
+                // Start rotation flow (even if already authenticated
+                // with one account — rotation needs N accounts)
                 if self.ps.qwen_rotation_enabled && self.ps.qwen_rotation_count >= 2 {
                     self.ps.qwen_rotation_collected.clear();
                     self.ps.qwen_rotation_current = 0;
@@ -614,6 +623,15 @@ impl App {
                     let cli_path = crate::brain::provider::qwen::QwenCredentials::qwen_cli_path();
                     let _ = std::fs::remove_file(&cli_path);
                     self.spawn_qwen_device_flow();
+                } else if matches!(
+                    self.ps.qwen_device_flow_status,
+                    QwenDeviceFlowStatus::Complete
+                ) || self.ps.has_existing_key
+                {
+                    // Single-account already authenticated → advance to model
+                    self.ps.focused_field = 2;
+                    self.ps.selected_model = 0;
+                    return Ok(());
                 } else {
                     self.ps.qwen_device_flow_status = QwenDeviceFlowStatus::WaitingForUser {
                         verification_uri: String::new(),

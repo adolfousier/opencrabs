@@ -451,6 +451,14 @@ impl OnboardingWizard {
                         self.ps.qwen_rotation_count = 10;
                     }
                     KeyCode::Enter => {
+                        // Device flow in progress — ignore Enter
+                        if matches!(
+                            self.ps.qwen_device_flow_status,
+                            QwenDeviceFlowStatus::RotationStep { .. }
+                                | QwenDeviceFlowStatus::WaitingForUser { .. }
+                        ) {
+                            return WizardAction::None;
+                        }
                         // Handle signout confirmation during rotation
                         if matches!(
                             self.ps.qwen_device_flow_status,
@@ -458,10 +466,27 @@ impl OnboardingWizard {
                         ) {
                             return WizardAction::QwenRotationNext;
                         }
-                        // Rotation complete or single-account complete → advance to model
+                        // Rotation complete → advance to model
                         if matches!(
                             self.ps.qwen_device_flow_status,
-                            QwenDeviceFlowStatus::Complete | QwenDeviceFlowStatus::RotationComplete
+                            QwenDeviceFlowStatus::RotationComplete
+                        ) {
+                            self.auth_field = AuthField::Model;
+                            self.ps.models.clear();
+                            self.ps.selected_model = 0;
+                            self.ps.config_models =
+                                crate::tui::provider_selector::load_default_models("qwen");
+                            return WizardAction::None;
+                        }
+                        // Start rotation flow (even if already authenticated
+                        // with one account — rotation needs N accounts)
+                        if self.ps.qwen_rotation_enabled && self.ps.qwen_rotation_count >= 2 {
+                            return WizardAction::QwenRotationFlow;
+                        }
+                        // Single-account complete → advance to model
+                        if matches!(
+                            self.ps.qwen_device_flow_status,
+                            QwenDeviceFlowStatus::Complete
                         ) || self.ps.has_existing_key_sentinel()
                         {
                             self.auth_field = AuthField::Model;
@@ -471,10 +496,7 @@ impl OnboardingWizard {
                                 crate::tui::provider_selector::load_default_models("qwen");
                             return WizardAction::None;
                         }
-                        // Start rotation or single device flow
-                        if self.ps.qwen_rotation_enabled && self.ps.qwen_rotation_count >= 2 {
-                            return WizardAction::QwenRotationFlow;
-                        }
+                        // Start single device flow
                         return WizardAction::QwenDeviceFlow;
                     }
                     KeyCode::Backspace | KeyCode::BackTab | KeyCode::Up => {

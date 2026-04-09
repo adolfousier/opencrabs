@@ -114,11 +114,25 @@ impl FallbackProvider {
     }
 
     /// Decide whether an error justifies trying the next provider in the
-    /// chain. Rate-limit, transient HTTP errors and 5xx warrant a swap.
-    /// Hard errors (auth, malformed request) surface directly — trying
-    /// a different provider won't fix bad credentials.
+    /// chain. Beyond transient errors (rate-limit, 5xx, timeout), we also
+    /// fall through on model/parameter mismatches — the fallback provider
+    /// may support the request after model remapping.
+    /// Hard auth errors (invalid key) surface directly.
     fn should_try_next(err: &ProviderError) -> bool {
-        err.is_retryable()
+        if err.is_retryable() {
+            return true;
+        }
+        match err {
+            // Model not supported by this provider — fallback may have it
+            ProviderError::ModelNotFound(_) => true,
+            // Invalid parameter / unsupported model returned as 400 —
+            // often means the model or parameter isn't valid for this
+            // specific provider but a fallback with remapping may work
+            ProviderError::ApiError { status: 400, .. } => true,
+            // InvalidRequest covers parsed model/param errors
+            ProviderError::InvalidRequest(_) => true,
+            _ => false,
+        }
     }
 }
 

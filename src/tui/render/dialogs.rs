@@ -308,6 +308,9 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     // Base URL(2) + API Key(2) + Model text(1) + Name(2) + Context Window(1) + spacing(2) + help(2) = 12
     let form_lines: u16 = if is_custom_selected {
         12
+    } else if provider_idx == 10 {
+        // Qwen: rotation toggle(2) + auth status(3) + model section(4) + footer(2) + padding(3)
+        14 + model_count as u16
     } else {
         4 + model_count as u16 + 4 // key/filter chrome + model list + footer
     };
@@ -498,18 +501,12 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
                 ),
                 Style::default().fg(Color::Cyan),
             )));
-            if app.ps.qwen_rotation_enabled && app.ps.focused_field == 1 {
-                lines.push(Line::from(Span::styled(
-                    "  Press 2-9 to set count (1 for 10)",
-                    Style::default()
-                        .fg(Color::DarkGray)
-                        .add_modifier(Modifier::ITALIC),
-                )));
-            }
             lines.push(Line::from(""));
         }
 
+        // "Authenticated" shortcut — only when NOT mid-rotation
         if app.ps.has_existing_key
+            && !app.ps.qwen_rotation_enabled
             && matches!(
                 app.ps.qwen_device_flow_status,
                 QwenDeviceFlowStatus::Idle | QwenDeviceFlowStatus::Complete
@@ -519,14 +516,6 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
                 "  ● Authenticated with Qwen",
                 Style::default().fg(Color::Green),
             )));
-            if app.ps.focused_field <= 1 {
-                lines.push(Line::from(Span::styled(
-                    "  Press Enter to continue to model selection",
-                    Style::default()
-                        .fg(Color::DarkGray)
-                        .add_modifier(Modifier::ITALIC),
-                )));
-            }
         } else {
             match &app.ps.qwen_device_flow_status {
                 QwenDeviceFlowStatus::Idle => {
@@ -535,11 +524,6 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
                         Style::default()
                             .fg(Color::DarkGray)
                             .add_modifier(Modifier::ITALIC),
-                    )));
-                    lines.push(Line::from(""));
-                    lines.push(Line::from(Span::styled(
-                        "  Press Enter to sign in with qwen.ai",
-                        Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
                     )));
                 }
                 QwenDeviceFlowStatus::WaitingForUser { verification_uri } => {
@@ -906,6 +890,37 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
             3 => vec![("[Type]", "Model name"), ("[Enter]", "Next")],
             4 => vec![("[Type]", "Provider name"), ("[Enter]", "Next")],
             5 => vec![("[Type]", "Context window (tokens)"), ("[Enter]", "Save")],
+            _ => vec![],
+        }
+    } else if provider_idx == 10 {
+        // Qwen native — field 1 is auth/rotation, not API key
+        match focused_field {
+            0 => vec![
+                ("[↑/↓]", "Select"),
+                ("[Enter]", "Next"),
+                ("[Tab]", "Skip to Model"),
+            ],
+            1 => {
+                let mut hints = vec![("[Space]", "Rotate")];
+                if app.ps.qwen_rotation_enabled {
+                    hints.push(("[2-9]", "#"));
+                }
+                hints.push((
+                    "[Enter]",
+                    if app.ps.has_existing_key {
+                        "Next"
+                    } else {
+                        "Sign In"
+                    },
+                ));
+                hints.push(("[Esc]", "Back"));
+                hints
+            }
+            2 => vec![
+                ("[Type]", "Filter"),
+                ("[↑/↓]", "Select"),
+                ("[Enter]", "Confirm"),
+            ],
             _ => vec![],
         }
     } else {
