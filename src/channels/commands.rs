@@ -54,7 +54,8 @@ pub fn sync_provider_for_session(
                     // unreachable URL — fall through to the global config.
                     tracing::warn!(
                         "Failed to restore session provider '{}': {} — falling back to active config provider",
-                        sess_prov, e
+                        sess_prov,
+                        e
                     );
                 }
             }
