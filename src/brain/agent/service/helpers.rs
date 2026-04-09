@@ -1025,6 +1025,51 @@ const GASLIGHTING_REFUSAL_PHRASES: &[&str] = &[
     "analyze it via url",
     "public url (imgur",
     "(imgur, github",
+    // "sandbox / tools acting up" family (2026-04-09 incident — model
+    // woke up on first round convinced it was in a sandboxed container
+    // and the tool layer was broken, while drafting the full answer
+    // right after the preamble).
+    "tools are acting up",
+    "tools are acting weird",
+    "tool layer is acting",
+    "does not exists errors",
+    "does not exist errors",
+    "errors across the board",
+    "getting errors across",
+    "getting \"does not exist",
+    "getting 'does not exist",
+    "tools seem to be down",
+    "tools seem broken",
+    "tool system is down",
+    "running in a sandbox",
+    "running in a sandboxed",
+    "sandboxed environment",
+    "sandboxed container",
+    "docker container with no",
+    "no tool access in",
+    // "still glitching / session weirdness" family (2026-04-09 second
+    // incident — model blamed a previous model-switch for tool failures
+    // while drafting the real answer in the same block).
+    "tools are still glitching",
+    "tools still glitching",
+    "tools are glitching",
+    "tool layer is glitching",
+    "session state got weird",
+    "session state is weird",
+    "from the model switch earlier",
+    "from the earlier model switch",
+    "from the earlier session state",
+    "turbulence from rapid model",
+    "turbulence from the model",
+    "some turbulence from",
+    "session had some turbulence",
+    "tools temporarily failing",
+    "temporarily failing due to",
+    "session state issues from model",
+    "had the issue context from the earlier fetch",
+    "have the issue context from the earlier",
+    "from the earlier fetch, so let me break",
+    "so let me break this down directly",
 ];
 
 /// Detect a gaslighting refusal preamble: short assistant text that lies
@@ -1102,4 +1147,42 @@ pub fn is_gaslighting_preamble(text: &str) -> bool {
         "analyse_image",
     ];
     IMAGE_CONTEXT.iter().any(|w| lower.contains(w))
+}
+
+/// Strip leading gaslighting paragraphs from a text block.
+///
+/// Splits `text` on blank lines and drops any LEADING paragraphs that
+/// match `is_gaslighting_preamble`, stopping at the first non-matching
+/// paragraph. Returns `Some(stripped_text)` if anything was removed, or
+/// `None` if the block is clean.
+///
+/// This exists because the model often emits ONE text block containing
+/// a gaslighting opener ("Tools are acting up right now…") followed by
+/// a full legitimate implementation draft. The old full-block strip
+/// either dropped the entire block (nuking the draft) or gave up
+/// because the block exceeded the 1500-char length guard used by
+/// `is_gaslighting_preamble`.
+pub fn strip_gaslighting_preamble(text: &str) -> Option<String> {
+    // Split on blank lines (paragraph boundaries). Use split_terminator
+    // so we preserve the trailing empty string semantics when needed.
+    let paragraphs: Vec<&str> = text.split("\n\n").collect();
+    if paragraphs.is_empty() {
+        return None;
+    }
+
+    let mut first_kept = 0usize;
+    for (idx, p) in paragraphs.iter().enumerate() {
+        if is_gaslighting_preamble(p) {
+            first_kept = idx + 1;
+        } else {
+            break;
+        }
+    }
+
+    if first_kept == 0 {
+        return None;
+    }
+
+    let remainder = paragraphs[first_kept..].join("\n\n");
+    Some(remainder.trim_start().to_string())
 }
