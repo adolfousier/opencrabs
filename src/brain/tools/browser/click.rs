@@ -24,7 +24,7 @@ impl Tool for BrowserClickTool {
     }
 
     fn description(&self) -> &str {
-        "Click an element on the page by CSS selector."
+        "Click an element on the page by CSS selector. Returns an automatic screenshot after the click."
     }
 
     fn input_schema(&self) -> Value {
@@ -72,6 +72,16 @@ impl Tool for BrowserClickTool {
             return Ok(ToolResult::error(format!("Click failed: {e}")));
         }
 
-        Ok(ToolResult::success(format!("Clicked element: {selector}")))
+        // Brief wait for page to settle after click (navigation, AJAX, animations)
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        let mut result = ToolResult::success(format!("Clicked element: {selector}"));
+
+        // Auto-screenshot: give the model vision of the page after clicking
+        if let Some(img) = self.manager.take_screenshot().await {
+            result.images.push(img);
+        }
+
+        Ok(result)
     }
 }

@@ -24,8 +24,9 @@ impl Tool for BrowserNavigateTool {
     }
 
     fn description(&self) -> &str {
-        "Navigate to a URL in the browser. Returns the page title and final URL \
-         (after redirects). Supports both headless and headed (visible) mode."
+        "Navigate to a URL in the browser. Returns the page title, final URL \
+         (after redirects), and an automatic screenshot of the page. \
+         Supports both headless and headed (visible) mode."
     }
 
     fn input_schema(&self) -> Value {
@@ -79,8 +80,13 @@ impl Tool for BrowserNavigateTool {
         let title = page.get_title().await.ok().flatten().unwrap_or_default();
         let final_url = page.url().await.ok().flatten().unwrap_or_default();
 
-        Ok(ToolResult::success(format!(
-            "Navigated to: {final_url}\nTitle: {title}"
-        )))
+        let mut result = ToolResult::success(format!("Navigated to: {final_url}\nTitle: {title}"));
+
+        // Auto-screenshot: give the model vision of the page after navigation
+        if let Some(img) = self.manager.take_screenshot().await {
+            result.images.push(img);
+        }
+
+        Ok(result)
     }
 }

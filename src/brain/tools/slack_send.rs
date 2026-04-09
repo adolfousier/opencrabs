@@ -24,6 +24,7 @@ impl SlackSendTool {
 }
 
 /// Extract a required non-empty string param, returning ToolResult::error on failure.
+#[allow(clippy::result_large_err)]
 fn get_str<'a>(input: &'a Value, key: &str) -> std::result::Result<&'a str, ToolResult> {
     match input.get(key).and_then(|v| v.as_str()) {
         Some(s) if !s.is_empty() => Ok(s),
@@ -34,6 +35,7 @@ fn get_str<'a>(input: &'a Value, key: &str) -> std::result::Result<&'a str, Tool
 }
 
 /// Unwrap channel id or return error ToolResult.
+#[allow(clippy::result_large_err)]
 fn channel_or_err(id: Option<String>) -> std::result::Result<String, ToolResult> {
     id.ok_or_else(|| {
         ToolResult::error(

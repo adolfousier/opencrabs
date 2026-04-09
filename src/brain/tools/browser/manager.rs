@@ -4,6 +4,7 @@
 //! browser, connects to a running instance when possible, or launches a new one.
 //! Manages named page sessions (tabs) for concurrent browsing.
 
+use base64::Engine;
 use chromiumoxide::browser::BrowserConfig;
 use chromiumoxide::{Browser, Page};
 use futures::StreamExt;
@@ -241,6 +242,25 @@ impl BrowserManager {
         if let Err(e) = page.evaluate(stealth_js).await {
             tracing::warn!("Stealth JS injection failed: {e}");
         }
+    }
+
+    /// Take a screenshot of the current page and return (media_type, base64_data).
+    /// Returns None if no page exists or screenshot fails — never errors out.
+    pub async fn take_screenshot(&self) -> Option<(String, String)> {
+        let inner = self.inner.lock().await;
+        let page = inner.pages.get("default")?;
+        let bytes = page
+            .screenshot(
+                chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotParams::builder()
+                    .format(
+                        chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png,
+                    )
+                    .build(),
+            )
+            .await
+            .ok()?;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        Some(("image/png".to_string(), b64))
     }
 
     /// Close a named page session.

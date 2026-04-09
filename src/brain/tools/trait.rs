@@ -96,6 +96,11 @@ pub struct ToolResult {
 
     /// Additional metadata
     pub metadata: HashMap<String, String>,
+
+    /// Optional images to include alongside the text result.
+    /// Each entry is (media_type, base64_data) — e.g. ("image/png", "<base64>").
+    /// These are sent as ContentBlock::Image blocks following the ToolResult.
+    pub images: Vec<(String, String)>,
 }
 
 impl ToolResult {
@@ -106,6 +111,7 @@ impl ToolResult {
             output,
             error: None,
             metadata: HashMap::new(),
+            images: Vec::new(),
         }
     }
 
@@ -116,7 +122,14 @@ impl ToolResult {
             output: String::new(),
             error: Some(error),
             metadata: HashMap::new(),
+            images: Vec::new(),
         }
+    }
+
+    /// Attach images to the result (sent as ContentBlock::Image alongside the tool result).
+    pub fn with_images(mut self, images: Vec<(String, String)>) -> Self {
+        self.images = images;
+        self
     }
 
     /// Add metadata
