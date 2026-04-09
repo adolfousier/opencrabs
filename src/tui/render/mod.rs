@@ -24,7 +24,6 @@ pub(crate) use tools::collapse_build_output;
 use super::app::App;
 use super::events::AppMode;
 use super::onboarding_render;
-use super::splash;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -46,22 +45,6 @@ use sessions::render_sessions;
 
 /// Render the entire UI
 pub fn render(f: &mut Frame, app: &mut App) {
-    if app.mode == AppMode::Splash || app.mode == AppMode::UpdatePrompt {
-        let config = match crate::config::Config::load() {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::error!("Failed to load config for splash: {e}");
-                return;
-            }
-        };
-        let (provider, model) = crate::config::resolve_provider_from_config(&config);
-        splash::render_splash(f, f.area(), provider, model);
-        if app.mode == AppMode::UpdatePrompt {
-            render_update_dialog(f, app, f.area());
-        }
-        return;
-    }
-
     if app.mode == AppMode::Onboarding {
         if let Some(ref wizard) = app.onboarding {
             onboarding_render::render_onboarding(f, wizard);
@@ -124,8 +107,8 @@ pub fn render(f: &mut Frame, app: &mut App) {
     };
 
     match app.mode {
-        AppMode::Splash | AppMode::Onboarding => {
-            // Handled by early returns above
+        AppMode::Onboarding => {
+            // Handled by early return above
         }
         AppMode::Chat => {
             if app.pane_manager.is_split() {
@@ -195,7 +178,18 @@ pub fn render(f: &mut Frame, app: &mut App) {
             render_restart_dialog(f, app, f.area());
         }
         AppMode::UpdatePrompt => {
-            // Handled by early return above (renders on top of splash)
+            // Overlay the update dialog on top of the normal chat UI.
+            if app.pane_manager.is_split() {
+                render_split_panes(f, app, chunks[0]);
+            } else {
+                render_chat(f, app, chunks[0]);
+            }
+            if plan_height > 0 {
+                render_plan_checklist(f, app, chunks[1]);
+            }
+            render_input(f, app, chunks[2]);
+            render_status_bar(f, app, chunks[3]);
+            render_update_dialog(f, app, f.area());
         }
     }
 }

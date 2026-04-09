@@ -293,8 +293,6 @@ pub struct ToolApprovalResponse {
 /// Application mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppMode {
-    /// Splash screen
-    Splash,
     /// Main chat interface (full execution)
     Chat,
     /// Session list/management
