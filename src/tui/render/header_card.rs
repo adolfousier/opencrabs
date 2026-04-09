@@ -23,20 +23,19 @@ use ratatui::{
 
 /// Render the header card centered within the given area (the chat region).
 pub(super) fn render_header_card(f: &mut Frame, app: &App, area: Rect) {
-    // The card has a target size — wide enough to fit the logo + tagline
-    // comfortably, but capped so it doesn't balloon to fill a large
-    // terminal. On tiny terminals we shrink instead.
-    const MAX_W: u16 = 88;
-    const MAX_H: u16 = 22;
+    // Size the card as a percentage of the chat area so it scales with
+    // the terminal. Clamp to sane min/max so it doesn't get swallowed on
+    // huge terminals or collapse on tiny ones.
     const MIN_W: u16 = 20;
     const MIN_H: u16 = 8;
+    const MAX_W: u16 = 120;
+    const MAX_H: u16 = 32;
 
-    // Leave a breathing gap so surrounding chat still peeks through.
-    let avail_w = area.width.saturating_sub(4);
-    let avail_h = area.height.saturating_sub(2);
+    let target_w = (area.width as u32 * 70 / 100) as u16;
+    let target_h = (area.height as u32 * 75 / 100) as u16;
 
-    let card_w = avail_w.min(MAX_W).max(MIN_W.min(avail_w));
-    let card_h = avail_h.min(MAX_H).max(MIN_H.min(avail_h));
+    let card_w = target_w.clamp(MIN_W.min(area.width), MAX_W);
+    let card_h = target_h.clamp(MIN_H.min(area.height), MAX_H);
 
     if card_w < MIN_W || card_h < MIN_H {
         return; // too small to render meaningfully
