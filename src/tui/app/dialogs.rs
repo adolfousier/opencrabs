@@ -311,26 +311,6 @@ impl App {
                     }
                     true
                 }
-                crossterm::event::KeyCode::Char(' ') if self.ps.selected_provider == 10 => {
-                    // Toggle Qwen rotation
-                    self.ps.qwen_rotation_enabled = !self.ps.qwen_rotation_enabled;
-                    if self.ps.qwen_rotation_enabled && self.ps.qwen_rotation_count < 2 {
-                        self.ps.qwen_rotation_count = 2;
-                    }
-                    false
-                }
-                crossterm::event::KeyCode::Char(c @ '2'..='9')
-                    if self.ps.selected_provider == 10 && self.ps.qwen_rotation_enabled =>
-                {
-                    self.ps.qwen_rotation_count = (c as usize) - ('0' as usize);
-                    false
-                }
-                crossterm::event::KeyCode::Char('1')
-                    if self.ps.selected_provider == 10 && self.ps.qwen_rotation_enabled =>
-                {
-                    self.ps.qwen_rotation_count = 10;
-                    false
-                }
                 _ => false,
             };
 
@@ -421,6 +401,23 @@ impl App {
                 });
                 self.ps.models.clear();
                 self.ps.selected_model = 0;
+            }
+        } else if self.ps.focused_field == 1 && self.ps.selected_provider == 10 {
+            // Qwen native: auth/rotation area (field 1)
+            match event.code {
+                crossterm::event::KeyCode::Char(' ') => {
+                    self.ps.qwen_rotation_enabled = !self.ps.qwen_rotation_enabled;
+                    if self.ps.qwen_rotation_enabled && self.ps.qwen_rotation_count < 2 {
+                        self.ps.qwen_rotation_count = 2;
+                    }
+                }
+                crossterm::event::KeyCode::Char(c @ '2'..='9') if self.ps.qwen_rotation_enabled => {
+                    self.ps.qwen_rotation_count = (c as usize) - ('0' as usize);
+                }
+                crossterm::event::KeyCode::Char('1') if self.ps.qwen_rotation_enabled => {
+                    self.ps.qwen_rotation_count = 10;
+                }
+                _ => {}
             }
         } else if self.ps.focused_field == 1 && is_zhipu {
             // z.ai GLM endpoint type toggle (field 1)
@@ -564,48 +561,6 @@ impl App {
             let is_cli_provider = matches!(self.ps.selected_provider, 7..=9);
 
             if self.ps.focused_field == 0 {
-                // Qwen: handle rotation signout confirmation
-                if self.ps.selected_provider == 10
-                    && matches!(
-                        self.ps.qwen_device_flow_status,
-                        super::onboarding::QwenDeviceFlowStatus::RotationSignout { .. }
-                    )
-                {
-                    let cli_path = crate::brain::provider::qwen::QwenCredentials::qwen_cli_path();
-                    let _ = std::fs::remove_file(&cli_path);
-                    let current = self.ps.qwen_rotation_current;
-                    let total = self.ps.qwen_rotation_count;
-                    self.ps.qwen_device_flow_status =
-                        super::onboarding::QwenDeviceFlowStatus::RotationStep { current, total };
-                    self.spawn_qwen_device_flow();
-                    return Ok(());
-                }
-
-                // Qwen native (idx 10) uses OAuth device flow. If no
-                // credentials exist yet, kick off rotation or single flow.
-                if self.ps.selected_provider == 10 && !self.ps.has_existing_key {
-                    if self.ps.qwen_rotation_enabled && self.ps.qwen_rotation_count >= 2 {
-                        self.ps.qwen_rotation_collected.clear();
-                        self.ps.qwen_rotation_current = 0;
-                        self.ps.qwen_device_flow_status =
-                            super::onboarding::QwenDeviceFlowStatus::RotationStep {
-                                current: 0,
-                                total: self.ps.qwen_rotation_count,
-                            };
-                        let cli_path =
-                            crate::brain::provider::qwen::QwenCredentials::qwen_cli_path();
-                        let _ = std::fs::remove_file(&cli_path);
-                        self.spawn_qwen_device_flow();
-                        return Ok(());
-                    }
-                    self.ps.qwen_device_flow_status =
-                        super::onboarding::QwenDeviceFlowStatus::WaitingForUser {
-                            verification_uri: String::new(),
-                        };
-                    self.spawn_qwen_device_flow();
-                    return Ok(());
-                }
-
                 // On provider field - save config, DON'T close dialog
                 // Map indices >= 12 back to 11 for save (custom provider)
                 let save_idx = self.ps.selected_provider.min(11);
@@ -617,6 +572,53 @@ impl App {
                 } else {
                     // CLI providers have no API key — skip straight to model field
                     self.ps.focused_field = if is_cli_provider { 2 } else { 1 };
+                }
+            } else if self.ps.focused_field == 1 && self.ps.selected_provider == 10 {
+                // Qwen native: field 1 is auth/rotation area
+                use super::onboarding::QwenDeviceFlowStatus;
+
+                // Handle signout confirmation during rotation
+                if matches!(
+                    self.ps.qwen_device_flow_status,
+                    QwenDeviceFlowStatus::RotationSignout { .. }
+                ) {
+                    let cli_path = crate::brain::provider::qwen::QwenCredentials::qwen_cli_path();
+                    let _ = std::fs::remove_file(&cli_path);
+                    let current = self.ps.qwen_rotation_current;
+                    let total = self.ps.qwen_rotation_count;
+                    self.ps.qwen_device_flow_status =
+                        QwenDeviceFlowStatus::RotationStep { current, total };
+                    self.spawn_qwen_device_flow();
+                    return Ok(());
+                }
+
+                // Already authenticated (single or rotation complete) → advance to model
+                if matches!(
+                    self.ps.qwen_device_flow_status,
+                    QwenDeviceFlowStatus::Complete | QwenDeviceFlowStatus::RotationComplete
+                ) || self.ps.has_existing_key
+                {
+                    self.ps.focused_field = 2;
+                    self.ps.selected_model = 0;
+                    return Ok(());
+                }
+
+                // Start rotation or single auth flow
+                if self.ps.qwen_rotation_enabled && self.ps.qwen_rotation_count >= 2 {
+                    self.ps.qwen_rotation_collected.clear();
+                    self.ps.qwen_rotation_current = 0;
+                    self.ps.qwen_device_flow_status = QwenDeviceFlowStatus::RotationStep {
+                        current: 0,
+                        total: self.ps.qwen_rotation_count,
+                    };
+                    let cli_path = crate::brain::provider::qwen::QwenCredentials::qwen_cli_path();
+                    let _ = std::fs::remove_file(&cli_path);
+                    self.spawn_qwen_device_flow();
+                } else {
+                    self.ps.qwen_device_flow_status = QwenDeviceFlowStatus::WaitingForUser {
+                        verification_uri: String::new(),
+                    };
+                    self.spawn_qwen_device_flow();
                 }
             } else if self.ps.focused_field == 1 && is_zhipu {
                 // z.ai GLM: field 1 is endpoint type, move to field 2 (api_key)

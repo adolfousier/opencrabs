@@ -716,48 +716,57 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
             ),
         ]));
     } else if wizard.ps.selected_provider == 10 {
-        // Qwen native — OAuth device flow
+        // Qwen native — OAuth device flow + rotation toggle
         use crate::tui::onboarding::QwenDeviceFlowStatus;
 
-        // Rotation toggle — always visible when Qwen is selected
-        let rotation_marker = if wizard.ps.qwen_rotation_enabled {
-            "[*]"
-        } else {
-            "[ ]"
-        };
-        lines.push(Line::from(Span::styled(
-            format!(
-                "  {} Account rotation (Space){} ",
-                rotation_marker,
-                if wizard.ps.qwen_rotation_enabled {
-                    format!("  Accounts: {}", wizard.ps.qwen_rotation_count)
-                } else {
-                    String::new()
-                }
-            ),
-            Style::default().fg(Color::Cyan),
-        )));
-        if wizard.ps.qwen_rotation_enabled {
+        // Rotation toggle (only shown in auth step, not provider list)
+        if wizard.auth_field == AuthField::ApiKey || wizard.auth_field == AuthField::Model {
+            let rotation_marker = if wizard.ps.qwen_rotation_enabled {
+                "[*]"
+            } else {
+                "[ ]"
+            };
             lines.push(Line::from(Span::styled(
-                "  Press 2-9 to set count (1 for 10)",
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::ITALIC),
+                format!(
+                    "  {} Account rotation (Space){}",
+                    rotation_marker,
+                    if wizard.ps.qwen_rotation_enabled {
+                        format!("  Accounts: {}", wizard.ps.qwen_rotation_count)
+                    } else {
+                        String::new()
+                    }
+                ),
+                Style::default().fg(Color::Cyan),
             )));
+            if wizard.ps.qwen_rotation_enabled && wizard.auth_field == AuthField::ApiKey {
+                lines.push(Line::from(Span::styled(
+                    "  Press 2-9 to set count (1 for 10)",
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::ITALIC),
+                )));
+            }
+            lines.push(Line::from(""));
         }
-        lines.push(Line::from(""));
 
-        if wizard.ps.has_existing_key_sentinel() {
+        if wizard.ps.has_existing_key_sentinel()
+            && matches!(
+                wizard.ps.qwen_device_flow_status,
+                QwenDeviceFlowStatus::Idle | QwenDeviceFlowStatus::Complete
+            )
+        {
             lines.push(Line::from(Span::styled(
                 "  ● Authenticated with Qwen",
                 Style::default().fg(Color::Green),
             )));
-            lines.push(Line::from(Span::styled(
-                "  Press Enter to continue, or re-authenticate below",
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::ITALIC),
-            )));
+            if wizard.auth_field == AuthField::ApiKey {
+                lines.push(Line::from(Span::styled(
+                    "  Press Enter to continue to model selection",
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::ITALIC),
+                )));
+            }
         } else {
             match &wizard.ps.qwen_device_flow_status {
                 QwenDeviceFlowStatus::Idle => {

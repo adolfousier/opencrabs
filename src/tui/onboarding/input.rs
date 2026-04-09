@@ -406,27 +406,10 @@ impl OnboardingWizard {
                         // Not yet authenticated — start device flow
                         return WizardAction::GitHubDeviceFlow;
                     } else if self.ps.selected_provider == 10 {
-                        // Qwen native: handle rotation signout confirmation
-                        if matches!(
-                            self.ps.qwen_device_flow_status,
-                            crate::tui::onboarding::QwenDeviceFlowStatus::RotationSignout { .. }
-                        ) {
-                            return WizardAction::QwenRotationNext;
-                        }
-                        // If already authenticated, advance to model
-                        if self.ps.has_existing_key_sentinel() {
-                            self.auth_field = AuthField::Model;
-                            self.ps.models.clear();
-                            self.ps.selected_model = 0;
-                            self.ps.config_models =
-                                crate::tui::provider_selector::load_default_models("qwen");
-                            return WizardAction::None;
-                        }
-                        // Not yet authenticated — start rotation or single flow
-                        if self.ps.qwen_rotation_enabled && self.ps.qwen_rotation_count >= 2 {
-                            return WizardAction::QwenRotationFlow;
-                        }
-                        return WizardAction::QwenDeviceFlow;
+                        // Qwen native: always go to ApiKey field first (shows
+                        // auth status + rotation toggle, like other providers
+                        // show their key field)
+                        self.auth_field = AuthField::ApiKey;
                     } else if self.ps.is_custom() {
                         self.auth_field = AuthField::CustomName;
                     } else if self.ps.is_cli() {
@@ -448,26 +431,61 @@ impl OnboardingWizard {
                         self.auth_field = AuthField::ApiKey;
                     }
                 }
-                KeyCode::Char(' ') if self.ps.selected_provider == 10 => {
-                    // Toggle Qwen rotation
-                    self.ps.qwen_rotation_enabled = !self.ps.qwen_rotation_enabled;
-                    if self.ps.qwen_rotation_enabled && self.ps.qwen_rotation_count < 2 {
-                        self.ps.qwen_rotation_count = 2;
-                    }
-                }
-                KeyCode::Char(c @ '2'..='9')
-                    if self.ps.selected_provider == 10 && self.ps.qwen_rotation_enabled =>
-                {
-                    self.ps.qwen_rotation_count = (c as usize) - ('0' as usize);
-                }
-                KeyCode::Char('1')
-                    if self.ps.selected_provider == 10 && self.ps.qwen_rotation_enabled =>
-                {
-                    // "10" — append 0 to make 10 if currently single digit
-                    self.ps.qwen_rotation_count = 10;
-                }
                 _ => {}
             },
+            AuthField::ApiKey if self.ps.selected_provider == 10 => {
+                // Qwen native: ApiKey field shows auth status + rotation toggle
+                use crate::tui::onboarding::QwenDeviceFlowStatus;
+                match event.code {
+                    KeyCode::Char(' ') => {
+                        // Toggle rotation
+                        self.ps.qwen_rotation_enabled = !self.ps.qwen_rotation_enabled;
+                        if self.ps.qwen_rotation_enabled && self.ps.qwen_rotation_count < 2 {
+                            self.ps.qwen_rotation_count = 2;
+                        }
+                    }
+                    KeyCode::Char(c @ '2'..='9') if self.ps.qwen_rotation_enabled => {
+                        self.ps.qwen_rotation_count = (c as usize) - ('0' as usize);
+                    }
+                    KeyCode::Char('1') if self.ps.qwen_rotation_enabled => {
+                        self.ps.qwen_rotation_count = 10;
+                    }
+                    KeyCode::Enter => {
+                        // Handle signout confirmation during rotation
+                        if matches!(
+                            self.ps.qwen_device_flow_status,
+                            QwenDeviceFlowStatus::RotationSignout { .. }
+                        ) {
+                            return WizardAction::QwenRotationNext;
+                        }
+                        // Rotation complete or single-account complete → advance to model
+                        if matches!(
+                            self.ps.qwen_device_flow_status,
+                            QwenDeviceFlowStatus::Complete | QwenDeviceFlowStatus::RotationComplete
+                        ) || self.ps.has_existing_key_sentinel()
+                        {
+                            self.auth_field = AuthField::Model;
+                            self.ps.models.clear();
+                            self.ps.selected_model = 0;
+                            self.ps.config_models =
+                                crate::tui::provider_selector::load_default_models("qwen");
+                            return WizardAction::None;
+                        }
+                        // Start rotation or single device flow
+                        if self.ps.qwen_rotation_enabled && self.ps.qwen_rotation_count >= 2 {
+                            return WizardAction::QwenRotationFlow;
+                        }
+                        return WizardAction::QwenDeviceFlow;
+                    }
+                    KeyCode::Backspace | KeyCode::BackTab | KeyCode::Up => {
+                        self.auth_field = AuthField::Provider;
+                    }
+                    KeyCode::Esc => {
+                        self.auth_field = AuthField::Provider;
+                    }
+                    _ => {}
+                }
+            }
             AuthField::ApiKey => match event.code {
                 KeyCode::Char(c) => {
                     // If existing key is loaded and user starts typing, clear it (replace mode)
