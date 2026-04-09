@@ -1189,6 +1189,10 @@ async fn handle_message(
         }
     }
 
+    // Track sent intermediate messages for dedup against final response
+    let sent_intermediates: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let sent_intermediates_final = sent_intermediates.clone();
+
     // Build progress callback — sends tool call status as Slack messages
     let progress_cb: crate::brain::agent::ProgressCallback = {
         use crate::brain::agent::ProgressEvent;
@@ -1200,8 +1204,6 @@ async fn handle_message(
         }
 
         let tools: Arc<Mutex<Vec<ToolEntry>>> = Arc::new(Mutex::new(Vec::new()));
-        let sent_intermediates: Arc<Mutex<Vec<String>>> =
-            Arc::new(Mutex::new(Vec::new()));
         let bot_token_cb = state.current_bot_token();
         let channel_cb = SlackChannelId::new(channel_id.clone());
         let client_cb = client.clone();
@@ -1303,7 +1305,7 @@ async fn handle_message(
                         if let Err(e) = session.chat_post_message(&req).await {
                             tracing::debug!("Slack: failed to send intermediate text: {}", e);
                         } else {
-                            sent_ref.lock().unwrap().push(text);
+                            sent_ref.lock().await.push(text);
                         }
                     });
                 }
@@ -1347,12 +1349,7 @@ async fn handle_message(
 
             // Dedup: strip text that was already sent as intermediate messages
             // to avoid duplicating content on Slack.
-            let sent = {
-                sent_intermediates
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .clone()
-            };
+            let sent = sent_intermediates_final.lock().await.clone();
             tracing::info!(
                 "Slack dedup: response.content len={}, sent_intermediates count={}",
                 text_only.len(),

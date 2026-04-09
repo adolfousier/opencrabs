@@ -199,7 +199,9 @@ impl TelegramAgent {
                                 // Agent-handled providers (OpenRouter 300+ models, custom)
                                 // Switch to default if set, then let the agent follow up.
                                 if resp.agent_handled {
-                                    let session_id = *shared_session.lock().await;
+                                    // Resolve session from the chat where the button was pressed,
+                                    // not from shared_session (which is the TUI session).
+                                    let session_id = resolve_callback_session(&query, &state, &shared_session).await;
                                     let display = crate::channels::commands::provider_display_name(provider_name);
                                     // Switch to this provider with its default model
                                     if let Ok(config) = crate::config::Config::load()
@@ -311,7 +313,9 @@ impl TelegramAgent {
                                 let (switch_ok, display_text) = if let Some(err) = provider_err {
                                     (false, format!("⚠️ {}", err))
                                 } else {
-                                    let session_id = *shared_session.lock().await;
+                                    // Resolve session from the chat where the button was pressed,
+                                    // not from shared_session (which is the TUI session).
+                                    let session_id = resolve_callback_session(&query, &state, &shared_session).await;
                                     match crate::channels::commands::switch_model(&agent, model_name, session_id).await {
                                         Ok(_) => (true, format!("✅ Model switched to <code>{}</code>", model_name)),
                                         Err(e) => (false, format!("⚠️ {}", e)),
@@ -483,6 +487,29 @@ impl TelegramAgent {
             }
         })
     }
+}
+
+/// Resolve the correct session ID for a callback query.
+///
+/// Callbacks from inline buttons (e.g. `/models` picker) fire in the chat
+/// where the button was pressed. We look up the session that's registered for
+/// that chat — this is the session the message handler resolved. Only falls
+/// back to the shared TUI session when no chat→session mapping exists (e.g.
+/// first-ever interaction before any message was processed).
+async fn resolve_callback_session(
+    query: &CallbackQuery,
+    state: &super::TelegramState,
+    shared_session: &tokio::sync::Mutex<Option<Uuid>>,
+) -> Option<Uuid> {
+    // Try to get the session registered for this chat
+    if let Some(msg) = &query.message {
+        let chat_id = msg.chat().id.0;
+        if let Some(session_id) = state.chat_session(chat_id).await {
+            return Some(session_id);
+        }
+    }
+    // Fallback: shared TUI session (owner DMs before any message handler ran)
+    *shared_session.lock().await
 }
 
 /// Register bot commands with Telegram so they appear in the `/` menu.
