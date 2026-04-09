@@ -1534,7 +1534,18 @@ pub(crate) async fn handle_message(
                         sent.len()
                     );
                 }
-                result
+                // If dedup stripped everything, send the full response anyway.
+                // The intermediates were streaming updates; the final response
+                // should still be delivered even if it overlaps.
+                if result.is_empty() {
+                    tracing::warn!(
+                        "Telegram dedup: result empty after stripping intermediates, sending full response (len={})",
+                        text_only.len()
+                    );
+                    text_only
+                } else {
+                    result
+                }
             } else {
                 tracing::info!("Telegram dedup: no intermediates to strip");
                 text_only
