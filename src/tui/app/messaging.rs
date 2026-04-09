@@ -769,7 +769,21 @@ impl App {
                 let lang = ci(tool_input, "language")
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
-                format!("Execute {}", lang)
+                let code = ci(tool_input, "code")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if code.is_empty() {
+                    format!("Execute {}", lang)
+                } else {
+                    // Show first line of code for context
+                    let first_line = code.lines().next().unwrap_or(code);
+                    let truncated = if first_line.len() > 80 {
+                        format!("{}…", &first_line[..80])
+                    } else {
+                        first_line.to_string()
+                    };
+                    format!("{}: {}", lang, truncated)
+                }
             }
             "notebook_edit" => {
                 let path = ci(tool_input, "notebook_path")
