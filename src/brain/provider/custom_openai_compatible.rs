@@ -2113,6 +2113,10 @@ impl Provider for OpenAIProvider {
         &self.name
     }
 
+    fn base_url(&self) -> Option<&str> {
+        Some(&self.base_url)
+    }
+
     fn default_model(&self) -> &str {
         self.custom_default_model.as_deref().unwrap_or_else(|| {
             tracing::error!(

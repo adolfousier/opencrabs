@@ -256,6 +256,13 @@ impl Provider for FallbackProvider {
         self.primary.name()
     }
 
+    fn base_url(&self) -> Option<&str> {
+        // Forward the primary's base_url so features that identify specific
+        // proxies by URL (e.g. dialagram gaslighting strip) keep working even
+        // when the provider is wrapped in a fallback chain.
+        self.primary.base_url()
+    }
+
     fn default_model(&self) -> &str {
         self.primary.default_model()
     }

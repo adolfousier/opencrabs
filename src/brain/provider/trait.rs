@@ -68,6 +68,15 @@ pub trait Provider: Send + Sync {
     /// Get the provider name
     fn name(&self) -> &str;
 
+    /// Base URL this provider sends requests to. Returns `None` for
+    /// providers that use hardcoded endpoints; `Some(url)` for custom
+    /// OpenAI-compatible providers where the user configured the host.
+    /// Used to identify specific proxies by URL regardless of what the
+    /// user named them in config.
+    fn base_url(&self) -> Option<&str> {
+        None
+    }
+
     /// Get the default model for this provider
     fn default_model(&self) -> &str;
 
