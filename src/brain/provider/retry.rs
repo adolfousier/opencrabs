@@ -75,19 +75,23 @@ impl RetryConfig {
         }
     }
 
-    /// Mirrors qwen-cli's `DEFAULT_RETRY_OPTIONS` for the DashScope OAuth
-    /// transport: 7 attempts, 1.5s initial, 30s cap, 2× backoff with ±30%
+    /// Mirrors qwen-cli's OpenAI SDK retry behaviour for the DashScope OAuth
+    /// transport: 3 retries, 500ms initial, 8s cap, 2× backoff with 25%
     /// jitter, and 429s are retried in-place (Retry-After honored) instead
     /// of bailing to fallback. Qwen's shared-key upstream briefly closes its
     /// window after 2–3 tool calls then reopens within seconds; retrying in
     /// place matches the CLI and keeps the session on the healthy route.
+    ///
+    /// These values are taken directly from the OpenAI Node SDK used by
+    /// qwen-code-cli v0.14: initialRetryDelay=0.5s, maxRetryDelay=8s,
+    /// maxRetries=3, jitter=0.25.
     pub fn qwen_cli_match() -> Self {
         Self {
-            max_attempts: 7,
-            initial_delay: Duration::from_millis(1500),
-            max_delay: Duration::from_secs(30),
+            max_attempts: 3,
+            initial_delay: Duration::from_millis(500),
+            max_delay: Duration::from_secs(8),
             backoff_multiplier: 2.0,
-            jitter: 0.3,
+            jitter: 0.25,
             retry_on_rate_limit: true,
         }
     }
@@ -252,8 +256,8 @@ pub fn extract_retry_after(error: &ProviderError) -> Option<Duration> {
             if let Some(secs) = parse_retry_seconds(msg) {
                 return Some(Duration::from_secs(secs));
             }
-            // Default to 1 minute if no specific time found
-            Some(Duration::from_secs(60))
+            // No parseable hint — let exponential backoff decide
+            None
         }
         ProviderError::ApiError {
             status, message, ..
@@ -261,7 +265,8 @@ pub fn extract_retry_after(error: &ProviderError) -> Option<Duration> {
             if let Some(secs) = parse_retry_seconds(message) {
                 return Some(Duration::from_secs(secs));
             }
-            Some(Duration::from_secs(60))
+            // No parseable hint — let exponential backoff decide
+            None
         }
         _ => None,
     }
