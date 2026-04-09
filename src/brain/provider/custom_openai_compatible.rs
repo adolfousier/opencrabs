@@ -55,14 +55,32 @@ const STRIP_CLOSE_TAGS: &[&[&str]] = &[
 /// for a close tag that is not coming.
 const THINK_BLOCK_MAX_BYTES: usize = 400;
 
+/// Longest open-tag-prefix we may have to hold back between chunks so
+/// an open tag split across chunk boundaries still gets detected.
+/// `"<!-- reasoning -->"` is the longest entry, but we only need to
+/// carry up to `len(open_tag) - 1` bytes of it to bridge a split.
+const MAX_OPEN_TAG_CARRY: usize = 17;
+
 fn filter_think_tags(
     text: &str,
     inside_think: &mut bool,
     active_close_tag: &mut usize,
     bytes_consumed: &mut usize,
+    carry: &mut String,
 ) -> String {
+    // Prepend any carry-over from the previous chunk so a split open
+    // tag (e.g. prior chunk ended with `<!`, current chunk starts with
+    // `-- tools-v2:`) can match as one unit.
+    let mut owned: String;
+    let input_ref: &str = if carry.is_empty() {
+        text
+    } else {
+        owned = std::mem::take(carry);
+        owned.push_str(text);
+        owned.as_str()
+    };
     let mut result = String::new();
-    let mut remaining = text;
+    let mut remaining = input_ref;
 
     loop {
         if *inside_think {
@@ -118,13 +136,45 @@ fn filter_think_tags(
                 *active_close_tag = tag_idx;
                 *bytes_consumed = 0;
             } else {
-                result.push_str(remaining);
+                // Before emitting `remaining` as final output, check if its
+                // tail could be the leading prefix of an open tag that gets
+                // completed by the next chunk. If so, move those bytes to
+                // the carry instead of emitting them.
+                let tail_keep = open_tag_prefix_len(remaining);
+                if tail_keep > 0 {
+                    let split_at = remaining.len() - tail_keep;
+                    result.push_str(&remaining[..split_at]);
+                    carry.push_str(&remaining[split_at..]);
+                } else {
+                    result.push_str(remaining);
+                }
                 break;
             }
         }
     }
 
     result
+}
+
+/// Return how many trailing bytes of `s` look like the beginning of any
+/// STRIP_OPEN_TAGS entry (but not a full match). These are withheld as
+/// carry so the open-tag detector can see the full tag on the next chunk.
+fn open_tag_prefix_len(s: &str) -> usize {
+    if s.is_empty() {
+        return 0;
+    }
+    let max_len = MAX_OPEN_TAG_CARRY.min(s.len());
+    // Longest-match-first — we want the largest prefix that's a real
+    // proper prefix of some open tag.
+    for take in (1..=max_len).rev() {
+        let suffix = &s[s.len() - take..];
+        for open in STRIP_OPEN_TAGS {
+            if open.len() > suffix.len() && open.starts_with(suffix) {
+                return take;
+            }
+        }
+    }
+    0
 }
 
 /// Strip complete reasoning/markup blocks from non-streaming content.
@@ -1649,6 +1699,11 @@ impl Provider for OpenAIProvider {
             /// content through — the model likely hallucinated an open tag
             /// without a matching close (e.g. `<!-- tools-v2: ...` with no `-->`).
             think_bytes_consumed: usize,
+            /// Bytes withheld from the previous chunk because they could be
+            /// the start of a split open tag (e.g. chunk ended with `<!`,
+            /// which could become `<!--`). Prepended to the next chunk so
+            /// the open-tag finder can match across chunk boundaries.
+            think_carry: String,
             /// Stashed stop_reason from finish_reason chunk, emitted with
             /// the final usage-only chunk (MiniMax/OpenAI include_usage flow).
             pending_stop_reason: Option<crate::brain::provider::types::StopReason>,
@@ -1663,6 +1718,7 @@ impl Provider for OpenAIProvider {
             inside_think: false,
             active_close_tag: 0,
             think_bytes_consumed: 0,
+            think_carry: String::new(),
             pending_stop_reason: None,
         }));
 
@@ -1926,10 +1982,18 @@ impl Provider for OpenAIProvider {
                                             } else {
                                             let (mut inside, mut close_idx, mut consumed) =
                                                 (st.inside_think, st.active_close_tag, st.think_bytes_consumed);
-                                            let filtered = filter_think_tags(c, &mut inside, &mut close_idx, &mut consumed);
+                                            let mut carry = std::mem::take(&mut st.think_carry);
+                                            let filtered = filter_think_tags(
+                                                c,
+                                                &mut inside,
+                                                &mut close_idx,
+                                                &mut consumed,
+                                                &mut carry,
+                                            );
                                             st.inside_think = inside;
                                             st.active_close_tag = close_idx;
                                             st.think_bytes_consumed = consumed;
+                                            st.think_carry = carry;
 
                                             if !filtered.is_empty() {
                                                 if !st.emitted_content_start {
