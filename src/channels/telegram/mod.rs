@@ -27,6 +27,8 @@ pub struct TelegramState {
     bot_username: Mutex<Option<String>>,
     /// Maps session_id → Telegram chat_id for approval routing
     session_chats: Mutex<HashMap<Uuid, i64>>,
+    /// Reverse map: chat_id → session_id (kept in sync with session_chats)
+    chat_sessions: Mutex<HashMap<i64, Uuid>>,
     /// Pending approval channels: approval_id → oneshot sender of (approved, always).
     pending_approvals: Mutex<HashMap<String, oneshot::Sender<(bool, bool)>>>,
     /// Per-session cancel tokens for aborting in-flight agent tasks via /stop
@@ -46,6 +48,7 @@ impl TelegramState {
             owner_chat_id: Mutex::new(None),
             bot_username: Mutex::new(None),
             session_chats: Mutex::new(HashMap::new()),
+            chat_sessions: Mutex::new(HashMap::new()),
             pending_approvals: Mutex::new(HashMap::new()),
             cancel_tokens: Mutex::new(HashMap::new()),
         }
@@ -87,13 +90,22 @@ impl TelegramState {
     }
 
     /// Record which chat_id corresponds to a given session (for approval routing).
+    /// Also maintains a reverse map so callbacks can resolve session from chat.
     pub async fn register_session_chat(&self, session_id: Uuid, chat_id: i64) {
         self.session_chats.lock().await.insert(session_id, chat_id);
+        self.chat_sessions.lock().await.insert(chat_id, session_id);
     }
 
     /// Look up the chat_id for a given session_id.
     pub async fn session_chat(&self, session_id: Uuid) -> Option<i64> {
         self.session_chats.lock().await.get(&session_id).copied()
+    }
+
+    /// Reverse lookup: find the session_id for a given chat_id.
+    /// Used by callback handlers to resolve the correct session for the chat
+    /// where a button was pressed (instead of using the shared TUI session).
+    pub async fn chat_session(&self, chat_id: i64) -> Option<Uuid> {
+        self.chat_sessions.lock().await.get(&chat_id).copied()
     }
 
     /// Register a pending approval channel by id.
