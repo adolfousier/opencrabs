@@ -479,45 +479,54 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     if provider_idx == 10 {
         use crate::tui::onboarding::QwenDeviceFlowStatus;
 
-        // Rotation toggle — always visible when Qwen is selected
-        let rotation_marker = if app.ps.qwen_rotation_enabled {
-            "[*]"
-        } else {
-            "[ ]"
-        };
-        lines.push(Line::from(Span::styled(
-            format!(
-                "  {} Account rotation (Space){} ",
-                rotation_marker,
-                if app.ps.qwen_rotation_enabled {
-                    format!("  Accounts: {}", app.ps.qwen_rotation_count)
-                } else {
-                    String::new()
-                }
-            ),
-            Style::default().fg(Color::Cyan),
-        )));
-        if app.ps.qwen_rotation_enabled {
+        // Rotation toggle — only in auth area (focused_field >= 1), not provider list
+        if app.ps.focused_field >= 1 {
+            let rotation_marker = if app.ps.qwen_rotation_enabled {
+                "[*]"
+            } else {
+                "[ ]"
+            };
             lines.push(Line::from(Span::styled(
-                "  Press 2-9 to set count (1 for 10)",
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::ITALIC),
+                format!(
+                    "  {} Account rotation (Space){}",
+                    rotation_marker,
+                    if app.ps.qwen_rotation_enabled {
+                        format!("  Accounts: {}", app.ps.qwen_rotation_count)
+                    } else {
+                        String::new()
+                    }
+                ),
+                Style::default().fg(Color::Cyan),
             )));
+            if app.ps.qwen_rotation_enabled && app.ps.focused_field == 1 {
+                lines.push(Line::from(Span::styled(
+                    "  Press 2-9 to set count (1 for 10)",
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::ITALIC),
+                )));
+            }
+            lines.push(Line::from(""));
         }
-        lines.push(Line::from(""));
 
-        if app.ps.has_existing_key {
+        if app.ps.has_existing_key
+            && matches!(
+                app.ps.qwen_device_flow_status,
+                QwenDeviceFlowStatus::Idle | QwenDeviceFlowStatus::Complete
+            )
+        {
             lines.push(Line::from(Span::styled(
                 "  ● Authenticated with Qwen",
                 Style::default().fg(Color::Green),
             )));
-            lines.push(Line::from(Span::styled(
-                "  Press Enter to continue, or re-authenticate",
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::ITALIC),
-            )));
+            if app.ps.focused_field <= 1 {
+                lines.push(Line::from(Span::styled(
+                    "  Press Enter to continue to model selection",
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::ITALIC),
+                )));
+            }
         } else {
             match &app.ps.qwen_device_flow_status {
                 QwenDeviceFlowStatus::Idle => {
