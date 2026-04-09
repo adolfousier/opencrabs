@@ -229,9 +229,6 @@ async fn run_loop(
                 }
             }
             // Apply coalesced scroll as a single operation
-            if pending_scroll != 0 {
-                app.header_card_shown_at = None;
-            }
             if pending_scroll > 0 {
                 app.scroll_offset = app.scroll_offset.saturating_add(pending_scroll as usize);
             } else if pending_scroll < 0 {

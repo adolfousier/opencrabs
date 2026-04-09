@@ -4,7 +4,7 @@
 
 mod chat;
 mod dialogs;
-mod header_card;
+
 mod help;
 mod input;
 mod panes;
@@ -126,11 +126,6 @@ pub fn render(f: &mut Frame, app: &mut App) {
                 render_slash_autocomplete(f, app, chunks[2]);
             } else if app.emoji_picker_active {
                 render_emoji_picker(f, app, chunks[2]);
-            }
-            // Header card overlays the chat area on launch — 500ms timer
-            // is enforced by the event loop; we only check presence here.
-            if app.header_card_shown_at.is_some() {
-                header_card::render_header_card(f, app, chunks[0]);
             }
         }
         AppMode::Sessions => {

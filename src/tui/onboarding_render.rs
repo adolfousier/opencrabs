@@ -31,6 +31,28 @@ pub fn render_onboarding(f: &mut Frame, wizard: &OnboardingWizard) {
     // Header
     let step = wizard.step;
     if step != OnboardingStep::Complete && !wizard.quick_jump {
+        // Show logo + tagline on the first step only
+        if step == OnboardingStep::ModeSelect {
+            let logo_style = Style::default().fg(BRAND_GOLD).add_modifier(Modifier::BOLD);
+            for logo_line in [
+                "   ___                    ___           _",
+                "  / _ \\ _ __  ___ _ _    / __|_ _ __ _| |__  ___",
+                " | (_) | '_ \\/ -_) ' \\  | (__| '_/ _` | '_ \\(_-<",
+                r"  \___/| .__/\___|_||_|  \___|_| \__,_|_.__//__/",
+                "       |_|",
+            ] {
+                lines.push(Line::from(Span::styled(logo_line.to_string(), logo_style)));
+            }
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "\u{1f980} The autonomous AI agent. Self-improving. Every channel.",
+                Style::default()
+                    .fg(BRAND_GOLD)
+                    .add_modifier(Modifier::ITALIC),
+            )));
+            lines.push(Line::from(""));
+        }
+
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             render_progress_dots(&step),

@@ -15,6 +15,11 @@ Also ships the **native Qwen OAuth provider** with opt-in Qwen3 hybrid
 thinking mode and a full round of prompt caching across Anthropic /
 OpenRouter / Gemini / Qwen DashScope.
 
+Post-release work adds a **brand new TUI startup experience** (splash screen
+replaced by an animated header card overlaying the chat), drag-to-select
+text, panic recovery, gaslighting refusal stripping, and a dozen input/render
+fixes.
+
 > ⚠️ **Known limitations**
 >
 > - **Qwen OAuth** still hits upstream rate limits intermittently even with
@@ -75,9 +80,54 @@ OpenRouter / Gemini / Qwen DashScope.
   DashScope cache + reasoning token fields, so the context window display
   reflects real usage across cache-aware providers (`d973808`).
 
-#### TUI
-- **Drag-to-select text with auto-copy to clipboard** — native mouse
-  selection in the TUI, auto-copies the selection on release (`40e9279`).
+#### TUI — header card replacing splash screen
+- **Splash mode removed** — app now starts directly in chat with the last
+  session loaded, so user input is available immediately (`e637e4a`).
+- **Header card overlay** — animated card replaces the old splash screen,
+  overlaying the top of the chat history, then vanishes like the splash
+  did. Responsive layout, padding, and wrapping (`76791af`, `8368f97`).
+- **Card sizing** — scales as 70% of chat area, capped and centered to
+  avoid overwhelming small terminals (`1e7eb5a`, `1094832`, `5f4bc72`).
+- **Full startup banner** — `opencrabs` prints the complete banner to the
+  terminal on startup and exit, visible in scrollback even when the card
+  vanishes (`08470bc`).
+- **Help screen shows version** — `/help` now displays the current version,
+  provider, and model (`fe3a49a`).
+- **App title shortened** to "OpenCrabs AI Agent" for cleaner card display
+  (`0e116dd`).
+- **Async session load** — session messages load asynchronously on startup
+  for instant first paint instead of blocking render (`66512ee`).
+
+#### TUI — input, rendering, and interaction
+- **Drag-to-select text with auto-copy** — native mouse selection in the
+  TUI, auto-copies the selection on release (`40e9279`).
+- **O(N) input render + scroll-to-cursor** — tall pastes no longer cause
+  quadratic render cost; cursor position preserved on long inputs
+  (`c05f809`).
+- **Line navigation inside recalled multiline** — pressing Up/Down inside
+  a multi-line history-recalled input navigates lines instead of wiping
+  the whole buffer (`5f97d90`, `ee718e5`).
+- **Emoji cursor rendering** — grapheme cluster extraction for the cursor
+  so multi-byte emoji are highlighted correctly (`6df5774`).
+- **Panic recovery** — TUI recovers from render panics and clamps title
+  splits instead of crashing (`3460d1b`).
+- **SoftBreak as space** — markdown soft breaks now render as a single
+  space instead of a hard line break (`e81c62c`).
+
+#### Self-healing gaslighting strip
+- **Mid-turn refusal preamble strip** — reasoning models (dialagram,
+  qwen-3.6-plus-thinking, etc.) that inject "I can't use tools right now"
+  or similar refusal text mid-stream now have those paragraphs stripped
+  before the reply reaches the user (`531f172`).
+- **Per-paragraph strip + new refusal phrases** — extended phrase list
+  covering tool-registry family denials, applied per-paragraph so partial
+  refusals don't nuke the entire response (`bebd951`, `df51c3c`).
+- **Dialagram refusal detection mid-stream** — detects `<think>`-adjacent
+  refusal patterns that fire alongside tool calls and strips them inline
+  (`2d80119`).
+- **Cross-chunk `tool_calls` leak detection** — detects and surgically
+  strips leaked `tool_calls` JSON that some routers inject across SSE chunk
+  boundaries (`ff1ff22`, `b9adfb4`).
 
 ### Changed
 
@@ -104,6 +154,15 @@ OpenRouter / Gemini / Qwen DashScope.
   through `resolve_tool_path()`, normalising tilde expansion,
   relative-to-working-dir, and symlink handling in one place instead of
   eight copies (`9898aee`).
+- **Provider base_url() trait method** — added to the provider trait and
+  forwarded through `FallbackProvider`, so rate-limit toasts and swap
+  notices can report the actual serving backend (`0d97ea8`).
+- **Qwen DashScope wire format parity** — request body matches `qwen-cli`
+  capture exactly to avoid upstream rate-limit triggers (`5d8a483`).
+- **Qwen 429 retry in-place** — rate limits are retried in the same way
+  `qwen-cli` does it instead of bailing to fallback immediately (`994cb6a`).
+- **OpenRouter `:free` 429 retry in-place** — free-tier models on OpenRouter
+  retry rate limits in-place before falling back (`c46cb81`).
 
 ### Fixed
 
@@ -155,6 +214,15 @@ OpenRouter / Gemini / Qwen DashScope.
   the static `agent.context_limit` fallback while the enforcer used the
   real provider window. `context_window_for_model()` now delegates to
   `context_limit()` so both agree (`6129a88`).
+- **Panic-free `open_tag_prefix_len`** — replaced a `chars().take()` that
+  could underflow on short strings with `char_indices()` for byte-safe
+  slicing (`091487d`).
+- **Strip-tag opens split across SSE chunks** — the gaslighting detector
+  now handles `<strip>` or similar markers that arrive mid-chunk across
+  stream boundaries (`b9adfb4`).
+- **Qwen HTTP 529 classified as retryable** — `overloaded_error` (529)
+  from Qwen is now mapped to `StreamError` for automatic retry
+  (`b29d9f6`).
 
 #### Tool layer
 - **`execute_code` now returns actionable error messages** — serde's
@@ -194,6 +262,12 @@ OpenRouter / Gemini / Qwen DashScope.
   then echoed back. The flag is now propagated at `AgentService::new()`
   and again on `/approve` toggle via `rebuild_agent_service()` (`90748af`).
 
+#### Agent / image handling
+- **Image paths preserved for non-vision models** — when a model doesn't
+  support vision, the image path text is now preserved in the user message
+  instead of being silently dropped, so the model at least knows a file
+  was referenced (`330c544`).
+
 #### Onboarding
 - **Brain onboarding auto-format + preview flow** — the wizard now
   auto-formats brain files and shows a preview before writing, catching
@@ -207,6 +281,14 @@ OpenRouter / Gemini / Qwen DashScope.
   download no longer dumps a raw hf-hub progress bar over the TUI
   (`29893b5`).
 
+#### Channel fixes
+- **New sessions inherit provider from most recent session** —
+  channel-created sessions now start with the same provider/model as the
+  latest active session instead of falling back to default (`fad8272`).
+- **Discord stops defaulting to LM Studio on missing base_url** — custom
+  providers without a configured base URL no longer silently fall back to
+  LM Studio on Discord (`6819373`).
+
 #### TUI
 - **Don't wipe streamed reply when `response.content` is empty** — some
   providers return an empty `content` array on the final complete
@@ -216,8 +298,7 @@ OpenRouter / Gemini / Qwen DashScope.
   truncates the visible scrollback buffer, only the LLM's in-context
   history (`bf6f5f9`).
 
-
-
+## [0.3.1] - 2026-04-07
 ## [0.3.1] - 2026-04-07
 
 ### Added

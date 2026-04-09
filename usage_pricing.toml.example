@@ -93,6 +93,14 @@ entries = [
   { prefix = "mistral",            input_per_m = 0.25,  output_per_m = 0.25  },
 ]
 
+[providers.qwen]
+entries = [
+  # Qwen 3.6 Plus (thinking) — DashScope tiered pricing (input ≤256k)
+  { prefix = "qwen-3.6-plus",      input_per_m = 0.50,  output_per_m = 1.50,  cache_write_per_m = 0.625, cache_read_per_m = 0.05 },
+  { prefix = "qwen3.6-plus",       input_per_m = 0.50,  output_per_m = 1.50,  cache_write_per_m = 0.625, cache_read_per_m = 0.05 },
+  { prefix = "qwen-plus",          input_per_m = 0.50,  output_per_m = 1.50,  cache_write_per_m = 0.625, cache_read_per_m = 0.05 },
+]
+
 [providers.opencode]
 entries = [
   { prefix = "mimo-v2-pro",         input_per_m = 1.0,   output_per_m = 3.0   },
