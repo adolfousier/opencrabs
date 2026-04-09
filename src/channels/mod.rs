@@ -6,6 +6,7 @@
 pub mod commands;
 mod factory;
 pub mod manager;
+pub mod session_init;
 #[cfg(test)]
 mod tests;
 pub mod voice;

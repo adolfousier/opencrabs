@@ -57,7 +57,7 @@ pub async fn process_comment(
             None => {
                 drop(shared);
                 tracing::warn!("Trello: no active TUI session, creating one for owner");
-                match session_svc.create_session(Some("Trello".to_string())).await {
+                match crate::channels::session_init::create_channel_session(&session_svc, Some("Trello".to_string())).await {
                     Ok(s) => {
                         *shared_session.lock().await = Some(s.id);
                         s.id
@@ -85,7 +85,7 @@ pub async fn process_comment(
                 elapsed > (h * 3600.0) as i64
             }) {
                 let _ = session_svc.archive_session(session.id).await;
-                match session_svc.create_session(Some(session_title)).await {
+                match crate::channels::session_init::create_channel_session(&session_svc, Some(session_title)).await {
                     Ok(new_session) => new_session.id,
                     Err(e) => {
                         tracing::error!(
@@ -100,7 +100,7 @@ pub async fn process_comment(
                 session.id
             }
         } else {
-            match session_svc.create_session(Some(session_title)).await {
+            match crate::channels::session_init::create_channel_session(&session_svc, Some(session_title)).await {
                 Ok(session) => {
                     tracing::info!(
                         "Trello: created new session {} for {}",

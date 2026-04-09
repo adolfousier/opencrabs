@@ -494,7 +494,7 @@ pub(crate) async fn handle_message(
                     Some(id) => id,
                     None => {
                         tracing::info!("WhatsApp: no existing session, creating one for owner");
-                        match session_svc.create_session(Some("Chat".to_string())).await {
+                        match crate::channels::session_init::create_channel_session(&session_svc, Some("Chat".to_string())).await {
                             Ok(session) => session.id,
                             Err(e) => {
                                 tracing::error!("WhatsApp: failed to create session: {}", e);
@@ -525,7 +525,7 @@ pub(crate) async fn handle_message(
                 if let Err(e) = session_svc.archive_session(session.id).await {
                     tracing::error!("WhatsApp: failed to archive session {}: {}", session.id, e);
                 }
-                match session_svc.create_session(Some(session_title)).await {
+                match crate::channels::session_init::create_channel_session(&session_svc, Some(session_title)).await {
                     Ok(new_session) => new_session.id,
                     Err(e) => {
                         tracing::error!("WhatsApp: failed to create session: {}", e);
@@ -536,7 +536,7 @@ pub(crate) async fn handle_message(
                 session.id
             }
         } else {
-            match session_svc.create_session(Some(session_title)).await {
+            match crate::channels::session_init::create_channel_session(&session_svc, Some(session_title)).await {
                 Ok(session) => {
                     tracing::info!("WhatsApp: created new session {} for {}", session.id, phone);
                     session.id
@@ -592,7 +592,7 @@ pub(crate) async fn handle_message(
                 {
                     tracing::error!("WhatsApp: failed to archive old session {}: {}", old.id, e);
                 }
-                match session_svc.create_session(Some(session_title)).await {
+                match crate::channels::session_init::create_channel_session(&session_svc, Some(session_title)).await {
                     Ok(new_session) => {
                         if is_owner {
                             *shared_session.lock().await = Some(new_session.id);
