@@ -2442,6 +2442,9 @@ impl Provider for OpenAIProvider {
 
 /// Returns true if this model requires `max_completion_tokens` instead of `max_tokens`.
 /// Newer OpenAI models (gpt-4.1-*, gpt-5-*, o1-*, o3-*) reject `max_tokens`.
+/// Qwen thinking models also need this — when `max_tokens` is sent, DashScope
+/// treats it as a text-only cap and reasoning tokens eat from a separate (tiny)
+/// default budget, causing the model to stop after a handful of output tokens.
 pub(crate) fn uses_max_completion_tokens(model: &str) -> bool {
     let m = model.to_lowercase();
     m.starts_with("gpt-4.1")
@@ -2449,6 +2452,7 @@ pub(crate) fn uses_max_completion_tokens(model: &str) -> bool {
         || m.starts_with("o1")
         || m.starts_with("o3")
         || m.starts_with("o4")
+        || m.contains("thinking")
 }
 
 // ============================================================================

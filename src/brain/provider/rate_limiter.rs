@@ -163,10 +163,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_rate_limiter_enforces_interval() {
-        let limiter = RateLimiter::new(Duration::from_millis(50));
+        let limiter = RateLimiter::new(Duration::from_millis(100));
         limiter.wait().await; // first, instant
-        let wait = limiter.wait().await; // second, should wait ~50ms
-        assert!(wait.as_millis() >= 40); // allow some scheduling jitter
+        let before = std::time::Instant::now();
+        limiter.wait().await; // second, should wait ~100ms
+        let actual = before.elapsed();
+        assert!(
+            actual.as_millis() >= 50,
+            "Expected ≥50ms wall-clock wait, got {}ms",
+            actual.as_millis()
+        );
     }
 
     #[tokio::test]

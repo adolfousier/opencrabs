@@ -459,13 +459,16 @@ impl AgentService {
 
         // Detect premature stream termination — if we accumulated blocks but never
         // got a stop_reason, the connection likely dropped before [DONE]/MessageStop.
+        // Return a StreamError so the tool_loop's retry logic can re-issue the request
+        // instead of silently returning partial/empty content to the user.
         if stop_reason.is_none() && !block_states.is_empty() {
-            tracing::warn!(
-                "⚠️ Stream ended without MessageStop/[DONE]. {} content blocks accumulated, \
-                 {} output tokens counted. Possible network interruption or provider timeout.",
+            let msg = format!(
+                "Stream ended without [DONE]: {} content blocks, {} output tokens — connection likely dropped",
                 block_states.len(),
                 output_tokens,
             );
+            tracing::warn!("⚠️ {}", msg);
+            return Err(crate::brain::provider::ProviderError::StreamError(msg));
         }
 
         // Build final content blocks from accumulated state

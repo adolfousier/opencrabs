@@ -918,8 +918,6 @@ impl App {
         } else if keys::is_submit(&event)
             && (!self.input_buffer.trim().is_empty() || !self.attachments.is_empty())
         {
-            // Dismiss the header card on any submit
-            self.header_card_shown_at = None;
             // Check for slash commands before sending to LLM
             let content = self.input_buffer.clone();
             if self.handle_slash_command(content.trim()).await {
@@ -1170,11 +1168,9 @@ impl App {
                 }
             }
         } else if keys::is_page_up(&event) {
-            self.header_card_shown_at = None;
             self.scroll_offset = self.scroll_offset.saturating_add(10);
             self.auto_scroll = false;
         } else if keys::is_page_down(&event) {
-            self.header_card_shown_at = None;
             self.scroll_offset = self.scroll_offset.saturating_sub(10);
             if self.scroll_offset == 0 {
                 self.auto_scroll = true;

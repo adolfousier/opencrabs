@@ -292,11 +292,6 @@ pub struct App {
     /// Animation state
     pub animation_frame: usize,
 
-    /// Header card overlay state — Some(when) while the launch card is
-    /// visible on top of the chat area. Vanishes after 500ms, on Enter,
-    /// or on any scroll action.
-    pub(crate) header_card_shown_at: Option<std::time::Instant>,
-
     /// Escape confirmation state (double-press to clear)
     pub(crate) escape_pending_at: Option<std::time::Instant>,
 
@@ -516,7 +511,7 @@ impl App {
             build_lines: Vec::new(),
             build_msg_idx: None,
             animation_frame: 0,
-            header_card_shown_at: None,
+
             escape_pending_at: None,
             ctrl_c_pending_at: None,
             help_scroll_offset: 0,
@@ -684,7 +679,7 @@ impl App {
             return false;
         }
         self.mode = AppMode::Chat;
-        self.header_card_shown_at = Some(std::time::Instant::now());
+
         true
     }
 
@@ -1400,13 +1395,6 @@ impl App {
                     && !wizard.health_complete
                 {
                     wizard.tick_health_check();
-                }
-
-                // Auto-dismiss header card after 2.5 seconds
-                if let Some(shown_at) = self.header_card_shown_at
-                    && shown_at.elapsed() >= std::time::Duration::from_millis(2500)
-                {
-                    self.header_card_shown_at = None;
                 }
 
                 // Auto-dismiss error/warning messages after 2.5 seconds

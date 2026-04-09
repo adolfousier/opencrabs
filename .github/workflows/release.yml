@@ -13,8 +13,32 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  ci-gate:
+    name: CI Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install ALSA dev
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --lib --bins --tests --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo test --all-features --verbose
+
   publish-crate:
     name: Publish to crates.io
+    needs: ci-gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -1135,6 +1135,12 @@ impl App {
                     try_write(section, "context_window", &self.ps.context_window);
                 }
             }
+            11 => {
+                try_write(section, "base_url", &self.ps.base_url);
+                if !self.ps.context_window.is_empty() {
+                    try_write(section, "context_window", &self.ps.context_window);
+                }
+            }
             _ => {}
         }
 
