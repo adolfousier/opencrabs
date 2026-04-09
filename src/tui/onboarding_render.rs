@@ -182,6 +182,35 @@ pub fn render_onboarding(f: &mut Frame, wizard: &OnboardingWizard) {
             } else {
                 footer.push(Span::styled("Check", Style::default().fg(Color::White)));
             }
+        } else if step == OnboardingStep::ProviderAuth
+            && wizard.ps.selected_provider == 10
+            && wizard.auth_field == AuthField::ApiKey
+        {
+            // Qwen auth step: rotation toggle + count + sign in
+            footer.push(Span::styled(
+                "[Space] ",
+                Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
+            ));
+            footer.push(Span::styled("Rotate  ", Style::default().fg(Color::White)));
+            if wizard.ps.qwen_rotation_enabled {
+                footer.push(Span::styled(
+                    "[2-9] ",
+                    Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
+                ));
+                footer.push(Span::styled("#  ", Style::default().fg(Color::White)));
+            }
+            footer.push(Span::styled(
+                "[Enter] ",
+                Style::default()
+                    .fg(ACCENT_GOLD)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            let enter_label = if wizard.ps.has_existing_key_sentinel() {
+                "Next"
+            } else {
+                "Sign In"
+            };
+            footer.push(Span::styled(enter_label, Style::default().fg(Color::White)));
         } else {
             // All other steps: Tab/Shift+Tab field nav + Enter confirm
             if step != OnboardingStep::ModeSelect {
@@ -721,6 +750,10 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
 
         // Rotation toggle (only shown in auth step, not provider list)
         if wizard.auth_field == AuthField::ApiKey || wizard.auth_field == AuthField::Model {
+            // Set scroll anchor so this section stays visible
+            if wizard.auth_field == AuthField::ApiKey {
+                focused_line = lines.len();
+            }
             let rotation_marker = if wizard.ps.qwen_rotation_enabled {
                 "[*]"
             } else {
@@ -738,18 +771,12 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
                 ),
                 Style::default().fg(Color::Cyan),
             )));
-            if wizard.ps.qwen_rotation_enabled && wizard.auth_field == AuthField::ApiKey {
-                lines.push(Line::from(Span::styled(
-                    "  Press 2-9 to set count (1 for 10)",
-                    Style::default()
-                        .fg(Color::DarkGray)
-                        .add_modifier(Modifier::ITALIC),
-                )));
-            }
             lines.push(Line::from(""));
         }
 
+        // "Authenticated" shortcut — only when NOT mid-rotation
         if wizard.ps.has_existing_key_sentinel()
+            && !wizard.ps.qwen_rotation_enabled
             && matches!(
                 wizard.ps.qwen_device_flow_status,
                 QwenDeviceFlowStatus::Idle | QwenDeviceFlowStatus::Complete
@@ -759,14 +786,6 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
                 "  ● Authenticated with Qwen",
                 Style::default().fg(Color::Green),
             )));
-            if wizard.auth_field == AuthField::ApiKey {
-                lines.push(Line::from(Span::styled(
-                    "  Press Enter to continue to model selection",
-                    Style::default()
-                        .fg(Color::DarkGray)
-                        .add_modifier(Modifier::ITALIC),
-                )));
-            }
         } else {
             match &wizard.ps.qwen_device_flow_status {
                 QwenDeviceFlowStatus::Idle => {
@@ -775,11 +794,6 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
                         Style::default()
                             .fg(Color::DarkGray)
                             .add_modifier(Modifier::ITALIC),
-                    )));
-                    lines.push(Line::from(""));
-                    lines.push(Line::from(Span::styled(
-                        "  Press Enter to sign in with qwen.ai",
-                        Style::default().fg(BRAND_BLUE).add_modifier(Modifier::BOLD),
                     )));
                 }
                 QwenDeviceFlowStatus::WaitingForUser { verification_uri } => {

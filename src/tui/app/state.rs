@@ -2011,35 +2011,40 @@ impl App {
             TuiEvent::QwenRotationAccountDone { idx, total } => {
                 // Store the freshly-authed creds from keys.toml into the
                 // rotation collection, then prompt user to sign out.
-                if let Some(ref mut wizard) = self.onboarding {
-                    // The device flow just wrote creds to [providers.qwen] in keys.toml.
-                    // Read them back.
-                    if let Ok(cfg) = crate::config::Config::load()
-                        && let Some(qcfg) = &cfg.providers.qwen
-                        && let Some(creds) =
-                            crate::brain::provider::qwen::QwenCredentials::from_provider_config(
-                                qcfg,
-                            )
-                    {
-                        wizard.ps.qwen_rotation_collected.push(creds);
-                    }
-                    wizard.ps.qwen_rotation_current = idx + 1;
+                // Read fresh creds from keys.toml
+                let creds = crate::config::Config::load()
+                    .ok()
+                    .and_then(|cfg| cfg.providers.qwen.as_ref().cloned())
+                    .and_then(|qcfg| {
+                        crate::brain::provider::qwen::QwenCredentials::from_provider_config(&qcfg)
+                    });
 
-                    if idx + 1 < total {
-                        // More accounts to go — ask user to sign out
-                        wizard.ps.qwen_device_flow_status =
-                            super::onboarding::QwenDeviceFlowStatus::RotationSignout {
-                                current: idx + 1,
-                                total,
-                            };
-                    } else {
-                        // All done — persist and finalize
-                        let _ = crate::brain::provider::qwen::QwenCredentials::persist_all_accounts(
-                            &wizard.ps.qwen_rotation_collected,
-                        );
-                        wizard.ps.qwen_device_flow_status =
-                            super::onboarding::QwenDeviceFlowStatus::RotationComplete;
-                    }
+                // Determine which state to update (onboarding wizard or /models dialog)
+                let ps = if let Some(ref mut wizard) = self.onboarding {
+                    &mut wizard.ps
+                } else {
+                    &mut self.ps
+                };
+
+                if let Some(c) = creds {
+                    ps.qwen_rotation_collected.push(c);
+                }
+                ps.qwen_rotation_current = idx + 1;
+
+                if idx + 1 < total {
+                    // More accounts to go — ask user to sign out
+                    ps.qwen_device_flow_status =
+                        super::onboarding::QwenDeviceFlowStatus::RotationSignout {
+                            current: idx + 1,
+                            total,
+                        };
+                } else {
+                    // All done — persist and finalize
+                    let _ = crate::brain::provider::qwen::QwenCredentials::persist_all_accounts(
+                        &ps.qwen_rotation_collected,
+                    );
+                    ps.qwen_device_flow_status =
+                        super::onboarding::QwenDeviceFlowStatus::RotationComplete;
                 }
             }
             TuiEvent::QwenRotationComplete => {

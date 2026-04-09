@@ -437,7 +437,14 @@ pub async fn start_device_flow(pkce: &PkcePair) -> anyhow::Result<DeviceCodeResp
         anyhow::bail!("Qwen device flow request failed ({}): {}", status, body);
     }
 
-    let dcr: DeviceCodeResponse = resp.json().await?;
+    let raw = resp.text().await?;
+    if raw.starts_with("<!doctype") || raw.starts_with("<!DOCTYPE") || raw.starts_with("<html") {
+        anyhow::bail!(
+            "Qwen device flow blocked by WAF (bot detection). \
+             Try again in a few minutes or use a different network."
+        );
+    }
+    let dcr: DeviceCodeResponse = serde_json::from_str(&raw)?;
     Ok(dcr)
 }
 
@@ -467,10 +474,31 @@ pub async fn poll_for_token(device_code: &str, pkce: &PkcePair) -> anyhow::Resul
             .await?;
 
         let status = resp.status();
-        let body: TokenPollResponse = match resp.json().await {
+        let raw = match resp.text().await {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::warn!("Qwen token poll: failed to read body: {}", e);
+                continue;
+            }
+        };
+        // WAF/bot-detection: Alibaba Cloud WAF returns HTML instead of JSON.
+        // Fail immediately — retrying won't help.
+        if raw.starts_with("<!doctype") || raw.starts_with("<!DOCTYPE") || raw.starts_with("<html")
+        {
+            anyhow::bail!(
+                "Qwen token endpoint blocked by WAF (bot detection). \
+                 Try again in a few minutes or use a different network."
+            );
+        }
+        let body: TokenPollResponse = match serde_json::from_str(&raw) {
             Ok(b) => b,
             Err(e) => {
-                tracing::warn!("Qwen token poll: failed to parse body: {}", e);
+                tracing::warn!(
+                    "Qwen token poll: parse error: {} (status={}, body={})",
+                    e,
+                    status,
+                    &raw[..raw.len().min(500)]
+                );
                 continue;
             }
         };
@@ -555,7 +583,14 @@ pub async fn refresh_credentials(creds: &QwenCredentials) -> anyhow::Result<Qwen
         anyhow::bail!("Qwen refresh failed ({}): {}", status, body);
     }
 
-    let body: TokenPollResponse = resp.json().await?;
+    let raw = resp.text().await?;
+    if raw.starts_with("<!doctype") || raw.starts_with("<!DOCTYPE") || raw.starts_with("<html") {
+        anyhow::bail!(
+            "Qwen refresh blocked by WAF (bot detection). \
+             Try again in a few minutes or use a different network."
+        );
+    }
+    let body: TokenPollResponse = serde_json::from_str(&raw)?;
     let access_token = body
         .access_token
         .ok_or_else(|| anyhow::anyhow!("Qwen refresh response missing access_token"))?;

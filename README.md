@@ -109,7 +109,7 @@ https://github.com/user-attachments/assets/7f45c5f8-acdf-48d5-b6a4-0e4811a9ee23
 ### AI & Providers
 | Feature | Description |
 |---------|-------------|
-| **Multi-Provider** | Anthropic Claude, OpenAI, GitHub Copilot (uses your Copilot subscription), OpenRouter (400+ models), MiniMax, Google Gemini, z.ai GLM (General API + Coding API), Claude CLI, OpenCode CLI, Qwen Code CLI (1k free req/day), and any OpenAI-compatible API (Ollama, LM Studio, LocalAI). Model lists fetched live from provider APIs — new models available instantly. Each session remembers its provider + model and restores it on switch |
+| **Multi-Provider** | Anthropic Claude, OpenAI, GitHub Copilot (uses your Copilot subscription), OpenRouter (400+ models), MiniMax, Google Gemini, z.ai GLM (General API + Coding API), Claude CLI, OpenCode CLI, Qwen Native (free OAuth with multi-account rotation), Qwen Code CLI (1k free req/day), and any OpenAI-compatible API (Ollama, LM Studio, LocalAI). Model lists fetched live from provider APIs — new models available instantly. Each session remembers its provider + model and restores it on switch |
 | **Fallback Providers** | Configure a chain of fallback providers — if the primary fails, each fallback is tried in sequence automatically. Any configured provider can be a fallback. Config: `[providers.fallback] providers = ["openrouter", "anthropic"]` |
 | **Per-Provider Vision** | Set `vision_model` per provider — the LLM calls `analyze_image` as a tool, which uses the vision model on the same provider API to describe images. The chat model stays the same and gets vision capability via tool call. Gemini vision takes priority when configured. Auto-configured for known providers (e.g. MiniMax) on first run |
 | **Real-time Streaming** | Character-by-character response streaming with animated spinner showing model name and live text |
@@ -298,6 +298,7 @@ Multiple profiles can run as simultaneous daemon services with full isolation.
 | [z.ai GLM](#zai-glm) | API key | GLM-4.5 through GLM-5 Turbo | ✅ | ✅ | General API + Coding API endpoints |
 | [Claude CLI](#claude-code-cli) | CLI auth | Via `claude` binary | ✅ | ✅ | Uses your Claude Code subscription |
 | [OpenCode CLI](#opencode-cli) | None | Free models (Mimo, etc.) | ✅ | ✅ | Free — no API key or subscription needed |
+| [Qwen (Native)](#qwen-native) | OAuth | Qwen3.6-Plus, Qwen3.5-Plus, Qwen3-Max | ✅ | ✅ | Free tier (60 req/min, 1k/day). Multi-account rotation multiplies quota |
 | [Qwen Code CLI](#qwen-code-cli) | OAuth / API key | Qwen3-Coder-Plus, Qwen3.5-Plus, Qwen3.6-Plus | ✅ | ✅ | 1k free req/day via Qwen OAuth — no API key needed |
 | [Custom](#custom-openai-compatible) | Optional | Any | ✅ | ✅ | Ollama, LM Studio, Groq, NVIDIA, any OpenAI-compatible API |
 
@@ -451,6 +452,37 @@ default_model = "opencode/mimo-v2-pro-free"
 Models are fetched live from `opencode models`. Free models like `mimo-v2-pro-free` work without any authentication.
 
 **Features:** Streaming, tools, extended thinking support, NDJSON event protocol
+
+### Qwen (Native)
+
+Direct integration with Qwen's API via OAuth device flow — **no API key needed**. Free tier gives 60 req/min and 1,000 req/day per account.
+
+**Setup:** Select Qwen in `/onboard` or `/models` and follow the browser OAuth flow.
+
+**Multi-account rotation:** Multiply your free quota by authenticating multiple Qwen accounts. When one account hits rate limits, OpenCrabs automatically rotates to the next — only falling to the fallback provider when all accounts are exhausted.
+
+To enable rotation during setup:
+1. Select Qwen in `/onboard` or `/models`
+2. Press `Space` to toggle rotation
+3. Press `2-9` to set the number of accounts
+4. Press `Enter` — authenticate each account in sequence (sign out in your browser between accounts)
+
+Rotation accounts are stored in `keys.toml`:
+```toml
+[[providers.qwen_accounts]]
+api_key = "..."
+refresh_token = "..."
+expiry_date = 1234567890
+resource_url = "portal.qwen.ai"
+
+[[providers.qwen_accounts]]
+api_key = "..."
+refresh_token = "..."
+expiry_date = 1234567891
+resource_url = "portal.qwen.ai"
+```
+
+With 3 accounts you get **180 req/min** and **3,000 req/day** before fallback kicks in.
 
 ### Qwen Code CLI
 

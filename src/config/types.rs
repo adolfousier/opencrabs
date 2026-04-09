@@ -1379,6 +1379,12 @@ fn merge_provider_keys(mut base: ProviderConfigs, keys: ProviderConfigs) -> Prov
             }
         }
     }
+    // Merge qwen rotation accounts (entire array from keys.toml takes precedence)
+    if let Some(accounts) = keys.qwen_accounts
+        && !accounts.is_empty()
+    {
+        base.qwen_accounts = Some(accounts);
+    }
     if let Some(custom_keys) = keys.custom
         && let Some(ref mut base_customs) = base.custom
     {
