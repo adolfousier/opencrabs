@@ -1200,6 +1200,8 @@ async fn handle_message(
         }
 
         let tools: Arc<Mutex<Vec<ToolEntry>>> = Arc::new(Mutex::new(Vec::new()));
+        let sent_intermediates: Arc<Mutex<Vec<String>>> =
+            Arc::new(Mutex::new(Vec::new()));
         let bot_token_cb = state.current_bot_token();
         let channel_cb = SlackChannelId::new(channel_id.clone());
         let client_cb = client.clone();
@@ -1208,6 +1210,7 @@ async fn handle_message(
 
         Arc::new(move |_session_id, event| {
             let tools = tools.clone();
+            let sent = sent_intermediates.clone();
             let token = SlackApiToken::new(SlackApiTokenValue::from(bot_token_cb.clone()));
             let channel = channel_cb.clone();
             let client = client_cb.clone();
@@ -1284,6 +1287,26 @@ async fn handle_message(
                         let _ = session.chat_post_message(&req).await;
                     });
                 }
+                ProgressEvent::IntermediateText { text, .. } => {
+                    let thread_ts_resp = thread_ts_inner.clone();
+                    let sent_ref = sent.clone();
+                    tokio::spawn(async move {
+                        let session = client.open_session(&token);
+                        let text_fmt = crate::utils::slack_fmt::markdown_to_mrkdwn(&text);
+                        let mut req = SlackApiChatPostMessageRequest::new(
+                            channel,
+                            SlackMessageContent::new().with_text(text_fmt),
+                        );
+                        if let Some(ref ts) = thread_ts_resp {
+                            req = req.with_thread_ts(ts.clone());
+                        }
+                        if let Err(e) = session.chat_post_message(&req).await {
+                            tracing::debug!("Slack: failed to send intermediate text: {}", e);
+                        } else {
+                            sent_ref.lock().unwrap().push(text);
+                        }
+                    });
+                }
                 _ => {}
             }
         })
@@ -1321,6 +1344,53 @@ async fn handle_message(
             let (text_only, img_paths) = crate::utils::extract_img_markers(&response.content);
             let text_only = crate::utils::sanitize::strip_llm_artifacts(&text_only);
             let text_only = redact_secrets(&text_only);
+
+            // Dedup: strip text that was already sent as intermediate messages
+            // to avoid duplicating content on Slack.
+            let sent = {
+                sent_intermediates
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone()
+            };
+            tracing::info!(
+                "Slack dedup: response.content len={}, sent_intermediates count={}",
+                text_only.len(),
+                sent.len()
+            );
+            let text_only = if !sent.is_empty() {
+                let mut remaining = text_only.clone();
+                for intermediate in &sent {
+                    remaining = remaining.replace(intermediate.as_str(), "");
+                }
+                let result = remaining.trim().to_string();
+                if result != text_only {
+                    tracing::info!(
+                        "Slack dedup: stripped {} chars, remaining len={}",
+                        text_only.len() - result.len(),
+                        result.len()
+                    );
+                } else {
+                    tracing::warn!(
+                        "Slack dedup: NO MATCH — none of {} intermediates found in response",
+                        sent.len()
+                    );
+                }
+                // If dedup stripped everything, send the full response anyway.
+                if result.is_empty() {
+                    tracing::warn!(
+                        "Slack dedup: result empty after stripping intermediates, sending full response (len={})",
+                        text_only.len()
+                    );
+                    text_only
+                } else {
+                    result
+                }
+            } else {
+                tracing::info!("Slack dedup: no intermediates to strip");
+                text_only
+            };
+
             let text_only = crate::utils::slack_fmt::markdown_to_mrkdwn(&text_only);
 
             let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
