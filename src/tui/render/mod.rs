@@ -246,7 +246,7 @@ fn split_title_area(area: Rect) -> (Rect, Rect) {
 /// Render the app name header used on Sessions, Help, and Settings screens.
 fn render_app_title(f: &mut Frame, area: Rect) {
     let para = Paragraph::new(vec![Line::from(Span::styled(
-        " 🦀 OpenCrabs AI Orchestration Agent",
+        " 🦀 OpenCrabs AI Agent",
         Style::default()
             .fg(Color::Rgb(120, 120, 120))
             .add_modifier(Modifier::BOLD),
