@@ -160,17 +160,18 @@ fn filter_think_tags(
 /// STRIP_OPEN_TAGS entry (but not a full match). These are withheld as
 /// carry so the open-tag detector can see the full tag on the next chunk.
 fn open_tag_prefix_len(s: &str) -> usize {
-    if s.is_empty() {
-        return 0;
-    }
-    let max_len = MAX_OPEN_TAG_CARRY.min(s.len());
-    // Longest-match-first — we want the largest prefix that's a real
-    // proper prefix of some open tag.
-    for take in (1..=max_len).rev() {
-        let suffix = &s[s.len() - take..];
+    // Walk character boundaries from the tail so every suffix we test is
+    // guaranteed to be a valid `&str`. Longest-first: return the largest
+    // tail that's a proper prefix of any STRIP_OPEN_TAGS entry.
+    let tail_starts = s
+        .char_indices()
+        .map(|(i, _)| i)
+        .filter(|i| s.len() - i <= MAX_OPEN_TAG_CARRY);
+    for start in tail_starts {
+        let suffix = &s[start..];
         for open in STRIP_OPEN_TAGS {
             if open.len() > suffix.len() && open.starts_with(suffix) {
-                return take;
+                return suffix.len();
             }
         }
     }
