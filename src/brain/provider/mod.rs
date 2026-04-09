@@ -27,6 +27,7 @@ pub mod gemini;
 pub mod opencode_cli;
 pub mod qwen;
 pub mod qwen_code;
+pub mod rotating_qwen;
 
 pub use anthropic::AnthropicProvider;
 pub use claude_cli::ClaudeCliProvider;
@@ -36,3 +37,4 @@ pub use fallback::{FallbackProvider, SwapEvent};
 pub use gemini::GeminiProvider;
 pub use opencode_cli::OpenCodeCliProvider;
 pub use qwen_code::QwenCodeCliProvider;
+pub use rotating_qwen::RotatingQwenProvider;

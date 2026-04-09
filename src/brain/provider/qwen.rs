@@ -239,6 +239,83 @@ impl QwenCredentials {
         Ok(())
     }
 
+    /// Build a vec of credentials from a `[[providers.qwen_accounts]]` array.
+    pub fn from_account_configs(cfgs: &[crate::config::ProviderConfig]) -> Vec<Self> {
+        cfgs.iter().filter_map(Self::from_provider_config).collect()
+    }
+
+    /// Persist multiple rotation accounts to `keys.toml` under
+    /// `[[providers.qwen_accounts]]`. Each entry gets `api_key`,
+    /// `refresh_token`, `expiry_date`, and `resource_url`.
+    pub fn persist_all_accounts(accounts: &[Self]) -> anyhow::Result<()> {
+        use crate::config::{daily_backup, keys_path};
+        use anyhow::Context;
+
+        let path = keys_path();
+
+        let mut doc: toml::Value = if path.exists() {
+            let content = std::fs::read_to_string(&path)?;
+            toml::from_str(&content).unwrap_or(toml::Value::Table(toml::map::Map::new()))
+        } else {
+            toml::Value::Table(toml::map::Map::new())
+        };
+
+        let root = doc
+            .as_table_mut()
+            .context("keys.toml root is not a table")?;
+        let providers = root
+            .entry("providers".to_string())
+            .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+            .as_table_mut()
+            .context("[providers] is not a table")?;
+
+        // Build the TOML array of tables
+        let arr: Vec<toml::Value> = accounts
+            .iter()
+            .map(|a| {
+                let mut tbl = toml::map::Map::new();
+                tbl.insert(
+                    "api_key".to_string(),
+                    toml::Value::String(a.access_token.clone()),
+                );
+                tbl.insert(
+                    "refresh_token".to_string(),
+                    toml::Value::String(a.refresh_token.clone()),
+                );
+                tbl.insert(
+                    "expiry_date".to_string(),
+                    toml::Value::Integer(a.expiry_date as i64),
+                );
+                if !a.resource_url.is_empty() {
+                    tbl.insert(
+                        "resource_url".to_string(),
+                        toml::Value::String(a.resource_url.clone()),
+                    );
+                }
+                toml::Value::Table(tbl)
+            })
+            .collect();
+
+        providers.insert("qwen_accounts".to_string(), toml::Value::Array(arr));
+
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        daily_backup(&path, 7);
+        let toml_str = toml::to_string_pretty(&doc)?;
+        std::fs::write(&path, toml_str)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        }
+        tracing::debug!(
+            "Persisted {} Qwen rotation accounts to keys.toml",
+            accounts.len()
+        );
+        Ok(())
+    }
+
     /// True if the access_token is still valid (with the 30s safety buffer).
     pub fn is_valid(&self) -> bool {
         let now_ms = SystemTime::now()
