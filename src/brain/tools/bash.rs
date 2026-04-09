@@ -236,6 +236,7 @@ impl Tool for BashTool {
                 output: result_text,
                 error: Some(format!("Command exited with code {}", exit_code)),
                 metadata: std::collections::HashMap::new(),
+                images: Vec::new(),
             }
         };
 

@@ -23,6 +23,7 @@ impl DiscordSendTool {
 }
 
 /// Extract a required non-empty string param, returning ToolResult::error on failure.
+#[allow(clippy::result_large_err)]
 fn get_str<'a>(input: &'a Value, key: &str) -> std::result::Result<&'a str, ToolResult> {
     match input.get(key).and_then(|v| v.as_str()) {
         Some(s) if !s.is_empty() => Ok(s),
@@ -33,6 +34,7 @@ fn get_str<'a>(input: &'a Value, key: &str) -> std::result::Result<&'a str, Tool
 }
 
 /// Parse a required numeric-string param as u64.
+#[allow(clippy::result_large_err)]
 fn get_id(input: &Value, key: &str) -> std::result::Result<u64, ToolResult> {
     match input.get(key).and_then(|v| v.as_str()) {
         Some(s) => s.parse::<u64>().map_err(|_| {
@@ -45,6 +47,7 @@ fn get_id(input: &Value, key: &str) -> std::result::Result<u64, ToolResult> {
 }
 
 /// Unwrap channel id or return error ToolResult.
+#[allow(clippy::result_large_err)]
 fn channel_or_err(id: Option<u64>) -> std::result::Result<u64, ToolResult> {
     id.ok_or_else(|| {
         ToolResult::error(
@@ -56,6 +59,7 @@ fn channel_or_err(id: Option<u64>) -> std::result::Result<u64, ToolResult> {
 }
 
 /// Unwrap guild id or return error ToolResult.
+#[allow(clippy::result_large_err)]
 fn guild_or_err(id: Option<u64>) -> std::result::Result<u64, ToolResult> {
     id.ok_or_else(|| {
         ToolResult::error(

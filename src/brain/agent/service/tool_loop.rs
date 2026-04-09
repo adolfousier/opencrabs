@@ -2074,6 +2074,7 @@ impl AgentService {
                                 match exec_result {
                                     Ok(result) => {
                                         let success = result.success;
+                                        let images = result.images;
                                         let content = if result.success {
                                             result.output
                                         } else {
@@ -2116,6 +2117,16 @@ impl AgentService {
                                             content,
                                             is_error: Some(!success),
                                         });
+                                        // Append images (e.g. browser auto-screenshots) so the model sees them
+                                        for (media_type, data) in images {
+                                            tool_results.push(ContentBlock::Image {
+                                                source:
+                                                    crate::brain::provider::ImageSource::Base64 {
+                                                        media_type,
+                                                        data,
+                                                    },
+                                            });
+                                        }
                                     }
                                     Err(e) => {
                                         let err_msg = format!("Tool execution error: {}", e);
@@ -2193,6 +2204,7 @@ impl AgentService {
                 match exec_result {
                     Ok(result) => {
                         let success = result.success;
+                        let images = result.images;
                         let content = if result.success {
                             result.output
                         } else {
@@ -2234,6 +2246,15 @@ impl AgentService {
                             content,
                             is_error: Some(!success),
                         });
+                        // Append images (e.g. browser auto-screenshots) so the model sees them
+                        for (media_type, data) in images {
+                            tool_results.push(ContentBlock::Image {
+                                source: crate::brain::provider::ImageSource::Base64 {
+                                    media_type,
+                                    data,
+                                },
+                            });
+                        }
                     }
                     Err(e) => {
                         let err_msg = format!("Tool execution error: {}", e);

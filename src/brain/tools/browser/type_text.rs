@@ -24,7 +24,7 @@ impl Tool for BrowserTypeTool {
     }
 
     fn description(&self) -> &str {
-        "Type text into a focused element or an element found by CSS selector."
+        "Type text into a focused element or an element found by CSS selector. Returns an automatic screenshot after typing."
     }
 
     fn input_schema(&self) -> Value {
@@ -79,10 +79,14 @@ impl Tool for BrowserTypeTool {
                 return Ok(ToolResult::error(format!("Typing failed: {e}")));
             }
 
-            Ok(ToolResult::success(format!(
-                "Typed '{}' into {}",
-                text, sel
-            )))
+            let mut result = ToolResult::success(format!("Typed '{}' into {}", text, sel));
+
+            // Auto-screenshot: give the model vision after typing
+            if let Some(img) = self.manager.take_screenshot().await {
+                result.images.push(img);
+            }
+
+            Ok(result)
         } else {
             // Type into the currently focused element via JS
             let js = format!(
@@ -97,10 +101,12 @@ impl Tool for BrowserTypeTool {
                         .and_then(|v: &serde_json::Value| v.as_bool())
                         .unwrap_or(false);
                     if ok {
-                        Ok(ToolResult::success(format!(
-                            "Typed '{}' into focused element",
-                            text
-                        )))
+                        let mut result =
+                            ToolResult::success(format!("Typed '{}' into focused element", text));
+                        if let Some(img) = self.manager.take_screenshot().await {
+                            result.images.push(img);
+                        }
+                        Ok(result)
                     } else {
                         Ok(ToolResult::error(
                             "No focused input element found. Use 'selector' to target an element."
