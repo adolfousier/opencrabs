@@ -89,6 +89,12 @@ pub enum ProgressEvent {
     /// valid tool_use block. The UI should wipe its in-progress streaming
     /// buffer so the lie doesn't stay on screen.
     StripStreamedContent {
+        /// Number of bytes to strip from the START of the streaming buffer.
+        /// The gaslighting preamble is always leading, so consumers should
+        /// drain exactly this many bytes (at a char boundary) rather than
+        /// wiping the whole buffer — otherwise any legitimate draft that
+        /// followed the preamble in the same text block is destroyed.
+        bytes: usize,
         reason: String,
     },
     /// Sticky fallback promoted a new provider/model. Carries structured data

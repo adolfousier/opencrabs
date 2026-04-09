@@ -54,7 +54,12 @@ pub enum TuiEvent {
     /// Wipe the in-progress streaming buffer for a session — used when a
     /// gaslighting refusal preamble has been detected mid-turn and must
     /// not stay on screen while the tools it contradicted actually execute.
-    StripStreamedContent { session_id: Uuid, reason: String },
+    StripStreamedContent {
+        session_id: Uuid,
+        /// Bytes to strip from the start of the streaming response buffer.
+        bytes: usize,
+        reason: String,
+    },
 
     /// Agent completed response
     ResponseComplete {

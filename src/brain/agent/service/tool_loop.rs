@@ -1573,6 +1573,7 @@ impl AgentService {
                         cb(
                             session_id,
                             ProgressEvent::StripStreamedContent {
+                                bytes: stripped_bytes,
                                 reason: format!(
                                     "gaslighting refusal ({} bytes) stripped (had_tool_use={})",
                                     stripped_bytes, had_tool_use

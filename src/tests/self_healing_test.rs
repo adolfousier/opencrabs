@@ -1026,11 +1026,13 @@ fn strip_streamed_content_progress_event_carries_reason() {
     use crate::brain::agent::ProgressEvent;
 
     let event = ProgressEvent::StripStreamedContent {
+        bytes: 312,
         reason: "gaslighting refusal preamble (312 bytes) stripped".to_string(),
     };
 
     match event {
-        ProgressEvent::StripStreamedContent { reason } => {
+        ProgressEvent::StripStreamedContent { bytes, reason } => {
+            assert_eq!(bytes, 312);
             assert!(reason.contains("gaslighting"));
             assert!(reason.contains("312 bytes"));
         }

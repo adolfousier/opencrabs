@@ -1708,6 +1708,17 @@ impl Provider for OpenAIProvider {
             /// Stashed stop_reason from finish_reason chunk, emitted with
             /// the final usage-only chunk (MiniMax/OpenAI include_usage flow).
             pending_stop_reason: Option<crate::brain::provider::types::StopReason>,
+            /// Rolling buffer of the leading visible content. Used to catch
+            /// a hallucinated `{"tool_calls":...}` JSON envelope that
+            /// dialagram-style providers stream 1-3 chars at a time through
+            /// `delta.content`. While `leak_probe` is a strict prefix of the
+            /// known leak markers, content is buffered rather than emitted.
+            /// Once the accumulator diverges from every marker, the buffer
+            /// is flushed through the normal think-tag filter. If the full
+            /// marker is matched, `leak_active` is set and ALL subsequent
+            /// content deltas are dropped for the remainder of the turn.
+            leak_probe: String,
+            leak_active: bool,
         }
 
         let state = std::sync::Arc::new(std::sync::Mutex::new(StreamState {
@@ -1721,6 +1732,8 @@ impl Provider for OpenAIProvider {
             think_bytes_consumed: 0,
             think_carry: String::new(),
             pending_stop_reason: None,
+            leak_probe: String::new(),
+            leak_active: false,
         }));
 
         let event_stream = byte_stream
@@ -1970,55 +1983,107 @@ impl Provider for OpenAIProvider {
                                             // `{"tool_calls":[{"id"...`). The real tool calls come
                                             // through `delta.tool_calls` — any such text in
                                             // `delta.content` is pure noise. Drop it outright.
-                                            // Use a guard (not `continue`) so reasoning_content
-                                            // and finish_reason handling below still runs.
-                                            let c_trimmed = c.trim_start();
-                                            let is_tool_calls_leak = c_trimmed.starts_with("{\"tool_calls\"")
-                                                || c_trimmed.starts_with("{ \"tool_calls\"");
-                                            if is_tool_calls_leak {
-                                                tracing::warn!(
-                                                    "[STREAM_FILTER] Dropping hallucinated tool_calls JSON in content delta ({} chars)",
-                                                    c.len()
-                                                );
-                                            } else {
-                                            let (mut inside, mut close_idx, mut consumed) =
-                                                (st.inside_think, st.active_close_tag, st.think_bytes_consumed);
-                                            let mut carry = std::mem::take(&mut st.think_carry);
-                                            let filtered = filter_think_tags(
-                                                c,
-                                                &mut inside,
-                                                &mut close_idx,
-                                                &mut consumed,
-                                                &mut carry,
-                                            );
-                                            st.inside_think = inside;
-                                            st.active_close_tag = close_idx;
-                                            st.think_bytes_consumed = consumed;
-                                            st.think_carry = carry;
+                                            //
+                                            // Detection runs over the ROLLING accumulator because
+                                            // dialagram-style providers stream 1-3 chars per delta
+                                            // and the single-chunk prefix check would never fire.
+                                            // Strategy: while the trimmed accumulator is still a
+                                            // strict prefix of a known leak marker, buffer the
+                                            // content. Once the full marker matches → drop the
+                                            // buffer and flip leak_active for the rest of the turn.
+                                            // If the accumulator diverges → flush the buffer
+                                            // through the normal think-tag filter.
+                                            const LEAK_MARKERS: &[&str] = &[
+                                                "{\"tool_calls\"",
+                                                "{ \"tool_calls\"",
+                                            ];
 
-                                            if !filtered.is_empty() {
-                                                if !st.emitted_content_start {
+                                            // Once we know the turn is leaking, drop everything.
+                                            let drop_all = st.leak_active;
+                                            let mut to_emit: Option<String> = None;
+                                            if drop_all {
+                                                if !c.is_empty() {
+                                                    tracing::debug!(
+                                                        "[STREAM_FILTER] Suppressing {} chars of content during active tool_calls leak",
+                                                        c.len()
+                                                    );
+                                                }
+                                            } else {
+                                                st.leak_probe.push_str(c);
+                                                let probe_trimmed = st.leak_probe.trim_start();
+                                                let full_match = LEAK_MARKERS
+                                                    .iter()
+                                                    .any(|m| probe_trimmed.starts_with(m));
+                                                if full_match {
+                                                    tracing::warn!(
+                                                        "[STREAM_FILTER] Dropping hallucinated tool_calls JSON across accumulated content ({} chars buffered)",
+                                                        st.leak_probe.len()
+                                                    );
+                                                    st.leak_active = true;
+                                                    st.leak_probe.clear();
+                                                } else {
+                                                    // Is the trimmed accum still a viable prefix
+                                                    // of some marker? If so, keep buffering.
+                                                    // Also allow buffering when the accum is empty
+                                                    // after trim (pure leading whitespace).
+                                                    let still_prefix = probe_trimmed.is_empty()
+                                                        || LEAK_MARKERS.iter().any(|m| {
+                                                            m.starts_with(probe_trimmed)
+                                                        });
+                                                    if still_prefix {
+                                                        // Keep withholding — bounded by marker len.
+                                                        // Safety cap so a legitimate response that
+                                                        // happens to start with "{" doesn't get
+                                                        // buffered forever.
+                                                        if st.leak_probe.len() > 64 {
+                                                            to_emit = Some(std::mem::take(&mut st.leak_probe));
+                                                        }
+                                                    } else {
+                                                        // Diverged — flush the buffer as normal content.
+                                                        to_emit = Some(std::mem::take(&mut st.leak_probe));
+                                                    }
+                                                }
+                                            }
+
+                                            if let Some(ref flushed) = to_emit {
+                                                let (mut inside, mut close_idx, mut consumed) =
+                                                    (st.inside_think, st.active_close_tag, st.think_bytes_consumed);
+                                                let mut carry = std::mem::take(&mut st.think_carry);
+                                                let filtered = filter_think_tags(
+                                                    flushed,
+                                                    &mut inside,
+                                                    &mut close_idx,
+                                                    &mut consumed,
+                                                    &mut carry,
+                                                );
+                                                st.inside_think = inside;
+                                                st.active_close_tag = close_idx;
+                                                st.think_bytes_consumed = consumed;
+                                                st.think_carry = carry;
+
+                                                if !filtered.is_empty() {
+                                                    if !st.emitted_content_start {
+                                                        st.emitted_content_start = true;
+                                                        events.push(Ok(StreamEvent::ContentBlockStart {
+                                                            index: 0,
+                                                            content_block: ContentBlock::Text { text: String::new() },
+                                                        }));
+                                                    }
+
+                                                    events.push(Ok(StreamEvent::ContentBlockDelta {
+                                                        index: 0,
+                                                        delta: ContentDelta::TextDelta {
+                                                            text: filtered,
+                                                        },
+                                                    }));
+                                                } else if !st.emitted_content_start && flushed.is_empty() {
                                                     st.emitted_content_start = true;
                                                     events.push(Ok(StreamEvent::ContentBlockStart {
                                                         index: 0,
                                                         content_block: ContentBlock::Text { text: String::new() },
                                                     }));
                                                 }
-
-                                                events.push(Ok(StreamEvent::ContentBlockDelta {
-                                                    index: 0,
-                                                    delta: ContentDelta::TextDelta {
-                                                        text: filtered,
-                                                    },
-                                                }));
-                                            } else if !st.emitted_content_start && c.is_empty() {
-                                                st.emitted_content_start = true;
-                                                events.push(Ok(StreamEvent::ContentBlockStart {
-                                                    index: 0,
-                                                    content_block: ContentBlock::Text { text: String::new() },
-                                                }));
                                             }
-                                            } // end else (not tool_calls leak)
                                         }
 
                                         // Extract reasoning_content (MiniMax/dialagram thinking process).
@@ -2054,6 +2119,41 @@ impl Provider for OpenAIProvider {
                                         // final usage-only chunk AFTER this one. We handle
                                         // MessageStop on [DONE] or the usage-only chunk below.
                                         if let Some(reason) = finish_reason_str {
+                                            // If we were still withholding a leak-probe buffer
+                                            // waiting to confirm/deny a tool_calls envelope and
+                                            // the turn is ending without it ever matching, flush
+                                            // the buffered content as legitimate text so short
+                                            // responses that happen to begin with `{` aren't lost.
+                                            if !st.leak_active && !st.leak_probe.is_empty() {
+                                                let flushed = std::mem::take(&mut st.leak_probe);
+                                                let (mut inside, mut close_idx, mut consumed) =
+                                                    (st.inside_think, st.active_close_tag, st.think_bytes_consumed);
+                                                let mut carry = std::mem::take(&mut st.think_carry);
+                                                let filtered = filter_think_tags(
+                                                    &flushed,
+                                                    &mut inside,
+                                                    &mut close_idx,
+                                                    &mut consumed,
+                                                    &mut carry,
+                                                );
+                                                st.inside_think = inside;
+                                                st.active_close_tag = close_idx;
+                                                st.think_bytes_consumed = consumed;
+                                                st.think_carry = carry;
+                                                if !filtered.is_empty() {
+                                                    if !st.emitted_content_start {
+                                                        st.emitted_content_start = true;
+                                                        events.push(Ok(StreamEvent::ContentBlockStart {
+                                                            index: 0,
+                                                            content_block: ContentBlock::Text { text: String::new() },
+                                                        }));
+                                                    }
+                                                    events.push(Ok(StreamEvent::ContentBlockDelta {
+                                                        index: 0,
+                                                        delta: ContentDelta::TextDelta { text: filtered },
+                                                    }));
+                                                }
+                                            }
                                             // Close the text block (no tool path above will have
                                             // handled this if there were no tool calls to flush).
                                             if st.emitted_content_start && !st.emitted_content_stop {
