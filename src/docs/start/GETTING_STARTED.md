@@ -32,7 +32,7 @@ Check your Rust version with `rustc --version` if you are unsure.
     <Tabs>
       <Tab title="macOS/Linux">
         ```bash
-        curl -fsSL https://opencrabs.ai/install.sh | bash
+        curl -fsSL https://opencrabs.com/install.sh | bash
         ```
         <img
   src="/assets/install-script.svg"
@@ -42,7 +42,7 @@ Check your Rust version with `rustc --version` if you are unsure.
       </Tab>
       <Tab title="Windows (PowerShell)">
         ```powershell
-        iwr -useb https://opencrabs.ai/install.ps1 | iex
+        iwr -useb https://opencrabs.com/install.ps1 | iex
         ```
       </Tab>
     </Tabs>
