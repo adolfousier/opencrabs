@@ -1259,12 +1259,15 @@ impl App {
                         .map(|s| s.len())
                         .unwrap_or(0);
                     tracing::warn!(
-                        "[TUI] StripStreamedContent: wiping {} bytes of streaming buffer — {}",
+                        "[TUI] StripStreamedContent: wiping {} bytes of streaming response buffer — {}",
                         prior_len,
                         reason
                     );
+                    // Only wipe the visible response text. Leave
+                    // streaming_reasoning alone — the model's thinking block
+                    // is separate from the gaslighting preamble and often
+                    // contains legitimate planning the user wants to see.
                     self.streaming_response = None;
-                    self.streaming_reasoning = None;
                 }
             }
             TuiEvent::ReasoningChunk { session_id, text } => {
