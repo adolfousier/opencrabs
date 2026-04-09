@@ -1272,23 +1272,42 @@ impl App {
                     self.append_streaming_chunk(text);
                 }
             }
-            TuiEvent::StripStreamedContent { session_id, reason } => {
+            TuiEvent::StripStreamedContent {
+                session_id,
+                bytes,
+                reason,
+            } => {
                 if self.is_current_session(session_id) {
-                    let prior_len = self
-                        .streaming_response
-                        .as_ref()
-                        .map(|s| s.len())
-                        .unwrap_or(0);
-                    tracing::warn!(
-                        "[TUI] StripStreamedContent: wiping {} bytes of streaming response buffer — {}",
-                        prior_len,
-                        reason
-                    );
-                    // Only wipe the visible response text. Leave
-                    // streaming_reasoning alone — the model's thinking block
-                    // is separate from the gaslighting preamble and often
-                    // contains legitimate planning the user wants to see.
-                    self.streaming_response = None;
+                    // The gaslighting preamble is always leading in the
+                    // streaming buffer, so drain exactly `bytes` bytes from
+                    // the start — not the entire buffer. Prior behavior
+                    // wiped everything, which also destroyed any legitimate
+                    // draft that followed the preamble in the same block.
+                    if let Some(ref mut buf) = self.streaming_response {
+                        let prior_len = buf.len();
+                        // Clamp to a valid char boundary ≤ bytes to avoid
+                        // panicking on multi-byte codepoints.
+                        let mut cut = bytes.min(prior_len);
+                        while cut > 0 && !buf.is_char_boundary(cut) {
+                            cut -= 1;
+                        }
+                        tracing::warn!(
+                            "[TUI] StripStreamedContent: draining {}/{} bytes from start of streaming response — {}",
+                            cut,
+                            prior_len,
+                            reason
+                        );
+                        buf.drain(..cut);
+                        if buf.is_empty() {
+                            self.streaming_response = None;
+                        }
+                    } else {
+                        tracing::warn!(
+                            "[TUI] StripStreamedContent: no buffer to strip ({} bytes requested) — {}",
+                            bytes,
+                            reason
+                        );
+                    }
                 }
             }
             TuiEvent::ReasoningChunk { session_id, text } => {
