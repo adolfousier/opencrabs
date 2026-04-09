@@ -70,7 +70,10 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
             };
 
             let padded = if cursor_in_line {
-                let local_pos = cursor_pos - line_start;
+                let raw_pos = cursor_pos - line_start;
+                // Clamp to nearest char boundary to avoid panics from
+                // cursor_position landing mid-character (issue #69).
+                let local_pos = line.floor_char_boundary(raw_pos.min(line.len()));
                 let before = &line[..local_pos];
                 // Extract the full grapheme cluster under the cursor, not just
                 // one codepoint — ZWJ-joined emoji sequences (🏳️‍🌈, 👨‍👩‍👧, flags)

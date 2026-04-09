@@ -1133,6 +1133,12 @@ impl App {
                         );
                         // skip — don't insert garbage into input
                     } else {
+                        // Ensure cursor is on a valid char boundary before inserting
+                        // (defensive — prevents panics from corrupted cursor state, issue #69).
+                        self.cursor_position = self
+                            .input_buffer
+                            .floor_char_boundary(self.cursor_position.min(self.input_buffer.len()));
+
                         // Check if pasted text contains image paths — extract as attachments
                         let (clean_text, new_attachments) = Self::extract_image_paths(&filtered);
                         if !new_attachments.is_empty() {
@@ -2267,7 +2273,7 @@ impl App {
             let trimmed = before.trim_end();
             self.cursor_position = trimmed
                 .rfind(char::is_whitespace)
-                .map(|pos| pos + 1)
+                .map(|pos| trimmed.ceil_char_boundary(pos + 1))
                 .unwrap_or(0);
             return Ok(());
         }
@@ -2277,7 +2283,7 @@ impl App {
             let trimmed = before.trim_end();
             self.cursor_position = trimmed
                 .rfind(char::is_whitespace)
-                .map(|pos| pos + 1)
+                .map(|pos| trimmed.ceil_char_boundary(pos + 1))
                 .unwrap_or(0);
             return Ok(());
         }
