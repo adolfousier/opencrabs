@@ -45,13 +45,22 @@ pub fn sync_provider_for_session(
                         agent_model,
                     );
                     agent.swap_provider(new_provider);
+                    return;
                 }
                 Err(e) => {
-                    tracing::warn!("Failed to restore session provider '{}': {}", sess_prov, e);
+                    // Session's stored provider is gone (e.g. user removed a
+                    // custom provider, or the config was reset). Don't leave
+                    // the channel agent on a stale provider pointing at an
+                    // unreachable URL — fall through to the global config.
+                    tracing::warn!(
+                        "Failed to restore session provider '{}': {} — falling back to active config provider",
+                        sess_prov, e
+                    );
                 }
             }
+        } else {
+            return;
         }
-        return;
     }
 
     // No session provider — fall back to global config (first message in a new session)
