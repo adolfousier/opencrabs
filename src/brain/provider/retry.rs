@@ -26,6 +26,10 @@ pub struct RetryConfig {
     pub backoff_multiplier: f64,
     /// Add random jitter to delays (0.0-1.0)
     pub jitter: f64,
+    /// If true, 429 / rate-limit errors are retried in-place with backoff
+    /// (honoring Retry-After) instead of immediately bailing to the
+    /// FallbackProvider. Matches qwen-cli's DEFAULT_RETRY_OPTIONS behavior.
+    pub retry_on_rate_limit: bool,
 }
 
 impl Default for RetryConfig {
@@ -36,6 +40,7 @@ impl Default for RetryConfig {
             max_delay: Duration::from_secs(30),
             backoff_multiplier: 2.0,
             jitter: 0.1,
+            retry_on_rate_limit: false,
         }
     }
 }
@@ -66,6 +71,24 @@ impl RetryConfig {
             max_delay: Duration::from_secs(60),
             backoff_multiplier: 2.0,
             jitter: 0.2,
+            retry_on_rate_limit: true,
+        }
+    }
+
+    /// Mirrors qwen-cli's `DEFAULT_RETRY_OPTIONS` for the DashScope OAuth
+    /// transport: 7 attempts, 1.5s initial, 30s cap, 2× backoff with ±30%
+    /// jitter, and 429s are retried in-place (Retry-After honored) instead
+    /// of bailing to fallback. Qwen's shared-key upstream briefly closes its
+    /// window after 2–3 tool calls then reopens within seconds; retrying in
+    /// place matches the CLI and keeps the session on the healthy route.
+    pub fn qwen_cli_match() -> Self {
+        Self {
+            max_attempts: 7,
+            initial_delay: Duration::from_millis(1500),
+            max_delay: Duration::from_secs(30),
+            backoff_multiplier: 2.0,
+            jitter: 0.3,
+            retry_on_rate_limit: true,
         }
     }
 
@@ -133,17 +156,18 @@ where
                     return Err(err);
                 }
 
-                // Rate-limit errors must NOT be retried in-place. Retrying
-                // hammers the same dead route while the upstream window stays
-                // closed (often shared across the whole API key) and burns
-                // tens of seconds before fallback. Bail immediately so the
-                // FallbackProvider can swap to a healthy chain in milliseconds.
+                // Rate-limit errors: by default we bail immediately so the
+                // FallbackProvider can swap to a healthy chain in milliseconds
+                // instead of hammering a dead route whose shared upstream
+                // window is closed. Providers that want qwen-cli-style
+                // in-place retry (e.g. qwen OAuth, whose window reopens
+                // within seconds) opt in via `retry_on_rate_limit`.
                 let is_rate_limit = matches!(&err, ProviderError::RateLimitExceeded(_))
                     || matches!(
                         &err,
                         ProviderError::ApiError { status, .. } if *status == 429
                     );
-                if is_rate_limit {
+                if is_rate_limit && !config.retry_on_rate_limit {
                     tracing::warn!(
                         "Rate limit hit — skipping retries, bailing to fallback: {}",
                         err
@@ -161,7 +185,18 @@ where
                     return Err(last_error.unwrap_or(err));
                 }
 
-                let delay = config.calculate_delay(attempt);
+                // When retrying a rate limit, prefer the server's Retry-After
+                // hint (clamped to max_delay) over the naïve exponential
+                // schedule so we don't retry before the window reopens.
+                let delay = if is_rate_limit {
+                    let base = config.calculate_delay(attempt);
+                    match extract_retry_after(&err) {
+                        Some(hint) => hint.min(config.max_delay).max(base),
+                        None => base,
+                    }
+                } else {
+                    config.calculate_delay(attempt)
+                };
 
                 tracing::info!(
                     "Retry attempt {} after {}ms for error: {}",
@@ -284,6 +319,7 @@ mod tests {
             backoff_multiplier: 2.0,
             jitter: 0.0, // Disable jitter for predictable testing
             max_attempts: 5,
+            retry_on_rate_limit: false,
         };
 
         let delay0 = config.calculate_delay(0);
