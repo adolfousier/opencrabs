@@ -1007,22 +1007,99 @@ const GASLIGHTING_REFUSAL_PHRASES: &[&str] = &[
     "drop the path",
     "if you need image analysis",
     "for image analysis you could",
+    // "no access / not in my environment" family (00:30 incident)
+    "don't have access to a working",
+    "do not have access to a working",
+    "don't have a working",
+    "tool isn't available in my",
+    "tool is not available in my",
+    "isn't available in my current environment",
+    "not available in my current environment",
+    "in my current environment",
+    "working image analysis tool",
+    "image analysis tool for local files",
+    "upload the screenshot to a public",
+    "upload the image to a public",
+    "try to analyze it via url",
+    "analyze it via a url",
+    "analyze it via url",
+    "public url (imgur",
+    "(imgur, github",
 ];
 
-/// Detect a gaslighting refusal preamble: short assistant text that claims
-/// tools are broken/missing/unregistered. Only meaningful when paired with
-/// a successful `ToolUse` block in the same assistant turn — the presence
-/// of that block proves the refusal is a lie.
+/// Detect a gaslighting refusal preamble: short assistant text that lies
+/// about tool/capability availability for images.
 ///
-/// Length guard: > 1500 chars is almost always a real explanation or
-/// long narration, so we leave it alone to avoid false positives.
+/// Two independent signals, either one is sufficient:
+///
+/// 1. **Exact phrase match** against `GASLIGHTING_REFUSAL_PHRASES` —
+///    catches canned preambles from known provider quirks.
+///
+/// 2. **First-person refusal opening + image context** — text must BEGIN
+///    with a first-person refusal ("I can't", "I don't have", "I'm
+///    unable", etc.) AND mention image/screenshot/vision context.
+///
+///    This shape is near-zero false positive because legit responses
+///    describing an image start with "It's a...", "The screenshot
+///    shows...", "This image contains..." — never "I can't see...".
+///
+/// Length guard: > 1500 chars is almost always legit long narration.
 pub fn is_gaslighting_preamble(text: &str) -> bool {
     let trimmed = text.trim();
     if trimmed.is_empty() || trimmed.len() > 1500 {
         return false;
     }
     let lower = trimmed.to_lowercase();
-    GASLIGHTING_REFUSAL_PHRASES
+
+    // Signal 1: exact phrase list
+    if GASLIGHTING_REFUSAL_PHRASES
         .iter()
         .any(|phrase| lower.contains(phrase))
+    {
+        return true;
+    }
+
+    // Signal 2: refusal opening + image context
+    const REFUSAL_OPENINGS: &[&str] = &[
+        "i can't",
+        "i cannot",
+        "i can not",
+        "i don't have",
+        "i do not have",
+        "i'm unable",
+        "i am unable",
+        "i'm not able",
+        "i am not able",
+        "i lack ",
+        "unfortunately, i can't",
+        "unfortunately i can't",
+        "unfortunately, i cannot",
+        "unfortunately i cannot",
+        "unfortunately, i don't",
+        "unfortunately i don't",
+        "sorry, i can't",
+        "sorry i can't",
+        "sorry, i cannot",
+        "sorry i cannot",
+    ];
+    let starts_with_refusal = REFUSAL_OPENINGS.iter().any(|o| lower.starts_with(o));
+    if !starts_with_refusal {
+        return false;
+    }
+
+    // Tight image/vision context — deliberately NO generic "tool"/"file"
+    // because legit responses ("I can't find the file you mentioned")
+    // would false-positive.
+    const IMAGE_CONTEXT: &[&str] = &[
+        "image",
+        "images",
+        "screenshot",
+        "photo",
+        "picture",
+        "vision",
+        "visual",
+        "analyze_image",
+        "analyse_image",
+    ];
+    IMAGE_CONTEXT.iter().any(|w| lower.contains(w))
 }

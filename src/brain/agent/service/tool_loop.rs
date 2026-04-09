@@ -277,11 +277,20 @@ impl AgentService {
         // internally yet has NO persistent session — every spawn is cold and
         // we re-send the entire history. For qwen we still want the local
         // compaction; only the tool-execution skip applies.
-        let (is_cli_provider, cli_owns_context) = self
+        let (is_cli_provider, cli_owns_context, is_dialagram) = self
             .provider
             .read()
-            .map(|p| (p.cli_handles_tools(), p.cli_manages_context()))
-            .unwrap_or((false, false));
+            .map(|p| {
+                // Detect dialagram by base_url — users add it as a custom
+                // provider under any name they choose (typos included),
+                // but the proxy URL is always https://www.dialagram.me/...
+                let is_dialagram = p
+                    .base_url()
+                    .map(|u| u.to_lowercase().contains("dialagram.me"))
+                    .unwrap_or(false);
+                (p.cli_handles_tools(), p.cli_manages_context(), is_dialagram)
+            })
+            .unwrap_or((false, false, false));
 
         // For API providers ONLY: strip persisted `<!-- tools-v2: ... -->` and
         // `<!-- reasoning -->` markers from DB content before loading into the
@@ -1508,23 +1517,14 @@ impl AgentService {
             // Separate text blocks and tool use blocks from the response
             tracing::debug!("Response has {} content blocks", response.content.len());
 
-            // ── Contradiction strip ─────────────────────────────────────
-            // Some providers (notably dialagram qwen-thinking) emit a canned
-            // "tools aren't responding / isn't registered" refusal preamble
-            // in the SAME assistant turn that also contains a valid tool_use
-            // block. The tool fires and succeeds; the text is objectively a
-            // lie. If we persist it, the model pattern-matches its own past
-            // lies on the next turn and the bug compounds forever.
-            //
-            // Strip the refusal text from response.content BEFORE we build
-            // iteration_text, tell the TUI to wipe its streaming buffer, and
-            // log a [CONTRADICTION_STRIP] warning so we can see how often
-            // this fires per provider.
-            let has_valid_tool_use = response
-                .content
-                .iter()
-                .any(|b| matches!(b, ContentBlock::ToolUse { .. }));
-            if has_valid_tool_use {
+            // ── Gaslighting refusal strip ───────────────────────────────
+            // Some providers (notably dialagram qwen-thinking) emit canned
+            // "I can't analyze this image / tool isn't available" refusals
+            // even though the tools ARE available globally. The detector
+            // is narrow enough (first-person refusal opening + image
+            // context, OR exact phrase from known quirks) that we can
+            // strip unconditionally without false-positive risk.
+            if is_dialagram {
                 let mut stripped_bytes = 0usize;
                 let mut stripped_preview = String::new();
                 response.content.retain(|b| match b {
@@ -1540,20 +1540,25 @@ impl AgentService {
                     _ => true,
                 });
                 if stripped_bytes > 0 {
+                    let had_tool_use = response
+                        .content
+                        .iter()
+                        .any(|b| matches!(b, ContentBlock::ToolUse { .. }));
                     tracing::warn!(
-                        "[CONTRADICTION_STRIP] dropped {} bytes of gaslighting refusal (tools fired in same turn) — preview: {:?}",
+                        "[GASLIGHT_STRIP] dropped {} bytes of refusal (had_tool_use={}) — preview: {:?}",
                         stripped_bytes,
+                        had_tool_use,
                         stripped_preview
                     );
                     // Wipe the TUI's in-progress streaming buffer so the
-                    // lie doesn't stay on screen while tools execute.
+                    // lie doesn't stay on screen.
                     if let Some(ref cb) = progress_callback {
                         cb(
                             session_id,
                             ProgressEvent::StripStreamedContent {
                                 reason: format!(
-                                    "gaslighting refusal preamble ({} bytes) stripped — tools fired in same turn",
-                                    stripped_bytes
+                                    "gaslighting refusal ({} bytes) stripped (had_tool_use={})",
+                                    stripped_bytes, had_tool_use
                                 ),
                             },
                         );

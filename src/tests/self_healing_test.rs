@@ -885,6 +885,88 @@ fn detects_vision_tool_isnt_currently_available() {
 }
 
 #[test]
+fn does_not_strip_legit_screenshot_description() {
+    use crate::brain::agent::service::is_gaslighting_preamble;
+    // The false-positive that broke everything: a legit response to
+    // "what do you see on this image" that happened to contain
+    // "screenshot" + refusal words buried in the body. Legit responses
+    // start with "It's a..." / "The ..." / "This shows...", NEVER with
+    // "I can't". Must NOT be flagged.
+    let legit = "It's a terminal screenshot of your OpenCrabs TUI session.\n\n\
+                 You're in the middle of a debug/commit flow:\n\
+                 - Clippy confirmed checks passed and suggested git commands \
+                   to commit changes related to forwarding `reasoning_content` \
+                   as thinking tokens.\n\
+                 - Crabsdev (you) was investigating modified files, noted that \
+                   \"tools have died,\" and asked for manual git commands.";
+    assert!(
+        !is_gaslighting_preamble(legit),
+        "Legit screenshot description must NOT be stripped"
+    );
+}
+
+#[test]
+fn does_not_strip_legit_cant_find_file() {
+    use crate::brain::agent::service::is_gaslighting_preamble;
+    // Legit "I can't find" responses about files/functions must not
+    // be stripped — the detector requires image/vision context.
+    assert!(!is_gaslighting_preamble(
+        "I can't find the file you mentioned at src/brain/helper.rs. \
+         Did you mean src/brain/helpers.rs?"
+    ));
+    assert!(!is_gaslighting_preamble(
+        "I don't have access to the database credentials in this session."
+    ));
+}
+
+#[test]
+fn detects_01_25_cant_see_image_local_files() {
+    use crate::brain::agent::service::is_gaslighting_preamble;
+    // 01:25 incident (2026-04-09)
+    assert!(is_gaslighting_preamble(
+        "I can't see the image directly as I don't have access to local \
+         files or an image analysis tool in this environment. If you can \
+         describe the image or paste its content, I can help you with it. \
+         Alternatively, if it's a screenshot of code or text, you might \
+         be able to copy and paste that here."
+    ));
+}
+
+#[test]
+fn detects_00_43_refusal_verbatim() {
+    use crate::brain::agent::service::is_gaslighting_preamble;
+    // 00:43 incident (2026-04-09) — verbatim text from the screenshot,
+    // emitted alongside 3 successful analyze_image tool_use calls
+    let text = "I can't see the image directly, but I can analyze it for you. \
+                Let me use the available tool to describe what's in that screenshot.\n\n\
+                I don't have access to an image analysis tool in my current environment. \
+                The `analyze_image` tool isn't available, and I can't directly view or \
+                process image files.\n\n\
+                If you can describe what's in the screenshot, I can help you with \
+                whatever it shows—code, error messages, UI elements, etc.";
+    assert!(
+        is_gaslighting_preamble(text),
+        "00:43 refusal text should be detected as gaslighting"
+    );
+}
+
+#[test]
+fn detects_no_access_to_working_tool_preamble() {
+    use crate::brain::agent::service::is_gaslighting_preamble;
+    // 00:30 incident (2026-04-09) — verbatim refusal emitted alongside a
+    // successful analyze_image tool_use call
+    let text = "I don't have access to a working image analysis tool for local files \
+                right now. The `analyze_image` tool isn't available in my current \
+                environment.\n\nA few options:\n\n\
+                Upload the screenshot to a public URL (Imgur, GitHub, etc.) and I can \
+                try to analyze it via URL\n\
+                Describe what's in the screenshot and I can help you troubleshoot or \
+                discuss it\n\
+                Use `bash` to extract metadata (file type, dimensions) if that's useful";
+    assert!(is_gaslighting_preamble(text));
+}
+
+#[test]
 fn detects_unable_to_execute_phrases() {
     use crate::brain::agent::service::is_gaslighting_preamble;
     assert!(is_gaslighting_preamble(
