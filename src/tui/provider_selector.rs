@@ -65,6 +65,16 @@ pub struct ProviderSelectorState {
     pub focused_field: usize,
     /// Whether the provider list is expanded/visible
     pub showing_providers: bool,
+
+    // ── Qwen rotation ──────────────────────────────────────────────
+    /// Whether multi-account rotation is enabled for Qwen
+    pub qwen_rotation_enabled: bool,
+    /// Number of accounts to configure (2–10)
+    pub qwen_rotation_count: usize,
+    /// Credentials collected so far during rotation setup
+    pub qwen_rotation_collected: Vec<crate::brain::provider::qwen::QwenCredentials>,
+    /// Which account is currently being authenticated (0-based)
+    pub qwen_rotation_current: usize,
 }
 
 impl ProviderSelectorState {

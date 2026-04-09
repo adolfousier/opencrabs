@@ -1940,11 +1940,110 @@ impl App {
                 }
             }
             TuiEvent::QwenOAuthComplete => {
-                // Persist enabled flag to config.toml and disable all other providers,
-                // mirroring what /models save_provider_selection_internal does. The
-                // OAuth credentials live in keys.toml; without this, config.toml never
-                // sees `[providers.qwen] enabled = true` and Qwen never becomes the
-                // active provider on next load.
+                // ── Rotation mode: redirect to rotation handler ─────────
+                let rotation_active = self
+                    .onboarding
+                    .as_ref()
+                    .is_some_and(|w| w.ps.qwen_rotation_enabled)
+                    || self.ps.qwen_rotation_enabled;
+
+                if rotation_active {
+                    let (current, total) = self
+                        .onboarding
+                        .as_ref()
+                        .map(|w| (w.ps.qwen_rotation_current, w.ps.qwen_rotation_count))
+                        .unwrap_or((self.ps.qwen_rotation_current, self.ps.qwen_rotation_count));
+                    // Re-dispatch as rotation account done
+                    let sender = self.event_sender();
+                    let _ = sender.send(TuiEvent::QwenRotationAccountDone {
+                        idx: current,
+                        total,
+                    });
+                } else {
+                    // ── Normal single-account path ──────────────────────
+                    if let Ok(cfg) = crate::config::Config::load() {
+                        let sections = crate::utils::providers::all_config_sections(&cfg.providers);
+                        for s in &sections {
+                            if s != "providers.qwen" {
+                                let _ = crate::config::Config::write_key(s, "enabled", "false");
+                            }
+                        }
+                    }
+                    let _ = crate::config::Config::write_key("providers.qwen", "enabled", "true");
+                    let _ = crate::config::Config::write_key(
+                        "providers.qwen",
+                        "default_model",
+                        "coder-model",
+                    );
+
+                    self.ps.qwen_device_flow_status =
+                        super::onboarding::QwenDeviceFlowStatus::Complete;
+                    self.ps.api_key_input = super::onboarding::EXISTING_KEY_SENTINEL.to_string();
+                    self.ps.has_existing_key = true;
+                    if self.ps.config_models.is_empty() {
+                        self.ps.config_models =
+                            crate::tui::provider_selector::load_default_models("qwen");
+                        if self.ps.config_models.is_empty() {
+                            self.ps.config_models = vec!["coder-model".to_string()];
+                        }
+                    }
+
+                    if let Some(ref mut wizard) = self.onboarding {
+                        wizard.ps.qwen_device_flow_status =
+                            super::onboarding::QwenDeviceFlowStatus::Complete;
+                        wizard.ps.api_key_input =
+                            super::onboarding::EXISTING_KEY_SENTINEL.to_string();
+                        wizard.ps.has_existing_key = true;
+                        wizard.auth_field = super::onboarding::AuthField::Model;
+                        wizard.ps.config_models =
+                            crate::tui::provider_selector::load_default_models("qwen");
+                        if wizard.ps.config_models.is_empty() {
+                            wizard.ps.config_models = vec!["coder-model".to_string()];
+                        }
+                        wizard.ps.selected_model = 0;
+                    }
+
+                    if let Err(e) = self.rebuild_agent_service().await {
+                        tracing::warn!("Failed to rebuild agent service after Qwen OAuth: {}", e);
+                    }
+                }
+            }
+            TuiEvent::QwenRotationAccountDone { idx, total } => {
+                // Store the freshly-authed creds from keys.toml into the
+                // rotation collection, then prompt user to sign out.
+                if let Some(ref mut wizard) = self.onboarding {
+                    // The device flow just wrote creds to [providers.qwen] in keys.toml.
+                    // Read them back.
+                    if let Ok(cfg) = crate::config::Config::load()
+                        && let Some(qcfg) = &cfg.providers.qwen
+                        && let Some(creds) =
+                            crate::brain::provider::qwen::QwenCredentials::from_provider_config(
+                                qcfg,
+                            )
+                    {
+                        wizard.ps.qwen_rotation_collected.push(creds);
+                    }
+                    wizard.ps.qwen_rotation_current = idx + 1;
+
+                    if idx + 1 < total {
+                        // More accounts to go — ask user to sign out
+                        wizard.ps.qwen_device_flow_status =
+                            super::onboarding::QwenDeviceFlowStatus::RotationSignout {
+                                current: idx + 1,
+                                total,
+                            };
+                    } else {
+                        // All done — persist and finalize
+                        let _ = crate::brain::provider::qwen::QwenCredentials::persist_all_accounts(
+                            &wizard.ps.qwen_rotation_collected,
+                        );
+                        wizard.ps.qwen_device_flow_status =
+                            super::onboarding::QwenDeviceFlowStatus::RotationComplete;
+                    }
+                }
+            }
+            TuiEvent::QwenRotationComplete => {
+                // All rotation accounts persisted — enable qwen and rebuild
                 if let Ok(cfg) = crate::config::Config::load() {
                     let sections = crate::utils::providers::all_config_sections(&cfg.providers);
                     for s in &sections {
@@ -1960,24 +2059,12 @@ impl App {
                     "coder-model",
                 );
 
-                // Mirror to the model-selector ps so `/models` shows the
-                // authenticated state without a mode switch.
-                self.ps.qwen_device_flow_status = super::onboarding::QwenDeviceFlowStatus::Complete;
+                self.ps.qwen_device_flow_status =
+                    super::onboarding::QwenDeviceFlowStatus::RotationComplete;
                 self.ps.api_key_input = super::onboarding::EXISTING_KEY_SENTINEL.to_string();
                 self.ps.has_existing_key = true;
-                if self.ps.config_models.is_empty() {
-                    self.ps.config_models =
-                        crate::tui::provider_selector::load_default_models("qwen");
-                    if self.ps.config_models.is_empty() {
-                        self.ps.config_models = vec!["coder-model".to_string()];
-                    }
-                }
 
                 if let Some(ref mut wizard) = self.onboarding {
-                    wizard.ps.qwen_device_flow_status =
-                        super::onboarding::QwenDeviceFlowStatus::Complete;
-                    // Credentials already persisted via persist_to_keys() in the spawn task.
-                    // Mark key as existing and advance to model selection.
                     wizard.ps.api_key_input = super::onboarding::EXISTING_KEY_SENTINEL.to_string();
                     wizard.ps.has_existing_key = true;
                     wizard.auth_field = super::onboarding::AuthField::Model;
@@ -1989,9 +2076,8 @@ impl App {
                     wizard.ps.selected_model = 0;
                 }
 
-                // Reload the agent service so the running session picks up Qwen.
                 if let Err(e) = self.rebuild_agent_service().await {
-                    tracing::warn!("Failed to rebuild agent service after Qwen OAuth: {}", e);
+                    tracing::warn!("Failed to rebuild agent service after Qwen rotation: {}", e);
                 }
             }
             TuiEvent::QwenOAuthError(err) => {

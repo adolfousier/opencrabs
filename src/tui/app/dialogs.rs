@@ -1793,6 +1793,30 @@ impl App {
                         }
                     }
                 }
+                WizardAction::QwenRotationFlow => {
+                    // Start multi-account rotation setup
+                    wizard.ps.qwen_rotation_collected.clear();
+                    wizard.ps.qwen_rotation_current = 0;
+                    wizard.ps.qwen_device_flow_status =
+                        super::onboarding::QwenDeviceFlowStatus::RotationStep {
+                            current: 0,
+                            total: wizard.ps.qwen_rotation_count,
+                        };
+                    // Clear any stale qwen-cli creds so browser prompts fresh login
+                    let cli_path = crate::brain::provider::qwen::QwenCredentials::qwen_cli_path();
+                    let _ = std::fs::remove_file(&cli_path);
+                    self.spawn_qwen_device_flow();
+                }
+                WizardAction::QwenRotationNext => {
+                    // User confirmed signout — kick off next account's device flow
+                    let cli_path = crate::brain::provider::qwen::QwenCredentials::qwen_cli_path();
+                    let _ = std::fs::remove_file(&cli_path);
+                    let current = wizard.ps.qwen_rotation_current;
+                    let total = wizard.ps.qwen_rotation_count;
+                    wizard.ps.qwen_device_flow_status =
+                        super::onboarding::QwenDeviceFlowStatus::RotationStep { current, total };
+                    self.spawn_qwen_device_flow();
+                }
                 WizardAction::None => {
                     // Stay in onboarding
                 }

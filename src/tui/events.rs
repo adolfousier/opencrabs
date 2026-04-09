@@ -162,6 +162,11 @@ pub enum TuiEvent {
     /// Qwen native device flow: failed
     QwenOAuthError(String),
 
+    /// Qwen rotation: single account done (idx 0-based, total)
+    QwenRotationAccountDone { idx: usize, total: usize },
+    /// Qwen rotation: all accounts collected and persisted
+    QwenRotationComplete,
+
     /// A system message to display in chat
     SystemMessage(String),
 
