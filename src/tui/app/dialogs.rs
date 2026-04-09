@@ -311,6 +311,26 @@ impl App {
                     }
                     true
                 }
+                crossterm::event::KeyCode::Char(' ') if self.ps.selected_provider == 10 => {
+                    // Toggle Qwen rotation
+                    self.ps.qwen_rotation_enabled = !self.ps.qwen_rotation_enabled;
+                    if self.ps.qwen_rotation_enabled && self.ps.qwen_rotation_count < 2 {
+                        self.ps.qwen_rotation_count = 2;
+                    }
+                    false
+                }
+                crossterm::event::KeyCode::Char(c @ '2'..='9')
+                    if self.ps.selected_provider == 10 && self.ps.qwen_rotation_enabled =>
+                {
+                    self.ps.qwen_rotation_count = (c as usize) - ('0' as usize);
+                    false
+                }
+                crossterm::event::KeyCode::Char('1')
+                    if self.ps.selected_provider == 10 && self.ps.qwen_rotation_enabled =>
+                {
+                    self.ps.qwen_rotation_count = 10;
+                    false
+                }
                 _ => false,
             };
 
@@ -544,12 +564,40 @@ impl App {
             let is_cli_provider = matches!(self.ps.selected_provider, 7..=9);
 
             if self.ps.focused_field == 0 {
-                // Qwen native (idx 10) uses OAuth device flow instead of an
-                // API-key text field. If no credentials exist yet, kick off
-                // the device flow and don't advance focus — the user watches
-                // the status overlay and the QwenOAuthComplete event will
-                // populate the existing-key sentinel for us.
+                // Qwen: handle rotation signout confirmation
+                if self.ps.selected_provider == 10
+                    && matches!(
+                        self.ps.qwen_device_flow_status,
+                        super::onboarding::QwenDeviceFlowStatus::RotationSignout { .. }
+                    )
+                {
+                    let cli_path = crate::brain::provider::qwen::QwenCredentials::qwen_cli_path();
+                    let _ = std::fs::remove_file(&cli_path);
+                    let current = self.ps.qwen_rotation_current;
+                    let total = self.ps.qwen_rotation_count;
+                    self.ps.qwen_device_flow_status =
+                        super::onboarding::QwenDeviceFlowStatus::RotationStep { current, total };
+                    self.spawn_qwen_device_flow();
+                    return Ok(());
+                }
+
+                // Qwen native (idx 10) uses OAuth device flow. If no
+                // credentials exist yet, kick off rotation or single flow.
                 if self.ps.selected_provider == 10 && !self.ps.has_existing_key {
+                    if self.ps.qwen_rotation_enabled && self.ps.qwen_rotation_count >= 2 {
+                        self.ps.qwen_rotation_collected.clear();
+                        self.ps.qwen_rotation_current = 0;
+                        self.ps.qwen_device_flow_status =
+                            super::onboarding::QwenDeviceFlowStatus::RotationStep {
+                                current: 0,
+                                total: self.ps.qwen_rotation_count,
+                            };
+                        let cli_path =
+                            crate::brain::provider::qwen::QwenCredentials::qwen_cli_path();
+                        let _ = std::fs::remove_file(&cli_path);
+                        self.spawn_qwen_device_flow();
+                        return Ok(());
+                    }
                     self.ps.qwen_device_flow_status =
                         super::onboarding::QwenDeviceFlowStatus::WaitingForUser {
                             verification_uri: String::new(),

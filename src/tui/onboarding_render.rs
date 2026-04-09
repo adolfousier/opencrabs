@@ -719,6 +719,34 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
         // Qwen native — OAuth device flow
         use crate::tui::onboarding::QwenDeviceFlowStatus;
 
+        // Rotation toggle — always visible when Qwen is selected
+        let rotation_marker = if wizard.ps.qwen_rotation_enabled {
+            "[*]"
+        } else {
+            "[ ]"
+        };
+        lines.push(Line::from(Span::styled(
+            format!(
+                "  {} Account rotation (Space){} ",
+                rotation_marker,
+                if wizard.ps.qwen_rotation_enabled {
+                    format!("  Accounts: {}", wizard.ps.qwen_rotation_count)
+                } else {
+                    String::new()
+                }
+            ),
+            Style::default().fg(Color::Cyan),
+        )));
+        if wizard.ps.qwen_rotation_enabled {
+            lines.push(Line::from(Span::styled(
+                "  Press 2-9 to set count (1 for 10)",
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
+            )));
+        }
+        lines.push(Line::from(""));
+
         if wizard.ps.has_existing_key_sentinel() {
             lines.push(Line::from(Span::styled(
                 "  ● Authenticated with Qwen",
@@ -739,33 +767,6 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
                             .fg(Color::DarkGray)
                             .add_modifier(Modifier::ITALIC),
                     )));
-                    lines.push(Line::from(""));
-                    // Rotation toggle
-                    let rotation_marker = if wizard.ps.qwen_rotation_enabled {
-                        "[*]"
-                    } else {
-                        "[ ]"
-                    };
-                    lines.push(Line::from(Span::styled(
-                        format!(
-                            "  {} Account rotation (Space to toggle){}",
-                            rotation_marker,
-                            if wizard.ps.qwen_rotation_enabled {
-                                format!("  Accounts: {}", wizard.ps.qwen_rotation_count)
-                            } else {
-                                String::new()
-                            }
-                        ),
-                        Style::default().fg(Color::Cyan),
-                    )));
-                    if wizard.ps.qwen_rotation_enabled {
-                        lines.push(Line::from(Span::styled(
-                            "  Press 2-9 to set account count (1 for 10)",
-                            Style::default()
-                                .fg(Color::DarkGray)
-                                .add_modifier(Modifier::ITALIC),
-                        )));
-                    }
                     lines.push(Line::from(""));
                     lines.push(Line::from(Span::styled(
                         "  Press Enter to sign in with qwen.ai",
