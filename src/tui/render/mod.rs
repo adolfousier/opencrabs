@@ -223,13 +223,18 @@ fn render_split_panes(f: &mut Frame, app: &mut App, area: Rect) {
 /// Split 1 row off the top of an area for the app title bar.
 fn split_title_area(area: Rect) -> (Rect, Rect) {
     let title_height = 1u16; // title only
+    let used_title = title_height.min(area.height);
     let title_area = Rect {
-        height: title_height.min(area.height),
+        height: used_title,
         ..area
     };
+    // Clamp content_area.y so it never lands past the buffer when area is
+    // very small (e.g. height == 0 during a resize). Without the clamp,
+    // `area.y + title_height` can walk one row past the valid buffer and
+    // downstream renders panic on the first cell write.
     let content_area = Rect {
-        y: area.y + title_height,
-        height: area.height.saturating_sub(title_height),
+        y: area.y.saturating_add(used_title),
+        height: area.height.saturating_sub(used_title),
         ..area
     };
     (title_area, content_area)

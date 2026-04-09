@@ -125,8 +125,34 @@ async fn run_loop(
             mouse_capture_applied = app.mouse_capture_enabled;
         }
 
-        // Render
-        terminal.draw(|f| render::render(f, app))?;
+        // Render — wrap in catch_unwind so a render-time panic (e.g. a
+        // ratatui buffer OOB from some edge-case layout) is caught, logged,
+        // and the loop continues instead of crashing the whole TUI.
+        // Reborrow terminal/app as fresh mutable references for this
+        // iteration so moving them into the catch_unwind closure doesn't
+        // consume the outer references permanently.
+        let term_ref: &mut Terminal<CrosstermBackend<io::Stdout>> = &mut *terminal;
+        let app_ref: &mut App = &mut *app;
+        let draw_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            term_ref.draw(move |f| render::render(f, app_ref))
+        }));
+        match draw_result {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => return Err(e.into()),
+            Err(panic_payload) => {
+                let msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
+                    (*s).to_string()
+                } else if let Some(s) = panic_payload.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "unknown render panic".to_string()
+                };
+                tracing::error!("[TUI] render panic caught: {}", msg);
+                app.error_message = Some(format!("render panic: {}", msg));
+                // Try to recover the terminal state for the next frame.
+                let _ = terminal.clear();
+            }
+        }
 
         // Check for quit
         if app.should_quit {
