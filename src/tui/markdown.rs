@@ -167,8 +167,16 @@ pub fn parse_markdown(markdown: &str) -> Vec<Line<'static>> {
                 ));
             }
 
-            Event::HardBreak | Event::SoftBreak if !current_line.is_empty() => {
+            Event::HardBreak if !current_line.is_empty() => {
                 lines.push(Line::from(std::mem::take(&mut current_line)));
+            }
+
+            // CommonMark: a soft break (single newline inside a paragraph)
+            // renders as a space so the layout engine can reflow. Treating
+            // it as a hard break baked the LLM's 72-col source wrap into
+            // chat history, making replies appear narrow on wide terminals.
+            Event::SoftBreak if !current_line.is_empty() => {
+                current_line.push(Span::raw(" "));
             }
 
             Event::Rule => {
