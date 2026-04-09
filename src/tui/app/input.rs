@@ -1167,9 +1167,10 @@ impl App {
         } else if keys::is_up(&event)
             && !self.slash_suggestions_active
             && self.input_history_index.is_none()
-            && self.cursor_position > 0
+            && !self.input_buffer.is_empty()
         {
-            // Arrow Up — try visual line first, then logical line, then start
+            // Arrow Up with typed content — navigate lines. History browse
+            // is reserved for empty buffers so typing never gets wiped.
             if !self.cursor_visual_up() {
                 // Already on first visual line of this logical line
                 let line_start = self.cursor_line_position().0;
@@ -1203,9 +1204,10 @@ impl App {
         } else if keys::is_down(&event)
             && !self.slash_suggestions_active
             && self.input_history_index.is_none()
-            && self.cursor_position < self.input_buffer.len()
+            && !self.input_buffer.is_empty()
         {
-            // Arrow Down — try visual line first, then logical line, then end
+            // Arrow Down with typed content — navigate lines. History browse
+            // is reserved for empty buffers so typing never gets wiped.
             if !self.cursor_visual_down() {
                 // Already on last visual line of this logical line
                 let line_start = self.cursor_line_position().0;
@@ -1266,8 +1268,10 @@ impl App {
         } else if keys::is_up(&event)
             && !self.slash_suggestions_active
             && !self.input_history.is_empty()
+            && (self.input_buffer.is_empty() || self.input_history_index.is_some())
         {
-            // Arrow Up — browse input history (older)
+            // Arrow Up — browse input history (older). Only when the buffer
+            // is empty (nothing to lose) or we're already inside history.
             match self.input_history_index {
                 None => {
                     // Entering history — stash current input
