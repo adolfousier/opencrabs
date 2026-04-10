@@ -219,9 +219,11 @@ async fn run_loop(
             }
 
             // Drain all remaining queued events before re-rendering.
-            // Coalesce Ticks and Scrolls to avoid redundant re-renders.
-            // Break on streaming chunks so each chunk triggers an immediate redraw.
+            // Coalesce Ticks, Scrolls, and streaming chunks to avoid redundant
+            // re-renders. Streaming chunks are batched with a time budget so the
+            // TUI stays responsive to keyboard/mouse input during long streams.
             let mut pending_scroll: i32 = 0;
+            let drain_start = std::time::Instant::now();
             loop {
                 match app.try_next_event() {
                     Some(TuiEvent::Tick) => continue,
@@ -229,15 +231,19 @@ async fn run_loop(
                         pending_scroll += dir as i32;
                     }
                     Some(event) => {
-                        // Break on ResponseChunk so text appears immediately.
-                        // ReasoningChunk is NOT broken on — reasoning can batch
-                        // within the 100ms tick so it doesn't starve response text.
-                        let is_response_chunk = matches!(event, TuiEvent::ResponseChunk { .. });
+                        let is_chunk = matches!(
+                            event,
+                            TuiEvent::ResponseChunk { .. } | TuiEvent::ReasoningChunk { .. }
+                        );
                         if let Err(e) = app.handle_event(event).await {
                             app.error_message = Some(e.to_string());
                         }
-                        if is_response_chunk {
-                            break; // Redraw immediately so each text chunk shows in real-time
+                        // Batch streaming chunks for up to 30ms before yielding
+                        // to render. This lets multiple chunks coalesce into one
+                        // re-render instead of O(n) renders per second.
+                        if is_chunk && drain_start.elapsed() >= std::time::Duration::from_millis(30)
+                        {
+                            break;
                         }
                     }
                     None => break,
