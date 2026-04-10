@@ -295,8 +295,25 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             lines.push(Line::from("")); // separator between reasoning and response
         }
 
-        let clean_response = crate::utils::sanitize::strip_llm_artifacts(response);
-        let streaming_lines = parse_markdown(&clean_response);
+        // Cache parsed markdown for the streaming buffer — re-parse only when
+        // the buffer grows. This avoids O(n²) markdown parsing during streaming
+        // (previously re-parsed the entire growing buffer on every render frame).
+        let current_len = response.len();
+        let streaming_lines = if let Some((cached_len, ref cached)) = app.streaming_render_cache {
+            if cached_len == current_len {
+                cached.clone()
+            } else {
+                let clean = crate::utils::sanitize::strip_llm_artifacts(response);
+                let parsed = parse_markdown(&clean);
+                app.streaming_render_cache = Some((current_len, parsed.clone()));
+                parsed
+            }
+        } else {
+            let clean = crate::utils::sanitize::strip_llm_artifacts(response);
+            let parsed = parse_markdown(&clean);
+            app.streaming_render_cache = Some((current_len, parsed.clone()));
+            parsed
+        };
         for line in streaming_lines {
             let mut padded_spans = vec![Span::raw("  ")];
             padded_spans.extend(line.spans);

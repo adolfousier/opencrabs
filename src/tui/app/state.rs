@@ -269,6 +269,10 @@ pub struct App {
     pub is_processing: bool,
     pub processing_started_at: Option<std::time::Instant>,
     pub streaming_response: Option<String>,
+    /// Cached parsed markdown lines for the streaming response — avoids
+    /// re-parsing the entire growing buffer on every render frame.
+    /// Invalidated when streaming_response length changes.
+    pub(crate) streaming_render_cache: Option<(usize, Vec<ratatui::text::Line<'static>>)>,
     /// Reasoning/thinking content from providers like MiniMax (display-only, cleared on complete)
     pub streaming_reasoning: Option<String>,
     pub error_message: Option<String>,
@@ -507,6 +511,7 @@ impl App {
             is_processing: false,
             processing_started_at: None,
             streaming_response: None,
+            streaming_render_cache: None,
             streaming_reasoning: None,
             error_message: None,
             error_message_shown_at: None,
@@ -1309,6 +1314,7 @@ impl App {
                         buf.drain(..cut);
                         if buf.is_empty() {
                             self.streaming_response = None;
+                            self.streaming_render_cache = None;
                         }
                     } else {
                         tracing::warn!(
@@ -1479,6 +1485,7 @@ impl App {
 
                 // Clear streaming response - text is now going to be a permanent message
                 self.streaming_response = None;
+                self.streaming_render_cache = None;
                 self.streaming_reasoning = None;
                 self.intermediate_text_received = true;
 
@@ -1687,6 +1694,7 @@ impl App {
                 // no notice. Only reset internal streaming state so the next
                 // assistant turn renders cleanly.
                 self.streaming_response = None;
+                self.streaming_render_cache = None;
                 self.streaming_reasoning = None;
                 self.active_tool_group = None;
                 // Allow post-compaction TokenCountUpdated to set a lower value
@@ -2573,6 +2581,7 @@ impl App {
         self.is_processing = false;
         self.processing_started_at = None;
         self.streaming_response = None;
+        self.streaming_render_cache = None;
         self.streaming_reasoning = None;
         self.cancel_token = None;
         self.task_abort_handle = None;
@@ -2718,6 +2727,7 @@ impl App {
         }
 
         // Clear streaming overlay so the approval dialog is visible
+        self.streaming_render_cache = None;
         if let Some(text) = self.streaming_response.take()
             && !text.trim().is_empty()
         {
