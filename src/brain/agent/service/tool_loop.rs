@@ -207,6 +207,14 @@ impl AgentService {
         let progress_callback: Option<ProgressCallback> =
             override_progress_callback.or_else(|| self.progress_callback.clone());
 
+        // Notify TUI when a remote channel starts/finishes processing so it can
+        // block concurrent sends on the same session and avoid garbled display.
+        if has_progress_override && let Some(ref tx) = self.session_updated_tx {
+            let _ = tx.send(crate::brain::agent::ChannelSessionEvent::ProcessingStarted(
+                session_id,
+            ));
+        }
+
         // Run the actual loop
         let result = self
             .run_tool_loop_inner(
@@ -220,6 +228,11 @@ impl AgentService {
                 progress_callback,
             )
             .await;
+
+        if has_progress_override && let Some(ref tx) = self.session_updated_tx {
+            let _ =
+                tx.send(crate::brain::agent::ChannelSessionEvent::ProcessingFinished(session_id));
+        }
 
         // Request finished — delete the tracking row. Only PROCESSING rows
         // survive (meaning the process crashed/restarted mid-request).
@@ -2326,7 +2339,9 @@ impl AgentService {
                 // Notify TUI after each tool iteration so it refreshes in real-time,
                 // even during long-running channel sessions (Telegram, WhatsApp, etc.)
                 if let Some(ref tx) = self.session_updated_tx {
-                    let _ = tx.send(session_id);
+                    let _ = tx.send(crate::brain::agent::ChannelSessionEvent::Updated(
+                        session_id,
+                    ));
                 }
 
                 tool_descriptions.clear();
@@ -2527,7 +2542,9 @@ impl AgentService {
         // Notify the TUI that this session was updated (enables live refresh when
         // a remote channel — Telegram, WhatsApp, Discord, Slack — processes a message).
         if let Some(ref tx) = self.session_updated_tx {
-            let _ = tx.send(session_id);
+            let _ = tx.send(crate::brain::agent::ChannelSessionEvent::Updated(
+                session_id,
+            ));
         }
 
         Ok(AgentResponse {

@@ -645,12 +645,24 @@ async fn cmd_chat_inner(
     // Create session-updated notification channel — remote channels fire this so the TUI
     // reloads in real-time when Telegram/WhatsApp/Discord/Slack messages are processed.
     let (session_updated_tx, mut session_updated_rx) =
-        tokio::sync::mpsc::unbounded_channel::<uuid::Uuid>();
+        tokio::sync::mpsc::unbounded_channel::<crate::brain::agent::ChannelSessionEvent>();
     {
         let event_sender = app.event_sender();
         tokio::spawn(async move {
-            while let Some(session_id) = session_updated_rx.recv().await {
-                let _ = event_sender.send(crate::tui::events::TuiEvent::SessionUpdated(session_id));
+            use crate::brain::agent::ChannelSessionEvent;
+            while let Some(event) = session_updated_rx.recv().await {
+                let tui_event = match event {
+                    ChannelSessionEvent::Updated(id) => {
+                        crate::tui::events::TuiEvent::SessionUpdated(id)
+                    }
+                    ChannelSessionEvent::ProcessingStarted(id) => {
+                        crate::tui::events::TuiEvent::ChannelProcessingStarted(id)
+                    }
+                    ChannelSessionEvent::ProcessingFinished(id) => {
+                        crate::tui::events::TuiEvent::ChannelProcessingFinished(id)
+                    }
+                };
+                let _ = event_sender.send(tui_event);
             }
         });
     }

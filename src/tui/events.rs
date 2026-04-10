@@ -215,6 +215,12 @@ pub enum TuiEvent {
     /// response — the TUI should refresh if it's the current session.
     SessionUpdated(Uuid),
 
+    /// A remote channel started processing a session — TUI should block sends
+    /// on this session to prevent concurrent tool loops.
+    ChannelProcessingStarted(Uuid),
+    /// A remote channel finished processing a session.
+    ChannelProcessingFinished(Uuid),
+
     /// A pending request was resumed on startup — TUI must track the cancel token
     /// so double-Escape can abort it.
     PendingResumed {

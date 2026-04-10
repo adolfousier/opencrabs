@@ -234,7 +234,9 @@ async fn persist_command_to_history(
     }
     // Notify TUI to reload session messages (same mechanism as agent responses)
     if let Some(tx) = agent.session_updated_tx() {
-        let _ = tx.send(session_id);
+        let _ = tx.send(crate::brain::agent::ChannelSessionEvent::Updated(
+            session_id,
+        ));
     }
 }
 
