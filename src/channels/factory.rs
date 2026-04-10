@@ -29,7 +29,8 @@ pub struct ChannelFactory {
     brain_path: PathBuf,
     shared_session_id: Arc<Mutex<Option<Uuid>>>,
     config_rx: tokio::sync::watch::Receiver<Config>,
-    session_updated_tx: OnceLock<tokio::sync::mpsc::UnboundedSender<Uuid>>,
+    session_updated_tx:
+        OnceLock<tokio::sync::mpsc::UnboundedSender<crate::brain::agent::ChannelSessionEvent>>,
 }
 
 impl ChannelFactory {
@@ -57,7 +58,10 @@ impl ChannelFactory {
     }
 
     /// Wire in the TUI session-updated sender so channel agents trigger live TUI refresh.
-    pub fn set_session_updated_tx(&self, tx: tokio::sync::mpsc::UnboundedSender<Uuid>) {
+    pub fn set_session_updated_tx(
+        &self,
+        tx: tokio::sync::mpsc::UnboundedSender<crate::brain::agent::ChannelSessionEvent>,
+    ) {
         let _ = self.session_updated_tx.set(tx);
     }
 

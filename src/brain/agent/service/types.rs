@@ -112,6 +112,18 @@ pub enum ProgressEvent {
 /// The first parameter is the `session_id` the event belongs to.
 pub type ProgressCallback = Arc<dyn Fn(Uuid, ProgressEvent) + Send + Sync>;
 
+/// Events sent through `session_updated_tx` to notify the TUI about remote channel
+/// session activity (Telegram, WhatsApp, Discord, Slack).
+#[derive(Debug, Clone)]
+pub enum ChannelSessionEvent {
+    /// A remote channel started processing a session
+    ProcessingStarted(uuid::Uuid),
+    /// Session content was updated (tool result persisted, response complete, etc.)
+    Updated(uuid::Uuid),
+    /// A remote channel finished processing a session
+    ProcessingFinished(uuid::Uuid),
+}
+
 /// Callback for requesting sudo password from the user.
 /// Takes the command string, returns Ok(Some(password)) or Ok(None) if cancelled.
 pub type SudoCallback = Arc<

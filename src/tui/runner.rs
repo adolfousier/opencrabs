@@ -138,6 +138,21 @@ async fn run_loop(
             mouse_capture_applied = app.mouse_capture_enabled;
         }
 
+        // Flush debounced session refresh from remote channels.
+        // Only fires after 500ms of quiet to avoid blocking the loop with
+        // rapid DB queries during multi-tool Telegram runs.
+        if let Some((session_id, queued_at)) = app.pending_session_refresh
+            && queued_at.elapsed() >= std::time::Duration::from_millis(500)
+        {
+            app.pending_session_refresh = None;
+            if app.is_current_session(session_id)
+                && !app.processing_sessions.contains(&session_id)
+                && let Err(e) = app.load_session(session_id).await
+            {
+                tracing::warn!("Debounced session refresh failed: {}", e);
+            }
+        }
+
         // Render — wrap in catch_unwind so a render-time panic (e.g. a
         // ratatui buffer OOB from some edge-case layout) is caught, logged,
         // and the loop continues instead of crashing the whole TUI.

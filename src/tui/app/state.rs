@@ -364,6 +364,12 @@ pub struct App {
     pub(crate) session_cancel_tokens: HashMap<Uuid, CancellationToken>,
     /// Sessions that completed while user was in a different session (unread responses)
     pub(crate) sessions_with_unread: HashSet<Uuid>,
+    /// Sessions being processed by a remote channel (Telegram, etc.) — prevents
+    /// concurrent TUI sends on the same session and avoids blocking reload loops.
+    pub(crate) channel_processing_sessions: HashSet<Uuid>,
+    /// Pending session refresh from remote channel — debounced to avoid blocking
+    /// the event loop with rapid DB queries during multi-tool runs.
+    pub(crate) pending_session_refresh: Option<(Uuid, std::time::Instant)>,
     /// Sessions that have pending approval requests waiting
     pub(crate) sessions_with_pending_approval: HashSet<Uuid>,
     /// Cached provider instances keyed by provider name (e.g., "anthropic", "custom:nvidia")
@@ -543,6 +549,8 @@ impl App {
             processing_sessions: HashSet::new(),
             session_cancel_tokens: HashMap::new(),
             sessions_with_unread: HashSet::new(),
+            channel_processing_sessions: HashSet::new(),
+            pending_session_refresh: None,
             sessions_with_pending_approval: HashSet::new(),
             provider_cache: HashMap::new(),
             cancel_token: None,
@@ -1782,15 +1790,47 @@ impl App {
             | TuiEvent::StreamingOutputTokens { .. } => {}
 
             TuiEvent::SessionUpdated(session_id) => {
-                // A remote channel completed an agent response. Only react when the TUI
-                // itself is NOT processing this session (to avoid conflicting with the
-                // TUI's own ResponseComplete flow).
-                if !self.processing_sessions.contains(&session_id) {
-                    if self.is_current_session(session_id) {
-                        self.load_session(session_id).await?;
-                    } else {
-                        self.sessions_with_unread.insert(session_id);
+                // A remote channel updated a session. Don't reload immediately —
+                // during multi-tool runs this fires after every tool call, and each
+                // reload is a blocking DB query that freezes the event loop (making
+                // Ctrl+C unresponsive and garbling the display). Instead, debounce:
+                // schedule a refresh and let the main loop's idle tick handle it.
+                if self.is_current_session(session_id) {
+                    // Only schedule refresh if the session isn't being processed
+                    // by the TUI itself (channel processing is fine — the refresh
+                    // fires after ChannelProcessingFinished).
+                    if !self.processing_sessions.contains(&session_id)
+                        || self.channel_processing_sessions.contains(&session_id)
+                    {
+                        self.pending_session_refresh =
+                            Some((session_id, std::time::Instant::now()));
                     }
+                } else {
+                    self.sessions_with_unread.insert(session_id);
+                }
+            }
+
+            TuiEvent::ChannelProcessingStarted(session_id) => {
+                self.channel_processing_sessions.insert(session_id);
+                // If it's the current session, mark as processing so the TUI
+                // queues user messages instead of starting a concurrent tool loop.
+                if self.is_current_session(session_id) {
+                    self.processing_sessions.insert(session_id);
+                    self.is_processing = true;
+                    self.processing_started_at = Some(std::time::Instant::now());
+                }
+            }
+
+            TuiEvent::ChannelProcessingFinished(session_id) => {
+                self.channel_processing_sessions.remove(&session_id);
+                // Only clear processing if the TUI itself didn't also start a task.
+                // The TUI's own tasks are tracked via cancel_token; channel tasks are not.
+                if self.is_current_session(session_id) && self.cancel_token.is_none() {
+                    self.processing_sessions.remove(&session_id);
+                    self.is_processing = false;
+                    self.processing_started_at = None;
+                    // Force a reload now that the channel is done
+                    self.load_session(session_id).await?;
                 }
             }
 

@@ -51,7 +51,8 @@ pub struct AgentService {
     /// Notification channel — fired after every `run_tool_loop` completion so
     /// the TUI can refresh when a remote channel (Telegram/WhatsApp/…) updates
     /// the shared session.
-    pub(super) session_updated_tx: Option<tokio::sync::mpsc::UnboundedSender<uuid::Uuid>>,
+    pub(super) session_updated_tx:
+        Option<tokio::sync::mpsc::UnboundedSender<super::types::ChannelSessionEvent>>,
 
     /// Fallback providers for rate-limit recovery (built from config on startup).
     /// When the primary provider hits a rate/account limit mid-stream, these are
@@ -235,14 +236,16 @@ impl AgentService {
     /// (Telegram, WhatsApp, Discord, Slack) processes a message.
     pub fn with_session_updated_tx(
         mut self,
-        tx: tokio::sync::mpsc::UnboundedSender<uuid::Uuid>,
+        tx: tokio::sync::mpsc::UnboundedSender<super::types::ChannelSessionEvent>,
     ) -> Self {
         self.session_updated_tx = Some(tx);
         self
     }
 
     /// Get the session-updated sender (for preserving across agent rebuilds).
-    pub fn session_updated_tx(&self) -> Option<tokio::sync::mpsc::UnboundedSender<uuid::Uuid>> {
+    pub fn session_updated_tx(
+        &self,
+    ) -> Option<tokio::sync::mpsc::UnboundedSender<super::types::ChannelSessionEvent>> {
         self.session_updated_tx.clone()
     }
 
