@@ -299,6 +299,16 @@ impl OnboardingWizard {
                 .unwrap_or_default(),
             zhipu_endpoint_type: 0, // default to API mode
             model_filter: String::new(),
+            qwen_rotation_enabled: existing_config
+                .as_ref()
+                .and_then(|c| c.providers.qwen_accounts.as_ref())
+                .is_some_and(|a| a.len() >= 2),
+            qwen_rotation_count: existing_config
+                .as_ref()
+                .and_then(|c| c.providers.qwen_accounts.as_ref())
+                .map(|a| a.len())
+                .filter(|&n| n >= 2)
+                .unwrap_or(2),
             ..Default::default()
         };
 
