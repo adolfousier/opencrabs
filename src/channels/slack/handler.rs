@@ -1373,13 +1373,14 @@ async fn handle_message(
                         sent.len()
                     );
                 }
-                // If dedup stripped everything, send the full response anyway.
+                // If dedup stripped everything, the intermediates already
+                // cover the full response — nothing new to send.
                 if result.is_empty() {
-                    tracing::warn!(
-                        "Slack dedup: result empty after stripping intermediates, sending full response (len={})",
+                    tracing::info!(
+                        "Slack dedup: result empty after stripping — intermediates already delivered full response (len={})",
                         text_only.len()
                     );
-                    text_only
+                    String::new()
                 } else {
                     result
                 }

@@ -471,6 +471,53 @@ impl AgentService {
             return Err(crate::brain::provider::ProviderError::StreamError(msg));
         }
 
+        // Self-heal: detect truncated responses disguised as complete.
+        // Some providers (notably Qwen) occasionally send finish_reason="stop"
+        // with a usage chunk after only a handful of tokens, producing a response
+        // like "Let me check the current state:" — clearly mid-thought.  The
+        // premature-termination guard above can't catch this because stop_reason
+        // IS set (from the finish_reason chunk).  Detect it by checking: very low
+        // output tokens + text that looks like an incomplete preamble (ends with
+        // `:` or `...`).  Returning StreamError lets retry/rotation/fallback
+        // re-issue the request instead of accepting garbage.
+        if stop_reason == Some(StopReason::EndTurn) && output_tokens > 0 && output_tokens < 100 {
+            let has_tool_use = block_states
+                .iter()
+                .any(|bs| matches!(&bs.block, ContentBlock::ToolUse { .. }));
+            if !has_tool_use {
+                let text: String = block_states
+                    .iter()
+                    .filter_map(|bs| match &bs.block {
+                        ContentBlock::Text { text } => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect();
+                let trimmed = text.trim();
+                if trimmed.ends_with(':') || trimmed.ends_with("...") {
+                    let preview = if trimmed.len() > 80 {
+                        &trimmed[trimmed.len() - 80..]
+                    } else {
+                        trimmed
+                    };
+                    let msg = format!(
+                        "Self-heal: provider sent stop after only {} output tokens — \
+                         response appears truncated: \"{}\"",
+                        output_tokens, preview,
+                    );
+                    tracing::warn!("⚠️ {}", msg);
+                    if let Some(cb) = effective_cb {
+                        cb(
+                            session_id,
+                            ProgressEvent::SelfHealingAlert {
+                                message: msg.clone(),
+                            },
+                        );
+                    }
+                    return Err(crate::brain::provider::ProviderError::StreamError(msg));
+                }
+            }
+        }
+
         // Build final content blocks from accumulated state
         // Filter out empty text blocks — Anthropic rejects "text content blocks must be non-empty"
         let content_blocks: Vec<ContentBlock> = block_states

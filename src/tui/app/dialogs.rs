@@ -230,6 +230,20 @@ impl App {
         self.ps.has_existing_key = api_key.is_some();
         self.ps.api_key_input.clear();
 
+        // Load Qwen rotation state from persisted config (single source of truth)
+        if let Some(accounts) = config.providers.qwen_accounts.as_ref() {
+            if accounts.len() >= 2 {
+                self.ps.qwen_rotation_enabled = true;
+                self.ps.qwen_rotation_count = accounts.len();
+            } else {
+                self.ps.qwen_rotation_enabled = false;
+                self.ps.qwen_rotation_count = 2;
+            }
+        } else {
+            self.ps.qwen_rotation_enabled = false;
+            self.ps.qwen_rotation_count = 2;
+        }
+
         // Spawn async model fetch — dialog opens immediately, models arrive via event
         let sender = self.event_sender();
         tokio::spawn(async move {
