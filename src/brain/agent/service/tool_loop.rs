@@ -85,6 +85,11 @@ impl AgentService {
                 context.token_count as f64 / effective_max as f64 * 100.0,
             );
 
+            // Emit updated token count so TUI reflects post-truncation value.
+            if let Some(cb) = progress_callback {
+                cb(session_id, ProgressEvent::TokenCount(context.token_count));
+            }
+
             return None;
         }
 
@@ -151,6 +156,11 @@ impl AgentService {
                 context.hard_truncate_to(safety_target);
                 context.trim_to_fit(0);
             }
+        }
+
+        // Emit updated token count so TUI reflects post-compaction value immediately.
+        if let Some(cb) = progress_callback {
+            cb(session_id, ProgressEvent::TokenCount(context.token_count));
         }
 
         summary_result
@@ -1204,6 +1214,10 @@ impl AgentService {
                             context.messages.drain(..total - KEEP_MESSAGES);
                         }
                     }
+                }
+                // Emit updated token count so TUI reflects post-compaction value.
+                if let Some(ref cb) = progress_callback {
+                    cb(session_id, ProgressEvent::TokenCount(context.token_count));
                 }
                 // Re-run the loop iteration with the compacted context
                 continue;
