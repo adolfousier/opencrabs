@@ -625,9 +625,25 @@ impl App {
                     return Ok(());
                 }
 
-                // Start rotation flow (even if already authenticated
-                // with one account — rotation needs N accounts)
-                if self.ps.qwen_rotation_enabled && self.ps.qwen_rotation_count >= 2 {
+                // If rotation accounts already exist in config, skip auth — just
+                // advance to model selection. Only re-trigger the rotation flow when
+                // the user explicitly changed the count (collected is empty means
+                // we haven't started a new flow this dialog session).
+                let has_persisted_accounts = crate::config::Config::load()
+                    .ok()
+                    .and_then(|c| c.providers.qwen_accounts)
+                    .is_some_and(|a| a.len() >= 2);
+
+                if self.ps.qwen_rotation_enabled
+                    && self.ps.qwen_rotation_count >= 2
+                    && has_persisted_accounts
+                {
+                    // Accounts already set up — advance to model
+                    self.ps.focused_field = 2;
+                    self.ps.selected_model = 0;
+                    return Ok(());
+                } else if self.ps.qwen_rotation_enabled && self.ps.qwen_rotation_count >= 2 {
+                    // New rotation setup requested
                     self.ps.qwen_rotation_collected.clear();
                     self.ps.qwen_rotation_current = 0;
                     self.ps.qwen_device_flow_status = QwenDeviceFlowStatus::RotationStep {
