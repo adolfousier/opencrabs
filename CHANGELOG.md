@@ -5,6 +5,73 @@ All notable changes to OpenCrabs will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] - 2026-04-11
+
+Major feature release: **Qwen multi-account OAuth rotation** — configure 2–10
+Qwen accounts that rotate automatically on rate-limit, giving effectively N×
+the free-tier quota. Also ships critical TUI stability and performance fixes,
+a visual redesign of the provider selector, and cross-platform improvements.
+
+### Added
+
+- **Qwen multi-account rotation** — new `RotatingQwenProvider` round-robins
+  across N OAuth accounts, auto-advancing on 429 / rate-limit errors. Setup
+  via `/models` or `/onboard`: toggle rotation with `Space`, pick 2–10
+  accounts (`1` = 10), authenticate each via device flow. Credentials persist
+  in `keys.toml` under `[[providers.qwen_accounts]]`. With 3 accounts you get
+  **180 req/min** and **3,000 req/day** before fallback kicks in (`e1b2417`,
+  `a104290`).
+- **Incremental rotation setup** — adding accounts later (e.g. 3→5) only
+  authenticates the new ones, preserving existing credentials (`5200146`).
+- **Provider credential indicators** — providers with existing API keys, OAuth
+  tokens, or CLI binaries in PATH now display in green with a **✓** checkmark
+  in both `/models` and `/onboard` provider lists, so you immediately see
+  what's already configured (`471ae0a`).
+
+### Fixed
+
+- **TUI garbled display from channel sessions** — Telegram/Discord processing
+  the shared TUI session flooded the event loop with `SessionUpdated` events,
+  each triggering a blocking DB query. Now uses a `ChannelSessionEvent` enum
+  with `ProcessingStarted`/`Finished` lifecycle and 500ms debounced refresh.
+  Input remains responsive while channels process in the background (`33f9ab6`).
+- **TUI streaming lag** — every `ResponseChunk` forced a full re-render with
+  O(n²) markdown re-parsing on the entire growing buffer. Now batches chunks
+  within a 30ms time budget and caches parsed markdown between frames. Typing,
+  scrolling, and Ctrl+C work normally during streaming (`9098e02`).
+- **Context counter not updating after compaction** — `TokenCount` event now
+  emitted after both LLM tier-1 compaction and tier-2 hard truncation so the
+  footer percentage reflects post-compaction values in real time (`98dc401`).
+- **Qwen rotation auth wipe** — opening `/models` with existing rotation
+  accounts no longer re-triggers the full OAuth flow and destroys credentials.
+  Guard checks persisted account count matches desired count (`8e8bb04`,
+  `5200146`).
+- **Duplicate messages and truncated response self-heal** — dedup logic
+  prevents double-send and rotation state now persists across sessions
+  (`de5a040`).
+- **Custom provider duplicate entries** — entering a name with capital letters
+  (e.g. "Dialagram") no longer creates two entries (one normalized, one empty).
+  Names are normalized via `normalize_toml_key()` on Enter in both `/models`
+  and `/onboard` (`5200146`).
+- **Onboarding missing defaults** — `approval_policy = "auto-always"` and
+  `enable_thinking = true` (Qwen) are now persisted to `config.toml` during
+  onboarding so they're visible and editable on fresh installs (`c5c326c`).
+- **CLI health check** — `qwen-code-cli` binary detection now works correctly
+  in the onboarding health check (was falling through to "opencode") (`c5c326c`).
+
+### Changed
+
+- **Shared provider module** — all Qwen rotation logic (state loading, auth
+  guards, incremental flow, count-change handling), custom name normalization,
+  and credential detection consolidated into `ProviderSelectorState` methods.
+  `/models` and `/onboard` now share one code path instead of diverging
+  independently (`5200146`).
+- **Windows provider list** — CLI providers (claude-cli, opencode-cli,
+  qwen-code-cli) are hidden from the provider selector on Windows where they
+  cannot work (`5200146`).
+- **Windows release build** — now uses `--no-default-features` to exclude
+  local-stt/local-tts, matching the CI test matrix.
+
 ## [0.3.3] - 2026-04-09
 
 Focused fix release: **Qwen OAuth time-to-first-token drops from 60-70s to
@@ -2436,6 +2503,7 @@ fixes.
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.3.4]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.4
 [0.3.3]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.3
 [0.3.2]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.2
 [0.3.1]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.1
