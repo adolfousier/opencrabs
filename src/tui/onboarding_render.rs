@@ -789,12 +789,33 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
         } else {
             match &wizard.ps.qwen_device_flow_status {
                 QwenDeviceFlowStatus::Idle => {
-                    lines.push(Line::from(Span::styled(
-                        "  Free tier: 60 req/min, 1000 req/day",
-                        Style::default()
-                            .fg(Color::DarkGray)
-                            .add_modifier(Modifier::ITALIC),
-                    )));
+                    let persisted = wizard.ps.qwen_persisted_account_count();
+                    if wizard.ps.qwen_rotation_enabled && persisted >= 2 {
+                        let needed = wizard.ps.qwen_rotation_count.saturating_sub(persisted);
+                        if needed > 0 {
+                            lines.push(Line::from(Span::styled(
+                                format!(
+                                    "  ● {} accounts configured, {} more needed — press Enter",
+                                    persisted, needed
+                                ),
+                                Style::default().fg(Color::Yellow),
+                            )));
+                        } else {
+                            lines.push(Line::from(Span::styled(
+                                format!("  ● {} Qwen accounts configured for rotation!", persisted),
+                                Style::default()
+                                    .fg(Color::Green)
+                                    .add_modifier(Modifier::BOLD),
+                            )));
+                        }
+                    } else {
+                        lines.push(Line::from(Span::styled(
+                            "  Free tier: 60 req/min, 1000 req/day",
+                            Style::default()
+                                .fg(Color::DarkGray)
+                                .add_modifier(Modifier::ITALIC),
+                        )));
+                    }
                 }
                 QwenDeviceFlowStatus::WaitingForUser { verification_uri } => {
                     if !verification_uri.is_empty() {

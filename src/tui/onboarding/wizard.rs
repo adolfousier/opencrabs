@@ -280,7 +280,7 @@ impl OnboardingWizard {
                 (0, String::new(), String::new(), String::new())
             };
 
-        let ps = crate::tui::provider_selector::ProviderSelectorState {
+        let mut ps = crate::tui::provider_selector::ProviderSelectorState {
             selected_provider,
             api_key_input,
             api_key_cursor: 0,
@@ -299,18 +299,10 @@ impl OnboardingWizard {
                 .unwrap_or_default(),
             zhipu_endpoint_type: 0, // default to API mode
             model_filter: String::new(),
-            qwen_rotation_enabled: existing_config
-                .as_ref()
-                .and_then(|c| c.providers.qwen_accounts.as_ref())
-                .is_some_and(|a| a.len() >= 2),
-            qwen_rotation_count: existing_config
-                .as_ref()
-                .and_then(|c| c.providers.qwen_accounts.as_ref())
-                .map(|a| a.len())
-                .filter(|&n| n >= 2)
-                .unwrap_or(2),
             ..Default::default()
         };
+        // Load Qwen rotation state from config (shared logic)
+        ps.load_qwen_rotation_from_config();
 
         let mut wizard = Self {
             step: OnboardingStep::ModeSelect,

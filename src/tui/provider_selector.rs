@@ -139,7 +139,17 @@ impl ProviderSelectorState {
     pub fn provider_display_order(&self) -> Vec<usize> {
         let num_customs = self.custom_names.len();
         // Named providers: everything except the last "Custom" sentinel
-        let mut static_indices: Vec<usize> = (0..CUSTOM_PROVIDER_IDX).collect();
+        let mut static_indices: Vec<usize> = (0..CUSTOM_PROVIDER_IDX)
+            .filter(|&i| {
+                // Hide CLI providers on Windows — they require Unix CLI tools
+                if cfg!(target_os = "windows") {
+                    let id = PROVIDERS[i].id;
+                    id != "claude-cli" && id != "opencode-cli" && id != "qwen-code-cli"
+                } else {
+                    true
+                }
+            })
+            .collect();
         static_indices.sort_by_key(|&i| PROVIDERS[i].name.to_ascii_lowercase());
         static_indices
             .into_iter()
@@ -290,6 +300,84 @@ impl ProviderSelectorState {
             )
         } else {
             None
+        }
+    }
+
+    // ── Qwen rotation helpers (shared by /models + onboarding) ────
+
+    /// Load Qwen rotation state from persisted config.
+    /// Sets `qwen_rotation_enabled`, `qwen_rotation_count`, and
+    /// `qwen_device_flow_status` so both `/models` and onboarding show the
+    /// correct status on dialog open without duplicating this logic.
+    pub fn load_qwen_rotation_from_config(&mut self) {
+        use crate::tui::onboarding::QwenDeviceFlowStatus;
+        if let Ok(config) = crate::config::Config::load()
+            && let Some(accounts) = config.providers.qwen_accounts.as_ref()
+            && accounts.len() >= 2
+        {
+            self.qwen_rotation_enabled = true;
+            self.qwen_rotation_count = accounts.len();
+            // Mark as complete so renderers show green status
+            self.qwen_device_flow_status = QwenDeviceFlowStatus::RotationComplete;
+            return;
+        }
+        self.qwen_rotation_enabled = false;
+        self.qwen_rotation_count = 2;
+    }
+
+    /// Number of Qwen rotation accounts persisted in keys.toml.
+    pub fn qwen_persisted_account_count(&self) -> usize {
+        crate::config::Config::load()
+            .ok()
+            .and_then(|c| c.providers.qwen_accounts)
+            .map(|a| a.len())
+            .unwrap_or(0)
+    }
+
+    /// Whether Enter on Qwen auth field should skip auth (accounts already
+    /// configured and count matches what the user selected).
+    pub fn qwen_should_skip_auth(&self) -> bool {
+        let persisted = self.qwen_persisted_account_count();
+        self.qwen_rotation_enabled
+            && self.qwen_rotation_count >= 2
+            && persisted >= 2
+            && persisted == self.qwen_rotation_count
+    }
+
+    /// Prepare state for starting a rotation auth flow.
+    /// If accounts already exist (e.g. going 3→5), pre-loads them into
+    /// `qwen_rotation_collected` so the flow only auths the new ones.
+    /// Returns the starting account index.
+    pub fn qwen_rotation_prepare_flow(&mut self) -> usize {
+        let existing = crate::config::Config::load()
+            .ok()
+            .and_then(|c| c.providers.qwen_accounts)
+            .map(|cfgs| crate::brain::provider::qwen::QwenCredentials::from_account_configs(&cfgs))
+            .unwrap_or_default();
+
+        if !existing.is_empty() && existing.len() < self.qwen_rotation_count {
+            // Incremental: keep existing, only auth new ones
+            let n = existing.len();
+            self.qwen_rotation_collected = existing;
+            self.qwen_rotation_current = n;
+            n
+        } else {
+            // Fresh start (no existing or reducing count)
+            self.qwen_rotation_collected.clear();
+            self.qwen_rotation_current = 0;
+            0
+        }
+    }
+
+    /// Call when the user changes the rotation count or toggles rotation.
+    /// Clears `RotationComplete` so Enter re-evaluates instead of skipping.
+    pub fn qwen_rotation_count_changed(&mut self) {
+        use crate::tui::onboarding::QwenDeviceFlowStatus;
+        if matches!(
+            self.qwen_device_flow_status,
+            QwenDeviceFlowStatus::RotationComplete
+        ) {
+            self.qwen_device_flow_status = QwenDeviceFlowStatus::Idle;
         }
     }
 
