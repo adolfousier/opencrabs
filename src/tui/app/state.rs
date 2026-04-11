@@ -1837,8 +1837,11 @@ impl App {
                     self.processing_sessions.remove(&session_id);
                     self.is_processing = false;
                     self.processing_started_at = None;
-                    // Force a reload now that the channel is done
-                    self.load_session(session_id).await?;
+                    // Schedule a debounced refresh instead of blocking with
+                    // load_session().await — a direct DB query here freezes the
+                    // event loop, eating queued terminal events and garbling the
+                    // display when channels process messages in parallel.
+                    self.pending_session_refresh = Some((session_id, std::time::Instant::now()));
                 }
             }
 

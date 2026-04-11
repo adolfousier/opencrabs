@@ -70,6 +70,10 @@ pub async fn run(mut app: App) -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
+    // Signal that the TUI owns stdout — suppress_stdio() will skip fd 1
+    // redirection to avoid racing with ratatui's escape-sequence writes.
+    crate::utils::fd_suppress::set_tui_active(true);
+
     // Force a full clear so stale content from a previous exec() restart is wiped
     terminal.clear()?;
 
@@ -104,6 +108,7 @@ pub async fn run(mut app: App) -> Result<()> {
     let result = run_loop(&mut terminal, &mut app, &sigint_flag).await;
 
     // Restore terminal
+    crate::utils::fd_suppress::set_tui_active(false);
     force_restore_terminal();
 
     result
