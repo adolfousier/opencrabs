@@ -145,7 +145,12 @@ jobs:
           CXXFLAGS: ${{ matrix.target == 'aarch64-apple-darwin' && '-march=armv8-a+crypto' || '' }}
           # aws-lc-sys needs cmake builder on Windows MSVC to avoid __builtin_bswap errors
           AWS_LC_SYS_CMAKE_BUILDER: ${{ matrix.os == 'windows-latest' && '1' || '' }}
-        run: cargo build --release --target ${{ matrix.target }} --all-features
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cargo build --release --target ${{ matrix.target }} --no-default-features --features "telegram,discord,slack,whatsapp,trello"
+          else
+            cargo build --release --target ${{ matrix.target }} --all-features
+          fi
 
       - name: Strip binary (Unix)
         if: matrix.os != 'windows-latest'
