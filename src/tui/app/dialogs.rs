@@ -231,18 +231,7 @@ impl App {
         self.ps.api_key_input.clear();
 
         // Load Qwen rotation state from persisted config (single source of truth)
-        if let Some(accounts) = config.providers.qwen_accounts.as_ref() {
-            if accounts.len() >= 2 {
-                self.ps.qwen_rotation_enabled = true;
-                self.ps.qwen_rotation_count = accounts.len();
-            } else {
-                self.ps.qwen_rotation_enabled = false;
-                self.ps.qwen_rotation_count = 2;
-            }
-        } else {
-            self.ps.qwen_rotation_enabled = false;
-            self.ps.qwen_rotation_count = 2;
-        }
+        self.ps.load_qwen_rotation_from_config();
 
         // Spawn async model fetch — dialog opens immediately, models arrive via event
         let sender = self.event_sender();
@@ -427,9 +416,11 @@ impl App {
                 }
                 crossterm::event::KeyCode::Char(c @ '2'..='9') if self.ps.qwen_rotation_enabled => {
                     self.ps.qwen_rotation_count = (c as usize) - ('0' as usize);
+                    self.ps.qwen_rotation_count_changed();
                 }
                 crossterm::event::KeyCode::Char('1') if self.ps.qwen_rotation_enabled => {
                     self.ps.qwen_rotation_count = 10;
+                    self.ps.qwen_rotation_count_changed();
                 }
                 _ => {}
             }
@@ -629,25 +620,16 @@ impl App {
                 // advance to model selection. Only re-trigger the rotation flow when
                 // the user explicitly changed the count (collected is empty means
                 // we haven't started a new flow this dialog session).
-                let has_persisted_accounts = crate::config::Config::load()
-                    .ok()
-                    .and_then(|c| c.providers.qwen_accounts)
-                    .is_some_and(|a| a.len() >= 2);
-
-                if self.ps.qwen_rotation_enabled
-                    && self.ps.qwen_rotation_count >= 2
-                    && has_persisted_accounts
-                {
-                    // Accounts already set up — advance to model
+                if self.ps.qwen_should_skip_auth() {
+                    // Accounts already set up with matching count — advance to model
                     self.ps.focused_field = 2;
                     self.ps.selected_model = 0;
                     return Ok(());
                 } else if self.ps.qwen_rotation_enabled && self.ps.qwen_rotation_count >= 2 {
-                    // New rotation setup requested
-                    self.ps.qwen_rotation_collected.clear();
-                    self.ps.qwen_rotation_current = 0;
+                    // Rotation setup — incremental if accounts already exist
+                    let start_from = self.ps.qwen_rotation_prepare_flow();
                     self.ps.qwen_device_flow_status = QwenDeviceFlowStatus::RotationStep {
-                        current: 0,
+                        current: start_from,
                         total: self.ps.qwen_rotation_count,
                     };
                     let cli_path = crate::brain::provider::qwen::QwenCredentials::qwen_cli_path();
@@ -745,12 +727,14 @@ impl App {
                 // Custom: after model, go to name field (field 4)
                 self.ps.focused_field = 4;
             } else if is_custom && self.ps.focused_field == 4 {
-                // Custom: on name field — validate then go to context window
+                // Custom: on name field — validate, normalize, then go to context window
                 if self.ps.custom_name.is_empty() {
                     self.error_message =
                         Some("Enter a name identifier for this provider".to_string());
                     self.error_message_shown_at = Some(std::time::Instant::now());
                 } else {
+                    self.ps.custom_name =
+                        crate::config::normalize_toml_key(&self.ps.custom_name);
                     self.error_message = None;
                     self.error_message_shown_at = None;
                     self.ps.focused_field = 5;
@@ -1892,12 +1876,11 @@ impl App {
                     }
                 }
                 WizardAction::QwenRotationFlow => {
-                    // Start multi-account rotation setup
-                    wizard.ps.qwen_rotation_collected.clear();
-                    wizard.ps.qwen_rotation_current = 0;
+                    // Start multi-account rotation setup (incremental if accounts exist)
+                    let start_from = wizard.ps.qwen_rotation_prepare_flow();
                     wizard.ps.qwen_device_flow_status =
                         super::onboarding::QwenDeviceFlowStatus::RotationStep {
-                            current: 0,
+                            current: start_from,
                             total: wizard.ps.qwen_rotation_count,
                         };
                     // Clear any stale qwen-cli creds so browser prompts fresh login

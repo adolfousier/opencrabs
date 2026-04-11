@@ -446,9 +446,11 @@ impl OnboardingWizard {
                     }
                     KeyCode::Char(c @ '2'..='9') if self.ps.qwen_rotation_enabled => {
                         self.ps.qwen_rotation_count = (c as usize) - ('0' as usize);
+                        self.ps.qwen_rotation_count_changed();
                     }
                     KeyCode::Char('1') if self.ps.qwen_rotation_enabled => {
                         self.ps.qwen_rotation_count = 10;
+                        self.ps.qwen_rotation_count_changed();
                     }
                     KeyCode::Enter => {
                         // Device flow in progress — ignore Enter
@@ -478,8 +480,16 @@ impl OnboardingWizard {
                                 crate::tui::provider_selector::load_default_models("qwen");
                             return WizardAction::None;
                         }
-                        // Start rotation flow (even if already authenticated
-                        // with one account — rotation needs N accounts)
+                        // Rotation accounts already match desired count — skip auth
+                        if self.ps.qwen_should_skip_auth() {
+                            self.auth_field = AuthField::Model;
+                            self.ps.models.clear();
+                            self.ps.selected_model = 0;
+                            self.ps.config_models =
+                                crate::tui::provider_selector::load_default_models("qwen");
+                            return WizardAction::None;
+                        }
+                        // Start rotation flow (need new/different account count)
                         if self.ps.qwen_rotation_enabled && self.ps.qwen_rotation_count >= 2 {
                             return WizardAction::QwenRotationFlow;
                         }
@@ -618,7 +628,8 @@ impl OnboardingWizard {
                             Some("Enter a name identifier for this provider".to_string());
                         return WizardAction::None;
                     }
-                    self.ps.custom_name = self.ps.custom_name.to_lowercase();
+                    self.ps.custom_name =
+                        crate::config::normalize_toml_key(&self.ps.custom_name);
                     self.auth_field = AuthField::CustomBaseUrl;
                 }
                 KeyCode::BackTab | KeyCode::Up => {
