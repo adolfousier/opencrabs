@@ -30,11 +30,16 @@ a visual redesign of the provider selector, and cross-platform improvements.
 
 ### Fixed
 
-- **TUI garbled display from channel sessions** — Telegram/Discord processing
-  the shared TUI session flooded the event loop with `SessionUpdated` events,
-  each triggering a blocking DB query. Now uses a `ChannelSessionEvent` enum
-  with `ProcessingStarted`/`Finished` lifecycle and 500ms debounced refresh.
-  Input remains responsive while channels process in the background (`33f9ab6`).
+- **TUI garbled display from channel sessions** — two root causes fixed:
+  (1) `suppress_stdio()` in the embedding engine did process-wide
+  `dup2(devnull, stdout)` which raced with ratatui's terminal writes on fd 1,
+  producing partial escape sequences → garbled display. Now skips stdout
+  redirection when TUI is active (stderr-only suppression). (2)
+  `ChannelProcessingFinished` called `load_session().await` directly, blocking
+  the event loop with a DB query and eating queued terminal events. Now
+  schedules a debounced refresh instead. Earlier fix (`33f9ab6`) added the
+  `ChannelSessionEvent` lifecycle with 500ms debounce for `SessionUpdated`
+  events (`33f9ab6`, `5c349d4`).
 - **TUI streaming lag** — every `ResponseChunk` forced a full re-render with
   O(n²) markdown re-parsing on the entire growing buffer. Now batches chunks
   within a 30ms time budget and caches parsed markdown between frames. Typing,

@@ -91,9 +91,6 @@ pulldown-cmark = "0.13"
 # Concurrent Data Structures
 once_cell = "1.20"
 
-# OpenSSL (vendored for cross-compilation)
-openssl = { version = "0.10", features = ["vendored"] }
-
 # Security
 zeroize = { version = "1.8", features = ["derive"] }
 
