@@ -42,7 +42,7 @@ jobs:
 
   publish-crate:
     name: Publish to crates.io
-    needs: wait-for-ci
+    needs: [wait-for-ci, build-release]
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.check.outputs.version }}
@@ -78,7 +78,7 @@ jobs:
 
   build-release:
     name: Build Release
-    needs: publish-crate
+    needs: wait-for-ci
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write
@@ -139,6 +139,7 @@ jobs:
         uses: ilammy/setup-nasm@v1
 
       - name: Build
+        shell: bash
         env:
           # Disable i8mm intrinsics on macOS ARM — CI clang targets newer arch than M1
           CFLAGS: ${{ matrix.target == 'aarch64-apple-darwin' && '-march=armv8-a+crypto' || '' }}
@@ -178,7 +179,7 @@ jobs:
   create-release:
     name: Create Release
     needs: [publish-crate, build-release]
-    if: always() && needs.build-release.result != 'cancelled'
+    if: always() && needs.publish-crate.result != 'cancelled' && needs.build-release.result != 'cancelled'
     runs-on: ubuntu-latest
     permissions:
       contents: write
