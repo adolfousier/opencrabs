@@ -464,8 +464,10 @@ Direct integration with Qwen's API via OAuth device flow — **no API key needed
 To enable rotation during setup:
 1. Select Qwen in `/onboard` or `/models`
 2. Press `Space` to toggle rotation
-3. Press `2-9` to set the number of accounts
+3. Press `2-9` to set the number of accounts (`1` = 10)
 4. Press `Enter` — authenticate each account in sequence (sign out in your browser between accounts)
+
+Adding more accounts later (e.g. 3→5) is incremental — only the new accounts need authentication. Configured providers show a green **✓** in the provider list.
 
 Rotation accounts are stored in `keys.toml`:
 ```toml

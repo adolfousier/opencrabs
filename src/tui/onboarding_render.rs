@@ -554,6 +554,7 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
     for &idx in &display_order {
         let selected = idx == wizard.ps.selected_provider;
         let focused = wizard.auth_field == AuthField::Provider;
+        let configured = wizard.ps.provider_has_credentials(idx);
 
         let prefix = if selected && focused { " > " } else { "   " };
         let marker = if selected { "[*]" } else { "[ ]" };
@@ -572,31 +573,40 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
                 .unwrap_or_else(|| "custom".to_string())
         };
 
-        lines.push(Line::from(vec![
+        // Green for configured providers, white/bold for selected, gray for rest
+        let label_color = if selected {
+            Color::White
+        } else if configured {
+            Color::Green
+        } else {
+            Color::DarkGray
+        };
+
+        let mut spans = vec![
             Span::styled(prefix, Style::default().fg(ACCENT_GOLD)),
             Span::styled(
                 marker,
                 Style::default().fg(if selected {
                     BRAND_GOLD
+                } else if configured {
+                    Color::Green
                 } else {
                     Color::DarkGray
                 }),
             ),
             Span::styled(
                 format!(" {}", label),
-                Style::default()
-                    .fg(if selected {
-                        Color::White
-                    } else {
-                        Color::DarkGray
-                    })
-                    .add_modifier(if selected {
-                        Modifier::BOLD
-                    } else {
-                        Modifier::empty()
-                    }),
+                Style::default().fg(label_color).add_modifier(if selected {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
             ),
-        ]));
+        ];
+        if configured && !selected {
+            spans.push(Span::styled(" ✓", Style::default().fg(Color::Green)));
+        }
+        lines.push(Line::from(spans));
     }
 
     lines.push(Line::from(""));
