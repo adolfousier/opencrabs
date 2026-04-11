@@ -5,6 +5,15 @@ All notable changes to OpenCrabs will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] - 2026-04-12
+
+### Fixed
+
+- **Windows CLI providers restored** — v0.3.4 erroneously hid Claude CLI,
+  OpenCode CLI, and Qwen CLI from the provider selector on Windows. These
+  providers work correctly on Windows and are now visible again on all
+  platforms.
+
 ## [0.3.4] - 2026-04-11
 
 Major feature release: **Qwen multi-account OAuth rotation** — configure 2–10
@@ -2508,6 +2517,7 @@ fixes.
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.3.5]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.5
 [0.3.4]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.4
 [0.3.3]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.3
 [0.3.2]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.2

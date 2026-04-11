@@ -267,10 +267,8 @@ fn test_handle_key_provider_navigation() {
     assert_eq!(wizard.ps.selected_provider, 0);
 
     wizard.handle_key(key(KeyCode::Down));
-    // Next alphabetically after Anthropic: Claude CLI(7) on Unix, GitHub Copilot(2) on Windows
-    // (CLI providers are hidden on Windows)
-    let expected_next = if cfg!(target_os = "windows") { 2 } else { 7 };
-    assert_eq!(wizard.ps.selected_provider, expected_next);
+    // Next alphabetically after Anthropic: Claude CLI(7)
+    assert_eq!(wizard.ps.selected_provider, 7);
 
     wizard.handle_key(key(KeyCode::Up));
     assert_eq!(wizard.ps.selected_provider, 0);
@@ -956,16 +954,9 @@ fn test_provider_display_order_no_customs() {
     wizard.ps.custom_names.clear();
     let order = wizard.ps.provider_display_order();
     // Named providers sorted alphabetically, then 11 ("+ New Custom") last
-    // CLI providers (7=Claude CLI, 8=OpenCode CLI, 9=Qwen CLI) hidden on Windows
-    let expected = if cfg!(target_os = "windows") {
-        // Anthropic(0), GitHub(2), Gemini(3), Minimax(5), OpenAI(1), OpenRouter(4), Qwen(10), z.ai(6)
-        vec![0, 2, 3, 5, 1, 4, 10, 6, 11]
-    } else {
-        // Anthropic(0), Claude CLI(7), GitHub(2), Gemini(3), Minimax(5), OpenAI(1),
-        // OpenCode CLI(8), OpenRouter(4), Qwen(10), Qwen CLI(9), z.ai GLM(6)
-        vec![0, 7, 2, 3, 5, 1, 8, 4, 10, 9, 6, 11]
-    };
-    assert_eq!(order, expected);
+    // Anthropic(0), Claude CLI(7), GitHub(2), Gemini(3), Minimax(5), OpenAI(1),
+    // OpenCode CLI(8), OpenRouter(4), Qwen(10), Qwen CLI(9), z.ai GLM(6)
+    assert_eq!(order, vec![0, 7, 2, 3, 5, 1, 8, 4, 10, 9, 6, 11]);
 }
 
 #[test]
@@ -974,13 +965,10 @@ fn test_provider_display_order_with_customs() {
     wizard.ps.custom_names = vec!["nvidia".into(), "opus".into(), "opusdistil".into()];
     let order = wizard.ps.provider_display_order();
     // Named providers sorted alphabetically, then 12,13,14 existing customs, 11 ("+ New Custom") last
-    // CLI providers (7, 8, 9) hidden on Windows
-    let expected = if cfg!(target_os = "windows") {
-        vec![0, 2, 3, 5, 1, 4, 10, 6, 12, 13, 14, 11]
-    } else {
+    assert_eq!(
+        order,
         vec![0, 7, 2, 3, 5, 1, 8, 4, 10, 9, 6, 12, 13, 14, 11]
-    };
-    assert_eq!(order, expected);
+    );
 }
 
 #[test]
