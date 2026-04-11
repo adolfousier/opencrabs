@@ -733,8 +733,7 @@ impl App {
                         Some("Enter a name identifier for this provider".to_string());
                     self.error_message_shown_at = Some(std::time::Instant::now());
                 } else {
-                    self.ps.custom_name =
-                        crate::config::normalize_toml_key(&self.ps.custom_name);
+                    self.ps.custom_name = crate::config::normalize_toml_key(&self.ps.custom_name);
                     self.error_message = None;
                     self.error_message_shown_at = None;
                     self.ps.focused_field = 5;

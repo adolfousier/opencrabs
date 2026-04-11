@@ -628,8 +628,7 @@ impl OnboardingWizard {
                             Some("Enter a name identifier for this provider".to_string());
                         return WizardAction::None;
                     }
-                    self.ps.custom_name =
-                        crate::config::normalize_toml_key(&self.ps.custom_name);
+                    self.ps.custom_name = crate::config::normalize_toml_key(&self.ps.custom_name);
                     self.auth_field = AuthField::CustomBaseUrl;
                 }
                 KeyCode::BackTab | KeyCode::Up => {

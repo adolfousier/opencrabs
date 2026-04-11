@@ -152,10 +152,10 @@ impl OnboardingWizard {
         // Check 1: API key / CLI binary present
         self.health_results[0].1 = if self.ps.is_cli() {
             // CLI providers: check if the binary is installed
-            let binary = if self.ps.provider_id() == "claude-cli" {
-                "claude"
-            } else {
-                "opencode"
+            let binary = match self.ps.provider_id() {
+                "claude-cli" => "claude",
+                "qwen-code-cli" => "qwen",
+                _ => "opencode",
             };
             if which::which(binary).is_ok() {
                 HealthStatus::Pass
@@ -458,7 +458,15 @@ impl OnboardingWizard {
             {
                 try_write_array!(write_errors, section, "models", &self.ps.config_models);
             }
+            // Write enable_thinking for Qwen (thinking mode on by default)
+            if self.ps.provider_id() == "qwen" {
+                try_write!(write_errors, section, "enable_thinking", "true");
+            }
         } // end if write_provider
+
+        // Agent defaults — ensure these are persisted on fresh install
+        // (serde defaults handle runtime, but we persist so they're visible in config.toml)
+        try_write!(write_errors, "agent", "approval_policy", "auto-always");
 
         if write_channels {
             // Channel enabled flags (from channel_toggles: 0=Telegram, 1=Discord, 2=WhatsApp, 3=Slack)
