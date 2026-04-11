@@ -139,17 +139,7 @@ impl ProviderSelectorState {
     pub fn provider_display_order(&self) -> Vec<usize> {
         let num_customs = self.custom_names.len();
         // Named providers: everything except the last "Custom" sentinel
-        let mut static_indices: Vec<usize> = (0..CUSTOM_PROVIDER_IDX)
-            .filter(|&i| {
-                // Hide CLI providers on Windows — they require Unix CLI tools
-                if cfg!(target_os = "windows") {
-                    let id = PROVIDERS[i].id;
-                    id != "claude-cli" && id != "opencode-cli" && id != "qwen-code-cli"
-                } else {
-                    true
-                }
-            })
-            .collect();
+        let mut static_indices: Vec<usize> = (0..CUSTOM_PROVIDER_IDX).collect();
         static_indices.sort_by_key(|&i| PROVIDERS[i].name.to_ascii_lowercase());
         static_indices
             .into_iter()
