@@ -343,17 +343,11 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     lines.push(Line::from(""));
 
     // Provider list — static providers sorted alphabetically, then custom names, then "+ New Custom" last.
-    let num_customs = app.ps.custom_names.len();
-    let mut static_indices: Vec<usize> = (0..CUSTOM_PROVIDER_IDX).collect();
-    static_indices.sort_by_key(|&i| PROVIDERS[i].name.to_ascii_lowercase());
-    let display_order: Vec<usize> = static_indices
-        .into_iter()
-        .chain(CUSTOM_INSTANCES_START..CUSTOM_INSTANCES_START + num_customs)
-        .chain(std::iter::once(CUSTOM_PROVIDER_IDX))
-        .collect();
+    let display_order = app.ps.provider_display_order();
     for &idx in &display_order {
         let selected = idx == provider_idx;
         let focused = focused_field == 0;
+        let configured = app.ps.provider_has_credentials(idx);
 
         let prefix = if selected && focused { " > " } else { "   " };
         let marker = if selected { "[*]" } else { "[ ]" };
@@ -371,31 +365,40 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
                 .unwrap_or_else(|| "custom".to_string())
         };
 
-        lines.push(Line::from(vec![
+        // Green for configured providers, white/bold for selected, gray for rest
+        let label_color = if selected {
+            Color::Reset
+        } else if configured {
+            Color::Green
+        } else {
+            Color::DarkGray
+        };
+
+        let mut spans = vec![
             Span::styled(prefix, Style::default().fg(BRAND_GOLD)),
             Span::styled(
                 marker,
                 Style::default().fg(if selected {
                     BRAND_GOLD
+                } else if configured {
+                    Color::Green
                 } else {
                     Color::DarkGray
                 }),
             ),
             Span::styled(
                 format!(" {}", label),
-                Style::default()
-                    .fg(if selected {
-                        Color::Reset
-                    } else {
-                        Color::DarkGray
-                    })
-                    .add_modifier(if selected {
-                        Modifier::BOLD
-                    } else {
-                        Modifier::empty()
-                    }),
+                Style::default().fg(label_color).add_modifier(if selected {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
             ),
-        ]));
+        ];
+        if configured && !selected {
+            spans.push(Span::styled(" ✓", Style::default().fg(Color::Green)));
+        }
+        lines.push(Line::from(spans));
     }
 
     lines.push(Line::from(""));

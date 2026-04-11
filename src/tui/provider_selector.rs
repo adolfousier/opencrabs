@@ -158,6 +158,66 @@ impl ProviderSelectorState {
             .collect()
     }
 
+    /// Check if a provider at the given index has credentials configured.
+    /// Used by renderers to show a green indicator in the provider list.
+    /// Does NOT mutate state — pure read from config.
+    pub fn provider_has_credentials(&self, idx: usize) -> bool {
+        let config = match crate::config::Config::load() {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+
+        if idx < CUSTOM_PROVIDER_IDX {
+            let id = PROVIDERS[idx].id;
+            match id {
+                // CLI providers — always "configured" if binary exists
+                "claude-cli" | "opencode-cli" | "qwen-code-cli" => {
+                    let bin = match id {
+                        "claude-cli" => "claude",
+                        "qwen-code-cli" => "qwen",
+                        _ => "opencode",
+                    };
+                    which::which(bin).is_ok()
+                }
+                // OAuth providers — check for token/accounts
+                "github" => config
+                    .providers
+                    .github
+                    .as_ref()
+                    .and_then(|p| p.api_key.as_ref())
+                    .is_some_and(|k| !k.is_empty()),
+                "qwen" => {
+                    // Rotation accounts OR single OAuth
+                    config
+                        .providers
+                        .qwen_accounts
+                        .as_ref()
+                        .is_some_and(|a| !a.is_empty())
+                        || config
+                            .providers
+                            .qwen
+                            .as_ref()
+                            .and_then(|p| p.api_key.as_ref())
+                            .is_some_and(|k| !k.is_empty())
+                }
+                // Standard API key providers
+                _ => crate::utils::providers::config_for(&config.providers, id)
+                    .and_then(|p| p.api_key.as_ref())
+                    .is_some_and(|k| !k.is_empty()),
+            }
+        } else if idx == CUSTOM_PROVIDER_IDX {
+            false // "+ New Custom" — never configured
+        } else {
+            // Existing custom provider
+            let custom_idx = idx - CUSTOM_INSTANCES_START;
+            self.custom_names
+                .get(custom_idx)
+                .and_then(|name| config.providers.custom_by_name(name))
+                .and_then(|p| p.api_key.as_ref())
+                .is_some_and(|k| !k.is_empty())
+        }
+    }
+
     /// Detect if an API key exists in config for the current provider.
     /// Sets `has_existing_key` flag and `api_key_input` sentinel. Never loads actual key.
     pub fn detect_existing_key(&mut self) {
