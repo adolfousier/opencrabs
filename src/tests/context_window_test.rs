@@ -85,10 +85,10 @@ fn without_context_window_returns_heuristic_for_known() {
 
 // ── Factory: context_window wired through config ────────────────
 
-#[test]
-fn factory_passes_context_window_to_provider() {
+#[tokio::test]
+async fn factory_passes_context_window_to_provider() {
     let config = config_with_context_window(Some(200_000));
-    let result = create_provider(&config);
+    let result = create_provider(&config).await;
     assert!(result.is_ok());
     let provider = result.unwrap();
     assert_eq!(
@@ -98,10 +98,10 @@ fn factory_passes_context_window_to_provider() {
     );
 }
 
-#[test]
-fn factory_no_context_window_returns_none_for_unknown() {
+#[tokio::test]
+async fn factory_no_context_window_returns_none_for_unknown() {
     let config = config_with_context_window(None);
-    let result = create_provider(&config);
+    let result = create_provider(&config).await;
     assert!(result.is_ok());
     let provider = result.unwrap();
     assert_eq!(
@@ -111,10 +111,10 @@ fn factory_no_context_window_returns_none_for_unknown() {
     );
 }
 
-#[test]
-fn factory_by_name_passes_context_window() {
+#[tokio::test]
+async fn factory_by_name_passes_context_window() {
     let config = config_with_context_window(Some(16_384));
-    let result = create_provider_by_name(&config, "custom:lmstudio");
+    let result = create_provider_by_name(&config, "custom:lmstudio").await;
     assert!(result.is_ok());
     let provider = result.unwrap();
     assert_eq!(provider.context_window("whatever-model"), Some(16_384));
@@ -173,8 +173,8 @@ enabled = true
 
 // ── Multiple custom providers with different context windows ────
 
-#[test]
-fn multiple_customs_each_get_own_context_window() {
+#[tokio::test]
+async fn multiple_customs_each_get_own_context_window() {
     let mut custom_map = BTreeMap::new();
     custom_map.insert(
         "nvidia".to_string(),
@@ -205,11 +205,11 @@ fn multiple_customs_each_get_own_context_window() {
     };
 
     // nvidia is the active (enabled) one
-    let provider = create_provider(&config).unwrap();
+    let provider = create_provider(&config).await.unwrap();
     assert_eq!(provider.context_window("llama-70b"), Some(128_000));
 
     // ollama via by_name
-    let ollama = create_provider_by_name(&config, "custom:ollama").unwrap();
+    let ollama = create_provider_by_name(&config, "custom:ollama").await.unwrap();
     assert_eq!(ollama.context_window("phi3"), Some(4_096));
 }
 

@@ -143,7 +143,7 @@ impl Tool for SlackConnectTool {
 
         // Create and spawn the Slack agent
         let factory = self.channel_factory.clone();
-        let agent = factory.create_agent_service();
+        let agent = factory.create_agent_service().await;
         let service_context = factory.service_context();
         let shared_session = factory.shared_session_id();
         let slack_state = self.slack_state.clone();

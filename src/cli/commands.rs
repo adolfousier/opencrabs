@@ -19,7 +19,7 @@ pub(crate) async fn cmd_status(config: &crate::config::Config) -> Result<()> {
     println!("🦀 OpenCrabs v{version}\n");
 
     // Provider
-    match crate::brain::provider::create_provider(config) {
+    match crate::brain::provider::create_provider(config).await {
         Ok(provider) => {
             println!(
                 "  Provider:  {} ({})",
@@ -219,7 +219,7 @@ pub(crate) async fn cmd_doctor(config: &crate::config::Config) -> Result<()> {
     }
 
     // 3. Provider
-    match crate::brain::provider::create_provider(config) {
+    match crate::brain::provider::create_provider(config).await {
         Ok(provider) => {
             println!(
                 "  ✅ Provider: {} (model: {})",
@@ -695,7 +695,7 @@ pub(crate) async fn cmd_run(
     db.run_migrations().await?;
 
     // Select provider based on configuration using factory
-    let provider = crate::brain::provider::create_provider(config)?;
+    let provider = crate::brain::provider::create_provider(config).await?;
 
     // Create tool registry (Arc-wrapped early so SpawnAgentTool can reference it)
     let tool_registry = Arc::new(ToolRegistry::new());
@@ -808,7 +808,7 @@ pub(crate) async fn cmd_run(
 
     // Create service context and agent service
     let service_context = ServiceContext::new(db.pool().clone());
-    let agent_service = AgentService::new(provider.clone(), service_context.clone(), config)
+    let agent_service = AgentService::new(provider.clone(), service_context.clone(), config).await
         .with_tool_registry(tool_registry.clone())
         .with_system_brain(system_brain);
 
@@ -1043,7 +1043,7 @@ pub(crate) async fn cmd_agent_interactive(
     let db = Database::connect(&config.database.path).await?;
     db.run_migrations().await?;
 
-    let provider = crate::brain::provider::create_provider(config)?;
+    let provider = crate::brain::provider::create_provider(config).await?;
 
     let tool_registry = Arc::new(ToolRegistry::new());
     tool_registry.register(Arc::new(ReadTool));
@@ -1143,7 +1143,7 @@ pub(crate) async fn cmd_agent_interactive(
     let system_brain = brain_loader.build_system_brain(Some(&runtime_info), None);
 
     let service_context = ServiceContext::new(db.pool().clone());
-    let agent_service = AgentService::new(provider.clone(), service_context.clone(), config)
+    let agent_service = AgentService::new(provider.clone(), service_context.clone(), config).await
         .with_tool_registry(tool_registry.clone())
         .with_system_brain(system_brain);
 

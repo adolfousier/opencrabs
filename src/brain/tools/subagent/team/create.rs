@@ -159,20 +159,22 @@ impl Tool for TeamCreateTool {
 
             // Create provider
             let provider = if let Some(ref provider_name) = config.agent.subagent_provider {
-                crate::brain::provider::create_provider_by_name(&config, provider_name)
-                    .unwrap_or_else(|_| {
-                        crate::brain::provider::create_provider(&config)
-                            .expect("fallback provider creation failed")
-                    })
+                match crate::brain::provider::create_provider_by_name(&config, provider_name).await {
+                    Ok(p) => p,
+                    Err(_) => {
+                        crate::brain::provider::create_provider(&config).await
+                            .map_err(|e| ToolError::Execution(format!("Fallback provider creation failed: {}", e)))?
+                    }
+                }
             } else {
-                crate::brain::provider::create_provider(&config)
+                crate::brain::provider::create_provider(&config).await
                     .map_err(|e| ToolError::Execution(format!("Provider creation failed: {}", e)))?
             };
 
             let child_registry = agent_type.build_registry(&self.parent_registry);
 
             let child_service = Arc::new(
-                crate::brain::agent::AgentService::new(provider, service_context.clone(), &config)
+                crate::brain::agent::AgentService::new(provider, service_context.clone(), &config).await
                     .with_tool_registry(Arc::new(child_registry))
                     .with_auto_approve_tools(true)
                     .with_working_directory(context.working_directory.clone()),

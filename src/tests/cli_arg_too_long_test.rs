@@ -276,7 +276,7 @@ async fn arg_too_long_triggers_emergency_compaction() -> Result<()> {
     let provider = Arc::new(ArgTooLongMockProvider::new());
     let service_context = ServiceContext::new(db.pool().clone());
 
-    let agent = AgentService::new_for_test(provider.clone(), service_context.clone());
+    let agent = AgentService::new_for_test(provider.clone(), service_context.clone()).await;
 
     let session_svc = SessionService::new(service_context);
     let session = session_svc
@@ -322,7 +322,7 @@ async fn context_length_exceeded_triggers_emergency_compaction() -> Result<()> {
     let provider = Arc::new(ContextLengthMockProvider::new());
     let service_context = ServiceContext::new(db.pool().clone());
 
-    let agent = AgentService::new_for_test(provider.clone(), service_context.clone());
+    let agent = AgentService::new_for_test(provider.clone(), service_context.clone()).await;
 
     let session_svc = SessionService::new(service_context);
     let session = session_svc

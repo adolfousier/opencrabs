@@ -275,7 +275,7 @@ async fn agent_service_new_for_test_uses_defaults() {
     db.run_migrations().await.unwrap();
     let ctx = crate::services::ServiceContext::new(db.pool().clone());
 
-    let agent = AgentService::new_for_test(provider, ctx);
+    let agent = AgentService::new_for_test(provider, ctx).await;
 
     // Should use Config::default() values
     let defaults = Config::default();
@@ -298,7 +298,7 @@ async fn agent_service_new_uses_provided_config() {
     config.agent.context_limit = 42_000;
     config.agent.max_tokens = 1234;
 
-    let agent = AgentService::new(provider, ctx, &config);
+    let agent = AgentService::new(provider, ctx, &config).await;
     assert_eq!(agent.context_limit(), 42_000);
     assert_eq!(agent.max_tokens(), 1234);
 }

@@ -68,123 +68,123 @@ fn config_with_custom(name: &str, api_key: Option<String>, base_url: Option<Stri
     }
 }
 
-#[test]
-fn factory_creates_custom_without_api_key() {
+#[tokio::test]
+async fn factory_creates_custom_without_api_key() {
     let config = config_with_custom(
         "lmstudio",
         None,
         Some("http://localhost:1234/v1".to_string()),
     );
-    let result = create_provider(&config);
+    let result = create_provider(&config).await;
     assert!(result.is_ok());
     let provider = result.unwrap();
     assert_eq!(provider.name(), "lmstudio");
 }
 
-#[test]
-fn factory_creates_custom_with_api_key() {
+#[tokio::test]
+async fn factory_creates_custom_with_api_key() {
     let config = config_with_custom(
         "remote-llm",
         Some("sk-test".to_string()),
         Some("https://api.example.com/v1".to_string()),
     );
-    let result = create_provider(&config);
+    let result = create_provider(&config).await;
     assert!(result.is_ok());
     let provider = result.unwrap();
     assert_eq!(provider.name(), "remote-llm");
 }
 
-#[test]
-fn factory_creates_custom_with_empty_api_key() {
+#[tokio::test]
+async fn factory_creates_custom_with_empty_api_key() {
     let config = config_with_custom(
         "ollama",
         Some(String::new()),
         Some("http://localhost:11434/v1".to_string()),
     );
-    let result = create_provider(&config);
+    let result = create_provider(&config).await;
     assert!(result.is_ok());
     let provider = result.unwrap();
     assert_eq!(provider.name(), "ollama");
 }
 
-#[test]
-fn factory_custom_auto_appends_chat_completions() {
+#[tokio::test]
+async fn factory_custom_auto_appends_chat_completions() {
     // base_url without /chat/completions should get it appended
     let config = config_with_custom(
         "test-local",
         None,
         Some("http://localhost:1234/v1".to_string()),
     );
-    let result = create_provider(&config);
+    let result = create_provider(&config).await;
     assert!(result.is_ok());
 }
 
-#[test]
-fn factory_custom_preserves_chat_completions_suffix() {
+#[tokio::test]
+async fn factory_custom_preserves_chat_completions_suffix() {
     // base_url already has /chat/completions — should not double-append
     let config = config_with_custom(
         "test-local",
         None,
         Some("http://localhost:1234/v1/chat/completions".to_string()),
     );
-    let result = create_provider(&config);
+    let result = create_provider(&config).await;
     assert!(result.is_ok());
 }
 
-#[test]
-fn factory_custom_default_base_url() {
+#[tokio::test]
+async fn factory_custom_default_base_url() {
     // No base_url → defaults to localhost:1234
     let config = config_with_custom("local", None, None);
-    let result = create_provider(&config);
+    let result = create_provider(&config).await;
     assert!(result.is_ok());
 }
 
 // ── Factory: create_provider_by_name ────────────────────────────
 
-#[test]
-fn create_by_name_custom_prefix() {
+#[tokio::test]
+async fn create_by_name_custom_prefix() {
     let config = config_with_custom(
         "mylocal",
         None,
         Some("http://localhost:1234/v1".to_string()),
     );
-    let result = create_provider_by_name(&config, "custom:mylocal");
+    let result = create_provider_by_name(&config, "custom:mylocal").await;
     assert!(result.is_ok());
     assert_eq!(result.unwrap().name(), "mylocal");
 }
 
-#[test]
-fn create_by_name_unknown_custom() {
+#[tokio::test]
+async fn create_by_name_unknown_custom() {
     let config = Config::default();
-    let result = create_provider_by_name(&config, "custom:nonexistent");
+    let result = create_provider_by_name(&config, "custom:nonexistent").await;
     assert!(result.is_err());
 }
 
-#[test]
-fn create_by_name_legacy_custom() {
+#[tokio::test]
+async fn create_by_name_legacy_custom() {
     // Legacy sessions store just the custom name without "custom:" prefix
     let config = config_with_custom(
         "lmstudio",
         None,
         Some("http://localhost:1234/v1".to_string()),
     );
-    let result = create_provider_by_name(&config, "lmstudio");
+    let result = create_provider_by_name(&config, "lmstudio").await;
     assert!(result.is_ok());
     assert_eq!(result.unwrap().name(), "lmstudio");
 }
 
 // ── Factory: no-crash guarantees ────────────────────────────────
 
-#[test]
-fn factory_never_crashes_empty_config() {
+#[tokio::test]
+async fn factory_never_crashes_empty_config() {
     let config = Config::default();
-    let result = create_provider(&config);
+    let result = create_provider(&config).await;
     // Must succeed — returns PlaceholderProvider
     assert!(result.is_ok());
 }
 
-#[test]
-fn factory_never_crashes_all_missing_keys() {
+#[tokio::test]
+async fn factory_never_crashes_all_missing_keys() {
     // All providers enabled but none have API keys
     let config = Config {
         providers: ProviderConfigs {
@@ -223,13 +223,13 @@ fn factory_never_crashes_all_missing_keys() {
         },
         ..Default::default()
     };
-    let result = create_provider(&config);
+    let result = create_provider(&config).await;
     // Must succeed — falls back to PlaceholderProvider
     assert!(result.is_ok());
 }
 
-#[test]
-fn factory_falls_back_when_primary_fails() {
+#[tokio::test]
+async fn factory_falls_back_when_primary_fails() {
     // Anthropic enabled but no key, OpenAI has key → should fall back to OpenAI
     let config = Config {
         providers: ProviderConfigs {
@@ -247,13 +247,13 @@ fn factory_falls_back_when_primary_fails() {
         },
         ..Default::default()
     };
-    let result = create_provider(&config);
+    let result = create_provider(&config).await;
     assert!(result.is_ok());
     assert_eq!(result.unwrap().name(), "openai");
 }
 
-#[test]
-fn factory_priority_order_anthropic_first() {
+#[tokio::test]
+async fn factory_priority_order_anthropic_first() {
     // Both Anthropic and OpenAI have keys — Anthropic should win
     let config = Config {
         providers: ProviderConfigs {
@@ -271,20 +271,20 @@ fn factory_priority_order_anthropic_first() {
         },
         ..Default::default()
     };
-    let result = create_provider(&config);
+    let result = create_provider(&config).await;
     assert!(result.is_ok());
     assert_eq!(result.unwrap().name(), "anthropic");
 }
 
-#[test]
-fn factory_custom_before_placeholder() {
+#[tokio::test]
+async fn factory_custom_before_placeholder() {
     // Only custom provider configured — should use it, not placeholder
     let config = config_with_custom(
         "ollama",
         None,
         Some("http://localhost:11434/v1".to_string()),
     );
-    let result = create_provider(&config);
+    let result = create_provider(&config).await;
     assert!(result.is_ok());
     assert_ne!(result.unwrap().name(), "placeholder");
 }
@@ -457,8 +457,8 @@ fn multiple_custom_providers_in_config() {
     assert!(names.contains(&"lmstudio".to_string()));
 }
 
-#[test]
-fn factory_switches_between_custom_providers() {
+#[tokio::test]
+async fn factory_switches_between_custom_providers() {
     // Two custom providers, only one enabled — factory picks the enabled one
     let mut custom_map = BTreeMap::new();
     custom_map.insert(
@@ -486,13 +486,13 @@ fn factory_switches_between_custom_providers() {
         },
         ..Default::default()
     };
-    let result = create_provider(&config);
+    let result = create_provider(&config).await;
     assert!(result.is_ok());
     assert_eq!(result.unwrap().name(), "local");
 }
 
-#[test]
-fn create_by_name_picks_specific_custom() {
+#[tokio::test]
+async fn create_by_name_picks_specific_custom() {
     // Even when "local" is enabled, create_by_name("custom:nvidia") picks nvidia
     let mut custom_map = BTreeMap::new();
     custom_map.insert(
@@ -520,7 +520,7 @@ fn create_by_name_picks_specific_custom() {
         },
         ..Default::default()
     };
-    let result = create_provider_by_name(&config, "custom:nvidia");
+    let result = create_provider_by_name(&config, "custom:nvidia").await;
     assert!(result.is_ok());
     assert_eq!(result.unwrap().name(), "nvidia");
 }

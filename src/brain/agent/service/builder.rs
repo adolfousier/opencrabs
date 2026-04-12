@@ -62,7 +62,7 @@ pub struct AgentService {
 
 impl AgentService {
     /// Create a new agent service. Reads agent settings from the provided config.
-    pub fn new(
+    pub async fn new(
         provider: Arc<dyn Provider>,
         context: ServiceContext,
         config: &crate::config::Config,
@@ -85,14 +85,14 @@ impl AgentService {
             )),
             brain_path: None,
             session_updated_tx: None,
-            fallback_providers: Self::build_fallback_providers(config),
+            fallback_providers: Self::build_fallback_providers(config).await,
         }
     }
 
     /// Create an agent service for tests (uses Config::default()).
     /// Only use in test code where no real user config exists.
-    pub fn new_for_test(provider: Arc<dyn Provider>, context: ServiceContext) -> Self {
-        Self::new(provider, context, &crate::config::Config::default())
+    pub async fn new_for_test(provider: Arc<dyn Provider>, context: ServiceContext) -> Self {
+        Self::new(provider, context, &crate::config::Config::default()).await
     }
 
     /// Get the service context
@@ -330,14 +330,14 @@ impl AgentService {
     }
 
     /// Build fallback providers from config for mid-stream rate limit recovery.
-    fn build_fallback_providers(config: &crate::config::Config) -> Vec<Arc<dyn Provider>> {
+    async fn build_fallback_providers(config: &crate::config::Config) -> Vec<Arc<dyn Provider>> {
         if let Some(fallback) = &config.providers.fallback
             && fallback.enabled
         {
             let chain = crate::brain::provider::factory::fallback_chain(fallback);
             let mut providers = Vec::new();
             for name in &chain {
-                match crate::brain::provider::factory::create_provider_by_name(config, name) {
+                match crate::brain::provider::factory::create_provider_by_name(config, name).await {
                     Ok(p) => {
                         tracing::info!("AgentService: fallback provider '{}' ready", name);
                         providers.push(p);

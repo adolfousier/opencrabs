@@ -9,7 +9,7 @@ async fn test_concurrent_sessions_independent() {
     let context = ServiceContext::new(pool);
 
     let provider = Arc::new(MockProvider);
-    let agent_service = Arc::new(AgentService::new_for_test(provider, context.clone()));
+    let agent_service = Arc::new(AgentService::new_for_test(provider, context.clone()).await);
 
     let session_service = SessionService::new(context);
     let session_a = session_service
@@ -58,8 +58,8 @@ async fn test_concurrent_sessions_different_providers() {
     let provider_alpha = Arc::new(MockProviderWithModel::new("alpha", "alpha-model"));
     let provider_beta = Arc::new(MockProviderWithModel::new("beta", "beta-model"));
 
-    let svc_alpha = Arc::new(AgentService::new_for_test(provider_alpha, context.clone()));
-    let svc_beta = Arc::new(AgentService::new_for_test(provider_beta, context.clone()));
+    let svc_alpha = Arc::new(AgentService::new_for_test(provider_alpha, context.clone()).await);
+    let svc_beta = Arc::new(AgentService::new_for_test(provider_beta, context.clone()).await);
 
     let session_service = SessionService::new(context);
     let session_a = session_service
@@ -112,7 +112,7 @@ async fn test_cancel_one_session_other_continues() {
     registry.register(Arc::new(MockTool));
 
     let svc_a = Arc::new(
-        AgentService::new_for_test(Arc::new(MockProviderWithTools::new()), context.clone())
+        AgentService::new_for_test(Arc::new(MockProviderWithTools::new()), context.clone()).await
             .with_tool_registry(Arc::new({
                 let r = ToolRegistry::new();
                 r.register(Arc::new(MockTool));
@@ -122,7 +122,7 @@ async fn test_cancel_one_session_other_continues() {
     );
 
     let svc_b = Arc::new(
-        AgentService::new_for_test(provider, context.clone())
+        AgentService::new_for_test(provider, context.clone()).await
             .with_tool_registry(Arc::new(registry))
             .with_auto_approve_tools(true),
     );
@@ -177,7 +177,7 @@ async fn test_message_isolation_between_sessions() {
     let context = ServiceContext::new(pool);
 
     let provider = Arc::new(MockProvider);
-    let agent_service = Arc::new(AgentService::new_for_test(provider, context.clone()));
+    let agent_service = Arc::new(AgentService::new_for_test(provider, context.clone()).await);
 
     let session_service = SessionService::new(context.clone());
     let session_a = session_service
@@ -240,7 +240,7 @@ async fn test_session_usage_tracked_independently() {
     let context = ServiceContext::new(pool);
 
     let provider = Arc::new(MockProvider);
-    let agent_service = Arc::new(AgentService::new_for_test(provider, context.clone()));
+    let agent_service = Arc::new(AgentService::new_for_test(provider, context.clone()).await);
 
     let session_service = SessionService::new(context.clone());
     let session_a = session_service

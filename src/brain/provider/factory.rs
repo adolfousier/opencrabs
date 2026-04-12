@@ -4,7 +4,7 @@
 
 use super::qwen::{
     QWEN_DEFAULT_CHAT_URL, QWEN_OAUTH_MODEL, QwenCredentials, QwenTokenManager,
-    qwen_body_transform, qwen_extra_headers,
+    qwen_body_transform, qwen_extra_headers, refresh_credentials,
 };
 use super::{
     Provider, anthropic::AnthropicProvider, claude_cli::ClaudeCliProvider,
@@ -15,15 +15,68 @@ use crate::config::{Config, ProviderConfig};
 use anyhow::Result;
 use std::sync::Arc;
 
-type ProviderAttempt<'a> = (
-    &'a str,
-    Box<dyn FnOnce() -> Result<Option<Arc<dyn Provider>>> + 'a>,
-);
+/// Try a single provider by name. Qwen is async (OAuth refresh),
+/// everything else is sync but wrapped in the same async signature.
+async fn try_create_by_name(
+    config: &Config,
+    name: &str,
+) -> Result<Option<Arc<dyn Provider>>> {
+    match name {
+        "Claude CLI" => try_create_claude_cli(config),
+        "OpenCode CLI" => try_create_opencode_cli(config),
+        "Qwen CLI" => try_create_qwen_code(config),
+        "Qwen" => try_create_qwen(config).await,
+        "Anthropic" => try_create_anthropic(config),
+        "OpenAI" => try_create_openai(config),
+        "GitHub Copilot" => try_create_github(config),
+        "Google Gemini" => try_create_gemini(config),
+        "OpenRouter" => try_create_openrouter(config),
+        "Minimax" => try_create_minimax(config),
+        "z.ai GLM" => try_create_zhipu(config),
+        "Custom" => try_create_custom(config),
+        _ => Ok(None),
+    }
+}
+
+/// Provider names in priority order.
+const PROVIDER_NAMES: &[&str] = &[
+    "Claude CLI",
+    "OpenCode CLI",
+    "Qwen CLI",
+    "Qwen",
+    "Anthropic",
+    "OpenAI",
+    "GitHub Copilot",
+    "Google Gemini",
+    "OpenRouter",
+    "Minimax",
+    "z.ai GLM",
+    "Custom",
+];
+
+/// Whether a provider is enabled in config, by index matching PROVIDER_NAMES.
+fn provider_enabled(config: &Config, idx: usize) -> bool {
+    match idx {
+        0 => config.providers.claude_cli.as_ref().is_some_and(|p| p.enabled),
+        1 => config.providers.opencode_cli.as_ref().is_some_and(|p| p.enabled),
+        2 => config.providers.qwen_code_cli.as_ref().is_some_and(|p| p.enabled),
+        3 => config.providers.qwen.as_ref().is_some_and(|p| p.enabled),
+        4 => config.providers.anthropic.as_ref().is_some_and(|p| p.enabled),
+        5 => config.providers.openai.as_ref().is_some_and(|p| p.enabled),
+        6 => config.providers.github.as_ref().is_some_and(|p| p.enabled),
+        7 => config.providers.gemini.as_ref().is_some_and(|p| p.enabled),
+        8 => config.providers.openrouter.as_ref().is_some_and(|p| p.enabled),
+        9 => config.providers.minimax.as_ref().is_some_and(|p| p.enabled),
+        10 => config.providers.zhipu.as_ref().is_some_and(|p| p.enabled),
+        11 => config.providers.active_custom().is_some(),
+        _ => false,
+    }
+}
 
 /// Create a provider based on config.toml
 /// No hardcoded priority - providers are enabled/disabled in config
-pub fn create_provider(config: &Config) -> Result<Arc<dyn Provider>> {
-    let (provider, warning) = create_provider_with_warning(config)?;
+pub async fn create_provider(config: &Config) -> Result<Arc<dyn Provider>> {
+    let (provider, warning) = create_provider_with_warning(config).await?;
     if let Some(msg) = &warning {
         tracing::warn!("{}", msg);
     }
@@ -32,72 +85,20 @@ pub fn create_provider(config: &Config) -> Result<Arc<dyn Provider>> {
 
 /// Like `create_provider` but returns a warning message when a fallback was used.
 /// The caller (TUI) should surface this to the user instead of printing to stderr.
-pub fn create_provider_with_warning(
+pub async fn create_provider_with_warning(
     config: &Config,
 ) -> Result<(Arc<dyn Provider>, Option<String>)> {
-    // Try the enabled provider. If it fails, warn and try others before giving up.
-    // Priority order: Claude CLI > OpenCode CLI > Qwen CLI > Anthropic > OpenAI > GitHub > Gemini > OpenRouter > Minimax > zhipu > Custom
-    let enabled_attempts: Vec<ProviderAttempt<'_>> = vec![
-        ("Claude CLI", Box::new(|| try_create_claude_cli(config))),
-        ("OpenCode CLI", Box::new(|| try_create_opencode_cli(config))),
-        ("Qwen CLI", Box::new(|| try_create_qwen_code(config))),
-        ("Qwen", Box::new(|| try_create_qwen(config))),
-        ("Anthropic", Box::new(|| try_create_anthropic(config))),
-        ("OpenAI", Box::new(|| try_create_openai(config))),
-        ("GitHub Copilot", Box::new(|| try_create_github(config))),
-        ("Google Gemini", Box::new(|| try_create_gemini(config))),
-        ("OpenRouter", Box::new(|| try_create_openrouter(config))),
-        ("Minimax", Box::new(|| try_create_minimax(config))),
-        ("z.ai GLM", Box::new(|| try_create_zhipu(config))),
-        ("Custom", Box::new(|| try_create_custom(config))),
-    ];
-
-    // Which providers are enabled in config?
-    let is_enabled: Vec<bool> = vec![
-        config
-            .providers
-            .claude_cli
-            .as_ref()
-            .is_some_and(|p| p.enabled),
-        config
-            .providers
-            .opencode_cli
-            .as_ref()
-            .is_some_and(|p| p.enabled),
-        config
-            .providers
-            .qwen_code_cli
-            .as_ref()
-            .is_some_and(|p| p.enabled),
-        config.providers.qwen.as_ref().is_some_and(|p| p.enabled),
-        config
-            .providers
-            .anthropic
-            .as_ref()
-            .is_some_and(|p| p.enabled),
-        config.providers.openai.as_ref().is_some_and(|p| p.enabled),
-        config.providers.github.as_ref().is_some_and(|p| p.enabled),
-        config.providers.gemini.as_ref().is_some_and(|p| p.enabled),
-        config
-            .providers
-            .openrouter
-            .as_ref()
-            .is_some_and(|p| p.enabled),
-        config.providers.minimax.as_ref().is_some_and(|p| p.enabled),
-        config.providers.zhipu.as_ref().is_some_and(|p| p.enabled),
-        config.providers.active_custom().is_some(),
-    ];
-
     let mut primary: Option<Arc<dyn Provider>> = None;
     let mut failed_name: Option<&str> = None;
     let mut warning: Option<String> = None;
 
-    for (i, (name, create_fn)) in enabled_attempts.into_iter().enumerate() {
-        if !is_enabled[i] {
+    // Try enabled providers in priority order
+    for (i, &name) in PROVIDER_NAMES.iter().enumerate() {
+        if !provider_enabled(config, i) {
             continue;
         }
 
-        match create_fn() {
+        match try_create_by_name(config, name).await {
             Ok(Some(provider)) => {
                 if let Some(failed) = failed_name {
                     let msg = format!(
@@ -119,57 +120,24 @@ pub fn create_provider_with_warning(
                 if failed_name.is_none() {
                     failed_name = Some(name);
                 }
-                // Continue to try next enabled provider
             }
             Err(e) => {
                 tracing::error!("{} provider error: {}", name, e);
                 if failed_name.is_none() {
                     failed_name = Some(name);
                 }
-                // Continue to try next enabled provider
             }
         }
     }
 
-    // If the enabled provider failed, try ALL providers as fallback (any with keys)
-    if primary.is_none() && failed_name.is_some() {
-        let fallback_attempts: Vec<ProviderAttempt<'_>> = vec![
-            ("Claude CLI", Box::new(|| try_create_claude_cli(config))),
-            ("OpenCode CLI", Box::new(|| try_create_opencode_cli(config))),
-            ("Qwen CLI", Box::new(|| try_create_qwen_code(config))),
-            ("Qwen", Box::new(|| try_create_qwen(config))),
-            ("Anthropic", Box::new(|| try_create_anthropic(config))),
-            ("OpenAI", Box::new(|| try_create_openai(config))),
-            ("GitHub Copilot", Box::new(|| try_create_github(config))),
-            ("Google Gemini", Box::new(|| try_create_gemini(config))),
-            ("OpenRouter", Box::new(|| try_create_openrouter(config))),
-            ("Minimax", Box::new(|| try_create_minimax(config))),
-            ("z.ai GLM", Box::new(|| try_create_zhipu(config))),
-            ("Custom", Box::new(|| try_create_custom(config))),
-        ];
-
-        for (name, create_fn) in fallback_attempts {
-            if let Ok(Some(provider)) = create_fn() {
-                let msg = format!(
-                    "Fell back to {}. Run /onboard:provider to reconfigure.",
-                    name
-                );
-                tracing::warn!("{}", msg);
-                warning = Some(msg);
-                primary = Some(provider);
-                break;
-            }
-        }
-    }
-
-    // Build fallback chain if configured
+    // Build fallback chain if configured (user-defined in config.toml)
     let fallback_providers = if let Some(fallback) = &config.providers.fallback
         && fallback.enabled
     {
         let chain = fallback_chain(fallback);
         let mut providers = Vec::new();
         for name in &chain {
-            match create_fallback(config, name) {
+            match create_fallback(config, name).await {
                 Ok(p) => {
                     tracing::info!("Fallback provider '{}' ready", name);
                     providers.push(p);
@@ -215,7 +183,7 @@ pub fn create_provider_with_warning(
 /// Create a provider by name, ignoring the `enabled` flag.
 /// Used for per-session provider restoration without toggling disk config.
 /// Accepts names like "anthropic", "openai", "minimax", "openrouter", or "custom:<name>".
-pub fn create_provider_by_name(config: &Config, name: &str) -> Result<Arc<dyn Provider>> {
+pub async fn create_provider_by_name(config: &Config, name: &str) -> Result<Arc<dyn Provider>> {
     match name {
         "claude-cli" | "claude_cli" => {
             // Bypass enabled check — session explicitly requested this provider
@@ -282,7 +250,8 @@ pub fn create_provider_by_name(config: &Config, name: &str) -> Result<Arc<dyn Pr
             .ok_or_else(|| anyhow::anyhow!("GitHub not configured (missing token)")),
         "gemini" => try_create_gemini(config)?
             .ok_or_else(|| anyhow::anyhow!("Gemini not configured (missing API key)")),
-        "qwen" => try_create_qwen(config)?
+        "qwen" => try_create_qwen(config)
+            .await?
             .ok_or_else(|| anyhow::anyhow!("Qwen not configured (run /onboard:provider)")),
         n if n.starts_with("custom:") => {
             let custom_name = &n["custom:".len()..];
@@ -352,7 +321,7 @@ pub(crate) fn fallback_chain(fallback: &crate::config::FallbackProviderConfig) -
 }
 
 /// Create fallback provider
-fn create_fallback(config: &Config, fallback_type: &str) -> Result<Arc<dyn Provider>> {
+async fn create_fallback(config: &Config, fallback_type: &str) -> Result<Arc<dyn Provider>> {
     match fallback_type {
         "claude-cli" | "claude_cli" => {
             tracing::info!("Using fallback: Claude CLI");
@@ -399,7 +368,9 @@ fn create_fallback(config: &Config, fallback_type: &str) -> Result<Arc<dyn Provi
         }
         "qwen" => {
             tracing::info!("Using fallback: Qwen native");
-            try_create_qwen(config)?.ok_or_else(|| anyhow::anyhow!("Qwen native not configured"))
+            try_create_qwen(config)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("Qwen native not configured"))
         }
         "custom" => {
             tracing::info!("Using fallback: Custom OpenAI-Compatible");
@@ -552,20 +523,25 @@ fn build_single_qwen_provider(
 /// Try to create the native **Qwen** provider (OAuth + DashScope OpenAI-compatible).
 ///
 /// If `[[providers.qwen_accounts]]` has ≥ 2 entries, builds a
-/// Check if Qwen credentials are usable. Returns false if the token is
-/// expired AND the refresh_token is missing/empty (unrecoverable without
-/// re-auth). If the token is expired but a refresh_token exists, the
-/// background refresh task will handle it — we don't block startup.
-fn qwen_creds_recoverable(creds: &QwenCredentials) -> bool {
-    creds.is_valid() || !creds.refresh_token.is_empty()
+/// Async refresh of Qwen credentials. Returns refreshed creds or error.
+async fn try_refresh_qwen(creds: &QwenCredentials) -> anyhow::Result<QwenCredentials> {
+    let refreshed = refresh_credentials(creds).await?;
+    if let Err(e) = refreshed.persist_to_keys() {
+        tracing::warn!("Failed to persist refreshed Qwen creds: {}", e);
+    }
+    refreshed.write_back_to_qwen_cli();
+    Ok(refreshed)
 }
 
+/// Try to create the native **Qwen** provider (OAuth + DashScope OpenAI-compatible).
+///
+/// If `[[providers.qwen_accounts]]` has ≥ 2 entries, builds a
 /// `RotatingQwenProvider` that round-robins on rate-limit instead of
 /// immediately falling to the outer fallback chain.
 ///
 /// Otherwise falls back to the single-account path from `[providers.qwen]`
 /// (including transparent import from `~/.qwen/oauth_creds.json`).
-fn try_create_qwen(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
+async fn try_create_qwen(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     let qwen_config = match &config.providers.qwen {
         Some(cfg) => cfg,
         None => return Ok(None),
@@ -579,16 +555,31 @@ fn try_create_qwen(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
                 "Building RotatingQwenProvider with {} accounts",
                 accounts_creds.len()
             );
-            // Skip accounts with no refresh_token (unrecoverable).
-            // Expired tokens with a refresh_token are kept — background task will refresh.
+            // Validate each account: refresh expired ones, skip dead ones
             let mut usable_providers: Vec<Arc<dyn Provider>> = Vec::new();
-            for (i, creds) in accounts_creds.into_iter().enumerate() {
-                if !qwen_creds_recoverable(&creds) {
-                    tracing::warn!(
-                        "  Qwen rotation account {} dead (no refresh_token) — skipping",
-                        i
-                    );
-                    continue;
+            for (i, mut creds) in accounts_creds.into_iter().enumerate() {
+                if !creds.is_valid() {
+                    if creds.refresh_token.is_empty() {
+                        tracing::warn!(
+                            "  Qwen rotation account {} dead (no refresh_token) — skipping",
+                            i
+                        );
+                        continue;
+                    }
+                    match try_refresh_qwen(&creds).await {
+                        Ok(refreshed) => {
+                            tracing::info!("  Qwen rotation account {} refreshed", i);
+                            creds = refreshed;
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "  Qwen rotation account {} dead (refresh failed: {}) — skipping",
+                                i,
+                                e
+                            );
+                            continue;
+                        }
+                    }
                 }
                 tracing::info!("  Qwen rotation account {} ready", i);
                 usable_providers.push(build_single_qwen_provider(creds, qwen_config));
@@ -631,7 +622,7 @@ fn try_create_qwen(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         }
     }
 
-    let Some(creds) = creds else {
+    let Some(mut creds) = creds else {
         tracing::warn!(
             "Qwen enabled but no OAuth credentials found in keys.toml \
              or ~/.qwen/oauth_creds.json. Run /onboard:provider to authenticate."
@@ -639,15 +630,29 @@ fn try_create_qwen(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         return Ok(None);
     };
 
-    // If the token is expired and there's no refresh_token, the provider
-    // is unrecoverable without re-auth — skip it so the factory falls back.
-    // If a refresh_token exists, the background refresh task will handle it.
-    if !qwen_creds_recoverable(&creds) {
-        tracing::warn!(
-            "Qwen token expired with no refresh_token — provider unavailable. \
-             Run /onboard:provider to re-authenticate."
-        );
-        return Ok(None);
+    // Validate: if expired, try async refresh. If no refresh_token, skip.
+    if !creds.is_valid() {
+        if creds.refresh_token.is_empty() {
+            tracing::warn!(
+                "Qwen token expired with no refresh_token — provider unavailable. \
+                 Run /onboard:provider to re-authenticate."
+            );
+            return Ok(None);
+        }
+        match try_refresh_qwen(&creds).await {
+            Ok(refreshed) => {
+                tracing::info!("Qwen token refreshed successfully at startup");
+                creds = refreshed;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Qwen token refresh failed — provider unavailable: {}. \
+                     Run /onboard:provider to re-authenticate.",
+                    e
+                );
+                return Ok(None);
+            }
+        }
     }
 
     tracing::info!("Using Qwen native provider (single account)");
@@ -1063,8 +1068,8 @@ mod tests {
     use super::*;
     use crate::config::{Config, ProviderConfig, ProviderConfigs};
 
-    #[test]
-    fn test_create_provider_with_anthropic() {
+    #[tokio::test]
+    async fn test_create_provider_with_anthropic() {
         let config = Config {
             providers: ProviderConfigs {
                 anthropic: Some(ProviderConfig {
@@ -1081,14 +1086,14 @@ mod tests {
             ..Default::default()
         };
 
-        let result = create_provider(&config);
+        let result = create_provider(&config).await;
         assert!(result.is_ok());
         let provider = result.unwrap();
         assert_eq!(provider.name(), "anthropic");
     }
 
-    #[test]
-    fn test_create_provider_with_minimax() {
+    #[tokio::test]
+    async fn test_create_provider_with_minimax() {
         let config = Config {
             providers: ProviderConfigs {
                 minimax: Some(ProviderConfig {
@@ -1105,12 +1110,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result = create_provider(&config);
+        let result = create_provider(&config).await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_minimax_takes_priority() {
+    #[tokio::test]
+    async fn test_minimax_takes_priority() {
         let config = Config {
             providers: ProviderConfigs {
                 openai: Some(ProviderConfig {
@@ -1136,19 +1141,19 @@ mod tests {
             ..Default::default()
         };
 
-        let result = create_provider(&config);
+        let result = create_provider(&config).await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_create_provider_no_credentials() {
+    #[tokio::test]
+    async fn test_create_provider_no_credentials() {
         let config = Config {
             providers: ProviderConfigs::default(),
             ..Default::default()
         };
 
         // No credentials → PlaceholderProvider (app starts, shows onboarding)
-        let result = create_provider(&config);
+        let result = create_provider(&config).await;
         assert!(result.is_ok());
     }
 }

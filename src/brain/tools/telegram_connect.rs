@@ -110,7 +110,7 @@ impl Tool for TelegramConnectTool {
 
         // Create and spawn the Telegram agent
         let factory = self.channel_factory.clone();
-        let agent = factory.create_agent_service();
+        let agent = factory.create_agent_service().await;
         let service_context = factory.service_context();
         let shared_session = factory.shared_session_id();
         let telegram_state = self.telegram_state.clone();

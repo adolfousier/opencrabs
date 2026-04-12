@@ -5,7 +5,7 @@
 //! so that toggling `channels.*.enabled` in config.toml takes effect without restart.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use tokio::task::JoinHandle;
 
@@ -14,7 +14,7 @@ use crate::config::Config;
 
 /// Manages running channel agents, allowing dynamic spawn/stop on config reload.
 pub struct ChannelManager {
-    handles: Mutex<HashMap<String, JoinHandle<()>>>,
+    handles: tokio::sync::Mutex<HashMap<String, JoinHandle<()>>>,
     channel_factory: Arc<ChannelFactory>,
     db_pool: deadpool_sqlite::Pool,
 
@@ -42,7 +42,7 @@ impl ChannelManager {
         #[cfg(feature = "trello")] trello_state: Arc<crate::channels::trello::TrelloState>,
     ) -> Self {
         Self {
-            handles: Mutex::new(HashMap::new()),
+            handles: tokio::sync::Mutex::new(HashMap::new()),
             channel_factory,
             db_pool,
             #[cfg(feature = "telegram")]
@@ -59,27 +59,27 @@ impl ChannelManager {
     }
 
     /// Compare running channels against config and spawn/stop as needed.
-    pub fn reconcile(&self, config: &Config) {
-        let mut handles = self.handles.lock().unwrap();
+    pub async fn reconcile(&self, config: &Config) {
+        let mut handles = self.handles.lock().await;
 
         #[cfg(feature = "telegram")]
-        self.reconcile_telegram(config, &mut handles);
+        self.reconcile_telegram(config, &mut handles).await;
 
         #[cfg(feature = "whatsapp")]
-        self.reconcile_whatsapp(config, &mut handles);
+        self.reconcile_whatsapp(config, &mut handles).await;
 
         #[cfg(feature = "discord")]
-        self.reconcile_discord(config, &mut handles);
+        self.reconcile_discord(config, &mut handles).await;
 
         #[cfg(feature = "slack")]
-        self.reconcile_slack(config, &mut handles);
+        self.reconcile_slack(config, &mut handles).await;
 
         #[cfg(feature = "trello")]
-        self.reconcile_trello(config, &mut handles);
+        self.reconcile_trello(config, &mut handles).await;
     }
 
     #[cfg(feature = "telegram")]
-    fn reconcile_telegram(&self, config: &Config, handles: &mut HashMap<String, JoinHandle<()>>) {
+    async fn reconcile_telegram(&self, config: &Config, handles: &mut HashMap<String, JoinHandle<()>>) {
         let tg = &config.channels.telegram;
         let has_valid_token = tg
             .token
@@ -105,7 +105,7 @@ impl ChannelManager {
                     return;
                 }
                 let agent = crate::channels::telegram::TelegramAgent::new(
-                    self.channel_factory.create_agent_service(),
+                    self.channel_factory.create_agent_service().await,
                     self.channel_factory.service_context(),
                     self.channel_factory.shared_session_id(),
                     self.telegram_state.clone(),
@@ -128,14 +128,14 @@ impl ChannelManager {
     }
 
     #[cfg(feature = "whatsapp")]
-    fn reconcile_whatsapp(&self, config: &Config, handles: &mut HashMap<String, JoinHandle<()>>) {
+    async fn reconcile_whatsapp(&self, config: &Config, handles: &mut HashMap<String, JoinHandle<()>>) {
         let wa = &config.channels.whatsapp;
         let should_run = wa.enabled;
         let is_running = handles.contains_key("whatsapp");
 
         if should_run && !is_running {
             let agent = crate::channels::whatsapp::WhatsAppAgent::new(
-                self.channel_factory.create_agent_service(),
+                self.channel_factory.create_agent_service().await,
                 self.channel_factory.service_context(),
                 self.channel_factory.shared_session_id(),
                 self.whatsapp_state.clone(),
@@ -157,7 +157,7 @@ impl ChannelManager {
     }
 
     #[cfg(feature = "discord")]
-    fn reconcile_discord(&self, config: &Config, handles: &mut HashMap<String, JoinHandle<()>>) {
+    async fn reconcile_discord(&self, config: &Config, handles: &mut HashMap<String, JoinHandle<()>>) {
         let dc = &config.channels.discord;
         let has_valid_token = dc
             .token
@@ -175,7 +175,7 @@ impl ChannelManager {
                     return;
                 }
                 let agent = crate::channels::discord::DiscordAgent::new(
-                    self.channel_factory.create_agent_service(),
+                    self.channel_factory.create_agent_service().await,
                     self.channel_factory.service_context(),
                     self.channel_factory.shared_session_id(),
                     self.discord_state.clone(),
@@ -198,7 +198,7 @@ impl ChannelManager {
     }
 
     #[cfg(feature = "slack")]
-    fn reconcile_slack(&self, config: &Config, handles: &mut HashMap<String, JoinHandle<()>>) {
+    async fn reconcile_slack(&self, config: &Config, handles: &mut HashMap<String, JoinHandle<()>>) {
         let sl = &config.channels.slack;
         let has_valid_tokens = sl
             .token
@@ -221,7 +221,7 @@ impl ChannelManager {
                     return;
                 }
                 let agent = crate::channels::slack::SlackAgent::new(
-                    self.channel_factory.create_agent_service(),
+                    self.channel_factory.create_agent_service().await,
                     self.channel_factory.service_context(),
                     self.channel_factory.shared_session_id(),
                     self.slack_state.clone(),
@@ -244,7 +244,7 @@ impl ChannelManager {
     }
 
     #[cfg(feature = "trello")]
-    fn reconcile_trello(&self, config: &Config, handles: &mut HashMap<String, JoinHandle<()>>) {
+    async fn reconcile_trello(&self, config: &Config, handles: &mut HashMap<String, JoinHandle<()>>) {
         let tr = &config.channels.trello;
         let has_valid_creds = tr
             .app_token
@@ -264,7 +264,7 @@ impl ChannelManager {
                     return;
                 }
                 let agent = crate::channels::trello::TrelloAgent::new(
-                    self.channel_factory.create_agent_service(),
+                    self.channel_factory.create_agent_service().await,
                     self.channel_factory.service_context(),
                     tr.allowed_users.clone(),
                     self.channel_factory.shared_session_id(),

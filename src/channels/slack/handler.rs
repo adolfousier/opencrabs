@@ -59,7 +59,7 @@ pub async fn on_interaction(
                                     crate::brain::provider::factory::create_provider_by_name(
                                         &config,
                                         provider_name,
-                                    )
+                                    ).await
                             {
                                 state.agent.swap_provider(new_provider);
                             }
@@ -170,7 +170,7 @@ pub async fn on_interaction(
                             Ok(config) => {
                                 match crate::brain::provider::factory::create_provider_by_name(
                                     &config, pname,
-                                ) {
+                                ).await {
                                     Ok(new_provider) => state.agent.swap_provider(new_provider),
                                     Err(e) => {
                                         provider_err = Some(format!(
@@ -917,7 +917,7 @@ async fn handle_message(
             .as_ref()
             .and_then(|s| s.provider_name.as_deref()),
         session_meta.as_ref().and_then(|s| s.model.as_deref()),
-    );
+    ).await;
 
     // ── Channel commands (/help, /usage, /models) ──────────────────────────
     {
