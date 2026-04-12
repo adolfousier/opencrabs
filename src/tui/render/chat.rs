@@ -153,7 +153,10 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         let msg_id = app.messages[msg_idx].id;
         let cache_key = (msg_id, content_width as u16);
         if !app.render_cache.contains_key(&cache_key) {
-            let parsed = parse_markdown(&app.messages[msg_idx].content);
+            let parsed = parse_markdown(
+                &app.messages[msg_idx].content,
+                content_width.saturating_sub(2),
+            );
             app.render_cache.insert(cache_key, parsed);
         }
         let content_lines = app.render_cache[&cache_key].clone();
@@ -304,13 +307,13 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                 cached.clone()
             } else {
                 let clean = crate::utils::sanitize::strip_llm_artifacts(response);
-                let parsed = parse_markdown(&clean);
+                let parsed = parse_markdown(&clean, content_width.saturating_sub(2));
                 app.streaming_render_cache = Some((current_len, parsed.clone()));
                 parsed
             }
         } else {
             let clean = crate::utils::sanitize::strip_llm_artifacts(response);
-            let parsed = parse_markdown(&clean);
+            let parsed = parse_markdown(&clean, content_width);
             app.streaming_render_cache = Some((current_len, parsed.clone()));
             parsed
         };

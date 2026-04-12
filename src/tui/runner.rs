@@ -158,13 +158,19 @@ async fn run_loop(
             }
         }
 
-        // On terminal resize, clear both ratatui buffers so the next draw
-        // paints a clean frame instead of diffing against stale dimensions.
-        // This eliminates the visible flash/blink during resize.
-        if app.needs_clear {
-            app.needs_clear = false;
-            let _ = terminal.clear();
-        }
+        // Consume pending resize (just clears the flag; ratatui's
+        // autoresize inside draw() handles the actual buffer resize).
+        app.pending_resize.take();
+
+        // Wrap every frame in synchronized output (DEC private mode
+        // 2026) so the terminal buffers all escape sequences and
+        // displays the complete frame atomically.  This eliminates
+        // flicker on resize because the clear + full redraw appear as
+        // a single update to the terminal.
+        let _ = execute!(
+            terminal.backend_mut(),
+            crossterm::terminal::BeginSynchronizedUpdate
+        );
 
         // Render — wrap in catch_unwind so a render-time panic (e.g. a
         // ratatui buffer OOB from some edge-case layout) is caught, logged,
@@ -194,6 +200,11 @@ async fn run_loop(
                 let _ = terminal.clear();
             }
         }
+
+        let _ = execute!(
+            terminal.backend_mut(),
+            crossterm::terminal::EndSynchronizedUpdate
+        );
 
         // Check for quit
         if app.should_quit {

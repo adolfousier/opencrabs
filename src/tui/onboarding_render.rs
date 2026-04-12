@@ -27,9 +27,7 @@ pub fn render_onboarding(f: &mut Frame, wizard: &OnboardingWizard) {
 
     // Compute wrap width early so content builders can use it.
     // Box = min(64, 90% terminal), inner = box - 2 borders, wrap = inner - 8 padding
-    let box_w = 64u16
-        .min(area.width * 9 / 10)
-        .max(40u16.min(area.width));
+    let box_w = 64u16.min(area.width * 9 / 10).max(40u16.min(area.width));
     let wrap_width = (box_w.saturating_sub(10) as usize).max(20);
 
     // Build wizard content FIRST so we know the actual height
@@ -247,9 +245,7 @@ pub fn render_onboarding(f: &mut Frame, wizard: &OnboardingWizard) {
 
     // --- Layout calculations ---
     // Responsive: use up to 90% of terminal width (min 40, max 64)
-    let box_width = 64u16
-        .min(area.width * 9 / 10)
-        .max(40u16.min(area.width));
+    let box_width = 64u16.min(area.width * 9 / 10).max(40u16.min(area.width));
     let inner_width = box_width.saturating_sub(2) as usize; // inside borders
 
     // The header occupies lines 0..header_end (progress dots, title, subtitle).
@@ -2498,7 +2494,11 @@ fn render_health_check(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard
     }
 }
 
-fn render_brain_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard, wrap_width: usize) {
+fn render_brain_setup(
+    lines: &mut Vec<Line<'static>>,
+    wizard: &OnboardingWizard,
+    wrap_width: usize,
+) {
     // Show generating state
     if wizard.brain_generating {
         lines.push(Line::from(""));
@@ -2632,7 +2632,10 @@ fn render_brain_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard,
     let italic_style = Style::default()
         .fg(Color::DarkGray)
         .add_modifier(Modifier::ITALIC);
-    for chunk in wrap_text("  The more you drop the better I cover your ass", wrap_width) {
+    for chunk in wrap_text(
+        "  The more you drop the better I cover your ass",
+        wrap_width,
+    ) {
         lines.push(Line::from(Span::styled(chunk, italic_style)));
     }
 
@@ -2644,7 +2647,10 @@ fn render_brain_setup(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard,
         )));
     }
     let hint_style = Style::default().fg(Color::DarkGray);
-    for chunk in wrap_text("  Esc to skip · Tab to switch · Enter to generate", wrap_width) {
+    for chunk in wrap_text(
+        "  Esc to skip · Tab to switch · Enter to generate",
+        wrap_width,
+    ) {
         lines.push(Line::from(Span::styled(chunk, hint_style)));
     }
 }
