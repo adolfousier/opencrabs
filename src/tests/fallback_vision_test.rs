@@ -386,7 +386,9 @@ default_model = "gpt-4"
             ..Default::default()
         };
 
-        let provider = crate::brain::provider::factory::create_provider(&config).await.unwrap();
+        let provider = crate::brain::provider::factory::create_provider(&config)
+            .await
+            .unwrap();
         assert!(provider.supports_vision());
     }
 
@@ -410,7 +412,9 @@ default_model = "gpt-4"
             ..Default::default()
         };
 
-        let provider = crate::brain::provider::factory::create_provider(&config).await.unwrap();
+        let provider = crate::brain::provider::factory::create_provider(&config)
+            .await
+            .unwrap();
         assert!(!provider.supports_vision());
     }
 }
@@ -438,7 +442,9 @@ mod factory_fallback {
             ..Default::default()
         };
 
-        let provider = crate::brain::provider::factory::create_provider(&config).await.unwrap();
+        let provider = crate::brain::provider::factory::create_provider(&config)
+            .await
+            .unwrap();
         assert_eq!(provider.name(), "openai");
     }
 
@@ -465,7 +471,9 @@ mod factory_fallback {
             ..Default::default()
         };
 
-        let provider = crate::brain::provider::factory::create_provider(&config).await.unwrap();
+        let provider = crate::brain::provider::factory::create_provider(&config)
+            .await
+            .unwrap();
         // Should be plain openai, not wrapped in fallback
         assert_eq!(provider.name(), "openai");
     }
@@ -477,7 +485,9 @@ mod factory_fallback {
             ..Default::default()
         };
 
-        let provider = crate::brain::provider::factory::create_provider(&config).await.unwrap();
+        let provider = crate::brain::provider::factory::create_provider(&config)
+            .await
+            .unwrap();
         assert_eq!(provider.name(), "none");
     }
 
@@ -497,7 +507,9 @@ mod factory_fallback {
         };
 
         // No providers configured at all — should end up with placeholder
-        let provider = crate::brain::provider::factory::create_provider(&config).await.unwrap();
+        let provider = crate::brain::provider::factory::create_provider(&config)
+            .await
+            .unwrap();
         assert_eq!(provider.name(), "none");
     }
 }

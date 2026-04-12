@@ -79,7 +79,11 @@ impl ChannelManager {
     }
 
     #[cfg(feature = "telegram")]
-    async fn reconcile_telegram(&self, config: &Config, handles: &mut HashMap<String, JoinHandle<()>>) {
+    async fn reconcile_telegram(
+        &self,
+        config: &Config,
+        handles: &mut HashMap<String, JoinHandle<()>>,
+    ) {
         let tg = &config.channels.telegram;
         let has_valid_token = tg
             .token
@@ -128,7 +132,11 @@ impl ChannelManager {
     }
 
     #[cfg(feature = "whatsapp")]
-    async fn reconcile_whatsapp(&self, config: &Config, handles: &mut HashMap<String, JoinHandle<()>>) {
+    async fn reconcile_whatsapp(
+        &self,
+        config: &Config,
+        handles: &mut HashMap<String, JoinHandle<()>>,
+    ) {
         let wa = &config.channels.whatsapp;
         let should_run = wa.enabled;
         let is_running = handles.contains_key("whatsapp");
@@ -157,7 +165,11 @@ impl ChannelManager {
     }
 
     #[cfg(feature = "discord")]
-    async fn reconcile_discord(&self, config: &Config, handles: &mut HashMap<String, JoinHandle<()>>) {
+    async fn reconcile_discord(
+        &self,
+        config: &Config,
+        handles: &mut HashMap<String, JoinHandle<()>>,
+    ) {
         let dc = &config.channels.discord;
         let has_valid_token = dc
             .token
@@ -198,7 +210,11 @@ impl ChannelManager {
     }
 
     #[cfg(feature = "slack")]
-    async fn reconcile_slack(&self, config: &Config, handles: &mut HashMap<String, JoinHandle<()>>) {
+    async fn reconcile_slack(
+        &self,
+        config: &Config,
+        handles: &mut HashMap<String, JoinHandle<()>>,
+    ) {
         let sl = &config.channels.slack;
         let has_valid_tokens = sl
             .token
@@ -244,7 +260,11 @@ impl ChannelManager {
     }
 
     #[cfg(feature = "trello")]
-    async fn reconcile_trello(&self, config: &Config, handles: &mut HashMap<String, JoinHandle<()>>) {
+    async fn reconcile_trello(
+        &self,
+        config: &Config,
+        handles: &mut HashMap<String, JoinHandle<()>>,
+    ) {
         let tr = &config.channels.trello;
         let has_valid_creds = tr
             .app_token

@@ -128,6 +128,20 @@ type = "string"
 description = "Git branch to deploy"
 required = true
 
+# --- Built-in RSI Tools (no config needed) ---
+#
+# OpenCrabs has 3 built-in Recursive Self-Improvement tools that work
+# out of the box — no tools.toml entry needed:
+#
+#   feedback_record   — Log observations (tool outcomes, user corrections, patterns)
+#   feedback_analyze  — Query the feedback ledger (summary, tool_stats, recent, failures)
+#   self_improve      — Propose/apply brain file changes (requires human approval)
+#
+# These are compiled-in tools, not dynamic tools. They appear automatically
+# in the LLM tool list. Tool executions are auto-recorded to the feedback
+# ledger — the agent also calls feedback_record/feedback_analyze manually
+# when it notices patterns worth tracking.
+
 # --- Field Reference ---
 #
 # name             (required)  Tool name — used by the agent to call it

@@ -79,7 +79,8 @@ impl ChannelFactory {
     pub async fn create_agent_service(&self) -> Arc<AgentService> {
         let config = self.config_rx.borrow().clone();
         let mut builder =
-            AgentService::new(self.provider.clone(), self.service_context.clone(), &config).await
+            AgentService::new(self.provider.clone(), self.service_context.clone(), &config)
+                .await
                 .with_system_brain(self.shared_brain.clone())
                 .with_working_directory(self.working_directory.clone())
                 .with_brain_path(self.brain_path.clone());

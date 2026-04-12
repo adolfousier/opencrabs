@@ -67,12 +67,16 @@ Use these **exact parameter names** when calling tools:
 | `browser_wait` | — | `selector`, `timeout_secs`, `delay_secs` |
 | `evolve` | — | `check_only` |
 | `rebuild` | — | — |
+| `feedback_record` | `event_type`, `dimension` | `value`, `metadata` |
+| `feedback_analyze` | `query` | `limit` |
+| `self_improve` | `action` | `target_file`, `description`, `rationale`, `content` |
 | `spawn_agent` | `prompt` | `label` |
 | `wait_agent` | `agent_id` | `timeout_secs` |
 | `send_input` | `agent_id`, `text` | — |
 | `close_agent` | `agent_id` | `remove` |
 | `resume_agent` | `agent_id`, `prompt` | — |
 
+> **RSI tools (Recursive Self-Improvement):** `feedback_record` logs observations to the feedback ledger — `event_type` is one of `tool_success`, `tool_failure`, `user_correction`, `provider_error`, `context_compaction`, `improvement_applied`, `pattern_observed`. `dimension` identifies what was observed (tool name, provider name, pattern label). `value` is numeric (1.0 = success, 0.0 = failure). `metadata` is optional free-text context. `feedback_analyze` queries the ledger — `query` is `summary` (overall stats), `tool_stats` (per-tool success/failure rates), `recent` (last N events), or `failures` (recent failures only). `limit` caps result count (default 50). `self_improve` modifies brain files autonomously — `action` is `apply` (edit brain file + log to ~/.opencrabs/rsi/) or `list` (show improvements). `target_file` must be a known brain file. No human approval needed. Changes are logged to `~/.opencrabs/rsi/improvements.md` and archived in `~/.opencrabs/rsi/history/YYYY-MM-DD.md`. Tool executions are auto-recorded to the feedback ledger — you don't need to call `feedback_record` for every tool call.
 > **Sub-agent tools:** Use `spawn_agent` to delegate independent sub-tasks to child agents that run in parallel. Each child gets its own session and essential tools (read, write, edit, bash, glob, grep, ls, web_search) with auto-approve. Use `wait_agent` to collect results, `send_input` for follow-up instructions, `close_agent` to cancel, and `resume_agent` to continue a completed agent with new work. Children cannot spawn their own sub-agents (no recursive spawning).
 > **Note:** `grep` and `glob` use `pattern` (not `query`). `bash` uses `command` (not `cmd`). File tools use `path` (not `file` or `file_path`).
 > **Search tools:** Multiple web search tools are available. Defaults work out of the box; optional tools appear when the user configures API keys:

@@ -3,6 +3,7 @@
 //! Reads workspace markdown files and assembles the system brain dynamically
 //! each turn, so edits to brain files take effect immediately.
 
+use crate::db::repository::feedback_ledger::FeedbackLedgerRepository;
 use std::path::PathBuf;
 
 /// Core brain files — always injected (personality + user context).
@@ -92,7 +93,20 @@ Mandatory steps for plan creation:
 
 NEVER generate text plans. ALWAYS use the plan tool for planning requests.
 
-ALWAYS explore first before answering questions about a codebase. Don't guess - use the tools!"#;
+ALWAYS explore first before answering questions about a codebase. Don't guess - use the tools!
+
+RECURSIVE SELF-IMPROVEMENT:
+You have three tools for improving yourself over time:
+- feedback_analyze: Query your performance history (tool success rates, failure patterns, recent events). Call with query='summary' or query='tool_stats' or query='failures'.
+- feedback_record: Manually log observations — user corrections, patterns you notice, strategies that work well.
+- self_improve: Propose or apply changes to your brain files (SOUL.md, TOOLS.md, etc.). Runs autonomously — no human approval needed. Changes are logged to ~/.opencrabs/rsi/improvements.md and archived in ~/.opencrabs/rsi/history/.
+
+Your tool executions are automatically tracked. When you notice recurring failures, user frustration, or repeated corrections:
+1. Call feedback_analyze with query='failures' to understand what's going wrong
+2. Call feedback_record to log the pattern you observed
+3. Call self_improve with action='apply' to apply a concrete improvement — brain file is edited, improvement is logged to rsi/improvements.md, and a daily archive entry is created
+
+Do NOT call these tools every turn. Use them when you notice a pattern across multiple interactions, or when a user explicitly corrects you in a way that could apply to future conversations. Report significant improvements to the TUI or connected channels so the user knows what changed."#;
 
 /// Loads brain workspace files and assembles the system brain.
 pub struct BrainLoader {
@@ -299,6 +313,71 @@ impl BrainLoader {
     }
 }
 
+/// Build a compact performance digest from the feedback ledger.
+///
+/// Returns `None` if there's no data (new user) or if the DB query fails.
+/// The digest is short — under 500 chars — to avoid bloating the system prompt.
+pub async fn build_feedback_digest(pool: crate::db::Pool) -> Option<String> {
+    let repo = FeedbackLedgerRepository::new(pool);
+    let total = repo.total_count().await.ok()?;
+    if total < 10 {
+        return None; // Not enough data to be useful
+    }
+
+    let mut out = String::from("--- Performance History ---\n");
+    out.push_str(&format!("Total tool executions recorded: {total}\n"));
+
+    // Tool stats — show tools with >10% failure rate
+    if let Ok(stats) = repo.stats_by_dimension("tool_").await {
+        let mut header_written = false;
+        for s in stats
+            .iter()
+            .filter(|s| s.failures > 0 && s.success_rate < 0.9)
+            .take(5)
+        {
+            if !header_written {
+                out.push_str("Tools with notable failure rates:\n");
+                header_written = true;
+            }
+            out.push_str(&format!(
+                "  {} — {:.0}% success ({} ok, {} fail)\n",
+                s.dimension,
+                s.success_rate * 100.0,
+                s.successes,
+                s.failures
+            ));
+        }
+    }
+
+    // Recent failures
+    if let Ok(entries) = repo.by_event_type("tool_failure", 5).await
+        && !entries.is_empty()
+    {
+        out.push_str("Recent failures:\n");
+        for e in &entries {
+            let meta = e.metadata.as_deref().unwrap_or("(no details)");
+            let short: String = meta.chars().take(80).collect();
+            out.push_str(&format!("  {} — {}\n", e.dimension, short));
+        }
+    }
+
+    // User corrections count
+    if let Ok(corrections) = repo.by_event_type("user_correction", 50).await
+        && !corrections.is_empty()
+    {
+        out.push_str(&format!(
+            "User corrections recorded: {}\n",
+            corrections.len()
+        ));
+    }
+
+    out.push_str(
+        "Use feedback_analyze for deeper analysis. \
+         If you see patterns, use self_improve to apply fixes autonomously.\n\n",
+    );
+    Some(out)
+}
+
 /// Runtime information injected into the system brain.
 #[derive(Debug, Clone, Default)]
 pub struct RuntimeInfo {
@@ -365,6 +444,7 @@ mod tests {
         let prompt = loader.build_system_brain(None, None);
 
         // Should NOT contain SOUL.md section header for empty content
-        assert!(!prompt.contains("SOUL.md"));
+        // (the filename may appear in BRAIN_PREAMBLE tool docs, so check for the section format)
+        assert!(!prompt.contains("--- SOUL.md ("));
     }
 }

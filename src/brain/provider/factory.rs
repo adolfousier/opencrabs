@@ -17,10 +17,7 @@ use std::sync::Arc;
 
 /// Try a single provider by name. Qwen is async (OAuth refresh),
 /// everything else is sync but wrapped in the same async signature.
-async fn try_create_by_name(
-    config: &Config,
-    name: &str,
-) -> Result<Option<Arc<dyn Provider>>> {
+async fn try_create_by_name(config: &Config, name: &str) -> Result<Option<Arc<dyn Provider>>> {
     match name {
         "Claude CLI" => try_create_claude_cli(config),
         "OpenCode CLI" => try_create_opencode_cli(config),
@@ -57,15 +54,35 @@ const PROVIDER_NAMES: &[&str] = &[
 /// Whether a provider is enabled in config, by index matching PROVIDER_NAMES.
 fn provider_enabled(config: &Config, idx: usize) -> bool {
     match idx {
-        0 => config.providers.claude_cli.as_ref().is_some_and(|p| p.enabled),
-        1 => config.providers.opencode_cli.as_ref().is_some_and(|p| p.enabled),
-        2 => config.providers.qwen_code_cli.as_ref().is_some_and(|p| p.enabled),
+        0 => config
+            .providers
+            .claude_cli
+            .as_ref()
+            .is_some_and(|p| p.enabled),
+        1 => config
+            .providers
+            .opencode_cli
+            .as_ref()
+            .is_some_and(|p| p.enabled),
+        2 => config
+            .providers
+            .qwen_code_cli
+            .as_ref()
+            .is_some_and(|p| p.enabled),
         3 => config.providers.qwen.as_ref().is_some_and(|p| p.enabled),
-        4 => config.providers.anthropic.as_ref().is_some_and(|p| p.enabled),
+        4 => config
+            .providers
+            .anthropic
+            .as_ref()
+            .is_some_and(|p| p.enabled),
         5 => config.providers.openai.as_ref().is_some_and(|p| p.enabled),
         6 => config.providers.github.as_ref().is_some_and(|p| p.enabled),
         7 => config.providers.gemini.as_ref().is_some_and(|p| p.enabled),
-        8 => config.providers.openrouter.as_ref().is_some_and(|p| p.enabled),
+        8 => config
+            .providers
+            .openrouter
+            .as_ref()
+            .is_some_and(|p| p.enabled),
         9 => config.providers.minimax.as_ref().is_some_and(|p| p.enabled),
         10 => config.providers.zhipu.as_ref().is_some_and(|p| p.enabled),
         11 => config.providers.active_custom().is_some(),

@@ -189,7 +189,8 @@ impl EventHandler for Handler {
                             crate::brain::provider::factory::create_provider_by_name(
                                 &config,
                                 provider_name,
-                            ).await
+                            )
+                            .await
                     {
                         self.agent.swap_provider(new_provider);
                     }
@@ -322,7 +323,9 @@ impl EventHandler for Handler {
                         Ok(config) => {
                             match crate::brain::provider::factory::create_provider_by_name(
                                 &config, pname,
-                            ).await {
+                            )
+                            .await
+                            {
                                 Ok(new_provider) => self.agent.swap_provider(new_provider),
                                 Err(e) => {
                                     provider_err = Some(format!(

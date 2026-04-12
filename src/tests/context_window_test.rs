@@ -209,7 +209,9 @@ async fn multiple_customs_each_get_own_context_window() {
     assert_eq!(provider.context_window("llama-70b"), Some(128_000));
 
     // ollama via by_name
-    let ollama = create_provider_by_name(&config, "custom:ollama").await.unwrap();
+    let ollama = create_provider_by_name(&config, "custom:ollama")
+        .await
+        .unwrap();
     assert_eq!(ollama.context_window("phi3"), Some(4_096));
 }
 

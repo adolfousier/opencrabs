@@ -7,7 +7,7 @@ mod builder;
 mod context;
 mod helpers;
 mod messaging;
-mod tool_loop;
+pub(crate) mod tool_loop;
 mod types;
 
 #[cfg(test)]
