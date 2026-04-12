@@ -158,6 +158,14 @@ async fn run_loop(
             }
         }
 
+        // On terminal resize, clear both ratatui buffers so the next draw
+        // paints a clean frame instead of diffing against stale dimensions.
+        // This eliminates the visible flash/blink during resize.
+        if app.needs_clear {
+            app.needs_clear = false;
+            let _ = terminal.clear();
+        }
+
         // Render — wrap in catch_unwind so a render-time panic (e.g. a
         // ratatui buffer OOB from some edge-case layout) is caught, logged,
         // and the loop continues instead of crashing the whole TUI.
