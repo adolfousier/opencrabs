@@ -78,7 +78,15 @@ impl Tool for SelfImproveTool {
     async fn execute(&self, input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
         let action = input.get("action").and_then(|v| v.as_str()).unwrap_or("");
 
-        let home = crate::config::opencrabs_home();
+        // Use working_directory from context (tests set this to temp dirs).
+        // Fall back to real opencrabs_home() for production.
+        let home = if !context.working_directory.as_os_str().is_empty()
+            && context.working_directory != std::path::Path::new(".")
+        {
+            context.working_directory.clone()
+        } else {
+            crate::config::opencrabs_home()
+        };
 
         match action {
             "list" => {

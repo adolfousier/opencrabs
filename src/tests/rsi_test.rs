@@ -679,11 +679,18 @@ mod self_improve_tool {
     }
 
     #[tokio::test]
-    async fn propose_missing_description() {
+    async fn apply_missing_description() {
         let ctx = setup_ctx_no_db();
         let tool = SelfImproveTool;
         let result = tool
-            .execute(json!({"action": "propose"}), &ctx)
+            .execute(
+                json!({
+                    "action": "apply",
+                    "target_file": "SOUL.md",
+                    "content": "test"
+                }),
+                &ctx,
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -691,28 +698,33 @@ mod self_improve_tool {
     }
 
     #[tokio::test]
-    async fn propose_writes_to_improvements() {
+    async fn apply_writes_to_rsi_improvements() {
         let (_db, ctx) = setup_ctx_with_db().await;
         let tool = SelfImproveTool;
         let result = tool
             .execute(
                 json!({
-                    "action": "propose",
+                    "action": "apply",
+                    "target_file": "AGENTS.md",
                     "description": "Add retry logic to bash tool",
-                    "rationale": "Frequent transient failures observed"
+                    "rationale": "Frequent transient failures observed",
+                    "content": "## Bash Retry\nAdd exponential backoff."
                 }),
                 &ctx,
             )
             .await
             .unwrap();
         assert!(result.success);
-        assert!(result.output.contains("proposed"));
+        assert!(result.output.contains("applied"));
         assert!(result.output.contains("Add retry logic"));
 
-        // Verify IMPROVEMENTS.md was written
-        let home = crate::config::opencrabs_home();
-        let improvements = std::fs::read_to_string(home.join("IMPROVEMENTS.md")).unwrap();
-        assert!(improvements.contains("[Proposed]"));
+        // Verify rsi/improvements.md was written to the temp working directory
+        let improvements = std::fs::read_to_string(
+            ctx.working_directory
+                .join("rsi")
+                .join("improvements.md"),
+        )
+        .unwrap();
         assert!(improvements.contains("Add retry logic"));
         assert!(improvements.contains("Frequent transient failures"));
     }
@@ -828,14 +840,13 @@ mod self_improve_tool {
         assert!(result.output.contains("applied"));
         assert!(result.output.contains("SOUL.md"));
 
-        // Verify content was appended to SOUL.md
-        let home = crate::config::opencrabs_home();
-        let soul = std::fs::read_to_string(home.join("SOUL.md")).unwrap();
+        // Verify content was appended to SOUL.md in temp working directory
+        let soul = std::fs::read_to_string(ctx.working_directory.join("SOUL.md")).unwrap();
         assert!(soul.contains("Conciseness"));
 
-        // Verify IMPROVEMENTS.md logged the change
-        let improvements = std::fs::read_to_string(home.join("IMPROVEMENTS.md")).unwrap();
-        assert!(improvements.contains("[Applied]"));
+        // Verify rsi/improvements.md logged the change in temp working directory
+        let improvements =
+            std::fs::read_to_string(ctx.working_directory.join("rsi").join("improvements.md")).unwrap();
         assert!(improvements.contains("SOUL.md"));
     }
 
@@ -892,23 +903,25 @@ mod self_improve_tool {
     }
 
     #[tokio::test]
-    async fn propose_without_rationale() {
+    async fn apply_without_rationale() {
         let (_db, ctx) = setup_ctx_with_db().await;
         let tool = SelfImproveTool;
         let result = tool
             .execute(
                 json!({
-                    "action": "propose",
-                    "description": "Improve error messages"
+                    "action": "apply",
+                    "target_file": "AGENTS.md",
+                    "description": "Improve error messages",
+                    "content": "## Better Errors\nReturn actionable hints."
                 }),
                 &ctx,
             )
             .await
             .unwrap();
         assert!(result.success);
-        // Should still work, rationale defaults to "(none)"
-        let home = crate::config::opencrabs_home();
-        let improvements = std::fs::read_to_string(home.join("IMPROVEMENTS.md")).unwrap();
+        // Rationale defaults to "(none)"
+        let improvements =
+            std::fs::read_to_string(ctx.working_directory.join("rsi").join("improvements.md")).unwrap();
         assert!(improvements.contains("(none)"));
     }
 }

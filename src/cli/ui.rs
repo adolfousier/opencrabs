@@ -278,6 +278,10 @@ async fn cmd_chat_inner(
     // Create service context
     let service_context = ServiceContext::new(db.pool().clone());
 
+    // Spawn RSI background engine (digest + periodic analysis)
+    let (rsi_tx, mut rsi_rx) = tokio::sync::mpsc::unbounded_channel();
+    crate::brain::rsi::spawn_rsi_engine(db.pool().clone(), config, rsi_tx);
+
     // Get working directory
     let working_directory = std::env::current_dir().unwrap_or_default();
 
@@ -341,6 +345,34 @@ async fn cmd_chat_inner(
 
     // Get event sender from app
     let event_sender = app.event_sender();
+
+    // Forward RSI notifications to TUI as system messages
+    {
+        let rsi_event_sender = event_sender.clone();
+        tokio::spawn(async move {
+            use crate::tui::events::TuiEvent;
+            while let Some(notification) = rsi_rx.recv().await {
+                let msg = match notification {
+                    crate::brain::rsi::RsiNotification::DigestWritten { total_events } => {
+                        format!("RSI: digest written ({total_events} events)")
+                    }
+                    crate::brain::rsi::RsiNotification::CycleStarted => {
+                        "RSI: analyzing feedback patterns...".to_string()
+                    }
+                    crate::brain::rsi::RsiNotification::ImprovementOpportunity { description } => {
+                        format!("RSI: {description}")
+                    }
+                    crate::brain::rsi::RsiNotification::AgentCycleComplete { summary } => {
+                        format!("RSI: agent cycle complete — {summary}")
+                    }
+                    crate::brain::rsi::RsiNotification::AgentCycleFailed { error } => {
+                        format!("RSI: agent cycle failed — {error}")
+                    }
+                };
+                let _ = rsi_event_sender.send(TuiEvent::SystemMessage(msg));
+            }
+        });
+    }
 
     // Create approval callback that sends requests to TUI
     let approval_callback: crate::brain::agent::ApprovalCallback = Arc::new(move |tool_info| {

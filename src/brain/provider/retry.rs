@@ -75,23 +75,18 @@ impl RetryConfig {
         }
     }
 
-    /// Mirrors qwen-cli's OpenAI SDK retry behaviour for the DashScope OAuth
-    /// transport: 3 retries, 500ms initial, 8s cap, 2× backoff with 25%
-    /// jitter, and 429s are retried in-place (Retry-After honored) instead
-    /// of bailing to fallback. Qwen's shared-key upstream briefly closes its
-    /// window after 2–3 tool calls then reopens within seconds; retrying in
-    /// place matches the CLI and keeps the session on the healthy route.
-    ///
-    /// These values are taken directly from the OpenAI Node SDK used by
-    /// qwen-code-cli v0.14: initialRetryDelay=0.5s, maxRetryDelay=8s,
-    /// maxRetries=3, jitter=0.25.
+    /// Qwen OAuth free-tier retry: the upstream rate limit window closes
+    /// after 2–3 tool calls and reopens after ~20-30s. Retry in-place with
+    /// a 3s initial delay so we don't burn quota while the window is closed.
+    /// Backoff 3s → 6s → 12s → 24s matches the observed recovery curve
+    /// from production logs (first success after ~23s).
     pub fn qwen_cli_match() -> Self {
         Self {
-            max_attempts: 3,
-            initial_delay: Duration::from_millis(500),
-            max_delay: Duration::from_secs(8),
+            max_attempts: 4,
+            initial_delay: Duration::from_secs(3),
+            max_delay: Duration::from_secs(30),
             backoff_multiplier: 2.0,
-            jitter: 0.25,
+            jitter: 0.2,
             retry_on_rate_limit: true,
         }
     }

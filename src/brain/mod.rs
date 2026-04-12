@@ -7,6 +7,7 @@ pub mod agent;
 pub mod commands;
 pub mod prompt_builder;
 pub mod provider;
+pub mod rsi;
 pub mod self_update;
 pub mod tokenizer;
 pub mod tools;

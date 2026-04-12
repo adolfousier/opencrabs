@@ -476,6 +476,17 @@ pub struct AgentConfig {
     /// When false, the user is shown an update prompt dialog instead.
     #[serde(default = "default_auto_update")]
     pub auto_update: bool,
+
+    /// Override provider for autonomous RSI self-improvement cycles (e.g. "zhipu", "minimax").
+    /// RSI runs on its own provider chain so it never competes with chat or sub-agents for quota.
+    /// When set, RSI jobs use this provider instead of the session's active one.
+    #[serde(default)]
+    pub self_improvement_provider: Option<String>,
+
+    /// Override model for RSI self-improvement cycles. Only used when self_improvement_provider is set.
+    /// Prefer cheap, fast models for autonomous analysis — results are deterministic.
+    #[serde(default)]
+    pub self_improvement_model: Option<String>,
 }
 
 fn default_approval_policy() -> String {
@@ -508,6 +519,8 @@ impl Default for AgentConfig {
             subagent_provider: None,
             subagent_model: None,
             auto_update: default_auto_update(),
+            self_improvement_provider: None,
+            self_improvement_model: None,
         }
     }
 }

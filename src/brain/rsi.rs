@@ -1,0 +1,413 @@
+//! RSI (Recursive Self-Improvement) background engine.
+//!
+//! Runs as a background task after startup:
+//! 1. Writes a digest of feedback_ledger stats to `~/.opencrabs/rsi/digest.md`
+//! 2. Periodically analyzes feedback and applies improvements autonomously
+//! 3. Emits TUI notifications when improvements are applied
+//!
+//! Uses the provider/model configured in `[agent].self_improvement_provider`
+//! and `[agent].self_improvement_model`, falling back to the active provider.
+
+use crate::config::Config;
+use crate::db::repository::FeedbackLedgerRepository;
+use std::io::Write;
+use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::sync::mpsc;
+
+/// Interval between RSI cycles (analyze + improve).
+const RSI_CYCLE_INTERVAL_SECS: u64 = 3600; // 1 hour
+
+/// Minimum feedback entries before RSI attempts improvements.
+const RSI_MIN_ENTRIES: i64 = 50;
+
+/// Max tool iterations for the RSI agent (keep it focused).
+const RSI_MAX_TOOL_ITERATIONS: usize = 10;
+
+/// Ensure `~/.opencrabs/rsi/` and `~/.opencrabs/rsi/history/` exist.
+fn ensure_rsi_dirs() -> std::io::Result<PathBuf> {
+    let home = crate::config::opencrabs_home();
+    let rsi_dir = home.join("rsi");
+    let history_dir = rsi_dir.join("history");
+    std::fs::create_dir_all(&history_dir)?;
+    Ok(rsi_dir)
+}
+
+/// Write the startup digest to `~/.opencrabs/rsi/digest.md`.
+/// Called once at boot after DB is ready.
+pub async fn write_startup_digest(pool: crate::db::Pool) {
+    let repo = FeedbackLedgerRepository::new(pool);
+    let total = match repo.total_count().await {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::warn!("RSI digest: failed to query feedback_ledger: {e}");
+            return;
+        }
+    };
+
+    if total == 0 {
+        tracing::debug!("RSI digest: no feedback data yet, skipping");
+        return;
+    }
+
+    let rsi_dir = match ensure_rsi_dirs() {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::warn!("RSI digest: failed to create rsi dir: {e}");
+            return;
+        }
+    };
+
+    let mut out = format!(
+        "# RSI Digest\n\n**Generated:** {}\n**Total events:** {total}\n\n",
+        chrono::Utc::now().format("%Y-%m-%d %H:%M UTC"),
+    );
+
+    // Event type breakdown
+    if let Ok(summary) = repo.summary().await {
+        out.push_str("## Event Breakdown\n\n");
+        for (event_type, count) in &summary {
+            let pct = (*count as f64 / total as f64) * 100.0;
+            out.push_str(&format!("- **{event_type}**: {count} ({pct:.1}%)\n"));
+        }
+        out.push('\n');
+    }
+
+    // Tool stats with failure rates
+    if let Ok(stats) = repo.stats_by_dimension("tool_").await {
+        let failing: Vec<_> = stats.iter().filter(|s| s.failures > 0).collect();
+        if !failing.is_empty() {
+            out.push_str("## Tool Performance\n\n");
+            out.push_str("| Tool | Total | OK | Fail | Rate |\n");
+            out.push_str("|------|------:|---:|-----:|-----:|\n");
+            for s in &failing {
+                out.push_str(&format!(
+                    "| {} | {} | {} | {} | {:.0}% |\n",
+                    s.dimension,
+                    s.total_events,
+                    s.successes,
+                    s.failures,
+                    s.success_rate * 100.0
+                ));
+            }
+            out.push('\n');
+        }
+    }
+
+    // Recent failures
+    if let Ok(entries) = repo.by_event_type("tool_failure", 10).await
+        && !entries.is_empty()
+    {
+        out.push_str("## Recent Failures\n\n");
+        for e in &entries {
+            let meta = e.metadata.as_deref().unwrap_or("(no details)");
+            let short: String = meta.chars().take(120).collect();
+            out.push_str(&format!(
+                "- `{}` — {} — {}\n",
+                e.created_at.format("%Y-%m-%d %H:%M"),
+                e.dimension,
+                short
+            ));
+        }
+        out.push('\n');
+    }
+
+    // User corrections
+    if let Ok(corrections) = repo.by_event_type("user_correction", 10).await
+        && !corrections.is_empty()
+    {
+        out.push_str("## User Corrections\n\n");
+        for c in &corrections {
+            let meta = c.metadata.as_deref().unwrap_or("(no details)");
+            let short: String = meta.chars().take(120).collect();
+            out.push_str(&format!(
+                "- `{}` — {} — {}\n",
+                c.created_at.format("%Y-%m-%d %H:%M"),
+                c.dimension,
+                short
+            ));
+        }
+        out.push('\n');
+    }
+
+    // Applied improvements
+    if let Ok(improvements) = repo.by_event_type("improvement_applied", 10).await
+        && !improvements.is_empty()
+    {
+        out.push_str("## Applied Improvements\n\n");
+        for imp in &improvements {
+            out.push_str(&format!(
+                "- `{}` — {}\n",
+                imp.created_at.format("%Y-%m-%d %H:%M"),
+                imp.dimension
+            ));
+        }
+        out.push('\n');
+    }
+
+    let digest_path = rsi_dir.join("digest.md");
+    match std::fs::File::create(&digest_path) {
+        Ok(mut f) => {
+            if let Err(e) = f.write_all(out.as_bytes()) {
+                tracing::warn!("RSI digest: failed to write: {e}");
+            } else {
+                tracing::info!(
+                    "RSI digest written to {} ({total} events)",
+                    digest_path.display()
+                );
+            }
+        }
+        Err(e) => tracing::warn!("RSI digest: failed to create file: {e}"),
+    }
+}
+
+/// Notification message from the RSI engine to TUI/channels.
+#[derive(Debug, Clone)]
+pub enum RsiNotification {
+    /// RSI cycle started
+    CycleStarted,
+    /// Digest written at startup
+    DigestWritten { total_events: i64 },
+    /// An improvement was identified and needs agent execution
+    ImprovementOpportunity { description: String },
+    /// Autonomous agent completed an improvement cycle
+    AgentCycleComplete { summary: String },
+    /// Autonomous agent failed
+    AgentCycleFailed { error: String },
+}
+
+/// Build a minimal tool registry containing only the 3 RSI tools.
+fn build_rsi_tool_registry() -> Arc<crate::brain::tools::ToolRegistry> {
+    use crate::brain::tools::ToolRegistry;
+    use crate::brain::tools::feedback_analyze::FeedbackAnalyzeTool;
+    use crate::brain::tools::feedback_record::FeedbackRecordTool;
+    use crate::brain::tools::self_improve::SelfImproveTool;
+
+    let registry = ToolRegistry::new();
+    registry.register(Arc::new(FeedbackRecordTool));
+    registry.register(Arc::new(FeedbackAnalyzeTool));
+    registry.register(Arc::new(SelfImproveTool));
+    Arc::new(registry)
+}
+
+/// The system prompt for the RSI agent.
+const RSI_AGENT_PROMPT: &str = "\
+You are the RSI (Recursive Self-Improvement) engine for OpenCrabs. \
+Your job is to analyze system feedback and autonomously apply improvements to brain files.
+
+Instructions:
+1. Call feedback_analyze with query='summary' to see overall system stats.
+2. Call feedback_analyze with query='tool_stats' to identify tools with high failure rates.
+3. Call feedback_analyze with query='failures' to see recent failure details.
+4. For each actionable problem, call self_improve to apply a targeted fix to the relevant brain file \
+   (TOOLS.md for tool guidance, SOUL.md for behavioral patterns, USER.md for user preferences).
+5. Be conservative: only apply improvements when you have clear evidence from the feedback data.
+6. Focus on the highest-impact issues first (highest failure rate, most frequent corrections).
+
+Do NOT apply improvements if the data is insufficient or ambiguous. \
+Quality over quantity — one well-reasoned improvement is better than many speculative ones.";
+
+/// Run a single autonomous RSI agent cycle.
+///
+/// Creates a lightweight AgentService with only RSI tools, sends the improvement
+/// prompt, and returns the agent's summary of what it did.
+async fn run_rsi_agent_cycle(
+    pool: crate::db::Pool,
+    config: &Config,
+    opportunities: &[String],
+) -> anyhow::Result<String> {
+    use crate::brain::agent::AgentService;
+    use crate::services::{ServiceContext, SessionService};
+
+    // Resolve RSI provider: prefer self_improvement_provider, fall back to active
+    let provider_name = config
+        .agent
+        .self_improvement_provider
+        .as_deref()
+        .unwrap_or_else(|| {
+            // Fall back to the first enabled provider
+            if config
+                .providers
+                .anthropic
+                .as_ref()
+                .is_some_and(|p| p.enabled)
+            {
+                "anthropic"
+            } else if config.providers.qwen.as_ref().is_some_and(|p| p.enabled) {
+                "qwen"
+            } else if config.providers.openai.as_ref().is_some_and(|p| p.enabled) {
+                "openai"
+            } else if config.providers.minimax.as_ref().is_some_and(|p| p.enabled) {
+                "minimax"
+            } else {
+                "anthropic" // last resort
+            }
+        });
+
+    let provider =
+        crate::brain::provider::factory::create_provider_by_name(config, provider_name).await?;
+
+    let service_ctx = ServiceContext::new(pool);
+    let tool_registry = build_rsi_tool_registry();
+    let brain_path = crate::config::opencrabs_home();
+
+    let agent = AgentService::new(provider, service_ctx.clone(), config)
+        .await
+        .with_tool_registry(tool_registry)
+        .with_auto_approve_tools(true)
+        .with_max_tool_iterations(RSI_MAX_TOOL_ITERATIONS)
+        .with_system_brain(RSI_AGENT_PROMPT.to_string())
+        .with_brain_path(brain_path);
+
+    // Create an ephemeral session for this RSI cycle
+    let session_service = SessionService::new(service_ctx);
+    let session = session_service
+        .create_session_with_provider(
+            Some("RSI autonomous cycle".to_string()),
+            Some(provider_name.to_string()),
+            config.agent.self_improvement_model.clone(),
+        )
+        .await?;
+
+    // Build the user prompt with detected opportunities
+    let mut prompt = "Run an autonomous self-improvement cycle.\n\n".to_string();
+    if !opportunities.is_empty() {
+        prompt.push_str("Detected opportunities:\n");
+        for opp in opportunities {
+            prompt.push_str(&format!("- {opp}\n"));
+        }
+        prompt.push('\n');
+    }
+    prompt.push_str(
+        "Analyze the feedback data, identify the highest-impact issues, and apply improvements.",
+    );
+
+    let model = config.agent.self_improvement_model.clone();
+
+    let response = agent
+        .send_message_with_tools(session.id, prompt, model)
+        .await?;
+
+    tracing::info!(
+        "RSI agent cycle complete: {} tokens used, ${:.4} cost",
+        response.usage.input_tokens + response.usage.output_tokens,
+        response.cost
+    );
+
+    Ok(response.content)
+}
+
+/// Spawn the background RSI engine.
+///
+/// - Writes startup digest immediately
+/// - Every `RSI_CYCLE_INTERVAL_SECS`, checks if there are actionable patterns
+/// - When opportunities are found, spawns an autonomous agent to apply improvements
+/// - Emits notifications to TUI via the provided channel
+pub fn spawn_rsi_engine(
+    pool: crate::db::Pool,
+    config: &Config,
+    notification_tx: mpsc::UnboundedSender<RsiNotification>,
+) {
+    let pool_clone = pool.clone();
+    let config_clone = config.clone();
+    tokio::spawn(async move {
+        // Delay to let the app fully start
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+
+        // 1. Write startup digest
+        write_startup_digest(pool_clone.clone()).await;
+        let repo = FeedbackLedgerRepository::new(pool_clone.clone());
+        if let Ok(total) = repo.total_count().await {
+            let _ = notification_tx.send(RsiNotification::DigestWritten {
+                total_events: total,
+            });
+        }
+
+        // 2. Periodic analysis + autonomous improvement cycle
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(RSI_CYCLE_INTERVAL_SECS)).await;
+
+            let total = match repo.total_count().await {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+
+            if total < RSI_MIN_ENTRIES {
+                tracing::debug!(
+                    "RSI cycle: only {total} entries (need {RSI_MIN_ENTRIES}), skipping"
+                );
+                continue;
+            }
+
+            let _ = notification_tx.send(RsiNotification::CycleStarted);
+            tracing::info!("RSI cycle: analyzing {total} feedback entries");
+
+            // Refresh digest file
+            write_startup_digest(repo.pool().clone()).await;
+
+            // Collect actionable opportunities
+            let mut opportunities = Vec::new();
+
+            // Tools with >20% failure rate and >5 executions
+            if let Ok(stats) = repo.stats_by_dimension("tool_").await {
+                for s in stats
+                    .iter()
+                    .filter(|s| s.total_events >= 5 && s.success_rate < 0.8)
+                {
+                    let desc = format!(
+                        "Tool '{}' has {:.0}% failure rate ({} failures out of {}). \
+                         Consider adding error handling guidance to TOOLS.md.",
+                        s.dimension,
+                        (1.0 - s.success_rate) * 100.0,
+                        s.failures,
+                        s.total_events
+                    );
+                    tracing::info!("RSI opportunity: {}", desc);
+                    let _ = notification_tx.send(RsiNotification::ImprovementOpportunity {
+                        description: desc.clone(),
+                    });
+                    opportunities.push(desc);
+                }
+            }
+
+            // Repeated user corrections
+            if let Ok(corrections) = repo.by_event_type("user_correction", 50).await
+                && corrections.len() >= 3
+            {
+                let desc = format!(
+                    "{} user corrections recorded. Review patterns and update brain files.",
+                    corrections.len()
+                );
+                tracing::info!("RSI opportunity: {}", desc);
+                let _ = notification_tx.send(RsiNotification::ImprovementOpportunity {
+                    description: desc.clone(),
+                });
+                opportunities.push(desc);
+            }
+
+            // 3. If opportunities detected, spawn autonomous agent
+            if !opportunities.is_empty() {
+                tracing::info!(
+                    "RSI cycle: {} opportunities found, spawning autonomous agent",
+                    opportunities.len()
+                );
+
+                match run_rsi_agent_cycle(repo.pool().clone(), &config_clone, &opportunities).await
+                {
+                    Ok(summary) => {
+                        let short: String = summary.chars().take(200).collect();
+                        tracing::info!("RSI agent completed: {short}");
+                        let _ = notification_tx
+                            .send(RsiNotification::AgentCycleComplete { summary: short });
+                    }
+                    Err(e) => {
+                        tracing::warn!("RSI agent cycle failed: {e}");
+                        let _ = notification_tx.send(RsiNotification::AgentCycleFailed {
+                            error: e.to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    });
+}

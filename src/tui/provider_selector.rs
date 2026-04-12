@@ -179,7 +179,7 @@ impl ProviderSelectorState {
                     .and_then(|p| p.api_key.as_ref())
                     .is_some_and(|k| !k.is_empty()),
                 "qwen" => {
-                    // Rotation accounts: "configured" if ≥2 have refresh_tokens (recoverable)
+                    // Rotation accounts: "configured" if ≥2 have valid (non-expired) tokens
                     if let Some(accounts) = config.providers.qwen_accounts.as_ref()
                         && accounts.len() >= 2
                     {
@@ -187,11 +187,8 @@ impl ProviderSelectorState {
                             crate::brain::provider::qwen::QwenCredentials::from_account_configs(
                                 accounts,
                             );
-                        let recoverable = creds
-                            .iter()
-                            .filter(|c| c.is_valid() || !c.refresh_token.is_empty())
-                            .count();
-                        recoverable >= 2
+                        let valid = creds.iter().filter(|c| c.is_valid()).count();
+                        valid >= 2
                     } else {
                         // Single OAuth — check api_key exists
                         config
@@ -380,17 +377,14 @@ impl ProviderSelectorState {
         {
             self.qwen_rotation_enabled = true;
             self.qwen_rotation_count = accounts.len();
-            // Check account health: "dead" = no refresh_token (unrecoverable)
-            // "expired" = token expired but refresh_token exists (background will fix)
+            // Count ANY expired token — a non-empty refresh_token doesn't
+            // guarantee it's still valid (Qwen returns HTTP 400 for revoked ones).
             let creds = QwenCredentials::from_account_configs(accounts);
-            let dead = creds
-                .iter()
-                .filter(|c| !c.is_valid() && c.refresh_token.is_empty())
-                .count();
-            if dead == 0 {
+            let expired = creds.iter().filter(|c| !c.is_valid()).count();
+            if expired == 0 {
                 self.qwen_device_flow_status = QwenDeviceFlowStatus::RotationComplete;
             } else {
-                self.qwen_rotation_expired_count = dead;
+                self.qwen_rotation_expired_count = expired;
                 self.qwen_device_flow_status = QwenDeviceFlowStatus::Idle;
             }
             return;
@@ -431,11 +425,8 @@ impl ProviderSelectorState {
             .map(|cfgs| crate::brain::provider::qwen::QwenCredentials::from_account_configs(&cfgs))
             .unwrap_or_default();
 
-        // Keep recoverable accounts (valid or has refresh_token), only re-auth dead ones
-        let valid: Vec<_> = existing
-            .into_iter()
-            .filter(|c| c.is_valid() || !c.refresh_token.is_empty())
-            .collect();
+        // Keep only accounts with valid (non-expired) tokens, re-auth the rest
+        let valid: Vec<_> = existing.into_iter().filter(|c| c.is_valid()).collect();
         let valid_count = valid.len();
 
         if valid_count > 0 && valid_count < self.qwen_rotation_count {
