@@ -299,7 +299,15 @@ async fn cmd_chat_inner(
         .collect();
     let commands_section = CommandLoader::commands_section(&builtin_commands, &user_commands);
 
-    let system_brain = brain_loader.build_core_brain(Some(&runtime_info), Some(&commands_section));
+    let mut system_brain =
+        brain_loader.build_core_brain(Some(&runtime_info), Some(&commands_section));
+
+    // Inject performance history from feedback ledger (zero-setup, auto for all users)
+    if let Some(digest) =
+        crate::brain::prompt_builder::build_feedback_digest(db.pool().clone()).await
+    {
+        system_brain.push_str(&digest);
+    }
 
     // Propagate persisted auto-always approval policy to the agent service so
     // the tool loop bypasses approval entirely. Without this, the TUI silently

@@ -1116,3 +1116,214 @@ mod rsi_integration {
         assert!(result.output.contains("5 entries"));
     }
 }
+
+// --- User Correction Detection Tests ---
+
+mod user_correction_detection {
+    // Test the is_user_correction function from tool_loop
+    use crate::brain::agent::service::tool_loop::is_user_correction;
+
+    #[test]
+    fn detects_simple_no() {
+        assert!(is_user_correction("no, that's wrong"));
+        assert!(is_user_correction("No. Try something else."));
+        assert!(is_user_correction("no! stop doing that"));
+    }
+
+    #[test]
+    fn detects_wrong() {
+        assert!(is_user_correction("that's wrong"));
+        assert!(is_user_correction("Wrong answer"));
+    }
+
+    #[test]
+    fn detects_not_what_i_meant() {
+        assert!(is_user_correction("that's not what I wanted"));
+        assert!(is_user_correction("thats not what i asked for"));
+    }
+
+    #[test]
+    fn detects_try_again() {
+        assert!(is_user_correction("try again please"));
+        assert!(is_user_correction("redo this"));
+    }
+
+    #[test]
+    fn detects_broke_it() {
+        assert!(is_user_correction("you broke everything"));
+        assert!(is_user_correction("broke it again"));
+    }
+
+    #[test]
+    fn detects_not_working() {
+        assert!(is_user_correction("doesn't work"));
+        assert!(is_user_correction("it's not working"));
+        assert!(is_user_correction("didn't work"));
+    }
+
+    #[test]
+    fn detects_fix_commands() {
+        assert!(is_user_correction("fix it"));
+        assert!(is_user_correction("fix this please"));
+    }
+
+    #[test]
+    fn detects_stop_dont() {
+        assert!(is_user_correction("stop doing that"));
+        assert!(is_user_correction("don't do that again"));
+    }
+
+    #[test]
+    fn detects_i_said() {
+        assert!(is_user_correction("i said to use the other approach"));
+        assert!(is_user_correction("i asked for something different"));
+    }
+
+    #[test]
+    fn ignores_normal_messages() {
+        assert!(!is_user_correction("please add a login form"));
+        assert!(!is_user_correction("how does the database work?"));
+        assert!(!is_user_correction("can you explain this function?"));
+        assert!(!is_user_correction("create a new file called test.rs"));
+    }
+
+    #[test]
+    fn ignores_long_messages() {
+        // Messages >500 chars are assumed to be new instructions
+        let long_msg = "x".repeat(501);
+        assert!(!is_user_correction(&long_msg));
+    }
+
+    #[test]
+    fn ignores_very_short() {
+        assert!(!is_user_correction(""));
+        assert!(!is_user_correction("x"));
+    }
+
+    #[test]
+    fn case_insensitive() {
+        assert!(is_user_correction("WRONG"));
+        assert!(is_user_correction("No, That's Not Right"));
+        assert!(is_user_correction("FIX IT"));
+    }
+
+    #[test]
+    fn nope_detection() {
+        assert!(is_user_correction("nope, try something else"));
+    }
+
+    #[test]
+    fn revert_undo() {
+        assert!(is_user_correction("revert those changes"));
+        assert!(is_user_correction("undo what you just did"));
+    }
+}
+
+// --- Feedback Digest Tests ---
+
+mod feedback_digest {
+    use crate::brain::prompt_builder::build_feedback_digest;
+    use crate::db::Database;
+    use crate::db::repository::FeedbackLedgerRepository;
+
+    #[tokio::test]
+    async fn returns_none_for_empty_ledger() {
+        let db = Database::connect_in_memory()
+            .await
+            .expect("in-memory DB");
+        db.run_migrations().await.expect("migrations");
+        let result = build_feedback_digest(db.pool().clone()).await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn returns_none_under_10_events() {
+        let db = Database::connect_in_memory()
+            .await
+            .expect("in-memory DB");
+        db.run_migrations().await.expect("migrations");
+        let repo = FeedbackLedgerRepository::new(db.pool().clone());
+        for i in 0..9 {
+            repo.record("s1", "tool_success", &format!("t{i}"), 1.0, None)
+                .await
+                .unwrap();
+        }
+        let result = build_feedback_digest(db.pool().clone()).await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn returns_digest_with_enough_data() {
+        let db = Database::connect_in_memory()
+            .await
+            .expect("in-memory DB");
+        db.run_migrations().await.expect("migrations");
+        let repo = FeedbackLedgerRepository::new(db.pool().clone());
+        // 8 successes + 4 failures = 12 total (>10 threshold)
+        for _ in 0..8 {
+            repo.record("s1", "tool_success", "bash", 1.0, None)
+                .await
+                .unwrap();
+        }
+        for _ in 0..4 {
+            repo.record("s1", "tool_failure", "edit", 0.0, Some("file locked"))
+                .await
+                .unwrap();
+        }
+
+        let result = build_feedback_digest(db.pool().clone()).await;
+        assert!(result.is_some());
+        let digest = result.unwrap();
+        assert!(digest.contains("Performance History"));
+        assert!(digest.contains("12")); // total count
+        assert!(digest.contains("edit")); // failing tool
+        assert!(digest.contains("file locked")); // failure metadata
+    }
+
+    #[tokio::test]
+    async fn includes_user_corrections() {
+        let db = Database::connect_in_memory()
+            .await
+            .expect("in-memory DB");
+        db.run_migrations().await.expect("migrations");
+        let repo = FeedbackLedgerRepository::new(db.pool().clone());
+        for _ in 0..10 {
+            repo.record("s1", "tool_success", "bash", 1.0, None)
+                .await
+                .unwrap();
+        }
+        repo.record("s1", "user_correction", "user_message", 1.0, Some("no, wrong"))
+            .await
+            .unwrap();
+
+        let result = build_feedback_digest(db.pool().clone()).await;
+        assert!(result.is_some());
+        let digest = result.unwrap();
+        assert!(digest.contains("User corrections recorded: 1"));
+    }
+
+    #[tokio::test]
+    async fn skips_high_success_rate_tools() {
+        let db = Database::connect_in_memory()
+            .await
+            .expect("in-memory DB");
+        db.run_migrations().await.expect("migrations");
+        let repo = FeedbackLedgerRepository::new(db.pool().clone());
+        // 95% success rate — should NOT appear in "notable failures"
+        for _ in 0..19 {
+            repo.record("s1", "tool_success", "bash", 1.0, None)
+                .await
+                .unwrap();
+        }
+        repo.record("s1", "tool_failure", "bash", 0.0, None)
+            .await
+            .unwrap();
+
+        let result = build_feedback_digest(db.pool().clone()).await;
+        assert!(result.is_some());
+        let digest = result.unwrap();
+        // bash has 95% success rate, which is >= 90% threshold, so it should NOT
+        // appear under "notable failure rates"
+        assert!(!digest.contains("notable failure rates"));
+    }
+}

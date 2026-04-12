@@ -10,6 +10,58 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+/// Detect whether a user message is a correction or negative feedback.
+///
+/// Public for testing — used internally by the tool loop.
+///
+/// Looks for patterns like "no", "wrong", "that's not what I meant", "try again",
+/// "you broke", etc. Only checks the first 300 chars and requires the message
+/// to be short-ish (under 500 chars) — long messages are usually new instructions,
+/// not corrections.
+pub fn is_user_correction(msg: &str) -> bool {
+    let len = msg.len();
+    // Long messages are usually new prompts, not corrections
+    if !(2..=500).contains(&len) {
+        return false;
+    }
+    let lower: String = msg.chars().take(300).collect::<String>().to_lowercase();
+    // Strong negative signals — short phrases that clearly indicate correction
+    const PATTERNS: &[&str] = &[
+        "no,",
+        "no.",
+        "no!",
+        "no that",
+        "no not",
+        "nope",
+        "wrong",
+        "that's not",
+        "thats not",
+        "not what i",
+        "try again",
+        "redo",
+        "revert",
+        "undo",
+        "you broke",
+        "broke it",
+        "doesn't work",
+        "doesnt work",
+        "didn't work",
+        "didnt work",
+        "not working",
+        "stop",
+        "don't do",
+        "dont do",
+        "i said",
+        "i asked",
+        "that's wrong",
+        "thats wrong",
+        "not correct",
+        "fix it",
+        "fix this",
+    ];
+    PATTERNS.iter().any(|p| lower.contains(p))
+}
+
 impl AgentService {
     /// Enforce context budget with two-tier enforcement.
     ///
@@ -400,6 +452,20 @@ impl AgentService {
         if let Some(brain) = &self.default_system_brain {
             context.token_count += AgentContext::estimate_tokens(brain);
             context.system_brain = Some(brain.clone());
+        }
+
+        // Detect user corrections / negative feedback and record automatically.
+        // Only fires on real user messages (not system continuations).
+        if !user_message.starts_with("[System:")
+            && !user_message.starts_with("[SYSTEM:")
+            && is_user_correction(&user_message)
+        {
+            self.record_provider_feedback(
+                session_id,
+                "user_correction",
+                "user_message",
+                Some(&user_message.chars().take(200).collect::<String>()),
+            );
         }
 
         // Check for manual /compact before user_message is consumed
