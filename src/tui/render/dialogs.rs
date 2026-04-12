@@ -327,9 +327,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     let dialog_height = content_lines
         .min(max_height)
         .min(area.height.saturating_sub(4));
-    let dialog_width = 64u16
-        .min(area.width * 9 / 10)
-        .max(40u16.min(area.width));
+    let dialog_width = 64u16.min(area.width * 9 / 10).max(40u16.min(area.width));
 
     let v_chunks = Layout::default()
         .direction(Direction::Vertical)
