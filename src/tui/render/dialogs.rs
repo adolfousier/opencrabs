@@ -15,7 +15,7 @@ use ratatui::{
 pub(super) fn render_file_picker(f: &mut Frame, app: &App, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
 
-    // Header
+    // Header: directory path
     lines.push(Line::from(vec![
         Span::styled(
             "📁 File Picker",
@@ -29,22 +29,35 @@ pub(super) fn render_file_picker(f: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(Color::Rgb(215, 100, 20)),
         ),
     ]));
+
+    // Search bar
+    if app.file_picker_search.is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            "  Type to filter...",
+            Style::default().fg(Color::DarkGray),
+        )]));
+    } else {
+        lines.push(Line::from(vec![
+            Span::styled("  🔍 ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                &app.file_picker_search,
+                Style::default().fg(Color::Rgb(215, 100, 20)),
+            ),
+        ]));
+    }
     lines.push(Line::from(""));
 
-    // Calculate visible range
-    let visible_items = (area.height as usize).saturating_sub(6); // Leave space for header and help
-    let start = app.file_picker_scroll_offset;
-    let end = (start + visible_items).min(app.file_picker_files.len());
+    let filtered = &app.file_picker_filtered;
 
-    // Render file list
-    for (idx, path) in app
-        .file_picker_files
-        .iter()
-        .enumerate()
-        .skip(start)
-        .take(end - start)
-    {
-        let is_selected = idx == app.file_picker_selected;
+    // Calculate visible range
+    let visible_items = (area.height as usize).saturating_sub(7);
+    let start = app.file_picker_scroll_offset;
+    let end = (start + visible_items).min(filtered.len());
+
+    // Render filtered file list
+    for (display_idx, &file_idx) in filtered.iter().enumerate().skip(start).take(end - start) {
+        let path = &app.file_picker_files[file_idx];
+        let is_selected = display_idx == app.file_picker_selected;
         let is_dir = path.is_dir();
 
         let icon = if path.ends_with("..") {
@@ -76,16 +89,11 @@ pub(super) fn render_file_picker(f: &mut Frame, app: &App, area: Rect) {
         ]));
     }
 
-    // Add scroll indicator if needed
-    if app.file_picker_files.len() > visible_items {
+    // Scroll indicator
+    if filtered.len() > visible_items {
         lines.push(Line::from(""));
         lines.push(Line::from(vec![Span::styled(
-            format!(
-                "Showing {}-{} of {} files",
-                start + 1,
-                end,
-                app.file_picker_files.len()
-            ),
+            format!("Showing {}-{} of {} files", start + 1, end, filtered.len()),
             Style::default().fg(Color::DarkGray),
         )]));
     }
@@ -319,7 +327,9 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     let dialog_height = content_lines
         .min(max_height)
         .min(area.height.saturating_sub(4));
-    let dialog_width = 64u16.min(area.width.saturating_sub(4));
+    let dialog_width = 64u16
+        .min(area.width * 9 / 10)
+        .max(40u16.min(area.width));
 
     let v_chunks = Layout::default()
         .direction(Direction::Vertical)
