@@ -166,6 +166,58 @@ impl AgentService {
         summary_result
     }
 
+    /// Fire-and-forget recording of a tool execution to the feedback ledger.
+    /// Never blocks, never fails visibly — if the DB is unavailable or the
+    /// write fails we just log and move on.
+    fn record_tool_feedback(
+        &self,
+        session_id: Uuid,
+        tool_name: &str,
+        success: bool,
+        error_snippet: Option<&str>,
+    ) {
+        let pool = self.context.pool();
+        let sid = session_id.to_string();
+        let tname = tool_name.to_string();
+        let meta = error_snippet.map(|s| s.chars().take(500).collect::<String>());
+        tokio::spawn(async move {
+            let repo = crate::db::repository::FeedbackLedgerRepository::new(pool);
+            let event = if success {
+                "tool_success"
+            } else {
+                "tool_failure"
+            };
+            let val = if success { 1.0 } else { 0.0 };
+            if let Err(e) = repo
+                .record(&sid, event, &tname, val, meta.as_deref())
+                .await
+            {
+                tracing::debug!("feedback ledger write failed: {e}");
+            }
+        });
+    }
+
+    /// Fire-and-forget recording of a provider error to the feedback ledger.
+    fn record_provider_feedback(
+        &self,
+        session_id: Uuid,
+        event_type: &str,
+        dimension: &str,
+        metadata: Option<&str>,
+    ) {
+        let pool = self.context.pool();
+        let sid = session_id.to_string();
+        let et = event_type.to_string();
+        let dim = dimension.to_string();
+        let meta = metadata.map(|s| s.chars().take(500).collect::<String>());
+        tokio::spawn(async move {
+            let repo = crate::db::repository::FeedbackLedgerRepository::new(pool);
+            if let Err(e) = repo.record(&sid, &et, &dim, 0.0, meta.as_deref()).await {
+                tracing::debug!("feedback ledger write failed: {e}");
+            }
+        });
+    }
+
     /// Core tool-execution loop — called by all public shims.
     /// `override_approval_callback` and `override_progress_callback` take
     /// precedence over the service-level callbacks (used by Telegram, etc.)
@@ -711,6 +763,12 @@ impl AgentService {
                         ) =>
                 {
                     tracing::warn!("Prompt too long for provider — emergency compaction");
+                    self.record_provider_feedback(
+                        session_id,
+                        "context_compaction",
+                        &model_name,
+                        Some(&format!("tokens={}", context.token_count)),
+                    );
 
                     // Pre-truncate to 85% of max so compact_context() can actually run.
                     // For 200k models: ~170k. For custom providers: scales proportionally.
@@ -905,6 +963,12 @@ impl AgentService {
                     ) =>
                 {
                     tracing::warn!("Rate/account limit hit — checking for fallback provider");
+                    self.record_provider_feedback(
+                        session_id,
+                        "provider_error",
+                        &model_name,
+                        Some("rate_limit_exceeded"),
+                    );
 
                     // Look up fallback BEFORE notifying so the user sees which
                     // provider/model we're switching to, and so it's clear that
@@ -997,6 +1061,12 @@ impl AgentService {
                 {
                     let err_msg = e.to_string();
                     tracing::warn!("Mid-stream error: {} — retrying up to 3 times", err_msg);
+                    self.record_provider_feedback(
+                        session_id,
+                        "provider_error",
+                        &model_name,
+                        Some(&err_msg),
+                    );
 
                     let mut last_err = e;
                     let mut succeeded = None;
@@ -2055,6 +2125,12 @@ impl AgentService {
                             Ok((approved, always_approve)) => {
                                 if !approved {
                                     tracing::warn!("User denied approval for tool '{}'", tool_name);
+                                    self.record_tool_feedback(
+                                        session_id,
+                                        &tool_name,
+                                        false,
+                                        Some("user_denied_approval"),
+                                    );
                                     tool_outputs
                                         .push((false, "User denied permission".to_string()));
                                     tool_results.push(ContentBlock::ToolResult {
@@ -2125,6 +2201,14 @@ impl AgentService {
                                             );
                                         }
 
+                                        // Auto-record to feedback ledger (fire-and-forget)
+                                        self.record_tool_feedback(
+                                            session_id,
+                                            &tool_name,
+                                            success,
+                                            if success { None } else { Some(&content) },
+                                        );
+
                                         let output_summary: String =
                                             content.chars().take(2000).collect();
                                         tool_outputs.push((success, output_summary.clone()));
@@ -2162,6 +2246,12 @@ impl AgentService {
                                             "[TOOL_EXEC] 💥 Tool '{}' error: {}",
                                             tool_name,
                                             err_msg
+                                        );
+                                        self.record_tool_feedback(
+                                            session_id,
+                                            &tool_name,
+                                            false,
+                                            Some(&err_msg),
                                         );
                                         let output_summary: String =
                                             err_msg.chars().take(2000).collect();
@@ -2255,6 +2345,14 @@ impl AgentService {
                             );
                         }
 
+                        // Auto-record to feedback ledger (fire-and-forget)
+                        self.record_tool_feedback(
+                            session_id,
+                            &tool_name,
+                            success,
+                            if success { None } else { Some(&content) },
+                        );
+
                         let output_summary: String = content.chars().take(2000).collect();
                         tool_outputs.push((success, output_summary.clone()));
                         if let Some(ref cb) = progress_callback {
@@ -2287,6 +2385,12 @@ impl AgentService {
                         let err_msg = format!("Tool execution error: {}", e);
                         // GRANULAR LOG: Direct tool execution error
                         tracing::error!("[TOOL_EXEC] 💥 Tool '{}' error: {}", tool_name, err_msg);
+                        self.record_tool_feedback(
+                            session_id,
+                            &tool_name,
+                            false,
+                            Some(&err_msg),
+                        );
                         let output_summary: String = err_msg.chars().take(2000).collect();
                         tool_outputs.push((false, output_summary.clone()));
                         if let Some(ref cb) = progress_callback {
