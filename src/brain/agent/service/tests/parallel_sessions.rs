@@ -112,7 +112,8 @@ async fn test_cancel_one_session_other_continues() {
     registry.register(Arc::new(MockTool));
 
     let svc_a = Arc::new(
-        AgentService::new_for_test(Arc::new(MockProviderWithTools::new()), context.clone()).await
+        AgentService::new_for_test(Arc::new(MockProviderWithTools::new()), context.clone())
+            .await
             .with_tool_registry(Arc::new({
                 let r = ToolRegistry::new();
                 r.register(Arc::new(MockTool));
@@ -122,7 +123,8 @@ async fn test_cancel_one_session_other_continues() {
     );
 
     let svc_b = Arc::new(
-        AgentService::new_for_test(provider, context.clone()).await
+        AgentService::new_for_test(provider, context.clone())
+            .await
             .with_tool_registry(Arc::new(registry))
             .with_auto_approve_tools(true),
     );

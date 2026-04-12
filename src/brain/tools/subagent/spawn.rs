@@ -123,7 +123,8 @@ impl Tool for SpawnAgentTool {
         let child_service = {
             // Use subagent-specific provider if configured, otherwise inherit parent's
             let provider = if let Some(ref provider_name) = config.agent.subagent_provider {
-                match crate::brain::provider::create_provider_by_name(&config, provider_name).await {
+                match crate::brain::provider::create_provider_by_name(&config, provider_name).await
+                {
                     Ok(p) => {
                         tracing::info!("Sub-agent using configured provider '{}'", provider_name);
                         p
@@ -133,22 +134,27 @@ impl Tool for SpawnAgentTool {
                             "Sub-agent provider '{}' failed: {e}, falling back to parent",
                             provider_name
                         );
-                        crate::brain::provider::create_provider(&config).await.map_err(|e| {
-                            ToolError::Execution(format!("Failed to create provider: {}", e))
-                        })?
+                        crate::brain::provider::create_provider(&config)
+                            .await
+                            .map_err(|e| {
+                                ToolError::Execution(format!("Failed to create provider: {}", e))
+                            })?
                     }
                 }
             } else {
-                crate::brain::provider::create_provider(&config).await.map_err(|e| {
-                    ToolError::Execution(format!("Failed to create provider: {}", e))
-                })?
+                crate::brain::provider::create_provider(&config)
+                    .await
+                    .map_err(|e| {
+                        ToolError::Execution(format!("Failed to create provider: {}", e))
+                    })?
             };
 
             // Build filtered tool registry based on agent type
             let child_registry = agent_type.build_registry(&self.parent_registry);
 
             let agent =
-                crate::brain::agent::AgentService::new(provider, service_context.clone(), &config).await
+                crate::brain::agent::AgentService::new(provider, service_context.clone(), &config)
+                    .await
                     .with_tool_registry(Arc::new(child_registry))
                     .with_auto_approve_tools(true) // children auto-approve (parent already approved spawn)
                     .with_working_directory(context.working_directory.clone());

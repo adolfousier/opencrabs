@@ -226,6 +226,15 @@ async fn cmd_chat_inner(
     ));
     tracing::info!("Registered 8 sub-agent + team orchestration tools");
 
+    // Recursive Self-Improvement tools
+    use crate::brain::tools::feedback_analyze::FeedbackAnalyzeTool;
+    use crate::brain::tools::feedback_record::FeedbackRecordTool;
+    use crate::brain::tools::self_improve::SelfImproveTool;
+    tool_registry.register(Arc::new(FeedbackRecordTool));
+    tool_registry.register(Arc::new(FeedbackAnalyzeTool));
+    tool_registry.register(Arc::new(SelfImproveTool));
+    tracing::info!("Registered 3 recursive self-improvement tools");
+
     // Index existing memory files and warm up embedding engine in the background.
     // Delay startup to avoid concurrent FFI access with resumed agent tasks
     // and channel connections — llama-cpp GGML can segfault under contention.
@@ -290,7 +299,15 @@ async fn cmd_chat_inner(
         .collect();
     let commands_section = CommandLoader::commands_section(&builtin_commands, &user_commands);
 
-    let system_brain = brain_loader.build_core_brain(Some(&runtime_info), Some(&commands_section));
+    let mut system_brain =
+        brain_loader.build_core_brain(Some(&runtime_info), Some(&commands_section));
+
+    // Inject performance history from feedback ledger (zero-setup, auto for all users)
+    if let Some(digest) =
+        crate::brain::prompt_builder::build_feedback_digest(db.pool().clone()).await
+    {
+        system_brain.push_str(&digest);
+    }
 
     // Propagate persisted auto-always approval policy to the agent service so
     // the tool loop bypasses approval entirely. Without this, the TUI silently
@@ -302,7 +319,8 @@ async fn cmd_chat_inner(
 
     // Create agent service with dynamic system brain
     let agent_service = Arc::new(
-        AgentService::new(provider.clone(), service_context.clone(), config).await
+        AgentService::new(provider.clone(), service_context.clone(), config)
+            .await
             .with_system_brain(system_brain.clone())
             .with_working_directory(working_directory.clone())
             .with_auto_approve_tools(auto_approve_tools),
@@ -726,7 +744,8 @@ async fn cmd_chat_inner(
     channel_factory.set_session_updated_tx(session_updated_tx.clone());
 
     let agent_service = Arc::new(
-        AgentService::new(provider.clone(), service_context.clone(), config).await
+        AgentService::new(provider.clone(), service_context.clone(), config)
+            .await
             .with_system_brain(system_brain)
             .with_tool_registry(shared_tool_registry.clone())
             .with_approval_callback(Some(approval_callback))
@@ -865,7 +884,9 @@ async fn cmd_chat_inner(
                                             match crate::brain::provider::create_provider_by_name(
                                                 &config,
                                                 saved_provider,
-                                            ).await {
+                                            )
+                                            .await
+                                            {
                                                 Ok(new_provider) => {
                                                     tracing::info!(
                                                         "Resume: swapping provider '{}' -> '{}' for session {}",

@@ -719,7 +719,8 @@ pub(crate) async fn handle_message(
             .as_ref()
             .and_then(|s| s.provider_name.as_deref()),
         session_meta.as_ref().and_then(|s| s.model.as_deref()),
-    ).await;
+    )
+    .await;
 
     // ── Channel commands (/help, /usage, /models) ──────────────────────────
     let mut text = text;

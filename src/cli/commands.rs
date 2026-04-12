@@ -791,6 +791,14 @@ pub(crate) async fn cmd_run(
         ),
     ));
 
+    // Recursive Self-Improvement tools
+    use crate::brain::tools::feedback_analyze::FeedbackAnalyzeTool;
+    use crate::brain::tools::feedback_record::FeedbackRecordTool;
+    use crate::brain::tools::self_improve::SelfImproveTool;
+    tool_registry.register(Arc::new(FeedbackRecordTool));
+    tool_registry.register(Arc::new(FeedbackAnalyzeTool));
+    tool_registry.register(Arc::new(SelfImproveTool));
+
     // Build dynamic system brain from workspace files
     let brain_path = BrainLoader::resolve_path();
     let brain_loader = BrainLoader::new(brain_path.clone());
@@ -804,11 +812,17 @@ pub(crate) async fn cmd_run(
                 .to_string(),
         ),
     };
-    let system_brain = brain_loader.build_system_brain(Some(&runtime_info), None);
+    let mut system_brain = brain_loader.build_system_brain(Some(&runtime_info), None);
+    if let Some(digest) =
+        crate::brain::prompt_builder::build_feedback_digest(db.pool().clone()).await
+    {
+        system_brain.push_str(&digest);
+    }
 
     // Create service context and agent service
     let service_context = ServiceContext::new(db.pool().clone());
-    let agent_service = AgentService::new(provider.clone(), service_context.clone(), config).await
+    let agent_service = AgentService::new(provider.clone(), service_context.clone(), config)
+        .await
         .with_tool_registry(tool_registry.clone())
         .with_system_brain(system_brain);
 
@@ -1128,6 +1142,15 @@ pub(crate) async fn cmd_agent_interactive(
         ),
     ));
 
+    // Recursive Self-Improvement tools
+    tool_registry.register(Arc::new(
+        crate::brain::tools::feedback_record::FeedbackRecordTool,
+    ));
+    tool_registry.register(Arc::new(
+        crate::brain::tools::feedback_analyze::FeedbackAnalyzeTool,
+    ));
+    tool_registry.register(Arc::new(crate::brain::tools::self_improve::SelfImproveTool));
+
     let brain_path = BrainLoader::resolve_path();
     let brain_loader = BrainLoader::new(brain_path);
     let runtime_info = RuntimeInfo {
@@ -1140,10 +1163,16 @@ pub(crate) async fn cmd_agent_interactive(
                 .to_string(),
         ),
     };
-    let system_brain = brain_loader.build_system_brain(Some(&runtime_info), None);
+    let mut system_brain = brain_loader.build_system_brain(Some(&runtime_info), None);
+    if let Some(digest) =
+        crate::brain::prompt_builder::build_feedback_digest(db.pool().clone()).await
+    {
+        system_brain.push_str(&digest);
+    }
 
     let service_context = ServiceContext::new(db.pool().clone());
-    let agent_service = AgentService::new(provider.clone(), service_context.clone(), config).await
+    let agent_service = AgentService::new(provider.clone(), service_context.clone(), config)
+        .await
         .with_tool_registry(tool_registry.clone())
         .with_system_brain(system_brain);
 

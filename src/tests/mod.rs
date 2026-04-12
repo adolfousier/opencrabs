@@ -40,6 +40,7 @@ pub mod stream_loop_test;
 pub mod system_continuation_test;
 //pub mod streaming_test;
 pub mod profile_test;
+pub mod rsi_test;
 pub mod self_healing_test;
 pub mod split_pane_test;
 pub mod subagent_test;

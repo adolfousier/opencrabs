@@ -35,7 +35,8 @@ pub async fn sync_provider_for_session(
         let same_model = session_model.is_none_or(|m| m == agent_model);
 
         if !same_provider || !same_model {
-            match crate::brain::provider::factory::create_provider_by_name(&config, sess_prov).await {
+            match crate::brain::provider::factory::create_provider_by_name(&config, sess_prov).await
+            {
                 Ok(new_provider) => {
                     tracing::info!(
                         "Channel: restored session provider {}/{} (was {}/{})",
@@ -499,19 +500,23 @@ pub async fn models_for_provider(provider_name: &str) -> ModelsResponse {
     };
 
     // Create a temporary provider to fetch its models
-    let provider =
-        match crate::brain::provider::factory::create_provider_by_name(&config, provider_name).await {
-            Ok(p) => p,
-            Err(e) => {
-                return ModelsResponse {
-                    provider_name: provider_name.to_string(),
-                    current_model: String::new(),
-                    models: vec![],
-                    text: format!("Failed to create provider: {}", e),
-                    agent_handled: false,
-                };
-            }
-        };
+    let provider = match crate::brain::provider::factory::create_provider_by_name(
+        &config,
+        provider_name,
+    )
+    .await
+    {
+        Ok(p) => p,
+        Err(e) => {
+            return ModelsResponse {
+                provider_name: provider_name.to_string(),
+                current_model: String::new(),
+                models: vec![],
+                text: format!("Failed to create provider: {}", e),
+                agent_handled: false,
+            };
+        }
+    };
 
     let current_model = provider.default_model().to_string();
 
@@ -608,12 +613,12 @@ pub async fn switch_model(
 
     // Create provider by name (doesn't modify global config enabled flags)
     let new_provider =
-        crate::brain::provider::factory::create_provider_by_name(&config, &provider_name).await.map_err(
-            |e| {
+        crate::brain::provider::factory::create_provider_by_name(&config, &provider_name)
+            .await
+            .map_err(|e| {
                 tracing::warn!("Failed to create provider after model switch: {}", e);
                 format!("Model saved but failed to reload provider: {}", e)
-            },
-        )?;
+            })?;
     let display_name = provider_display_name(&provider_name);
     agent.swap_provider(new_provider);
 

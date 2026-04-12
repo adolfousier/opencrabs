@@ -131,7 +131,8 @@ impl Tool for ResumeAgentTool {
         let child_service = {
             // Use subagent-specific provider if configured, otherwise inherit parent's
             let provider = if let Some(ref provider_name) = config.agent.subagent_provider {
-                match crate::brain::provider::create_provider_by_name(&config, provider_name).await {
+                match crate::brain::provider::create_provider_by_name(&config, provider_name).await
+                {
                     Ok(p) => {
                         tracing::info!(
                             "Resumed sub-agent using configured provider '{}'",
@@ -144,15 +145,19 @@ impl Tool for ResumeAgentTool {
                             "Sub-agent provider '{}' failed: {e}, falling back to parent",
                             provider_name
                         );
-                        crate::brain::provider::create_provider(&config).await.map_err(|e| {
-                            ToolError::Execution(format!("Failed to create provider: {}", e))
-                        })?
+                        crate::brain::provider::create_provider(&config)
+                            .await
+                            .map_err(|e| {
+                                ToolError::Execution(format!("Failed to create provider: {}", e))
+                            })?
                     }
                 }
             } else {
-                crate::brain::provider::create_provider(&config).await.map_err(|e| {
-                    ToolError::Execution(format!("Failed to create provider: {}", e))
-                })?
+                crate::brain::provider::create_provider(&config)
+                    .await
+                    .map_err(|e| {
+                        ToolError::Execution(format!("Failed to create provider: {}", e))
+                    })?
             };
 
             // Resumed agents get General type (full parent tools minus recursive/dangerous)
@@ -160,7 +165,8 @@ impl Tool for ResumeAgentTool {
                 super::agent_type::AgentType::General.build_registry(&self.parent_registry);
 
             Arc::new(
-                crate::brain::agent::AgentService::new(provider, service_context, &config).await
+                crate::brain::agent::AgentService::new(provider, service_context, &config)
+                    .await
                     .with_tool_registry(Arc::new(child_registry))
                     .with_auto_approve_tools(true)
                     .with_working_directory(context.working_directory.clone()),
