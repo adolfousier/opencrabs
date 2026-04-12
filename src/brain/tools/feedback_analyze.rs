@@ -55,10 +55,7 @@ impl Tool for FeedbackAnalyzeTool {
             .get("query")
             .and_then(|v| v.as_str())
             .unwrap_or("summary");
-        let limit = input
-            .get("limit")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(50) as u32;
+        let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as u32;
 
         let Some(ref svc_ctx) = context.service_context else {
             return Ok(ToolResult::error(
@@ -66,17 +63,18 @@ impl Tool for FeedbackAnalyzeTool {
             ));
         };
 
-        let repo =
-            crate::db::repository::FeedbackLedgerRepository::new(svc_ctx.pool().clone());
+        let repo = crate::db::repository::FeedbackLedgerRepository::new(svc_ctx.pool().clone());
 
         match query {
             "summary" => {
-                let total = repo.total_count().await.map_err(|e| {
-                    crate::brain::tools::ToolError::Execution(e.to_string())
-                })?;
-                let breakdown = repo.summary().await.map_err(|e| {
-                    crate::brain::tools::ToolError::Execution(e.to_string())
-                })?;
+                let total = repo
+                    .total_count()
+                    .await
+                    .map_err(|e| crate::brain::tools::ToolError::Execution(e.to_string()))?;
+                let breakdown = repo
+                    .summary()
+                    .await
+                    .map_err(|e| crate::brain::tools::ToolError::Execution(e.to_string()))?;
 
                 if total == 0 {
                     return Ok(ToolResult::success(
@@ -97,9 +95,10 @@ impl Tool for FeedbackAnalyzeTool {
             }
 
             "tool_stats" => {
-                let stats = repo.stats_by_dimension("tool_").await.map_err(|e| {
-                    crate::brain::tools::ToolError::Execution(e.to_string())
-                })?;
+                let stats = repo
+                    .stats_by_dimension("tool_")
+                    .await
+                    .map_err(|e| crate::brain::tools::ToolError::Execution(e.to_string()))?;
 
                 if stats.is_empty() {
                     return Ok(ToolResult::success(
@@ -128,9 +127,10 @@ impl Tool for FeedbackAnalyzeTool {
             }
 
             "recent" => {
-                let entries = repo.recent(limit).await.map_err(|e| {
-                    crate::brain::tools::ToolError::Execution(e.to_string())
-                })?;
+                let entries = repo
+                    .recent(limit)
+                    .await
+                    .map_err(|e| crate::brain::tools::ToolError::Execution(e.to_string()))?;
 
                 if entries.is_empty() {
                     return Ok(ToolResult::success("No recent feedback.".to_string()));
@@ -151,9 +151,10 @@ impl Tool for FeedbackAnalyzeTool {
             }
 
             "failures" => {
-                let entries = repo.by_event_type("tool_failure", limit).await.map_err(|e| {
-                    crate::brain::tools::ToolError::Execution(e.to_string())
-                })?;
+                let entries = repo
+                    .by_event_type("tool_failure", limit)
+                    .await
+                    .map_err(|e| crate::brain::tools::ToolError::Execution(e.to_string()))?;
 
                 if entries.is_empty() {
                     return Ok(ToolResult::success(

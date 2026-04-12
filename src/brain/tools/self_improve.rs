@@ -64,18 +64,12 @@ impl Tool for SelfImproveTool {
 
     fn requires_approval_for_input(&self, input: &Value) -> bool {
         // 'list' is safe, everything else needs approval
-        let action = input
-            .get("action")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let action = input.get("action").and_then(|v| v.as_str()).unwrap_or("");
         action != "list"
     }
 
     async fn execute(&self, input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
-        let action = input
-            .get("action")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let action = input.get("action").and_then(|v| v.as_str()).unwrap_or("");
 
         let home = crate::config::opencrabs_home();
 
@@ -84,8 +78,7 @@ impl Tool for SelfImproveTool {
                 let improvements_path = home.join("IMPROVEMENTS.md");
                 if !improvements_path.exists() {
                     return Ok(ToolResult::success(
-                        "No improvements recorded yet. IMPROVEMENTS.md does not exist."
-                            .to_string(),
+                        "No improvements recorded yet. IMPROVEMENTS.md does not exist.".to_string(),
                     ));
                 }
                 match std::fs::read_to_string(&improvements_path) {
@@ -173,10 +166,7 @@ impl Tool for SelfImproveTool {
                     .get("rationale")
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
-                let content = input
-                    .get("content")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let content = input.get("content").and_then(|v| v.as_str()).unwrap_or("");
 
                 if target_file.is_empty() || content.is_empty() || description.is_empty() {
                     return Ok(ToolResult::error(
@@ -228,7 +218,11 @@ impl Tool for SelfImproveTool {
                     description,
                     chrono::Utc::now().format("%Y-%m-%d %H:%M UTC"),
                     target_file,
-                    if rationale.is_empty() { "(none)" } else { rationale },
+                    if rationale.is_empty() {
+                        "(none)"
+                    } else {
+                        rationale
+                    },
                 );
                 let improvements_path = home.join("IMPROVEMENTS.md");
                 if let Ok(mut f) = std::fs::OpenOptions::new()

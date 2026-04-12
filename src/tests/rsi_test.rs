@@ -10,9 +10,7 @@ mod feedback_ledger_repo {
     use crate::db::repository::FeedbackLedgerRepository;
 
     async fn setup() -> (Database, FeedbackLedgerRepository) {
-        let db = Database::connect_in_memory()
-            .await
-            .expect("in-memory DB");
+        let db = Database::connect_in_memory().await.expect("in-memory DB");
         db.run_migrations().await.expect("migrations");
         let repo = FeedbackLedgerRepository::new(db.pool().clone());
         (db, repo)
@@ -50,11 +48,13 @@ mod feedback_ledger_repo {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].event_type, "tool_failure");
         assert_eq!(entries[0].dimension, "edit");
-        assert!(entries[0]
-            .metadata
-            .as_deref()
-            .unwrap()
-            .contains("file not found"));
+        assert!(
+            entries[0]
+                .metadata
+                .as_deref()
+                .unwrap()
+                .contains("file not found")
+        );
     }
 
     #[tokio::test]
@@ -257,9 +257,7 @@ mod feedback_record_tool {
     use uuid::Uuid;
 
     async fn setup() -> (Database, ToolExecutionContext) {
-        let db = Database::connect_in_memory()
-            .await
-            .expect("in-memory DB");
+        let db = Database::connect_in_memory().await.expect("in-memory DB");
         db.run_migrations().await.expect("migrations");
         let svc = ServiceContext::new(db.pool().clone());
         let mut ctx = ToolExecutionContext::new(Uuid::new_v4());
@@ -423,9 +421,7 @@ mod feedback_analyze_tool {
     use uuid::Uuid;
 
     async fn setup() -> (Database, ToolExecutionContext, FeedbackLedgerRepository) {
-        let db = Database::connect_in_memory()
-            .await
-            .expect("in-memory DB");
+        let db = Database::connect_in_memory().await.expect("in-memory DB");
         db.run_migrations().await.expect("migrations");
         let repo = FeedbackLedgerRepository::new(db.pool().clone());
         let svc = ServiceContext::new(db.pool().clone());
@@ -587,15 +583,9 @@ mod feedback_analyze_tool {
         repo.record("s1", "tool_success", "bash", 1.0, None)
             .await
             .unwrap();
-        repo.record(
-            "s1",
-            "tool_failure",
-            "edit",
-            0.0,
-            Some("permission denied"),
-        )
-        .await
-        .unwrap();
+        repo.record("s1", "tool_failure", "edit", 0.0, Some("permission denied"))
+            .await
+            .unwrap();
 
         let tool = FeedbackAnalyzeTool;
         let result = tool
@@ -612,10 +602,7 @@ mod feedback_analyze_tool {
     async fn unknown_query_type() {
         let (_db, ctx, _repo) = setup().await;
         let tool = FeedbackAnalyzeTool;
-        let result = tool
-            .execute(json!({"query": "bogus"}), &ctx)
-            .await
-            .unwrap();
+        let result = tool.execute(json!({"query": "bogus"}), &ctx).await.unwrap();
         assert!(!result.success);
         assert!(result_text(&result).contains("Unknown query type"));
     }
@@ -658,9 +645,7 @@ mod self_improve_tool {
     }
 
     async fn setup_ctx_with_db() -> (Database, ToolExecutionContext) {
-        let db = Database::connect_in_memory()
-            .await
-            .expect("in-memory DB");
+        let db = Database::connect_in_memory().await.expect("in-memory DB");
         db.run_migrations().await.expect("migrations");
         let svc = ServiceContext::new(db.pool().clone());
         let mut ctx = ToolExecutionContext::new(Uuid::new_v4());
@@ -699,10 +684,7 @@ mod self_improve_tool {
     async fn list_action() {
         let ctx = setup_ctx_no_db();
         let tool = SelfImproveTool;
-        let result = tool
-            .execute(json!({"action": "list"}), &ctx)
-            .await
-            .unwrap();
+        let result = tool.execute(json!({"action": "list"}), &ctx).await.unwrap();
         // list always succeeds — either reads file or reports it doesn't exist
         assert!(result.success);
     }
@@ -954,9 +936,7 @@ mod rsi_integration {
     use uuid::Uuid;
 
     async fn setup() -> (Database, ToolExecutionContext) {
-        let db = Database::connect_in_memory()
-            .await
-            .expect("in-memory DB");
+        let db = Database::connect_in_memory().await.expect("in-memory DB");
         db.run_migrations().await.expect("migrations");
         let svc = ServiceContext::new(db.pool().clone());
         let mut ctx = ToolExecutionContext::new(Uuid::new_v4());
@@ -1228,9 +1208,7 @@ mod feedback_digest {
 
     #[tokio::test]
     async fn returns_none_for_empty_ledger() {
-        let db = Database::connect_in_memory()
-            .await
-            .expect("in-memory DB");
+        let db = Database::connect_in_memory().await.expect("in-memory DB");
         db.run_migrations().await.expect("migrations");
         let result = build_feedback_digest(db.pool().clone()).await;
         assert!(result.is_none());
@@ -1238,9 +1216,7 @@ mod feedback_digest {
 
     #[tokio::test]
     async fn returns_none_under_10_events() {
-        let db = Database::connect_in_memory()
-            .await
-            .expect("in-memory DB");
+        let db = Database::connect_in_memory().await.expect("in-memory DB");
         db.run_migrations().await.expect("migrations");
         let repo = FeedbackLedgerRepository::new(db.pool().clone());
         for i in 0..9 {
@@ -1254,9 +1230,7 @@ mod feedback_digest {
 
     #[tokio::test]
     async fn returns_digest_with_enough_data() {
-        let db = Database::connect_in_memory()
-            .await
-            .expect("in-memory DB");
+        let db = Database::connect_in_memory().await.expect("in-memory DB");
         db.run_migrations().await.expect("migrations");
         let repo = FeedbackLedgerRepository::new(db.pool().clone());
         // 8 successes + 4 failures = 12 total (>10 threshold)
@@ -1282,9 +1256,7 @@ mod feedback_digest {
 
     #[tokio::test]
     async fn includes_user_corrections() {
-        let db = Database::connect_in_memory()
-            .await
-            .expect("in-memory DB");
+        let db = Database::connect_in_memory().await.expect("in-memory DB");
         db.run_migrations().await.expect("migrations");
         let repo = FeedbackLedgerRepository::new(db.pool().clone());
         for _ in 0..10 {
@@ -1292,9 +1264,15 @@ mod feedback_digest {
                 .await
                 .unwrap();
         }
-        repo.record("s1", "user_correction", "user_message", 1.0, Some("no, wrong"))
-            .await
-            .unwrap();
+        repo.record(
+            "s1",
+            "user_correction",
+            "user_message",
+            1.0,
+            Some("no, wrong"),
+        )
+        .await
+        .unwrap();
 
         let result = build_feedback_digest(db.pool().clone()).await;
         assert!(result.is_some());
@@ -1304,9 +1282,7 @@ mod feedback_digest {
 
     #[tokio::test]
     async fn skips_high_success_rate_tools() {
-        let db = Database::connect_in_memory()
-            .await
-            .expect("in-memory DB");
+        let db = Database::connect_in_memory().await.expect("in-memory DB");
         db.run_migrations().await.expect("migrations");
         let repo = FeedbackLedgerRepository::new(db.pool().clone());
         // 95% success rate — should NOT appear in "notable failures"

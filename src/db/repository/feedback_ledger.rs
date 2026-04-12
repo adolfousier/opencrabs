@@ -83,11 +83,7 @@ impl FeedbackLedgerRepository {
     }
 
     /// Get feedback entries filtered by event type
-    pub async fn by_event_type(
-        &self,
-        event_type: &str,
-        limit: u32,
-    ) -> Result<Vec<FeedbackEntry>> {
+    pub async fn by_event_type(&self, event_type: &str, limit: u32) -> Result<Vec<FeedbackEntry>> {
         let et = event_type.to_string();
         let lim = limit as i64;
         self.pool
@@ -109,10 +105,7 @@ impl FeedbackLedgerRepository {
 
     /// Get aggregated stats per dimension for a given event type.
     /// For tool_success/tool_failure, dimension is the tool name.
-    pub async fn stats_by_dimension(
-        &self,
-        event_type_prefix: &str,
-    ) -> Result<Vec<DimensionStats>> {
+    pub async fn stats_by_dimension(&self, event_type_prefix: &str) -> Result<Vec<DimensionStats>> {
         let prefix = format!("{}%", event_type_prefix);
         self.pool
             .get()
@@ -158,11 +151,7 @@ impl FeedbackLedgerRepository {
             .await
             .context("Failed to get connection")?
             .interact(|conn| {
-                conn.query_row(
-                    "SELECT COUNT(*) FROM feedback_ledger",
-                    [],
-                    |row| row.get(0),
-                )
+                conn.query_row("SELECT COUNT(*) FROM feedback_ledger", [], |row| row.get(0))
             })
             .await
             .map_err(interact_err)?
