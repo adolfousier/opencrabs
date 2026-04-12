@@ -791,6 +791,14 @@ pub(crate) async fn cmd_run(
         ),
     ));
 
+    // Recursive Self-Improvement tools
+    use crate::brain::tools::feedback_analyze::FeedbackAnalyzeTool;
+    use crate::brain::tools::feedback_record::FeedbackRecordTool;
+    use crate::brain::tools::self_improve::SelfImproveTool;
+    tool_registry.register(Arc::new(FeedbackRecordTool));
+    tool_registry.register(Arc::new(FeedbackAnalyzeTool));
+    tool_registry.register(Arc::new(SelfImproveTool));
+
     // Build dynamic system brain from workspace files
     let brain_path = BrainLoader::resolve_path();
     let brain_loader = BrainLoader::new(brain_path.clone());
@@ -1127,6 +1135,11 @@ pub(crate) async fn cmd_agent_interactive(
             team_manager.clone(),
         ),
     ));
+
+    // Recursive Self-Improvement tools
+    tool_registry.register(Arc::new(crate::brain::tools::feedback_record::FeedbackRecordTool));
+    tool_registry.register(Arc::new(crate::brain::tools::feedback_analyze::FeedbackAnalyzeTool));
+    tool_registry.register(Arc::new(crate::brain::tools::self_improve::SelfImproveTool));
 
     let brain_path = BrainLoader::resolve_path();
     let brain_loader = BrainLoader::new(brain_path);
