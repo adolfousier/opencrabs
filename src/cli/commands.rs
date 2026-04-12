@@ -1142,8 +1142,12 @@ pub(crate) async fn cmd_agent_interactive(
     ));
 
     // Recursive Self-Improvement tools
-    tool_registry.register(Arc::new(crate::brain::tools::feedback_record::FeedbackRecordTool));
-    tool_registry.register(Arc::new(crate::brain::tools::feedback_analyze::FeedbackAnalyzeTool));
+    tool_registry.register(Arc::new(
+        crate::brain::tools::feedback_record::FeedbackRecordTool,
+    ));
+    tool_registry.register(Arc::new(
+        crate::brain::tools::feedback_analyze::FeedbackAnalyzeTool,
+    ));
     tool_registry.register(Arc::new(crate::brain::tools::self_improve::SelfImproveTool));
 
     let brain_path = BrainLoader::resolve_path();

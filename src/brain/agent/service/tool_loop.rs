@@ -246,10 +246,7 @@ impl AgentService {
                 "tool_failure"
             };
             let val = if success { 1.0 } else { 0.0 };
-            if let Err(e) = repo
-                .record(&sid, event, &tname, val, meta.as_deref())
-                .await
-            {
+            if let Err(e) = repo.record(&sid, event, &tname, val, meta.as_deref()).await {
                 tracing::debug!("feedback ledger write failed: {e}");
             }
         });
@@ -2457,12 +2454,7 @@ impl AgentService {
                         let err_msg = format!("Tool execution error: {}", e);
                         // GRANULAR LOG: Direct tool execution error
                         tracing::error!("[TOOL_EXEC] 💥 Tool '{}' error: {}", tool_name, err_msg);
-                        self.record_tool_feedback(
-                            session_id,
-                            &tool_name,
-                            false,
-                            Some(&err_msg),
-                        );
+                        self.record_tool_feedback(session_id, &tool_name, false, Some(&err_msg));
                         let output_summary: String = err_msg.chars().take(2000).collect();
                         tool_outputs.push((false, output_summary.clone()));
                         if let Some(ref cb) = progress_callback {

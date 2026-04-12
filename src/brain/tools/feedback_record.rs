@@ -69,10 +69,7 @@ impl Tool for FeedbackRecordTool {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        let value = input
-            .get("value")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(1.0);
+        let value = input.get("value").and_then(|v| v.as_f64()).unwrap_or(1.0);
         let metadata = input
             .get("metadata")
             .and_then(|v| v.as_str())
@@ -91,8 +88,7 @@ impl Tool for FeedbackRecordTool {
             ));
         };
 
-        let repo =
-            crate::db::repository::FeedbackLedgerRepository::new(svc_ctx.pool().clone());
+        let repo = crate::db::repository::FeedbackLedgerRepository::new(svc_ctx.pool().clone());
 
         let session_id = context.session_id.to_string();
         match repo
@@ -108,9 +104,7 @@ impl Tool for FeedbackRecordTool {
             Ok(id) => Ok(ToolResult::success(format!(
                 "Recorded feedback #{id}: {event_type}/{dimension} = {value}"
             ))),
-            Err(e) => Ok(ToolResult::error(format!(
-                "Failed to record feedback: {e}"
-            ))),
+            Err(e) => Ok(ToolResult::error(format!("Failed to record feedback: {e}"))),
         }
     }
 }
