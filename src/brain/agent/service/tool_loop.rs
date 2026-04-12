@@ -102,6 +102,12 @@ impl AgentService {
             "Context at {:.0}% (>65%) — triggering LLM compaction",
             usage_pct
         );
+        self.record_provider_feedback(
+            session_id,
+            "context_compaction",
+            model_name,
+            Some(&format!("proactive_65pct tokens={}", context.token_count)),
+        );
 
         // Try LLM compaction first (preserves context via summary)
         let mut summary_result = None;
