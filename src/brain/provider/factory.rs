@@ -4,7 +4,7 @@
 
 use super::qwen::{
     QWEN_DEFAULT_CHAT_URL, QWEN_OAUTH_MODEL, QwenCredentials, QwenTokenManager,
-    qwen_body_transform, qwen_extra_headers,
+    qwen_body_transform, qwen_extra_headers, refresh_credentials,
 };
 use super::{
     Provider, anthropic::AnthropicProvider, claude_cli::ClaudeCliProvider,
@@ -552,6 +552,16 @@ fn build_single_qwen_provider(
 /// Try to create the native **Qwen** provider (OAuth + DashScope OpenAI-compatible).
 ///
 /// If `[[providers.qwen_accounts]]` has ≥ 2 entries, builds a
+/// Attempt a blocking token refresh inside the current tokio runtime.
+/// Used at provider creation time to validate credentials eagerly.
+fn try_blocking_refresh(creds: &QwenCredentials) -> anyhow::Result<QwenCredentials> {
+    // We're called from sync code running on a tokio runtime (rebuild_agent_service
+    // is async). block_in_place lets us .await without deadlocking the current task.
+    tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(refresh_credentials(creds))
+    })
+}
+
 /// `RotatingQwenProvider` that round-robins on rate-limit instead of
 /// immediately falling to the outer fallback chain.
 ///
@@ -571,15 +581,37 @@ fn try_create_qwen(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
                 "Building RotatingQwenProvider with {} accounts",
                 accounts_creds.len()
             );
-            let providers: Vec<Arc<dyn Provider>> = accounts_creds
-                .into_iter()
-                .enumerate()
-                .map(|(i, creds)| {
-                    tracing::info!("  Qwen rotation account {} ready", i);
-                    build_single_qwen_provider(creds, qwen_config)
-                })
-                .collect();
-            return Ok(Some(Arc::new(super::RotatingQwenProvider::new(providers))));
+            // Validate each account's token — refresh expired ones, skip dead ones
+            let mut valid_providers: Vec<Arc<dyn Provider>> = Vec::new();
+            for (i, mut creds) in accounts_creds.into_iter().enumerate() {
+                if !creds.is_valid() {
+                    match try_blocking_refresh(&creds) {
+                        Ok(refreshed) => {
+                            tracing::info!("  Qwen rotation account {} refreshed", i);
+                            creds = refreshed;
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "  Qwen rotation account {} dead (refresh failed: {}) — skipping",
+                                i,
+                                e
+                            );
+                            continue;
+                        }
+                    }
+                }
+                tracing::info!("  Qwen rotation account {} ready", i);
+                valid_providers.push(build_single_qwen_provider(creds, qwen_config));
+            }
+            if valid_providers.len() >= 2 {
+                return Ok(Some(Arc::new(super::RotatingQwenProvider::new(
+                    valid_providers,
+                ))));
+            }
+            tracing::warn!(
+                "Qwen rotation: only {} valid accounts (need ≥2) — falling to single-account path",
+                valid_providers.len()
+            );
         }
     }
 
@@ -609,13 +641,38 @@ fn try_create_qwen(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         }
     }
 
-    let Some(creds) = creds else {
+    let Some(mut creds) = creds else {
         tracing::warn!(
             "Qwen enabled but no OAuth credentials found in keys.toml \
              or ~/.qwen/oauth_creds.json. Run /onboard:provider to authenticate."
         );
         return Ok(None);
     };
+
+    // Validate the token eagerly: if expired, try refreshing now.
+    // If refresh fails the token is dead — skip the provider so the
+    // factory falls back or the user gets prompted to re-authenticate.
+    if !creds.is_valid() {
+        tracing::info!("Qwen access token expired at startup — attempting refresh");
+        match try_blocking_refresh(&creds) {
+            Ok(refreshed) => {
+                tracing::info!("Qwen token refreshed successfully at startup");
+                if let Err(e) = refreshed.persist_to_keys() {
+                    tracing::warn!("Failed to persist refreshed Qwen creds: {}", e);
+                }
+                refreshed.write_back_to_qwen_cli();
+                creds = refreshed;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Qwen token refresh failed — provider unavailable until re-auth: {}. \
+                     Run /onboard:provider to re-authenticate.",
+                    e
+                );
+                return Ok(None);
+            }
+        }
+    }
 
     tracing::info!("Using Qwen native provider (single account)");
     Ok(Some(build_single_qwen_provider(creds, qwen_config)))

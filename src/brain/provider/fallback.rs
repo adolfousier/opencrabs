@@ -117,7 +117,9 @@ impl FallbackProvider {
     /// chain. Beyond transient errors (rate-limit, 5xx, timeout), we also
     /// fall through on model/parameter mismatches — the fallback provider
     /// may support the request after model remapping.
-    /// Hard auth errors (invalid key) surface directly.
+    /// Auth errors (401/403) also trigger fallback — for OAuth providers
+    /// like Qwen, a 401 after refresh failure means the token is dead and
+    /// the provider is unusable until re-authenticated.
     fn should_try_next(err: &ProviderError) -> bool {
         if err.is_retryable() {
             return true;
@@ -129,6 +131,13 @@ impl FallbackProvider {
             // often means the model or parameter isn't valid for this
             // specific provider but a fallback with remapping may work
             ProviderError::ApiError { status: 400, .. } => true,
+            // Auth failure (401/403) — provider is dead (expired OAuth,
+            // revoked key, etc.). Fall to next provider rather than
+            // surfacing a cryptic auth error to the user.
+            ProviderError::ApiError {
+                status: 401 | 403, ..
+            }
+            | ProviderError::InvalidApiKey => true,
             // InvalidRequest covers parsed model/param errors
             ProviderError::InvalidRequest(_) => true,
             _ => false,
