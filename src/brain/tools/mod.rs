@@ -27,6 +27,11 @@ pub mod web_search;
 // Tool implementations - Phase 3: Workflow & Integration
 pub mod a2a_send;
 pub mod analyze_image;
+
+// Tool implementations - Recursive Self-Improvement
+pub mod feedback_analyze;
+pub mod feedback_record;
+pub mod self_improve;
 pub mod channel_search;
 pub mod config_tool;
 pub mod context;

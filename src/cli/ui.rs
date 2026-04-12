@@ -226,6 +226,15 @@ async fn cmd_chat_inner(
     ));
     tracing::info!("Registered 8 sub-agent + team orchestration tools");
 
+    // Recursive Self-Improvement tools
+    use crate::brain::tools::feedback_analyze::FeedbackAnalyzeTool;
+    use crate::brain::tools::feedback_record::FeedbackRecordTool;
+    use crate::brain::tools::self_improve::SelfImproveTool;
+    tool_registry.register(Arc::new(FeedbackRecordTool));
+    tool_registry.register(Arc::new(FeedbackAnalyzeTool));
+    tool_registry.register(Arc::new(SelfImproveTool));
+    tracing::info!("Registered 3 recursive self-improvement tools");
+
     // Index existing memory files and warm up embedding engine in the background.
     // Delay startup to avoid concurrent FFI access with resumed agent tasks
     // and channel connections — llama-cpp GGML can segfault under contention.
