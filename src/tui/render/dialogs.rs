@@ -531,24 +531,41 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
             match &app.ps.qwen_device_flow_status {
                 QwenDeviceFlowStatus::Idle => {
                     let persisted = app.ps.qwen_persisted_account_count();
+                    let expired = app.ps.qwen_rotation_expired_count;
                     if app.ps.qwen_rotation_enabled && persisted >= 2 {
-                        // Accounts exist but count changed — show current + needed
-                        let needed = app.ps.qwen_rotation_count.saturating_sub(persisted);
-                        if needed > 0 {
+                        if expired > 0 {
+                            // Tokens are dead — show red/yellow warning
                             lines.push(Line::from(Span::styled(
                                 format!(
-                                    "  ● {} accounts configured, {} more needed — press Enter",
-                                    persisted, needed
+                                    "  ● {} of {} accounts expired — press Enter to re-authenticate",
+                                    expired, persisted
                                 ),
-                                Style::default().fg(Color::Yellow),
-                            )));
-                        } else {
-                            lines.push(Line::from(Span::styled(
-                                format!("  ● {} Qwen accounts configured for rotation!", persisted),
                                 Style::default()
-                                    .fg(Color::Green)
+                                    .fg(Color::Red)
                                     .add_modifier(Modifier::BOLD),
                             )));
+                        } else {
+                            // Accounts exist but count changed — show current + needed
+                            let needed = app.ps.qwen_rotation_count.saturating_sub(persisted);
+                            if needed > 0 {
+                                lines.push(Line::from(Span::styled(
+                                    format!(
+                                        "  ● {} accounts configured, {} more needed — press Enter",
+                                        persisted, needed
+                                    ),
+                                    Style::default().fg(Color::Yellow),
+                                )));
+                            } else {
+                                lines.push(Line::from(Span::styled(
+                                    format!(
+                                        "  ● {} Qwen accounts configured for rotation!",
+                                        persisted
+                                    ),
+                                    Style::default()
+                                        .fg(Color::Green)
+                                        .add_modifier(Modifier::BOLD),
+                                )));
+                            }
                         }
                     } else {
                         lines.push(Line::from(Span::styled(
