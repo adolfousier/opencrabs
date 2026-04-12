@@ -2139,6 +2139,124 @@ impl Config {
         Ok(())
     }
 
+    /// Remove a dotted section from config.toml.
+    /// e.g. `remove_section("providers.custom.default")` removes `[providers.custom.default]`.
+    pub fn remove_section(section: &str) -> Result<()> {
+        let path =
+            Self::system_config_path().unwrap_or_else(|| opencrabs_home().join("config.toml"));
+        if !path.exists() {
+            return Ok(());
+        }
+
+        let content = fs::read_to_string(&path)?;
+        let mut doc: toml::Value =
+            toml::from_str(&content).unwrap_or(toml::Value::Table(toml::map::Map::new()));
+
+        let parts: Vec<&str> = section.split('.').collect();
+        if parts.is_empty() {
+            return Ok(());
+        }
+
+        // Navigate to the parent table and remove the last key
+        let parent_parts = &parts[..parts.len() - 1];
+        let leaf = parts[parts.len() - 1];
+
+        let mut current = doc.as_table_mut().context("config root is not a table")?;
+        for part in parent_parts {
+            match current.get_mut(*part) {
+                Some(v) if v.is_table() => {
+                    current = v.as_table_mut().unwrap();
+                }
+                _ => return Ok(()), // parent doesn't exist, nothing to remove
+            }
+        }
+
+        current.remove(leaf);
+        tracing::info!("Removed config section [{section}]");
+
+        Self::backup_config(&path, 7);
+        let toml_str = toml::to_string_pretty(&doc)?;
+        fs::write(&path, toml_str)?;
+        Ok(())
+    }
+
+    /// Clean up custom provider entries that have no base_url and no default_model.
+    /// These are ghost entries created when disabling all providers on save.
+    pub fn cleanup_empty_custom_providers() {
+        // Clean config.toml
+        if let Ok(config) = Self::load()
+            && let Some(customs) = &config.providers.custom
+        {
+            for (name, cfg) in customs {
+                let is_empty_name = name.is_empty();
+                let has_url = cfg.base_url.as_ref().is_some_and(|u| !u.is_empty());
+                let has_model = cfg.default_model.as_ref().is_some_and(|m| !m.is_empty());
+                if is_empty_name || (!has_url && !has_model) {
+                    let section = format!("providers.custom.{}", name);
+                    if let Err(e) = Self::remove_section(&section) {
+                        tracing::warn!("Failed to remove empty custom provider '{}': {}", name, e);
+                    }
+                }
+            }
+        }
+
+        // Clean keys.toml — remove empty-key entries and entries with no
+        // matching config (ghost keys left by normalization mismatches).
+        Self::cleanup_keys_custom_providers();
+    }
+
+    /// Remove ghost custom provider entries from keys.toml.
+    fn cleanup_keys_custom_providers() {
+        let keys_file = keys_path();
+        if !keys_file.exists() {
+            return;
+        }
+        let Ok(content) = std::fs::read_to_string(&keys_file) else {
+            return;
+        };
+        let Ok(mut doc) = content.parse::<toml::Value>() else {
+            return;
+        };
+
+        // Navigate to providers.custom table
+        let custom_table = match doc
+            .as_table_mut()
+            .and_then(|t| t.get_mut("providers"))
+            .and_then(|t| t.as_table_mut())
+            .and_then(|t| t.get_mut("custom"))
+            .and_then(|t| t.as_table_mut())
+        {
+            Some(t) => t,
+            None => return,
+        };
+
+        // Collect keys to remove: empty names or entries with no config counterpart
+        let config_names: std::collections::HashSet<String> = Self::load()
+            .ok()
+            .and_then(|c| c.providers.custom.map(|m| m.keys().cloned().collect()))
+            .unwrap_or_default();
+
+        let remove: Vec<String> = custom_table
+            .keys()
+            .filter(|k| k.is_empty() || !config_names.contains(*k))
+            .cloned()
+            .collect();
+
+        if remove.is_empty() {
+            return;
+        }
+
+        for key in &remove {
+            custom_table.remove(key);
+            tracing::info!("Removed ghost key from keys.toml: providers.custom.{}", key);
+        }
+
+        daily_backup(&keys_file, 7);
+        if let Ok(toml_str) = toml::to_string_pretty(&doc) {
+            let _ = std::fs::write(&keys_file, toml_str);
+        }
+    }
+
     /// Write a string array to a dotted config section.
     /// e.g. `write_array("channels.slack", "allowed_users", &["U123"])` →
     /// `[channels.slack] allowed_users = ["U123"]`

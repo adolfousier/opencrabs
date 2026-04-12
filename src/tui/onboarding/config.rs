@@ -462,6 +462,8 @@ impl OnboardingWizard {
             if self.ps.provider_id() == "qwen" {
                 try_write!(write_errors, section, "enable_thinking", "true");
             }
+            // Clean up ghost custom provider entries (empty name/url/model)
+            Config::cleanup_empty_custom_providers();
         } // end if write_provider
 
         // Agent defaults — ensure these are persisted on fresh install

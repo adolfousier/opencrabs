@@ -264,8 +264,8 @@ pub struct App {
     pub mouse_capture_enabled: bool,
     pub selected_session_index: usize,
     pub should_quit: bool,
-    /// Set by Resize handler — runner clears the terminal before next draw
-    pub needs_clear: bool,
+    /// Pending resize dimensions — runner pre-resizes buffers to avoid blink
+    pub pending_resize: Option<(u16, u16)>,
 
     /// Streaming state
     pub is_processing: bool,
@@ -512,7 +512,7 @@ impl App {
             mouse_capture_enabled: true,
             selected_session_index: 0,
             should_quit: false,
-            needs_clear: false,
+            pending_resize: None,
             is_processing: false,
             processing_started_at: None,
             streaming_response: None,
@@ -690,6 +690,9 @@ impl App {
     /// running `initialize_async` (i.e. we're going to Chat and want the
     /// card visible while the session loads).
     pub fn initialize_sync(&mut self) -> bool {
+        // Remove ghost custom provider entries left by previous saves
+        crate::config::Config::cleanup_empty_custom_providers();
+
         let is_first = super::onboarding::is_first_time();
         if self.force_onboard || is_first {
             self.force_onboard = false;
@@ -1223,6 +1226,9 @@ impl App {
                         }
                         // Zhipu: field 2 = API key
                         (2, false, true) => {
+                            if self.ps.has_existing_key_sentinel() {
+                                self.ps.api_key_input.clear();
+                            }
                             self.ps.api_key_input.push_str(&text);
                             let provider_idx = self.ps.selected_provider;
                             let api_key = self.ps.api_key_input.clone();
@@ -1243,6 +1249,10 @@ impl App {
                         }
                         // Non-custom non-zhipu: field 1 = API key
                         (1, false, false) => {
+                            // Clear sentinel so the pasted key replaces it
+                            if self.ps.has_existing_key_sentinel() {
+                                self.ps.api_key_input.clear();
+                            }
                             self.ps.api_key_input.push_str(&text);
                             // Trigger model fetch after pasting key
                             let provider_idx = self.ps.selected_provider;
@@ -1266,6 +1276,9 @@ impl App {
                             self.ps.base_url.push_str(&text);
                         }
                         (2, true, _) => {
+                            if self.ps.has_existing_key_sentinel() {
+                                self.ps.api_key_input.clear();
+                            }
                             self.ps.api_key_input.push_str(&text);
                         }
                         (3, true, _) => {
@@ -2283,13 +2296,12 @@ impl App {
             TuiEvent::FocusGained | TuiEvent::FocusLost => {
                 // Handled by the event loop for tick coalescing
             }
-            TuiEvent::Resize(_, _) => {
+            TuiEvent::Resize(w, h) => {
                 // Invalidate render cache on terminal resize (content width changes)
                 self.render_cache.clear();
-                // Signal the runner to clear the terminal before the next draw
-                // so ratatui doesn't diff against a stale buffer with wrong
-                // dimensions, which causes a visible flash/blink.
-                self.needs_clear = true;
+                // Store new dimensions so the runner can pre-resize ratatui
+                // buffers without clearing the screen (avoids blink).
+                self.pending_resize = Some((w, h));
             }
             TuiEvent::AgentProcessing => {
                 // Handled by the render loop
