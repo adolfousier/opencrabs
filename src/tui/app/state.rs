@@ -264,6 +264,8 @@ pub struct App {
     pub mouse_capture_enabled: bool,
     pub selected_session_index: usize,
     pub should_quit: bool,
+    /// Set by Resize handler — runner clears the terminal before next draw
+    pub needs_clear: bool,
 
     /// Streaming state
     pub is_processing: bool,
@@ -510,6 +512,7 @@ impl App {
             mouse_capture_enabled: true,
             selected_session_index: 0,
             should_quit: false,
+            needs_clear: false,
             is_processing: false,
             processing_started_at: None,
             streaming_response: None,
@@ -2283,6 +2286,10 @@ impl App {
             TuiEvent::Resize(_, _) => {
                 // Invalidate render cache on terminal resize (content width changes)
                 self.render_cache.clear();
+                // Signal the runner to clear the terminal before the next draw
+                // so ratatui doesn't diff against a stale buffer with wrong
+                // dimensions, which causes a visible flash/blink.
+                self.needs_clear = true;
             }
             TuiEvent::AgentProcessing => {
                 // Handled by the render loop
