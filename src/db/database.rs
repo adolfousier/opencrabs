@@ -141,7 +141,7 @@ impl Database {
     }
 
     /// Total number of migrations defined below — keep in sync when adding new ones.
-    const MIGRATION_COUNT: usize = 13;
+    const MIGRATION_COUNT: usize = 14;
 
     /// Run database migrations
     pub async fn run_migrations(&self) -> Result<()> {
@@ -182,6 +182,9 @@ impl Database {
             )),
             M::up(include_str!(
                 "../migrations/20260402000001_add_cron_job_runs.sql"
+            )),
+            M::up(include_str!(
+                "../migrations/20260412000001_add_feedback_ledger.sql"
             )),
         ]);
 
