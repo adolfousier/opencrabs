@@ -106,14 +106,14 @@ impl ExaSearchTool {
     }
 
     /// Execute search via free hosted MCP endpoint.
-    async fn execute_via_mcp(&self, query: &str, num_results: usize) -> Result<ToolResult> {
+    async fn execute_via_mcp(&self, query: &str, num_results: usize, search_type: &str) -> Result<ToolResult> {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
             .map_err(|e| ToolError::Execution(format!("Failed to create HTTP client: {}", e)))?;
 
         // Try with existing session, re-init on 404
-        let result = self.try_mcp_tool_call(&client, query, num_results).await;
+        let result = self.try_mcp_tool_call(&client, query, num_results, search_type).await;
 
         match result {
             Ok(tool_result) => Ok(tool_result),
@@ -121,7 +121,7 @@ impl ExaSearchTool {
                 // Session expired — re-initialize
                 tracing::info!("MCP session expired, re-initializing");
                 *self.mcp_session_id.write().await = None;
-                self.try_mcp_tool_call(&client, query, num_results).await
+                self.try_mcp_tool_call(&client, query, num_results, search_type).await
             }
             Err(e) => Err(e),
         }
@@ -133,6 +133,7 @@ impl ExaSearchTool {
         client: &reqwest::Client,
         query: &str,
         num_results: usize,
+        search_type: &str,
     ) -> Result<ToolResult> {
         let session_id = self.ensure_mcp_session(client).await?;
 
@@ -144,7 +145,8 @@ impl ExaSearchTool {
                 "name": "web_search_exa",
                 "arguments": {
                     "query": query,
-                    "numResults": num_results
+                    "numResults": num_results,
+                    "type": search_type
                 }
             }
         });
@@ -288,6 +290,7 @@ impl ExaSearchTool {
             .post("https://api.exa.ai/search")
             .header("x-api-key", api_key)
             .header("Content-Type", "application/json")
+            .header("x-exa-integration", "opencrabs")
             .json(&body)
             .send()
             .await
@@ -337,7 +340,7 @@ struct ExaSearchInput {
     #[serde(default = "default_max_results")]
     max_results: usize,
 
-    /// Search type: "auto", "neural", or "keyword"
+    /// Search type: "auto", "neural", "fast", "deep-lite", "deep", "deep-reasoning", or "instant"
     #[serde(default = "default_search_type")]
     search_type: String,
 }
@@ -390,8 +393,8 @@ impl Tool for ExaSearchTool {
                 },
                 "search_type": {
                     "type": "string",
-                    "description": "Search type: 'auto', 'neural', or 'keyword' (default: 'auto')",
-                    "enum": ["auto", "neural", "keyword"],
+                    "description": "Search type: 'auto', 'neural', 'fast', 'deep-lite', 'deep', 'deep-reasoning', or 'instant' (default: 'auto')",
+                    "enum": ["auto", "neural", "fast", "deep-lite", "deep", "deep-reasoning", "instant"],
                     "default": "auto"
                 }
             },
@@ -428,7 +431,7 @@ impl Tool for ExaSearchTool {
         let parsed: ExaSearchInput = serde_json::from_value(input)?;
 
         if self.use_mcp() {
-            self.execute_via_mcp(&parsed.query, parsed.max_results)
+            self.execute_via_mcp(&parsed.query, parsed.max_results, &parsed.search_type)
                 .await
         } else {
             self.execute_via_api(&parsed).await
