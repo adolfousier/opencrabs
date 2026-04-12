@@ -119,6 +119,7 @@ https://github.com/user-attachments/assets/7f45c5f8-acdf-48d5-b6a4-0e4811a9ee23
 | **3-Tier Memory** | (1) **Brain MEMORY.md** — user-curated durable memory loaded every turn, (2) **Daily Logs** — auto-compaction summaries at `~/.opencrabs/memory/YYYY-MM-DD.md`, (3) **Hybrid Memory Search** — FTS5 keyword search + local vector embeddings (embeddinggemma-300M, 768-dim) combined via Reciprocal Rank Fusion. Runs entirely local — no API key, no cost, works offline |
 | **Dynamic Brain System** | System brain assembled from workspace MD files (SOUL, IDENTITY, USER, AGENTS, TOOLS, MEMORY) — all editable live between turns |
 | **Multi-Agent Orchestration** | Spawn typed child agents (General, Explore, Plan, Code, Research) for parallel task execution. Five tools: `spawn_agent`, `wait_agent`, `send_input`, `close_agent`, `resume_agent`. Each type gets a role-specific system prompt and filtered tool registry. Configurable subagent provider/model. Children run in isolated sessions with auto-approve — no recursive spawning |
+| **Recursive Self-Improvement** | Automatic feedback ledger tracks every tool execution, user correction, and provider error. Three tools: `feedback_record` (log observations), `feedback_analyze` (query patterns and success rates), `self_improve` (propose/apply brain file changes with human approval). Startup digest injects performance summary into system prompt. User correction detection (~30 patterns) auto-records negative signals. Zero setup — works out of the box via auto-migration |
 
 ### Multimodal Input
 | Feature | Description |
@@ -1614,6 +1615,18 @@ OpenCrabs includes 30+ built-in tools. The AI can use these during conversation:
 | `tool_manage` | Manage runtime tools — list, add, remove, enable, disable, reload (`tools.toml`) |
 | `evolve` | Download latest release binary from GitHub and hot-restart (no Rust toolchain needed). Also runs automatically on startup and every 24h when `[agent] auto_update = true` (default), and via the `/evolve` slash command — both paths invoke the tool directly without the LLM, so they can't be dropped or refused by a provider |
 | `rebuild` | Build from source (`cargo build --release`) and hot-restart |
+
+#### Recursive Self-Improvement (RSI)
+
+Automatic feedback loop that tracks performance and enables the agent to improve its own brain files over time.
+
+| Tool | Description |
+|------|-------------|
+| `feedback_record` | Record an observation to the feedback ledger — tool outcomes, user corrections, patterns, provider errors. Auto-recorded for all tool executions; also callable manually |
+| `feedback_analyze` | Query the feedback ledger for patterns — overall summary, per-tool success rates, recent events, failure breakdown |
+| `self_improve` | Propose or apply improvements to brain files (SOUL.md, AGENTS.md, TOOLS.md, etc.) based on feedback analysis. Always requires human approval. Changes logged to IMPROVEMENTS.md |
+
+> **How it works:** Every tool call automatically records success/failure to an append-only SQLite feedback ledger (fire-and-forget, never blocks). User corrections are detected via pattern matching (~30 negative signal phrases) and recorded automatically. On startup, a performance digest (failure rates, correction count, recent issues) is injected into the system prompt. The agent can then use `feedback_analyze` to drill into patterns and `self_improve` to propose brain file edits — which always require explicit human approval before applying.
 
 #### Browser Automation (feature: `browser`)
 
