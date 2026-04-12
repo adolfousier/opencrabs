@@ -1077,6 +1077,66 @@ impl App {
                                 approval.state =
                                     ApprovalState::Denied("Operation cancelled".to_string());
                             }
+        } else if event.code == KeyCode::Char('a')
+            && event.modifiers == KeyModifiers::CONTROL
+        {
+            // Ctrl+A — beginning of current line (readline)
+            let line_start = self.input_buffer[..self.cursor_position]
+                .rfind('\n')
+                .map(|i| i + 1)
+                .unwrap_or(0);
+            self.cursor_position = line_start;
+        } else if event.code == KeyCode::Char('e')
+            && event.modifiers == KeyModifiers::CONTROL
+        {
+            // Ctrl+E — end of current line (readline)
+            let line_end = self.input_buffer[self.cursor_position..]
+                .find('\n')
+                .map(|i| self.cursor_position + i)
+                .unwrap_or(self.input_buffer.len());
+            self.cursor_position = line_end;
+        } else if event.code == KeyCode::Char('p')
+            && event.modifiers == KeyModifiers::CONTROL
+            && !self.slash_suggestions_active
+        {
+            // Ctrl+P — previous command (history up, readline)
+            if self.input_history_index.is_none() {
+                // Entering history — stash current input
+                if !self.input_buffer.is_empty() {
+                    self.input_history_stash = self.input_buffer.clone();
+                }
+                if !self.input_history.is_empty() {
+                    let idx = self.input_history.len() - 1;
+                    self.input_history_index = Some(idx);
+                    self.input_buffer = self.input_history[idx].clone();
+                    self.cursor_position = self.input_buffer.len();
+                }
+            } else if let Some(idx) = self.input_history_index
+                && idx > 0
+            {
+                let idx = idx - 1;
+                self.input_history_index = Some(idx);
+                self.input_buffer = self.input_history[idx].clone();
+                self.cursor_position = self.input_buffer.len();
+            }
+        } else if event.code == KeyCode::Char('n')
+            && event.modifiers == KeyModifiers::CONTROL
+            && !self.slash_suggestions_active
+        {
+            // Ctrl+N — next command (history down, readline)
+            if let Some(idx) = self.input_history_index {
+                if idx + 1 < self.input_history.len() {
+                    let idx = idx + 1;
+                    self.input_history_index = Some(idx);
+                    self.input_buffer = self.input_history[idx].clone();
+                    self.cursor_position = self.input_buffer.len();
+                } else {
+                    // Past newest — restore stashed input
+                    self.input_history_index = None;
+                    self.input_buffer = std::mem::take(&mut self.input_history_stash);
+                    self.cursor_position = self.input_buffer.len();
+                }
+            }
                         }
                         // Reload session from DB so tool calls appear inline
                         // (matching the persisted order from expand_message) instead
