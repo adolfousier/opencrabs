@@ -812,7 +812,12 @@ pub(crate) async fn cmd_run(
                 .to_string(),
         ),
     };
-    let system_brain = brain_loader.build_system_brain(Some(&runtime_info), None);
+    let mut system_brain = brain_loader.build_system_brain(Some(&runtime_info), None);
+    if let Some(digest) =
+        crate::brain::prompt_builder::build_feedback_digest(db.pool().clone()).await
+    {
+        system_brain.push_str(&digest);
+    }
 
     // Create service context and agent service
     let service_context = ServiceContext::new(db.pool().clone());
@@ -1153,7 +1158,12 @@ pub(crate) async fn cmd_agent_interactive(
                 .to_string(),
         ),
     };
-    let system_brain = brain_loader.build_system_brain(Some(&runtime_info), None);
+    let mut system_brain = brain_loader.build_system_brain(Some(&runtime_info), None);
+    if let Some(digest) =
+        crate::brain::prompt_builder::build_feedback_digest(db.pool().clone()).await
+    {
+        system_brain.push_str(&digest);
+    }
 
     let service_context = ServiceContext::new(db.pool().clone());
     let agent_service = AgentService::new(provider.clone(), service_context.clone(), config)
