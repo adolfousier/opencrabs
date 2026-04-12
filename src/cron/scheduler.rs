@@ -228,11 +228,11 @@ async fn execute_job(
     );
 
     // Spawn agent service (inherits tools, brain, working dir from factory)
-    let agent = factory.create_agent_service();
+    let agent = factory.create_agent_service().await;
 
     // Swap to cron-specific provider if configured
     if let Some(ref provider_name) = effective_provider {
-        match crate::brain::provider::create_provider_by_name(&config, provider_name) {
+        match crate::brain::provider::create_provider_by_name(&config, provider_name).await {
             Ok(provider) => {
                 tracing::info!(
                     "Cron job '{}' — using provider '{}'",

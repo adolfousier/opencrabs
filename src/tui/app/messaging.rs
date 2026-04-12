@@ -193,7 +193,7 @@ impl App {
                     tracing::info!("Restoring cached provider '{}' for session", saved_provider);
                     self.agent_service.swap_provider(cached);
                 } else if let Ok(config) = crate::config::Config::load() {
-                    match crate::brain::provider::create_provider_by_name(&config, saved_provider) {
+                    match crate::brain::provider::create_provider_by_name(&config, saved_provider).await {
                         Ok(new_provider) => {
                             tracing::info!("Created provider '{}' for session", saved_provider);
                             self.provider_cache

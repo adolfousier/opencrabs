@@ -46,7 +46,7 @@ async fn test_send_message_with_tool_execution() {
     let registry = ToolRegistry::new();
     registry.register(Arc::new(MockTool));
 
-    let agent_service = AgentService::new_for_test(provider, context.clone())
+    let agent_service = AgentService::new_for_test(provider, context.clone()).await
         .with_tool_registry(Arc::new(registry))
         .with_auto_approve_tools(true);
 
@@ -89,7 +89,7 @@ async fn test_message_queue_injection_between_tool_calls() {
         Box::pin(async move { q.lock().await.take() })
     });
 
-    let agent_service = AgentService::new_for_test(provider, context.clone())
+    let agent_service = AgentService::new_for_test(provider, context.clone()).await
         .with_tool_registry(Arc::new(registry))
         .with_auto_approve_tools(true)
         .with_message_queue_callback(Some(message_queue_callback));
@@ -152,7 +152,7 @@ async fn test_message_queue_empty_no_injection() {
         Box::pin(async move { q.lock().await.take() })
     });
 
-    let agent_service = AgentService::new_for_test(provider, context.clone())
+    let agent_service = AgentService::new_for_test(provider, context.clone()).await
         .with_tool_registry(Arc::new(registry))
         .with_auto_approve_tools(true)
         .with_message_queue_callback(Some(message_queue_callback));
@@ -217,7 +217,7 @@ async fn test_stream_complete_with_tool_use() {
     let db = Database::connect_in_memory().await.unwrap();
     db.run_migrations().await.unwrap();
     let context = ServiceContext::new(db.pool().clone());
-    let agent_service = AgentService::new_for_test(provider, context);
+    let agent_service = AgentService::new_for_test(provider, context).await;
 
     let request = LLMRequest::new("mock-model".to_string(), vec![Message::user("Use a tool")]);
 
@@ -270,7 +270,7 @@ async fn test_streaming_chunks_emitted() {
     });
 
     let agent_service =
-        AgentService::new_for_test(provider, context).with_progress_callback(Some(progress_cb));
+        AgentService::new_for_test(provider, context).await.with_progress_callback(Some(progress_cb));
 
     let request = LLMRequest::new("mock-model".to_string(), vec![Message::user("Hello")]);
 
@@ -300,7 +300,7 @@ async fn test_context_tokens_is_last_iteration_not_accumulated() {
     let registry = ToolRegistry::new();
     registry.register(Arc::new(MockTool));
 
-    let agent_service = AgentService::new_for_test(provider, context.clone())
+    let agent_service = AgentService::new_for_test(provider, context.clone()).await
         .with_tool_registry(Arc::new(registry))
         .with_auto_approve_tools(true);
 

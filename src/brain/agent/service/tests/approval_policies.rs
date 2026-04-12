@@ -21,7 +21,7 @@ async fn test_auto_approve_skips_callback() {
         Box::pin(async move { Ok((true, false)) })
     });
 
-    let agent_service = AgentService::new_for_test(provider, context.clone())
+    let agent_service = AgentService::new_for_test(provider, context.clone()).await
         .with_tool_registry(Arc::new(registry))
         .with_auto_approve_tools(true) // auto-approve ON
         .with_approval_callback(Some(approval_cb));
@@ -67,7 +67,7 @@ async fn test_approval_required_calls_callback() {
         Box::pin(async move { Ok((true, false)) }) // approve
     });
 
-    let agent_service = AgentService::new_for_test(provider, context.clone())
+    let agent_service = AgentService::new_for_test(provider, context.clone()).await
         .with_tool_registry(Arc::new(registry))
         .with_auto_approve_tools(false) // auto-approve OFF
         .with_approval_callback(Some(approval_cb));
@@ -106,7 +106,7 @@ async fn test_approval_denied_sends_error_result() {
     let approval_cb: ApprovalCallback =
         Arc::new(move |_info| Box::pin(async move { Ok((false, false)) }));
 
-    let agent_service = AgentService::new_for_test(provider, context.clone())
+    let agent_service = AgentService::new_for_test(provider, context.clone()).await
         .with_tool_registry(Arc::new(registry))
         .with_auto_approve_tools(false)
         .with_approval_callback(Some(approval_cb));
@@ -160,7 +160,7 @@ async fn test_approval_callback_receives_session_id() {
         })
     });
 
-    let agent_service = AgentService::new_for_test(provider, context)
+    let agent_service = AgentService::new_for_test(provider, context).await
         .with_tool_registry(Arc::new(registry))
         .with_auto_approve_tools(false)
         .with_approval_callback(Some(approval_cb));
@@ -191,7 +191,7 @@ async fn test_no_callback_denies_execution() {
     registry.register(Arc::new(MockToolRequiresApproval));
 
     // No approval_callback set
-    let agent_service = AgentService::new_for_test(provider, context.clone())
+    let agent_service = AgentService::new_for_test(provider, context.clone()).await
         .with_tool_registry(Arc::new(registry))
         .with_auto_approve_tools(false);
 
@@ -232,7 +232,7 @@ async fn test_non_approval_tool_executes_directly() {
         Box::pin(async move { Ok((true, false)) })
     });
 
-    let agent_service = AgentService::new_for_test(provider, context.clone())
+    let agent_service = AgentService::new_for_test(provider, context.clone()).await
         .with_tool_registry(Arc::new(registry))
         .with_auto_approve_tools(false) // auto-approve OFF, but tool doesn't need it
         .with_approval_callback(Some(approval_cb));
@@ -284,7 +284,7 @@ async fn test_mixed_tools_approval_and_auto() {
         Box::pin(async move { Ok((true, false)) }) // approve
     });
 
-    let agent_service = AgentService::new_for_test(provider, context.clone())
+    let agent_service = AgentService::new_for_test(provider, context.clone()).await
         .with_tool_registry(Arc::new(registry))
         .with_auto_approve_tools(false)
         .with_approval_callback(Some(approval_cb));

@@ -59,7 +59,7 @@ async fn cmd_chat_inner(
 
     // Select provider based on configuration using factory
     // Returns placeholder provider if none configured, so app can start and show onboarding
-    let provider = match crate::brain::provider::create_provider(config) {
+    let provider = match crate::brain::provider::create_provider(config).await {
         Ok(p) => {
             tracing::info!(
                 "Provider ready: {} (model: {})",
@@ -302,7 +302,7 @@ async fn cmd_chat_inner(
 
     // Create agent service with dynamic system brain
     let agent_service = Arc::new(
-        AgentService::new(provider.clone(), service_context.clone(), config)
+        AgentService::new(provider.clone(), service_context.clone(), config).await
             .with_system_brain(system_brain.clone())
             .with_working_directory(working_directory.clone())
             .with_auto_approve_tools(auto_approve_tools),
@@ -726,7 +726,7 @@ async fn cmd_chat_inner(
     channel_factory.set_session_updated_tx(session_updated_tx.clone());
 
     let agent_service = Arc::new(
-        AgentService::new(provider.clone(), service_context.clone(), config)
+        AgentService::new(provider.clone(), service_context.clone(), config).await
             .with_system_brain(system_brain)
             .with_tool_registry(shared_tool_registry.clone())
             .with_approval_callback(Some(approval_callback))
@@ -865,7 +865,7 @@ async fn cmd_chat_inner(
                                             match crate::brain::provider::create_provider_by_name(
                                                 &config,
                                                 saved_provider,
-                                            ) {
+                                            ).await {
                                                 Ok(new_provider) => {
                                                     tracing::info!(
                                                         "Resume: swapping provider '{}' -> '{}' for session {}",
@@ -1021,7 +1021,7 @@ async fn cmd_chat_inner(
     ));
 
     // Initial channel spawn — reconcile against current config
-    channel_manager.reconcile(config);
+    channel_manager.reconcile(config).await;
 
     // Spawn config hot-reload watcher — fires on any change to config.toml, keys.toml,
     // or commands.toml without requiring a restart.
@@ -1044,7 +1044,7 @@ async fn cmd_chat_inner(
                 // Provider swap still needs explicit call
                 let agent = agent.clone();
                 tokio::spawn(async move {
-                    match crate::brain::provider::create_provider(&cfg) {
+                    match crate::brain::provider::create_provider(&cfg).await {
                         Ok(new_provider) => {
                             agent.swap_provider(new_provider);
                             tracing::info!("ConfigWatcher: LLM provider reloaded from new keys");
@@ -1067,7 +1067,10 @@ async fn cmd_chat_inner(
         {
             let channel_mgr = channel_manager.clone();
             callbacks.push(Arc::new(move |cfg: crate::config::Config| {
-                channel_mgr.reconcile(&cfg);
+                let mgr = channel_mgr.clone();
+                tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(mgr.reconcile(&cfg));
+                });
             }));
         }
 
@@ -1103,7 +1106,7 @@ async fn cmd_chat_inner(
 
     // Spawn A2A gateway if configured
     if config.a2a.enabled {
-        let a2a_agent = channel_factory.create_agent_service();
+        let a2a_agent = channel_factory.create_agent_service().await;
         let a2a_ctx = service_context.clone();
         let a2a_config = config.a2a.clone();
         tokio::spawn(async move {

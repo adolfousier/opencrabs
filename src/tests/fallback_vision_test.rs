@@ -366,8 +366,8 @@ default_model = "gpt-4"
         assert!(cfg.vision_model.is_none());
     }
 
-    #[test]
-    fn factory_config_wires_vision_model() {
+    #[tokio::test]
+    async fn factory_config_wires_vision_model() {
         use crate::config::{Config, ProviderConfig, ProviderConfigs};
 
         let config = Config {
@@ -386,12 +386,12 @@ default_model = "gpt-4"
             ..Default::default()
         };
 
-        let provider = crate::brain::provider::factory::create_provider(&config).unwrap();
+        let provider = crate::brain::provider::factory::create_provider(&config).await.unwrap();
         assert!(provider.supports_vision());
     }
 
-    #[test]
-    fn factory_config_no_vision_model() {
+    #[tokio::test]
+    async fn factory_config_no_vision_model() {
         use crate::config::{Config, ProviderConfig, ProviderConfigs};
 
         let config = Config {
@@ -410,7 +410,7 @@ default_model = "gpt-4"
             ..Default::default()
         };
 
-        let provider = crate::brain::provider::factory::create_provider(&config).unwrap();
+        let provider = crate::brain::provider::factory::create_provider(&config).await.unwrap();
         assert!(!provider.supports_vision());
     }
 }
@@ -420,8 +420,8 @@ default_model = "gpt-4"
 mod factory_fallback {
     use crate::config::{Config, FallbackProviderConfig, ProviderConfig, ProviderConfigs};
 
-    #[test]
-    fn no_fallback_returns_primary_directly() {
+    #[tokio::test]
+    async fn no_fallback_returns_primary_directly() {
         let config = Config {
             providers: ProviderConfigs {
                 openai: Some(ProviderConfig {
@@ -438,12 +438,12 @@ mod factory_fallback {
             ..Default::default()
         };
 
-        let provider = crate::brain::provider::factory::create_provider(&config).unwrap();
+        let provider = crate::brain::provider::factory::create_provider(&config).await.unwrap();
         assert_eq!(provider.name(), "openai");
     }
 
-    #[test]
-    fn fallback_disabled_returns_primary_directly() {
+    #[tokio::test]
+    async fn fallback_disabled_returns_primary_directly() {
         let config = Config {
             providers: ProviderConfigs {
                 openai: Some(ProviderConfig {
@@ -465,24 +465,24 @@ mod factory_fallback {
             ..Default::default()
         };
 
-        let provider = crate::brain::provider::factory::create_provider(&config).unwrap();
+        let provider = crate::brain::provider::factory::create_provider(&config).await.unwrap();
         // Should be plain openai, not wrapped in fallback
         assert_eq!(provider.name(), "openai");
     }
 
-    #[test]
-    fn no_provider_no_fallback_returns_placeholder() {
+    #[tokio::test]
+    async fn no_provider_no_fallback_returns_placeholder() {
         let config = Config {
             providers: ProviderConfigs::default(),
             ..Default::default()
         };
 
-        let provider = crate::brain::provider::factory::create_provider(&config).unwrap();
+        let provider = crate::brain::provider::factory::create_provider(&config).await.unwrap();
         assert_eq!(provider.name(), "none");
     }
 
-    #[test]
-    fn fallback_with_unconfigured_providers_skipped() {
+    #[tokio::test]
+    async fn fallback_with_unconfigured_providers_skipped() {
         // Fallback lists providers that don't have API keys — should skip them gracefully
         let config = Config {
             providers: ProviderConfigs {
@@ -497,7 +497,7 @@ mod factory_fallback {
         };
 
         // No providers configured at all — should end up with placeholder
-        let provider = crate::brain::provider::factory::create_provider(&config).unwrap();
+        let provider = crate::brain::provider::factory::create_provider(&config).await.unwrap();
         assert_eq!(provider.name(), "none");
     }
 }

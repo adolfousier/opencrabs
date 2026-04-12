@@ -15,7 +15,7 @@ use crate::services::SessionService;
 /// If the session has its own provider/model stored, restore that — so each
 /// channel keeps its own provider independently of the TUI or other channels.
 /// Only falls back to the global config if the session has no provider set.
-pub fn sync_provider_for_session(
+pub async fn sync_provider_for_session(
     agent: &AgentService,
     session_provider: Option<&str>,
     session_model: Option<&str>,
@@ -35,7 +35,7 @@ pub fn sync_provider_for_session(
         let same_model = session_model.is_none_or(|m| m == agent_model);
 
         if !same_provider || !same_model {
-            match crate::brain::provider::factory::create_provider_by_name(&config, sess_prov) {
+            match crate::brain::provider::factory::create_provider_by_name(&config, sess_prov).await {
                 Ok(new_provider) => {
                     tracing::info!(
                         "Channel: restored session provider {}/{} (was {}/{})",
@@ -74,7 +74,7 @@ pub fn sync_provider_for_session(
     let same_provider = provider_names_match(&cfg_provider_norm, &agent_provider_norm);
 
     if !same_provider || cfg_model != agent_model {
-        match crate::brain::provider::create_provider(&config) {
+        match crate::brain::provider::create_provider(&config).await {
             Ok(new_provider) => {
                 tracing::info!(
                     "Channel agent synced to config: {} → {}",
@@ -500,7 +500,7 @@ pub async fn models_for_provider(provider_name: &str) -> ModelsResponse {
 
     // Create a temporary provider to fetch its models
     let provider =
-        match crate::brain::provider::factory::create_provider_by_name(&config, provider_name) {
+        match crate::brain::provider::factory::create_provider_by_name(&config, provider_name).await {
             Ok(p) => p,
             Err(e) => {
                 return ModelsResponse {
@@ -608,7 +608,7 @@ pub async fn switch_model(
 
     // Create provider by name (doesn't modify global config enabled flags)
     let new_provider =
-        crate::brain::provider::factory::create_provider_by_name(&config, &provider_name).map_err(
+        crate::brain::provider::factory::create_provider_by_name(&config, &provider_name).await.map_err(
             |e| {
                 tracing::warn!("Failed to create provider after model switch: {}", e);
                 format!("Model saved but failed to reload provider: {}", e)

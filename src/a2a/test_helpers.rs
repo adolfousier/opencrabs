@@ -13,7 +13,7 @@ pub mod helpers {
         let provider = Arc::new(PlaceholderProvider);
         let ctx = placeholder_service_context().await;
         let config = crate::config::Config::default();
-        Arc::new(AgentService::new(provider, ctx, &config))
+        Arc::new(AgentService::new(provider, ctx, &config).await)
     }
 
     /// Create a `ServiceContext` backed by an in-memory SQLite database.

@@ -192,7 +192,7 @@ impl Tool for TrelloConnectTool {
 
         // Spawn the TrelloAgent
         let factory = self.channel_factory.clone();
-        let agent_svc = factory.create_agent_service();
+        let agent_svc = factory.create_agent_service().await;
         let service_ctx = factory.service_context();
         let shared_session = factory.shared_session_id();
         let trello_state = self.trello_state.clone();

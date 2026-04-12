@@ -205,7 +205,7 @@ impl TelegramAgent {
                                     let display = crate::channels::commands::provider_display_name(provider_name);
                                     // Switch to this provider with its default model
                                     if let Ok(config) = crate::config::Config::load()
-                                        && let Ok(new_provider) = crate::brain::provider::factory::create_provider_by_name(&config, provider_name)
+                                        && let Ok(new_provider) = crate::brain::provider::factory::create_provider_by_name(&config, provider_name).await
                                     {
                                         agent.swap_provider(new_provider);
                                     }
@@ -303,7 +303,7 @@ impl TelegramAgent {
                                 let mut provider_err: Option<String> = None;
                                 if let Some(pname) = provider_name {
                                     match crate::config::Config::load() {
-                                        Ok(config) => match crate::brain::provider::factory::create_provider_by_name(&config, pname) {
+                                        Ok(config) => match crate::brain::provider::factory::create_provider_by_name(&config, pname).await {
                                             Ok(new_provider) => agent.swap_provider(new_provider),
                                             Err(e) => provider_err = Some(format!("Failed to create provider '{}': {}", pname, e)),
                                         },

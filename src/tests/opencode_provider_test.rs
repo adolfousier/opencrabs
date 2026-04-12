@@ -169,8 +169,8 @@ fn opencode_provider_sync_in_onboarding_array() {
 
 // ── Factory creation tests ──
 
-#[test]
-fn factory_creates_opencode_by_name() {
+#[tokio::test]
+async fn factory_creates_opencode_by_name() {
     if OpenCodeCliProvider::new().is_err() {
         return;
     }
@@ -180,13 +180,13 @@ fn factory_creates_opencode_by_name() {
         default_model: Some("opencode/gpt-5-nano".to_string()),
         ..Default::default()
     });
-    let provider = crate::brain::provider::factory::create_provider_by_name(&config, "opencode");
+    let provider = crate::brain::provider::factory::create_provider_by_name(&config, "opencode").await;
     assert!(provider.is_ok(), "Should create opencode provider by name");
     assert_eq!(provider.unwrap().name(), "opencode");
 }
 
-#[test]
-fn factory_creates_opencode_by_alt_names() {
+#[tokio::test]
+async fn factory_creates_opencode_by_alt_names() {
     if OpenCodeCliProvider::new().is_err() {
         return;
     }
@@ -198,7 +198,7 @@ fn factory_creates_opencode_by_alt_names() {
     });
 
     for name in ["opencode", "opencode-cli", "opencode_cli"] {
-        let provider = crate::brain::provider::factory::create_provider_by_name(&config, name);
+        let provider = crate::brain::provider::factory::create_provider_by_name(&config, name).await;
         assert!(
             provider.is_ok(),
             "Should create opencode provider via name '{}'",
