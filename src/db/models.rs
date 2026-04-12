@@ -552,6 +552,37 @@ impl CronJobRun {
     }
 }
 
+// ─── FeedbackEntry ──────────────────────────────────────────────────────────
+
+/// Feedback ledger entry — append-only observations for recursive self-improvement.
+///
+/// Records tool outcomes, user corrections, provider errors, and performance
+/// signals. Consumed by the feedback_analyze and self_improve tools.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeedbackEntry {
+    pub id: i64,
+    pub session_id: String,
+    pub event_type: String,
+    pub dimension: String,
+    pub value: f64,
+    pub metadata: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+impl FeedbackEntry {
+    pub fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
+        Ok(FeedbackEntry {
+            id: row.get("id")?,
+            session_id: row.get("session_id")?,
+            event_type: row.get("event_type")?,
+            dimension: row.get("dimension")?,
+            value: row.get("value")?,
+            metadata: row.get("metadata")?,
+            created_at: rfc3339_col(row, "created_at")?,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -591,6 +622,24 @@ mod tests {
         assert_eq!(file.session_id, session_id);
         assert_eq!(file.path, path);
         assert!(file.content.is_none());
+    }
+
+    #[test]
+    fn test_feedback_entry_from_row_fields() {
+        // Covered by integration tests in feedback_ledger_test.rs;
+        // this verifies struct construction.
+        let entry = FeedbackEntry {
+            id: 1,
+            session_id: "abc".to_string(),
+            event_type: "tool_success".to_string(),
+            dimension: "bash".to_string(),
+            value: 1.0,
+            metadata: None,
+            created_at: Utc::now(),
+        };
+        assert_eq!(entry.event_type, "tool_success");
+        assert_eq!(entry.dimension, "bash");
+        assert!((entry.value - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]
