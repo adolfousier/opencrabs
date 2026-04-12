@@ -314,9 +314,11 @@ pub struct App {
 
     /// File picker state
     pub file_picker_files: Vec<std::path::PathBuf>,
+    pub file_picker_filtered: Vec<usize>,
     pub file_picker_selected: usize,
     pub file_picker_scroll_offset: usize,
     pub file_picker_current_dir: std::path::PathBuf,
+    pub file_picker_search: String,
 
     /// Slash autocomplete state
     pub slash_suggestions_active: bool,
@@ -529,9 +531,11 @@ impl App {
             approval_auto_session,
             approval_auto_always,
             file_picker_files: Vec::new(),
+            file_picker_filtered: Vec::new(),
             file_picker_selected: 0,
             file_picker_scroll_offset: 0,
             file_picker_current_dir: std::env::current_dir().unwrap_or_default(),
+            file_picker_search: String::new(),
             slash_suggestions_active: false,
             slash_filtered: Vec::new(),
             slash_selected_index: 0,

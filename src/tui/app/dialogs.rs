@@ -1963,9 +1963,19 @@ impl App {
         });
     }
 
-    /// Open file picker and populate file list
+    /// Open file picker and populate file list.
+    ///
+    /// Starts at the session's working directory (not the app startup cwd).
+    /// Call `refresh_file_picker()` to reload entries without resetting the dir.
     pub(crate) async fn open_file_picker(&mut self) -> Result<()> {
-        // Get list of files in current directory
+        // Start at the session's working directory
+        self.file_picker_current_dir = self.working_directory.clone();
+        self.file_picker_search.clear();
+        self.refresh_file_picker().await
+    }
+
+    /// Reload file list for the current directory and apply search filter.
+    pub(crate) async fn refresh_file_picker(&mut self) -> Result<()> {
         let mut files = Vec::new();
 
         // Add parent directory option if not at root
@@ -1992,11 +2002,36 @@ impl App {
         });
 
         self.file_picker_files = files;
-        self.file_picker_selected = 0;
-        self.file_picker_scroll_offset = 0;
+        self.apply_file_picker_filter();
         self.switch_mode(AppMode::FilePicker).await?;
 
         Ok(())
+    }
+
+    /// Filter the file list based on the current search query.
+    /// ".." is always included so the user can navigate back.
+    fn apply_file_picker_filter(&mut self) {
+        let query = self.file_picker_search.to_lowercase();
+        self.file_picker_filtered = if query.is_empty() {
+            (0..self.file_picker_files.len()).collect()
+        } else {
+            self.file_picker_files
+                .iter()
+                .enumerate()
+                .filter(|(_, path)| {
+                    // Always keep ".." visible
+                    if path.ends_with("..") {
+                        return true;
+                    }
+                    path.file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|name| name.to_lowercase().contains(&query))
+                })
+                .map(|(i, _)| i)
+                .collect()
+        };
+        self.file_picker_selected = 0;
+        self.file_picker_scroll_offset = 0;
     }
 
     /// Handle keys in file picker mode
@@ -2007,53 +2042,55 @@ impl App {
         use super::events::keys;
         use crossterm::event::KeyCode;
 
+        let filtered_len = self.file_picker_filtered.len();
+
         if keys::is_cancel(&event) {
-            // Cancel file picker and return to chat
+            self.file_picker_search.clear();
             self.switch_mode(AppMode::Chat).await?;
         } else if keys::is_up(&event) {
-            // Move selection up
             self.file_picker_selected = self.file_picker_selected.saturating_sub(1);
-
-            // Adjust scroll offset if needed
             if self.file_picker_selected < self.file_picker_scroll_offset {
                 self.file_picker_scroll_offset = self.file_picker_selected;
             }
         } else if keys::is_down(&event) {
-            // Move selection down
-            if self.file_picker_selected + 1 < self.file_picker_files.len() {
+            if self.file_picker_selected + 1 < filtered_len {
                 self.file_picker_selected += 1;
-
-                // Adjust scroll offset if needed (assuming 20 visible items)
                 let visible_items = 20;
                 if self.file_picker_selected >= self.file_picker_scroll_offset + visible_items {
                     self.file_picker_scroll_offset = self.file_picker_selected - visible_items + 1;
                 }
             }
-        } else if keys::is_enter(&event) || event.code == KeyCode::Char(' ') || keys::is_tab(&event)
-        {
-            // Select file or navigate into directory
-            if let Some(selected_path) = self.file_picker_files.get(self.file_picker_selected) {
+        } else if keys::is_enter(&event) || keys::is_tab(&event) {
+            // Resolve filtered index to actual file index
+            if let Some(&file_idx) = self.file_picker_filtered.get(self.file_picker_selected)
+                && let Some(selected_path) = self.file_picker_files.get(file_idx).cloned()
+            {
                 if selected_path.is_dir() {
-                    // Navigate into directory
                     if selected_path.ends_with("..") {
-                        // Go to parent directory
                         if let Some(parent) = self.file_picker_current_dir.parent() {
                             self.file_picker_current_dir = parent.to_path_buf();
                         }
                     } else {
-                        self.file_picker_current_dir = selected_path.clone();
+                        self.file_picker_current_dir = selected_path;
                     }
-                    // Refresh file list
-                    self.open_file_picker().await?;
+                    self.file_picker_search.clear();
+                    self.refresh_file_picker().await?;
                 } else {
-                    // Insert file path into input buffer at cursor
                     let path_str = selected_path.to_string_lossy().to_string();
                     self.input_buffer
                         .insert_str(self.cursor_position, &path_str);
                     self.cursor_position += path_str.len();
+                    self.file_picker_search.clear();
                     self.switch_mode(AppMode::Chat).await?;
                 }
             }
+        } else if event.code == KeyCode::Backspace {
+            if self.file_picker_search.pop().is_some() {
+                self.apply_file_picker_filter();
+            }
+        } else if let KeyCode::Char(c) = event.code {
+            self.file_picker_search.push(c);
+            self.apply_file_picker_filter();
         }
 
         Ok(())
