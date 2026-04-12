@@ -106,14 +106,21 @@ impl ExaSearchTool {
     }
 
     /// Execute search via free hosted MCP endpoint.
-    async fn execute_via_mcp(&self, query: &str, num_results: usize, search_type: &str) -> Result<ToolResult> {
+    async fn execute_via_mcp(
+        &self,
+        query: &str,
+        num_results: usize,
+        search_type: &str,
+    ) -> Result<ToolResult> {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
             .map_err(|e| ToolError::Execution(format!("Failed to create HTTP client: {}", e)))?;
 
         // Try with existing session, re-init on 404
-        let result = self.try_mcp_tool_call(&client, query, num_results, search_type).await;
+        let result = self
+            .try_mcp_tool_call(&client, query, num_results, search_type)
+            .await;
 
         match result {
             Ok(tool_result) => Ok(tool_result),
@@ -121,7 +128,8 @@ impl ExaSearchTool {
                 // Session expired — re-initialize
                 tracing::info!("MCP session expired, re-initializing");
                 *self.mcp_session_id.write().await = None;
-                self.try_mcp_tool_call(&client, query, num_results, search_type).await
+                self.try_mcp_tool_call(&client, query, num_results, search_type)
+                    .await
             }
             Err(e) => Err(e),
         }

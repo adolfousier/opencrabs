@@ -32,6 +32,11 @@ impl FeedbackLedgerRepository {
         Self { pool }
     }
 
+    /// Get a clone of the underlying pool.
+    pub fn pool(&self) -> Pool {
+        self.pool.clone()
+    }
+
     /// Record a feedback event (append-only)
     pub async fn record(
         &self,

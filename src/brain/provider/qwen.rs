@@ -164,6 +164,42 @@ impl QwenCredentials {
         })
     }
 
+    /// Wipe single-account credentials from `keys.toml` (`[providers.qwen]`)
+    /// and `~/.qwen/oauth_creds.json`. Called when token is expired so stale
+    /// creds don't linger. Rotation accounts are handled separately via
+    /// `persist_all_accounts` with only the valid subset.
+    pub fn wipe_dead_credentials() {
+        if let Ok(path) = std::panic::catch_unwind(crate::config::keys_path)
+            && path.exists()
+            && let Ok(raw) = std::fs::read_to_string(&path)
+            && let Ok(mut doc) = raw.parse::<toml::Value>()
+        {
+            let mut changed = false;
+            if let Some(qwen) = doc
+                .get_mut("providers")
+                .and_then(|p| p.get_mut("qwen"))
+                .and_then(|q| q.as_table_mut())
+            {
+                qwen.remove("api_key");
+                qwen.remove("refresh_token");
+                qwen.remove("expiry_date");
+                qwen.remove("resource_url");
+                changed = true;
+            }
+            if changed {
+                if let Ok(out) = toml::to_string_pretty(&doc) {
+                    let _ = std::fs::write(&path, out);
+                }
+                tracing::info!("Wiped dead Qwen single-account creds from keys.toml");
+            }
+        }
+        let cli_path = Self::qwen_cli_path();
+        if cli_path.exists() {
+            let _ = std::fs::remove_file(&cli_path);
+            tracing::info!("Wiped dead Qwen creds from {}", cli_path.display());
+        }
+    }
+
     /// Persist credentials to `keys.toml` under `[providers.qwen]`.
     /// This is the canonical store. Background refresh writes here too.
     ///
@@ -558,7 +594,10 @@ pub async fn refresh_credentials(creds: &QwenCredentials) -> anyhow::Result<Qwen
         anyhow::bail!("Qwen refresh: no refresh_token stored — re-authentication required");
     }
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .build()?;
     let resp = client
         .post(QWEN_TOKEN_URL)
         .header("content-type", "application/x-www-form-urlencoded")
@@ -834,6 +873,15 @@ impl QwenTokenManager {
                     !snap.is_valid()
                 };
                 if should_refresh && let Err(e) = self.ensure_fresh().await {
+                    let msg = e.to_string();
+                    if msg.contains("HTTP 400") {
+                        tracing::error!(
+                            "Qwen refresh_token permanently dead — wiping credentials. \
+                             Run /onboard:provider to re-authenticate."
+                        );
+                        QwenCredentials::wipe_dead_credentials();
+                        break;
+                    }
                     tracing::warn!("Qwen background token refresh failed: {}", e);
                     tokio::time::sleep(Duration::from_secs(30)).await;
                 }

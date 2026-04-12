@@ -5,6 +5,81 @@ All notable changes to OpenCrabs will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.6] - 2026-04-13
+
+The self-improving release. OpenCrabs now records every tool execution,
+provider error, and user correction to a persistent feedback ledger,
+analyzes patterns at session start, and can autonomously rewrite its own
+brain files — no human approval needed. Plus Qwen OAuth hardening,
+readline keyboard shortcuts, responsive table rendering, and Exa search.
+
+Contributors:
+- Teo Gonzalez Collazo (PR #71 — Exa search tool update)
+- Swoorup (Issue #72 — readline shortcuts)
+
+### Added
+
+#### Recursive Self-Improvement (RSI) — Experimental
+- **Feedback ledger** — persistent SQLite table recording every tool
+  success/failure, provider error, user correction, and context compaction
+  event. Zero overhead — fires and forgets inside the tool loop.
+- **Startup digest** — on session open, the last 50 feedback events are
+  injected into the system prompt as "Performance History", surfacing
+  tool failure rates, recent errors, and user correction counts.
+- **`feedback_record` tool** — agent can manually log observations
+  (patterns, strategies, user corrections).
+- **`feedback_analyze` tool** — query aggregated stats: per-tool success
+  rates, recent failures, failure patterns.
+- **`self_improve` tool** — autonomously append improvements to brain
+  files (SOUL.md, AGENTS.md, TOOLS.md, etc.) and log to
+  `~/.opencrabs/rsi/improvements.md`. No human approval required —
+  the agent identifies patterns and applies fixes directly.
+- **User correction detection** — short negative messages ("wrong",
+  "no", "try again", "you broke", "fix it") are auto-recorded as
+  `user_correction` events, training the ledger without explicit action.
+- **Proactive compaction recording** — auto-compaction events at 65%
+  threshold are logged to the ledger.
+
+#### TUI
+- **Readline keyboard shortcuts** — Ctrl+P (history up), Ctrl+N
+  (history down), Ctrl+A (beginning of line), Ctrl+E (end of line).
+  Thanks to Swoorup (Issue #72).
+- **Responsive table rendering** — markdown tables now adapt to chat
+  width instead of clipping at the terminal edge.
+- **Onboarding/dialogs responsive** — dialogs scale to terminal size,
+  file picker search added, session directory navigation improved.
+- **Eliminated window blinking** on terminal resize.
+- **Expired Qwen rotation accounts** show as red in the provider
+  selector instead of green.
+
+#### Tools
+- **Exa search updated** — new search types (fast, deep-lite, deep,
+  deep-reasoning, instant) aligned with latest Exa API. Added
+  `x-exa-integration: opencrabs` header. Thanks to Teo Gonzalez Collazo
+  (PR #71).
+
+### Changed
+
+- **RSI is experimental** — enable via `~/.opencrabs/config.toml`
+  under `[agent]` section. The system self-improves autonomously by
+  default, but users should monitor `~/.opencrabs/rsi/improvements.md`
+  for changes. Existing users should ask their crab to compare
+  `~/.opencrabs/TOOLS.md` with the template and update any changes.
+- **Qwen OAuth retry backoff** — changed from 500ms hammer to 3s→6s→
+  12s→24s exponential backoff, letting Qwen's free tier recover instead
+  of burning quota on instant retries.
+
+### Fixed
+
+- **Qwen OAuth token validation** — validates tokens at startup, falls
+  back to next provider on 401/403.
+- **Async factory** — `create_provider()` is now fully async, removing
+  `block_in_place` calls and fixing potential deadlocks.
+- **Ghost custom providers** — cleaned up stale provider entries from
+  config, and fixed API key paste handling in the provider selector.
+- **Window blinking on resize** — eliminated the flash that occurred
+  when the terminal was resized.
+
 ## [0.3.5] - 2026-04-12
 
 ### Fixed
@@ -2517,6 +2592,7 @@ fixes.
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.3.6]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.6
 [0.3.5]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.5
 [0.3.4]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.4
 [0.3.3]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.3
