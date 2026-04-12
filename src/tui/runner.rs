@@ -74,7 +74,8 @@ pub async fn run(mut app: App) -> Result<()> {
     // redirection to avoid racing with ratatui's escape-sequence writes.
     crate::utils::fd_suppress::set_tui_active(true);
 
-    // Force a full clear so stale content from a previous exec() restart is wiped
+    // Force a full clear so stale content from a previous exec() restart
+    // is wiped.
     terminal.clear()?;
 
     // Drain any stale terminal events (e.g. mouse events queued after a crash
