@@ -51,3 +51,4 @@ pub mod usage_ledger_test;
 pub mod voice_onboarding_test;
 pub mod voice_stt_dispatch_test;
 pub mod whatsapp_state_test;
+pub mod rsi_test;
