@@ -450,10 +450,19 @@ impl App {
             // API key input (field 1 for non-Custom non-zhipu, field 2 for zhipu/Custom)
             match event.code {
                 crossterm::event::KeyCode::Char(c) => {
+                    // Clear sentinel on first keystroke so user replaces it
+                    if self.ps.has_existing_key_sentinel() {
+                        self.ps.api_key_input.clear();
+                    }
                     self.ps.api_key_input.push(c);
                 }
                 crossterm::event::KeyCode::Backspace => {
-                    self.ps.api_key_input.pop();
+                    // Clear sentinel entirely on backspace (can't partially edit masked key)
+                    if self.ps.has_existing_key_sentinel() {
+                        self.ps.api_key_input.clear();
+                    } else {
+                        self.ps.api_key_input.pop();
+                    }
                 }
                 _ => {}
             }
@@ -1092,7 +1101,7 @@ impl App {
                     ..merged
                 });
             }
-            11 => {
+            11 if !self.ps.custom_name.is_empty() => {
                 let custom_model = self.ps.custom_model.clone();
                 let custom_name = self.ps.custom_name.clone();
                 let mut customs = config.providers.custom.unwrap_or_default();
@@ -1130,13 +1139,15 @@ impl App {
             9 => "providers.qwen_code_cli",
             10 => "providers.qwen",
             11 => {
-                // Resolve custom provider name: UI field > config active > "default"
+                // Resolve custom provider name: UI field > config active
                 let cname = if !self.ps.custom_name.is_empty() {
                     self.ps.custom_name.clone()
                 } else if let Some((name, _)) = config.providers.active_custom() {
                     name.to_string()
                 } else {
-                    "default".to_string()
+                    // No name → can't save; fall through to anthropic
+                    // (cleanup_empty_custom_providers will remove ghosts)
+                    return Ok(());
                 };
                 custom_section = format!("providers.custom.{}", cname);
                 &custom_section
@@ -1224,6 +1235,9 @@ impl App {
             }
             _ => {}
         }
+
+        // Clean up ghost custom provider entries (empty name/url/model)
+        crate::config::Config::cleanup_empty_custom_providers();
 
         // Refresh custom provider names list after saving (so new entries appear immediately)
         if provider_idx == CUSTOM_PROVIDER_IDX
