@@ -1239,6 +1239,18 @@ impl App {
         // Clean up ghost custom provider entries (empty name/url/model)
         crate::config::Config::cleanup_empty_custom_providers();
 
+        // Write API key to keys.toml BEFORE any Config::load() calls.
+        // Otherwise merge_provider_keys() won't find the key during rebuild.
+        // This was the root cause of custom provider keys not persisting on first try.
+        if key_changed
+            && !self.ps.has_existing_key_sentinel()
+            && let Some(ref key) = api_key
+            && !key.is_empty()
+            && let Err(e) = crate::config::write_secret_key(section, "api_key", key)
+        {
+            tracing::warn!("Failed to save API key to keys.toml: {}", e);
+        }
+
         // Refresh custom provider names list after saving (so new entries appear immediately)
         if provider_idx == CUSTOM_PROVIDER_IDX
             && let Ok(fresh) = crate::config::Config::load()
@@ -1268,16 +1280,6 @@ impl App {
                     CUSTOM_INSTANCES_START + pos,
                 );
             }
-        }
-
-        // Only write key to keys.toml if the user typed a new one (never write sentinel)
-        if key_changed
-            && !self.ps.has_existing_key_sentinel()
-            && let Some(ref key) = api_key
-            && !key.is_empty()
-            && let Err(e) = crate::config::write_secret_key(section, "api_key", key)
-        {
-            tracing::warn!("Failed to save API key to keys.toml: {}", e);
         }
 
         // Write default_model to config BEFORE rebuild so the provider picks it up
