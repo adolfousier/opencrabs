@@ -301,6 +301,74 @@ impl QwenCredentials {
         cfgs.iter().filter_map(Self::from_provider_config).collect()
     }
 
+    /// Clear secrets from keys.toml for expired accounts only.
+    /// Config.toml is NOT touched — all accounts remain listed so the user
+    /// can re-auth expired ones later via the UI.
+    ///
+    /// In keys.toml, expired account slots become `{}` (empty table) while
+    /// valid accounts keep their `api_key` + `refresh_token`.
+    pub fn clear_expired_account_secrets(all_creds: &[Self]) -> anyhow::Result<()> {
+        use crate::config::{daily_backup, keys_path};
+        use anyhow::Context;
+
+        let path = keys_path();
+        let mut doc: toml::Value = if path.exists() {
+            let content = std::fs::read_to_string(&path)?;
+            toml::from_str(&content).unwrap_or(toml::Value::Table(toml::map::Map::new()))
+        } else {
+            return Ok(());
+        };
+
+        let root = doc
+            .as_table_mut()
+            .context("keys.toml root is not a table")?;
+        let providers = root
+            .entry("providers".to_string())
+            .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+            .as_table_mut()
+            .context("[providers] is not a table")?;
+
+        // Build array preserving slot positions: valid accounts keep secrets,
+        // expired accounts get empty entries (placeholder to maintain index alignment)
+        let arr: Vec<toml::Value> = all_creds
+            .iter()
+            .map(|a| {
+                let mut tbl = toml::map::Map::new();
+                if a.is_valid() {
+                    tbl.insert(
+                        "api_key".to_string(),
+                        toml::Value::String(a.access_token.clone()),
+                    );
+                    tbl.insert(
+                        "refresh_token".to_string(),
+                        toml::Value::String(a.refresh_token.clone()),
+                    );
+                }
+                // Expired: empty table — secrets cleared, slot preserved
+                toml::Value::Table(tbl)
+            })
+            .collect();
+
+        providers.insert("qwen_accounts".to_string(), toml::Value::Array(arr));
+
+        daily_backup(&path, 7);
+        let toml_str = toml::to_string_pretty(&doc)?;
+        std::fs::write(&path, toml_str)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        }
+
+        let valid = all_creds.iter().filter(|c| c.is_valid()).count();
+        tracing::info!(
+            "Cleared secrets for {} expired accounts, kept {} valid (keys.toml only)",
+            all_creds.len() - valid,
+            valid
+        );
+        Ok(())
+    }
+
     /// Persist multiple rotation accounts with proper separation:
     /// - **keys.toml**: secrets only (`api_key`, `refresh_token`)
     /// - **config.toml**: metadata (`name`, `expiry_date`, `resource_url`)
