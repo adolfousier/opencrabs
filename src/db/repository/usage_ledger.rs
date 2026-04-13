@@ -18,15 +18,35 @@ pub struct ModelUsageStats {
 }
 
 /// Normalize model names for consistent ledger tracking.
-/// "claude-opus-4-6" → "opus-4-6", bare "opus" → "opus-4-6", "sonnet" → "sonnet-4-6".
+/// - Claude: "claude-opus-4-6" → "opus-4-6", bare "opus" → "opus-4-6"
+/// - Qwen: "coder-model", "qwen3.6-plus", "qwen-3.6-plus", "qwen/qwen3.6-plus" → "qwen3.6-plus"
+/// - OpenRouter/OpenCode prefixed: "openrouter/X", "opencode/X" → "X"
 pub(crate) fn normalize_model_name(model: &str) -> String {
-    let stripped = model.strip_prefix("claude-").unwrap_or(model);
+    // Strip provider prefixes (openrouter/model, opencode/model, qwen/model, etc.)
+    let stripped = model
+        .split('/')
+        .next_back()
+        .unwrap_or(model);
+
+    // Claude normalization
+    let stripped = stripped.strip_prefix("claude-").unwrap_or(stripped);
     match stripped {
-        "opus" => "opus-4-6".to_string(),
-        "sonnet" => "sonnet-4-6".to_string(),
-        "haiku" => "haiku-4-5".to_string(),
-        other => other.to_string(),
+        "opus" | "opus-4-6" => return "opus-4-6".to_string(),
+        "sonnet" | "sonnet-4-6" => return "sonnet-4-6".to_string(),
+        "haiku" | "haiku-4-5" => return "haiku-4-5".to_string(),
+        _ => {}
     }
+
+    // Qwen normalization: coder-model, qwen3.6-plus, qwen-3.6-plus → qwen3.6-plus
+    match stripped {
+        "coder-model" | "qwen-3.6-plus" | "qwen3.6-plus" => {
+            return "qwen3.6-plus".to_string();
+        }
+        "qwen3.5-plus" | "qwen-3.5-plus" => return "qwen3.5-plus".to_string(),
+        _ => {}
+    }
+
+    stripped.to_string()
 }
 
 /// Repository for usage ledger operations
@@ -101,6 +121,9 @@ impl UsageLedgerRepository {
                          WHEN model IN ('sonnet', 'claude-sonnet-4-6') THEN 'sonnet-4-6' \
                          WHEN model IN ('haiku', 'claude-haiku-4-5-20251001') THEN 'haiku-4-5' \
                          WHEN model LIKE 'claude-%' THEN REPLACE(model, 'claude-', '') \
+                         WHEN model IN ('coder-model', 'qwen-3.6-plus', 'qwen/qwen3.6-plus') THEN 'qwen3.6-plus' \
+                         WHEN model IN ('qwen-3.5-plus', 'qwen/qwen3.5-plus') THEN 'qwen3.5-plus' \
+                         WHEN model LIKE '%/%' THEN SUBSTR(model, INSTR(model, '/') + 1) \
                          ELSE model \
                        END AS normalized_model, \
                        COALESCE(SUM(token_count), 0), \
