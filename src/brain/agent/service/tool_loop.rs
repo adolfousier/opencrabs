@@ -114,6 +114,7 @@ impl AgentService {
             );
 
             // Target ~75% to give breathing room after truncation
+            let pre_tokens = context.token_count;
             let target = (effective_max as f64 * 0.75) as usize;
             context.hard_truncate_to(target);
 
@@ -128,7 +129,7 @@ impl AgentService {
                             "⚠️ Emergency truncation: context hit {:.0}% ({:.0}k / {:.0}k tokens). \
                              Oldest messages dropped to ~75%. History is still in the database.",
                             usage_pct,
-                            context.token_count as f64 / 1000.0,
+                            pre_tokens as f64 / 1000.0,
                             effective_max as f64 / 1000.0,
                         ),
                     },
