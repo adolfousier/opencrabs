@@ -311,6 +311,28 @@ impl Provider for FallbackProvider {
             .calculate_cost(model, input_tokens, output_tokens)
     }
 
+    fn force_next_fallback(&self, reason: &str) -> bool {
+        let current = self.active.load(Ordering::Acquire);
+        let next = current + 1;
+        let total = 1 + self.fallbacks.len(); // primary + fallbacks
+        if next >= total {
+            tracing::warn!(
+                "force_next_fallback: no more fallbacks (current={}, total={})",
+                current,
+                total,
+            );
+            return false;
+        }
+        self.promote(next, reason);
+        tracing::info!(
+            "force_next_fallback: promoted index {} → {} (reason: {})",
+            current,
+            next,
+            reason,
+        );
+        true
+    }
+
     fn take_swap_event(&self) -> Option<SwapEvent> {
         self.pending_swap.lock().ok().and_then(|mut s| s.take())
     }

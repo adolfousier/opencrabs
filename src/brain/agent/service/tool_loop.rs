@@ -1670,7 +1670,52 @@ impl AgentService {
                         drop_msg,
                         response.content.len(),
                     );
-                    // Inject error as visible text so user sees it in the TUI
+
+                    // Record as feedback for RSI analysis
+                    self.record_provider_feedback(
+                        session_id,
+                        "stream_drop",
+                        &model_name,
+                        Some(&format!(
+                            "retries={}, content_blocks={}, provider={}",
+                            MAX_STREAM_RETRIES,
+                            response.content.len(),
+                            self.provider().name(),
+                        )),
+                    );
+
+                    // Try to fallback to next provider before giving up
+                    let fallback_reason =
+                        format!("stream dropped {} times with 0 content", MAX_STREAM_RETRIES,);
+                    if self.provider().force_next_fallback(&fallback_reason) {
+                        tracing::info!(
+                            "🔄 Fallback triggered after stream drops — retrying with next provider"
+                        );
+                        // Emit self-heal alert so user sees the fallback in TUI
+                        if let Some(ref cb) = progress_callback {
+                            cb(
+                                session_id,
+                                ProgressEvent::SelfHealingAlert {
+                                    message: format!(
+                                        "Stream dropped {} times — switching to fallback provider",
+                                        MAX_STREAM_RETRIES,
+                                    ),
+                                },
+                            );
+                        }
+                        // Reset and retry with the new provider
+                        stream_retry_count = 0;
+                        total_input_tokens -= response.usage.input_tokens;
+                        total_output_tokens -= response.usage.output_tokens;
+                        total_cache_creation = total_cache_creation
+                            .saturating_sub(response.usage.cache_creation_tokens);
+                        total_cache_read =
+                            total_cache_read.saturating_sub(response.usage.cache_read_tokens);
+                        iteration -= 1;
+                        continue;
+                    }
+
+                    // No fallback available — inject error and accept partial
                     if response.content.iter().all(
                         |b| !matches!(b, ContentBlock::Text { text } if !text.trim().is_empty()),
                     ) {
@@ -1678,7 +1723,6 @@ impl AgentService {
                             text: format!("⚠️ {}", drop_msg),
                         });
                     }
-                    // Reset retry counter — we're accepting the partial response
                     stream_retry_count = 0;
                 }
             } else {

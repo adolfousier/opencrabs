@@ -105,6 +105,16 @@ pub trait Provider: Send + Sync {
         None
     }
 
+    /// Force the fallback wrapper to advance to the next provider.
+    /// Used by the tool loop when stream drops exhaust retries — the
+    /// stream started OK so `FallbackProvider::stream()` never saw an error,
+    /// but the response was empty/broken. Returns `true` if a fallback was
+    /// promoted, `false` if there are no more fallbacks or the provider
+    /// isn't a fallback wrapper.
+    fn force_next_fallback(&self, _reason: &str) -> bool {
+        false
+    }
+
     /// Take any pending swap event from a sticky fallback wrapper.
     /// Returns `None` for non-fallback providers; only `FallbackProvider`
     /// implements this. Called once per turn by the agent service so it
