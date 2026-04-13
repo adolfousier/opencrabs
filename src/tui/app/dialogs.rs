@@ -1311,14 +1311,17 @@ impl App {
             return Err(e);
         }
 
-        // Update app state
-        self.default_model_name = default_model.clone();
+        // Update app state — use the ACTUAL provider's model, not the requested one.
+        // If the requested provider failed (e.g. Qwen no creds) and a fallback kicked in,
+        // the agent service's provider_model() reflects the real active model.
+        let actual_model = self.agent_service.provider_model();
+        self.default_model_name = actual_model.clone();
 
         // Persist provider + model to current session DB record
         let agent_provider_name = self.agent_service.provider_name();
         if let Some(ref mut session) = self.current_session {
             session.provider_name = Some(agent_provider_name.clone());
-            session.model = Some(default_model.clone());
+            session.model = Some(actual_model.clone());
             let session_copy = session.clone();
             if let Err(e) = self.session_service.update_session(&session_copy).await {
                 tracing::warn!("Failed to persist provider to session: {}", e);
