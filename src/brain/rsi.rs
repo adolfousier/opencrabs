@@ -272,30 +272,13 @@ async fn run_rsi_agent_cycle(
     use crate::brain::agent::AgentService;
     use crate::services::{ServiceContext, SessionService};
 
-    // Resolve RSI provider: prefer self_improvement_provider, fall back to active
+    // Resolve RSI provider: prefer self_improvement_provider, fall back to user's active provider
+    let active_provider = config.providers.active_provider_and_model().0;
     let provider_name = config
         .agent
         .self_improvement_provider
         .as_deref()
-        .unwrap_or_else(|| {
-            // Fall back to the first enabled provider
-            if config
-                .providers
-                .anthropic
-                .as_ref()
-                .is_some_and(|p| p.enabled)
-            {
-                "anthropic"
-            } else if config.providers.qwen.as_ref().is_some_and(|p| p.enabled) {
-                "qwen"
-            } else if config.providers.openai.as_ref().is_some_and(|p| p.enabled) {
-                "openai"
-            } else if config.providers.minimax.as_ref().is_some_and(|p| p.enabled) {
-                "minimax"
-            } else {
-                "anthropic" // last resort
-            }
-        });
+        .unwrap_or(&active_provider);
 
     let provider =
         crate::brain::provider::factory::create_provider_by_name(config, provider_name).await?;
