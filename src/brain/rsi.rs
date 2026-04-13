@@ -176,17 +176,29 @@ pub enum RsiNotification {
     AgentCycleFailed { error: String },
 }
 
-/// Build a minimal tool registry containing only the 3 RSI tools.
+/// Build the RSI tool registry.
+///
+/// Always includes: feedback_record, feedback_analyze, self_improve.
+/// Conditionally includes: github_report_issue (only when AGENTS.md
+/// contains `<!-- rsi:github-issues repo:OWNER/REPO -->`).
 fn build_rsi_tool_registry() -> Arc<crate::brain::tools::ToolRegistry> {
     use crate::brain::tools::ToolRegistry;
     use crate::brain::tools::feedback_analyze::FeedbackAnalyzeTool;
     use crate::brain::tools::feedback_record::FeedbackRecordTool;
+    use crate::brain::tools::github_issue::{GithubIssueTool, parse_repo_from_agents_md};
     use crate::brain::tools::self_improve::SelfImproveTool;
 
     let registry = ToolRegistry::new();
     registry.register(Arc::new(FeedbackRecordTool));
     registry.register(Arc::new(FeedbackAnalyzeTool));
     registry.register(Arc::new(SelfImproveTool));
+
+    // Opt-in: only register GitHub issue tool if AGENTS.md has the marker
+    if let Some(repo) = parse_repo_from_agents_md() {
+        tracing::info!("RSI: GitHub issue reporting enabled for repo '{repo}'");
+        registry.register(Arc::new(GithubIssueTool::new(repo)));
+    }
+
     Arc::new(registry)
 }
 
@@ -258,7 +270,24 @@ Do NOT apply improvements if the data is insufficient or ambiguous. \
 Quality over quantity — one well-reasoned improvement is better than many speculative ones. \
 Never duplicate an existing instruction in a brain file — you have the 'read' action to check first. \
 If an improvement was already applied (check self_improve action='list'), skip it. \
-Use 'update' over 'apply' when an existing instruction needs rewording, not a new one added.";
+Use 'update' over 'apply' when an existing instruction needs rewording, not a new one added.
+
+## GitHub Issue Reporting (when github_report_issue tool is available)
+
+If the github_report_issue tool is available, use it for problems that CANNOT be fixed via brain files:
+- Code-level bugs (e.g. parser doesn't handle a response format, tool has a logic error)
+- Architectural limitations (e.g. missing retry logic, no support for a provider feature)
+- Missing features that would prevent recurring failures
+- Self-heal patterns that keep triggering because the root cause is in Rust code
+
+Do NOT open issues for:
+- Behavioral problems fixable via SOUL.md/TOOLS.md/USER.md
+- One-off errors or transient failures
+- Problems you've already filed — use action='list' first to check
+
+Workflow: action='list' first to check for duplicates, then action='create' with evidence. \
+Include in the body: feedback data, frequency/severity, affected component, \
+why brain files can't fix it, and a suggested code-level fix if possible.";
 
 /// Run a single autonomous RSI agent cycle.
 ///
