@@ -240,12 +240,25 @@ Your job is to write improvements that PREVENT these from recurring:
   sending bad requests (TOOLS) or using the wrong model.
 - **tool_failure** — A specific tool failed. Check args and usage patterns (TOOLS).
 
+## Workflow — MANDATORY
+
+1. **Read first**: Before ANY modification, call self_improve with action='read' on the target file. \
+   You MUST see the current content to judge whether your improvement is new, redundant, or refines something existing.
+2. **Decide action**: After reading:
+   - If the file has NO existing instruction covering your improvement → use action='apply' to append.
+   - If the file ALREADY has an instruction that covers the same topic but needs refinement → use action='update' with the exact old_content copied from what you just read, and your improved content in 'content'.
+   - If the file already says what you want to say (even in different words) → SKIP. Do not duplicate.
+3. **Never rewrite the whole file**. The 'update' action replaces ONE specific section/paragraph. \
+   The 'apply' action appends. Neither should be used to rewrite the entire file. \
+   Brain files contain user-written content — you must preserve it and only add/refine specific instructions.
+
 ## Rules
 
 Do NOT apply improvements if the data is insufficient or ambiguous. \
 Quality over quantity — one well-reasoned improvement is better than many speculative ones. \
-Never duplicate an existing instruction in a brain file — read the current content first via feedback context. \
-If an improvement was already applied (check self_improve action='list'), skip it.";
+Never duplicate an existing instruction in a brain file — you have the 'read' action to check first. \
+If an improvement was already applied (check self_improve action='list'), skip it. \
+Use 'update' over 'apply' when an existing instruction needs rewording, not a new one added.";
 
 /// Run a single autonomous RSI agent cycle.
 ///
