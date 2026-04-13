@@ -459,7 +459,7 @@ fn build_single_qwen_provider(
     creds: QwenCredentials,
     qwen_config: &ProviderConfig,
 ) -> Arc<dyn Provider> {
-    build_qwen_provider_inner(creds, qwen_config, false)
+    build_qwen_provider_inner(creds, qwen_config, false, None)
 }
 
 /// Build a single Qwen OpenAI-compatible provider from credentials.
@@ -467,12 +467,20 @@ fn build_single_qwen_provider(
 /// When `for_rotation` is true, the provider uses `RetryConfig::qwen_rotation()`
 /// which disables retry-on-rate-limit — the `RotatingQwenProvider` handles 429s
 /// by switching accounts immediately instead of burning ~45s in backoff.
+///
+/// `rotation_index` is `Some(idx)` for rotation accounts so the background
+/// refresher persists tokens to `[[providers.qwen_accounts]][idx]` instead
+/// of the single-account `[providers.qwen]`.
 fn build_qwen_provider_inner(
     creds: QwenCredentials,
     qwen_config: &ProviderConfig,
     for_rotation: bool,
+    rotation_index: Option<usize>,
 ) -> Arc<dyn Provider> {
-    let manager = Arc::new(QwenTokenManager::new(creds));
+    let manager = Arc::new(match rotation_index {
+        Some(idx) => QwenTokenManager::new_rotation(creds, idx),
+        None => QwenTokenManager::new(creds),
+    });
     manager.clone().start_background_refresh();
 
     let mgr_for_token = manager.clone();
@@ -581,19 +589,22 @@ async fn try_create_qwen(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         let accounts_creds = QwenCredentials::from_account_configs(account_cfgs);
         if accounts_creds.len() >= 2 {
             let total = accounts_creds.len();
-            let valid_creds: Vec<_> = accounts_creds
+            // Preserve original indices so each account's background refresh
+            // persists to the correct slot in [[providers.qwen_accounts]].
+            let valid_indexed: Vec<(usize, QwenCredentials)> = accounts_creds
                 .iter()
-                .filter(|c| c.is_valid())
-                .cloned()
+                .enumerate()
+                .filter(|(_, c)| c.is_valid())
+                .map(|(i, c)| (i, c.clone()))
                 .collect();
-            let expired = total - valid_creds.len();
+            let expired = total - valid_indexed.len();
 
             if expired > 0 {
                 tracing::warn!(
                     "Qwen rotation: {} of {} accounts expired, {} still valid",
                     expired,
                     total,
-                    valid_creds.len()
+                    valid_indexed.len()
                 );
                 // Clear secrets for expired accounts in keys.toml but keep
                 // ALL accounts in config.toml so the user can re-auth later.
@@ -602,13 +613,12 @@ async fn try_create_qwen(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
                 }
             }
 
-            if valid_creds.len() >= 2 {
-                let usable_providers: Vec<Arc<dyn Provider>> = valid_creds
+            if valid_indexed.len() >= 2 {
+                let usable_providers: Vec<Arc<dyn Provider>> = valid_indexed
                     .into_iter()
-                    .enumerate()
-                    .map(|(i, creds)| {
-                        tracing::info!("  Qwen rotation account {} valid", i);
-                        build_qwen_provider_inner(creds, qwen_config, true)
+                    .map(|(original_idx, creds)| {
+                        tracing::info!("  Qwen rotation account {} valid", original_idx);
+                        build_qwen_provider_inner(creds, qwen_config, true, Some(original_idx))
                     })
                     .collect();
                 return Ok(Some(Arc::new(super::RotatingQwenProvider::new(
@@ -617,7 +627,7 @@ async fn try_create_qwen(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
             }
             tracing::warn!(
                 "Qwen rotation: only {} valid accounts (need ≥2) — falling to single-account path",
-                valid_creds.len()
+                valid_indexed.len()
             );
         }
     }

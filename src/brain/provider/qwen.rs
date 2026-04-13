@@ -301,6 +301,90 @@ impl QwenCredentials {
         cfgs.iter().filter_map(Self::from_provider_config).collect()
     }
 
+    /// Persist refreshed credentials to a specific slot in `[[providers.qwen_accounts]]`
+    /// in keys.toml. Used by rotation account background refresh so each account
+    /// updates its own slot instead of overwriting `[providers.qwen]`.
+    pub fn persist_to_account_slot(&self, index: usize) -> anyhow::Result<()> {
+        use crate::config::{daily_backup, keys_path};
+        use anyhow::Context;
+
+        let path = keys_path();
+        let mut doc: toml::Value = if path.exists() {
+            let content = std::fs::read_to_string(&path)?;
+            toml::from_str(&content).unwrap_or(toml::Value::Table(toml::map::Map::new()))
+        } else {
+            return Ok(()); // no keys.toml yet — nothing to update
+        };
+
+        let arr = doc
+            .get_mut("providers")
+            .and_then(|p| p.get_mut("qwen_accounts"))
+            .and_then(|a| a.as_array_mut())
+            .context("[[providers.qwen_accounts]] not found in keys.toml")?;
+
+        // Ensure the array is large enough
+        while arr.len() <= index {
+            arr.push(toml::Value::Table(toml::map::Map::new()));
+        }
+
+        let slot = arr[index]
+            .as_table_mut()
+            .context("qwen_accounts slot is not a table")?;
+        slot.insert(
+            "api_key".to_string(),
+            toml::Value::String(self.access_token.clone()),
+        );
+        slot.insert(
+            "refresh_token".to_string(),
+            toml::Value::String(self.refresh_token.clone()),
+        );
+
+        // Also update expiry_date in config.toml so the factory sees it's valid
+        daily_backup(&path, 7);
+        let toml_str = toml::to_string_pretty(&doc)?;
+        std::fs::write(&path, toml_str)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        }
+
+        // Update expiry_date in config.toml (metadata lives there)
+        Self::update_account_expiry_in_config(index, self.expiry_date)?;
+
+        tracing::debug!(
+            "Persisted refreshed Qwen rotation account {} to keys.toml",
+            index
+        );
+        Ok(())
+    }
+
+    /// Update expiry_date for a single rotation account slot in config.toml.
+    fn update_account_expiry_in_config(index: usize, expiry_date: u64) -> anyhow::Result<()> {
+        let path = crate::config::opencrabs_home().join("config.toml");
+        if !path.exists() {
+            return Ok(());
+        }
+        let content = std::fs::read_to_string(&path)?;
+        let mut doc: toml::Value =
+            toml::from_str(&content).unwrap_or(toml::Value::Table(toml::map::Map::new()));
+
+        if let Some(arr) = doc
+            .get_mut("providers")
+            .and_then(|p| p.get_mut("qwen_accounts"))
+            .and_then(|a| a.as_array_mut())
+            && let Some(slot) = arr.get_mut(index).and_then(|s| s.as_table_mut())
+        {
+            slot.insert(
+                "expiry_date".to_string(),
+                toml::Value::Integer(expiry_date as i64),
+            );
+            let toml_str = toml::to_string_pretty(&doc)?;
+            std::fs::write(&path, toml_str)?;
+        }
+        Ok(())
+    }
+
     /// Clear secrets from keys.toml for expired accounts only.
     /// Config.toml is NOT touched — all accounts remain listed so the user
     /// can re-auth expired ones later via the UI.
@@ -961,6 +1045,10 @@ pub struct QwenTokenManager {
     /// Last observed mtime (seconds since epoch) of `~/.qwen/oauth_creds.json`.
     /// Used by the background task to detect out-of-band refreshes by qwen-cli.
     last_cli_mtime: RwLock<u64>,
+    /// If `Some(idx)`, this manager belongs to rotation account `idx` and
+    /// persists refreshed tokens to `[[providers.qwen_accounts]][idx]`
+    /// instead of the single-account `[providers.qwen]`.
+    account_index: Option<usize>,
 }
 
 impl QwenTokenManager {
@@ -968,6 +1056,16 @@ impl QwenTokenManager {
         Self {
             state: RwLock::new(creds),
             last_cli_mtime: RwLock::new(QwenCredentials::qwen_cli_mtime()),
+            account_index: None,
+        }
+    }
+
+    /// Create a token manager for a rotation account at the given index.
+    pub fn new_rotation(creds: QwenCredentials, index: usize) -> Self {
+        Self {
+            state: RwLock::new(creds),
+            last_cli_mtime: RwLock::new(QwenCredentials::qwen_cli_mtime()),
+            account_index: Some(index),
         }
     }
 
@@ -1001,13 +1099,42 @@ impl QwenTokenManager {
             })
     }
 
+    /// Persist refreshed credentials to the correct location based on whether
+    /// this is a single-account or rotation account manager.
+    fn persist_refreshed(&self, creds: &QwenCredentials) {
+        match self.account_index {
+            Some(idx) => {
+                if let Err(e) = creds.persist_to_account_slot(idx) {
+                    tracing::warn!(
+                        "Failed to persist refreshed Qwen rotation account {}: {}",
+                        idx,
+                        e
+                    );
+                }
+                // Rotation accounts do NOT touch ~/.qwen/oauth_creds.json —
+                // that file is single-account territory shared with qwen-cli.
+            }
+            None => {
+                if let Err(e) = creds.persist_to_keys() {
+                    tracing::warn!("Failed to persist refreshed Qwen credentials: {}", e);
+                }
+                // Write back to ~/.qwen/oauth_creds.json so qwen-cli sees the
+                // new token too. Keeps the two clients from fighting over refreshes.
+                creds.write_back_to_qwen_cli();
+            }
+        }
+    }
+
     /// Refresh the token if it's about to expire. Persists the new creds on success.
     pub async fn ensure_fresh(&self) -> anyhow::Result<()> {
         // First, check if qwen-cli has rotated the token on disk. If its
         // mtime moved forward, import the new creds before deciding whether
         // we still need to refresh — avoids burning our refresh_token when
         // qwen-cli already did the work.
-        self.reload_from_qwen_cli_if_changed();
+        // (Only for single-account — rotation accounts don't share the cli file.)
+        if self.account_index.is_none() {
+            self.reload_from_qwen_cli_if_changed();
+        }
 
         let needs_refresh = {
             let c = self
@@ -1021,19 +1148,19 @@ impl QwenTokenManager {
         }
         let snap = self.snapshot();
         let new_creds = refresh_credentials(&snap).await?;
-        if let Err(e) = new_creds.persist_to_keys() {
-            tracing::warn!("Failed to persist refreshed Qwen credentials: {}", e);
-        }
-        // Write back to ~/.qwen/oauth_creds.json so qwen-cli sees the new
-        // token too. Keeps the two clients from fighting over refreshes.
-        new_creds.write_back_to_qwen_cli();
+        self.persist_refreshed(&new_creds);
         if let Ok(mut w) = self.state.write() {
             *w = new_creds;
         }
-        if let Ok(mut m) = self.last_cli_mtime.write() {
+        if self.account_index.is_none()
+            && let Ok(mut m) = self.last_cli_mtime.write()
+        {
             *m = QwenCredentials::qwen_cli_mtime();
         }
-        tracing::debug!("Qwen access token refreshed");
+        tracing::debug!(
+            "Qwen access token refreshed (account: {:?})",
+            self.account_index
+        );
         Ok(())
     }
 
@@ -1041,20 +1168,20 @@ impl QwenTokenManager {
     pub async fn force_refresh(&self) -> anyhow::Result<()> {
         // Check qwen-cli's file first — if it rotated the token since we
         // last looked, we can avoid burning our own refresh quota.
-        if self.reload_from_qwen_cli_if_changed() {
+        // (Only for single-account — rotation accounts don't share the cli file.)
+        if self.account_index.is_none() && self.reload_from_qwen_cli_if_changed() {
             tracing::info!("Qwen: picked up rotated token from qwen-cli — no refresh needed");
             return Ok(());
         }
         let snap = self.snapshot();
         let new_creds = refresh_credentials(&snap).await?;
-        if let Err(e) = new_creds.persist_to_keys() {
-            tracing::warn!("Failed to persist force-refreshed Qwen credentials: {}", e);
-        }
-        new_creds.write_back_to_qwen_cli();
+        self.persist_refreshed(&new_creds);
         if let Ok(mut w) = self.state.write() {
             *w = new_creds;
         }
-        if let Ok(mut m) = self.last_cli_mtime.write() {
+        if self.account_index.is_none()
+            && let Ok(mut m) = self.last_cli_mtime.write()
+        {
             *m = QwenCredentials::qwen_cli_mtime();
         }
         Ok(())
@@ -1101,10 +1228,14 @@ impl QwenTokenManager {
     /// it expires AND polls `~/.qwen/oauth_creds.json` every 30s for
     /// out-of-band updates from qwen-cli.
     pub fn start_background_refresh(self: Arc<Self>) {
+        let acct_label = match self.account_index {
+            Some(idx) => format!("rotation-{}", idx),
+            None => "single".to_string(),
+        };
         tokio::spawn(async move {
             // Initial check on startup
             if let Err(e) = self.ensure_fresh().await {
-                tracing::warn!("Qwen initial token refresh failed: {}", e);
+                tracing::warn!("Qwen [{}] initial token refresh failed: {}", acct_label, e);
             }
 
             loop {
@@ -1125,9 +1256,10 @@ impl QwenTokenManager {
                 let tick_secs = deadline_secs.min(30);
                 tokio::time::sleep(Duration::from_secs(tick_secs)).await;
 
-                // Out-of-band pickup: if qwen-cli rotated its token, import
-                // it instead of burning our own refresh.
-                if self.reload_from_qwen_cli_if_changed() {
+                // Out-of-band pickup from qwen-cli — only for single-account.
+                // Rotation accounts each have their own refresh_token and must
+                // not read/write ~/.qwen/oauth_creds.json.
+                if self.account_index.is_none() && self.reload_from_qwen_cli_if_changed() {
                     continue;
                 }
 
@@ -1139,14 +1271,29 @@ impl QwenTokenManager {
                 if should_refresh && let Err(e) = self.ensure_fresh().await {
                     let msg = e.to_string();
                     if msg.contains("HTTP 400") {
-                        tracing::error!(
-                            "Qwen refresh_token permanently dead — wiping credentials. \
-                             Run /onboard:provider to re-authenticate."
-                        );
-                        QwenCredentials::wipe_dead_credentials();
+                        if self.account_index.is_some() {
+                            // Rotation account: just stop refreshing this account.
+                            // The factory will see it as expired on next rebuild.
+                            // Do NOT wipe single-account creds or qwen-cli file.
+                            tracing::error!(
+                                "Qwen [{}] refresh_token permanently dead — \
+                                 stopping background refresh for this account.",
+                                acct_label
+                            );
+                        } else {
+                            tracing::error!(
+                                "Qwen refresh_token permanently dead — wiping credentials. \
+                                 Run /onboard:provider to re-authenticate."
+                            );
+                            QwenCredentials::wipe_dead_credentials();
+                        }
                         break;
                     }
-                    tracing::warn!("Qwen background token refresh failed: {}", e);
+                    tracing::warn!(
+                        "Qwen [{}] background token refresh failed: {}",
+                        acct_label,
+                        e
+                    );
                     tokio::time::sleep(Duration::from_secs(30)).await;
                 }
             }
