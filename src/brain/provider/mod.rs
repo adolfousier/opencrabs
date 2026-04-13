@@ -27,6 +27,7 @@ pub mod gemini;
 pub mod opencode_cli;
 pub mod qwen;
 pub mod qwen_code;
+pub(crate) mod nonstream_compat;
 pub mod rotating_qwen;
 
 pub use anthropic::AnthropicProvider;

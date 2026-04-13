@@ -22,6 +22,7 @@ pub mod fallback_vision_test;
 pub mod file_extract_test;
 pub mod image_util_test;
 //pub mod integration_test;
+pub mod nonstream_compat_test;
 pub mod onboarding_brain_test;
 pub mod onboarding_field_nav_test;
 pub mod onboarding_keys_test;
