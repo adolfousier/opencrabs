@@ -157,8 +157,7 @@ pub(crate) fn synthesize_stream_events(
                 .as_ref()
                 .and_then(|f| f.arguments.clone())
                 .unwrap_or_default();
-            let input =
-                serde_json::from_str(&args).unwrap_or_else(|_| serde_json::json!({}));
+            let input = serde_json::from_str(&args).unwrap_or_else(|_| serde_json::json!({}));
             let tool_index = tc.index + 1; // offset by 1 to avoid collision with text at 0
 
             tracing::info!(
@@ -172,9 +171,7 @@ pub(crate) fn synthesize_stream_events(
                 index: tool_index,
                 content_block: ContentBlock::ToolUse { id, name, input },
             }));
-            events.push(Ok(StreamEvent::ContentBlockStop {
-                index: tool_index,
-            }));
+            events.push(Ok(StreamEvent::ContentBlockStop { index: tool_index }));
         }
     }
 
@@ -211,4 +208,3 @@ pub(crate) fn synthesize_stream_events(
 
     Some(events)
 }
-

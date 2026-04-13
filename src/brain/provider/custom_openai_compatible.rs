@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Custom OpenAI-Compatible Provider Implementation
 //!
 //! Implements the Provider trait for any OpenAI-compatible API, including:
@@ -1428,20 +1429,6 @@ impl Provider for OpenAIProvider {
         let message_count = request.messages.len();
         let retry_config = self.retry_config(&model);
 
-        // For OpenRouter, use Anthropic format with cache_control for prompt caching.
-        // For all other providers, use standard OpenAI format.
-        if self.is_openrouter() {
-            let anthropic_request = self.to_anthropic_or_request(request.clone());
-            return self
-                .complete_with_anthropic_format(
-                    model,
-                    message_count,
-                    anthropic_request,
-                    retry_config,
-                )
-                .await;
-        }
-
         let mut openai_request = self.to_openai_request(request);
 
         let tool_count = openai_request.tools.as_ref().map(|t| t.len()).unwrap_or(0);
@@ -1603,14 +1590,6 @@ impl Provider for OpenAIProvider {
             message_count,
             self.base_url
         );
-
-        // For OpenRouter, use Anthropic format with cache_control for prompt caching.
-        if self.is_openrouter() {
-            let anthropic_request = self.to_anthropic_or_request(request);
-            return self
-                .stream_with_anthropic_format(model, message_count, anthropic_request)
-                .await;
-        }
 
         let mut openai_request = self.to_openai_request(request);
         openai_request.stream = Some(true);
@@ -2362,6 +2341,22 @@ impl Provider for OpenAIProvider {
                                     }
                                 }
                             }
+                        }
+
+                        // ── Non-streaming fallback ──────────────────
+                        // Some upstreams (OpenRouter Trinity, Venice) return a
+                        // plain JSON blob instead of SSE. Detect and synthesize
+                        // the same stream events the SSE parser would produce.
+                        if events.is_empty()
+                            && !st.emitted_message_start
+                            && super::nonstream_compat::is_nonstream_response(&buf)
+                            && let Some(synth) = super::nonstream_compat::synthesize_stream_events(&buf)
+                        {
+                            st.emitted_message_start = true;
+                            st.emitted_content_start = true;
+                            st.emitted_content_stop = true;
+                            buf.clear();
+                            events.extend(synth);
                         }
 
                         if events.is_empty() {
