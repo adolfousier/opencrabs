@@ -244,7 +244,11 @@ impl Tool for SelfImproveTool {
                     description,
                     chrono::Utc::now().format("%Y-%m-%d %H:%M UTC"),
                     target_file,
-                    if rationale.is_empty() { "(none)" } else { rationale },
+                    if rationale.is_empty() {
+                        "(none)"
+                    } else {
+                        rationale
+                    },
                 );
                 let improvements_path = home.join("rsi").join("improvements.md");
                 if let Ok(mut f) = std::fs::OpenOptions::new()
