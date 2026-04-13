@@ -971,6 +971,11 @@ pub struct ProviderConfig {
     /// Currently only honoured by the native Qwen provider.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable_thinking: Option<bool>,
+
+    /// Display name / alias for this account (e.g. "Personal", "Work").
+    /// Only used in `[[providers.qwen_accounts]]` entries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 fn default_enabled() -> bool {
@@ -1392,11 +1397,38 @@ fn merge_provider_keys(mut base: ProviderConfigs, keys: ProviderConfigs) -> Prov
             }
         }
     }
-    // Merge qwen rotation accounts (entire array from keys.toml takes precedence)
-    if let Some(accounts) = keys.qwen_accounts
-        && !accounts.is_empty()
-    {
-        base.qwen_accounts = Some(accounts);
+    // Merge qwen rotation accounts: config.toml has metadata (name, expiry_date,
+    // resource_url), keys.toml has secrets (api_key, refresh_token). Merge per-index.
+    match (&mut base.qwen_accounts, keys.qwen_accounts) {
+        (Some(base_accounts), Some(key_accounts)) if !key_accounts.is_empty() => {
+            // Per-index merge: overlay secrets from keys.toml onto metadata from config.toml
+            for (i, key_cfg) in key_accounts.into_iter().enumerate() {
+                if i < base_accounts.len() {
+                    // Merge secrets into existing config entry
+                    if key_cfg.api_key.is_some() {
+                        base_accounts[i].api_key = key_cfg.api_key;
+                    }
+                    if key_cfg.refresh_token.is_some() {
+                        base_accounts[i].refresh_token = key_cfg.refresh_token;
+                    }
+                    // keys.toml may also have expiry_date/resource_url from pre-migration
+                    if key_cfg.expiry_date.is_some() && base_accounts[i].expiry_date.is_none() {
+                        base_accounts[i].expiry_date = key_cfg.expiry_date;
+                    }
+                    if key_cfg.resource_url.is_some() && base_accounts[i].resource_url.is_none() {
+                        base_accounts[i].resource_url = key_cfg.resource_url;
+                    }
+                } else {
+                    // Legacy: keys.toml has more entries than config.toml (pre-migration)
+                    base_accounts.push(key_cfg);
+                }
+            }
+        }
+        (None, Some(key_accounts)) if !key_accounts.is_empty() => {
+            // Legacy: config.toml has no accounts, keys.toml has all (pre-migration)
+            base.qwen_accounts = Some(key_accounts);
+        }
+        _ => {}
     }
     if let Some(custom_keys) = keys.custom
         && let Some(ref mut base_customs) = base.custom

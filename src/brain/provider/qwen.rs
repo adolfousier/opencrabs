@@ -168,7 +168,28 @@ impl QwenCredentials {
     /// and `~/.qwen/oauth_creds.json`. Called when token is expired so stale
     /// creds don't linger. Rotation accounts are handled separately via
     /// `persist_all_accounts` with only the valid subset.
+    ///
+    /// Idempotent: skips write if there are no creds to remove. Uses a static
+    /// guard to prevent multiple threads racing to wipe simultaneously.
     pub fn wipe_dead_credentials() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static WIPE_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+
+        // Prevent concurrent wipe races (multiple background threads)
+        if WIPE_IN_PROGRESS
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return;
+        }
+        struct WipeGuard;
+        impl Drop for WipeGuard {
+            fn drop(&mut self) {
+                WIPE_IN_PROGRESS.store(false, Ordering::SeqCst);
+            }
+        }
+        let _guard = WipeGuard;
+
         if let Ok(path) = std::panic::catch_unwind(crate::config::keys_path)
             && path.exists()
             && let Ok(raw) = std::fs::read_to_string(&path)
@@ -180,11 +201,11 @@ impl QwenCredentials {
                 .and_then(|p| p.get_mut("qwen"))
                 .and_then(|q| q.as_table_mut())
             {
-                qwen.remove("api_key");
-                qwen.remove("refresh_token");
-                qwen.remove("expiry_date");
-                qwen.remove("resource_url");
-                changed = true;
+                let had_key = qwen.remove("api_key").is_some();
+                let had_refresh = qwen.remove("refresh_token").is_some();
+                let had_expiry = qwen.remove("expiry_date").is_some();
+                let had_url = qwen.remove("resource_url").is_some();
+                changed = had_key || had_refresh || had_expiry || had_url;
             }
             if changed {
                 if let Ok(out) = toml::to_string_pretty(&doc) {
@@ -280,15 +301,25 @@ impl QwenCredentials {
         cfgs.iter().filter_map(Self::from_provider_config).collect()
     }
 
-    /// Persist multiple rotation accounts to `keys.toml` under
-    /// `[[providers.qwen_accounts]]`. Each entry gets `api_key`,
-    /// `refresh_token`, `expiry_date`, and `resource_url`.
+    /// Persist multiple rotation accounts with proper separation:
+    /// - **keys.toml**: secrets only (`api_key`, `refresh_token`)
+    /// - **config.toml**: metadata (`name`, `expiry_date`, `resource_url`)
     pub fn persist_all_accounts(accounts: &[Self]) -> anyhow::Result<()> {
+        Self::persist_accounts_keys(accounts)?;
+        Self::persist_accounts_config(accounts)?;
+        tracing::debug!(
+            "Persisted {} Qwen rotation accounts (keys.toml + config.toml)",
+            accounts.len()
+        );
+        Ok(())
+    }
+
+    /// Write secrets only (`api_key`, `refresh_token`) to keys.toml.
+    fn persist_accounts_keys(accounts: &[Self]) -> anyhow::Result<()> {
         use crate::config::{daily_backup, keys_path};
         use anyhow::Context;
 
         let path = keys_path();
-
         let mut doc: toml::Value = if path.exists() {
             let content = std::fs::read_to_string(&path)?;
             toml::from_str(&content).unwrap_or(toml::Value::Table(toml::map::Map::new()))
@@ -305,7 +336,6 @@ impl QwenCredentials {
             .as_table_mut()
             .context("[providers] is not a table")?;
 
-        // Build the TOML array of tables
         let arr: Vec<toml::Value> = accounts
             .iter()
             .map(|a| {
@@ -318,16 +348,6 @@ impl QwenCredentials {
                     "refresh_token".to_string(),
                     toml::Value::String(a.refresh_token.clone()),
                 );
-                tbl.insert(
-                    "expiry_date".to_string(),
-                    toml::Value::Integer(a.expiry_date as i64),
-                );
-                if !a.resource_url.is_empty() {
-                    tbl.insert(
-                        "resource_url".to_string(),
-                        toml::Value::String(a.resource_url.clone()),
-                    );
-                }
                 toml::Value::Table(tbl)
             })
             .collect();
@@ -345,11 +365,187 @@ impl QwenCredentials {
             use std::os::unix::fs::PermissionsExt;
             let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
         }
-        tracing::debug!(
-            "Persisted {} Qwen rotation accounts to keys.toml",
-            accounts.len()
-        );
         Ok(())
+    }
+
+    /// Write metadata (`name`, `expiry_date`, `resource_url`) to config.toml.
+    fn persist_accounts_config(accounts: &[Self]) -> anyhow::Result<()> {
+        let path = crate::config::opencrabs_home().join("config.toml");
+        let mut doc: toml::Value = if path.exists() {
+            let content = std::fs::read_to_string(&path)?;
+            toml::from_str(&content).unwrap_or(toml::Value::Table(toml::map::Map::new()))
+        } else {
+            toml::Value::Table(toml::map::Map::new())
+        };
+
+        let root = doc
+            .as_table_mut()
+            .ok_or_else(|| anyhow::anyhow!("config.toml root is not a table"))?;
+        let providers = root
+            .entry("providers".to_string())
+            .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+            .as_table_mut()
+            .ok_or_else(|| anyhow::anyhow!("[providers] is not a table"))?;
+
+        let arr: Vec<toml::Value> = accounts
+            .iter()
+            .enumerate()
+            .map(|(i, a)| {
+                let mut tbl = toml::map::Map::new();
+                tbl.insert(
+                    "name".to_string(),
+                    toml::Value::String(format!("Account {}", i + 1)),
+                );
+                tbl.insert(
+                    "expiry_date".to_string(),
+                    toml::Value::Integer(a.expiry_date as i64),
+                );
+                if !a.resource_url.is_empty() {
+                    tbl.insert(
+                        "resource_url".to_string(),
+                        toml::Value::String(a.resource_url.clone()),
+                    );
+                }
+                toml::Value::Table(tbl)
+            })
+            .collect();
+
+        providers.insert("qwen_accounts".to_string(), toml::Value::Array(arr));
+
+        let toml_str = toml::to_string_pretty(&doc)?;
+        std::fs::write(&path, toml_str)?;
+        Ok(())
+    }
+
+    /// Migrate legacy keys.toml `[[providers.qwen_accounts]]` that had
+    /// everything (secrets + metadata) into the split format:
+    /// - Move `expiry_date`, `resource_url` to config.toml, add `name`
+    /// - Keep only `api_key`, `refresh_token` in keys.toml
+    ///
+    /// Called once at startup. No-op if config.toml already has the entries.
+    pub fn migrate_accounts_split() {
+        let keys_path = crate::config::keys_path();
+        let config_path = crate::config::opencrabs_home().join("config.toml");
+
+        let keys_raw = match std::fs::read_to_string(&keys_path) {
+            Ok(r) => r,
+            Err(_) => return,
+        };
+        let mut keys_doc: toml::Value = match keys_raw.parse() {
+            Ok(d) => d,
+            Err(_) => return,
+        };
+
+        // Check if keys.toml has qwen_accounts with expiry_date (pre-migration)
+        let needs_migration = keys_doc
+            .get("providers")
+            .and_then(|p| p.get("qwen_accounts"))
+            .and_then(|a| a.as_array())
+            .is_some_and(|arr| arr.iter().any(|entry| entry.get("expiry_date").is_some()));
+
+        if !needs_migration {
+            return;
+        }
+
+        // Check if config.toml already has qwen_accounts (already migrated)
+        let config_raw = std::fs::read_to_string(&config_path).unwrap_or_default();
+        let config_doc: toml::Value = config_raw
+            .parse()
+            .unwrap_or(toml::Value::Table(toml::map::Map::new()));
+        let config_has_accounts = config_doc
+            .get("providers")
+            .and_then(|p| p.get("qwen_accounts"))
+            .and_then(|a| a.as_array())
+            .is_some_and(|arr| !arr.is_empty());
+
+        if config_has_accounts {
+            return;
+        }
+
+        tracing::info!(
+            "Migrating Qwen rotation accounts: splitting keys.toml -> config.toml + keys.toml"
+        );
+
+        let accounts = keys_doc
+            .get("providers")
+            .and_then(|p| p.get("qwen_accounts"))
+            .and_then(|a| a.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        // Build config.toml entries (metadata only)
+        let config_entries: Vec<toml::Value> = accounts
+            .iter()
+            .enumerate()
+            .map(|(i, entry)| {
+                let mut tbl = toml::map::Map::new();
+                tbl.insert(
+                    "name".to_string(),
+                    toml::Value::String(format!("Account {}", i + 1)),
+                );
+                if let Some(exp) = entry.get("expiry_date") {
+                    tbl.insert("expiry_date".to_string(), exp.clone());
+                }
+                if let Some(url) = entry.get("resource_url") {
+                    tbl.insert("resource_url".to_string(), url.clone());
+                }
+                toml::Value::Table(tbl)
+            })
+            .collect();
+
+        // Write config.toml entries
+        let mut cfg_doc: toml::Value = config_raw
+            .parse()
+            .unwrap_or(toml::Value::Table(toml::map::Map::new()));
+        if let Some(root) = cfg_doc.as_table_mut() {
+            let providers = root
+                .entry("providers".to_string())
+                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+            if let Some(p) = providers.as_table_mut() {
+                p.insert(
+                    "qwen_accounts".to_string(),
+                    toml::Value::Array(config_entries),
+                );
+            }
+        }
+        if let Ok(out) = toml::to_string_pretty(&cfg_doc) {
+            let _ = std::fs::write(&config_path, out);
+        }
+
+        // Strip metadata from keys.toml (keep only api_key + refresh_token)
+        let keys_entries: Vec<toml::Value> = accounts
+            .iter()
+            .filter_map(|entry| {
+                let mut tbl = toml::map::Map::new();
+                if let Some(key) = entry.get("api_key") {
+                    tbl.insert("api_key".to_string(), key.clone());
+                }
+                if let Some(rt) = entry.get("refresh_token") {
+                    tbl.insert("refresh_token".to_string(), rt.clone());
+                }
+                if tbl.is_empty() {
+                    None
+                } else {
+                    Some(toml::Value::Table(tbl))
+                }
+            })
+            .collect();
+
+        if let Some(providers) = keys_doc
+            .as_table_mut()
+            .and_then(|r| r.get_mut("providers"))
+            .and_then(|p| p.as_table_mut())
+        {
+            providers.insert(
+                "qwen_accounts".to_string(),
+                toml::Value::Array(keys_entries),
+            );
+        }
+        if let Ok(out) = toml::to_string_pretty(&keys_doc) {
+            let _ = std::fs::write(&keys_path, out);
+        }
+
+        tracing::info!("Qwen rotation account migration complete");
     }
 
     /// True if the access_token is still valid (with the 30s safety buffer).
