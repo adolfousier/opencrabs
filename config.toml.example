@@ -166,6 +166,7 @@ model = "gpt-4o-mini-tts" # TTS model
 # Priority: subagent_provider > session's active provider.
 # Useful for routing sub-agents to a cheaper/faster model while keeping the main session on a premium one.
 [agent]
+# context_limit = 200000  # Context window in tokens (default: 200000)
 # subagent_provider = "zhipu"
 # subagent_model = "GLM 5"
 

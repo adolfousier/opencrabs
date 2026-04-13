@@ -85,8 +85,13 @@ impl AgentService {
         cancel_token: Option<&tokio_util::sync::CancellationToken>,
         progress_callback: &Option<ProgressCallback>,
     ) -> Option<String> {
-        let tool_overhead = self.actual_tool_schema_tokens();
-        let effective_max = context.max_tokens.saturating_sub(tool_overhead);
+        // Use the full context window as the budget. Tool schemas are sent
+        // alongside messages but the provider's context_limit already
+        // represents the total window (messages + tools + system). Subtracting
+        // tool overhead here was wrong — it shrank the effective budget by
+        // ~50k tokens and triggered emergency truncation at 140k/200k (70%
+        // real usage) instead of letting the conversation use the full window.
+        let effective_max = context.max_tokens;
         let usage_pct = if effective_max > 0 {
             (context.token_count as f64 / effective_max as f64) * 100.0
         } else {
@@ -94,10 +99,9 @@ impl AgentService {
         };
 
         tracing::debug!(
-            "Context budget: {} msg tokens / {} effective max ({} tool-schema overhead) = {:.1}%",
+            "Context budget: {} tokens / {} max = {:.1}%",
             context.token_count,
             effective_max,
-            tool_overhead,
             usage_pct,
         );
 
@@ -121,10 +125,11 @@ impl AgentService {
                     session_id,
                     ProgressEvent::SelfHealingAlert {
                         message: format!(
-                            "⚠️ Emergency truncation: context hit {:.0}% ({:.0} tokens). \
-                             Oldest messages were dropped to bring usage down to ~75%. \
-                             Full history is still searchable in the database.",
-                            usage_pct, context.token_count as f64
+                            "⚠️ Emergency truncation: context hit {:.0}% ({:.0}k / {:.0}k tokens). \
+                             Oldest messages dropped to ~75%. History is still in the database.",
+                            usage_pct,
+                            context.token_count as f64 / 1000.0,
+                            effective_max as f64 / 1000.0,
                         ),
                     },
                 );
@@ -2029,12 +2034,7 @@ impl AgentService {
                         session_id,
                         "phantom_tool_call",
                         "self_heal",
-                        Some(
-                            &iteration_text
-                                .chars()
-                                .take(300)
-                                .collect::<String>(),
-                        ),
+                        Some(&iteration_text.chars().take(300).collect::<String>()),
                     );
                     if let Some(ref cb) = progress_callback {
                         cb(
