@@ -24,10 +24,10 @@ pub mod custom_openai_compatible;
 pub mod factory;
 pub mod fallback;
 pub mod gemini;
+pub(crate) mod nonstream_compat;
 pub mod opencode_cli;
 pub mod qwen;
 pub mod qwen_code;
-pub(crate) mod nonstream_compat;
 pub mod rotating_qwen;
 
 pub use anthropic::AnthropicProvider;
