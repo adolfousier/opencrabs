@@ -1256,3 +1256,85 @@ pub fn strip_gaslighting_preamble(text: &str) -> Option<String> {
     let remainder = paragraphs[first_kept..].join("\n\n");
     Some(remainder.trim_start().to_string())
 }
+
+/// Detect "phantom tool calls" — the model narrates actions it claims to
+/// have performed but never actually executed any tool calls.
+///
+/// Returns `true` when the response text contains strong action-intent
+/// signals (modification verbs + file-path-like strings) suggesting the
+/// model believed it was making changes. The caller should inject a retry
+/// prompt so the model actually executes the tool calls on the next turn.
+///
+/// Deliberately conservative: requires BOTH an action verb AND a file
+/// path pattern to avoid false-positives on conversational responses.
+pub fn has_phantom_tool_intent(text: &str) -> bool {
+    let trimmed = text.trim();
+    // Short responses are usually direct answers, not phantom narrations
+    if trimmed.len() < 80 {
+        return false;
+    }
+    let lower = trimmed.to_lowercase();
+
+    // Signal 1: Action verbs that imply the model performed work
+    const ACTION_VERBS: &[&str] = &[
+        "now let me update",
+        "now let me fix",
+        "now let me modify",
+        "now let me create",
+        "now let me write",
+        "now let me edit",
+        "now let me add",
+        "now let me change",
+        "now let me replace",
+        "now let me remove",
+        "now let me delete",
+        "i'll update",
+        "i'll fix",
+        "i'll modify",
+        "i'll create",
+        "i'll write",
+        "i'll edit",
+        "i'll add",
+        "i'll change",
+        "i'll replace",
+        "let me update",
+        "let me fix",
+        "let me modify",
+        "let me create",
+        "let me write",
+        "let me edit",
+        "let me add",
+        "let me change",
+        "here's what changed",
+        "here's what's changed",
+        "here are the changes",
+        "changes applied",
+        "updated the file",
+        "updated the code",
+        "modified the file",
+        "fixed the file",
+        "fixed the issue",
+        "created the file",
+        "wrote the file",
+        "now update the",
+        "now fix the",
+    ];
+    let has_action = ACTION_VERBS.iter().any(|v| lower.contains(v));
+    if !has_action {
+        return false;
+    }
+
+    // Signal 2: File-path-like patterns (foo/bar.ext or foo.rs, foo.py, etc.)
+    // Must contain a slash-separated path or a recognizable source file extension.
+    use regex::Regex;
+    // Matches: src/foo/bar.rs, ./config.toml, docs/README.md, etc.
+    let path_re =
+        Regex::new(r"(?:^|[\s`(])(?:\./)?[a-zA-Z_][\w\-]*/[\w\-/]*\.\w{1,6}(?:[\s`),:;]|$)")
+            .unwrap();
+    // Matches: filename.rs, setup.sh, Dockerfile, Cargo.toml
+    let ext_re = Regex::new(
+        r"(?:^|[\s`(])[\w\-]+\.(?:rs|py|ts|tsx|js|jsx|go|sh|toml|yaml|yml|json|md|dockerfile)(?:[\s`),:;]|$)"
+    )
+    .unwrap();
+    path_re.is_match(&lower) || ext_re.is_match(trimmed)
+}

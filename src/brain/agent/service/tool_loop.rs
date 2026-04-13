@@ -645,6 +645,7 @@ impl AgentService {
         let mut recent_tool_calls: Vec<String> = Vec::new(); // Track tool calls to detect loops
         let mut stream_retry_count = 0u32; // Track consecutive stream drop retries
         const MAX_STREAM_RETRIES: u32 = 2; // Retry up to 2 times on dropped streams
+        let mut phantom_retry_used = false; // Single retry for phantom tool call detection
 
         // Ordered content segments for CLI providers — tracks text and tool markers
         // in the exact order they stream, so DB persistence preserves interleaving.
@@ -2008,6 +2009,52 @@ impl AgentService {
                         .create_message(session_id, "assistant".to_string(), String::new())
                         .await
                         .map_err(|e| AgentError::Database(e.to_string()))?;
+                    continue;
+                }
+
+                // ── Phantom tool call detection ──────────────────────────
+                // The model narrated actions (verbs + file paths) but never
+                // executed any tool calls. Inject a correction prompt and
+                // retry once so the model actually performs the work.
+                if !phantom_retry_used
+                    && !is_cli_provider
+                    && super::helpers::has_phantom_tool_intent(&iteration_text)
+                {
+                    phantom_retry_used = true;
+                    tracing::warn!(
+                        "Phantom tool call detected — model described actions without executing tools. \
+                         Injecting retry prompt."
+                    );
+                    self.record_provider_feedback(
+                        session_id,
+                        "phantom_tool_call",
+                        "self_heal",
+                        Some(
+                            &iteration_text
+                                .chars()
+                                .take(300)
+                                .collect::<String>(),
+                        ),
+                    );
+                    if let Some(ref cb) = progress_callback {
+                        cb(
+                            session_id,
+                            ProgressEvent::SelfHealingAlert {
+                                message: "Phantom tool calls detected — retrying with enforcement"
+                                    .into(),
+                            },
+                        );
+                    }
+                    // Add the narration as assistant context so the model sees
+                    // what it said, then inject a system correction.
+                    context.add_message(Message::assistant(iteration_text));
+                    context.add_message(Message::user(
+                        "[System: You described changes to files but did not execute any tool \
+                         calls. Your response contained action language and file paths but zero \
+                         tool_use blocks. Execute the actual tool calls NOW. Do not narrate — \
+                         call the tools.]"
+                            .to_string(),
+                    ));
                     continue;
                 }
 
