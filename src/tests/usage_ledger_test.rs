@@ -77,11 +77,23 @@ fn test_normalize_model_name() {
     assert_eq!(normalize_model_name("haiku"), "haiku-4-5");
     assert_eq!(normalize_model_name("opus-4-6"), "opus-4-6");
 
-    // Qwen normalization — all variants → canonical name
+    // Qwen 3.6 Plus normalization — all variants → canonical name
     assert_eq!(normalize_model_name("coder-model"), "qwen3.6-plus");
     assert_eq!(normalize_model_name("qwen-3.6-plus"), "qwen3.6-plus");
     assert_eq!(normalize_model_name("qwen3.6-plus"), "qwen3.6-plus");
     assert_eq!(normalize_model_name("qwen/qwen3.6-plus"), "qwen3.6-plus");
+    assert_eq!(normalize_model_name("qwen3.6-plus:free"), "qwen3.6-plus");
+    assert_eq!(normalize_model_name("qwen3.6-plus-free"), "qwen3.6-plus");
+    assert_eq!(normalize_model_name("qwen-3.6-plus-thinking"), "qwen3.6-plus");
+    assert_eq!(normalize_model_name("qwen3.6-plus-thinking"), "qwen3.6-plus");
+    assert_eq!(
+        normalize_model_name("qwen/qwen3.6-plus:free"),
+        "qwen3.6-plus"
+    );
+    assert_eq!(
+        normalize_model_name("opencode/qwen3.6-plus-free"),
+        "qwen3.6-plus"
+    );
     assert_eq!(normalize_model_name("qwen3.5-plus"), "qwen3.5-plus");
     assert_eq!(normalize_model_name("qwen-3.5-plus"), "qwen3.5-plus");
 

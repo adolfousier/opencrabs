@@ -23,10 +23,7 @@ pub struct ModelUsageStats {
 /// - OpenRouter/OpenCode prefixed: "openrouter/X", "opencode/X" → "X"
 pub(crate) fn normalize_model_name(model: &str) -> String {
     // Strip provider prefixes (openrouter/model, opencode/model, qwen/model, etc.)
-    let stripped = model
-        .split('/')
-        .next_back()
-        .unwrap_or(model);
+    let stripped = model.split('/').next_back().unwrap_or(model);
 
     // Claude normalization
     let stripped = stripped.strip_prefix("claude-").unwrap_or(stripped);
@@ -37,8 +34,14 @@ pub(crate) fn normalize_model_name(model: &str) -> String {
         _ => {}
     }
 
-    // Qwen normalization: coder-model, qwen3.6-plus, qwen-3.6-plus → qwen3.6-plus
-    match stripped {
+    // Qwen 3.6 Plus normalization: all variants (free, thinking, :free suffix) → qwen3.6-plus
+    // Strip `:free` suffix and `-free`/`-thinking` suffixes before matching
+    let qwen_stripped = stripped
+        .strip_suffix(":free")
+        .or_else(|| stripped.strip_suffix("-free"))
+        .or_else(|| stripped.strip_suffix("-thinking"))
+        .unwrap_or(stripped);
+    match qwen_stripped {
         "coder-model" | "qwen-3.6-plus" | "qwen3.6-plus" => {
             return "qwen3.6-plus".to_string();
         }
@@ -114,22 +117,34 @@ impl UsageLedgerRepository {
             .interact(|conn| {
                 // Normalize model names in SQL to merge duplicates:
                 // "claude-opus-4-6" → "opus-4-6", bare "opus" → "opus-4-6", etc.
+                // Two-pass normalization via nested CASE:
+                // 1. Strip provider prefix (openrouter/, opencode/, qwen/)
+                // 2. Match known model families to canonical names
                 let mut stmt = conn.prepare_cached(
-                    "SELECT \
+                    "WITH stripped AS ( \
+                       SELECT *, \
+                         CASE WHEN model LIKE '%/%' \
+                           THEN SUBSTR(model, INSTR(model, '/') + 1) \
+                           ELSE model \
+                         END AS m1 \
+                       FROM usage_ledger WHERE model != '' \
+                     ) \
+                     SELECT \
                        CASE \
-                         WHEN model IN ('opus', 'claude-opus-4-6') THEN 'opus-4-6' \
-                         WHEN model IN ('sonnet', 'claude-sonnet-4-6') THEN 'sonnet-4-6' \
-                         WHEN model IN ('haiku', 'claude-haiku-4-5-20251001') THEN 'haiku-4-5' \
-                         WHEN model LIKE 'claude-%' THEN REPLACE(model, 'claude-', '') \
-                         WHEN model IN ('coder-model', 'qwen-3.6-plus', 'qwen/qwen3.6-plus') THEN 'qwen3.6-plus' \
-                         WHEN model IN ('qwen-3.5-plus', 'qwen/qwen3.5-plus') THEN 'qwen3.5-plus' \
-                         WHEN model LIKE '%/%' THEN SUBSTR(model, INSTR(model, '/') + 1) \
-                         ELSE model \
+                         WHEN m1 IN ('opus', 'claude-opus-4-6') THEN 'opus-4-6' \
+                         WHEN m1 IN ('sonnet', 'claude-sonnet-4-6') THEN 'sonnet-4-6' \
+                         WHEN m1 IN ('haiku', 'claude-haiku-4-5-20251001') THEN 'haiku-4-5' \
+                         WHEN m1 LIKE 'claude-%' THEN REPLACE(m1, 'claude-', '') \
+                         WHEN m1 IN ('coder-model', 'qwen3.6-plus', 'qwen-3.6-plus', \
+                              'qwen3.6-plus:free', 'qwen3.6-plus-free', 'qwen-3.6-plus-free', \
+                              'qwen-3.6-plus-thinking', 'qwen3.6-plus-thinking') THEN 'qwen3.6-plus' \
+                         WHEN m1 IN ('qwen3.5-plus', 'qwen-3.5-plus') THEN 'qwen3.5-plus' \
+                         ELSE m1 \
                        END AS normalized_model, \
                        COALESCE(SUM(token_count), 0), \
                        COALESCE(SUM(cost), 0.0), \
                        COUNT(*) \
-                     FROM usage_ledger WHERE model != '' \
+                     FROM stripped \
                      GROUP BY normalized_model \
                      ORDER BY SUM(cost) DESC",
                 )?;
