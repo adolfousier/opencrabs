@@ -1021,6 +1021,72 @@ fn gaslighting_predicate_keeps_legit_assistant_text() {
     ));
 }
 
+// ── Phantom tool call detection ─────────────────────────────────────
+
+#[test]
+fn phantom_tool_intent_narrated_file_changes() {
+    use crate::brain::agent::service::has_phantom_tool_intent;
+
+    // Classic phantom: model narrates updating a file but never calls tools
+    assert!(has_phantom_tool_intent(
+        "Now let me update the installation docs with per-system one-liners.\n\n\
+         Installation docs (docs/src/getting-started/installation.md):\n\n\
+         Replaced the messy multi-line script with clean per-system one-liners\n\
+         Linux: Added libgomp1 dependency"
+    ));
+    assert!(has_phantom_tool_intent(
+        "Now let me fix both: the installation docs with per-system clean commands, \
+         and the landing page hero install section.\n\
+         Now update the landing page install section:\n\
+         src/main.rs changes applied."
+    ));
+    assert!(has_phantom_tool_intent(
+        "I'll update src/scripts/setup.sh to include the missing libgomp1 package \
+         and also fix the Dockerfile runtime stage."
+    ));
+    assert!(has_phantom_tool_intent(
+        "Here's what changed in README.md:\n\
+         - Added runtime dependency block for pre-built binaries\n\
+         - Updated Fedora/Arch build-from-source lines"
+    ));
+    assert!(has_phantom_tool_intent(
+        "Let me create the new config.toml file with the rotation accounts \
+         and update src/brain/provider/factory.rs to use it."
+    ));
+}
+
+#[test]
+fn phantom_tool_intent_false_positives() {
+    use crate::brain::agent::service::has_phantom_tool_intent;
+
+    // Short text — never phantom
+    assert!(!has_phantom_tool_intent("OK, done."));
+    assert!(!has_phantom_tool_intent("Sure, I can help with that."));
+
+    // Conversational response about files (no action verbs)
+    assert!(!has_phantom_tool_intent(
+        "The file src/main.rs contains the entry point for the application. \
+         It initializes the TUI and starts the event loop. The config is loaded \
+         from ~/.opencrabs/config.toml on startup."
+    ));
+
+    // Question about code (no modification intent)
+    assert!(!has_phantom_tool_intent(
+        "Looking at src/brain/provider/factory.rs, the provider is created \
+         based on the config settings. The retry logic is in retry.rs."
+    ));
+
+    // Empty / whitespace
+    assert!(!has_phantom_tool_intent(""));
+    assert!(!has_phantom_tool_intent("   "));
+
+    // Action verb but no file path
+    assert!(!has_phantom_tool_intent(
+        "Now let me update the database schema to include the new rotation fields. \
+         The migration should add a new column for account rotation status."
+    ));
+}
+
 #[test]
 fn strip_streamed_content_progress_event_carries_reason() {
     use crate::brain::agent::ProgressEvent;
