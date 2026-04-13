@@ -569,13 +569,17 @@ async fn try_create_qwen(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
 
             if expired > 0 {
                 tracing::warn!(
-                    "Qwen rotation: {} of {} accounts expired — keeping {} valid, wiping dead",
+                    "Qwen rotation: {} of {} accounts expired — keeping {} valid",
                     expired,
                     total,
                     valid_creds.len()
                 );
-                // Persist only valid accounts back to keys.toml
-                if let Err(e) = QwenCredentials::persist_all_accounts(&valid_creds) {
+                // Only persist if there are still valid accounts to keep.
+                // If all are dead, don't write an empty array — just skip to
+                // single-account path which will handle the wipe once.
+                if !valid_creds.is_empty()
+                    && let Err(e) = QwenCredentials::persist_all_accounts(&valid_creds)
+                {
                     tracing::warn!("Failed to persist cleaned Qwen accounts: {}", e);
                 }
             }
