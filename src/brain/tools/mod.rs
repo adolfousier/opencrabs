@@ -37,6 +37,7 @@ pub mod evolve;
 pub mod feedback_analyze;
 pub mod feedback_record;
 pub mod generate_image;
+pub mod github_issue;
 pub mod http;
 pub mod load_brain_file;
 pub mod memory_search;
