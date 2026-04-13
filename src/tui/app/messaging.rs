@@ -137,6 +137,19 @@ impl App {
         self.set_plan_file_for_session(session.id);
         // Sync is_processing flag with per-session state
         self.is_processing = self.processing_sessions.contains(&session.id);
+
+        // Calculate context tokens from compaction point (what the agent actually sends)
+        // BEFORE display trimming, so we don't need to clone messages.
+        let compaction_messages =
+            crate::brain::agent::service::AgentService::messages_from_last_compaction(
+                messages.clone(),
+            );
+        let compaction_token_count: usize = compaction_messages
+            .iter()
+            .filter(|m| !m.content.is_empty())
+            .map(|m| crate::brain::tokenizer::count_tokens(&m.content))
+            .sum();
+
         let (display, hidden) = Self::trim_messages_to_display_budget(&messages, 200_000);
         self.hidden_older_messages = hidden;
         self.oldest_displayed_sequence = display.first().map(|m| m.sequence).unwrap_or(0);
@@ -160,17 +173,16 @@ impl App {
         *self.shared_session_id.lock().await = Some(session.id);
 
         // Restore last known context size for this session.
-        // Priority: cached value from a real response > message token sum > agent baseline.
-        // The agent baseline (system prompt + tools) ensures ctx never shows "–",
-        // even on a brand-new session that hasn't sent its first message yet.
+        // Priority: cached value from a real response > compaction-aware token sum > agent baseline.
+        // Uses compaction_token_count (from last compaction point) — NOT all displayed messages.
         let base = self.agent_service.base_context_tokens();
         self.last_input_tokens = self
             .session_context_cache
             .get(&session_id)
             .copied()
             .or_else(|| {
-                if self.display_token_count > 0 {
-                    Some(self.display_token_count as u32 + base)
+                if compaction_token_count > 0 {
+                    Some(compaction_token_count as u32 + base)
                 } else {
                     None
                 }
