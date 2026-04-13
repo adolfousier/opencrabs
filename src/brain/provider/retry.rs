@@ -80,6 +80,10 @@ impl RetryConfig {
     /// a 3s initial delay so we don't burn quota while the window is closed.
     /// Backoff 3s → 6s → 12s → 24s matches the observed recovery curve
     /// from production logs (first success after ~23s).
+    ///
+    /// **Single-account only.** Inside `RotatingQwenProvider`, use
+    /// `qwen_rotation()` instead — rotation handles 429 by switching
+    /// accounts instantly instead of burning ~45s in backoff per account.
     pub fn qwen_cli_match() -> Self {
         Self {
             max_attempts: 4,
@@ -88,6 +92,22 @@ impl RetryConfig {
             backoff_multiplier: 2.0,
             jitter: 0.2,
             retry_on_rate_limit: true,
+        }
+    }
+
+    /// Retry config for Qwen accounts inside `RotatingQwenProvider`.
+    ///
+    /// Rate-limit (429) errors are NOT retried in-place — the rotation
+    /// layer switches to the next account immediately. Only non-rate-limit
+    /// transient errors (timeouts, 5xx) get a single fast retry.
+    pub fn qwen_rotation() -> Self {
+        Self {
+            max_attempts: 1,
+            initial_delay: Duration::from_millis(500),
+            max_delay: Duration::from_secs(5),
+            backoff_multiplier: 2.0,
+            jitter: 0.1,
+            retry_on_rate_limit: false,
         }
     }
 
