@@ -105,34 +105,22 @@ impl AgentService {
             usage_pct,
         );
 
-        // ── Tier 2: 90% hard floor — compaction already failed, force truncate ──
+        // ── Tier 2: 90% hard floor — truncate to 80%, then fall through to Tier 1 compaction ──
         if usage_pct >= 90.0 {
-            tracing::error!(
-                "🚨 LAST RESORT: Context at {:.0}% ({} tokens) — forcing hard truncation",
+            tracing::warn!(
+                "Context at {:.0}% ({} tokens) — hard truncating to 80%",
                 usage_pct,
                 context.token_count,
             );
 
-            // Target ~75% to give breathing room after truncation
-            let target = (effective_max as f64 * 0.75) as usize;
+            // Truncate to 80%
+            let target = (effective_max as f64 * 0.80) as usize;
             context.hard_truncate_to(target);
-
-            // Clean up any orphaned tool results left after truncation
             context.trim_to_fit(0);
 
+            // Emit updated token count so TUI reflects post-truncation value.
             if let Some(cb) = progress_callback {
-                cb(
-                    session_id,
-                    ProgressEvent::SelfHealingAlert {
-                        message: format!(
-                            "⚠️ Emergency truncation: context hit {:.0}% ({:.0}k / {:.0}k tokens). \
-                             Oldest messages dropped to ~75%. History is still in the database.",
-                            usage_pct,
-                            context.token_count as f64 / 1000.0,
-                            effective_max as f64 / 1000.0,
-                        ),
-                    },
-                );
+                cb(session_id, ProgressEvent::TokenCount(context.token_count));
             }
 
             tracing::info!(
@@ -142,15 +130,26 @@ impl AgentService {
                 context.token_count as f64 / effective_max as f64 * 100.0,
             );
 
-            // Emit updated token count so TUI reflects post-truncation value.
-            if let Some(cb) = progress_callback {
-                cb(session_id, ProgressEvent::TokenCount(context.token_count));
-            }
-
-            return None;
+            // Recalculate after truncation so Tier 1 sees accurate numbers
+            let usage_pct_now = if effective_max > 0 {
+                (context.token_count as f64 / effective_max as f64) * 100.0
+            } else {
+                100.0
+            };
+            tracing::debug!(
+                "Post-truncation: {:.0}% — falling through to auto-compaction",
+                usage_pct_now,
+            );
+            // Fall through to Tier 1 — auto-compaction will bring it down further
         }
 
         // ── Tier 1: soft trigger at 65% — LLM compaction ──
+        // Recalculate usage_pct in case Tier 2 truncated
+        let usage_pct = if effective_max > 0 {
+            (context.token_count as f64 / effective_max as f64) * 100.0
+        } else {
+            100.0
+        };
         if usage_pct <= 65.0 {
             return None;
         }
