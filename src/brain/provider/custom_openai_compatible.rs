@@ -1023,10 +1023,7 @@ impl OpenAIProvider {
             };
 
             return if status == 429 {
-                tracing::warn!(
-                    "[RATE_LIMIT] {} → {}: {}",
-                    self.name, status, message,
-                );
+                tracing::warn!("[RATE_LIMIT] {} → {}: {}", self.name, status, message,);
                 ProviderError::RateLimitExceeded(message)
             } else {
                 ProviderError::ApiError {
@@ -1389,84 +1386,19 @@ impl OpenAIProvider {
                         }
 
                         // ── Non-streaming fallback ──────────────────
-                        // Some OpenRouter upstreams (e.g. Venice) don't
-                        // support streaming. OpenRouter returns the full
-                        // response as a single JSON blob with
-                        // "object":"chat.completion" (not "chunk") and
-                        // "message" instead of "delta". Our SSE parser
-                        // above only matches `data: ` prefixed lines, so
-                        // the raw JSON sits in the buffer unprocessed.
-                        // Detect this and synthesize stream events.
-                        if events.is_empty() && !st.emitted_message_start {
-                            let trimmed = buf.trim();
-                            if trimmed.starts_with('{') && trimmed.contains("\"chat.completion\"") {
-                                // Try to parse the entire buffer as a non-streaming response
-                                if let Ok(chunk) = serde_json::from_str::<OpenAIStreamChunk>(trimmed) {
-                                    tracing::info!(
-                                        "[OR_STREAM_NONSTREAM] OpenRouter returned non-streaming \
-                                         response — synthesizing stream events"
-                                    );
-                                    buf.clear();
-
-                                    // MessageStart
-                                    if !chunk.id.is_empty() {
-                                        st.emitted_message_start = true;
-                                        let model = chunk.model.clone().unwrap_or_default();
-                                        events.push(Ok(StreamEvent::MessageStart {
-                                            message: crate::brain::provider::types::StreamMessage {
-                                                id: chunk.id,
-                                                model,
-                                                role: Role::Assistant,
-                                                usage: crate::brain::provider::types::TokenUsage {
-                                                    input_tokens: 0,
-                                                    output_tokens: 0, ..Default::default() },
-                                            },
-                                        }));
-                                    }
-
-                                    // Extract content from message (not delta)
-                                    let content = chunk.choices.first()
-                                        .and_then(|c| c.message.as_ref().or(c.delta.as_ref()))
-                                        .and_then(|m| m.content.as_ref())
-                                        .cloned()
-                                        .unwrap_or_default();
-
-                                    if !content.is_empty() {
-                                        st.emitted_content_start = true;
-                                        events.push(Ok(StreamEvent::ContentBlockStart {
-                                            index: 0,
-                                            content_block: ContentBlock::Text { text: content },
-                                        }));
-                                        events.push(Ok(StreamEvent::ContentBlockStop { index: 0 }));
-                                        st.emitted_content_stop = true;
-                                    }
-
-                                    // Stop reason
-                                    let stop_reason = chunk.choices.first()
-                                        .and_then(|c| c.finish_reason.as_ref())
-                                        .map(|fr| match fr.as_str() {
-                                            "tool_calls" | "function_call" => crate::brain::provider::types::StopReason::ToolUse,
-                                            "length" => crate::brain::provider::types::StopReason::MaxTokens,
-                                            _ => crate::brain::provider::types::StopReason::EndTurn,
-                                        });
-
-                                    // Usage
-                                    let mut token_usage = crate::brain::provider::types::TokenUsage::default();
-                                    if let Some(usage) = chunk.usage.as_ref() {
-                                        token_usage.input_tokens = usage.prompt_tokens.unwrap_or(0);
-                                        token_usage.output_tokens = usage.completion_tokens.unwrap_or(0);
-                                    }
-
-                                    events.push(Ok(StreamEvent::MessageDelta {
-                                        delta: crate::brain::provider::types::MessageDelta {
-                                            stop_reason,
-                                            stop_sequence: None,
-                                        },
-                                        usage: token_usage,
-                                    }));
-                                    events.push(Ok(StreamEvent::MessageStop));
-                                }
-                            }
+                        // Some OpenRouter upstreams don't support streaming
+                        // and return a plain JSON blob. Delegate to the
+                        // dedicated nonstream_compat module.
+                        if events.is_empty()
+                            && !st.emitted_message_start
+                            && super::nonstream_compat::is_nonstream_response(&buf)
+                            && let Some(synth) = super::nonstream_compat::synthesize_stream_events(&buf)
+                        {
+                            st.emitted_message_start = true;
+                            st.emitted_content_start = true;
+                            st.emitted_content_stop = true;
+                            buf.clear();
+                            events.extend(synth);
                         }
 
                         if events.is_empty() {
