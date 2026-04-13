@@ -766,6 +766,17 @@ tar xzf opencrabs-linux-amd64.tar.gz
 
 The onboarding wizard handles everything on first run.
 
+> **Linux runtime dependencies:** The pre-built binary links against system libraries that may not be installed on minimal/VPS images:
+> ```bash
+> # Debian/Ubuntu
+> sudo apt-get install libgomp1 libasound2
+> # Fedora/RHEL
+> sudo dnf install libgomp alsa-lib
+> # Arch
+> sudo pacman -S gcc-libs alsa-lib
+> ```
+> `libgomp` (GCC OpenMP) is required by the local embedding engine (`llama-cpp-2`). `libasound` is required for local speech-to-text audio I/O. macOS and Windows binaries have no extra prerequisites.
+
 > **Note:** `/rebuild` works even with pre-built binaries — it auto-clones the source to `~/.opencrabs/source/` on first use, then builds and hot-restarts. For active development or adding custom tools, Option 2 gives you the source tree directly.
 
 ### Option 2: Install via Cargo
@@ -811,8 +822,8 @@ Required for `/rebuild`, adding custom tools, or modifying the agent.
 - **SQLite** (bundled via sqlx)
 - **macOS:** Xcode CLI Tools + `brew install cmake pkg-config` (requires macOS 15+)
 - **Linux (Debian/Ubuntu):** `sudo apt-get install build-essential pkg-config clang libclang-dev libasound2-dev libssl-dev cmake`
-- **Linux (Fedora/RHEL):** `sudo dnf install gcc gcc-c++ make pkg-config openssl-devel cmake`
-- **Linux (Arch):** `sudo pacman -S base-devel pkg-config openssl cmake`
+- **Linux (Fedora/RHEL):** `sudo dnf install gcc gcc-c++ make pkg-config clang openssl-devel cmake alsa-lib-devel libgomp`
+- **Linux (Arch):** `sudo pacman -S base-devel pkg-config clang openssl cmake alsa-lib gcc-libs`
 
 > **One-liner setup:** `bash <(curl -sL https://raw.githubusercontent.com/adolfousier/opencrabs/main/src/scripts/setup.sh)` — detects your platform, installs all dependencies, and sets up Rust.
 

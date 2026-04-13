@@ -7,6 +7,9 @@ FROM rust:slim AS builder
 RUN apt-get update && apt-get install -y \
     build-essential \
     pkg-config \
+    clang \
+    libclang-dev \
+    libasound2-dev \
     libssl-dev \
     cmake \
     git \
@@ -37,6 +40,8 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     git \
+    libgomp1 \
+    libasound2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user

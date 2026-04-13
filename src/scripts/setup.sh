@@ -63,19 +63,22 @@ install_macos() {
 install_debian() {
     info "Platform: Debian/Ubuntu"
     sudo apt-get update -qq
-    sudo apt-get install -y build-essential pkg-config libssl-dev cmake
+    sudo apt-get install -y build-essential pkg-config clang libclang-dev \
+        libasound2-dev libssl-dev cmake libgomp1
     ok "Debian/Ubuntu dependencies installed"
 }
 
 install_fedora() {
     info "Platform: Fedora/RHEL"
-    sudo dnf install -y gcc gcc-c++ make pkg-config openssl-devel cmake
+    sudo dnf install -y gcc gcc-c++ make pkg-config clang openssl-devel cmake \
+        alsa-lib-devel libgomp
     ok "Fedora/RHEL dependencies installed"
 }
 
 install_arch() {
     info "Platform: Arch Linux"
-    sudo pacman -S --needed --noconfirm base-devel pkg-config openssl cmake
+    sudo pacman -S --needed --noconfirm base-devel pkg-config clang openssl cmake \
+        alsa-lib gcc-libs
     ok "Arch dependencies installed"
 }
 
