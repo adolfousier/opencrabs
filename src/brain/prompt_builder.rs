@@ -278,6 +278,20 @@ impl BrainLoader {
                     .push_str("- Working with environment-specific tool configs → load TOOLS.md\n");
             }
             prompt.push('\n');
+
+            // Memory persistence hint — tell the agent to proactively write learnings
+            if has("MEMORY.md") {
+                prompt.push_str(
+                    "Write proactively to MEMORY.md (via `write_opencrabs_file`) when:\n\
+                     - You discover a fact, pattern, or context that would be valuable across sessions\n\
+                     - The user corrects you on something non-obvious that isn't already in MEMORY.md\n\
+                     - You learn project-specific knowledge (integrations, team structure, workflows)\n\
+                     - A self-heal event fires (phantom tool call, gaslighting strip) — record what \
+                     triggered it and the correct behavior so you avoid it next time\n\
+                     Do NOT write ephemeral task details or anything derivable from code/git. \
+                     Load MEMORY.md first to avoid duplicates before writing.\n\n",
+                );
+            }
         }
 
         // 4. Runtime info
