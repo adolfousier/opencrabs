@@ -260,6 +260,10 @@ pub struct OpenAIProvider {
     /// Optional async auth-refresh hook. When set, a 401/403 response
     /// triggers a single retry after calling this hook.
     auth_refresh_fn: Option<AuthRefreshFn>,
+    /// When set, overrides the automatic retry config selection in
+    /// `retry_config()`. Used by `RotatingQwenProvider` to disable
+    /// retry-on-rate-limit for sub-providers (rotation handles 429).
+    retry_config_override: Option<super::retry::RetryConfig>,
 }
 
 impl OpenAIProvider {
@@ -284,6 +288,9 @@ impl OpenAIProvider {
     ///   on the fallback chain.
     /// - All other providers keep the default (bail-to-fallback on 429).
     fn retry_config(&self, model: &str) -> super::retry::RetryConfig {
+        if let Some(ref ovr) = self.retry_config_override {
+            return ovr.clone();
+        }
         if self.name == "qwen" || model.ends_with(":free") {
             super::retry::RetryConfig::qwen_cli_match()
         } else {
@@ -315,6 +322,7 @@ impl OpenAIProvider {
             body_transform: None,
             base_url_fn: None,
             auth_refresh_fn: None,
+            retry_config_override: None,
         }
     }
 
@@ -342,6 +350,7 @@ impl OpenAIProvider {
             body_transform: None,
             base_url_fn: None,
             auth_refresh_fn: None,
+            retry_config_override: None,
         }
     }
 
@@ -369,6 +378,7 @@ impl OpenAIProvider {
             body_transform: None,
             base_url_fn: None,
             auth_refresh_fn: None,
+            retry_config_override: None,
         }
     }
 
@@ -440,6 +450,14 @@ impl OpenAIProvider {
     /// retry the failed request exactly once with the refreshed token.
     pub fn with_auth_refresh_fn(mut self, f: AuthRefreshFn) -> Self {
         self.auth_refresh_fn = Some(f);
+        self
+    }
+
+    /// Override the automatic retry config selection. Used inside
+    /// `RotatingQwenProvider` to disable retry-on-rate-limit so 429s
+    /// rotate immediately instead of burning ~45s in backoff per account.
+    pub fn with_retry_config(mut self, config: super::retry::RetryConfig) -> Self {
+        self.retry_config_override = Some(config);
         self
     }
 

@@ -719,12 +719,9 @@ mod self_improve_tool {
         assert!(result.output.contains("Add retry logic"));
 
         // Verify rsi/improvements.md was written to the temp working directory
-        let improvements = std::fs::read_to_string(
-            ctx.working_directory
-                .join("rsi")
-                .join("improvements.md"),
-        )
-        .unwrap();
+        let improvements =
+            std::fs::read_to_string(ctx.working_directory.join("rsi").join("improvements.md"))
+                .unwrap();
         assert!(improvements.contains("Add retry logic"));
         assert!(improvements.contains("Frequent transient failures"));
     }
@@ -846,7 +843,8 @@ mod self_improve_tool {
 
         // Verify rsi/improvements.md logged the change in temp working directory
         let improvements =
-            std::fs::read_to_string(ctx.working_directory.join("rsi").join("improvements.md")).unwrap();
+            std::fs::read_to_string(ctx.working_directory.join("rsi").join("improvements.md"))
+                .unwrap();
         assert!(improvements.contains("SOUL.md"));
     }
 
@@ -921,7 +919,8 @@ mod self_improve_tool {
         assert!(result.success);
         // Rationale defaults to "(none)"
         let improvements =
-            std::fs::read_to_string(ctx.working_directory.join("rsi").join("improvements.md")).unwrap();
+            std::fs::read_to_string(ctx.working_directory.join("rsi").join("improvements.md"))
+                .unwrap();
         assert!(improvements.contains("(none)"));
     }
 }

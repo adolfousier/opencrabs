@@ -459,6 +459,19 @@ fn build_single_qwen_provider(
     creds: QwenCredentials,
     qwen_config: &ProviderConfig,
 ) -> Arc<dyn Provider> {
+    build_qwen_provider_inner(creds, qwen_config, false)
+}
+
+/// Build a single Qwen OpenAI-compatible provider from credentials.
+///
+/// When `for_rotation` is true, the provider uses `RetryConfig::qwen_rotation()`
+/// which disables retry-on-rate-limit — the `RotatingQwenProvider` handles 429s
+/// by switching accounts immediately instead of burning ~45s in backoff.
+fn build_qwen_provider_inner(
+    creds: QwenCredentials,
+    qwen_config: &ProviderConfig,
+    for_rotation: bool,
+) -> Arc<dyn Provider> {
     let manager = Arc::new(QwenTokenManager::new(creds));
     manager.clone().start_background_refresh();
 
@@ -509,31 +522,38 @@ fn build_single_qwen_provider(
 
     let qwen_limiter = Arc::clone(&super::rate_limiter::QWEN_OAUTH_LIMITER);
 
-    let provider = configure_openai_compatible(
-        OpenAIProvider::with_base_url("qwen-managed".to_string(), base_url)
-            .with_name("qwen")
-            .with_token_fn(token_fn)
-            .with_base_url_fn(base_url_fn)
-            .with_auth_refresh_fn(auth_refresh_fn)
-            .with_extra_headers(qwen_extra_headers())
-            .with_body_transform({
-                let enable_thinking = effective_config.enable_thinking;
-                Arc::new(move |body| {
-                    let mut body = qwen_body_transform(body);
-                    if let Some(enable) = enable_thinking
-                        && let Some(obj) = body.as_object_mut()
-                    {
-                        obj.insert(
-                            "enable_thinking".to_string(),
-                            serde_json::Value::Bool(enable),
-                        );
-                    }
-                    body
-                })
+    let mut builder = OpenAIProvider::with_base_url("qwen-managed".to_string(), base_url)
+        .with_name("qwen")
+        .with_token_fn(token_fn)
+        .with_base_url_fn(base_url_fn)
+        .with_auth_refresh_fn(auth_refresh_fn)
+        .with_extra_headers(qwen_extra_headers())
+        .with_body_transform({
+            let enable_thinking = effective_config.enable_thinking;
+            Arc::new(move |body| {
+                let mut body = qwen_body_transform(body);
+                if let Some(enable) = enable_thinking
+                    && let Some(obj) = body.as_object_mut()
+                {
+                    obj.insert(
+                        "enable_thinking".to_string(),
+                        serde_json::Value::Bool(enable),
+                    );
+                }
+                body
             })
-            .with_rate_limiter(qwen_limiter),
-        &effective_config,
-    );
+        })
+        .with_rate_limiter(qwen_limiter);
+
+    // Inside RotatingQwenProvider, 429s should rotate immediately to the
+    // next account instead of retrying in-place with exponential backoff.
+    // Without this, each account burns ~45s (3s→6s→12s→24s) before
+    // rotation kicks in, causing 2–3 minute response delays.
+    if for_rotation {
+        builder = builder.with_retry_config(super::retry::RetryConfig::qwen_rotation());
+    }
+
+    let provider = configure_openai_compatible(builder, &effective_config);
     Arc::new(provider)
 }
 
@@ -577,9 +597,7 @@ async fn try_create_qwen(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
                 );
                 // Clear secrets for expired accounts in keys.toml but keep
                 // ALL accounts in config.toml so the user can re-auth later.
-                if let Err(e) =
-                    QwenCredentials::clear_expired_account_secrets(&accounts_creds)
-                {
+                if let Err(e) = QwenCredentials::clear_expired_account_secrets(&accounts_creds) {
                     tracing::warn!("Failed to clean expired account secrets: {}", e);
                 }
             }
@@ -590,7 +608,7 @@ async fn try_create_qwen(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
                     .enumerate()
                     .map(|(i, creds)| {
                         tracing::info!("  Qwen rotation account {} valid", i);
-                        build_single_qwen_provider(creds, qwen_config)
+                        build_qwen_provider_inner(creds, qwen_config, true)
                     })
                     .collect();
                 return Ok(Some(Arc::new(super::RotatingQwenProvider::new(
