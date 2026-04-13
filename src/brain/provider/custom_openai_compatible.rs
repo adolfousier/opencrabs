@@ -291,7 +291,11 @@ impl OpenAIProvider {
         if let Some(ref ovr) = self.retry_config_override {
             return ovr.clone();
         }
-        if self.name == "qwen" || model.ends_with(":free") {
+        // Qwen, OpenRouter, and :free models: retry on 429 with backoff.
+        // OpenRouter upstream providers often have tight per-minute windows
+        // that reopen within seconds — bailing to fallback on the first 429
+        // is wasteful when a 3-retry backoff would get through.
+        if self.name == "qwen" || self.is_openrouter() || model.ends_with(":free") {
             super::retry::RetryConfig::qwen_cli_match()
         } else {
             super::retry::RetryConfig::default()
@@ -1019,6 +1023,10 @@ impl OpenAIProvider {
             };
 
             return if status == 429 {
+                tracing::warn!(
+                    "[RATE_LIMIT] {} → {}: {}",
+                    self.name, status, message,
+                );
                 ProviderError::RateLimitExceeded(message)
             } else {
                 ProviderError::ApiError {
