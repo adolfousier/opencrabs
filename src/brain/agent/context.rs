@@ -68,7 +68,10 @@ impl AgentContext {
         self.messages.push(message);
     }
 
-    /// Convert database messages to LLM messages
+    /// Convert database messages to LLM messages.
+    /// Uses real token counts from DB when available, falls back to estimation only
+    /// for messages that haven't been through a provider yet (e.g. user messages
+    /// before the first API call).
     pub fn from_db_messages(
         session_id: Uuid,
         db_messages: Vec<DbMessage>,
@@ -96,7 +99,14 @@ impl AgentContext {
                 }],
             };
 
-            context.add_message(message);
+            // Use real token count from DB when available (set after provider response),
+            // fall back to estimation only for messages without usage data.
+            let tokens = match db_msg.token_count {
+                Some(tc) if tc > 0 => tc as usize,
+                _ => context.estimate_message_tokens(&message),
+            };
+            context.token_count += tokens;
+            context.messages.push(message);
         }
 
         context
