@@ -5,6 +5,67 @@ All notable changes to OpenCrabs will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.7] - 2026-04-13
+
+OpenRouter streaming fully fixed — all models now use the standard OpenAI
+SSE parser with full reasoning, tool calls, and think-tag support.
+Qwen rotation hardened against wipe storms and expired accounts.
+RSI agent now reads before writing and can surgically update brain files.
+
+### Added
+
+#### Streaming
+- **Non-streaming compatibility module** — dedicated `nonstream_compat.rs`
+  synthesizes full stream events (reasoning, tool calls, usage with cache)
+  from non-streaming JSON responses. Handles OpenRouter upstreams like
+  Trinity and Venice that return `chat.completion` blobs instead of SSE.
+- **Stream drop exhaustion fallback** — when a provider stream drops
+  mid-response, triggers fallback to the next provider in the chain.
+
+#### RSI (Recursive Self-Improvement)
+- **`read` action** — RSI agent must read brain files before modifying,
+  preventing blind appends and redundancy.
+- **`update` action** — surgical find-and-replace on specific sections
+  of brain files instead of always appending.
+- **Mandatory read-before-write workflow** — RSI prompt enforces:
+  read → decide (apply new / update existing / skip redundant) → act.
+- **Structured awareness** — RSI routes improvements to the correct
+  brain file based on event type taxonomy.
+- **Phantom tool call detection** — self-heal layer detects when the
+  model narrates file changes in prose without executing tools, and
+  auto-retries with a corrective prompt.
+- **Proactive MEMORY.md hints** — system prompt nudges the agent to
+  persist important context to memory.
+
+### Changed
+
+- **OpenRouter uses standard OpenAI SSE parser** — removed the
+  Anthropic-format bypass that broke streaming, reasoning, and tool
+  calls for all OpenRouter models. Every model now gets full feature
+  support (reasoning_content, tool_call accumulation, think-tag
+  filtering, leak detection).
+- **Context budget** — stopped subtracting tool overhead from context
+  budget, which was causing premature compaction.
+
+### Fixed
+
+- **OpenRouter 429 retry** — exponential backoff before falling to
+  next provider, instead of immediately failing.
+- **Stream content ordering** — emit content delta before finish_reason
+  to prevent truncated final tokens.
+- **Qwen rotation wipe storm** — concurrent refresh failures no longer
+  cascade-wipe all accounts from keys.toml.
+- **Qwen expired rotation accounts** — preserved for re-auth instead
+  of being silently dropped.
+- **Qwen account split** — metadata in config.toml, secrets in
+  keys.toml, fixing #74 and #75.
+- **Qwen rotation retry** — disabled retry-on-rate-limit inside
+  RotatingQwenProvider to prevent double-retry with outer fallback.
+- **TUI footer model** — shows actual provider/model after fallback
+  swap instead of stale primary (#73).
+- **Runtime deps docs** — added libgomp + libasound to pre-built
+  binary requirements.
+
 ## [0.3.6] - 2026-04-13
 
 The self-improving release. OpenCrabs now records every tool execution,
@@ -2592,6 +2653,7 @@ fixes.
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.3.7]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.7
 [0.3.6]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.6
 [0.3.5]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.5
 [0.3.4]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.4
