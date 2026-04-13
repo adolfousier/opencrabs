@@ -1239,6 +1239,11 @@ impl OpenAIProvider {
                     Err(e) => vec![Err(ProviderError::StreamError(e.to_string()))],
                     Ok(chunk) => {
                         let raw_text = String::from_utf8_lossy(&chunk);
+                        tracing::debug!(
+                            "[OR_STREAM_RAW] chunk ({} bytes): {}",
+                            raw_text.len(),
+                            raw_text.chars().take(500).collect::<String>()
+                        );
                         let mut buf = buffer.lock().expect("SSE buffer lock poisoned");
                         buf.push_str(&raw_text);
 
@@ -1305,15 +1310,43 @@ impl OpenAIProvider {
                                             .and_then(|c| c.delta.as_ref())
                                             .and_then(|d| d.content.as_ref());
 
-                                        let is_finish = chunk.choices.first()
-                                            .map(|c| c.finish_reason.is_some())
-                                            .unwrap_or(false);
+                                        let finish_reason_str = chunk.choices.first()
+                                            .and_then(|c| c.finish_reason.as_ref());
 
-                                        if is_finish {
+                                        // Emit content BEFORE handling finish — some providers
+                                        // (OpenRouter Elephant, short responses) send content and
+                                        // finish_reason in the same chunk. The old code did
+                                        // `continue` on finish, silently dropping that content.
+                                        if let Some(text) = delta_content {
+                                            if !st.emitted_content_start {
+                                                st.emitted_content_start = true;
+                                                st.seen_delta_content = true;
+                                                events.push(Ok(StreamEvent::ContentBlockStart {
+                                                    index: 0,
+                                                    content_block: ContentBlock::Text { text: text.clone() },
+                                                }));
+                                            } else {
+                                                events.push(Ok(StreamEvent::ContentBlockDelta {
+                                                    index: 0,
+                                                    delta: ContentDelta::TextDelta { text: text.clone() },
+                                                }));
+                                            }
+                                        }
+
+                                        if finish_reason_str.is_some() {
                                             if st.emitted_content_start && !st.emitted_content_stop {
                                                 events.push(Ok(StreamEvent::ContentBlockStop { index: 0 }));
                                                 st.emitted_content_stop = true;
                                             }
+                                            // Convert finish_reason to StopReason for downstream
+                                            let stop_reason = match finish_reason_str.map(|s| s.as_str()) {
+                                                Some("stop") => Some(crate::brain::provider::types::StopReason::EndTurn),
+                                                Some("tool_calls") | Some("function_call") => Some(crate::brain::provider::types::StopReason::ToolUse),
+                                                Some("length") => Some(crate::brain::provider::types::StopReason::MaxTokens),
+                                                Some("content_filter") => Some(crate::brain::provider::types::StopReason::EndTurn),
+                                                _ => Some(crate::brain::provider::types::StopReason::EndTurn),
+                                            };
+                                            st.pending_stop_reason = stop_reason;
                                             if let Some(usage) = chunk.usage.as_ref() {
                                                 let input = usage.prompt_tokens.unwrap_or(0);
                                                 let output = usage.completion_tokens.unwrap_or(0);
@@ -1338,22 +1371,6 @@ impl OpenAIProvider {
                                                 }));
                                             }
                                             continue;
-                                        }
-
-                                        if let Some(text) = delta_content {
-                                            if !st.emitted_content_start {
-                                                st.emitted_content_start = true;
-                                                st.seen_delta_content = true;
-                                                events.push(Ok(StreamEvent::ContentBlockStart {
-                                                    index: 0,
-                                                    content_block: ContentBlock::Text { text: text.clone() },
-                                                }));
-                                            } else {
-                                                events.push(Ok(StreamEvent::ContentBlockDelta {
-                                                    index: 0,
-                                                    delta: ContentDelta::TextDelta { text: text.clone() },
-                                                }));
-                                            }
                                         }
                                     }
                                     Err(e) => {
