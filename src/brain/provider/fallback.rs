@@ -151,13 +151,12 @@ impl Provider for FallbackProvider {
         let start_idx = self.active.load(Ordering::Acquire);
         let mut last_err: Option<ProviderError>;
 
-        // Try the currently-active provider first
+        // Try the currently-active provider first.
+        // Always remap — after a restart the sticky index resets to 0 but
+        // the request may still carry a model from a previously-active
+        // provider (e.g. "openrouter/elephant-alpha" sent to Qwen).
         let active = self.active_provider();
-        let active_request = if start_idx == 0 {
-            request.clone()
-        } else {
-            Self::remap_request_for_fallback(active.as_ref(), &request)
-        };
+        let active_request = Self::remap_request_for_fallback(active.as_ref(), &request);
         match active.complete(active_request).await {
             Ok(resp) => return Ok(resp),
             Err(e) if !Self::should_try_next(&e) => return Err(e),
@@ -204,13 +203,10 @@ impl Provider for FallbackProvider {
         let start_idx = self.active.load(Ordering::Acquire);
         let mut last_err: Option<ProviderError>;
 
-        // Try the currently-active provider first
+        // Try the currently-active provider first.
+        // Always remap — see complete() comment.
         let active = self.active_provider();
-        let active_request = if start_idx == 0 {
-            request.clone()
-        } else {
-            Self::remap_request_for_fallback(active.as_ref(), &request)
-        };
+        let active_request = Self::remap_request_for_fallback(active.as_ref(), &request);
         match active.stream(active_request).await {
             Ok(stream) => return Ok(stream),
             Err(e) if !Self::should_try_next(&e) => return Err(e),
