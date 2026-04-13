@@ -69,11 +69,33 @@ async fn test_stats_by_model_merges_claude_prefix() {
 
 #[test]
 fn test_normalize_model_name() {
+    // Claude normalization
     assert_eq!(normalize_model_name("claude-opus-4-6"), "opus-4-6");
     assert_eq!(normalize_model_name("claude-sonnet-4-6"), "sonnet-4-6");
     assert_eq!(normalize_model_name("opus"), "opus-4-6");
     assert_eq!(normalize_model_name("sonnet"), "sonnet-4-6");
     assert_eq!(normalize_model_name("haiku"), "haiku-4-5");
     assert_eq!(normalize_model_name("opus-4-6"), "opus-4-6");
+
+    // Qwen normalization — all variants → canonical name
+    assert_eq!(normalize_model_name("coder-model"), "qwen3.6-plus");
+    assert_eq!(normalize_model_name("qwen-3.6-plus"), "qwen3.6-plus");
+    assert_eq!(normalize_model_name("qwen3.6-plus"), "qwen3.6-plus");
+    assert_eq!(normalize_model_name("qwen/qwen3.6-plus"), "qwen3.6-plus");
+    assert_eq!(normalize_model_name("qwen3.5-plus"), "qwen3.5-plus");
+    assert_eq!(normalize_model_name("qwen-3.5-plus"), "qwen3.5-plus");
+
+    // Provider prefix stripping
+    assert_eq!(
+        normalize_model_name("openrouter/elephant-model"),
+        "elephant-model"
+    );
+    assert_eq!(
+        normalize_model_name("opencode/qwen3.6-plus"),
+        "qwen3.6-plus"
+    );
+
+    // Pass-through
     assert_eq!(normalize_model_name("MiniMax-M2.5"), "MiniMax-M2.5");
+    assert_eq!(normalize_model_name("glm-5.1"), "glm-5.1");
 }
