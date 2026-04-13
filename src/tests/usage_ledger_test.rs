@@ -84,8 +84,14 @@ fn test_normalize_model_name() {
     assert_eq!(normalize_model_name("qwen/qwen3.6-plus"), "qwen3.6-plus");
     assert_eq!(normalize_model_name("qwen3.6-plus:free"), "qwen3.6-plus");
     assert_eq!(normalize_model_name("qwen3.6-plus-free"), "qwen3.6-plus");
-    assert_eq!(normalize_model_name("qwen-3.6-plus-thinking"), "qwen3.6-plus");
-    assert_eq!(normalize_model_name("qwen3.6-plus-thinking"), "qwen3.6-plus");
+    assert_eq!(
+        normalize_model_name("qwen-3.6-plus-thinking"),
+        "qwen3.6-plus"
+    );
+    assert_eq!(
+        normalize_model_name("qwen3.6-plus-thinking"),
+        "qwen3.6-plus"
+    );
     assert_eq!(
         normalize_model_name("qwen/qwen3.6-plus:free"),
         "qwen3.6-plus"
