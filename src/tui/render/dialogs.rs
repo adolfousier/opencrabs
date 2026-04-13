@@ -1126,7 +1126,10 @@ pub(super) fn render_usage_dialog(f: &mut Frame, app: &App, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("  Model:    ", label_style),
-            Span::styled(model.to_string(), value_style),
+            Span::styled(
+                crate::tui::provider_selector::model_display_label(&model).to_string(),
+                value_style,
+            ),
         ]),
         Line::from(vec![
             Span::styled("  Messages: ", label_style),
@@ -1167,10 +1170,12 @@ pub(super) fn render_usage_dialog(f: &mut Frame, app: &App, area: Rect) {
         } else {
             format!("${:.2}", stats.cost)
         };
-        let short_model = if model_name.len() > 20 {
-            format!("{}…", model_name.chars().take(19).collect::<String>())
+        let display_name =
+            crate::tui::provider_selector::model_display_label(model_name).to_string();
+        let short_model = if display_name.len() > 20 {
+            format!("{}…", display_name.chars().take(19).collect::<String>())
         } else {
-            model_name.to_string()
+            display_name
         };
         lines.push(Line::from(vec![
             Span::styled("    ", dim_style),
