@@ -324,15 +324,24 @@ async fn run_rsi_agent_cycle(
         .with_system_brain(RSI_AGENT_PROMPT.to_string())
         .with_brain_path(brain_path);
 
-    // Create an ephemeral session for this RSI cycle
+    // Reuse a persistent RSI session — keeps context across cycles so the agent
+    // knows what it already improved and doesn't repeat work.
     let session_service = SessionService::new(service_ctx);
-    let session = session_service
-        .create_session_with_provider(
-            Some("RSI autonomous cycle".to_string()),
-            Some(provider_name.to_string()),
-            config.agent.self_improvement_model.clone(),
-        )
-        .await?;
+    let session = match session_service
+        .find_session_by_title("RSI autonomous cycle")
+        .await?
+    {
+        Some(s) => s,
+        None => {
+            session_service
+                .create_session_with_provider(
+                    Some("RSI autonomous cycle".to_string()),
+                    Some(provider_name.to_string()),
+                    config.agent.self_improvement_model.clone(),
+                )
+                .await?
+        }
+    };
 
     // Build the user prompt with detected opportunities
     let mut prompt = "Run an autonomous self-improvement cycle.\n\n".to_string();
