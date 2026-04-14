@@ -1067,38 +1067,61 @@ impl AgentService {
                         Some("rate_limit_exceeded"),
                     );
 
-                    // Look up fallback BEFORE notifying so the user sees which
-                    // provider/model we're switching to, and so it's clear that
-                    // the retries already ran and failed before we gave up.
-                    let fallback_opt = self.try_get_fallback_provider();
-
                     if let Some(ref cb) = progress_callback {
-                        let message = match &fallback_opt {
-                            Some(fb) => format!(
-                                "Rate limit on '{}' (retries exhausted). Switching to '{}/{}'...",
-                                model_name,
-                                fb.name(),
-                                fb.default_model()
-                            ),
-                            None => format!(
-                                "Rate limit on '{}' (retries exhausted). No fallback provider configured — please try again later or configure a fallback in settings.",
+                        let message = if self.fallback_providers.is_empty() {
+                            format!(
+                                "Rate limit on '{}' — no fallback providers configured.",
                                 model_name
-                            ),
+                            )
+                        } else {
+                            format!(
+                                "Rate limit on '{}' — walking fallback chain...",
+                                model_name
+                            )
                         };
                         cb(session_id, ProgressEvent::SelfHealingAlert { message });
                     }
 
-                    // Try fallback provider if available
-                    if let Some(fallback) = fallback_opt {
+                    // Walk the entire fallback chain, skipping the active provider.
+                    // Each provider gets one attempt; on failure we try the next.
+                    let active_name = self
+                        .provider
+                        .read()
+                        .ok()
+                        .map(|p| p.name().to_string())
+                        .unwrap_or_default();
+                    let candidates: Vec<_> = self
+                        .fallback_providers
+                        .iter()
+                        .filter(|p| p.name() != active_name)
+                        .collect();
+
+                    if candidates.is_empty() {
+                        return Err(AgentError::Provider(e));
+                    }
+
+                    let mut last_err = e;
+                    let mut succeeded = None;
+                    for fallback in &candidates {
                         let fb_name = fallback.name().to_string();
                         let fb_model = fallback.default_model().to_string();
                         tracing::info!(
-                            "Switching to fallback provider '{}' (model '{}')",
+                            "Trying fallback provider '{}' (model '{}')",
                             fb_name,
                             fb_model
                         );
+                        if let Some(ref cb) = progress_callback {
+                            cb(
+                                session_id,
+                                ProgressEvent::SelfHealingAlert {
+                                    message: format!(
+                                        "Trying fallback '{}/{}'...",
+                                        fb_name, fb_model
+                                    ),
+                                },
+                            );
+                        }
 
-                        // Build request for fallback with remapped model
                         let mut fb_req =
                             LLMRequest::new(fb_model.clone(), context.messages.clone())
                                 .with_max_tokens(self.max_tokens);
@@ -1112,12 +1135,10 @@ impl AgentService {
                             fb_req = fb_req.with_tools(self.tool_registry.get_tool_definitions());
                         }
 
-                        // Temporarily swap in the fallback provider, stream through
-                        // the same pipeline (stream_complete), then swap back.
                         let original_provider = {
                             let mut guard = self.provider.write().expect("provider lock");
                             let orig = guard.clone();
-                            *guard = fallback.clone();
+                            *guard = (*fallback).clone();
                             orig
                         };
                         let fb_result = self
@@ -1126,29 +1147,39 @@ impl AgentService {
                                 fb_req,
                                 cancel_token.as_ref(),
                                 progress_callback.as_ref(),
-                                None,  // no CLI queue callback for fallback
-                                None,  // no queued messages
-                                false, // suppress_callback: true only for compaction
+                                None,
+                                None,
+                                false,
                             )
                             .await;
-                        // Swap back the original provider
                         {
                             let mut guard = self.provider.write().expect("provider lock");
                             *guard = original_provider;
                         }
                         match fb_result {
-                            Ok(resp) => resp,
+                            Ok(resp) => {
+                                succeeded = Some(resp);
+                                break;
+                            }
                             Err(fb_err) => {
-                                tracing::error!(
-                                    "Fallback provider '{}' also failed: {}",
+                                tracing::warn!(
+                                    "Fallback '{}' failed: {} — trying next",
                                     fb_name,
                                     fb_err
                                 );
-                                return Err(AgentError::Provider(fb_err));
+                                last_err = fb_err;
                             }
                         }
-                    } else {
-                        return Err(AgentError::Provider(e));
+                    }
+                    match succeeded {
+                        Some(resp) => resp,
+                        None => {
+                            tracing::error!(
+                                "All {} fallback providers exhausted",
+                                candidates.len()
+                            );
+                            return Err(AgentError::Provider(last_err));
+                        }
                     }
                 }
                 Err(e)
@@ -1249,11 +1280,29 @@ impl AgentService {
                             );
                         }
 
-                        if let Some(fallback) = self.try_get_fallback_provider() {
+                        // Walk the entire fallback chain, skipping the active provider.
+                        let stream_active_name = self
+                            .provider
+                            .read()
+                            .ok()
+                            .map(|p| p.name().to_string())
+                            .unwrap_or_default();
+                        let stream_candidates: Vec<_> = self
+                            .fallback_providers
+                            .iter()
+                            .filter(|p| p.name() != stream_active_name)
+                            .collect();
+
+                        if stream_candidates.is_empty() {
+                            return Err(AgentError::Provider(last_err));
+                        }
+
+                        let mut stream_succeeded = None;
+                        for fallback in &stream_candidates {
                             let fb_name = fallback.name().to_string();
                             let fb_model = fallback.default_model().to_string();
                             tracing::info!(
-                                "Stream fallback to '{}' (model '{}')",
+                                "Stream fallback trying '{}' (model '{}')",
                                 fb_name,
                                 fb_model
                             );
@@ -1275,7 +1324,7 @@ impl AgentService {
                             let original_provider = {
                                 let mut guard = self.provider.write().expect("provider lock");
                                 let orig = guard.clone();
-                                *guard = fallback.clone();
+                                *guard = (*fallback).clone();
                                 orig
                             };
                             let fb_result = self
@@ -1294,18 +1343,29 @@ impl AgentService {
                                 *guard = original_provider;
                             }
                             match fb_result {
-                                Ok(resp) => resp,
+                                Ok(resp) => {
+                                    stream_succeeded = Some(resp);
+                                    break;
+                                }
                                 Err(fb_err) => {
-                                    tracing::error!(
-                                        "Fallback provider '{}' also failed: {}",
+                                    tracing::warn!(
+                                        "Stream fallback '{}' failed: {} — trying next",
                                         fb_name,
                                         fb_err
                                     );
-                                    return Err(AgentError::Provider(fb_err));
+                                    last_err = fb_err;
                                 }
                             }
-                        } else {
-                            return Err(AgentError::Provider(last_err));
+                        }
+                        match stream_succeeded {
+                            Some(resp) => resp,
+                            None => {
+                                tracing::error!(
+                                    "All {} stream fallback providers exhausted",
+                                    stream_candidates.len()
+                                );
+                                return Err(AgentError::Provider(last_err));
+                            }
                         }
                     }
                 }

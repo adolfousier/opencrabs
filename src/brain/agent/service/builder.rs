@@ -358,8 +358,18 @@ impl AgentService {
         !self.fallback_providers.is_empty()
     }
 
-    /// Get the first available fallback provider
+    /// Get the next fallback provider that isn't the currently active one.
+    /// Walks the chain until it finds a different provider name.
     pub fn try_get_fallback_provider(&self) -> Option<Arc<dyn Provider>> {
-        self.fallback_providers.first().cloned()
+        let active_name = self
+            .provider
+            .read()
+            .ok()
+            .map(|p| p.name().to_string())
+            .unwrap_or_default();
+        self.fallback_providers
+            .iter()
+            .find(|p| p.name() != active_name)
+            .cloned()
     }
 }
