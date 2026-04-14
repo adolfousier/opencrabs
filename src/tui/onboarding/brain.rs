@@ -6,10 +6,10 @@ use super::wizard::OnboardingWizard;
 
 impl OnboardingWizard {
     pub(super) fn handle_brain_setup_key(&mut self, event: KeyEvent) -> WizardAction {
-        // While generating: only allow Esc to cancel and skip to Complete.
+        // While generating: Esc or Enter cancel and skip to Complete.
         // All other keys are ignored so the user can't corrupt input mid-stream.
         if self.brain_generating {
-            if event.code == KeyCode::Esc {
+            if matches!(event.code, KeyCode::Esc | KeyCode::Enter) {
                 self.brain_generating = false;
                 self.step = OnboardingStep::Complete;
                 return WizardAction::Complete;
@@ -216,7 +216,13 @@ Below are the 6 template files. Replace ALL <placeholder> tags and HTML comments
 ===TEMPLATE: MEMORY.md===
 {memory}
 
-Respond with EXACTLY six sections using these delimiters. No extra text before the first delimiter or after the last section:
+CRITICAL OUTPUT RULES:
+1. Start your response IMMEDIATELY with ---SOUL--- (no preamble, no "Here are", no commentary)
+2. Use EXACTLY these delimiters on their own line: ---SOUL--- ---IDENTITY--- ---USER--- ---AGENTS--- ---TOOLS--- ---MEMORY---
+3. After the last section (MEMORY content), STOP. No closing remarks, no "Let me know", no summary, no notes.
+4. Do NOT wrap output in markdown code fences (no ```). Raw content only.
+5. Each section is the complete file content — valid markdown, ready to save as-is.
+
 ---SOUL---
 (generated SOUL.md content)
 ---IDENTITY---
