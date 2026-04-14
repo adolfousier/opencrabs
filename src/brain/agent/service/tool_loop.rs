@@ -220,9 +220,25 @@ impl AgentService {
             }
         }
 
-        // Emit updated token count so TUI reflects post-compaction value immediately.
+        // Emit the token count the NEXT request will start with, not the
+        // in-memory count (which includes kept messages that won't survive
+        // reload). On next load, messages_from_last_compaction() picks up
+        // only the compaction marker + messages after it.
         if let Some(cb) = progress_callback {
-            cb(session_id, ProgressEvent::TokenCount(context.token_count));
+            if let Some(ref summary) = summary_result {
+                let marker_tokens = AgentContext::estimate_tokens(summary) + 100; // marker overhead
+                let brain_tokens = self
+                    .default_system_brain
+                    .as_deref()
+                    .map(AgentContext::estimate_tokens)
+                    .unwrap_or(0);
+                cb(
+                    session_id,
+                    ProgressEvent::TokenCount(marker_tokens + brain_tokens),
+                );
+            } else {
+                cb(session_id, ProgressEvent::TokenCount(context.token_count));
+            }
         }
 
         summary_result
@@ -453,6 +469,13 @@ impl AgentService {
         if let Some(brain) = &self.default_system_brain {
             context.token_count += AgentContext::estimate_tokens(brain);
             context.system_brain = Some(brain.clone());
+        }
+
+        // Emit token count immediately after DB reload so the TUI reflects the
+        // real post-compaction value. Without this, the TUI shows the stale
+        // pre-compaction count from the previous request until the API responds.
+        if let Some(ref cb) = progress_callback {
+            cb(session_id, ProgressEvent::TokenCount(context.token_count));
         }
 
         // Detect user corrections / negative feedback and record automatically.
@@ -1454,8 +1477,10 @@ impl AgentService {
                 }
             } else {
                 let api_input = response.usage.input_tokens as usize;
-                let tool_overhead = self.actual_tool_schema_tokens();
-                let real_message_tokens = api_input.saturating_sub(tool_overhead);
+                // API input_tokens includes system prompt + tool schemas + messages.
+                // Subtract both to get the real message-only token count.
+                let overhead = self.base_context_tokens() as usize;
+                let real_message_tokens = api_input.saturating_sub(overhead);
                 let min_sane = 100;
                 let max_drop_ratio = 0.2;
                 let min_after_drop = (context.token_count as f64 * max_drop_ratio) as usize;
@@ -1472,9 +1497,9 @@ impl AgentService {
                     }
                 } else if real_message_tokens > 0 && real_message_tokens < min_sane {
                     tracing::warn!(
-                        "Token calibration skipped: api_input={}, tool_overhead={}, result={} (below sanity threshold)",
+                        "Token calibration skipped: api_input={}, overhead={}, result={} (below sanity threshold)",
                         api_input,
-                        tool_overhead,
+                        overhead,
                         real_message_tokens,
                     );
                 }
