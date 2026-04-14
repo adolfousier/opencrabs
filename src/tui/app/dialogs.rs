@@ -17,40 +17,59 @@ impl App {
         use crate::brain::provider::qwen;
         let sender = self.event_sender();
         tokio::spawn(async move {
-            let pkce = qwen::PkcePair::generate();
-            let device = match qwen::start_device_flow(&pkce).await {
-                Ok(d) => d,
-                Err(e) => {
-                    let _ = sender.send(TuiEvent::QwenOAuthError(e.to_string()));
-                    return;
+            // Retry loop: on poll failure (expired code, WAF, etc.), generate
+            // a fresh device code and URL automatically. The user can also
+            // hit Enter to restart (which spawns a new task, orphaning this one).
+            const MAX_RETRIES: u32 = 5;
+            for attempt in 0..MAX_RETRIES {
+                if attempt > 0 {
+                    tracing::info!(
+                        "Qwen OAuth: auto-retrying with new device code (attempt {})",
+                        attempt + 1
+                    );
                 }
-            };
 
-            let url = device
-                .verification_uri_complete
-                .clone()
-                .unwrap_or_else(|| device.verification_uri.clone());
-            // Best-effort browser open — never blocks the flow.
-            let _ = qwen::open_browser(&url);
+                let pkce = qwen::PkcePair::generate();
+                let device = match qwen::start_device_flow(&pkce).await {
+                    Ok(d) => d,
+                    Err(e) => {
+                        let _ = sender.send(TuiEvent::QwenOAuthError(e.to_string()));
+                        // Brief pause before retry
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                        continue;
+                    }
+                };
 
-            let _ = sender.send(TuiEvent::QwenDeviceCode {
-                user_code: device.user_code.clone(),
-                verification_uri: url,
-            });
+                let url = device
+                    .verification_uri_complete
+                    .clone()
+                    .unwrap_or_else(|| device.verification_uri.clone());
+                let _ = qwen::open_browser(&url);
 
-            match qwen::poll_for_token(&device.device_code, &pkce).await {
-                Ok(creds) => {
-                    if let Err(e) = creds.persist_to_keys() {
-                        let _ = sender.send(TuiEvent::QwenOAuthError(format!(
-                            "Authorized but failed to save credentials: {}",
-                            e
-                        )));
+                let _ = sender.send(TuiEvent::QwenDeviceCode {
+                    user_code: device.user_code.clone(),
+                    verification_uri: url,
+                });
+
+                match qwen::poll_for_token(&device.device_code, &pkce).await {
+                    Ok(creds) => {
+                        if let Err(e) = creds.persist_to_keys() {
+                            let _ = sender.send(TuiEvent::QwenOAuthError(format!(
+                                "Authorized but failed to save credentials: {}",
+                                e
+                            )));
+                            return;
+                        }
+                        let _ = sender.send(TuiEvent::QwenOAuthComplete);
                         return;
                     }
-                    let _ = sender.send(TuiEvent::QwenOAuthComplete);
-                }
-                Err(e) => {
-                    let _ = sender.send(TuiEvent::QwenOAuthError(e.to_string()));
+                    Err(e) => {
+                        tracing::warn!("Qwen OAuth poll failed: {} — will retry", e);
+                        // Don't send error event on non-final attempts
+                        if attempt == MAX_RETRIES - 1 {
+                            let _ = sender.send(TuiEvent::QwenOAuthError(e.to_string()));
+                        }
+                    }
                 }
             }
         });
@@ -591,12 +610,28 @@ impl App {
                 // Qwen native: field 1 is auth/rotation area
                 use super::onboarding::QwenDeviceFlowStatus;
 
-                // Device flow in progress — ignore Enter
+                // RotationStep means we're actively starting a flow — ignore Enter
                 if matches!(
                     self.ps.qwen_device_flow_status,
                     QwenDeviceFlowStatus::RotationStep { .. }
-                        | QwenDeviceFlowStatus::WaitingForUser { .. }
                 ) {
+                    return Ok(());
+                }
+
+                // WaitingForUser: user hit Enter again before verifying —
+                // restart with a fresh device code/URL
+                if matches!(
+                    self.ps.qwen_device_flow_status,
+                    QwenDeviceFlowStatus::WaitingForUser { .. }
+                ) {
+                    tracing::info!("Qwen OAuth: user requested new device code (Enter while waiting)");
+                    if self.ps.qwen_rotation_enabled {
+                        let current = self.ps.qwen_rotation_current;
+                        let total = self.ps.qwen_rotation_count;
+                        self.ps.qwen_device_flow_status =
+                            QwenDeviceFlowStatus::RotationStep { current, total };
+                    }
+                    self.spawn_qwen_device_flow();
                     return Ok(());
                 }
 
