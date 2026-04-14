@@ -537,7 +537,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
                             // Tokens are dead — show red/yellow warning
                             lines.push(Line::from(Span::styled(
                                 format!(
-                                    "  ● {} of {} accounts expired — press Enter to re-authenticate",
+                                    "  ● {} of {} accounts expired — Enter to re-auth, Alt+Backspace to wipe",
                                     expired, persisted
                                 ),
                                 Style::default()

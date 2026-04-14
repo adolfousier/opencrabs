@@ -377,11 +377,15 @@ impl ProviderSelectorState {
         {
             self.qwen_rotation_enabled = true;
             self.qwen_rotation_count = accounts.len();
-            // Count ANY expired token — a non-empty refresh_token doesn't
-            // guarantee it's still valid (Qwen returns HTTP 400 for revoked ones).
+            // from_account_configs skips accounts with empty api_key (wiped
+            // secrets), so compare loaded count against total slots to detect
+            // expired/wiped accounts that can no longer authenticate.
             let creds = QwenCredentials::from_account_configs(accounts);
-            let expired = creds.iter().filter(|c| !c.is_valid()).count();
-            if expired == 0 {
+            let loaded = creds.len();
+            let valid = creds.iter().filter(|c| c.is_valid()).count();
+            // expired = accounts with wiped secrets + accounts with expired tokens
+            let expired = accounts.len() - valid;
+            if expired == 0 && loaded == accounts.len() {
                 self.qwen_device_flow_status = QwenDeviceFlowStatus::RotationComplete;
             } else {
                 self.qwen_rotation_expired_count = expired;
@@ -457,6 +461,40 @@ impl ProviderSelectorState {
         ) {
             self.qwen_device_flow_status = QwenDeviceFlowStatus::Idle;
         }
+    }
+
+    /// Wipe all Qwen rotation accounts from keys.toml and reset state
+    /// so the user can re-authenticate from scratch. Triggered by Alt+Backspace.
+    pub fn qwen_wipe_rotation_accounts(&mut self) {
+        use crate::config::keys_path;
+        use crate::tui::onboarding::QwenDeviceFlowStatus;
+
+        // Remove [[providers.qwen_accounts]] from keys.toml and config.toml
+        for path in [
+            keys_path(),
+            crate::config::opencrabs_home().join("config.toml"),
+        ] {
+            if path.exists()
+                && let Ok(content) = std::fs::read_to_string(&path)
+                && let Ok(mut doc) = content.parse::<toml::Value>()
+                && let Some(providers) = doc.get_mut("providers")
+                && let Some(tbl) = providers.as_table_mut()
+                && tbl.remove("qwen_accounts").is_some()
+                && let Ok(serialized) = toml::to_string_pretty(&doc)
+            {
+                let _ = std::fs::write(&path, serialized);
+            }
+        }
+
+        // Reset UI state
+        self.qwen_rotation_enabled = false;
+        self.qwen_rotation_count = 2;
+        self.qwen_rotation_expired_count = 0;
+        self.qwen_rotation_collected.clear();
+        self.qwen_rotation_current = 0;
+        self.qwen_device_flow_status = QwenDeviceFlowStatus::Idle;
+        self.has_existing_key = false;
+        tracing::info!("Wiped all Qwen rotation accounts — user can re-authenticate");
     }
 
     // ── Model list management ───────────────────────────────────────

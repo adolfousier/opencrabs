@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::helpers::{handle_text_paste, is_clear_field};
 use super::types::*;
@@ -454,6 +454,10 @@ impl OnboardingWizard {
                     KeyCode::Char('1') if self.ps.qwen_rotation_enabled => {
                         self.ps.qwen_rotation_count = 10;
                         self.ps.qwen_rotation_count_changed();
+                    }
+                    KeyCode::Backspace if event.modifiers.contains(KeyModifiers::ALT) => {
+                        self.ps.qwen_wipe_rotation_accounts();
+                        return WizardAction::None;
                     }
                     KeyCode::Enter => {
                         // RotationStep means we're starting a flow — ignore

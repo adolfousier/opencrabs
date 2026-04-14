@@ -441,6 +441,13 @@ impl App {
                     self.ps.qwen_rotation_count = 10;
                     self.ps.qwen_rotation_count_changed();
                 }
+                crossterm::event::KeyCode::Backspace
+                    if event
+                        .modifiers
+                        .contains(crossterm::event::KeyModifiers::ALT) =>
+                {
+                    self.ps.qwen_wipe_rotation_accounts();
+                }
                 _ => {}
             }
         } else if self.ps.focused_field == 1 && is_zhipu {
