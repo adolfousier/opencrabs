@@ -1088,6 +1088,91 @@ fn phantom_tool_intent_false_positives() {
 }
 
 #[test]
+fn phantom_tool_intent_numbered_step_narration() {
+    use crate::brain::agent::service::has_phantom_tool_intent;
+
+    // Numbered step plans where model narrates instead of executing
+    assert!(has_phantom_tool_intent(
+        "Here's what I need to do:\n\
+         1. Update src/config/types.rs to add the new field\n\
+         2. Fix the migration in src/db/migrations.rs\n\
+         3. Add tests for the new functionality"
+    ));
+    assert!(has_phantom_tool_intent(
+        "I'll make these changes:\n\
+         1. Create the new provider file\n\
+         2. Modify the factory to use it\n\
+         3. Update the config schema"
+    ));
+}
+
+#[test]
+fn phantom_tool_intent_completion_claims() {
+    use crate::brain::agent::service::has_phantom_tool_intent;
+
+    // Model claims it completed work with no tools
+    assert!(has_phantom_tool_intent(
+        "I've updated src/brain/provider/factory.rs with the rotation logic \
+         and fixed the config schema. All changes have been applied."
+    ));
+    assert!(has_phantom_tool_intent(
+        "I've made the changes to src/tui/render/dialogs.rs. The task is complete \
+         and the rotation UI should now work correctly."
+    ));
+    assert!(has_phantom_tool_intent(
+        "Updated src/config/types.rs with the new qwen_accounts field. \
+         All done! The rotation config is ready."
+    ));
+    assert!(has_phantom_tool_intent(
+        "Here's what I did:\n\
+         - Fixed the bug in src/brain/agent/service/tool_loop.rs\n\
+         - Updated the tests to match"
+    ));
+}
+
+#[test]
+fn phantom_tool_intent_git_amend_claim() {
+    use crate::brain::agent::service::has_phantom_tool_intent;
+
+    // Real incident: model claims it amended a commit but executed 0 tools
+    assert!(has_phantom_tool_intent(
+        "Let me amend that.\n\n\
+         Amended. Commit `4bd32a6` now says \"20 commits\" instead of \"18\"."
+    ));
+}
+
+#[test]
+fn phantom_tool_intent_multi_now_narration() {
+    use crate::brain::agent::service::has_phantom_tool_intent;
+
+    // Real incident: model narrates a multi-step plan with "Now" lines
+    assert!(has_phantom_tool_intent(
+        "Now let me check the URL references at the bottom:\n\n\
+         Now I see the format. The changelog uses reference-style links at the bottom. I need to:\n\n\
+         Add the `[0.3.8]` section\n\
+         Update the `[Unreleased]` link to point to `v0.3.8`\n\
+         Add the `[0.3.8]` reference link at the bottom\n\n\
+         Now add the `[0.3.8]` reference link at the bottom:\n\n\
+         Now bump version to 0.3.8:\n\n\
+         Now run the full CI workflow:"
+    ));
+}
+
+#[test]
+fn phantom_tool_intent_past_tense_standalone() {
+    use crate::brain::agent::service::has_phantom_tool_intent;
+
+    // Multiple past-tense standalone claims (must be >80 chars)
+    assert!(has_phantom_tool_intent(
+        "Updated.\nFixed.\nThe version is now 0.3.8 and the changelog entry has been added for the release."
+    ));
+    assert!(has_phantom_tool_intent(
+        "Amended. The commit message now reads correctly with the proper count.\n\
+         Committed. All changes are on the main branch and ready for push."
+    ));
+}
+
+#[test]
 fn strip_streamed_content_progress_event_carries_reason() {
     use crate::brain::agent::ProgressEvent;
 

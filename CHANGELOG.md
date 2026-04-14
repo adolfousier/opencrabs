@@ -5,6 +5,83 @@ All notable changes to OpenCrabs will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.8] - 2026-04-14
+
+20 hardening fixes across context tracking, self-heal, provider rotation,
+and cross-platform support. RSI moves to fully autonomous mode — no human
+approval required. Existing users should ask their crab to compare brain
+files with the latest templates and apply any diffs.
+
+> **RSI is experimental.** Autonomous self-improvement runs without human
+> approval and writes improvements to `~/.opencrabs/rsi/improvements.md`.
+> Monitor the file during early testing.
+
+### Changed
+
+- **RSI runs autonomously** — removed human-in-the-loop approval. The
+  `self_improve` tool now applies improvements directly and logs them
+  to `~/.opencrabs/rsi/improvements.md`. The `propose` action was removed;
+  only `apply`, `update`, and `read` remain.
+- **RSI uses active provider** — no longer hardcoded to Anthropic; respects
+  the current provider and model configuration.
+- **RSI reuses persistent session** — one session per cycle instead of
+  creating a new one on every improvement run.
+
+### Fixed
+
+#### Context & Token Accuracy
+- **Real token counts from DB** — replaced estimation with actual values
+  stored per request.
+- **Reverted cumulative DB token_count** — discovered values were API
+  lifetime totals, not per-request; stopped using them for context budget.
+- **Silent emergency truncation** — when context exceeds budget, truncates
+  to 80% and triggers auto-compaction instead of crashing.
+- **Accurate token display after compaction** — context token counter now
+  reads from the compaction point, not the full session history. Fixed
+  calibration drift that made the counter diverge over time.
+- **TUI shows compaction-aware token count** — context display reflects
+  tokens since last compaction, not the cumulative total.
+
+#### Self-Heal & Phantom Detection
+- **Phantom tool call detection without file paths** — catches when the
+  model narrates file changes in prose (e.g. "I updated the config") without
+  actually executing any tool calls.
+- **Structural phantom detection via imperative statement count** — detects
+  hallucinated tool usage by analyzing imperative verb density in responses.
+
+#### Provider & Rotation
+- **Fallback walks entire provider chain** — on failure, iterates all
+  configured providers while skipping the one that just failed.
+- **Rotation token persistence** — saved between sessions so model rotation
+  resumes correctly after restart. Fixed model remap and resume contamination.
+- **Custom provider API key written before config reload** — prevents the
+  key from being lost on `/models` switch or config refresh.
+
+#### Qwen
+- **Auto-retry device flow on failure** — Qwen OAuth device flow now retries
+  automatically; pressing Enter restarts with a fresh auth code.
+- **Normalized Qwen 3.6 Plus variants** — `:free`, `thinking`, and bare
+  variants all resolve correctly.
+
+#### TUI
+- **Fixed panic on multi-byte characters** — mouse sequence detection no
+  longer crashes on Unicode input. Fixed path truncation for wide chars.
+
+#### Usage
+- **Normalized model names and display labels in `/usage`** — consistent
+  naming across providers with human-readable labels.
+
+#### Windows
+- **`where.exe` for CLI binary detection** — uses Windows-native `where.exe`
+  instead of `which` when running on Windows.
+- **Restored `--all-features` for Windows CI builds** — full feature set
+  tested in CI again.
+
+### Contributors
+
+- **Teo Gonzalez Collazo** — PR #71 (Exa search integration)
+- **Swoorup** — Issue #72 (readline keyboard shortcuts)
+
 ## [0.3.7] - 2026-04-13
 
 OpenRouter streaming fully fixed — all models now use the standard OpenAI
@@ -2653,6 +2730,7 @@ fixes.
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.3.8]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.8
 [0.3.7]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.7
 [0.3.6]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.6
 [0.3.5]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.5
