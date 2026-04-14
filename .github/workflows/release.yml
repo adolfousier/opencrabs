@@ -142,8 +142,8 @@ jobs:
         shell: bash
         env:
           # macOS ARM: disable i8mm intrinsics; Windows: force static CRT at C level
-          CFLAGS: ${{ matrix.target == 'aarch64-apple-darwin' && '-march=armv8-a+crypto' || (matrix.os == 'windows-latest' && '/MT' || '') }}
-          CXXFLAGS: ${{ matrix.target == 'aarch64-apple-darwin' && '-march=armv8-a+crypto' || (matrix.os == 'windows-latest' && '/MT' || '') }}
+          CFLAGS: ${{ matrix.target == 'aarch64-apple-darwin' && '-march=armv8-a+crypto' || (matrix.os == 'windows-latest' && '-MT' || '') }}
+          CXXFLAGS: ${{ matrix.target == 'aarch64-apple-darwin' && '-march=armv8-a+crypto' || (matrix.os == 'windows-latest' && '-MT' || '') }}
           # aws-lc-sys needs cmake builder on Windows MSVC to avoid __builtin_bswap errors
           AWS_LC_SYS_CMAKE_BUILDER: ${{ matrix.os == 'windows-latest' && '1' || '' }}
           # llama-cpp-sys-2 defaults to dynamic CRT (MD) but esaxx-rs hardcodes static (MT) — force match
