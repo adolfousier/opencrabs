@@ -426,11 +426,11 @@ pub(super) fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
         .and_then(|s| s.provider_name.clone())
         .unwrap_or_else(|| app.agent_service.provider_name());
     let model_str = {
-        let raw = session
-            .and_then(|s| s.model.as_deref())
-            .unwrap_or_else(|| session
+        let raw = session.and_then(|s| s.model.as_deref()).unwrap_or_else(|| {
+            session
                 .and_then(|s| s.provider_name.as_deref())
-                .unwrap_or(""));
+                .unwrap_or("")
+        });
         let prefix = format!("{}/", provider_str);
         let stripped = raw.strip_prefix(&prefix).unwrap_or(raw);
         crate::tui::provider_selector::model_display_label(stripped).to_string()

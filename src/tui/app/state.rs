@@ -2196,16 +2196,14 @@ impl App {
                     };
                 }
             }
-            TuiEvent::BrainGenerationResult { result } => {
-                match result {
-                    Ok(msg) => {
-                        self.push_system_message(format!("✓ {}", msg));
-                    }
-                    Err(e) => {
-                        self.push_system_message(format!("Brain generation: {}", e));
-                    }
+            TuiEvent::BrainGenerationResult { result } => match result {
+                Ok(msg) => {
+                    self.push_system_message(format!("✓ {}", msg));
                 }
-            }
+                Err(e) => {
+                    self.push_system_message(format!("Brain generation: {}", e));
+                }
+            },
             TuiEvent::WhisperDownloadProgress(progress) => {
                 if let Some(ref mut wizard) = self.onboarding {
                     wizard.stt_model_download_progress = Some(progress);
