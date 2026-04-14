@@ -341,6 +341,7 @@ pub enum VoiceField {
     LocalModelSelect,
     TtsModeSelect,
     TtsLocalVoiceSelect,
+    Continue,
 }
 
 /// Which field is focused in ImageSetup step
