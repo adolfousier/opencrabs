@@ -223,13 +223,14 @@ impl App {
                     }
                 }
                 // After swapping, the new provider may use a renamed canonical id
-                // (e.g. legacy "qwen-code" → "qwen-cli"). Refresh session.provider_name
-                // so the status bar reflects the live provider name.
+                // (e.g. legacy "qwen-code" → "qwen-cli"). Refresh both provider
+                // AND model so they always stay paired.
                 let live_name = self.agent_service.provider_name();
                 if live_name != *saved_provider
                     && let Some(ref mut s) = self.current_session
                 {
                     s.provider_name = Some(live_name);
+                    s.model = Some(self.agent_service.provider_model());
                 }
             }
         } else {

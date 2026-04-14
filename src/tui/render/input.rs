@@ -420,38 +420,20 @@ pub(super) fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
         .to_string();
 
     // --- Provider / model ---
-    // Both provider and model must come from the SAME source to avoid
-    // impossible combos like "zhipu / Qwen 3.6 Plus".  Either both come
-    // from the session record, or both come from the active provider.
-    let (provider_str, model_str) = {
-        let session_provider = app
-            .current_session
-            .as_ref()
-            .and_then(|s| s.provider_name.clone());
-        let session_model = app
-            .current_session
-            .as_ref()
-            .and_then(|s| s.model.clone());
-
-        let (prov, raw_model) = match (session_provider, session_model) {
-            (Some(p), Some(m)) => (p, m),
-            // Session has provider but no model — use provider name as-is,
-            // but do NOT mix in the active provider's model.
-            (Some(p), None) => (p.clone(), p),
-            // No session provider — use active provider for both.
-            _ => (
-                app.agent_service.provider_name(),
-                app.default_model_name.clone(),
-            ),
-        };
-
-        // Strip redundant "{provider}/" prefix so we don't render "opencode / opencode/foo"
-        let prefix = format!("{}/", prov);
-        let stripped = raw_model
-            .strip_prefix(&prefix)
-            .unwrap_or(&raw_model);
-        let display = crate::tui::provider_selector::model_display_label(stripped).to_string();
-        (prov, display)
+    // Always read from the session record — every session has both fields.
+    let session = app.current_session.as_ref();
+    let provider_str = session
+        .and_then(|s| s.provider_name.clone())
+        .unwrap_or_else(|| app.agent_service.provider_name());
+    let model_str = {
+        let raw = session
+            .and_then(|s| s.model.as_deref())
+            .unwrap_or_else(|| session
+                .and_then(|s| s.provider_name.as_deref())
+                .unwrap_or(""));
+        let prefix = format!("{}/", provider_str);
+        let stripped = raw.strip_prefix(&prefix).unwrap_or(raw);
+        crate::tui::provider_selector::model_display_label(stripped).to_string()
     };
 
     // Working directory — collapse $HOME to ~, then truncate if still long
