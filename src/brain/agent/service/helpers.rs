@@ -1276,14 +1276,35 @@ pub fn has_phantom_tool_intent(text: &str) -> bool {
     let lower = trimmed.to_lowercase();
 
     // ── Signal A: Multiple imperative "now" statements ─────────────────
-    // If the model writes 2+ lines starting with "Now <verb>" it's narrating
-    // a multi-step plan it should be executing via tools. This is the strongest
-    // phantom signal — no phrase list needed, purely structural.
+    // If the model writes 2+ lines starting with "Now <verb>" or "Let me <verb>"
+    // it's narrating a multi-step plan it should be executing via tools.
+    // Allow optional whitespace/bullet before "now" — TUI rendering and
+    // markdown formatting can indent these lines.
     use regex::Regex;
     let now_imperative =
-        Regex::new(r"(?m)^(?:now\s+(?:let\s+me\s+)?|let\s+me\s+)\w").unwrap();
+        Regex::new(r"(?m)^[\s\-*]*(?:now\s+(?:let\s+me\s+)?|let\s+me\s+)\w").unwrap();
     let now_count = now_imperative.find_iter(&lower).count();
     if now_count >= 2 {
+        return true;
+    }
+
+    // ── Signal A2: Numbered step narration ───────────────────────────────
+    // "1. Update src/foo.rs\n2. Fix the bug\n3. Add tests" — model narrates
+    // a numbered plan with action verbs instead of executing tools.
+    let numbered_steps =
+        Regex::new(r"(?m)^\s*\d+\.\s+(?:update|fix|modify|create|write|edit|add|change|remove|delete|check|read|run|bump|amend|verify|test|deploy|install)")
+            .unwrap();
+    if numbered_steps.find_iter(&lower).count() >= 2 {
+        return true;
+    }
+
+    // ── Signal A3: Past-tense standalone completion sentences ─────────
+    // "Amended." / "Updated." / "Fixed." — model claims action in a single
+    // terse sentence. 2+ of these = phantom narration.
+    let past_tense_standalone = Regex::new(
+        r"(?m)^[\s\-*]*(?:amended|updated|fixed|modified|created|written|saved|deleted|removed|replaced|bumped|deployed|committed)[.!]"
+    ).unwrap();
+    if past_tense_standalone.find_iter(&lower).count() >= 2 {
         return true;
     }
 
@@ -1307,6 +1328,12 @@ pub fn has_phantom_tool_intent(text: &str) -> bool {
         "now let me bump",
         "now let me prepend",
         "now let me append",
+        "now let me amend",
+        "now let me verify",
+        "now let me test",
+        "now let me deploy",
+        "now let me install",
+        "now let me commit",
         // "now <verb>" patterns (without "let me")
         "now update the",
         "now fix the",
@@ -1317,6 +1344,9 @@ pub fn has_phantom_tool_intent(text: &str) -> bool {
         "now read the",
         "now prepend",
         "now append",
+        "now amend",
+        "now verify",
+        "now commit",
         // "i'll <verb>" patterns
         "i'll update",
         "i'll fix",
@@ -1331,6 +1361,9 @@ pub fn has_phantom_tool_intent(text: &str) -> bool {
         "i'll run",
         "i'll bump",
         "i'll read",
+        "i'll amend",
+        "i'll verify",
+        "i'll commit",
         // "let me <verb>" patterns
         "let me update",
         "let me fix",
@@ -1346,28 +1379,45 @@ pub fn has_phantom_tool_intent(text: &str) -> bool {
         "let me bump",
         "let me prepend",
         "let me append",
+        "let me amend",
+        "let me verify",
+        "let me commit",
         // Past-tense completion claims (model says it already did it)
         "here's what changed",
         "here's what's changed",
         "here are the changes",
+        "here's what i did",
+        "here is what i did",
+        "the changes are",
         "changes applied",
         "updated the file",
         "updated the code",
+        "updated src/",
         "modified the file",
+        "modified src/",
         "fixed the file",
+        "fixed the bug",
         "fixed the issue",
+        "fixed src/",
         "created the file",
         "wrote the file",
+        "all done",
+        "task complete",
+        "everything is updated",
+        // "i've <verb>" patterns (past tense narration)
+        "i've made the changes",
+        "i've completed",
+        "i've done",
+        "i've finished",
     ];
     let has_action = ACTION_VERBS.iter().any(|v| lower.contains(v));
 
     if has_action {
         // Signal B + file-path-like patterns = phantom
         // Matches: src/foo/bar.rs, ./config.toml, docs/README.md, etc.
-        let path_re = Regex::new(
-            r"(?:^|[\s`(])(?:\./)?[a-zA-Z_][\w\-]*/[\w\-/]*\.\w{1,6}(?:[\s`),:;]|$)",
-        )
-        .unwrap();
+        let path_re =
+            Regex::new(r"(?:^|[\s`(])(?:\./)?[a-zA-Z_][\w\-]*/[\w\-/]*\.\w{1,6}(?:[\s`),:;]|$)")
+                .unwrap();
         // Matches: filename.rs, setup.sh, Dockerfile, Cargo.toml
         let ext_re = Regex::new(
             r"(?:^|[\s`(])[\w\-]+\.(?:rs|py|ts|tsx|js|jsx|go|sh|toml|yaml|yml|json|md|dockerfile)(?:[\s`),:;]|$)"
@@ -1409,6 +1459,30 @@ pub fn has_phantom_tool_intent(text: &str) -> bool {
             "i've added",
             "i've modified",
             "i've fixed",
+            "i've changed",
+            "i've removed",
+            "i've deleted",
+            "i've replaced",
+            "i've amended",
+            "i've committed",
+            "i've bumped",
+            "i've made the changes",
+            "i've made all",
+            "all changes have been",
+            "all files have been",
+            "the changes have been applied",
+            "changes are now in place",
+            "task is complete",
+            "the task is complete",
+            "all done!",
+            "all done.",
+            // Git-specific phantom claims
+            "amended.",
+            "committed.",
+            "commit `",
+            "amended the commit",
+            "bumped the version",
+            "version bumped",
         ];
         if COMPLETION_CLAIMS.iter().any(|c| lower.contains(c)) {
             return true;

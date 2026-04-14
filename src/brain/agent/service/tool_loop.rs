@@ -673,6 +673,7 @@ impl AgentService {
         let mut stream_retry_count = 0u32; // Track consecutive stream drop retries
         const MAX_STREAM_RETRIES: u32 = 2; // Retry up to 2 times on dropped streams
         let mut phantom_retry_used = false; // Single retry for phantom tool call detection
+        let mut rotation_retry_used = false; // Single retry when Qwen rotation yields 0 tools
 
         // Ordered content segments for CLI providers — tracks text and tool markers
         // in the exact order they stream, so DB persistence preserves interleaving.
@@ -1074,10 +1075,7 @@ impl AgentService {
                                 model_name
                             )
                         } else {
-                            format!(
-                                "Rate limit on '{}' — walking fallback chain...",
-                                model_name
-                            )
+                            format!("Rate limit on '{}' — walking fallback chain...", model_name)
                         };
                         cb(session_id, ProgressEvent::SelfHealingAlert { message });
                     }
@@ -1375,7 +1373,8 @@ impl AgentService {
             // Surface any sticky-fallback swap that the FallbackProvider
             // performed during this turn so the user sees which provider/model
             // is now active. Fires at most once per swap.
-            if let Some(swap) = self.provider().take_swap_event()
+            let rotated_this_iteration = self.provider().take_swap_event();
+            if let Some(ref swap) = rotated_this_iteration
                 && let Some(ref cb) = progress_callback
             {
                 let reason = if swap.reason.is_empty() {
@@ -1397,10 +1396,10 @@ impl AgentService {
                 cb(
                     session_id,
                     ProgressEvent::ProviderSwitched {
-                        from_name: swap.from_name,
-                        from_model: swap.from_model,
-                        to_name: swap.to_name,
-                        to_model: swap.to_model,
+                        from_name: swap.from_name.clone(),
+                        from_model: swap.from_model.clone(),
+                        to_name: swap.to_name.clone(),
+                        to_model: swap.to_model.clone(),
                         reason,
                     },
                 );
@@ -2181,6 +2180,42 @@ impl AgentService {
                          calls. Your response contained action language and file paths but zero \
                          tool_use blocks. Execute the actual tool calls NOW. Do not narrate — \
                          call the tools.]"
+                            .to_string(),
+                    ));
+                    continue;
+                }
+
+                // ── Rotation continuation ──────────────────────────────
+                // When Qwen OAuth rotation happens mid-task, the new account
+                // gets the same request but may respond with text-only (0 tools)
+                // because it's a cold start on a fresh account. Inject a
+                // continuation prompt so it picks up where the previous account
+                // left off. Only retry once to avoid infinite loops.
+                if !rotation_retry_used
+                    && rotated_this_iteration.is_some()
+                    && iteration > 1
+                {
+                    rotation_retry_used = true;
+                    tracing::warn!(
+                        "Rotation yielded 0 tool calls after {} iterations — injecting continuation prompt",
+                        iteration
+                    );
+                    if let Some(ref cb) = progress_callback {
+                        cb(
+                            session_id,
+                            ProgressEvent::SelfHealingAlert {
+                                message: "Account rotation mid-task — retrying with continuation context".into(),
+                            },
+                        );
+                    }
+                    // Add the text-only response as assistant context, then nudge
+                    context.add_message(Message::assistant(iteration_text));
+                    context.add_message(Message::user(
+                        "[System: Provider account rotation just occurred mid-task. You were \
+                         actively executing tools in previous iterations but your last response \
+                         contained zero tool calls. This is a continuation — review the conversation \
+                         above and resume executing tools from where you left off. Do NOT summarize \
+                         or re-explain. Execute the next tool call immediately.]"
                             .to_string(),
                     ));
                     continue;

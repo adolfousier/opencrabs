@@ -624,7 +624,9 @@ impl App {
                     self.ps.qwen_device_flow_status,
                     QwenDeviceFlowStatus::WaitingForUser { .. }
                 ) {
-                    tracing::info!("Qwen OAuth: user requested new device code (Enter while waiting)");
+                    tracing::info!(
+                        "Qwen OAuth: user requested new device code (Enter while waiting)"
+                    );
                     if self.ps.qwen_rotation_enabled {
                         let current = self.ps.qwen_rotation_current;
                         let total = self.ps.qwen_rotation_count;
