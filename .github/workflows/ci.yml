@@ -48,14 +48,25 @@ jobs:
           path: target
           key: ${{ runner.os }}-target-stable-v3-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Run tests (Windows — no local-stt/local-tts)
+      - name: Install CMake (Windows)
+        if: runner.os == 'Windows'
+        uses: lukka/get-cmake@latest
+
+      - name: Install NASM (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/setup-nasm@v1
+
+      - name: Run tests (Windows)
         if: runner.os == 'Windows'
         env:
           AWS_LC_SYS_CMAKE_BUILDER: "1"
-        # llama-cpp-sys CRT mismatch only affects debug builds (cargo test).
-        # Release builds use /MT successfully. Skip local-stt/local-tts here;
-        # they're tested on Linux/macOS and built for Windows in release.yml.
-        run: cargo test --no-default-features --features "telegram,discord,slack,whatsapp,trello,browser" --verbose
+          LLAMA_STATIC_CRT: "1"
+          RUSTFLAGS: "-Ctarget-feature=+crt-static"
+          # Debug builds need /MTd (static debug CRT), not /MT (static release CRT).
+          # /MT links static VCRT but dynamic debug UCRT, leaving __imp_lroundf etc unresolved.
+          CFLAGS: "/MTd"
+          CXXFLAGS: "/MTd"
+        run: cargo test --all-features --verbose
 
       - name: Run tests (macOS)
         if: runner.os == 'macOS'
