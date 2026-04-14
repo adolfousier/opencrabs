@@ -85,6 +85,20 @@ latest templates and apply any diffs.
 #### TUI
 - **Fixed panic on multi-byte characters** — mouse sequence detection no
   longer crashes on Unicode input. Fixed path truncation for wide chars.
+- **Voice step Continue button** — Tab now cycles between fields instead
+  of advancing to the next onboarding screen. Added Continue button
+  matching the Channels step pattern.
+- **Brain textarea wrapping + template wipe** — first backspace on untouched
+  template clears the entire field. Large markdown pastes render cleanly
+  with line-wrap and overflow indicator.
+- **Brain generation runs in background** — no longer blocks on "Cooking
+  up brain files..." screen. Enters chat immediately, generates in the
+  background, writes files directly to workspace. 120s timeout prevents
+  infinite hangs.
+- **Stricter brain prompt** — explicitly forbids preamble, closing remarks,
+  and code fences so parsing succeeds reliably.
+- **Rebuild provider before brain gen on fresh install** — prevents
+  PlaceholderProvider error when brain step fires before provider is wired.
 
 #### Usage
 - **Normalized model names and display labels in `/usage`** — consistent
@@ -95,9 +109,15 @@ latest templates and apply any diffs.
   instead of `which` when running on Windows.
 - **Restored `--all-features` for Windows CI builds** — full feature set
   tested in CI again.
-- **Fixed MSVC CRT mismatch** — `LLAMA_STATIC_CRT=1` forces llama-cpp-sys-2
-  to use static CRT, matching esaxx-rs and resolving the RuntimeLibrary
-  link error on Windows MSVC.
+- **Fixed MSVC CRT mismatch** — triple-layer fix: `LLAMA_STATIC_CRT=1`
+  (cmake path), `RUSTFLAGS=-Ctarget-feature=+crt-static` (Rust linker),
+  and `CFLAGS=/MT CXXFLAGS=/MT` (direct MSVC compiler flags). Ensures
+  all C/C++ objects use static CRT matching esaxx-rs.
+
+### Docs
+
+- **Python runtime dependency for local TTS** — added install commands
+  for all platforms (apt, dnf, brew, winget) in README.
 
 ### Contributors
 
