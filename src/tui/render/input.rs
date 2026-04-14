@@ -448,7 +448,11 @@ pub(super) fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
         raw_dir.to_string()
     };
     let display_dir = if short_dir.len() > 40 {
-        format!("...{}", &short_dir[short_dir.len().saturating_sub(37)..])
+        let mut start = short_dir.len().saturating_sub(37);
+        while start > 0 && !short_dir.is_char_boundary(start) {
+            start -= 1;
+        }
+        format!("...{}", &short_dir[start..])
     } else {
         short_dir
     };
