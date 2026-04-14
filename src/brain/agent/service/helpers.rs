@@ -1336,5 +1336,51 @@ pub fn has_phantom_tool_intent(text: &str) -> bool {
         r"(?:^|[\s`(])[\w\-]+\.(?:rs|py|ts|tsx|js|jsx|go|sh|toml|yaml|yml|json|md|dockerfile)(?:[\s`),:;]|$)"
     )
     .unwrap();
-    path_re.is_match(&lower) || ext_re.is_match(trimmed)
+
+    if path_re.is_match(&lower) || ext_re.is_match(trimmed) {
+        return true;
+    }
+
+    // Signal 3: Completion claims — model says "done", "prepended", "saved" etc.
+    // without naming a file path. Action verb (signal 1) + completion = phantom.
+    // This catches the case where the model says "let me prepend to the file"
+    // then "Done. v0.3.7 prepended" without ever calling a tool.
+    const COMPLETION_CLAIMS: &[&str] = &[
+        "done.",
+        "done!",
+        "done —",
+        "done,",
+        "prepended",
+        "appended",
+        "written to",
+        "saved to",
+        "saved the",
+        "wrote to",
+        "file updated",
+        "file created",
+        "file saved",
+        "successfully updated",
+        "successfully created",
+        "successfully wrote",
+        "successfully written",
+        "successfully saved",
+        "successfully prepended",
+        "successfully appended",
+        "changes saved",
+        "all under 280",
+        "here are the results",
+        "here's the result",
+        "the file now contains",
+        "the file has been",
+        "i've updated",
+        "i've written",
+        "i've created",
+        "i've saved",
+        "i've prepended",
+        "i've appended",
+        "i've added",
+        "i've modified",
+        "i've fixed",
+    ];
+    COMPLETION_CLAIMS.iter().any(|c| lower.contains(c))
 }
