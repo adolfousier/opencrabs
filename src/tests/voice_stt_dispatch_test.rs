@@ -239,10 +239,13 @@ fn quick_jump_done_triggers_apply_config_flag() {
     wizard.step = OnboardingStep::VoiceSetup;
     wizard.voice_field = VoiceField::TtsModeSelect;
 
-    // Tab on TtsModeSelect (Off) calls next_step() → sets quick_jump_done
+    // Tab on TtsModeSelect (Off) → Continue field
     let action = wizard.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+    assert_eq!(action, crate::tui::onboarding::WizardAction::None);
+    assert_eq!(wizard.voice_field, VoiceField::Continue);
 
-    // In quick_jump mode, completing a step returns QuickJumpDone (saves config then closes)
+    // Enter on Continue calls next_step() → QuickJumpDone in quick_jump mode
+    let action = wizard.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
     assert_eq!(
         action,
         crate::tui::onboarding::WizardAction::QuickJumpDone,
@@ -274,7 +277,13 @@ fn non_quick_jump_tts_tab_advances_step() {
     wizard.step = OnboardingStep::VoiceSetup;
     wizard.voice_field = VoiceField::TtsModeSelect;
 
+    // Tab → Continue field
     let action = wizard.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+    assert_eq!(action, WizardAction::None);
+    assert_eq!(wizard.voice_field, VoiceField::Continue);
+
+    // Enter on Continue → next step
+    let action = wizard.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
     assert_eq!(action, WizardAction::None);
     assert_eq!(
         wizard.step,
