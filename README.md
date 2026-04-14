@@ -776,6 +776,19 @@ The onboarding wizard handles everything on first run.
 > sudo pacman -S gcc-libs alsa-lib
 > ```
 > `libgomp` (GCC OpenMP) is required by the local embedding engine (`llama-cpp-2`). `libasound` is required for local speech-to-text audio I/O. macOS and Windows binaries have no extra prerequisites.
+>
+> **Local TTS (Piper) additionally requires Python 3 with the `venv` module:**
+> ```bash
+> # Debian/Ubuntu
+> sudo apt-get install python3 python3-venv
+> # Fedora/RHEL
+> sudo dnf install python3
+> # macOS
+> brew install python3
+> # Windows
+> winget install Python.Python.3
+> ```
+> Not needed if you use API TTS (OpenAI) or disable TTS entirely.
 
 > **Note:** `/rebuild` works even with pre-built binaries — it auto-clones the source to `~/.opencrabs/source/` on first use, then builds and hot-restarts. For active development or adding custom tools, Option 2 gives you the source tree directly.
 
@@ -809,7 +822,7 @@ cargo install opencrabs --no-default-features --features "telegram,whatsapp,disc
 | `slack` | slack-morphism | Slack bot channel (Socket Mode) |
 | `trello` | — | Trello webhook channel |
 | `local-stt` | rwhisper | On-device speech-to-text (requires CMake + C++ compiler) |
-| `local-tts` | opusic-sys | On-device text-to-speech |
+| `local-tts` | opusic-sys | On-device text-to-speech (requires `python3` + `python3-venv` at runtime) |
 | `browser` | chromey | Browser automation via CDP (Chrome, Brave, Edge, Arc, Vivaldi, Opera — not Firefox) |
 
 ### Option 3: Build from Source (full control)
@@ -2344,7 +2357,7 @@ cargo clippy -- -D warnings
 | `slack` | Slack bot integration (default: enabled) |
 | `trello` | Trello board polling + card management (default: enabled) |
 | `local-stt` | Local speech-to-text via rwhisper (candle-based, pure Rust) |
-| `local-tts` | Local text-to-speech via Piper (requires python3) |
+| `local-tts` | Local text-to-speech via Piper (requires `python3` + `python3-venv` at runtime) |
 | `profiling` | Enable pprof flamegraph profiling (Unix only) |
 
 ### Performance
