@@ -2191,10 +2191,7 @@ impl AgentService {
                 // because it's a cold start on a fresh account. Inject a
                 // continuation prompt so it picks up where the previous account
                 // left off. Only retry once to avoid infinite loops.
-                if !rotation_retry_used
-                    && rotated_this_iteration.is_some()
-                    && iteration > 1
-                {
+                if !rotation_retry_used && rotated_this_iteration.is_some() && iteration > 1 {
                     rotation_retry_used = true;
                     tracing::warn!(
                         "Rotation yielded 0 tool calls after {} iterations — injecting continuation prompt",
@@ -2204,7 +2201,9 @@ impl AgentService {
                         cb(
                             session_id,
                             ProgressEvent::SelfHealingAlert {
-                                message: "Account rotation mid-task — retrying with continuation context".into(),
+                                message:
+                                    "Account rotation mid-task — retrying with continuation context"
+                                        .into(),
                             },
                         );
                     }
