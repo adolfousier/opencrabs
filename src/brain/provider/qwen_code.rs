@@ -145,26 +145,12 @@ fn resolve_qwen_path() -> Result<String> {
         }
     }
 
-    // Try PATH via `which`
-    if let Ok(output) = std::process::Command::new("which").arg("qwen").output()
-        && output.status.success()
-    {
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !path.is_empty() {
-            return Ok(path);
-        }
+    // Try PATH lookup (cross-platform: `which` on Unix, `where.exe` on Windows)
+    if let Some(path) = super::which_binary("qwen") {
+        return Ok(path);
     }
-
-    // Also try `qwen-code` as the binary name (some installs use this)
-    if let Ok(output) = std::process::Command::new("which")
-        .arg("qwen-code")
-        .output()
-        && output.status.success()
-    {
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !path.is_empty() {
-            return Ok(path);
-        }
+    if let Some(path) = super::which_binary("qwen-code") {
+        return Ok(path);
     }
 
     Err(ProviderError::Internal(
