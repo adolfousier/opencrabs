@@ -1821,9 +1821,17 @@ impl App {
                     });
                 }
                 WizardAction::GenerateBrain => {
-                    // Ensure provider config is persisted and agent service
-                    // rebuilt BEFORE generation — on fresh install the active
-                    // provider is still PlaceholderProvider at this point.
+                    // Extract prompt and workspace path before dropping wizard.
+                    // Brain generation runs in the background after entering chat.
+                    let brain_context = self.onboarding.as_mut().map(|wizard| {
+                        wizard.normalize_brain_inputs();
+                        let prompt = wizard.build_brain_prompt();
+                        let workspace = wizard.workspace_path.clone();
+                        (prompt, workspace)
+                    });
+
+                    // Ensure provider is available (fresh install may still
+                    // have PlaceholderProvider at this point).
                     if self.agent_service.provider_name() == "none" {
                         if let Some(ref wizard) = self.onboarding
                             && let Err(e) = wizard.apply_config()
@@ -1838,17 +1846,54 @@ impl App {
                                 "Brain gen: rebuild_agent_service failed: {}",
                                 e
                             );
-                            if let Some(ref mut wizard) = self.onboarding {
-                                wizard.brain_generating = false;
-                                wizard.brain_error = Some(
-                                    "No provider available — skip or reconfigure"
-                                        .to_string(),
-                                );
-                            }
-                            return Ok(());
                         }
                     }
-                    self.generate_brain_files();
+
+                    // Complete onboarding — go straight to chat
+                    if let Some(ref wizard) = self.onboarding {
+                        match wizard.apply_config() {
+                            Ok(()) => {
+                                let (provider_name, model_name) = if wizard.ps.is_custom() {
+                                    (
+                                        format!("Custom ({})", wizard.ps.custom_name),
+                                        wizard.ps.custom_model.clone(),
+                                    )
+                                } else {
+                                    (
+                                        super::onboarding::PROVIDERS[wizard.ps.selected_provider]
+                                            .name
+                                            .to_string(),
+                                        wizard.ps.selected_model_name().to_string(),
+                                    )
+                                };
+                                self.push_system_message(format!(
+                                    "Setup complete! Provider: {} | Model: {}",
+                                    provider_name, model_name
+                                ));
+                                if let Err(e) = self.rebuild_agent_service().await {
+                                    tracing::warn!("Failed to rebuild agent service: {}", e);
+                                }
+                            }
+                            Err(e) => {
+                                self.push_system_message(format!(
+                                    "Setup finished with warnings: {}",
+                                    e
+                                ));
+                            }
+                        }
+                    }
+                    self.onboarding = None;
+                    self.sync_session_to_provider().await;
+                    self.switch_mode(AppMode::Chat).await?;
+
+                    // Fire brain generation in the background
+                    if let Some((prompt, workspace)) = brain_context {
+                        self.push_system_message(
+                            "Generating personalized brain files in the background..."
+                                .to_string(),
+                        );
+                        self.generate_brain_files_background(prompt, workspace);
+                    }
                 }
                 WizardAction::DownloadWhisperModel => {
                     #[cfg(feature = "local-stt")]
@@ -1988,42 +2033,25 @@ impl App {
         Ok(())
     }
 
-    /// Generate personalized brain files via the AI provider
-    /// Kick off brain-file generation in a background task so the TUI stays
-    /// responsive (Esc cancels, render keeps ticking). The result is delivered
-    /// via `TuiEvent::BrainGenerationResult` and applied in `state.rs`.
-    fn generate_brain_files(&mut self) {
-        // Extract what we need before borrowing wizard mutably.
-        // Normalize the user-provided free-form text into valid markdown
-        // first so the model sees a consistent structure even if the user
-        // pasted plain prose instead of markdown.
-        let prompt = {
-            let Some(ref mut wizard) = self.onboarding else {
-                return;
-            };
-            wizard.normalize_brain_inputs();
-            wizard.build_brain_prompt()
-        };
-
-        // Mark as generating
-        if let Some(ref mut wizard) = self.onboarding {
-            wizard.brain_generating = true;
-            wizard.brain_error = None;
-        }
-
-        // Get provider and model from the wizard's selected provider
+    /// Fire brain generation in the background. Onboarding is already done —
+    /// the user is in chat. On success, writes brain files directly to workspace
+    /// and notifies via `TuiEvent::BrainGenerationResult`.
+    fn generate_brain_files_background(&self, prompt: String, workspace: String) {
         let provider = self.agent_service.provider().clone();
         let model = self.agent_service.provider_model().to_string();
         let sender = self.event_sender();
 
-        // Build LLM request
         let request = LLMRequest::new(model, vec![crate::brain::provider::Message::user(prompt)])
             .with_max_tokens(65536);
 
-        // Spawn the LLM call so the TUI event loop keeps running.
         tokio::spawn(async move {
-            let result: Result<String, String> = match provider.complete(request).await {
-                Ok(response) => {
+            let result: Result<String, String> = match tokio::time::timeout(
+                std::time::Duration::from_secs(120),
+                provider.complete(request),
+            )
+            .await
+            {
+                Ok(Ok(response)) => {
                     let text: String = response
                         .content
                         .iter()
@@ -2035,11 +2063,68 @@ impl App {
                             }
                         })
                         .collect();
-                    Ok(text)
+
+                    // Parse and write directly to workspace
+                    let parsed =
+                        crate::tui::onboarding::parse_brain_sections(&text);
+
+                    let names = ["SOUL", "IDENTITY", "USER", "AGENTS", "TOOLS", "MEMORY"];
+                    let found: Vec<&str> = names
+                        .iter()
+                        .zip(parsed.iter())
+                        .filter_map(|(n, p)| p.as_ref().map(|_| *n))
+                        .collect();
+                    let missing: Vec<&str> = names
+                        .iter()
+                        .zip(parsed.iter())
+                        .filter_map(|(n, p)| if p.is_none() { Some(*n) } else { None })
+                        .collect();
+                    tracing::info!(
+                        "Brain gen parsed: found=[{}], missing=[{}]",
+                        found.join(", "),
+                        missing.join(", ")
+                    );
+
+                    // Need at least SOUL + IDENTITY + USER
+                    if parsed[0].is_none() || parsed[1].is_none() || parsed[2].is_none() {
+                        tracing::warn!(
+                            "Brain gen: couldn't parse response (first 500 chars): {}",
+                            &text[..text.len().min(500)]
+                        );
+                        Err(
+                            "Couldn't parse brain files from AI response — using defaults"
+                                .to_string(),
+                        )
+                    } else {
+                        let ws = std::path::Path::new(&workspace);
+                        let file_map = [
+                            ("SOUL.md", &parsed[0]),
+                            ("IDENTITY.md", &parsed[1]),
+                            ("USER.md", &parsed[2]),
+                            ("AGENTS.md", &parsed[3]),
+                            ("TOOLS.md", &parsed[4]),
+                            ("MEMORY.md", &parsed[5]),
+                        ];
+                        let mut written = 0;
+                        for (filename, content) in &file_map {
+                            if let Some(text) = content {
+                                if let Err(e) = std::fs::write(ws.join(filename), text) {
+                                    tracing::warn!("Brain gen: failed to write {}: {}", filename, e);
+                                } else {
+                                    written += 1;
+                                }
+                            }
+                        }
+                        Ok(format!("{written} brain files personalized"))
+                    }
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     tracing::warn!("Brain generation failed: {}", e);
-                    Err(format!("Generation failed: {}", e))
+                    Err(format!("Brain generation failed: {}", e))
+                }
+                Err(_) => {
+                    tracing::warn!("Brain generation timed out after 120s");
+                    Err("Brain generation timed out — using defaults".to_string())
                 }
             };
             let _ = sender.send(TuiEvent::BrainGenerationResult { result });

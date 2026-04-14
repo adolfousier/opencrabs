@@ -30,4 +30,5 @@ pub use types::{
 
 pub use wizard::OnboardingWizard;
 
+pub(crate) use brain::parse_brain_sections;
 pub use fetch::{fetch_provider_models, is_first_time};
