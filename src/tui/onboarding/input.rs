@@ -453,13 +453,19 @@ impl OnboardingWizard {
                         self.ps.qwen_rotation_count_changed();
                     }
                     KeyCode::Enter => {
-                        // Device flow in progress — ignore Enter
+                        // RotationStep means we're starting a flow — ignore
                         if matches!(
                             self.ps.qwen_device_flow_status,
                             QwenDeviceFlowStatus::RotationStep { .. }
-                                | QwenDeviceFlowStatus::WaitingForUser { .. }
                         ) {
                             return WizardAction::None;
+                        }
+                        // WaitingForUser: Enter restarts with fresh code/URL
+                        if matches!(
+                            self.ps.qwen_device_flow_status,
+                            QwenDeviceFlowStatus::WaitingForUser { .. }
+                        ) {
+                            return WizardAction::QwenRotationFlow;
                         }
                         // Handle signout confirmation during rotation
                         if matches!(
