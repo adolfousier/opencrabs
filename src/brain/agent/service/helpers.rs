@@ -1364,6 +1364,15 @@ pub fn has_phantom_tool_intent(text: &str) -> bool {
         "i'll amend",
         "i'll verify",
         "i'll commit",
+        "i'll search",
+        "i'll look",
+        "i'll find",
+        "i'll scan",
+        "i'll inspect",
+        "i'll examine",
+        "i'll investigate",
+        "i'll explore",
+        "i'll open",
         // "let me <verb>" patterns
         "let me update",
         "let me fix",
@@ -1382,6 +1391,15 @@ pub fn has_phantom_tool_intent(text: &str) -> bool {
         "let me amend",
         "let me verify",
         "let me commit",
+        "let me search",
+        "let me look",
+        "let me find",
+        "let me scan",
+        "let me inspect",
+        "let me examine",
+        "let me investigate",
+        "let me explore",
+        "let me open",
         // Past-tense completion claims (model says it already did it)
         "here's what changed",
         "here's what's changed",
@@ -1412,24 +1430,29 @@ pub fn has_phantom_tool_intent(text: &str) -> bool {
     ];
     let has_action = ACTION_VERBS.iter().any(|v| lower.contains(v));
 
+    // ── Signal B: action keyphrase alone = phantom ───────────────────────
+    // The model announced tool intent (e.g. "Let me search the brain files")
+    // but produced zero tool_use blocks. The keyphrase itself is the signal.
+    // The 80-char minimum (checked above) filters short conversational uses.
     if has_action {
-        // Signal B + file-path-like patterns = phantom
-        // Matches: src/foo/bar.rs, ./config.toml, docs/README.md, etc.
-        let path_re =
-            Regex::new(r"(?:^|[\s`(])(?:\./)?[a-zA-Z_][\w\-]*/[\w\-/]*\.\w{1,6}(?:[\s`),:;]|$)")
-                .unwrap();
-        // Matches: filename.rs, setup.sh, Dockerfile, Cargo.toml
-        let ext_re = Regex::new(
-            r"(?:^|[\s`(])[\w\-]+\.(?:rs|py|ts|tsx|js|jsx|go|sh|toml|yaml|yml|json|md|dockerfile)(?:[\s`),:;]|$)"
-        )
-        .unwrap();
+        return true;
+    }
 
-        if path_re.is_match(&lower) || ext_re.is_match(trimmed) {
-            return true;
-        }
+    // ── Signal C (additional): file paths or completion claims without
+    //    an explicit keyphrase — catches narrated plans and past-tense claims.
+    let path_re =
+        Regex::new(r"(?:^|[\s`(])(?:\./)?[a-zA-Z_][\w\-]*/[\w\-/]*\.\w{1,6}(?:[\s`),:;]|$)")
+            .unwrap();
+    let ext_re = Regex::new(
+        r"(?:^|[\s`(])[\w\-]+\.(?:rs|py|ts|tsx|js|jsx|go|sh|toml|yaml|yml|json|md|dockerfile)(?:[\s`),:;]|$)"
+    )
+    .unwrap();
 
-        // Signal B + completion claims = phantom (even without file paths)
-        // Catches "let me prepend to the file" + "Done." without naming a file.
+    if path_re.is_match(&lower) || ext_re.is_match(trimmed) {
+        return true;
+    }
+
+    {
         const COMPLETION_CLAIMS: &[&str] = &[
             "done.",
             "done!",
