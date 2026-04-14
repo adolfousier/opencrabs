@@ -106,6 +106,10 @@ pub struct OnboardingWizard {
     /// Original values loaded from workspace brain files (for change detection)
     pub original_about_me: String,
     pub original_about_opencrabs: String,
+    /// Whether the user has started editing each field (arrow key or char input).
+    /// First backspace on an untouched template clears the entire field.
+    pub brain_me_edited: bool,
+    pub brain_agent_edited: bool,
     pub brain_generating: bool,
     pub brain_generated: bool,
     pub brain_error: Option<String>,
@@ -384,6 +388,8 @@ impl OnboardingWizard {
             about_opencrabs: String::new(),
             original_about_me: String::new(),
             original_about_opencrabs: String::new(),
+            brain_me_edited: false,
+            brain_agent_edited: false,
             brain_generating: false,
             brain_generated: false,
             brain_error: None,

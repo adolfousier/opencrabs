@@ -2570,27 +2570,13 @@ fn render_brain_setup(
             .add_modifier(Modifier::BOLD),
     )));
 
-    let me_display = if wizard.about_me.is_empty() && !me_focused {
-        "  name, role, links, projects, whatever you got".to_string()
-    } else {
-        let cursor = if me_focused { "█" } else { "" };
-        format!("  {}{}", wizard.about_me, cursor)
-    };
-    let me_style = if wizard.about_me.is_empty() && !me_focused {
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::ITALIC)
-    } else {
-        Style::default().fg(if me_focused {
-            Color::White
-        } else {
-            Color::DarkGray
-        })
-    };
-    // Wrap long text into multiple lines
-    for chunk in wrap_text(&me_display, wrap_width) {
-        lines.push(Line::from(Span::styled(chunk, me_style)));
-    }
+    render_brain_field(
+        lines,
+        &wizard.about_me,
+        me_focused,
+        "  name, role, links, projects, whatever you got",
+        wrap_width,
+    );
 
     lines.push(Line::from(""));
 
@@ -2607,26 +2593,13 @@ fn render_brain_setup(
             .add_modifier(Modifier::BOLD),
     )));
 
-    let agent_display = if wizard.about_opencrabs.is_empty() && !agent_focused {
-        "  personality, vibe, how I should talk to you".to_string()
-    } else {
-        let cursor = if agent_focused { "█" } else { "" };
-        format!("  {}{}", wizard.about_opencrabs, cursor)
-    };
-    let agent_style = if wizard.about_opencrabs.is_empty() && !agent_focused {
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::ITALIC)
-    } else {
-        Style::default().fg(if agent_focused {
-            Color::White
-        } else {
-            Color::DarkGray
-        })
-    };
-    for chunk in wrap_text(&agent_display, wrap_width) {
-        lines.push(Line::from(Span::styled(chunk, agent_style)));
-    }
+    render_brain_field(
+        lines,
+        &wizard.about_opencrabs,
+        agent_focused,
+        "  personality, vibe, how I should talk to you",
+        wrap_width,
+    );
 
     lines.push(Line::from(""));
     let italic_style = Style::default()
@@ -2656,29 +2629,87 @@ fn render_brain_setup(
 }
 
 /// Wrap a string into chunks of max_width display columns
+/// Render a brain text field with capped visible lines.
+/// Large content shows the last few lines + a "N lines pasted" indicator.
+fn render_brain_field(
+    lines: &mut Vec<Line<'static>>,
+    content: &str,
+    focused: bool,
+    placeholder: &str,
+    wrap_width: usize,
+) {
+    const MAX_VISIBLE_LINES: usize = 4;
+
+    if content.is_empty() && !focused {
+        lines.push(Line::from(Span::styled(
+            placeholder.to_string(),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
+        )));
+        return;
+    }
+
+    let style = Style::default().fg(if focused {
+        Color::White
+    } else {
+        Color::DarkGray
+    });
+
+    let cursor = if focused { "\u{2588}" } else { "" };
+    let display = format!("  {}{}", content, cursor);
+    let wrapped: Vec<String> = wrap_text(&display, wrap_width);
+    let total = wrapped.len();
+
+    if total <= MAX_VISIBLE_LINES {
+        for chunk in &wrapped {
+            lines.push(Line::from(Span::styled(chunk.clone(), style)));
+        }
+    } else {
+        // Show line count + last few lines so user sees the tail
+        let content_lines = content.matches('\n').count() + 1;
+        lines.push(Line::from(Span::styled(
+            format!("  ({} lines pasted)", content_lines),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
+        )));
+        for chunk in &wrapped[total - MAX_VISIBLE_LINES..] {
+            lines.push(Line::from(Span::styled(chunk.clone(), style)));
+        }
+    }
+}
+
 fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
     use unicode_width::UnicodeWidthStr;
-    if text.width() <= max_width {
-        return vec![text.to_string()];
-    }
     let mut result = Vec::new();
-    let mut remaining = text;
-    while !remaining.is_empty() {
-        if remaining.width() <= max_width {
-            result.push(remaining.to_string());
-            break;
+    // Split on newlines first, then wrap each line independently
+    for line in text.split('\n') {
+        if line.width() <= max_width {
+            result.push(line.to_string());
+            continue;
         }
-        // Find byte index at display width limit
-        let byte_limit = super::render::char_boundary_at_width(remaining, max_width);
-        // Try to break at a space
-        let break_at = remaining[..byte_limit].rfind(' ').unwrap_or(byte_limit);
-        let break_at = if break_at == 0 {
-            byte_limit.max(remaining.ceil_char_boundary(1))
-        } else {
-            break_at
-        };
-        result.push(remaining[..break_at].to_string());
-        remaining = remaining[break_at..].trim_start();
+        let mut remaining = line;
+        while !remaining.is_empty() {
+            if remaining.width() <= max_width {
+                result.push(remaining.to_string());
+                break;
+            }
+            // Find byte index at display width limit
+            let byte_limit = super::render::char_boundary_at_width(remaining, max_width);
+            // Try to break at a space
+            let break_at = remaining[..byte_limit].rfind(' ').unwrap_or(byte_limit);
+            let break_at = if break_at == 0 {
+                byte_limit.max(remaining.ceil_char_boundary(1))
+            } else {
+                break_at
+            };
+            result.push(remaining[..break_at].to_string());
+            remaining = remaining[break_at..].trim_start();
+        }
+    }
+    if result.is_empty() {
+        result.push(String::new());
     }
     result
 }
