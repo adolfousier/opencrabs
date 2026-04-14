@@ -146,6 +146,8 @@ jobs:
           CXXFLAGS: ${{ matrix.target == 'aarch64-apple-darwin' && '-march=armv8-a+crypto' || '' }}
           # aws-lc-sys needs cmake builder on Windows MSVC to avoid __builtin_bswap errors
           AWS_LC_SYS_CMAKE_BUILDER: ${{ matrix.os == 'windows-latest' && '1' || '' }}
+          # llama-cpp-sys-2 defaults to dynamic CRT (MD) but esaxx-rs hardcodes static (MT) — force match
+          LLAMA_STATIC_CRT: ${{ matrix.os == 'windows-latest' && '1' || '' }}
         run: cargo build --release --target ${{ matrix.target }} --all-features
 
       - name: Strip binary (Unix)
