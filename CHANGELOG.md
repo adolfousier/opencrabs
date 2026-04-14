@@ -7,10 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.8] - 2026-04-14
 
-20 hardening fixes across context tracking, self-heal, provider rotation,
-and cross-platform support. RSI moves to fully autonomous mode — no human
-approval required. Existing users should ask their crab to compare brain
-files with the latest templates and apply any diffs.
+25+ hardening fixes across context tracking, self-heal, provider rotation,
+and cross-platform support. RSI moves to fully autonomous mode with restart
+resilience, skip-on-unchanged, and optional GitHub issue reporting.
+Existing users should ask their crab to compare brain files with the
+latest templates and apply any diffs.
 
 > **RSI is experimental.** Autonomous self-improvement runs without human
 > approval and writes improvements to `~/.opencrabs/rsi/improvements.md`.
@@ -26,6 +27,16 @@ files with the latest templates and apply any diffs.
   the current provider and model configuration.
 - **RSI reuses persistent session** — one session per cycle instead of
   creating a new one on every improvement run.
+- **RSI survives app restarts** — persists `last_cycle` timestamp to disk;
+  calculates remaining delay on startup instead of resetting the 1h timer.
+- **RSI skips unchanged feedback** — if feedback count hasn't changed since
+  last cycle, skips analysis entirely to avoid wasted LLM calls.
+- **RSI enriched opportunities** — opportunity descriptions now include
+  session ID, model name, provider, and timestamps so the agent knows
+  which model/session produced failures.
+- **RSI GitHub issue reporting** — new `github_report_issue` tool lets the
+  RSI agent open issues for code-level bugs it can't fix via brain files.
+  Gated by `<!-- rsi:github-issues repo:OWNER/REPO -->` in AGENTS.md.
 
 ### Fixed
 
@@ -48,6 +59,14 @@ files with the latest templates and apply any diffs.
   actually executing any tool calls.
 - **Structural phantom detection via imperative statement count** — detects
   hallucinated tool usage by analyzing imperative verb density in responses.
+- **Past-tense standalone detection** — catches "Amended.\nCommitted.\n..."
+  style phantom narration where the model claims completed actions.
+- **Expanded completion claim vocabulary** — git-specific patterns like
+  "amended the commit", "bumped the version", and "I've made the changes"
+  now trigger phantom retry.
+- **Rotation continuation prompt** — when Qwen OAuth rotation happens
+  mid-task and the new account returns 0 tool calls, injects a continuation
+  prompt so the agent resumes where it left off.
 
 #### Provider & Rotation
 - **Fallback walks entire provider chain** — on failure, iterates all
@@ -76,6 +95,9 @@ files with the latest templates and apply any diffs.
   instead of `which` when running on Windows.
 - **Restored `--all-features` for Windows CI builds** — full feature set
   tested in CI again.
+- **Fixed MSVC CRT mismatch** — `LLAMA_STATIC_CRT=1` forces llama-cpp-sys-2
+  to use static CRT, matching esaxx-rs and resolving the RuntimeLibrary
+  link error on Windows MSVC.
 
 ### Contributors
 
