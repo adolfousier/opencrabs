@@ -552,8 +552,19 @@ impl ProviderSelectorState {
 /// for models whose API id is an opaque alias (e.g. qwen-oauth's `coder-model`).
 pub fn model_display_label(model_id: &str) -> &str {
     match model_id {
-        "coder-model" | "qwen3.6-plus" | "qwen-3.6-plus" => "Qwen 3.6 Plus",
-        "qwen3.5-plus" | "qwen-3.5-plus" => "Qwen 3.5 Plus",
+        "coder-model" | "qwen3.6-plus" | "qwen-3.6-plus" => "qwen 3.6 plus",
+        "qwen3.5-plus" | "qwen-3.5-plus" => "qwen 3.5 plus",
+        "minimax-m2.5" => "minimax m2.5",
+        "minimax-m2.7" => "minimax m2.7",
+        "mimo-v2-omni" | "mimo-v2-omni-free" => "mimo v2 omni",
+        "mimo-v2-pro" | "mimo-v2-pro-free" => "mimo v2 pro",
+        "kimi-k2.5" | "kimi-k2-5" => "kimi k2.5",
+        "glm-5-turbo" => "glm 5 turbo",
+        "glm-5" => "glm 5",
+        "glm-5.1" => "glm 5.1",
+        "opus-4-6" => "opus 4.6",
+        "sonnet-4-6" => "sonnet 4.6",
+        "haiku-4-5" => "haiku 4.5",
         other => other,
     }
 }
