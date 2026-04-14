@@ -1438,20 +1438,6 @@ pub fn has_phantom_tool_intent(text: &str) -> bool {
         return true;
     }
 
-    // ── Signal C (additional): file paths or completion claims without
-    //    an explicit keyphrase — catches narrated plans and past-tense claims.
-    let path_re =
-        Regex::new(r"(?:^|[\s`(])(?:\./)?[a-zA-Z_][\w\-]*/[\w\-/]*\.\w{1,6}(?:[\s`),:;]|$)")
-            .unwrap();
-    let ext_re = Regex::new(
-        r"(?:^|[\s`(])[\w\-]+\.(?:rs|py|ts|tsx|js|jsx|go|sh|toml|yaml|yml|json|md|dockerfile)(?:[\s`),:;]|$)"
-    )
-    .unwrap();
-
-    if path_re.is_match(&lower) || ext_re.is_match(trimmed) {
-        return true;
-    }
-
     {
         const COMPLETION_CLAIMS: &[&str] = &[
             "done.",

@@ -1080,8 +1080,9 @@ fn phantom_tool_intent_false_positives() {
     assert!(!has_phantom_tool_intent(""));
     assert!(!has_phantom_tool_intent("   "));
 
-    // Action verb but no file path
-    assert!(!has_phantom_tool_intent(
+    // Action verb with no file path — still phantom because the model
+    // announced tool intent ("Now let me update") but made zero tool calls.
+    assert!(has_phantom_tool_intent(
         "Now let me update the database schema to include the new rotation fields. \
          The migration should add a new column for account rotation status."
     ));

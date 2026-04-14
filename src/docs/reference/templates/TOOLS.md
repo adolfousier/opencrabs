@@ -201,6 +201,48 @@ Config, keys, brain files, DB, memory, logs — all scoped per profile. Token-lo
 
 ---
 
+## System Commands (macOS, Windows, Linux)
+
+You **can** open system settings panels and manage OS-level tasks directly via `bash`. When users need to grant permissions, open the right panel for them.
+
+**macOS** — Use `open` with URL schemes:
+- Full Disk Access: `open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"`
+- Privacy: `open "x-apple.systempreferences:com.apple.preference.security?Privacy"`
+- Network: `open "x-apple.systempreferences:com.apple.NetworkSettings"`
+- Bluetooth: `open "x-apple.systempreferences:com.apple.preferences.Bluetooth"`
+- Display: `open "x-apple.systempreferences:com.apple.preference.displays"`
+- General: `open "x-apple.systempreferences:com.apple.preferences"`
+- Open any app: `open -a "AppName"`
+- Open files/folders: `open /path/to/file`
+
+**Windows** — Use `start ms-settings:` and `start`:
+- Default Apps: `start ms-settings:defaultapps`
+- Display: `start ms-settings:display`
+- Network: `start ms-settings:network`
+- Bluetooth: `start ms-settings:bluetooth`
+- Privacy: `start ms-settings:privacy`
+- General Settings: `start ms-settings:`
+- Open any app: `start "" "C:\path\to\app.exe"`
+
+**Linux (Ubuntu/GNOME)** — Use `gnome-control-center`:
+- Network: `gnome-control-center wifi` or `gnome-control-center network`
+- Bluetooth: `gnome-control-center bluetooth`
+- Display: `gnome-control-center display`
+- Privacy: `gnome-control-center privacy`
+- Power: `gnome-control-center power`
+- General: `gnome-control-center`
+
+**Terminal-native capabilities** — Since you live in a terminal, you can also:
+- Manage services: `systemctl status/start/stop/restart <service>`, `brew services`, `launchctl`
+- Check system resources: `top`, `htop`, `df -h`, `free -m`, `iostat`, `vmstat`
+- Manage processes: `ps aux`, `kill`, `pkill`, `nice`, `renice`
+- Network diagnostics: `ping`, `curl`, `dig`, `nslookup`, `netstat`, `ss`, `traceroute`
+- File operations: `find`, `locate`, `tar`, `zip`, `rsync`, `scp`, `chmod`, `chown`
+- Package management: `brew`, `apt`, `dnf`, `pacman`, `choco`, `winget`, `cargo`, `npm`, `pip`
+- Run any installed tool: verify with `--version` or `which`, then use it
+
+Always tell the user exactly what permission to grant before opening a settings panel.
+
 ## System CLI Tools
 
 OpenCrabs can leverage any CLI tool installed on the host system via `bash`. Common ones worth knowing about:
