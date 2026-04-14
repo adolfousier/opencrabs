@@ -19,7 +19,12 @@ fn is_mouse_sequence_fragment(c: char, buf: &str, cursor: usize) -> bool {
         return false;
     }
 
-    let tail_start = cursor.saturating_sub(30);
+    let mut tail_start = cursor.saturating_sub(30);
+    // Snap to a char boundary — cursor.saturating_sub(30) can land inside
+    // a multi-byte character (e.g. 🦀 is 4 bytes).
+    while tail_start > 0 && !buf.is_char_boundary(tail_start) {
+        tail_start -= 1;
+    }
     let tail = &buf[tail_start..cursor];
 
     // Look for `[<` anywhere in the tail — that's the start of an SGR mouse seq.
