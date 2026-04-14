@@ -398,8 +398,47 @@ pub fn spawn_rsi_engine(
         }
 
         // 2. Periodic analysis + autonomous improvement cycle
+        //
+        // On startup, check how long ago the last cycle ran. If the app was
+        // restarted before the interval elapsed (e.g. dev recompile every
+        // ~20 min), only sleep the remaining time instead of a full hour.
+        // Without this, frequent restarts prevent RSI from ever firing.
+        let last_cycle_path = dirs::home_dir()
+            .unwrap_or_default()
+            .join(".opencrabs/rsi/last_cycle");
+        let initial_delay = if let Ok(meta) = std::fs::metadata(&last_cycle_path) {
+            let elapsed = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.elapsed().ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(RSI_CYCLE_INTERVAL_SECS);
+            if elapsed >= RSI_CYCLE_INTERVAL_SECS {
+                // Overdue — run soon (30s grace for app to stabilize)
+                30
+            } else {
+                RSI_CYCLE_INTERVAL_SECS - elapsed
+            }
+        } else {
+            // First run ever — use full interval
+            RSI_CYCLE_INTERVAL_SECS
+        };
+        tracing::info!(
+            "RSI engine: first cycle in {}m{}s",
+            initial_delay / 60,
+            initial_delay % 60
+        );
+
+        let mut first_iteration = true;
+        let mut last_seen_count: i64 = 0;
         loop {
-            tokio::time::sleep(std::time::Duration::from_secs(RSI_CYCLE_INTERVAL_SECS)).await;
+            let delay = if first_iteration {
+                first_iteration = false;
+                initial_delay
+            } else {
+                RSI_CYCLE_INTERVAL_SECS
+            };
+            tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
 
             let total = match repo.total_count().await {
                 Ok(t) => t,
@@ -412,6 +451,17 @@ pub fn spawn_rsi_engine(
                 );
                 continue;
             }
+
+            // Skip if no new feedback since last cycle — same data = same analysis
+            if total == last_seen_count {
+                tracing::debug!(
+                    "RSI cycle: feedback count unchanged ({total}), skipping"
+                );
+                // Still stamp the file so restart timer stays accurate
+                let _ = std::fs::write(&last_cycle_path, "");
+                continue;
+            }
+            last_seen_count = total;
 
             let _ = notification_tx.send(RsiNotification::CycleStarted);
             tracing::info!("RSI cycle: analyzing {total} feedback entries");
@@ -428,7 +478,8 @@ pub fn spawn_rsi_engine(
                     .iter()
                     .filter(|s| s.total_events >= 5 && s.success_rate < 0.8)
                 {
-                    let desc = format!(
+                    // Pull recent failures for this tool to give agent context
+                    let mut detail = format!(
                         "Tool '{}' has {:.0}% failure rate ({} failures out of {}). \
                          Consider adding error handling guidance to TOOLS.md.",
                         s.dimension,
@@ -436,22 +487,76 @@ pub fn spawn_rsi_engine(
                         s.failures,
                         s.total_events
                     );
-                    tracing::info!("RSI opportunity: {}", desc);
+                    if let Ok(recent) = repo.by_event_type("tool_failure", 10).await {
+                        let relevant: Vec<_> = recent
+                            .iter()
+                            .filter(|e| e.dimension == s.dimension)
+                            .take(3)
+                            .collect();
+                        if !relevant.is_empty() {
+                            detail.push_str("\n  Recent failures:");
+                            for e in relevant {
+                                detail.push_str(&format!(
+                                    "\n  - session={}, time={}, meta={}",
+                                    &e.session_id[..8.min(e.session_id.len())],
+                                    e.created_at.format("%Y-%m-%d %H:%M"),
+                                    e.metadata.as_deref().unwrap_or("none")
+                                ));
+                            }
+                        }
+                    }
+                    tracing::info!("RSI opportunity: {}", detail);
                     let _ = notification_tx.send(RsiNotification::ImprovementOpportunity {
-                        description: desc.clone(),
+                        description: detail.clone(),
                     });
-                    opportunities.push(desc);
+                    opportunities.push(detail);
                 }
             }
 
-            // Repeated user corrections
+            // Repeated user corrections — include recent examples with session/model
             if let Ok(corrections) = repo.by_event_type("user_correction", 50).await
                 && corrections.len() >= 3
             {
-                let desc = format!(
+                let mut desc = format!(
                     "{} user corrections recorded. Review patterns and update brain files.",
                     corrections.len()
                 );
+                desc.push_str("\n  Recent corrections:");
+                for e in corrections.iter().take(5) {
+                    desc.push_str(&format!(
+                        "\n  - session={}, model={}, time={}, text={}",
+                        &e.session_id[..8.min(e.session_id.len())],
+                        e.dimension,
+                        e.created_at.format("%Y-%m-%d %H:%M"),
+                        e.metadata.as_deref().unwrap_or("none")
+                    ));
+                }
+                tracing::info!("RSI opportunity: {}", desc);
+                let _ = notification_tx.send(RsiNotification::ImprovementOpportunity {
+                    description: desc.clone(),
+                });
+                opportunities.push(desc);
+            }
+
+            // Provider errors — surface model/provider info so agent knows which
+            // provider is failing and can adjust brain files accordingly
+            if let Ok(errors) = repo.by_event_type("provider_error", 20).await
+                && errors.len() >= 3
+            {
+                let mut desc = format!(
+                    "{} provider errors recorded.",
+                    errors.len()
+                );
+                desc.push_str("\n  Recent errors:");
+                for e in errors.iter().take(5) {
+                    desc.push_str(&format!(
+                        "\n  - session={}, provider/model={}, time={}, detail={}",
+                        &e.session_id[..8.min(e.session_id.len())],
+                        e.dimension,
+                        e.created_at.format("%Y-%m-%d %H:%M"),
+                        e.metadata.as_deref().unwrap_or("none")
+                    ));
+                }
                 tracing::info!("RSI opportunity: {}", desc);
                 let _ = notification_tx.send(RsiNotification::ImprovementOpportunity {
                     description: desc.clone(),
@@ -482,6 +587,9 @@ pub fn spawn_rsi_engine(
                     }
                 }
             }
+
+            // Stamp last_cycle so restarts resume from here, not from scratch
+            let _ = std::fs::write(&last_cycle_path, "");
         }
     });
 }
