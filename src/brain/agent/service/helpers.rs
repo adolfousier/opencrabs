@@ -1275,8 +1275,21 @@ pub fn has_phantom_tool_intent(text: &str) -> bool {
     }
     let lower = trimmed.to_lowercase();
 
-    // Signal 1: Action verbs that imply the model performed work
+    // ── Signal A: Multiple imperative "now" statements ─────────────────
+    // If the model writes 2+ lines starting with "Now <verb>" it's narrating
+    // a multi-step plan it should be executing via tools. This is the strongest
+    // phantom signal — no phrase list needed, purely structural.
+    use regex::Regex;
+    let now_imperative =
+        Regex::new(r"(?m)^(?:now\s+(?:let\s+me\s+)?|let\s+me\s+)\w").unwrap();
+    let now_count = now_imperative.find_iter(&lower).count();
+    if now_count >= 2 {
+        return true;
+    }
+
+    // ── Signal B: Action verbs that imply the model performed work ─────
     const ACTION_VERBS: &[&str] = &[
+        // "now let me <verb>" patterns
         "now let me update",
         "now let me fix",
         "now let me modify",
@@ -1288,6 +1301,23 @@ pub fn has_phantom_tool_intent(text: &str) -> bool {
         "now let me replace",
         "now let me remove",
         "now let me delete",
+        "now let me check",
+        "now let me read",
+        "now let me run",
+        "now let me bump",
+        "now let me prepend",
+        "now let me append",
+        // "now <verb>" patterns (without "let me")
+        "now update the",
+        "now fix the",
+        "now add the",
+        "now bump ",
+        "now run the",
+        "now check the",
+        "now read the",
+        "now prepend",
+        "now append",
+        // "i'll <verb>" patterns
         "i'll update",
         "i'll fix",
         "i'll modify",
@@ -1297,6 +1327,11 @@ pub fn has_phantom_tool_intent(text: &str) -> bool {
         "i'll add",
         "i'll change",
         "i'll replace",
+        "i'll check",
+        "i'll run",
+        "i'll bump",
+        "i'll read",
+        // "let me <verb>" patterns
         "let me update",
         "let me fix",
         "let me modify",
@@ -1305,6 +1340,13 @@ pub fn has_phantom_tool_intent(text: &str) -> bool {
         "let me edit",
         "let me add",
         "let me change",
+        "let me check",
+        "let me read",
+        "let me run",
+        "let me bump",
+        "let me prepend",
+        "let me append",
+        // Past-tense completion claims (model says it already did it)
         "here's what changed",
         "here's what's changed",
         "here are the changes",
@@ -1316,71 +1358,62 @@ pub fn has_phantom_tool_intent(text: &str) -> bool {
         "fixed the issue",
         "created the file",
         "wrote the file",
-        "now update the",
-        "now fix the",
     ];
     let has_action = ACTION_VERBS.iter().any(|v| lower.contains(v));
-    if !has_action {
-        return false;
+
+    if has_action {
+        // Signal B + file-path-like patterns = phantom
+        // Matches: src/foo/bar.rs, ./config.toml, docs/README.md, etc.
+        let path_re = Regex::new(
+            r"(?:^|[\s`(])(?:\./)?[a-zA-Z_][\w\-]*/[\w\-/]*\.\w{1,6}(?:[\s`),:;]|$)",
+        )
+        .unwrap();
+        // Matches: filename.rs, setup.sh, Dockerfile, Cargo.toml
+        let ext_re = Regex::new(
+            r"(?:^|[\s`(])[\w\-]+\.(?:rs|py|ts|tsx|js|jsx|go|sh|toml|yaml|yml|json|md|dockerfile)(?:[\s`),:;]|$)"
+        )
+        .unwrap();
+
+        if path_re.is_match(&lower) || ext_re.is_match(trimmed) {
+            return true;
+        }
+
+        // Signal B + completion claims = phantom (even without file paths)
+        // Catches "let me prepend to the file" + "Done." without naming a file.
+        const COMPLETION_CLAIMS: &[&str] = &[
+            "done.",
+            "done!",
+            "done —",
+            "done,",
+            "prepended",
+            "appended",
+            "written to",
+            "saved to",
+            "saved the",
+            "wrote to",
+            "file updated",
+            "file created",
+            "file saved",
+            "successfully ",
+            "changes saved",
+            "here are the results",
+            "here's the result",
+            "the file now contains",
+            "the file has been",
+            "i've updated",
+            "i've written",
+            "i've created",
+            "i've saved",
+            "i've prepended",
+            "i've appended",
+            "i've added",
+            "i've modified",
+            "i've fixed",
+        ];
+        if COMPLETION_CLAIMS.iter().any(|c| lower.contains(c)) {
+            return true;
+        }
     }
 
-    // Signal 2: File-path-like patterns (foo/bar.ext or foo.rs, foo.py, etc.)
-    // Must contain a slash-separated path or a recognizable source file extension.
-    use regex::Regex;
-    // Matches: src/foo/bar.rs, ./config.toml, docs/README.md, etc.
-    let path_re =
-        Regex::new(r"(?:^|[\s`(])(?:\./)?[a-zA-Z_][\w\-]*/[\w\-/]*\.\w{1,6}(?:[\s`),:;]|$)")
-            .unwrap();
-    // Matches: filename.rs, setup.sh, Dockerfile, Cargo.toml
-    let ext_re = Regex::new(
-        r"(?:^|[\s`(])[\w\-]+\.(?:rs|py|ts|tsx|js|jsx|go|sh|toml|yaml|yml|json|md|dockerfile)(?:[\s`),:;]|$)"
-    )
-    .unwrap();
-
-    if path_re.is_match(&lower) || ext_re.is_match(trimmed) {
-        return true;
-    }
-
-    // Signal 3: Completion claims — model says "done", "prepended", "saved" etc.
-    // without naming a file path. Action verb (signal 1) + completion = phantom.
-    // This catches the case where the model says "let me prepend to the file"
-    // then "Done. v0.3.7 prepended" without ever calling a tool.
-    const COMPLETION_CLAIMS: &[&str] = &[
-        "done.",
-        "done!",
-        "done —",
-        "done,",
-        "prepended",
-        "appended",
-        "written to",
-        "saved to",
-        "saved the",
-        "wrote to",
-        "file updated",
-        "file created",
-        "file saved",
-        "successfully updated",
-        "successfully created",
-        "successfully wrote",
-        "successfully written",
-        "successfully saved",
-        "successfully prepended",
-        "successfully appended",
-        "changes saved",
-        "all under 280",
-        "here are the results",
-        "here's the result",
-        "the file now contains",
-        "the file has been",
-        "i've updated",
-        "i've written",
-        "i've created",
-        "i've saved",
-        "i've prepended",
-        "i've appended",
-        "i've added",
-        "i've modified",
-        "i've fixed",
-    ];
-    COMPLETION_CLAIMS.iter().any(|c| lower.contains(c))
+    false
 }
