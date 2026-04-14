@@ -2197,18 +2197,12 @@ impl App {
                 }
             }
             TuiEvent::BrainGenerationResult { result } => {
-                if let Some(ref mut wizard) = self.onboarding {
-                    match result {
-                        Ok(text) => {
-                            wizard.apply_generated_brain(&text);
-                            if wizard.brain_generated {
-                                wizard.step = super::onboarding::OnboardingStep::Complete;
-                            }
-                        }
-                        Err(e) => {
-                            wizard.brain_generating = false;
-                            wizard.brain_error = Some(e);
-                        }
+                match result {
+                    Ok(msg) => {
+                        self.push_system_message(format!("✓ {}", msg));
+                    }
+                    Err(e) => {
+                        self.push_system_message(format!("Brain generation: {}", e));
                     }
                 }
             }
