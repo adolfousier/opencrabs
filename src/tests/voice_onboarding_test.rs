@@ -269,6 +269,9 @@ fn tts_off_enter_advances_to_next_step() {
     wizard.tts_mode = 0; // Off
 
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Enter));
+    assert_eq!(wizard.voice_field, VoiceField::Continue);
+    // Enter on Continue advances to next step
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Enter));
     assert_eq!(wizard.step, OnboardingStep::ImageSetup);
 }
 
@@ -279,6 +282,8 @@ fn tts_api_enter_advances_to_next_step() {
     wizard.voice_field = VoiceField::TtsModeSelect;
     wizard.tts_mode = 1; // API
 
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Enter));
+    assert_eq!(wizard.voice_field, VoiceField::Continue);
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Enter));
     assert_eq!(wizard.step, OnboardingStep::ImageSetup);
 }
@@ -351,7 +356,10 @@ fn full_api_flow_stt_to_tts_to_next_step() {
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Tab));
     assert_eq!(wizard.voice_field, VoiceField::TtsModeSelect);
 
-    // Enter (tts_mode=0 Off) → next step
+    // Enter (tts_mode=0 Off) → Continue
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Enter));
+    assert_eq!(wizard.voice_field, VoiceField::Continue);
+    // Enter on Continue → next step
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Enter));
     assert_eq!(wizard.step, OnboardingStep::ImageSetup);
 }
@@ -728,12 +736,15 @@ fn tts_local_voice_select_tab_advances_step() {
     wizard.voice_field = VoiceField::TtsLocalVoiceSelect;
 
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Tab));
+    assert_eq!(wizard.voice_field, VoiceField::Continue);
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Enter));
     assert_eq!(wizard.step, OnboardingStep::ImageSetup);
 }
 
 #[test]
 fn tts_local_voice_enter_when_downloaded_advances() {
-    // Enter on an already-downloaded voice confirms and advances to next step
+    // Enter on an already-downloaded voice — stays on voice select (Enter doesn't advance)
+    // Tab moves to Continue, then Enter advances
     let mut wizard = OnboardingWizard::new();
     wizard.step = OnboardingStep::VoiceSetup;
     wizard.voice_field = VoiceField::TtsLocalVoiceSelect;
@@ -741,6 +752,10 @@ fn tts_local_voice_enter_when_downloaded_advances() {
 
     let action = crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Enter));
     assert_eq!(action, WizardAction::None);
+    // Enter on downloaded voice doesn't advance — use Tab → Continue → Enter
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Tab));
+    assert_eq!(wizard.voice_field, VoiceField::Continue);
+    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Enter));
     assert_eq!(wizard.step, OnboardingStep::ImageSetup);
 }
 
