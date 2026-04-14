@@ -62,6 +62,10 @@ jobs:
           AWS_LC_SYS_CMAKE_BUILDER: "1"
           LLAMA_STATIC_CRT: "1"
           RUSTFLAGS: "-Ctarget-feature=+crt-static"
+          # Force static CRT at the C/C++ compiler level — cc/cmake sometimes
+          # ignore CARGO_CFG_TARGET_FEATURE and default to /MD (dynamic CRT)
+          CFLAGS: "/MT"
+          CXXFLAGS: "/MT"
         run: cargo test --all-features --verbose
 
       - name: Run tests (macOS)
