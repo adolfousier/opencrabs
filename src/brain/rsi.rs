@@ -425,9 +425,7 @@ pub fn spawn_rsi_engine(
 
             // Skip if no new feedback since last cycle — same data = same analysis
             if total == last_seen_count {
-                tracing::debug!(
-                    "RSI cycle: feedback count unchanged ({total}), skipping"
-                );
+                tracing::debug!("RSI cycle: feedback count unchanged ({total}), skipping");
                 // Still stamp the file so restart timer stays accurate
                 let _ = std::fs::write(&last_cycle_path, "");
                 continue;
@@ -514,10 +512,7 @@ pub fn spawn_rsi_engine(
             if let Ok(errors) = repo.by_event_type("provider_error", 20).await
                 && errors.len() >= 3
             {
-                let mut desc = format!(
-                    "{} provider errors recorded.",
-                    errors.len()
-                );
+                let mut desc = format!("{} provider errors recorded.", errors.len());
                 desc.push_str("\n  Recent errors:");
                 for e in errors.iter().take(5) {
                     desc.push_str(&format!(

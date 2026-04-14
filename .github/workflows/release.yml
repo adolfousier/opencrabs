@@ -148,6 +148,8 @@ jobs:
           AWS_LC_SYS_CMAKE_BUILDER: ${{ matrix.os == 'windows-latest' && '1' || '' }}
           # llama-cpp-sys-2 defaults to dynamic CRT (MD) but esaxx-rs hardcodes static (MT) — force match
           LLAMA_STATIC_CRT: ${{ matrix.os == 'windows-latest' && '1' || '' }}
+          # Force static CRT globally so cc-rs and cmake-rs both use /MT on MSVC
+          RUSTFLAGS: ${{ matrix.os == 'windows-latest' && '-Ctarget-feature=+crt-static' || '' }}
         run: cargo build --release --target ${{ matrix.target }} --all-features
 
       - name: Strip binary (Unix)
