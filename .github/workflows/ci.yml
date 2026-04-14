@@ -46,7 +46,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: target
-          key: ${{ runner.os }}-target-stable-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-target-stable-v3-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install CMake (Windows)
         if: runner.os == 'Windows'
@@ -61,6 +61,7 @@ jobs:
         env:
           AWS_LC_SYS_CMAKE_BUILDER: "1"
           LLAMA_STATIC_CRT: "1"
+          RUSTFLAGS: "-Ctarget-feature=+crt-static"
         run: cargo test --all-features --verbose
 
       - name: Run tests (macOS)
