@@ -46,7 +46,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: target
-          key: ${{ runner.os }}-target-stable-v2-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-target-stable-v3-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install CMake (Windows)
         if: runner.os == 'Windows'
