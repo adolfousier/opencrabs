@@ -61,10 +61,13 @@ jobs:
         env:
           AWS_LC_SYS_CMAKE_BUILDER: "1"
           LLAMA_STATIC_CRT: "1"
-          RUSTFLAGS: "-Ctarget-feature=+crt-static"
+          # llama-cpp-sys-2 build.rs always links libcmtd (debug static VCRT)
+          # due to cfg!(debug_assertions) being true in build scripts.
+          # This leaves UCRT symbols unresolved. Force-link static UCRT.
+          RUSTFLAGS: "-Ctarget-feature=+crt-static -Clink-arg=libucrt.lib"
           CFLAGS: "/MT"
           CXXFLAGS: "/MT"
-        run: cargo test --release --all-features --verbose
+        run: cargo test --all-features --verbose
 
       - name: Run tests (macOS)
         if: runner.os == 'macOS'
