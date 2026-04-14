@@ -70,14 +70,39 @@ impl OnboardingWizard {
                 self.brain_field = BrainField::AboutAgent;
             }
             KeyCode::Char(c) => {
+                self.mark_brain_field_edited();
                 self.active_brain_field_mut().push(c);
             }
             KeyCode::Backspace => {
-                self.active_brain_field_mut().pop();
+                if !self.is_brain_field_edited() && !self.active_brain_field().is_empty() {
+                    // First destructive action on untouched template — wipe it
+                    self.active_brain_field_mut().clear();
+                    self.mark_brain_field_edited();
+                } else {
+                    self.active_brain_field_mut().pop();
+                }
+            }
+            KeyCode::Delete => {
+                if !self.is_brain_field_edited() && !self.active_brain_field().is_empty() {
+                    self.active_brain_field_mut().clear();
+                    self.mark_brain_field_edited();
+                }
+            }
+            KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
+                // Arrow navigation signals intent to edit — mark as touched
+                self.mark_brain_field_edited();
             }
             _ => {}
         }
         WizardAction::None
+    }
+
+    /// Get reference to the currently focused brain text area
+    fn active_brain_field(&self) -> &str {
+        match self.brain_field {
+            BrainField::AboutMe => &self.about_me,
+            BrainField::AboutAgent => &self.about_opencrabs,
+        }
     }
 
     /// Get mutable reference to the currently focused brain text area
@@ -85,6 +110,22 @@ impl OnboardingWizard {
         match self.brain_field {
             BrainField::AboutMe => &mut self.about_me,
             BrainField::AboutAgent => &mut self.about_opencrabs,
+        }
+    }
+
+    /// Whether the current field has been explicitly edited (arrow/char input)
+    fn is_brain_field_edited(&self) -> bool {
+        match self.brain_field {
+            BrainField::AboutMe => self.brain_me_edited,
+            BrainField::AboutAgent => self.brain_agent_edited,
+        }
+    }
+
+    /// Mark the current field as touched by user editing
+    fn mark_brain_field_edited(&mut self) {
+        match self.brain_field {
+            BrainField::AboutMe => self.brain_me_edited = true,
+            BrainField::AboutAgent => self.brain_agent_edited = true,
         }
     }
 
