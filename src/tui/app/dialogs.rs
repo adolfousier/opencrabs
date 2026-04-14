@@ -1821,6 +1821,33 @@ impl App {
                     });
                 }
                 WizardAction::GenerateBrain => {
+                    // Ensure provider config is persisted and agent service
+                    // rebuilt BEFORE generation — on fresh install the active
+                    // provider is still PlaceholderProvider at this point.
+                    if self.agent_service.provider_name() == "none" {
+                        if let Some(ref wizard) = self.onboarding
+                            && let Err(e) = wizard.apply_config()
+                        {
+                            tracing::warn!(
+                                "Brain gen: apply_config before generation: {}",
+                                e
+                            );
+                        }
+                        if let Err(e) = self.rebuild_agent_service().await {
+                            tracing::warn!(
+                                "Brain gen: rebuild_agent_service failed: {}",
+                                e
+                            );
+                            if let Some(ref mut wizard) = self.onboarding {
+                                wizard.brain_generating = false;
+                                wizard.brain_error = Some(
+                                    "No provider available — skip or reconfigure"
+                                        .to_string(),
+                                );
+                            }
+                            return Ok(());
+                        }
+                    }
                     self.generate_brain_files();
                 }
                 WizardAction::DownloadWhisperModel => {
