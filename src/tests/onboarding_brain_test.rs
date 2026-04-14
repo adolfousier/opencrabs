@@ -97,6 +97,7 @@ fn brain_char_appends_to_about_agent_when_focused() {
 fn brain_backspace_removes_char() {
     let mut w = make_wizard_at_brain();
     w.about_me = "Hello".to_string();
+    w.brain_me_edited = true; // Mark as edited so backspace pops instead of clearing
     w.handle_key(key(KeyCode::Backspace));
     assert_eq!(w.about_me, "Hell");
 }
