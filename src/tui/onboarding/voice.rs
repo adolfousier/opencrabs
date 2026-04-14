@@ -22,6 +22,7 @@ pub fn handle_key(wizard: &mut OnboardingWizard, event: KeyEvent) -> WizardActio
         VoiceField::LocalModelSelect => handle_local_model(wizard, event.code),
         VoiceField::TtsModeSelect => handle_tts_mode(wizard, event.code),
         VoiceField::TtsLocalVoiceSelect => handle_tts_voice(wizard, event.code),
+        VoiceField::Continue => handle_continue(wizard, event.code),
     }
 }
 
@@ -143,7 +144,7 @@ fn handle_tts_mode(wizard: &mut OnboardingWizard, key: KeyCode) -> WizardAction 
                 wizard.voice_field = VoiceField::TtsLocalVoiceSelect;
                 refresh_tts_voice_status(wizard);
             } else {
-                wizard.next_step();
+                wizard.voice_field = VoiceField::Continue;
             }
         }
         KeyCode::BackTab => {
@@ -175,19 +176,38 @@ fn handle_tts_voice(wizard: &mut OnboardingWizard, key: KeyCode) -> WizardAction
         KeyCode::Enter => {
             if wizard.tts_voice_download_progress.is_some() {
                 // Download in progress — do nothing
-            } else if wizard.tts_voice_downloaded {
-                // Voice already downloaded — confirm and advance
-                wizard.next_step();
-            } else {
+            } else if !wizard.tts_voice_downloaded {
                 // Download the selected voice (play preview on completion)
                 return WizardAction::DownloadPiperVoice;
             }
         }
         KeyCode::Tab => {
-            wizard.next_step();
+            wizard.voice_field = VoiceField::Continue;
         }
         KeyCode::BackTab => {
             wizard.voice_field = VoiceField::TtsModeSelect;
+        }
+        _ => {}
+    }
+    WizardAction::None
+}
+
+fn handle_continue(wizard: &mut OnboardingWizard, key: KeyCode) -> WizardAction {
+    match key {
+        KeyCode::Enter => {
+            wizard.next_step();
+        }
+        KeyCode::Tab => {
+            // Wrap back to top
+            wizard.voice_field = VoiceField::SttModeSelect;
+        }
+        KeyCode::BackTab => {
+            // Back to last TTS field
+            if wizard.tts_mode == 2 && crate::channels::voice::local_tts_available() {
+                wizard.voice_field = VoiceField::TtsLocalVoiceSelect;
+            } else {
+                wizard.voice_field = VoiceField::TtsModeSelect;
+            }
         }
         _ => {}
     }
@@ -285,9 +305,34 @@ pub fn render(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
         render_local_tts_fields(lines, wizard);
     }
 
+    // Continue button
+    lines.push(Line::from(""));
+    let continue_focused = wizard.voice_field == VoiceField::Continue;
+    if continue_focused {
+        lines.push(Line::from(vec![
+            Span::styled(
+                "  > ",
+                Style::default()
+                    .fg(ACCENT_GOLD)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Continue",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+    } else {
+        lines.push(Line::from(Span::styled(
+            "    Continue",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "  \u{2191}\u{2193}: select \u{b7} Tab: next \u{b7} Esc: back \u{b7} Enter: continue",
+        "  \u{2191}\u{2193}: select \u{b7} Tab: next field \u{b7} Esc: back \u{b7} Enter: confirm",
         Style::default().fg(Color::DarkGray),
     )));
 }
