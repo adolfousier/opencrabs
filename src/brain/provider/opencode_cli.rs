@@ -150,14 +150,9 @@ fn resolve_opencode_path() -> Result<String> {
         }
     }
 
-    // Try PATH via `which`
-    if let Ok(output) = std::process::Command::new("which").arg("opencode").output()
-        && output.status.success()
-    {
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !path.is_empty() {
-            return Ok(path);
-        }
+    // Try PATH lookup (cross-platform: `which` on Unix, `where.exe` on Windows)
+    if let Some(path) = super::which_binary("opencode") {
+        return Ok(path);
     }
 
     Err(ProviderError::Internal(

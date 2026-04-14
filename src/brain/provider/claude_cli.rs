@@ -169,14 +169,9 @@ fn resolve_claude_path() -> Result<String> {
         }
     }
 
-    // Try PATH via `which`
-    if let Ok(output) = std::process::Command::new("which").arg("claude").output()
-        && output.status.success()
-    {
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !path.is_empty() {
-            return Ok(path);
-        }
+    // Try PATH lookup (cross-platform: `which` on Unix, `where.exe` on Windows)
+    if let Some(path) = super::which_binary("claude") {
+        return Ok(path);
     }
 
     Err(ProviderError::Internal(
