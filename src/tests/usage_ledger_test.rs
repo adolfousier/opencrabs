@@ -113,7 +113,16 @@ fn test_normalize_model_name() {
         "qwen3.6-plus"
     );
 
-    // Pass-through
-    assert_eq!(normalize_model_name("MiniMax-M2.5"), "MiniMax-M2.5");
+    // Lowercase + normalization
+    assert_eq!(normalize_model_name("MiniMax-M2.5"), "minimax-m2.5");
+    assert_eq!(normalize_model_name("MiniMax-M2.7"), "minimax-m2.7");
+    assert_eq!(normalize_model_name("minimax-m2.7"), "minimax-m2.7");
     assert_eq!(normalize_model_name("glm-5.1"), "glm-5.1");
+    assert_eq!(normalize_model_name("glm-5-turbo"), "glm-5-turbo");
+    assert_eq!(normalize_model_name("zhipu"), "glm-5-turbo");
+    assert_eq!(normalize_model_name("mimo-v2-omni-free"), "mimo-v2-omni");
+    assert_eq!(normalize_model_name("mimo-v2-pro-free"), "mimo-v2-pro");
+    assert_eq!(normalize_model_name("kimi-k2.5"), "kimi-k2.5");
+    // Everything lowercased
+    assert_eq!(normalize_model_name("GPT-5-mini"), "gpt-5-mini");
 }
