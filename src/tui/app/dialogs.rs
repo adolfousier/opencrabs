@@ -1836,16 +1836,10 @@ impl App {
                         if let Some(ref wizard) = self.onboarding
                             && let Err(e) = wizard.apply_config()
                         {
-                            tracing::warn!(
-                                "Brain gen: apply_config before generation: {}",
-                                e
-                            );
+                            tracing::warn!("Brain gen: apply_config before generation: {}", e);
                         }
                         if let Err(e) = self.rebuild_agent_service().await {
-                            tracing::warn!(
-                                "Brain gen: rebuild_agent_service failed: {}",
-                                e
-                            );
+                            tracing::warn!("Brain gen: rebuild_agent_service failed: {}", e);
                         }
                     }
 
@@ -1889,8 +1883,7 @@ impl App {
                     // Fire brain generation in the background
                     if let Some((prompt, workspace)) = brain_context {
                         self.push_system_message(
-                            "Generating personalized brain files in the background..."
-                                .to_string(),
+                            "Generating personalized brain files in the background...".to_string(),
                         );
                         self.generate_brain_files_background(prompt, workspace);
                     }
@@ -2065,8 +2058,7 @@ impl App {
                         .collect();
 
                     // Parse and write directly to workspace
-                    let parsed =
-                        crate::tui::onboarding::parse_brain_sections(&text);
+                    let parsed = crate::tui::onboarding::parse_brain_sections(&text);
 
                     let names = ["SOUL", "IDENTITY", "USER", "AGENTS", "TOOLS", "MEMORY"];
                     let found: Vec<&str> = names
@@ -2109,7 +2101,11 @@ impl App {
                         for (filename, content) in &file_map {
                             if let Some(text) = content {
                                 if let Err(e) = std::fs::write(ws.join(filename), text) {
-                                    tracing::warn!("Brain gen: failed to write {}: {}", filename, e);
+                                    tracing::warn!(
+                                        "Brain gen: failed to write {}: {}",
+                                        filename,
+                                        e
+                                    );
                                 } else {
                                     written += 1;
                                 }
