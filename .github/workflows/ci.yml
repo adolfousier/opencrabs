@@ -48,9 +48,19 @@ jobs:
           path: target
           key: ${{ runner.os }}-target-stable-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Run tests (Windows — no whatsapp/local-stt/local-tts)
+      - name: Install CMake (Windows)
         if: runner.os == 'Windows'
-        run: cargo test --no-default-features --features "telegram,discord,slack,whatsapp,trello" --verbose
+        uses: lukka/get-cmake@latest
+
+      - name: Install NASM (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/setup-nasm@v1
+
+      - name: Run tests (Windows)
+        if: runner.os == 'Windows'
+        env:
+          AWS_LC_SYS_CMAKE_BUILDER: "1"
+        run: cargo test --all-features --verbose
 
       - name: Run tests (macOS)
         if: runner.os == 'macOS'
