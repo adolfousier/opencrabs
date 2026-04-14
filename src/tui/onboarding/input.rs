@@ -60,23 +60,26 @@ impl OnboardingWizard {
             if trimmed.is_empty() {
                 return;
             }
+            // Paste replaces untouched template, appends to edited field
+            let field = match self.brain_field {
+                BrainField::AboutMe => &mut self.about_me,
+                BrainField::AboutAgent => &mut self.about_opencrabs,
+            };
+            let edited = match self.brain_field {
+                BrainField::AboutMe => self.brain_me_edited,
+                BrainField::AboutAgent => self.brain_agent_edited,
+            };
+            if !edited || field.is_empty() {
+                // Replace template entirely with pasted content
+                *field = trimmed.to_string();
+            } else {
+                field.push('\n');
+                field.push_str(trimmed);
+            }
+            // Mark as edited after paste
             match self.brain_field {
-                BrainField::AboutMe => {
-                    if self.about_me.is_empty() {
-                        self.about_me = trimmed.to_string();
-                    } else {
-                        self.about_me.push('\n');
-                        self.about_me.push_str(trimmed);
-                    }
-                }
-                BrainField::AboutAgent => {
-                    if self.about_opencrabs.is_empty() {
-                        self.about_opencrabs = trimmed.to_string();
-                    } else {
-                        self.about_opencrabs.push('\n');
-                        self.about_opencrabs.push_str(trimmed);
-                    }
-                }
+                BrainField::AboutMe => self.brain_me_edited = true,
+                BrainField::AboutAgent => self.brain_agent_edited = true,
             }
             return;
         }
