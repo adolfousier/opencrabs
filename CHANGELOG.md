@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 25+ hardening fixes across context tracking, self-heal, provider rotation,
 and cross-platform support. RSI moves to fully autonomous mode with restart
-resilience, skip-on-unchanged, and optional GitHub issue reporting.
+resilience and skip-on-unchanged.
 Existing users should ask their crab to compare brain files with the
 latest templates and apply any diffs.
 
@@ -34,9 +34,6 @@ latest templates and apply any diffs.
 - **RSI enriched opportunities** — opportunity descriptions now include
   session ID, model name, provider, and timestamps so the agent knows
   which model/session produced failures.
-- **RSI GitHub issue reporting** — new `github_report_issue` tool lets the
-  RSI agent open issues for code-level bugs it can't fix via brain files.
-  Gated by `<!-- rsi:github-issues repo:OWNER/REPO -->` in AGENTS.md.
 
 ### Fixed
 
