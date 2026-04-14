@@ -62,11 +62,9 @@ jobs:
           AWS_LC_SYS_CMAKE_BUILDER: "1"
           LLAMA_STATIC_CRT: "1"
           RUSTFLAGS: "-Ctarget-feature=+crt-static"
-          # Debug builds need /MTd (static debug CRT), not /MT (static release CRT).
-          # /MT links static VCRT but dynamic debug UCRT, leaving __imp_lroundf etc unresolved.
-          CFLAGS: "/MTd"
-          CXXFLAGS: "/MTd"
-        run: cargo test --all-features --verbose
+          CFLAGS: "/MT"
+          CXXFLAGS: "/MT"
+        run: cargo test --release --all-features --verbose
 
       - name: Run tests (macOS)
         if: runner.os == 'macOS'
