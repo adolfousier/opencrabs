@@ -5,6 +5,100 @@ All notable changes to OpenCrabs will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.9] - 2026-04-15
+
+Usage Dashboard, config stability overhaul, and TUI polish. The headline
+feature is an interactive `/usage` overlay showing cost, tokens, and
+sessions broken down by project, model, activity, and tool. Config writes
+were rewritten from scratch to stop the recurring config-wipe bug.
+
+### Added
+
+#### Usage Dashboard
+- **Interactive usage overlay** — press `/usage` to open a centered TUI
+  panel with five cards: Daily Activity, By Project, By Model, Core Tools,
+  and By Activity. Tab navigates cards, T/W/M/A filters by time period.
+- **Tool execution recording** — every tool call is now logged to a
+  `tool_executions` table for per-tool usage analytics in the dashboard.
+- **Session auto-categorization** — heuristic classifier tags sessions as
+  Development, CI/Deploy, Testing, etc. based on title and tool patterns.
+  Categories feed the By Activity card with cost/turns/1-shot% breakdown.
+- **Project & model breakdowns** — By Project shows cost, tokens, and
+  session count per workspace. By Model shows cost and tokens with display
+  labels and estimated-cost markers for free-tier models.
+
+#### TUI
+- **Mouse drag-select text copy** — click and drag in the input area to
+  select text, automatically copied to clipboard on release.
+
+### Fixed
+
+#### Config Stability
+- **Stopped `migrate_if_needed` from wiping `config.toml`** — the migration
+  function was overwriting the file on every startup with default values.
+- **Replaced toml round-trip with `toml_edit`** — all config writes now use
+  lossless parsing so comments, ordering, and unknown keys are preserved.
+- **Eliminated all `unwrap_or(empty_table)` write paths** — these were
+  silently replacing corrupt or partially-loaded config with blank tables.
+- **Mutex lock on config writes** — prevents concurrent writes from racing
+  and producing empty files.
+- **API key recovery from last-good snapshot** — when `keys.toml` is
+  corrupt, recovers credentials from the most recent valid backup.
+- **Qwen OAuth credentials passed directly** — OAuth tokens flow through
+  the event chain instead of being re-read from a potentially-wiped config.
+
+#### Qwen
+- **Enforce `gitCoAuthor=false` before every CLI spawn** — patches
+  `~/.qwen/settings.json` programmatically so `Co-authored-by` trailers
+  never appear, even after config resets. System prompt rule stays as
+  belt-and-suspenders.
+- **Detect expired rotation accounts** — Alt+Backspace wipes stale OAuth
+  credentials for the current account.
+
+#### Usage Dashboard Polish
+- **Right-aligned data columns** — cost, tokens, sessions, and 1-shot%
+  columns are pushed flush to the right card edge across all cards.
+- **Adaptive card widths** — columns auto-size to actual data width instead
+  of using fixed-width assumptions.
+- **Real 1-shot% calculation** — replaced fake binary approximation with
+  actual per-session turn counting.
+- **Half-block bar charts** — visual separation between bars and data.
+
+#### Self-Heal
+- **Phantom detection on single intent keyphrase** — catches when the model
+  produces a single tool-intent phrase with zero actual tool calls.
+
+#### TUI
+- **Prevent impossible provider/model combos** — status bar no longer shows
+  model names that don't belong to the active provider.
+- **Brain generation background mode** — enters chat immediately while brain
+  files generate asynchronously. 120s timeout prevents infinite hangs.
+- **Stricter brain prompt** — forbids preamble, closing remarks, and code
+  fences so parsing succeeds reliably.
+- **Voice step Continue button** — Tab cycles between fields instead of
+  advancing screens. Added Continue button matching Channels step.
+- **Brain textarea wrapping** — first backspace on untouched template clears
+  the field. Large pastes render cleanly with line-wrap.
+
+#### Database
+- **Soft-delete sessions** — preserves metadata for usage tracking instead
+  of hard-deleting.
+- **Strip ANSI codes from tool output** — prevents escape sequences from
+  polluting DB persistence.
+- **Recreated `tool_executions` schema** — migration fixes column types for
+  correct recording.
+
+#### CI
+- **Windows CRT static linking** — `LLAMA_STATIC_CRT=1`, `RUSTFLAGS`,
+  and `CFLAGS=/MT` ensure all objects use static CRT.
+- **Removed Windows CRT overrides** — cleaned up after the fix landed.
+
+### Docs
+- **Terminal permissions setup** — macOS, Windows, Linux instructions.
+- **Session auto-categorization** documented in README.
+- **Python runtime dependency for local TTS** added to install docs.
+- **System commands section** — documented OS-specific terminal capabilities.
+
 ## [0.3.8] - 2026-04-14
 
 25+ hardening fixes across context tracking, self-heal, provider rotation,
@@ -2769,6 +2863,7 @@ fixes.
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
+[0.3.9]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.9
 [0.3.8]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.8
 [0.3.7]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.7
 [0.3.6]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.6
