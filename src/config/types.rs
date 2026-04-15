@@ -1729,7 +1729,9 @@ impl Config {
         match load_keys_from_file() {
             Err(e) => {
                 tracing::error!("Failed to load keys.toml: {:#}", e);
-                eprintln!("⚠️  keys.toml parse error — attempting recovery from last-known-good snapshot");
+                eprintln!(
+                    "⚠️  keys.toml parse error — attempting recovery from last-known-good snapshot"
+                );
 
                 // Try recovering from last-good keys snapshot
                 let keys_good = opencrabs_home().join("keys.last_good.toml");
@@ -1764,7 +1766,9 @@ impl Config {
                                 "keys.last_good.toml also failed: {:#} — no API keys loaded",
                                 e2
                             );
-                            eprintln!("❌ keys.last_good.toml also corrupt — no API keys loaded: {e}");
+                            eprintln!(
+                                "❌ keys.last_good.toml also corrupt — no API keys loaded: {e}"
+                            );
                         }
                     }
                 } else {
