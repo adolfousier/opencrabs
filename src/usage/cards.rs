@@ -74,7 +74,16 @@ pub fn render_daily(f: &mut Frame, daily: &[DailyStats], area: Rect, focused: bo
     }
 
     let max_tokens = daily.iter().map(|d| d.tokens).max().unwrap_or(1);
-    let bar_width = inner.width.saturating_sub(14) as usize; // date(10) + space + bar + cost
+
+    // Compute actual cost column width from data
+    let max_cost_len = daily
+        .iter()
+        .map(|d| fmt_tokens(d.tokens).len())
+        .max()
+        .unwrap_or(8);
+    let date_width = 6usize; // " 04-15 "
+    let data_cols = max_cost_len + 2; // " {cost}"
+    let bar_width = inner.width.saturating_sub((date_width + data_cols) as u16) as usize;
 
     let mut lines: Vec<Line> = Vec::new();
     // Show most recent days first (reversed), N that fit
@@ -82,7 +91,7 @@ pub fn render_daily(f: &mut Frame, daily: &[DailyStats], area: Rect, focused: bo
     let start = daily.len().saturating_sub(visible);
 
     for day in daily[start..].iter().rev() {
-        let bar_len = if max_tokens > 0 {
+        let bar_len = if max_tokens > 0 && bar_width > 0 {
             ((day.tokens as f64 / max_tokens as f64) * bar_width as f64).ceil() as usize
         } else {
             0
@@ -100,7 +109,10 @@ pub fn render_daily(f: &mut Frame, daily: &[DailyStats], area: Rect, focused: bo
             Span::styled(format!(" {:>5} ", short_date), DIM),
             Span::styled(bar, ACCENT),
             Span::raw(pad),
-            Span::styled(format!(" {}", fmt_tokens(day.tokens)), LABEL),
+            Span::styled(
+                format!(" {:>width$}", fmt_tokens(day.tokens), width = max_cost_len),
+                LABEL,
+            ),
         ]));
     }
 
@@ -121,10 +133,34 @@ pub fn render_projects(f: &mut Frame, projects: &[ProjectStats], area: Rect, foc
         return;
     }
 
+    // Compute column widths from actual data
+    let max_name_len = projects.iter().map(|p| p.project.len()).max().unwrap_or(8);
+    let max_cost_len = projects
+        .iter()
+        .map(|p| fmt_cost(p.cost).len())
+        .max()
+        .unwrap_or(6);
+    let max_tok_len = projects
+        .iter()
+        .map(|p| fmt_tokens(p.tokens).len())
+        .max()
+        .unwrap_or(6);
+    let max_sess_len = projects
+        .iter()
+        .map(|p| p.sessions.to_string().len())
+        .max()
+        .unwrap_or(1);
+
+    let data_cols = max_name_len + max_cost_len + max_tok_len + max_sess_len + 4; // 4 spacer chars
+    let total_needed = (inner.width as usize).min(data_cols);
+
+    // Name gets what's left, min of actual max and available space
+    let name_width = total_needed
+        .saturating_sub(max_cost_len + max_tok_len + max_sess_len + 3)
+        .max(max_name_len.min(6));
+
     let mut lines: Vec<Line> = Vec::new();
     let visible = (inner.height as usize).min(projects.len());
-    // cost(9) + tokens(7) + sessions(5) + spacing(4) = ~25 reserved for data columns
-    let name_width = (inner.width as usize).saturating_sub(25).max(8);
     for proj in projects.iter().take(visible) {
         let name = if proj.project.len() > name_width {
             format!(
@@ -139,9 +175,18 @@ pub fn render_projects(f: &mut Frame, projects: &[ProjectStats], area: Rect, foc
         };
         lines.push(Line::from(vec![
             Span::styled(format!(" {:<width$}", name, width = name_width), BOLD),
-            Span::styled(format!(" {:>8}", fmt_cost(proj.cost)), LABEL),
-            Span::styled(format!(" {:>6}", fmt_tokens(proj.tokens)), DIM),
-            Span::styled(format!(" {}s", proj.sessions), DIM),
+            Span::styled(
+                format!(" {:>width$}", fmt_cost(proj.cost), width = max_cost_len),
+                LABEL,
+            ),
+            Span::styled(
+                format!(" {:>width$}", fmt_tokens(proj.tokens), width = max_tok_len),
+                DIM,
+            ),
+            Span::styled(
+                format!(" {:>width$}s", proj.sessions, width = max_sess_len),
+                DIM,
+            ),
         ]));
     }
 
@@ -162,10 +207,37 @@ pub fn render_models(f: &mut Frame, models: &[ModelStats], area: Rect, focused: 
         return;
     }
 
-    let mut lines: Vec<Line> = Vec::new();
+    // Compute column widths from actual data
     let visible = (inner.height as usize).min(models.len());
-    // cost(10) + tokens(7) + spacing(3) = ~20 reserved for data columns
-    let name_width = (inner.width as usize).saturating_sub(20).max(10);
+    let max_name_len = models
+        .iter()
+        .take(visible)
+        .map(|m| crate::tui::provider_selector::model_display_label(&m.model).len())
+        .max()
+        .unwrap_or(8);
+    let max_cost_len = models
+        .iter()
+        .take(visible)
+        .map(|m| {
+            let c = fmt_cost(m.cost);
+            if m.estimated { c.len() + 1 } else { c.len() }
+        })
+        .max()
+        .unwrap_or(6);
+    let max_tok_len = models
+        .iter()
+        .take(visible)
+        .map(|m| fmt_tokens(m.tokens).len())
+        .max()
+        .unwrap_or(6);
+
+    let data_cols = max_name_len + max_cost_len + max_tok_len + 3;
+    let total_needed = (inner.width as usize).min(data_cols);
+    let name_width = total_needed
+        .saturating_sub(max_cost_len + max_tok_len + 2)
+        .max(max_name_len.min(4));
+
+    let mut lines: Vec<Line> = Vec::new();
     for m in models.iter().take(visible) {
         let display = crate::tui::provider_selector::model_display_label(&m.model).to_string();
         let name = if display.len() > name_width {
@@ -187,8 +259,14 @@ pub fn render_models(f: &mut Frame, models: &[ModelStats], area: Rect, focused: 
         };
         lines.push(Line::from(vec![
             Span::styled(format!(" {:<width$}", name, width = name_width), BOLD),
-            Span::styled(format!(" {:>9}", cost_str), cost_style),
-            Span::styled(format!(" {}", fmt_tokens(m.tokens)), DIM),
+            Span::styled(
+                format!(" {:>width$}", cost_str, width = max_cost_len),
+                cost_style,
+            ),
+            Span::styled(
+                format!(" {:>width$}", fmt_tokens(m.tokens), width = max_tok_len),
+                DIM,
+            ),
         ]));
     }
 
@@ -209,13 +287,39 @@ pub fn render_tools(f: &mut Frame, tools: &[ToolStats], area: Rect, focused: boo
         return;
     }
 
-    let max_count = tools.first().map(|t| t.call_count).unwrap_or(1);
-    let bar_width = inner.width.saturating_sub(22) as usize;
     let visible = (inner.height as usize).min(tools.len());
+
+    // Compute widths from actual data
+    let max_name_len = tools
+        .iter()
+        .take(visible)
+        .map(|t| t.tool_name.len())
+        .max()
+        .unwrap_or(8);
+    let max_count_len = tools
+        .iter()
+        .take(visible)
+        .map(|t| t.call_count.to_string().len())
+        .max()
+        .unwrap_or(1);
+    let max_count = tools.first().map(|t| t.call_count).unwrap_or(1);
+
+    // Reserve space for actual name and count, bar gets the rest
+    let data_cols = max_name_len + max_count_len + 3; // 3 spacer chars
+    let total_needed = (inner.width as usize).min(data_cols);
+    let name_width = total_needed
+        .saturating_sub(max_count_len + 2)
+        .max(max_name_len.min(4));
+    let count_width = total_needed
+        .saturating_sub(name_width + 2)
+        .max(max_count_len);
+    let bar_width = inner
+        .width
+        .saturating_sub((name_width + count_width + 3) as u16) as usize;
 
     let mut lines: Vec<Line> = Vec::new();
     for tool in tools.iter().take(visible) {
-        let bar_len = if max_count > 0 {
+        let bar_len = if max_count > 0 && bar_width > 0 {
             ((tool.call_count as f64 / max_count as f64) * bar_width as f64).ceil() as usize
         } else {
             0
@@ -223,16 +327,25 @@ pub fn render_tools(f: &mut Frame, tools: &[ToolStats], area: Rect, focused: boo
         let bar_len = bar_len.max(1).min(bar_width);
         let bar: String = "\u{2584}".repeat(bar_len);
         let pad: String = " ".repeat(bar_width.saturating_sub(bar_len));
-        let name = if tool.tool_name.len() > 12 {
-            format!("{}...", tool.tool_name.chars().take(9).collect::<String>())
+        let name = if tool.tool_name.len() > name_width {
+            format!(
+                "{}...",
+                tool.tool_name
+                    .chars()
+                    .take(name_width.saturating_sub(3))
+                    .collect::<String>()
+            )
         } else {
             tool.tool_name.clone()
         };
         lines.push(Line::from(vec![
-            Span::styled(format!(" {:<12}", name), BOLD),
+            Span::styled(format!(" {:<width$}", name, width = name_width), BOLD),
             Span::styled(bar, ACCENT),
             Span::raw(pad),
-            Span::styled(format!(" {:>5}", tool.call_count), DIM),
+            Span::styled(
+                format!(" {:>width$}", tool.call_count, width = count_width),
+                DIM,
+            ),
         ]));
     }
 
@@ -253,17 +366,57 @@ pub fn render_activities(f: &mut Frame, activities: &[ActivityStats], area: Rect
         return;
     }
 
-    // Header
-    let mut lines: Vec<Line> = vec![Line::from(vec![
-        Span::styled(format!(" {:<16}", "Category"), LABEL),
-        Span::styled(format!("{:>10}", "Cost"), LABEL),
-        Span::styled(format!("{:>8}", "Turns"), LABEL),
-        Span::styled(format!("{:>8}", "1-shot%"), LABEL),
-    ])];
+    // Compute column widths from actual data
+    let visible = (inner.height.saturating_sub(1) as usize).min(activities.len());
+    let max_cat_len = activities
+        .iter()
+        .take(visible)
+        .map(|a| a.category.len())
+        .max()
+        .unwrap_or(8);
+    let max_cost_len = activities
+        .iter()
+        .take(visible)
+        .map(|a| fmt_cost(a.cost).len())
+        .max()
+        .unwrap_or(6);
+    let max_turns_len = activities
+        .iter()
+        .take(visible)
+        .map(|a| a.turns.to_string().len())
+        .max()
+        .unwrap_or(1);
+    let max_pct_len = activities
+        .iter()
+        .take(visible)
+        .map(|a| a.one_shot_pct.to_string().len())
+        .max()
+        .unwrap_or(1);
+
+    let header_line = Line::from(vec![
+        Span::styled(
+            format!(" {:<width$}", "Category", width = max_cat_len),
+            LABEL,
+        ),
+        Span::styled(format!(" {:>width$}", "Cost", width = max_cost_len), LABEL),
+        Span::styled(
+            format!(" {:>width$}", "Turns", width = max_turns_len),
+            LABEL,
+        ),
+        Span::styled(
+            format!(" {:>width$}%", "1-shot", width = max_pct_len + 1),
+            LABEL,
+        ),
+    ]);
+    let mut lines: Vec<Line> = vec![header_line];
 
     let max_cost = activities.iter().map(|a| a.cost).fold(0.0_f64, f64::max);
-    let bar_width = inner.width.saturating_sub(46) as usize;
-    let visible = (inner.height.saturating_sub(1) as usize).min(activities.len());
+    let total_cols = max_cat_len + max_cost_len + max_turns_len + max_pct_len + 8;
+    let bar_width = if total_cols as u16 >= inner.width {
+        0
+    } else {
+        (inner.width - total_cols as u16) as usize
+    };
 
     for act in activities.iter().take(visible) {
         let bar_len = if max_cost > 0.0 && bar_width > 0 {
@@ -276,13 +429,32 @@ pub fn render_activities(f: &mut Frame, activities: &[ActivityStats], area: Rect
             .min(bar_width);
         let bar: String = "\u{2584}".repeat(bar_len);
         let pad: String = " ".repeat(bar_width.saturating_sub(bar_len));
+        let category = if act.category.len() > max_cat_len {
+            format!(
+                "{}...",
+                act.category
+                    .chars()
+                    .take(max_cat_len.saturating_sub(3))
+                    .collect::<String>()
+            )
+        } else {
+            act.category.clone()
+        };
+        let one_shot = format!("{}%", act.one_shot_pct as u32);
+        let pct_width = max_pct_len + 1;
         lines.push(Line::from(vec![
-            Span::styled(format!(" {:<16}", act.category), BOLD),
+            Span::styled(format!(" {:<width$}", category, width = max_cat_len), BOLD),
             Span::styled(bar, ACCENT),
             Span::raw(pad),
-            Span::styled(format!(" {:>9}", fmt_cost(act.cost)), LABEL),
-            Span::styled(format!("{:>8}", act.turns), DIM),
-            Span::styled(format!("{:>7}%", act.one_shot_pct as u32), DIM),
+            Span::styled(
+                format!(" {:>width$}", fmt_cost(act.cost), width = max_cost_len),
+                LABEL,
+            ),
+            Span::styled(
+                format!(" {:>width$}", act.turns, width = max_turns_len),
+                DIM,
+            ),
+            Span::styled(format!(" {:>width$}", one_shot, width = pct_width), DIM),
         ]));
     }
 
