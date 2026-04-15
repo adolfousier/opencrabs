@@ -157,9 +157,7 @@ pub fn render_projects(f: &mut Frame, projects: &[ProjectStats], area: Rect, foc
     let sess_width = max_sess_len;
     // +1 for leading space on name, +1 for trailing 's' on sessions
     let fixed = cost_width + tok_width + sess_width + spacing * 3 + 2;
-    let name_width = (inner.width as usize)
-        .saturating_sub(fixed)
-        .max(4);
+    let name_width = (inner.width as usize).saturating_sub(fixed).max(4);
 
     let mut lines: Vec<Line> = Vec::new();
     let visible = (inner.height as usize).min(projects.len());
@@ -236,9 +234,7 @@ pub fn render_models(f: &mut Frame, models: &[ModelStats], area: Rect, focused: 
     let tok_width = max_tok_len;
     // +1 for leading space on name
     let fixed = cost_width + tok_width + spacing * 2 + 1;
-    let name_width = (inner.width as usize)
-        .saturating_sub(fixed)
-        .max(4);
+    let name_width = (inner.width as usize).saturating_sub(fixed).max(4);
 
     let mut lines: Vec<Line> = Vec::new();
     for m in models.iter().take(visible) {
@@ -398,30 +394,27 @@ pub fn render_activities(f: &mut Frame, activities: &[ActivityStats], area: Rect
         .max()
         .unwrap_or(1);
 
+    // Data columns get guaranteed space; category+bar fill whatever is left
+    let spacing = 1; // single space between data cols
+    let pct_width = max_pct_len + 2; // e.g. "45%" needs digit + %
+    let fixed_data = max_cost_len + max_turns_len + pct_width + spacing * 3;
+    let cat_bar_width = (inner.width as usize).saturating_sub(fixed_data + 1); // +1 leading space
+    let cat_width = max_cat_len.min(cat_bar_width / 3).max(4);
+    let bar_width = cat_bar_width.saturating_sub(cat_width);
+
     let header_line = Line::from(vec![
-        Span::styled(
-            format!(" {:<width$}", "Category", width = max_cat_len),
-            LABEL,
-        ),
+        Span::styled(format!(" {:<width$}", "Category", width = cat_width), LABEL),
+        Span::raw(" ".repeat(bar_width)),
         Span::styled(format!(" {:>width$}", "Cost", width = max_cost_len), LABEL),
         Span::styled(
             format!(" {:>width$}", "Turns", width = max_turns_len),
             LABEL,
         ),
-        Span::styled(
-            format!(" {:>width$}%", "1-shot", width = max_pct_len + 1),
-            LABEL,
-        ),
+        Span::styled(format!(" {:>width$}", "1-shot", width = pct_width), LABEL),
     ]);
     let mut lines: Vec<Line> = vec![header_line];
 
     let max_cost = activities.iter().map(|a| a.cost).fold(0.0_f64, f64::max);
-    let total_cols = max_cat_len + max_cost_len + max_turns_len + max_pct_len + 8;
-    let bar_width = if total_cols as u16 >= inner.width {
-        0
-    } else {
-        (inner.width - total_cols as u16) as usize
-    };
 
     for act in activities.iter().take(visible) {
         let bar_len = if max_cost > 0.0 && bar_width > 0 {
@@ -434,21 +427,20 @@ pub fn render_activities(f: &mut Frame, activities: &[ActivityStats], area: Rect
             .min(bar_width);
         let bar: String = "\u{2584}".repeat(bar_len);
         let pad: String = " ".repeat(bar_width.saturating_sub(bar_len));
-        let category = if act.category.len() > max_cat_len {
+        let category = if act.category.len() > cat_width {
             format!(
                 "{}...",
                 act.category
                     .chars()
-                    .take(max_cat_len.saturating_sub(3))
+                    .take(cat_width.saturating_sub(3))
                     .collect::<String>()
             )
         } else {
             act.category.clone()
         };
         let one_shot = format!("{}%", act.one_shot_pct as u32);
-        let pct_width = max_pct_len + 1;
         lines.push(Line::from(vec![
-            Span::styled(format!(" {:<width$}", category, width = max_cat_len), BOLD),
+            Span::styled(format!(" {:<width$}", category, width = cat_width), BOLD),
             Span::styled(bar, ACCENT),
             Span::raw(pad),
             Span::styled(

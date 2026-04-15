@@ -468,7 +468,8 @@ async fn fetch_activities(pool: &Pool, since: Option<i64>) -> Result<Vec<Activit
         let mut stmt = conn.prepare(query)?;
 
         // Aggregate by activity category
-        let mut categories: std::collections::HashMap<String, (f64, i64, i64)> =
+        // (cost, turns, total_sessions, one_shot_sessions)
+        let mut categories: std::collections::HashMap<String, (f64, i64, i64, i64)> =
             std::collections::HashMap::new();
         let rows = stmt.query_map(refs.as_slice(), |row| {
             Ok((
@@ -484,21 +485,20 @@ async fn fetch_activities(pool: &Pool, since: Option<i64>) -> Result<Vec<Activit
                 Some(ref c) if !c.is_empty() => c.clone(),
                 _ => classify_activity(&title).to_string(),
             };
-            let entry = categories.entry(category).or_insert((0.0, 0, 0));
+            let entry = categories.entry(category).or_insert((0.0, 0, 0, 0));
             entry.0 += cost;
             entry.1 += turns;
             entry.2 += 1; // session count
+            if turns <= 1 {
+                entry.3 += 1; // one-shot session
+            }
         }
 
         let mut result: Vec<ActivityStats> = categories
             .into_iter()
-            .map(|(cat, (cost, turns, sessions))| {
-                // 1-shot% = sessions with only 1 turn / total sessions
+            .map(|(cat, (cost, turns, sessions, one_shot_sessions))| {
                 let one_shot = if sessions > 0 {
-                    // We don't have per-session turn count here, approximate:
-                    // if avg turns/session <= 2, it's likely one-shot
-                    let avg = turns as f64 / sessions as f64;
-                    if avg <= 2.0 { 100.0 } else { 0.0 }
+                    (one_shot_sessions as f64 / sessions as f64) * 100.0
                 } else {
                     0.0
                 };
