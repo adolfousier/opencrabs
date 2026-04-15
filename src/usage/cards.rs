@@ -121,10 +121,11 @@ pub fn render_projects(f: &mut Frame, projects: &[ProjectStats], area: Rect, foc
         return;
     }
 
+    // Dynamic name width: reserve space for data columns (~8 chars) + spacing
+    let name_width = (inner.width as usize).saturating_sub(8).max(8);
+
     let mut lines: Vec<Line> = Vec::new();
     let visible = (inner.height as usize).min(projects.len());
-    // cost(9) + tokens(7) + sessions(5) + spacing(4) = ~25 reserved for data columns
-    let name_width = (inner.width as usize).saturating_sub(25).max(8);
     for proj in projects.iter().take(visible) {
         let name = if proj.project.len() > name_width {
             format!(
@@ -162,10 +163,11 @@ pub fn render_models(f: &mut Frame, models: &[ModelStats], area: Rect, focused: 
         return;
     }
 
+    // Dynamic name width: reserve space for data columns (~18 chars) + spacing
+    let name_width = (inner.width as usize).saturating_sub(18).max(10);
+
     let mut lines: Vec<Line> = Vec::new();
     let visible = (inner.height as usize).min(models.len());
-    // cost(10) + tokens(7) + spacing(3) = ~20 reserved for data columns
-    let name_width = (inner.width as usize).saturating_sub(20).max(10);
     for m in models.iter().take(visible) {
         let display = crate::tui::provider_selector::model_display_label(&m.model).to_string();
         let name = if display.len() > name_width {
@@ -213,6 +215,9 @@ pub fn render_tools(f: &mut Frame, tools: &[ToolStats], area: Rect, focused: boo
     let bar_width = inner.width.saturating_sub(22) as usize;
     let visible = (inner.height as usize).min(tools.len());
 
+    // Dynamic name width: reserve space for count column (~7 chars) and bar padding
+    let name_width = (bar_width as u16).saturating_sub(2).max(8) as usize;
+
     let mut lines: Vec<Line> = Vec::new();
     for tool in tools.iter().take(visible) {
         let bar_len = if max_count > 0 {
@@ -223,13 +228,19 @@ pub fn render_tools(f: &mut Frame, tools: &[ToolStats], area: Rect, focused: boo
         let bar_len = bar_len.max(1).min(bar_width);
         let bar: String = "\u{2584}".repeat(bar_len);
         let pad: String = " ".repeat(bar_width.saturating_sub(bar_len));
-        let name = if tool.tool_name.len() > 12 {
-            format!("{}...", tool.tool_name.chars().take(9).collect::<String>())
+        let name = if tool.tool_name.len() > name_width {
+            format!(
+                "{}...",
+                tool.tool_name
+                    .chars()
+                    .take(name_width.saturating_sub(3))
+                    .collect::<String>()
+            )
         } else {
             tool.tool_name.clone()
         };
         lines.push(Line::from(vec![
-            Span::styled(format!(" {:<12}", name), BOLD),
+            Span::styled(format!(" {:<width$}", name, width = name_width), BOLD),
             Span::styled(bar, ACCENT),
             Span::raw(pad),
             Span::styled(format!(" {:>5}", tool.call_count), DIM),
@@ -254,15 +265,16 @@ pub fn render_activities(f: &mut Frame, activities: &[ActivityStats], area: Rect
     }
 
     // Header
+    let cat_width = inner.width.saturating_sub(46).max(10) as usize;
     let mut lines: Vec<Line> = vec![Line::from(vec![
-        Span::styled(format!(" {:<16}", "Category"), LABEL),
+        Span::styled(format!(" {:<width$}", "Category", width = cat_width), LABEL),
         Span::styled(format!("{:>10}", "Cost"), LABEL),
         Span::styled(format!("{:>8}", "Turns"), LABEL),
         Span::styled(format!("{:>8}", "1-shot%"), LABEL),
     ])];
 
     let max_cost = activities.iter().map(|a| a.cost).fold(0.0_f64, f64::max);
-    let bar_width = inner.width.saturating_sub(46) as usize;
+    let bar_width = inner.width.saturating_sub(cat_width as u16 + 32) as usize;
     let visible = (inner.height.saturating_sub(1) as usize).min(activities.len());
 
     for act in activities.iter().take(visible) {
@@ -276,8 +288,19 @@ pub fn render_activities(f: &mut Frame, activities: &[ActivityStats], area: Rect
             .min(bar_width);
         let bar: String = "\u{2584}".repeat(bar_len);
         let pad: String = " ".repeat(bar_width.saturating_sub(bar_len));
+        let category = if act.category.len() > cat_width {
+            format!(
+                "{}...",
+                act.category
+                    .chars()
+                    .take(cat_width.saturating_sub(3))
+                    .collect::<String>()
+            )
+        } else {
+            act.category.clone()
+        };
         lines.push(Line::from(vec![
-            Span::styled(format!(" {:<16}", act.category), BOLD),
+            Span::styled(format!(" {:<width$}", category, width = cat_width), BOLD),
             Span::styled(bar, ACCENT),
             Span::raw(pad),
             Span::styled(format!(" {:>9}", fmt_cost(act.cost)), LABEL),
