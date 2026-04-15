@@ -60,7 +60,7 @@ impl App {
                             )));
                             return;
                         }
-                        let _ = sender.send(TuiEvent::QwenOAuthComplete);
+                        let _ = sender.send(TuiEvent::QwenOAuthComplete(creds));
                         return;
                     }
                     Err(e) => {
