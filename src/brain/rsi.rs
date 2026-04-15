@@ -542,8 +542,8 @@ pub fn spawn_rsi_engine(
                     Ok(summary) => {
                         let short: String = summary.chars().take(200).collect();
                         tracing::info!("RSI agent completed: {short}");
-                        let _ = notification_tx
-                            .send(RsiNotification::AgentCycleComplete { summary });
+                        let _ =
+                            notification_tx.send(RsiNotification::AgentCycleComplete { summary });
                     }
                     Err(e) => {
                         tracing::warn!("RSI agent cycle failed: {e}");
