@@ -151,13 +151,10 @@ pub fn render_projects(f: &mut Frame, projects: &[ProjectStats], area: Rect, foc
         .max()
         .unwrap_or(1);
 
-    // Minimum 2 spaces between columns for readability
+    // Name column fills remaining width; data columns fit tight on the right
     let spacing = 2;
-    let total_needed = max_name_len + max_cost_len + max_tok_len + max_sess_len + spacing * 3;
-    let total_needed = (inner.width as usize).min(total_needed);
-    let name_width = total_needed
-        .saturating_sub(max_cost_len + max_tok_len + max_sess_len + spacing * 3)
-        .max(max_name_len.min(6));
+    let data_cols = max_cost_len + max_tok_len + max_sess_len + spacing * 3;
+    let name_width = (inner.width as usize).saturating_sub(data_cols).max(max_name_len);
     let cost_width = max_cost_len;
     let tok_width = max_tok_len;
     let sess_width = max_sess_len;
@@ -237,13 +234,10 @@ pub fn render_models(f: &mut Frame, models: &[ModelStats], area: Rect, focused: 
         .max()
         .unwrap_or(6);
 
-    // Minimum 2 spaces between columns for readability
+    // Name column fills remaining width; data columns fit tight on the right
     let spacing = 2;
-    let total_needed = max_name_len + max_cost_len + max_tok_len + spacing * 2;
-    let total_needed = (inner.width as usize).min(total_needed);
-    let name_width = total_needed
-        .saturating_sub(max_cost_len + max_tok_len + spacing * 2)
-        .max(max_name_len.min(4));
+    let data_cols = max_cost_len + max_tok_len + spacing * 2;
+    let name_width = (inner.width as usize).saturating_sub(data_cols).max(max_name_len);
     let cost_width = max_cost_len;
     let tok_width = max_tok_len;
 
