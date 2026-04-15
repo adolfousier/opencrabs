@@ -13,6 +13,12 @@ static CONFIG_RECOVERED: std::sync::atomic::AtomicBool = std::sync::atomic::Atom
 /// Unknown top-level keys found in config.toml (possible typos).
 static CONFIG_TYPO_WARNINGS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
+/// Mutex protecting read-modify-write cycles on config.toml / keys.toml.
+/// Without this, concurrent `write_key` calls can race: one reads while
+/// another is mid-write, gets a partial/empty file, parses it as empty,
+/// and overwrites the real config with an empty table.
+static CONFIG_FILE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Main configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -1229,11 +1235,20 @@ pub fn write_secret_key(section: &str, key: &str, value: &str) -> Result<()> {
         return Ok(()); // Don't write empty values
     }
 
+    // Hold lock for entire read-modify-write to prevent races
+    let _guard = CONFIG_FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
     let path = keys_path();
 
     let mut doc: toml::Value = if path.exists() {
         let content = fs::read_to_string(&path)?;
-        toml::from_str(&content).unwrap_or(toml::Value::Table(toml::map::Map::new()))
+        toml::from_str(&content).with_context(|| {
+            format!(
+                "keys.toml is corrupt or was partially written — refusing to overwrite. \
+                 Content length: {} bytes",
+                content.len(),
+            )
+        })?
     } else {
         toml::Value::Table(toml::map::Map::new())
     };
@@ -1977,8 +1992,13 @@ impl Config {
                 content.contains("subagent_provider") || content.contains("subagent_model");
             if !has_subagent && let Ok(injected) = inject_subagent_defaults(&content) {
                 match fs::write(path, &injected) {
-                    Ok(()) => tracing::info!("Config migrated: injected subagent defaults into [agent]"),
-                    Err(e) => tracing::warn!("Config migration: failed to write injected defaults to {}: {e}", path.display()),
+                    Ok(()) => {
+                        tracing::info!("Config migrated: injected subagent defaults into [agent]")
+                    }
+                    Err(e) => tracing::warn!(
+                        "Config migration: failed to write injected defaults to {}: {e}",
+                        path.display()
+                    ),
                 }
                 return;
             }
@@ -1991,8 +2011,13 @@ impl Config {
         if !has_subagent && let Ok(injected) = inject_subagent_defaults(&final_content) {
             Self::backup_config(path, 7);
             match fs::write(path, &injected) {
-                Ok(()) => tracing::info!("Config migrated: [voice] → providers.stt/tts + subagent defaults"),
-                Err(e) => tracing::warn!("Config migration: failed to write injected defaults to {}: {e}", path.display()),
+                Ok(()) => tracing::info!(
+                    "Config migrated: [voice] → providers.stt/tts + subagent defaults"
+                ),
+                Err(e) => tracing::warn!(
+                    "Config migration: failed to write injected defaults to {}: {e}",
+                    path.display()
+                ),
             }
             return;
         }
@@ -2102,13 +2127,25 @@ impl Config {
         // Sanitize: trim whitespace/newlines that may leak from TUI input
         let value = value.trim();
 
+        // Hold lock for entire read-modify-write to prevent races between
+        // concurrent write_key calls (e.g. fallback provider switching fires
+        // multiple writes in rapid succession).
+        let _guard = CONFIG_FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
         let path =
             Self::system_config_path().unwrap_or_else(|| opencrabs_home().join("config.toml"));
 
         // Read existing TOML or start fresh
         let mut doc: toml::Value = if path.exists() {
             let content = fs::read_to_string(&path)?;
-            toml::from_str(&content).unwrap_or(toml::Value::Table(toml::map::Map::new()))
+            toml::from_str(&content).with_context(|| {
+                format!(
+                    "config.toml is corrupt or was partially written — refusing to overwrite. \
+                     Content length: {} bytes. Check backups in {:?}",
+                    content.len(),
+                    path.parent().unwrap_or(Path::new(".")),
+                )
+            })?
         } else {
             toml::Value::Table(toml::map::Map::new())
         };
@@ -2193,6 +2230,8 @@ impl Config {
     /// Remove a dotted section from config.toml.
     /// e.g. `remove_section("providers.custom.default")` removes `[providers.custom.default]`.
     pub fn remove_section(section: &str) -> Result<()> {
+        let _guard = CONFIG_FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
         let path =
             Self::system_config_path().unwrap_or_else(|| opencrabs_home().join("config.toml"));
         if !path.exists() {
@@ -2200,8 +2239,12 @@ impl Config {
         }
 
         let content = fs::read_to_string(&path)?;
-        let mut doc: toml::Value =
-            toml::from_str(&content).unwrap_or(toml::Value::Table(toml::map::Map::new()));
+        let mut doc: toml::Value = toml::from_str(&content).with_context(|| {
+            format!(
+                "config.toml is corrupt — refusing to modify. Content length: {} bytes",
+                content.len(),
+            )
+        })?;
 
         let parts: Vec<&str> = section.split('.').collect();
         if parts.is_empty() {
@@ -2419,6 +2462,8 @@ impl Config {
 
     /// Save configuration to a file
     pub fn save(&self, path: &Path) -> Result<()> {
+        let _guard = CONFIG_FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
         let toml_string =
             toml::to_string_pretty(self).context("Failed to serialize config to TOML")?;
 
