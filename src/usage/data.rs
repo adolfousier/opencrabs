@@ -76,6 +76,7 @@ pub struct DailyStats {
 pub struct ProjectStats {
     pub project: String,
     pub cost: f64,
+    pub tokens: i64,
     pub sessions: i64,
 }
 
@@ -143,7 +144,7 @@ pub fn classify_activity(title: &str) -> &'static str {
     if t.contains("config") || t.contains("setup") || t.contains("setting") {
         return "Config";
     }
-    "Other"
+    "Development"
 }
 
 // ── Data fetching ────────────────────────────────────────────────────────────
@@ -243,13 +244,47 @@ async fn fetch_daily(pool: &Pool, since: Option<i64>) -> Result<Vec<DailyStats>>
     .context("Failed to fetch daily stats")
 }
 
+/// Map raw working_directory to a display-friendly project name.
+/// User home directory (no project) typically means brain-file editing.
+fn normalize_project_name(raw: &str) -> String {
+    if raw == "unknown" || raw.is_empty() {
+        return "unknown".to_string();
+    }
+    let home = std::env::var("HOME").unwrap_or_default();
+    if !home.is_empty() && raw.trim_end_matches('/') == home.trim_end_matches('/') {
+        return "brain-files".to_string();
+    }
+    raw.rsplit('/').next().unwrap_or(raw).to_string()
+}
+
+/// Merge rows that map to the same display name by summing stats.
+fn merge_project_stats(stats: &mut Vec<ProjectStats>) {
+    let mut map = std::collections::HashMap::<String, ProjectStats>::new();
+    for s in stats.drain(..) {
+        map.entry(s.project.clone())
+            .and_modify(|e| {
+                e.cost += s.cost;
+                e.tokens += s.tokens;
+                e.sessions += s.sessions;
+            })
+            .or_insert(s);
+    }
+    *stats = map.into_values().collect();
+    stats.sort_by(|a, b| {
+        b.cost
+            .partial_cmp(&a.cost)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+}
+
 async fn fetch_projects(pool: &Pool, since: Option<i64>) -> Result<Vec<ProjectStats>> {
     let conn = pool.get().await.context("pool")?;
-    conn.interact(move |conn| {
+    conn.interact(move |conn| -> rusqlite::Result<Vec<ProjectStats>> {
         let (query, param): (&str, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(s) = since {
             (
                 "SELECT COALESCE(s.working_directory, 'unknown'), \
-                 COALESCE(SUM(u.cost), 0.0), COUNT(DISTINCT u.session_id) \
+                 COALESCE(SUM(u.cost), 0.0), COALESCE(SUM(u.token_count), 0), \
+                 COUNT(DISTINCT u.session_id) \
                  FROM usage_ledger u \
                  LEFT JOIN sessions s ON u.session_id = s.id \
                  WHERE u.created_at >= ?1 \
@@ -260,7 +295,8 @@ async fn fetch_projects(pool: &Pool, since: Option<i64>) -> Result<Vec<ProjectSt
         } else {
             (
                 "SELECT COALESCE(s.working_directory, 'unknown'), \
-                 COALESCE(SUM(u.cost), 0.0), COUNT(DISTINCT u.session_id) \
+                 COALESCE(SUM(u.cost), 0.0), COALESCE(SUM(u.token_count), 0), \
+                 COUNT(DISTINCT u.session_id) \
                  FROM usage_ledger u \
                  LEFT JOIN sessions s ON u.session_id = s.id \
                  GROUP BY s.working_directory \
@@ -272,15 +308,17 @@ async fn fetch_projects(pool: &Pool, since: Option<i64>) -> Result<Vec<ProjectSt
         let mut stmt = conn.prepare(query)?;
         let rows = stmt.query_map(refs.as_slice(), |row| {
             let raw: String = row.get(0)?;
-            // Show just the last path component for brevity
-            let project = raw.rsplit('/').next().unwrap_or(&raw).to_string();
+            let project = normalize_project_name(&raw);
             Ok(ProjectStats {
                 project,
                 cost: row.get(1)?,
-                sessions: row.get(2)?,
+                tokens: row.get(2)?,
+                sessions: row.get(3)?,
             })
         })?;
-        rows.collect::<std::result::Result<Vec<_>, _>>()
+        let mut stats: Vec<ProjectStats> = rows.collect::<std::result::Result<Vec<_>, _>>()?;
+        merge_project_stats(&mut stats);
+        Ok(stats)
     })
     .await
     .map_err(interact_err)?
@@ -408,7 +446,7 @@ async fn fetch_activities(pool: &Pool, since: Option<i64>) -> Result<Vec<Activit
             (
                 "SELECT COALESCE(s.title, ''), \
                  COALESCE(SUM(u.cost), 0.0), COUNT(*), \
-                 COUNT(DISTINCT u.session_id) \
+                 COUNT(DISTINCT u.session_id), s.category \
                  FROM usage_ledger u \
                  LEFT JOIN sessions s ON u.session_id = s.id \
                  WHERE u.created_at >= ?1 \
@@ -419,7 +457,7 @@ async fn fetch_activities(pool: &Pool, since: Option<i64>) -> Result<Vec<Activit
             (
                 "SELECT COALESCE(s.title, ''), \
                  COALESCE(SUM(u.cost), 0.0), COUNT(*), \
-                 COUNT(DISTINCT u.session_id) \
+                 COUNT(DISTINCT u.session_id), s.category \
                  FROM usage_ledger u \
                  LEFT JOIN sessions s ON u.session_id = s.id \
                  GROUP BY u.session_id",
@@ -430,18 +468,22 @@ async fn fetch_activities(pool: &Pool, since: Option<i64>) -> Result<Vec<Activit
         let mut stmt = conn.prepare(query)?;
 
         // Aggregate by activity category
-        let mut categories: std::collections::HashMap<&'static str, (f64, i64, i64)> =
+        let mut categories: std::collections::HashMap<String, (f64, i64, i64)> =
             std::collections::HashMap::new();
         let rows = stmt.query_map(refs.as_slice(), |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, f64>(1)?,
                 row.get::<_, i64>(2)?,
+                row.get::<_, Option<String>>(4)?,
             ))
         })?;
         for row in rows {
-            let (title, cost, turns) = row?;
-            let category = classify_activity(&title);
+            let (title, cost, turns, explicit_cat) = row?;
+            let category: String = match explicit_cat {
+                Some(ref c) if !c.is_empty() => c.clone(),
+                _ => classify_activity(&title).to_string(),
+            };
             let entry = categories.entry(category).or_insert((0.0, 0, 0));
             entry.0 += cost;
             entry.1 += turns;
@@ -553,8 +595,8 @@ mod tests {
         assert_eq!(classify_activity("implement search"), "Features");
         assert_eq!(classify_activity("config file parsing"), "Config");
         assert_eq!(classify_activity("setup dev environment"), "Config");
-        assert_eq!(classify_activity("random chat session"), "Other");
-        assert_eq!(classify_activity(""), "Other");
+        assert_eq!(classify_activity("random chat session"), "Development");
+        assert_eq!(classify_activity(""), "Development");
     }
 
     #[test]
