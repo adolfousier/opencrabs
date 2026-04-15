@@ -250,13 +250,19 @@ impl Tool for SelfImproveTool {
                         rationale
                     },
                 );
-                let improvements_path = home.join("rsi").join("improvements.md");
-                if let Ok(mut f) = std::fs::OpenOptions::new()
+                match std::fs::OpenOptions::new()
                     .create(true)
                     .append(true)
-                    .open(&improvements_path)
+                    .open(home.join("rsi").join("improvements.md"))
                 {
-                    let _ = f.write_all(entry.as_bytes());
+                    Ok(mut f) => {
+                        if let Err(e) = f.write_all(entry.as_bytes()) {
+                            tracing::warn!("RSI: failed to write improvements.md: {e}");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("RSI: failed to open improvements.md: {e}");
+                    }
                 }
 
                 // Archive to daily history file
@@ -264,17 +270,24 @@ impl Tool for SelfImproveTool {
                     .join("rsi")
                     .join("history")
                     .join(format!("{}.md", chrono::Utc::now().format("%Y-%m-%d")));
-                if let Ok(mut f) = std::fs::OpenOptions::new()
+                match std::fs::OpenOptions::new()
                     .create(true)
                     .append(true)
                     .open(&history_path)
                 {
-                    let _ = f.write_all(
-                        format!(
-                            "\n### [Updated] {description}\n\n**Replaced:**\n```\n{old_content}\n```\n**With:**\n```\n{new_content}\n```\n"
-                        )
-                        .as_bytes(),
-                    );
+                    Ok(mut f) => {
+                        if let Err(e) = f.write_all(
+                            format!(
+                                "\n### [Updated] {description}\n\n**Replaced:**\n```\n{old_content}\n```\n**With:**\n```\n{new_content}\n```\n"
+                            )
+                            .as_bytes(),
+                        ) {
+                            tracing::warn!("RSI: failed to write history archive: {e}");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("RSI: failed to open history archive: {e}");
+                    }
                 }
 
                 // Record in feedback ledger
@@ -288,7 +301,7 @@ impl Tool for SelfImproveTool {
                         "action": "update",
                     })
                     .to_string();
-                    let _ = repo
+                    if let Err(e) = repo
                         .record(
                             &context.session_id.to_string(),
                             "improvement_applied",
@@ -296,7 +309,10 @@ impl Tool for SelfImproveTool {
                             1.0,
                             Some(&meta),
                         )
-                        .await;
+                        .await
+                    {
+                        tracing::warn!("RSI: failed to record improvement in feedback ledger: {e}");
+                    }
                 }
 
                 Ok(ToolResult::success(format!(
@@ -371,13 +387,19 @@ impl Tool for SelfImproveTool {
                         rationale
                     },
                 );
-                let improvements_path = home.join("rsi").join("improvements.md");
-                if let Ok(mut f) = std::fs::OpenOptions::new()
+                match std::fs::OpenOptions::new()
                     .create(true)
                     .append(true)
-                    .open(&improvements_path)
+                    .open(home.join("rsi").join("improvements.md"))
                 {
-                    let _ = f.write_all(entry.as_bytes());
+                    Ok(mut f) => {
+                        if let Err(e) = f.write_all(entry.as_bytes()) {
+                            tracing::warn!("RSI: failed to write improvements.md: {e}");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("RSI: failed to open improvements.md: {e}");
+                    }
                 }
 
                 // Archive to daily history file
@@ -385,12 +407,19 @@ impl Tool for SelfImproveTool {
                     .join("rsi")
                     .join("history")
                     .join(format!("{}.md", chrono::Utc::now().format("%Y-%m-%d")));
-                if let Ok(mut f) = std::fs::OpenOptions::new()
+                match std::fs::OpenOptions::new()
                     .create(true)
                     .append(true)
                     .open(&history_path)
                 {
-                    let _ = f.write_all(format!("\n### {description}\n\n{content}\n").as_bytes());
+                    Ok(mut f) => {
+                        if let Err(e) = f.write_all(format!("\n### {description}\n\n{content}\n").as_bytes()) {
+                            tracing::warn!("RSI: failed to write history archive: {e}");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("RSI: failed to open history archive: {e}");
+                    }
                 }
 
                 // Record in feedback ledger
@@ -403,7 +432,7 @@ impl Tool for SelfImproveTool {
                         "rationale": rationale,
                     })
                     .to_string();
-                    let _ = repo
+                    if let Err(e) = repo
                         .record(
                             &context.session_id.to_string(),
                             "improvement_applied",
@@ -411,7 +440,10 @@ impl Tool for SelfImproveTool {
                             1.0,
                             Some(&meta),
                         )
-                        .await;
+                        .await
+                    {
+                        tracing::warn!("RSI: failed to record improvement in feedback ledger: {e}");
+                    }
                 }
 
                 Ok(ToolResult::success(format!(

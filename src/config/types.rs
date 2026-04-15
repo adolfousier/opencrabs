@@ -1020,8 +1020,10 @@ fn expand_tilde(p: &Path) -> PathBuf {
 /// Selection priority: `set_active_profile()` > `OPENCRABS_PROFILE` env > default.
 pub fn opencrabs_home() -> PathBuf {
     let p = super::profile::resolve_profile_home();
-    if !p.exists() {
-        let _ = std::fs::create_dir_all(&p);
+    if !p.exists()
+        && let Err(e) = std::fs::create_dir_all(&p)
+    {
+        tracing::error!("Failed to create opencrabs home directory {p:?}: {e}");
     }
     p
 }
@@ -1974,10 +1976,12 @@ impl Config {
             let has_subagent =
                 content.contains("subagent_provider") || content.contains("subagent_model");
             if !has_subagent && let Ok(injected) = inject_subagent_defaults(&content) {
-                let _ = fs::write(path, &injected);
-                tracing::info!("Config migrated: injected subagent defaults into [agent]");
+                match fs::write(path, &injected) {
+                    Ok(()) => tracing::info!("Config migrated: injected subagent defaults into [agent]"),
+                    Err(e) => tracing::warn!("Config migration: failed to write injected defaults to {}: {e}", path.display()),
+                }
+                return;
             }
-            return;
         }
 
         // Migration 3: also inject subagent defaults when other migrations occurred
@@ -1986,8 +1990,10 @@ impl Config {
             final_content.contains("subagent_provider") || final_content.contains("subagent_model");
         if !has_subagent && let Ok(injected) = inject_subagent_defaults(&final_content) {
             Self::backup_config(path, 7);
-            let _ = fs::write(path, &injected);
-            tracing::info!("Config migrated: [voice] → providers.stt/tts + subagent defaults");
+            match fs::write(path, &injected) {
+                Ok(()) => tracing::info!("Config migrated: [voice] → providers.stt/tts + subagent defaults"),
+                Err(e) => tracing::warn!("Config migration: failed to write injected defaults to {}: {e}", path.display()),
+            }
             return;
         }
 
@@ -2297,8 +2303,10 @@ impl Config {
         }
 
         daily_backup(&keys_file, 7);
-        if let Ok(toml_str) = toml::to_string_pretty(&doc) {
-            let _ = std::fs::write(&keys_file, toml_str);
+        if let Ok(toml_str) = toml::to_string_pretty(&doc)
+            && let Err(e) = std::fs::write(&keys_file, toml_str)
+        {
+            tracing::warn!("Failed to clean ghost keys from keys.toml: {e}");
         }
     }
 
