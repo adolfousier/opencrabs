@@ -1242,28 +1242,7 @@ pub fn write_secret_key(section: &str, key: &str, value: &str) -> Result<()> {
 
     let mut doc: toml::Value = if path.exists() {
         let content = fs::read_to_string(&path)?;
-        match toml::from_str(&content) {
-            Ok(v) => v,
-            Err(e) => {
-                tracing::error!("keys.toml corrupt ({e}), recovering from backup");
-                // Try last-good snapshot before starting fresh
-                let keys_good = opencrabs_home().join("keys.last_good.toml");
-                if keys_good.exists() {
-                    let good_content = fs::read_to_string(&keys_good)?;
-                    match toml::from_str(&good_content) {
-                        Ok(v) => {
-                            // Restore the good file over the corrupt one
-                            fs::copy(&keys_good, &path).ok();
-                            tracing::warn!("Restored keys.toml from last-good backup");
-                            v
-                        }
-                        Err(_) => toml::Value::Table(toml::map::Map::new()),
-                    }
-                } else {
-                    toml::Value::Table(toml::map::Map::new())
-                }
-            }
-        }
+        toml::from_str(&content)?
     } else {
         toml::Value::Table(toml::map::Map::new())
     };
@@ -2188,7 +2167,7 @@ impl Config {
         // Read existing TOML or start fresh
         let mut doc: toml::Value = if path.exists() {
             let content = fs::read_to_string(&path)?;
-            toml::from_str(&content).unwrap_or(toml::Value::Table(toml::map::Map::new()))
+            toml::from_str(&content)?
         } else {
             toml::Value::Table(toml::map::Map::new())
         };
@@ -2283,7 +2262,7 @@ impl Config {
 
         let content = fs::read_to_string(&path)?;
         let mut doc: toml::Value =
-            toml::from_str(&content).unwrap_or(toml::Value::Table(toml::map::Map::new()));
+            toml::from_str(&content)?;
 
         let parts: Vec<&str> = section.split('.').collect();
         if parts.is_empty() {
@@ -2401,7 +2380,7 @@ impl Config {
 
         let mut doc: toml::Value = if path.exists() {
             let content = fs::read_to_string(&path)?;
-            toml::from_str(&content).unwrap_or(toml::Value::Table(toml::map::Map::new()))
+            toml::from_str(&content)?
         } else {
             toml::Value::Table(toml::map::Map::new())
         };
