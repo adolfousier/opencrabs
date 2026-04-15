@@ -100,12 +100,12 @@ pub fn render(f: &mut Frame, state: &DashboardState, area: Rect) {
     let border_inner = border.inner(panel);
     f.render_widget(border, panel);
 
-    // 1-cell padding inside the border (horizontal + 1 row top padding below title)
+    // 1-cell horizontal padding inside the border
     let inner = Rect {
         x: border_inner.x + 1,
-        y: border_inner.y + 1,
+        y: border_inner.y,
         width: border_inner.width.saturating_sub(2),
-        height: border_inner.height.saturating_sub(1),
+        height: border_inner.height,
     };
 
     // Adaptive: if panel is too short, shrink activity card

@@ -4,5 +4,6 @@
 //! Summary Bar, Daily Activity, By Project, By Model, Core Tools, By Activity.
 
 pub mod cards;
+pub mod categorizer;
 pub mod dashboard;
 pub mod data;
