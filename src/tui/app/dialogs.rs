@@ -2383,6 +2383,41 @@ impl App {
 
         Ok(())
     }
+
+    /// Open the usage dashboard — fetch data and populate state
+    pub(crate) async fn open_usage_dashboard(&mut self) {
+        use crate::usage::dashboard::DashboardState;
+        use crate::usage::data::{DashboardData, Period};
+
+        let period = self
+            .dashboard_state
+            .as_ref()
+            .map(|s| s.period)
+            .unwrap_or(Period::AllTime);
+
+        let data = if let Some(pool) = crate::db::global_pool() {
+            DashboardData::fetch(pool, period).await.unwrap_or_default()
+        } else {
+            DashboardData::default()
+        };
+
+        self.dashboard_state = Some(DashboardState {
+            period,
+            focused_card: 0,
+            data,
+        });
+    }
+
+    /// Update dashboard period and re-fetch data
+    pub(crate) async fn set_dashboard_period(&mut self, period: crate::usage::data::Period) {
+        if let Some(ds) = &mut self.dashboard_state
+            && ds.set_period(period)
+            && let Some(pool) = crate::db::global_pool()
+            && let Ok(data) = crate::usage::data::DashboardData::fetch(pool, period).await
+        {
+            ds.data = data;
+        }
+    }
 }
 
 /// Download WhisperCrabs binary if not cached, return the path to the binary.

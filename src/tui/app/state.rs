@@ -243,6 +243,8 @@ pub struct App {
     pub sessions: Vec<Session>,
     /// All-time usage stats from the ledger (survives session deletes)
     pub usage_ledger_stats: Vec<crate::db::repository::usage_ledger::ModelUsageStats>,
+    /// Usage dashboard state (populated when /usage is opened)
+    pub dashboard_state: Option<crate::usage::dashboard::DashboardState>,
 
     /// UI state
     pub mode: AppMode,
@@ -502,6 +504,7 @@ impl App {
             messages: Vec::new(),
             sessions: Vec::new(),
             usage_ledger_stats: Vec::new(),
+            dashboard_state: None,
             mode: AppMode::Chat,
             input_buffer: String::new(),
             cursor_position: 0,
@@ -2529,9 +2532,40 @@ impl App {
             AppMode::FilePicker => self.handle_file_picker_key(event).await?,
             AppMode::DirectoryPicker => self.handle_directory_picker_key(event).await?,
             AppMode::ModelSelector => self.handle_model_selector_key(event).await?,
-            AppMode::UsageDialog => {
-                if keys::is_cancel(&event) || keys::is_enter(&event) {
-                    self.switch_mode(AppMode::Chat).await?;
+            AppMode::UsageDashboard => {
+                use crossterm::event::KeyCode;
+                match event.code {
+                    KeyCode::Esc => {
+                        self.dashboard_state = None;
+                        self.switch_mode(AppMode::Chat).await?;
+                    }
+                    KeyCode::Tab => {
+                        if let Some(ds) = &mut self.dashboard_state {
+                            ds.focus_next();
+                        }
+                    }
+                    KeyCode::BackTab => {
+                        if let Some(ds) = &mut self.dashboard_state {
+                            ds.focus_prev();
+                        }
+                    }
+                    KeyCode::Char('t') | KeyCode::Char('T') => {
+                        self.set_dashboard_period(crate::usage::data::Period::Today)
+                            .await;
+                    }
+                    KeyCode::Char('w') | KeyCode::Char('W') => {
+                        self.set_dashboard_period(crate::usage::data::Period::Week)
+                            .await;
+                    }
+                    KeyCode::Char('m') | KeyCode::Char('M') => {
+                        self.set_dashboard_period(crate::usage::data::Period::Month)
+                            .await;
+                    }
+                    KeyCode::Char('a') | KeyCode::Char('A') => {
+                        self.set_dashboard_period(crate::usage::data::Period::AllTime)
+                            .await;
+                    }
+                    _ => {}
                 }
             }
             AppMode::RestartPending => {

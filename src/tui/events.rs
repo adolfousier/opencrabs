@@ -321,8 +321,8 @@ pub enum AppMode {
     FilePicker,
     /// Model selector dialog (triggered by /models)
     ModelSelector,
-    /// Usage stats dialog (triggered by /usage)
-    UsageDialog,
+    /// Full-screen usage dashboard (triggered by /usage)
+    UsageDashboard,
     /// Restart confirmation pending (after successful /rebuild)
     RestartPending,
     /// Update prompt — ask user to accept or decline update
