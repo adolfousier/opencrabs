@@ -2487,6 +2487,19 @@ impl AgentService {
                                             if success { None } else { Some(&content) },
                                         );
 
+                                        // Record tool execution for usage dashboard
+                                        if let Some(pool) = crate::db::global_pool() {
+                                            let tool_repo = crate::db::repository::ToolExecutionRepository::new(pool.clone());
+                                            let exec_id = uuid::Uuid::new_v4().to_string();
+                                            let mid = assistant_db_msg.id.to_string();
+                                            let sid = session_id.to_string();
+                                            let tname = tool_name.clone();
+                                            let status = if success { "success" } else { "error" };
+                                            tokio::spawn(async move {
+                                                let _ = tool_repo.record(&exec_id, &mid, &sid, &tname, status).await;
+                                            });
+                                        }
+
                                         let output_summary: String =
                                             content.chars().take(2000).collect();
                                         tool_outputs.push((success, output_summary.clone()));
