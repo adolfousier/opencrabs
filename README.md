@@ -444,7 +444,7 @@ https://github.com/user-attachments/assets/7f45c5f8-acdf-48d5-b6a4-0e4811a9ee23
 | **Per-Provider Vision** | Set `vision_model` per provider — the LLM calls `analyze_image` as a tool, which uses the vision model on the same provider API to describe images. The chat model stays the same and gets vision capability via tool call. Gemini vision takes priority when configured. Auto-configured for known providers (e.g. MiniMax) on first run |
 | **Real-time Streaming** | Character-by-character response streaming with animated spinner showing model name and live text |
 | **Local LLM Support** | Run with LM Studio, Ollama, or any OpenAI-compatible endpoint — 100% private, zero-cost |
-| **Cost Tracking** | Per-message token count and cost displayed in header; `/usage` shows all-time breakdown grouped by model with real costs + estimates for historical sessions |
+| **Usage Dashboard** | Per-message token count and cost displayed in header; `/usage` opens an interactive dashboard with daily activity charts, cost breakdowns by project/model/activity, core tool usage stats, and period filtering (Today/Week/Month/All-Time). Estimated costs for historical sessions shown as `~$X.XX` |
 | **Context Awareness** | Live context usage indicator showing actual token counts (e.g. `ctx: 45K/200K (23%)`); auto-compaction at 70% with tool overhead budgeting; accurate tiktoken-based counting calibrated against API actuals |
 | **3-Tier Memory** | (1) **Brain MEMORY.md** — user-curated durable memory loaded every turn, (2) **Daily Logs** — auto-compaction summaries at `~/.opencrabs/memory/YYYY-MM-DD.md`, (3) **Hybrid Memory Search** — FTS5 keyword search + local vector embeddings (embeddinggemma-300M, 768-dim) combined via Reciprocal Rank Fusion. Runs entirely local — no API key, no cost, works offline |
 | **Dynamic Brain System** | System brain assembled from workspace MD files (SOUL, IDENTITY, USER, AGENTS, TOOLS, MEMORY) — all editable live between turns |
@@ -1890,7 +1890,7 @@ All API keys and secrets are stored in `keys.toml` — **not** in environment va
 OpenCrabs tracks real token costs per model using a centralized pricing table at `~/.opencrabs/usage_pricing.toml`. It's written automatically on first run with sensible defaults.
 
 **Why it matters:**
-- `/usage` shows real costs grouped by model across all sessions
+- `/usage` dashboard shows real costs broken down by day, project, model, activity, and tool usage
 - Old sessions with stored tokens but zero cost get estimated costs (shown as `~$X.XX` in yellow)
 - Unknown models show `$0.00` instead of silently ignoring them
 
@@ -2095,7 +2095,7 @@ Any tool on your `$PATH` works. If it runs in your terminal, OpenCrabs can use i
 | `/help` | Open help dialog |
 | `/model` | Show current model |
 | `/models` | Switch model (fetches live from provider API) |
-| `/usage` | Token/cost stats — shows current session + all-time breakdown grouped by model with estimated costs for historical sessions |
+| `/usage` | Usage dashboard — interactive overlay with daily activity, cost by project/model/activity, tool stats, and period filtering (T/W/M/A keys). Tab to navigate cards, Esc to close |
 | `/onboard` | Run setup wizard (full flow) |
 | `/onboard:provider` | Jump to provider/API key setup |
 | `/onboard:workspace` | Jump to workspace settings |
@@ -2121,7 +2121,7 @@ When connected via messaging channels, the following slash commands are availabl
 | Command | Action |
 |---------|--------|
 | `/help` | List available channel commands |
-| `/usage` | Session token & cost stats (current session + all-time breakdown by model) |
+| `/usage` | Usage dashboard — daily activity, cost breakdowns by project/model/activity, and tool stats with period filtering |
 | `/models` | Switch AI model — shows platform-native buttons (Telegram inline keyboard, Discord buttons, Slack Block Kit). WhatsApp shows a plain text list |
 | `/stop` | Abort the current agent operation immediately — cancels streaming, tool execution, and any pending approvals. Equivalent to double-Escape in the TUI |
 
@@ -2935,7 +2935,7 @@ OpenCrabs is under active development. While functional, it may contain bugs or 
 - API costs from cloud providers (Anthropic, OpenAI, etc.) are your responsibility
 - Set billing alerts with your provider
 - Consider local LLMs for cost-free operation
-- Use the built-in cost tracker to monitor spending
+- Use the built-in `/usage` dashboard to monitor spending across projects, models, and activities
 
 ### Support
 
