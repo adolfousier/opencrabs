@@ -365,8 +365,10 @@ mod tests {
 
         service.delete_session(session.id).await.unwrap();
 
+        // Session row preserved (soft-delete) for usage tracking, but archived
         let result = service.get_session(session.id).await.unwrap();
-        assert!(result.is_none());
+        assert!(result.is_some());
+        assert!(result.unwrap().archived_at.is_some());
     }
 
     #[tokio::test]

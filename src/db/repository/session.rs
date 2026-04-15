@@ -137,7 +137,9 @@ impl SessionRepository {
         Ok(())
     }
 
-    /// Delete a session
+    /// Delete a session's messages but keep the session row for usage tracking.
+    /// The session is archived (soft-deleted) so it no longer appears in the
+    /// session list, while usage_ledger joins still resolve its metadata.
     pub async fn delete(&self, id: Uuid) -> Result<()> {
         let id_str = id.to_string();
         self.pool
@@ -145,13 +147,24 @@ impl SessionRepository {
             .await
             .context("Failed to get connection")?
             .interact(move |conn| {
-                conn.execute("DELETE FROM sessions WHERE id = ?1", params![id_str])
+                // Remove heavy data (messages, files) but preserve the session row
+                conn.execute(
+                    "DELETE FROM messages WHERE session_id = ?1",
+                    params![id_str],
+                )?;
+                conn.execute("DELETE FROM files WHERE session_id = ?1", params![id_str])?;
+                // Mark as archived so it's hidden from the session list
+                conn.execute(
+                    "UPDATE sessions SET archived_at = strftime('%s', 'now') WHERE id = ?1",
+                    params![id_str],
+                )?;
+                Ok::<_, rusqlite::Error>(())
             })
             .await
             .map_err(interact_err)?
             .context("Failed to delete session")?;
 
-        tracing::debug!("Deleted session: {}", id);
+        tracing::debug!("Soft-deleted session (preserved for usage): {}", id);
         Ok(())
     }
 
