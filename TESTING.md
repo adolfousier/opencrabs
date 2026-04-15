@@ -129,9 +129,10 @@ cargo test --all-features
 | Tests — Subagent / Swarm | 84 | `src/tests/subagent_test.rs` |
 | Tests — Telegram Resume & Helpers | 55 | `src/tests/telegram_resume_test.rs` |
 | Tests — Token Tracking | 8 | `src/tests/token_tracking_test.rs` |
+| **Usage — Categorizer** | 4 | `src/usage/categorizer.rs` |
 | **Usage — Dashboard** | 6 | `src/usage/dashboard.rs` |
 | **Usage — Data** | 7 | `src/usage/data.rs` |
-| **Total** | **1,991** | |
+| **Total** | **1,995** | |
 
 ---
 
