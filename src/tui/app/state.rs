@@ -447,6 +447,16 @@ pub struct App {
     /// Drag selection: current point in terminal-screen coords (col, row), updated during drag.
     pub drag_current: Option<(u16, u16)>,
 
+    /// Input area screen coordinates (set each render frame)
+    pub input_area_x: u16,
+    pub input_area_y: u16,
+    pub input_area_width: u16,
+    pub input_area_height: u16,
+    /// Input drag selection state
+    pub input_drag_anchor: Option<(u16, u16)>,
+    pub input_drag_current: Option<(u16, u16)>,
+    pub input_drag_selecting: bool,
+
     /// History paging — how many DB messages are hidden above the current view
     pub hidden_older_messages: usize,
     pub oldest_displayed_sequence: i32,
@@ -593,6 +603,13 @@ impl App {
             chat_rendered_lines: Vec::new(),
             drag_anchor: None,
             drag_current: None,
+            input_area_x: 0,
+            input_area_y: 0,
+            input_area_width: 0,
+            input_area_height: 0,
+            input_drag_anchor: None,
+            input_drag_current: None,
+            input_drag_selecting: false,
             hidden_older_messages: 0,
             oldest_displayed_sequence: 0,
             display_token_count: 0,
@@ -1128,6 +1145,13 @@ impl App {
             }
             TuiEvent::MouseClick(_col, row) => {
                 if self.mode == AppMode::Chat {
+                    // Clear input drag selection if clicking outside input
+                    if row < self.input_area_y || row >= self.input_area_y + self.input_area_height
+                    {
+                        self.input_drag_selecting = false;
+                        self.input_drag_anchor = None;
+                        self.input_drag_current = None;
+                    }
                     self.handle_click_select(row);
                 }
             }
@@ -1138,12 +1162,31 @@ impl App {
             }
             TuiEvent::MouseDrag(col, row) => {
                 if self.mode == AppMode::Chat {
-                    self.handle_mouse_drag(col, row);
+                    // Check input area first
+                    if self.input_drag_selecting
+                        || (row >= self.input_area_y
+                            && row < self.input_area_y + self.input_area_height)
+                    {
+                        self.handle_input_mouse_drag(col, row);
+                    } else {
+                        self.handle_mouse_drag(col, row);
+                    }
                 }
             }
             TuiEvent::MouseUp(col, row) => {
                 if self.mode == AppMode::Chat {
-                    self.handle_mouse_up(col, row);
+                    // Check input area first
+                    if self.input_drag_selecting
+                        || (row >= self.input_area_y
+                            && row < self.input_area_y + self.input_area_height)
+                    {
+                        if self.handle_input_mouse_up(col, row) {
+                            self.notification = Some("Copied to clipboard".to_string());
+                            self.notification_shown_at = Some(std::time::Instant::now());
+                        }
+                    } else {
+                        self.handle_mouse_up(col, row);
+                    }
                 }
             }
             TuiEvent::Paste(text) => {

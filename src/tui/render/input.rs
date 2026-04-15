@@ -3,7 +3,7 @@
 //! Text input area with cursor and slash command autocomplete dropdown.
 
 use super::super::app::App;
-use super::utils::{format_token_count_raw, wrap_line_with_padding};
+use super::utils::format_token_count_raw;
 use ratatui::{
     Frame,
     layout::{Alignment, Rect},
@@ -11,35 +11,179 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
 };
+
+struct SelConfig<'a> {
+    sel_from: usize,
+    sel_to: usize,
+    selection_style: &'a Style,
+    cursor_style: &'a Style,
+    cursor_local_byte: Option<usize>,
+}
+
+#[allow(clippy::too_many_arguments)]
+/// Apply selection highlighting to a visual row's text at the character level.
+fn spans_with_selection(
+    text: &str,
+    row_byte_start: usize,
+    row_byte_end: usize,
+    sel: &SelConfig<'_>,
+    prefix: Span<'static>,
+) -> Line<'static> {
+    let has_sel = row_byte_end > sel.sel_from && row_byte_start < sel.sel_to;
+    let has_cursor = sel.cursor_local_byte.is_some();
+
+    if !has_sel && !has_cursor {
+        return Line::from(vec![prefix, Span::raw(text.to_string())]);
+    }
+
+    let mut spans: Vec<Span<'static>> = vec![prefix];
+    for (idx, ch) in text.char_indices() {
+        let global_start = row_byte_start + idx;
+        let ch_len = ch.len_utf8();
+        let global_end = global_start + ch_len;
+
+        let in_sel = global_start >= sel.sel_from && global_end <= sel.sel_to;
+        let is_cursor = sel.cursor_local_byte == Some(idx);
+
+        let span_text = if is_cursor && !in_sel {
+            Span::styled(ch.to_string(), *sel.cursor_style)
+        } else if in_sel {
+            Span::styled(ch.to_string(), *sel.selection_style)
+        } else if is_cursor && in_sel {
+            Span::styled(
+                ch.to_string(),
+                Style::default()
+                    .fg(Color::White)
+                    .bg(Color::Rgb(50, 80, 160)),
+            )
+        } else {
+            Span::raw(ch.to_string())
+        };
+        spans.push(span_text);
+    }
+
+    if sel.cursor_local_byte == Some(text.len()) {
+        let at_end_sel =
+            row_byte_start + text.len() >= sel.sel_from && row_byte_start + text.len() < sel.sel_to;
+        if at_end_sel {
+            spans.push(Span::styled(" ", *sel.selection_style));
+        } else {
+            spans.push(Span::styled(" ", *sel.cursor_style));
+        }
+    }
+
+    Line::from(spans)
+}
+
 /// Render the input box
 pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
     let input_content_width = area.width.saturating_sub(2) as usize; // borders
     let mut input_lines: Vec<Line> = Vec::new();
-    // Visual row (into input_lines) that contains the cursor. Used below
-    // to scroll the paragraph so the cursor is always visible.
     let mut cursor_row: usize = 0;
 
-    // Build input text with cursor highlight on the character (not inserting a block)
     let cursor_style = Style::default()
         .fg(Color::Black)
         .bg(Color::Rgb(120, 120, 120));
+    let selection_style = Style::default()
+        .bg(Color::Rgb(50, 80, 160))
+        .fg(Color::White);
+
+    // Compute selection byte range from drag coordinates
+    let sel_from_to: Option<(usize, usize)> = if app.input_drag_selecting {
+        let a = app.input_drag_anchor.unwrap_or((0, 0));
+        let b = app.input_drag_current.unwrap_or(a);
+        let (start, end) = if (a.1, a.0) <= (b.1, b.0) {
+            (a, b)
+        } else {
+            (b, a)
+        };
+
+        let input_top = app.input_area_y;
+        let input_content_width = area.width.saturating_sub(2) as usize;
+        let content_left = app.input_area_x + 2;
+
+        if input_content_width == 0 || app.input_buffer.is_empty() {
+            None
+        } else {
+            let start_visual = start.1.saturating_sub(input_top + 1) as usize;
+            let end_visual = end.1.saturating_sub(input_top + 1) as usize;
+
+            // Build a list of visual rows: each entry is (global_byte_start, global_byte_end)
+            let mut visual_rows: Vec<(usize, usize)> = Vec::new();
+            let buf = &app.input_buffer;
+            let blen = buf.len();
+            let mut ls = 0usize;
+            while ls <= blen {
+                let le = buf[ls..].find('\n').map(|i| ls + i).unwrap_or(blen);
+                let line = &buf[ls..le];
+                let lw = unicode_width::UnicodeWidthStr::width(line);
+                let rows = if lw == 0 {
+                    1
+                } else {
+                    lw.div_ceil(input_content_width)
+                };
+                for r in 0..rows {
+                    let chunk_start = r * input_content_width;
+                    let mut display_w = 0;
+                    let mut char_start = 0;
+                    let mut char_end = line.len();
+                    let mut found_start = false;
+                    for (idx, ch) in line.char_indices() {
+                        let ch_w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+                        if r > 0 && !found_start && display_w >= chunk_start {
+                            char_start = idx;
+                            found_start = true;
+                        }
+                        if display_w + ch_w > chunk_start + input_content_width {
+                            char_end = idx;
+                            break;
+                        }
+                        display_w += ch_w;
+                    }
+                    visual_rows.push((ls + char_start, ls + char_end));
+                }
+                if le == blen {
+                    break;
+                }
+                ls = le + 1;
+            }
+
+            let map_vr_to_byte = |vr: usize, col: u16| -> usize {
+                if vr >= visual_rows.len() {
+                    return blen;
+                }
+                let (rs, re) = visual_rows[vr];
+                let line_text = &buf[rs..re];
+                let target_disp = col.saturating_sub(content_left) as usize;
+                let mut w = 0;
+                for (idx, ch) in line_text.char_indices() {
+                    if w >= target_disp {
+                        return rs + idx;
+                    }
+                    w += unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+                }
+                re
+            };
+
+            let from = map_vr_to_byte(start_visual, start.0);
+            let to = map_vr_to_byte(end_visual, end.0);
+            Some((from.min(to), from.max(to)))
+        }
+    } else {
+        None
+    };
 
     if app.input_buffer.is_empty() {
-        // Empty input — just show prompt with cursor block
         input_lines.push(Line::from(vec![
             Span::styled("\u{276F} ", Style::default().fg(Color::Rgb(100, 100, 100))),
             Span::styled(" ", cursor_style),
         ]));
     } else {
-        // Walk the buffer by logical lines, tracking the byte offset of each
-        // line start so the O(lines²) "take().sum()" per-line recount is gone.
         let buf = &app.input_buffer;
         let cursor_pos = app.cursor_position;
         let is_queued = app.queued_message_preview.is_some();
 
-        // Manually split on '\n' so we preserve the exact byte offsets
-        // (buf.lines() strips newlines but its iteration order/positioning
-        // makes accumulated offset tracking awkward).
+        // Build visual rows from logical lines with wrapping
         let mut line_start = 0usize;
         let mut line_idx = 0usize;
         let buf_len = buf.len();
@@ -52,10 +196,6 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
             let next_start = line_end + 1;
             let is_last_line = line_end == buf_len;
 
-            // Does the cursor sit in this line?
-            // - strictly within: cursor_pos in [line_start, line_end)
-            // - at end of buffer's last line: cursor_pos == buf_len and this
-            //   is the last line
             let cursor_in_line = cursor_pos >= line_start && cursor_pos < line_end;
             let cursor_at_end_of_last_line = cursor_pos >= buf_len && is_last_line;
 
@@ -69,52 +209,87 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
                 Span::raw("  ")
             };
 
-            let padded = if cursor_in_line {
-                let raw_pos = cursor_pos - line_start;
-                // Clamp to nearest char boundary to avoid panics from
-                // cursor_position landing mid-character (issue #69).
-                let local_pos = line.floor_char_boundary(raw_pos.min(line.len()));
-                let before = &line[..local_pos];
-                // Extract the full grapheme cluster under the cursor, not just
-                // one codepoint — ZWJ-joined emoji sequences (🏳️‍🌈, 👨‍👩‍👧, flags)
-                // are multiple codepoints glued together and splitting them
-                // leaves orphan codepoints that render as fallback glyphs and
-                // overflow past the border.
-                let (ch, after) = if local_pos < line.len() {
-                    use unicode_segmentation::UnicodeSegmentation;
-                    let next_boundary = line[local_pos..]
-                        .grapheme_indices(true)
-                        .nth(1)
-                        .map(|(i, _)| local_pos + i)
-                        .unwrap_or(line.len());
-                    (&line[local_pos..next_boundary], &line[next_boundary..])
-                } else {
-                    (" ", "")
-                };
-                Line::from(vec![
-                    prefix,
-                    Span::raw(before.to_string()),
-                    Span::styled(ch.to_string(), cursor_style),
-                    Span::raw(after.to_string()),
-                ])
-            } else if cursor_at_end_of_last_line {
-                Line::from(vec![
-                    prefix,
-                    Span::raw(line.to_string()),
-                    Span::styled(" ", cursor_style),
-                ])
+            // Build wrapped visual rows for this logical line
+            let lw = unicode_width::UnicodeWidthStr::width(line);
+            let num_visual_rows = if lw == 0 {
+                1
             } else {
-                Line::from(vec![prefix, Span::raw(line.to_string())])
+                lw.div_ceil(input_content_width)
             };
 
-            let before_push = input_lines.len();
-            for wrapped in wrap_line_with_padding(padded, input_content_width, "  ") {
-                input_lines.push(wrapped);
-            }
-            if cursor_in_line || cursor_at_end_of_last_line {
-                // Land on the LAST wrapped row of this logical line so the
-                // cursor is visible when the line soft-wraps past one row.
-                cursor_row = input_lines.len().saturating_sub(1).max(before_push);
+            let (sel_from, sel_to) = sel_from_to.unwrap_or((usize::MAX, usize::MAX));
+
+            for vr in 0..num_visual_rows {
+                let chunk_start_display = vr * input_content_width;
+                let chunk_end_display = chunk_start_display + input_content_width;
+
+                // Find the byte range within `line` that fits this visual row
+                let mut disp_w = 0;
+                let mut char_start = 0;
+                let mut char_end = line.len();
+                for (idx, ch) in line.char_indices() {
+                    let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+                    if vr == 0 && disp_w + cw > chunk_end_display {
+                        char_end = idx;
+                        break;
+                    }
+                    if vr > 0 {
+                        if disp_w < chunk_start_display {
+                            char_start = idx;
+                        }
+                        if disp_w + cw > chunk_end_display {
+                            char_end = idx;
+                            break;
+                        }
+                    }
+                    disp_w += cw;
+                }
+
+                let chunk_text = &line[char_start..char_end];
+                let global_chunk_start = line_start + char_start;
+                let global_chunk_end = line_start + char_end;
+
+                // Cursor position within this visual row (local byte index)
+                let local_cursor = if cursor_in_line {
+                    let c = cursor_pos.saturating_sub(line_start);
+                    if c >= char_start && c <= char_end {
+                        Some(c - char_start)
+                    } else if c == line.len() && vr == num_visual_rows - 1 {
+                        // Cursor at end of line, show on last visual row
+                        Some(chunk_text.len())
+                    } else {
+                        None
+                    }
+                } else if cursor_at_end_of_last_line && is_last_line && vr == num_visual_rows - 1 {
+                    Some(chunk_text.len())
+                } else {
+                    None
+                };
+
+                let line_sel = SelConfig {
+                    sel_from,
+                    sel_to,
+                    selection_style: &selection_style,
+                    cursor_style: &cursor_style,
+                    cursor_local_byte: local_cursor,
+                };
+                let padded_line = spans_with_selection(
+                    chunk_text,
+                    global_chunk_start,
+                    global_chunk_end,
+                    &line_sel,
+                    if vr == 0 {
+                        prefix.clone()
+                    } else {
+                        Span::raw("  ")
+                    },
+                );
+
+                input_lines.push(padded_line);
+
+                if local_cursor.is_some() {
+                    cursor_row = input_lines.len() - 1;
+                }
             }
 
             if is_last_line {
@@ -124,8 +299,7 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
             line_idx += 1;
         }
 
-        // If cursor is at end of buffer and buffer ends with newline, add
-        // cursor on a fresh visual row.
+        // If buffer ends with newline, add a cursor line
         if cursor_pos >= buf_len && buf.ends_with('\n') {
             input_lines.push(Line::from(vec![
                 Span::raw("  "),

@@ -396,6 +396,130 @@ impl App {
         }
     }
 
+    /// Handle mouse drag in the input area — track text selection.
+    pub(crate) fn handle_input_mouse_drag(&mut self, col: u16, row: u16) {
+        if self.input_area_height == 0 {
+            return;
+        }
+        // Check if mouse is within input area
+        if row < self.input_area_y || row >= self.input_area_y + self.input_area_height {
+            return;
+        }
+        if !self.input_drag_selecting {
+            self.input_drag_selecting = true;
+            self.input_drag_anchor = Some((col, row));
+            // Clear any chat drag selection
+            self.drag_anchor = None;
+            self.drag_current = None;
+        }
+        self.input_drag_current = Some((col, row));
+    }
+
+    /// Handle mouse up in the input area — finalize selection and copy.
+    /// Returns true if text was copied.
+    pub(crate) fn handle_input_mouse_up(&mut self, col: u16, row: u16) -> bool {
+        if !self.input_drag_selecting {
+            return false;
+        }
+        self.input_drag_selecting = false;
+        let Some(anchor) = self.input_drag_anchor.take() else {
+            self.input_drag_current = None;
+            return false;
+        };
+        self.input_drag_current = None;
+
+        let text = self.extract_input_drag_selection(anchor, (col, row));
+        if text.trim().is_empty() {
+            return false;
+        }
+        Self::copy_to_clipboard(&text)
+    }
+
+    /// Extract text from input buffer based on drag selection coordinates.
+    fn extract_input_drag_selection(&self, a: (u16, u16), b: (u16, u16)) -> String {
+        let (start, end) = if (a.1, a.0) <= (b.1, b.0) {
+            (a, b)
+        } else {
+            (b, a)
+        };
+
+        let input_top = self.input_area_y;
+        let input_left = self.input_area_x;
+        let content_left = input_left + 2;
+        let input_width = self.input_area_width.saturating_sub(2) as usize;
+
+        if input_width == 0 || self.input_buffer.is_empty() {
+            return String::new();
+        }
+
+        // Build visual rows: each is (global_byte_start, global_byte_end)
+        let buf = &self.input_buffer;
+        let blen = buf.len();
+        let mut visual_rows: Vec<(usize, usize)> = Vec::new();
+        let mut ls = 0usize;
+        while ls <= blen {
+            let le = buf[ls..].find('\n').map(|i| ls + i).unwrap_or(blen);
+            let line = &buf[ls..le];
+            let lw = unicode_width::UnicodeWidthStr::width(line);
+            let rows = if lw == 0 { 1 } else { lw.div_ceil(input_width) };
+            for vr in 0..rows {
+                let chunk_start_display = vr * input_width;
+                let chunk_end_display = chunk_start_display + input_width;
+                let mut disp_w = 0;
+                let mut char_start = 0;
+                let mut char_end = line.len();
+                for (idx, ch) in line.char_indices() {
+                    let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+                    if vr == 0 && disp_w + cw > chunk_end_display {
+                        char_end = idx;
+                        break;
+                    }
+                    if vr > 0 {
+                        if disp_w < chunk_start_display {
+                            char_start = idx;
+                        }
+                        if disp_w + cw > chunk_end_display {
+                            char_end = idx;
+                            break;
+                        }
+                    }
+                    disp_w += cw;
+                }
+                visual_rows.push((ls + char_start, ls + char_end));
+            }
+            if le == blen {
+                break;
+            }
+            ls = le + 1;
+        }
+
+        // Map visual row + column to byte offset
+        let map_to_byte = |vr: usize, col: u16| -> usize {
+            if vr >= visual_rows.len() {
+                return blen;
+            }
+            let (rs, re) = visual_rows[vr];
+            let chunk = &buf[rs..re];
+            let target_disp = col.saturating_sub(content_left) as usize;
+            let mut w = 0;
+            for (idx, ch) in chunk.char_indices() {
+                if w >= target_disp {
+                    return rs + idx;
+                }
+                w += unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+            }
+            re
+        };
+
+        let start_visual = start.1.saturating_sub(input_top + 1) as usize;
+        let end_visual = end.1.saturating_sub(input_top + 1) as usize;
+
+        let from = map_to_byte(start_visual, start.0);
+        let to = map_to_byte(end_visual, end.0);
+
+        buf[from.min(to)..from.max(to)].to_string()
+    }
+
     /// Copy text to system clipboard
     fn copy_to_clipboard(text: &str) -> bool {
         use std::io::Write;

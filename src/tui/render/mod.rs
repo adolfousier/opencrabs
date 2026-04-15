@@ -120,6 +120,11 @@ pub fn render(f: &mut Frame, app: &mut App) {
             if plan_height > 0 {
                 render_plan_checklist(f, app, chunks[1]);
             }
+            // Store input area coordinates for mouse event mapping
+            app.input_area_x = chunks[2].x;
+            app.input_area_y = chunks[2].y;
+            app.input_area_width = chunks[2].width;
+            app.input_area_height = chunks[2].height;
             render_input(f, app, chunks[2]);
             render_status_bar(f, app, chunks[3]);
             if app.slash_suggestions_active {
@@ -156,6 +161,10 @@ pub fn render(f: &mut Frame, app: &mut App) {
             if plan_height > 0 {
                 render_plan_checklist(f, app, chunks[1]);
             }
+            app.input_area_x = chunks[2].x;
+            app.input_area_y = chunks[2].y;
+            app.input_area_width = chunks[2].width;
+            app.input_area_height = chunks[2].height;
             render_input(f, app, chunks[2]);
             render_status_bar(f, app, chunks[3]);
             render_model_selector(f, app, f.area());
@@ -165,6 +174,10 @@ pub fn render(f: &mut Frame, app: &mut App) {
             if plan_height > 0 {
                 render_plan_checklist(f, app, chunks[1]);
             }
+            app.input_area_x = chunks[2].x;
+            app.input_area_y = chunks[2].y;
+            app.input_area_width = chunks[2].width;
+            app.input_area_height = chunks[2].height;
             render_input(f, app, chunks[2]);
             render_status_bar(f, app, chunks[3]);
             if let Some(ref ds) = app.dashboard_state {
@@ -176,6 +189,10 @@ pub fn render(f: &mut Frame, app: &mut App) {
             if plan_height > 0 {
                 render_plan_checklist(f, app, chunks[1]);
             }
+            app.input_area_x = chunks[2].x;
+            app.input_area_y = chunks[2].y;
+            app.input_area_width = chunks[2].width;
+            app.input_area_height = chunks[2].height;
             render_input(f, app, chunks[2]);
             render_status_bar(f, app, chunks[3]);
             render_restart_dialog(f, app, f.area());
@@ -190,6 +207,10 @@ pub fn render(f: &mut Frame, app: &mut App) {
             if plan_height > 0 {
                 render_plan_checklist(f, app, chunks[1]);
             }
+            app.input_area_x = chunks[2].x;
+            app.input_area_y = chunks[2].y;
+            app.input_area_width = chunks[2].width;
+            app.input_area_height = chunks[2].height;
             render_input(f, app, chunks[2]);
             render_status_bar(f, app, chunks[3]);
             render_update_dialog(f, app, f.area());

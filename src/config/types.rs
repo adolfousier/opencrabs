@@ -2040,7 +2040,9 @@ impl Config {
         // Voice/trello migration occurred — need to write structural changes.
         // Use toml_edit to preserve formatting of untouched sections.
         let Ok(mut edit_doc) = content.parse::<toml_edit::DocumentMut>() else {
-            tracing::warn!("Config migration: failed to parse config.toml for format-preserving write");
+            tracing::warn!(
+                "Config migration: failed to parse config.toml for format-preserving write"
+            );
             return;
         };
 
@@ -2066,8 +2068,8 @@ impl Config {
 
         // Migration 3: inject subagent defaults after structural migration
         let updated_content = fs::read_to_string(path).unwrap_or_default();
-        let has_subagent =
-            updated_content.contains("subagent_provider") || updated_content.contains("subagent_model");
+        let has_subagent = updated_content.contains("subagent_provider")
+            || updated_content.contains("subagent_model");
         if !has_subagent
             && let Ok(injected) = inject_subagent_defaults(&updated_content)
             && let Err(e) = fs::write(path, &injected)
