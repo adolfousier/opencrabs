@@ -57,6 +57,11 @@ async fn cmd_chat_inner(
         .await
         .context("Failed to run database migrations")?;
 
+    // Auto-categorize uncategorized sessions using keyword heuristics
+    if let Err(e) = crate::usage::categorizer::categorize_with_heuristic(db.pool()).await {
+        tracing::warn!("Session auto-categorization failed: {}", e);
+    }
+
     // Migrate legacy qwen_accounts (all-in-keys.toml → split config/keys) for existing users
     crate::brain::provider::qwen::QwenCredentials::migrate_accounts_split();
 
