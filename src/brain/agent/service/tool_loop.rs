@@ -2487,6 +2487,24 @@ impl AgentService {
                                             if success { None } else { Some(&content) },
                                         );
 
+                                        // Record tool execution for usage dashboard
+                                        if let Some(pool) = crate::db::global_pool() {
+                                            let tool_repo =
+                                                crate::db::repository::ToolExecutionRepository::new(
+                                                    pool.clone(),
+                                                );
+                                            let exec_id = uuid::Uuid::new_v4().to_string();
+                                            let mid = assistant_db_msg.id.to_string();
+                                            let sid = session_id.to_string();
+                                            let tname = tool_name.clone();
+                                            let status = if success { "success" } else { "error" };
+                                            tokio::spawn(async move {
+                                                let _ = tool_repo
+                                                    .record(&exec_id, &mid, &sid, &tname, status)
+                                                    .await;
+                                            });
+                                        }
+
                                         let output_summary: String =
                                             content.chars().take(2000).collect();
                                         tool_outputs.push((success, output_summary.clone()));
@@ -2531,6 +2549,22 @@ impl AgentService {
                                             false,
                                             Some(&err_msg),
                                         );
+                                        // Record tool execution for usage dashboard
+                                        if let Some(pool) = crate::db::global_pool() {
+                                            let tool_repo =
+                                                crate::db::repository::ToolExecutionRepository::new(
+                                                    pool.clone(),
+                                                );
+                                            let exec_id = uuid::Uuid::new_v4().to_string();
+                                            let mid = assistant_db_msg.id.to_string();
+                                            let sid = session_id.to_string();
+                                            let tname = tool_name.clone();
+                                            tokio::spawn(async move {
+                                                let _ = tool_repo
+                                                    .record(&exec_id, &mid, &sid, &tname, "error")
+                                                    .await;
+                                            });
+                                        }
                                         let output_summary: String =
                                             err_msg.chars().take(2000).collect();
                                         tool_outputs.push((false, output_summary.clone()));
@@ -2631,6 +2665,21 @@ impl AgentService {
                             if success { None } else { Some(&content) },
                         );
 
+                        // Record tool execution for usage dashboard
+                        if let Some(pool) = crate::db::global_pool() {
+                            let tool_repo =
+                                crate::db::repository::ToolExecutionRepository::new(pool.clone());
+                            let exec_id = uuid::Uuid::new_v4().to_string();
+                            let mid = assistant_db_msg.id.to_string();
+                            let sid = session_id.to_string();
+                            let tname = tool_name.clone();
+                            let status = if success { "success" } else { "error" };
+                            tokio::spawn(async move {
+                                let _ =
+                                    tool_repo.record(&exec_id, &mid, &sid, &tname, status).await;
+                            });
+                        }
+
                         let output_summary: String = content.chars().take(2000).collect();
                         tool_outputs.push((success, output_summary.clone()));
                         if let Some(ref cb) = progress_callback {
@@ -2664,6 +2713,20 @@ impl AgentService {
                         // GRANULAR LOG: Direct tool execution error
                         tracing::error!("[TOOL_EXEC] 💥 Tool '{}' error: {}", tool_name, err_msg);
                         self.record_tool_feedback(session_id, &tool_name, false, Some(&err_msg));
+                        // Record tool execution for usage dashboard
+                        if let Some(pool) = crate::db::global_pool() {
+                            let tool_repo =
+                                crate::db::repository::ToolExecutionRepository::new(pool.clone());
+                            let exec_id = uuid::Uuid::new_v4().to_string();
+                            let mid = assistant_db_msg.id.to_string();
+                            let sid = session_id.to_string();
+                            let tname = tool_name.clone();
+                            tokio::spawn(async move {
+                                let _ = tool_repo
+                                    .record(&exec_id, &mid, &sid, &tname, "error")
+                                    .await;
+                            });
+                        }
                         let output_summary: String = err_msg.chars().take(2000).collect();
                         tool_outputs.push((false, output_summary.clone()));
                         if let Some(ref cb) = progress_callback {
