@@ -1242,13 +1242,28 @@ pub fn write_secret_key(section: &str, key: &str, value: &str) -> Result<()> {
 
     let mut doc: toml::Value = if path.exists() {
         let content = fs::read_to_string(&path)?;
-        toml::from_str(&content).with_context(|| {
-            format!(
-                "keys.toml is corrupt or was partially written — refusing to overwrite. \
-                 Content length: {} bytes",
-                content.len(),
-            )
-        })?
+        match toml::from_str(&content) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::error!("keys.toml corrupt ({e}), recovering from backup");
+                // Try last-good snapshot before starting fresh
+                let keys_good = opencrabs_home().join("keys.last_good.toml");
+                if keys_good.exists() {
+                    let good_content = fs::read_to_string(&keys_good)?;
+                    match toml::from_str(&good_content) {
+                        Ok(v) => {
+                            // Restore the good file over the corrupt one
+                            fs::copy(&keys_good, &path).ok();
+                            tracing::warn!("Restored keys.toml from last-good backup");
+                            v
+                        }
+                        Err(_) => toml::Value::Table(toml::map::Map::new()),
+                    }
+                } else {
+                    toml::Value::Table(toml::map::Map::new())
+                }
+            }
+        }
     } else {
         toml::Value::Table(toml::map::Map::new())
     };
@@ -1729,7 +1744,6 @@ impl Config {
         match load_keys_from_file() {
             Err(e) => {
                 tracing::error!("Failed to load keys.toml: {:#}", e);
-                eprintln!("⚠️  keys.toml parse error — attempting recovery from last-known-good snapshot");
 
                 // Try recovering from last-good keys snapshot
                 let keys_good = opencrabs_home().join("keys.last_good.toml");
@@ -1744,10 +1758,6 @@ impl Config {
                             tracing::warn!(
                                 "Recovered API keys from keys.last_good.toml — \
                                  fix or delete keys.toml to clear this warning"
-                            );
-                            eprintln!(
-                                "✅ Recovered API keys from last-known-good snapshot. \
-                                 Fix or delete keys.toml to clear this warning."
                             );
                             config.providers =
                                 merge_provider_keys(config.providers, keys.providers);
@@ -1764,11 +1774,10 @@ impl Config {
                                 "keys.last_good.toml also failed: {:#} — no API keys loaded",
                                 e2
                             );
-                            eprintln!("❌ keys.last_good.toml also corrupt — no API keys loaded: {e}");
                         }
                     }
                 } else {
-                    eprintln!("❌ No keys.last_good.toml backup found — no API keys loaded: {e}");
+                    tracing::error!("No keys.last_good.toml backup — no API keys loaded");
                 }
             }
             Ok(keys) => {
