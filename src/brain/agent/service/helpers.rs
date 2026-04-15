@@ -1403,10 +1403,9 @@ pub fn has_phantom_tool_intent(text: &str) -> bool {
     if has_intent {
         // Corroborate: does the text reference file paths?
         // e.g. src/foo/bar.rs, ./config.toml, Cargo.toml
-        let path_re = Regex::new(
-            r"(?:^|[\s`(])(?:\./)?[a-zA-Z_][\w\-]*/[\w\-/]*\.\w{1,6}(?:[\s`),:;]|$)",
-        )
-        .unwrap();
+        let path_re =
+            Regex::new(r"(?:^|[\s`(])(?:\./)?[a-zA-Z_][\w\-]*/[\w\-/]*\.\w{1,6}(?:[\s`),:;]|$)")
+                .unwrap();
         let ext_re = Regex::new(
             r"(?:^|[\s`(])[\w\-]+\.(?:rs|py|ts|tsx|js|jsx|go|sh|toml|yaml|yml|json|md)(?:[\s`),:;]|$)",
         )

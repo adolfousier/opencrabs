@@ -252,7 +252,7 @@ flowchart TD
     START([User Message]) --> BUDGET{Over 90 pct}
     BUDGET --> |yes|HARD[Hard Truncate to 80 pct]
     HARD --> RECHECK{Over 65 pct}
-    RECHECK --> |yes|COMPACT[LLM Compaction to 55 pct]
+    RECHECK --> |yes|COMPACT[LLM Auto-Compaction]
     RECHECK --> |no|BUILD
     BUDGET --> |65 to 89|COMPACT
     COMPACT --> BUILD
