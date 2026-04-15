@@ -2517,8 +2517,10 @@ impl AgentService {
                                             });
                                         }
 
-                                        let output_summary: String =
-                                            strip_ansi_output(&content).chars().take(2000).collect();
+                                        let output_summary: String = strip_ansi_output(&content)
+                                            .chars()
+                                            .take(2000)
+                                            .collect();
                                         tool_outputs.push((success, output_summary.clone()));
                                         if let Some(ref cb) = progress_callback {
                                             cb(
@@ -2583,8 +2585,10 @@ impl AgentService {
                                                 }
                                             });
                                         }
-                                        let output_summary: String =
-                                            strip_ansi_output(&err_msg).chars().take(2000).collect();
+                                        let output_summary: String = strip_ansi_output(&err_msg)
+                                            .chars()
+                                            .take(2000)
+                                            .collect();
                                         tool_outputs.push((false, output_summary.clone()));
                                         if let Some(ref cb) = progress_callback {
                                             cb(
@@ -2704,7 +2708,8 @@ impl AgentService {
                             });
                         }
 
-                        let output_summary: String = strip_ansi_output(&content).chars().take(2000).collect();
+                        let output_summary: String =
+                            strip_ansi_output(&content).chars().take(2000).collect();
                         tool_outputs.push((success, output_summary.clone()));
                         if let Some(ref cb) = progress_callback {
                             cb(
