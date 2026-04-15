@@ -1725,10 +1725,51 @@ impl Config {
         }
 
         // 3. Load API keys from keys.toml (overrides config.toml keys)
+        //    On parse failure, try keys.last_good.toml before giving up.
         match load_keys_from_file() {
             Err(e) => {
                 tracing::error!("Failed to load keys.toml: {:#}", e);
-                eprintln!("⚠️  keys.toml parse error — API keys not loaded: {e}");
+                eprintln!("⚠️  keys.toml parse error — attempting recovery from last-known-good snapshot");
+
+                // Try recovering from last-good keys snapshot
+                let keys_good = opencrabs_home().join("keys.last_good.toml");
+                if keys_good.exists() {
+                    match fs::read_to_string(&keys_good)
+                        .context("reading keys.last_good.toml")
+                        .and_then(|content| {
+                            toml::from_str::<KeysFile>(&content)
+                                .context("parsing keys.last_good.toml")
+                        }) {
+                        Ok(keys) => {
+                            tracing::warn!(
+                                "Recovered API keys from keys.last_good.toml — \
+                                 fix or delete keys.toml to clear this warning"
+                            );
+                            eprintln!(
+                                "✅ Recovered API keys from last-known-good snapshot. \
+                                 Fix or delete keys.toml to clear this warning."
+                            );
+                            config.providers =
+                                merge_provider_keys(config.providers, keys.providers);
+                            config.channels = merge_channel_keys(config.channels, keys.channels);
+                            if let Some(a2a_keys) = keys.a2a
+                                && let Some(key) = a2a_keys.api_key
+                                && !key.is_empty()
+                            {
+                                config.a2a.api_key = Some(key);
+                            }
+                        }
+                        Err(e2) => {
+                            tracing::error!(
+                                "keys.last_good.toml also failed: {:#} — no API keys loaded",
+                                e2
+                            );
+                            eprintln!("❌ keys.last_good.toml also corrupt — no API keys loaded: {e}");
+                        }
+                    }
+                } else {
+                    eprintln!("❌ No keys.last_good.toml backup found — no API keys loaded: {e}");
+                }
             }
             Ok(keys) => {
                 config.providers = merge_provider_keys(config.providers, keys.providers);
