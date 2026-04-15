@@ -400,7 +400,7 @@ mod tests {
             .expect("Failed to find session");
         assert_eq!(found.unwrap().title, Some("Updated Title".to_string()));
 
-        // Delete
+        // Delete (soft-delete: row preserved with archived_at set)
         repo.delete(session.id)
             .await
             .expect("Failed to delete session");
@@ -408,7 +408,11 @@ mod tests {
             .find_by_id(session.id)
             .await
             .expect("Failed to find session");
-        assert!(found.is_none());
+        let found = found.expect("Soft-deleted session should still be findable by ID");
+        assert!(
+            found.archived_at.is_some(),
+            "Soft-deleted session should have archived_at set"
+        );
     }
 
     #[tokio::test]
