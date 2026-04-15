@@ -10,6 +10,12 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+/// Strip ANSI escape codes from raw tool output before persisting to DB.
+/// Prevents garbled artifacts in session history.
+fn strip_ansi_output(raw: &str) -> String {
+    strip_ansi::strip_ansi(raw)
+}
+
 /// Detect whether a user message is a correction or negative feedback.
 ///
 /// Public for testing — used internally by the tool loop.
@@ -2512,7 +2518,7 @@ impl AgentService {
                                         }
 
                                         let output_summary: String =
-                                            content.chars().take(2000).collect();
+                                            strip_ansi_output(&content).chars().take(2000).collect();
                                         tool_outputs.push((success, output_summary.clone()));
                                         if let Some(ref cb) = progress_callback {
                                             cb(
@@ -2578,7 +2584,7 @@ impl AgentService {
                                             });
                                         }
                                         let output_summary: String =
-                                            err_msg.chars().take(2000).collect();
+                                            strip_ansi_output(&err_msg).chars().take(2000).collect();
                                         tool_outputs.push((false, output_summary.clone()));
                                         if let Some(ref cb) = progress_callback {
                                             cb(
@@ -2698,7 +2704,7 @@ impl AgentService {
                             });
                         }
 
-                        let output_summary: String = content.chars().take(2000).collect();
+                        let output_summary: String = strip_ansi_output(&content).chars().take(2000).collect();
                         tool_outputs.push((success, output_summary.clone()));
                         if let Some(ref cb) = progress_callback {
                             cb(
