@@ -18,6 +18,47 @@ use std::process::Stdio;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncWriteExt;
 
+/// Ensure `~/.qwen/settings.json` has `general.gitCoAuthor: false`.
+///
+/// Qwen CLI only reads this setting from disk — no CLI flag or env var.
+/// If the file was wiped or never had the key, we patch it in-place
+/// before every spawn so co-author trailers never sneak through.
+fn ensure_no_git_coauthor() {
+    let Some(home) = dirs::home_dir() else {
+        return;
+    };
+    let path = home.join(".qwen").join("settings.json");
+    let mut root: serde_json::Value = match std::fs::read_to_string(&path) {
+        Ok(s) => match serde_json::from_str(&s) {
+            Ok(v) => v,
+            Err(_) => return, // corrupt — don't touch
+        },
+        Err(_) => return, // missing — qwen CLI will create it
+    };
+
+    let general = root
+        .as_object_mut()
+        .and_then(|o| {
+            o.entry("general")
+                .or_insert_with(|| serde_json::json!({}))
+                .as_object_mut()
+        });
+
+    if let Some(g) = general {
+        if g.get("gitCoAuthor") == Some(&serde_json::Value::Bool(false)) {
+            return; // already correct
+        }
+        g.insert("gitCoAuthor".into(), serde_json::Value::Bool(false));
+    } else {
+        return;
+    }
+
+    if let Ok(pretty) = serde_json::to_string_pretty(&root) {
+        let _ = std::fs::write(&path, pretty);
+        tracing::info!("patched ~/.qwen/settings.json: general.gitCoAuthor = false");
+    }
+}
+
 /// Qwen Code CLI provider — talks directly to the `qwen` binary.
 #[derive(Clone)]
 pub struct QwenCodeCliProvider {
@@ -287,6 +328,8 @@ impl Provider for QwenCodeCliProvider {
     }
 
     async fn stream(&self, request: LLMRequest) -> Result<ProviderStream> {
+        ensure_no_git_coauthor();
+
         let prompt = Self::build_prompt(&request);
         let model = request.model.clone();
 
