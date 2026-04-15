@@ -5,6 +5,26 @@ All notable changes to OpenCrabs will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.10] - 2026-04-15
+
+RSI reliability hardening — cycle summaries no longer truncated, phantom
+detection reduced to a two-signal requirement, and compaction label
+simplified in the README diagram.
+
+### Fixed
+
+#### RSI
+- **Stop truncating cycle summary sent to TUI** — cycle summaries now
+  display the full text instead of being cut off mid-sentence.
+- **Reduce phantom detection false positives** — now requires two signals
+  (intent keyphrase + zero tool calls) before flagging a phantom,
+  eliminating spurious self-heal triggers.
+
+#### Style
+- **Cargo fmt pass** — `rsi.rs` and `helpers.rs` formatting.
+- **Simplify compaction label in README diagram** — cleaner visual in
+  the architecture reference.
+
 ## [0.3.9] - 2026-04-15
 
 Usage Dashboard, config stability overhaul, and TUI polish. The headline
@@ -2863,7 +2883,8 @@ fixes.
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
-[0.3.9]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.9
+[0.3.10]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.10
+[0.3.9]: https://github.com/adolfousier/opencrabs/compare/v0.3.9...v0.3.10
 [0.3.8]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.8
 [0.3.7]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.7
 [0.3.6]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.6
