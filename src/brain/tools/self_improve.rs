@@ -413,7 +413,9 @@ impl Tool for SelfImproveTool {
                     .open(&history_path)
                 {
                     Ok(mut f) => {
-                        if let Err(e) = f.write_all(format!("\n### {description}\n\n{content}\n").as_bytes()) {
+                        if let Err(e) =
+                            f.write_all(format!("\n### {description}\n\n{content}\n").as_bytes())
+                        {
                             tracing::warn!("RSI: failed to write history archive: {e}");
                         }
                     }
