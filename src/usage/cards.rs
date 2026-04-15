@@ -151,13 +151,16 @@ pub fn render_projects(f: &mut Frame, projects: &[ProjectStats], area: Rect, foc
         .max()
         .unwrap_or(1);
 
-    let data_cols = max_name_len + max_cost_len + max_tok_len + max_sess_len + 4; // 4 spacer chars
-    let total_needed = (inner.width as usize).min(data_cols);
-
-    // Name gets what's left, min of actual max and available space
+    // Minimum 2 spaces between columns for readability
+    let spacing = 2;
+    let total_needed = max_name_len + max_cost_len + max_tok_len + max_sess_len + spacing * 3;
+    let total_needed = (inner.width as usize).min(total_needed);
     let name_width = total_needed
-        .saturating_sub(max_cost_len + max_tok_len + max_sess_len + 3)
+        .saturating_sub(max_cost_len + max_tok_len + max_sess_len + spacing * 3)
         .max(max_name_len.min(6));
+    let cost_width = max_cost_len;
+    let tok_width = max_tok_len;
+    let sess_width = max_sess_len;
 
     let mut lines: Vec<Line> = Vec::new();
     let visible = (inner.height as usize).min(projects.len());
@@ -175,16 +178,19 @@ pub fn render_projects(f: &mut Frame, projects: &[ProjectStats], area: Rect, foc
         };
         lines.push(Line::from(vec![
             Span::styled(format!(" {:<width$}", name, width = name_width), BOLD),
+            Span::raw("  "),
             Span::styled(
-                format!(" {:>width$}", fmt_cost(proj.cost), width = max_cost_len),
+                format!("{:>width$}", fmt_cost(proj.cost), width = cost_width),
                 LABEL,
             ),
+            Span::raw("  "),
             Span::styled(
-                format!(" {:>width$}", fmt_tokens(proj.tokens), width = max_tok_len),
+                format!("{:>width$}", fmt_tokens(proj.tokens), width = tok_width),
                 DIM,
             ),
+            Span::raw("  "),
             Span::styled(
-                format!(" {:>width$}s", proj.sessions, width = max_sess_len),
+                format!("{:>width$}s", proj.sessions, width = sess_width),
                 DIM,
             ),
         ]));
@@ -231,11 +237,15 @@ pub fn render_models(f: &mut Frame, models: &[ModelStats], area: Rect, focused: 
         .max()
         .unwrap_or(6);
 
-    let data_cols = max_name_len + max_cost_len + max_tok_len + 3;
-    let total_needed = (inner.width as usize).min(data_cols);
+    // Minimum 2 spaces between columns for readability
+    let spacing = 2;
+    let total_needed = max_name_len + max_cost_len + max_tok_len + spacing * 2;
+    let total_needed = (inner.width as usize).min(total_needed);
     let name_width = total_needed
-        .saturating_sub(max_cost_len + max_tok_len + 2)
+        .saturating_sub(max_cost_len + max_tok_len + spacing * 2)
         .max(max_name_len.min(4));
+    let cost_width = max_cost_len;
+    let tok_width = max_tok_len;
 
     let mut lines: Vec<Line> = Vec::new();
     for m in models.iter().take(visible) {
@@ -259,12 +269,14 @@ pub fn render_models(f: &mut Frame, models: &[ModelStats], area: Rect, focused: 
         };
         lines.push(Line::from(vec![
             Span::styled(format!(" {:<width$}", name, width = name_width), BOLD),
+            Span::raw("  "),
             Span::styled(
-                format!(" {:>width$}", cost_str, width = max_cost_len),
+                format!("{:>width$}", cost_str, width = cost_width),
                 cost_style,
             ),
+            Span::raw("  "),
             Span::styled(
-                format!(" {:>width$}", fmt_tokens(m.tokens), width = max_tok_len),
+                format!("{:>width$}", fmt_tokens(m.tokens), width = tok_width),
                 DIM,
             ),
         ]));
