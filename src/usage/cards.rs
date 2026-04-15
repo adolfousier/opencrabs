@@ -212,11 +212,13 @@ pub fn render_tools(f: &mut Frame, tools: &[ToolStats], area: Rect, focused: boo
     }
 
     let max_count = tools.first().map(|t| t.call_count).unwrap_or(1);
-    let bar_width = inner.width.saturating_sub(22) as usize;
     let visible = (inner.height as usize).min(tools.len());
 
-    // Dynamic name width: reserve space for count column (~7 chars) and bar padding
-    let name_width = (bar_width as u16).saturating_sub(2).max(8) as usize;
+    // Reserve 8 chars right for count column, rest split between name + bar
+    let right_width = 8usize;
+    let bar_and_name = inner.width.saturating_sub(right_width as u16) as usize;
+    let name_width = (bar_and_name / 2).max(8);
+    let bar_width = bar_and_name.saturating_sub(name_width);
 
     let mut lines: Vec<Line> = Vec::new();
     for tool in tools.iter().take(visible) {
