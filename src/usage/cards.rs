@@ -134,7 +134,6 @@ pub fn render_projects(f: &mut Frame, projects: &[ProjectStats], area: Rect, foc
     }
 
     // Compute column widths from actual data
-    let max_name_len = projects.iter().map(|p| p.project.len()).max().unwrap_or(8);
     let max_cost_len = projects
         .iter()
         .map(|p| fmt_cost(p.cost).len())
@@ -160,8 +159,7 @@ pub fn render_projects(f: &mut Frame, projects: &[ProjectStats], area: Rect, foc
     let fixed = cost_width + tok_width + sess_width + spacing * 3 + 2;
     let name_width = (inner.width as usize)
         .saturating_sub(fixed)
-        .max(4)
-        .min(max_name_len);
+        .max(4);
 
     let mut lines: Vec<Line> = Vec::new();
     let visible = (inner.height as usize).min(projects.len());
@@ -216,12 +214,6 @@ pub fn render_models(f: &mut Frame, models: &[ModelStats], area: Rect, focused: 
 
     // Compute column widths from actual data
     let visible = (inner.height as usize).min(models.len());
-    let max_name_len = models
-        .iter()
-        .take(visible)
-        .map(|m| crate::tui::provider_selector::model_display_label(&m.model).len())
-        .max()
-        .unwrap_or(8);
     let max_cost_len = models
         .iter()
         .take(visible)
@@ -246,8 +238,7 @@ pub fn render_models(f: &mut Frame, models: &[ModelStats], area: Rect, focused: 
     let fixed = cost_width + tok_width + spacing * 2 + 1;
     let name_width = (inner.width as usize)
         .saturating_sub(fixed)
-        .max(4)
-        .min(max_name_len);
+        .max(4);
 
     let mut lines: Vec<Line> = Vec::new();
     for m in models.iter().take(visible) {
