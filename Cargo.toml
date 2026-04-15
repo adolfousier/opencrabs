@@ -87,6 +87,7 @@ urlencoding = "2.1"
 # Syntax & Parsing
 syntect = { version = "5.2", default-features = false, features = ["default-fancy"] }
 pulldown-cmark = "0.13"
+strip-ansi = "0.1"
 
 # Concurrent Data Structures
 once_cell = "1.20"
