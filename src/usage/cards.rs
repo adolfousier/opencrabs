@@ -8,7 +8,7 @@ use super::data::{
 };
 use ratatui::{
     Frame,
-    layout::Rect,
+    layout::{Alignment, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
@@ -40,7 +40,7 @@ pub fn render_summary(f: &mut Frame, data: &DashboardData, area: Rect, period_la
     let s = &data.summary;
     let version = crate::VERSION;
     let line = Line::from(vec![
-        Span::styled(format!(" v{version}  "), ACCENT),
+        Span::styled(format!("v{version}  "), ACCENT),
         Span::styled("Tokens: ", LABEL),
         Span::styled(fmt_tokens(s.total_tokens), BOLD),
         Span::styled("  Cost: ", LABEL),
@@ -54,7 +54,9 @@ pub fn render_summary(f: &mut Frame, data: &DashboardData, area: Rect, period_la
     let block = Block::default()
         .borders(Borders::BOTTOM)
         .border_style(Style::default().fg(Color::DarkGray));
-    let paragraph = Paragraph::new(vec![line]).block(block);
+    let paragraph = Paragraph::new(vec![line])
+        .block(block)
+        .alignment(Alignment::Center);
     f.render_widget(paragraph, area);
 }
 
@@ -75,11 +77,11 @@ pub fn render_daily(f: &mut Frame, daily: &[DailyStats], area: Rect, focused: bo
     let bar_width = inner.width.saturating_sub(14) as usize; // date(10) + space + bar + cost
 
     let mut lines: Vec<Line> = Vec::new();
-    // Show last N days that fit
+    // Show most recent days first (reversed), N that fit
     let visible = (inner.height as usize).min(daily.len());
     let start = daily.len().saturating_sub(visible);
 
-    for day in &daily[start..] {
+    for day in daily[start..].iter().rev() {
         let bar_len = if max_cost > 0.0 {
             ((day.cost / max_cost) * bar_width as f64).ceil() as usize
         } else {
@@ -122,22 +124,16 @@ pub fn render_projects(f: &mut Frame, projects: &[ProjectStats], area: Rect, foc
     let mut lines: Vec<Line> = Vec::new();
     let visible = (inner.height as usize).min(projects.len());
     for proj in projects.iter().take(visible) {
-        let name_width = inner.width.saturating_sub(20) as usize;
-        let name = if proj.project.len() > name_width {
-            format!(
-                "{}...",
-                proj.project
-                    .chars()
-                    .take(name_width.saturating_sub(3))
-                    .collect::<String>()
-            )
+        let name = if proj.project.len() > 14 {
+            format!("{}...", proj.project.chars().take(11).collect::<String>())
         } else {
             proj.project.clone()
         };
         lines.push(Line::from(vec![
-            Span::styled(format!(" {:<width$}", name, width = name_width), BOLD),
+            Span::styled(format!(" {:<14}", name), BOLD),
             Span::styled(format!(" {:>8}", fmt_cost(proj.cost)), LABEL),
-            Span::styled(format!("  {}s", proj.sessions), DIM),
+            Span::styled(format!(" {:>6}", fmt_tokens(proj.tokens)), DIM),
+            Span::styled(format!(" {}s", proj.sessions), DIM),
         ]));
     }
 
@@ -282,7 +278,7 @@ pub fn render_activities(f: &mut Frame, activities: &[ActivityStats], area: Rect
 
 pub fn render_footer(f: &mut Frame, area: Rect) {
     let line = Line::from(vec![
-        Span::styled(" Tab", ACCENT),
+        Span::styled("Tab", ACCENT),
         Span::styled(" navigate  ", DIM),
         Span::styled("Enter", ACCENT),
         Span::styled(" details  ", DIM),
@@ -297,6 +293,8 @@ pub fn render_footer(f: &mut Frame, area: Rect) {
         Span::styled("Esc", ACCENT),
         Span::styled(" close", DIM),
     ]);
-    let p = Paragraph::new(vec![line]).wrap(Wrap { trim: false });
+    let p = Paragraph::new(vec![line])
+        .alignment(Alignment::Center)
+        .wrap(Wrap { trim: false });
     f.render_widget(p, area);
 }
