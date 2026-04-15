@@ -11,6 +11,7 @@ pub mod message;
 pub mod pending_request;
 pub mod plan;
 pub mod session;
+pub mod tool_execution;
 pub mod usage_ledger;
 
 pub use channel_message::ChannelMessageRepository;
@@ -22,6 +23,7 @@ pub use message::MessageRepository;
 pub use pending_request::PendingRequestRepository;
 pub use plan::PlanRepository;
 pub use session::{SessionListOptions, SessionRepository};
+pub use tool_execution::ToolExecutionRepository;
 pub use usage_ledger::UsageLedgerRepository;
 
 use anyhow::Result;
