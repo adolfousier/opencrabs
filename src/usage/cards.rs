@@ -15,7 +15,7 @@ use ratatui::{
 };
 
 const LABEL: Style = Style::new().fg(Color::DarkGray);
-const BOLD: Style = Style::new().fg(Color::Reset).add_modifier(Modifier::BOLD);
+const BOLD: Style = Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD);
 const DIM: Style = Style::new().fg(Color::DarkGray);
 const ACCENT: Style = Style::new().fg(Color::Rgb(215, 100, 20));
 
@@ -123,14 +123,22 @@ pub fn render_projects(f: &mut Frame, projects: &[ProjectStats], area: Rect, foc
 
     let mut lines: Vec<Line> = Vec::new();
     let visible = (inner.height as usize).min(projects.len());
+    // cost(9) + tokens(7) + sessions(5) + spacing(4) = ~25 reserved for data columns
+    let name_width = (inner.width as usize).saturating_sub(25).max(8);
     for proj in projects.iter().take(visible) {
-        let name = if proj.project.len() > 14 {
-            format!("{}...", proj.project.chars().take(11).collect::<String>())
+        let name = if proj.project.len() > name_width {
+            format!(
+                "{}...",
+                proj.project
+                    .chars()
+                    .take(name_width.saturating_sub(3))
+                    .collect::<String>()
+            )
         } else {
             proj.project.clone()
         };
         lines.push(Line::from(vec![
-            Span::styled(format!(" {:<14}", name), BOLD),
+            Span::styled(format!(" {:<width$}", name, width = name_width), BOLD),
             Span::styled(format!(" {:>8}", fmt_cost(proj.cost)), LABEL),
             Span::styled(format!(" {:>6}", fmt_tokens(proj.tokens)), DIM),
             Span::styled(format!(" {}s", proj.sessions), DIM),
@@ -156,10 +164,18 @@ pub fn render_models(f: &mut Frame, models: &[ModelStats], area: Rect, focused: 
 
     let mut lines: Vec<Line> = Vec::new();
     let visible = (inner.height as usize).min(models.len());
+    // cost(10) + tokens(7) + spacing(3) = ~20 reserved for data columns
+    let name_width = (inner.width as usize).saturating_sub(20).max(10);
     for m in models.iter().take(visible) {
         let display = crate::tui::provider_selector::model_display_label(&m.model).to_string();
-        let name = if display.len() > 18 {
-            format!("{}...", display.chars().take(15).collect::<String>())
+        let name = if display.len() > name_width {
+            format!(
+                "{}...",
+                display
+                    .chars()
+                    .take(name_width.saturating_sub(3))
+                    .collect::<String>()
+            )
         } else {
             display
         };
@@ -170,9 +186,9 @@ pub fn render_models(f: &mut Frame, models: &[ModelStats], area: Rect, focused: 
             fmt_cost(m.cost)
         };
         lines.push(Line::from(vec![
-            Span::styled(format!(" {:<18}", name), BOLD),
+            Span::styled(format!(" {:<width$}", name, width = name_width), BOLD),
             Span::styled(format!(" {:>9}", cost_str), cost_style),
-            Span::styled(format!("  {}", fmt_tokens(m.tokens)), DIM),
+            Span::styled(format!(" {}", fmt_tokens(m.tokens)), DIM),
         ]));
     }
 
