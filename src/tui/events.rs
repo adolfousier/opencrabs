@@ -157,13 +157,20 @@ pub enum TuiEvent {
         user_code: String,
         verification_uri: String,
     },
-    /// Qwen native device flow: credentials obtained and persisted
-    QwenOAuthComplete,
+    /// Qwen native device flow: credentials obtained and persisted.
+    /// Carries the freshly-obtained credentials so handlers don't need to
+    /// re-read from disk (which was fragile and caused credential loss).
+    QwenOAuthComplete(crate::brain::provider::qwen::QwenCredentials),
     /// Qwen native device flow: failed
     QwenOAuthError(String),
 
-    /// Qwen rotation: single account done (idx 0-based, total)
-    QwenRotationAccountDone { idx: usize, total: usize },
+    /// Qwen rotation: single account done (idx 0-based, total).
+    /// Carries the credentials directly from the OAuth flow.
+    QwenRotationAccountDone {
+        idx: usize,
+        total: usize,
+        creds: crate::brain::provider::qwen::QwenCredentials,
+    },
     /// Qwen rotation: all accounts collected and persisted
     QwenRotationComplete,
 

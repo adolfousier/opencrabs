@@ -2015,7 +2015,7 @@ impl App {
                         };
                 }
             }
-            TuiEvent::QwenOAuthComplete => {
+            TuiEvent::QwenOAuthComplete(creds) => {
                 // ── Rotation mode: redirect to rotation handler ─────────
                 let rotation_active = self
                     .onboarding
@@ -2029,11 +2029,12 @@ impl App {
                         .as_ref()
                         .map(|w| (w.ps.qwen_rotation_current, w.ps.qwen_rotation_count))
                         .unwrap_or((self.ps.qwen_rotation_current, self.ps.qwen_rotation_count));
-                    // Re-dispatch as rotation account done
+                    // Re-dispatch as rotation account done — pass creds directly
                     let sender = self.event_sender();
                     let _ = sender.send(TuiEvent::QwenRotationAccountDone {
                         idx: current,
                         total,
+                        creds,
                     });
                 } else {
                     // ── Normal single-account path ──────────────────────
@@ -2084,16 +2085,10 @@ impl App {
                     }
                 }
             }
-            TuiEvent::QwenRotationAccountDone { idx, total } => {
-                // Store the freshly-authed creds from keys.toml into the
-                // rotation collection, then prompt user to sign out.
-                // Read fresh creds from keys.toml
-                let creds = crate::config::Config::load()
-                    .ok()
-                    .and_then(|cfg| cfg.providers.qwen.as_ref().cloned())
-                    .and_then(|qcfg| {
-                        crate::brain::provider::qwen::QwenCredentials::from_provider_config(&qcfg)
-                    });
+            TuiEvent::QwenRotationAccountDone { idx, total, creds } => {
+                // Credentials arrive directly from the OAuth flow — no need
+                // to re-read from disk (the old Config::load() approach was
+                // fragile and caused credential loss / empty entries).
 
                 // Determine which state to update (onboarding wizard or /models dialog)
                 let ps = if let Some(ref mut wizard) = self.onboarding {
@@ -2102,9 +2097,7 @@ impl App {
                     &mut self.ps
                 };
 
-                if let Some(c) = creds {
-                    ps.qwen_rotation_collected.push(c);
-                }
+                ps.qwen_rotation_collected.push(creds);
                 ps.qwen_rotation_current = idx + 1;
 
                 if idx + 1 < total {
@@ -2125,6 +2118,9 @@ impl App {
                     }
                     ps.qwen_device_flow_status =
                         super::onboarding::QwenDeviceFlowStatus::RotationComplete;
+                    // Dispatch finalization (enable qwen, disable others, rebuild agent)
+                    let sender = self.event_sender();
+                    let _ = sender.send(TuiEvent::QwenRotationComplete);
                 }
             }
             TuiEvent::QwenRotationComplete => {
