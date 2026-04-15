@@ -235,7 +235,7 @@ impl QwenCredentials {
 
         let mut doc: toml::Value = if path.exists() {
             let content = std::fs::read_to_string(&path)?;
-            toml::from_str(&content).unwrap_or(toml::Value::Table(toml::map::Map::new()))
+            toml::from_str(&content)?
         } else {
             toml::Value::Table(toml::map::Map::new())
         };
@@ -311,7 +311,7 @@ impl QwenCredentials {
         let path = keys_path();
         let mut doc: toml::Value = if path.exists() {
             let content = std::fs::read_to_string(&path)?;
-            toml::from_str(&content).unwrap_or(toml::Value::Table(toml::map::Map::new()))
+            toml::from_str(&content)?
         } else {
             return Ok(()); // no keys.toml yet — nothing to update
         };
@@ -367,7 +367,7 @@ impl QwenCredentials {
         }
         let content = std::fs::read_to_string(&path)?;
         let mut doc: toml::Value =
-            toml::from_str(&content).unwrap_or(toml::Value::Table(toml::map::Map::new()));
+            toml::from_str(&content)?;
 
         if let Some(arr) = doc
             .get_mut("providers")
@@ -398,7 +398,7 @@ impl QwenCredentials {
         let path = keys_path();
         let mut doc: toml::Value = if path.exists() {
             let content = std::fs::read_to_string(&path)?;
-            toml::from_str(&content).unwrap_or(toml::Value::Table(toml::map::Map::new()))
+            toml::from_str(&content)?
         } else {
             return Ok(());
         };
@@ -468,13 +468,15 @@ impl QwenCredentials {
 
     /// Write secrets only (`api_key`, `refresh_token`) to keys.toml.
     fn persist_accounts_keys(accounts: &[Self]) -> anyhow::Result<()> {
-        use crate::config::{daily_backup, keys_path};
+        use crate::config::{daily_backup, keys_path, CONFIG_FILE_LOCK};
         use anyhow::Context;
+
+        let _guard = CONFIG_FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         let path = keys_path();
         let mut doc: toml::Value = if path.exists() {
             let content = std::fs::read_to_string(&path)?;
-            toml::from_str(&content).unwrap_or(toml::Value::Table(toml::map::Map::new()))
+            toml::from_str(&content)?
         } else {
             toml::Value::Table(toml::map::Map::new())
         };
@@ -522,10 +524,14 @@ impl QwenCredentials {
 
     /// Write metadata (`name`, `expiry_date`, `resource_url`) to config.toml.
     fn persist_accounts_config(accounts: &[Self]) -> anyhow::Result<()> {
+        use crate::config::CONFIG_FILE_LOCK;
+
+        let _guard = CONFIG_FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
         let path = crate::config::opencrabs_home().join("config.toml");
         let mut doc: toml::Value = if path.exists() {
             let content = std::fs::read_to_string(&path)?;
-            toml::from_str(&content).unwrap_or(toml::Value::Table(toml::map::Map::new()))
+            toml::from_str(&content)?
         } else {
             toml::Value::Table(toml::map::Map::new())
         };
@@ -603,7 +609,7 @@ impl QwenCredentials {
         let config_raw = std::fs::read_to_string(&config_path).unwrap_or_default();
         let config_doc: toml::Value = config_raw
             .parse()
-            .unwrap_or(toml::Value::Table(toml::map::Map::new()));
+            .unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()));
         let config_has_accounts = config_doc
             .get("providers")
             .and_then(|p| p.get("qwen_accounts"))
@@ -645,10 +651,14 @@ impl QwenCredentials {
             })
             .collect();
 
-        // Write config.toml entries
-        let mut cfg_doc: toml::Value = config_raw
-            .parse()
-            .unwrap_or(toml::Value::Table(toml::map::Map::new()));
+        // Write config.toml entries — bail if corrupt to avoid wiping
+        let mut cfg_doc: toml::Value = match config_raw.parse() {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::error!("config.toml corrupt during Qwen migration, skipping: {e}");
+                return;
+            }
+        };
         if let Some(root) = cfg_doc.as_table_mut() {
             let providers = root
                 .entry("providers".to_string())
@@ -660,8 +670,13 @@ impl QwenCredentials {
                 );
             }
         }
-        if let Ok(out) = toml::to_string_pretty(&cfg_doc) {
-            let _ = std::fs::write(&config_path, out);
+        match toml::to_string_pretty(&cfg_doc) {
+            Ok(out) => {
+                if let Err(e) = std::fs::write(&config_path, out) {
+                    tracing::error!("Failed to write config.toml during Qwen migration: {e}");
+                }
+            }
+            Err(e) => tracing::error!("Failed to serialize config.toml during Qwen migration: {e}"),
         }
 
         // Strip metadata from keys.toml (keep only api_key + refresh_token)

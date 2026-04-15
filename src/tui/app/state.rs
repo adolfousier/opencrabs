@@ -2116,9 +2116,11 @@ impl App {
                         };
                 } else {
                     // All done — persist and finalize
-                    let _ = crate::brain::provider::qwen::QwenCredentials::persist_all_accounts(
+                    if let Err(e) = crate::brain::provider::qwen::QwenCredentials::persist_all_accounts(
                         &ps.qwen_rotation_collected,
-                    );
+                    ) {
+                        tracing::error!("Failed to persist Qwen rotation accounts: {e}");
+                    }
                     ps.qwen_device_flow_status =
                         super::onboarding::QwenDeviceFlowStatus::RotationComplete;
                 }
