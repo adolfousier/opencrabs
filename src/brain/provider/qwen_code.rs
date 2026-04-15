@@ -36,13 +36,11 @@ fn ensure_no_git_coauthor() {
         Err(_) => return, // missing — qwen CLI will create it
     };
 
-    let general = root
-        .as_object_mut()
-        .and_then(|o| {
-            o.entry("general")
-                .or_insert_with(|| serde_json::json!({}))
-                .as_object_mut()
-        });
+    let general = root.as_object_mut().and_then(|o| {
+        o.entry("general")
+            .or_insert_with(|| serde_json::json!({}))
+            .as_object_mut()
+    });
 
     if let Some(g) = general {
         if g.get("gitCoAuthor") == Some(&serde_json::Value::Bool(false)) {
