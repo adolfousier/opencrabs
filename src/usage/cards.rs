@@ -73,7 +73,7 @@ pub fn render_daily(f: &mut Frame, daily: &[DailyStats], area: Rect, focused: bo
         return;
     }
 
-    let max_cost = daily.iter().map(|d| d.cost).fold(0.0_f64, f64::max);
+    let max_tokens = daily.iter().map(|d| d.tokens).max().unwrap_or(1);
     let bar_width = inner.width.saturating_sub(14) as usize; // date(10) + space + bar + cost
 
     let mut lines: Vec<Line> = Vec::new();
@@ -82,13 +82,13 @@ pub fn render_daily(f: &mut Frame, daily: &[DailyStats], area: Rect, focused: bo
     let start = daily.len().saturating_sub(visible);
 
     for day in daily[start..].iter().rev() {
-        let bar_len = if max_cost > 0.0 {
-            ((day.cost / max_cost) * bar_width as f64).ceil() as usize
+        let bar_len = if max_tokens > 0 {
+            ((day.tokens as f64 / max_tokens as f64) * bar_width as f64).ceil() as usize
         } else {
             0
         };
         let bar_len = bar_len.max(1).min(bar_width);
-        let bar: String = "\u{2588}".repeat(bar_len);
+        let bar: String = "\u{2584}".repeat(bar_len); // ▄ lower-half block for visual separation
         let pad: String = " ".repeat(bar_width.saturating_sub(bar_len));
         // Show short date (MM-DD)
         let short_date = if day.date.len() >= 10 {
@@ -100,7 +100,7 @@ pub fn render_daily(f: &mut Frame, daily: &[DailyStats], area: Rect, focused: bo
             Span::styled(format!(" {:>5} ", short_date), DIM),
             Span::styled(bar, ACCENT),
             Span::raw(pad),
-            Span::styled(format!(" {}", fmt_cost(day.cost)), LABEL),
+            Span::styled(format!(" {}", fmt_tokens(day.tokens)), LABEL),
         ]));
     }
 
@@ -221,7 +221,7 @@ pub fn render_tools(f: &mut Frame, tools: &[ToolStats], area: Rect, focused: boo
             0
         };
         let bar_len = bar_len.max(1).min(bar_width);
-        let bar: String = "\u{2588}".repeat(bar_len);
+        let bar: String = "\u{2584}".repeat(bar_len);
         let pad: String = " ".repeat(bar_width.saturating_sub(bar_len));
         let name = if tool.tool_name.len() > 12 {
             format!("{}...", tool.tool_name.chars().take(9).collect::<String>())
@@ -274,7 +274,7 @@ pub fn render_activities(f: &mut Frame, activities: &[ActivityStats], area: Rect
         let bar_len = bar_len
             .max(if act.cost > 0.0 { 1 } else { 0 })
             .min(bar_width);
-        let bar: String = "\u{2588}".repeat(bar_len);
+        let bar: String = "\u{2584}".repeat(bar_len);
         let pad: String = " ".repeat(bar_width.saturating_sub(bar_len));
         lines.push(Line::from(vec![
             Span::styled(format!(" {:<16}", act.category), BOLD),
