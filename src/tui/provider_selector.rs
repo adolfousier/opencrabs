@@ -476,13 +476,12 @@ impl ProviderSelectorState {
         ] {
             if path.exists()
                 && let Ok(content) = std::fs::read_to_string(&path)
-                && let Ok(mut doc) = content.parse::<toml::Value>()
+                && let Ok(mut doc) = content.parse::<toml_edit::DocumentMut>()
                 && let Some(providers) = doc.get_mut("providers")
                 && let Some(tbl) = providers.as_table_mut()
                 && tbl.remove("qwen_accounts").is_some()
-                && let Ok(serialized) = toml::to_string_pretty(&doc)
             {
-                let _ = std::fs::write(&path, serialized);
+                let _ = std::fs::write(&path, doc.to_string());
             }
         }
 

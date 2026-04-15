@@ -1229,6 +1229,8 @@ pub fn normalize_toml_key(key: &str) -> String {
 /// # }
 /// ```
 pub fn write_secret_key(section: &str, key: &str, value: &str) -> Result<()> {
+    use toml_edit::DocumentMut;
+
     // Sanitize: strip carriage returns, take only first token (reject pasted URLs/junk after key)
     let value = value.split(['\r', '\n']).next().unwrap_or("").trim();
     if value.is_empty() {
@@ -1240,11 +1242,10 @@ pub fn write_secret_key(section: &str, key: &str, value: &str) -> Result<()> {
 
     let path = keys_path();
 
-    let mut doc: toml::Value = if path.exists() {
-        let content = fs::read_to_string(&path)?;
-        toml::from_str(&content)?
+    let mut doc: DocumentMut = if path.exists() {
+        fs::read_to_string(&path)?.parse()?
     } else {
-        toml::Value::Table(toml::map::Map::new())
+        DocumentMut::new()
     };
 
     // Normalize custom provider names (e.g. "Qwen_2.5_4B" → "qwen-2-5-4b")
@@ -1259,13 +1260,12 @@ pub fn write_secret_key(section: &str, key: &str, value: &str) -> Result<()> {
             }
         })
         .collect();
-    let mut current = doc
-        .as_table_mut()
-        .context("keys.toml root is not a table")?;
 
+    // Navigate/create nested tables
+    let mut current = doc.as_table_mut();
     for part in &parts {
-        if !current.contains_key(part.as_str()) {
-            current.insert(part.clone(), toml::Value::Table(toml::map::Map::new()));
+        if current.get(part.as_str()).is_none() {
+            current.insert(part, toml_edit::Item::Table(toml_edit::Table::new()));
         }
         current = current
             .get_mut(part.as_str())
@@ -1273,14 +1273,13 @@ pub fn write_secret_key(section: &str, key: &str, value: &str) -> Result<()> {
             .as_table_mut()
             .with_context(|| format!("'{}' is not a table", part))?;
     }
-    current.insert(key.to_string(), toml::Value::String(value.to_string()));
+    current.insert(key, toml_edit::value(value));
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     daily_backup(&path, 7);
-    let toml_str = toml::to_string_pretty(&doc)?;
-    fs::write(&path, toml_str)?;
+    fs::write(&path, doc.to_string())?;
     tracing::info!("Wrote secret key [{section}].{key}");
     Ok(())
 }
@@ -2153,6 +2152,8 @@ impl Config {
     /// `key` is the field name inside that section.
     /// `value` is the TOML-serialisable value.
     pub fn write_key(section: &str, key: &str, value: &str) -> Result<()> {
+        use toml_edit::DocumentMut;
+
         // Sanitize: trim whitespace/newlines that may leak from TUI input
         let value = value.trim();
 
@@ -2164,12 +2165,11 @@ impl Config {
         let path =
             Self::system_config_path().unwrap_or_else(|| opencrabs_home().join("config.toml"));
 
-        // Read existing TOML or start fresh
-        let mut doc: toml::Value = if path.exists() {
-            let content = fs::read_to_string(&path)?;
-            toml::from_str(&content)?
+        // Format-preserving parse — only the targeted key is modified
+        let mut doc: DocumentMut = if path.exists() {
+            fs::read_to_string(&path)?.parse()?
         } else {
-            toml::Value::Table(toml::map::Map::new())
+            DocumentMut::new()
         };
 
         // Navigate/create the section table (supports dotted paths like "channels.slack")
@@ -2186,11 +2186,11 @@ impl Config {
                 }
             })
             .collect();
-        let mut current = doc.as_table_mut().context("config root is not a table")?;
 
+        let mut current = doc.as_table_mut();
         for part in &parts {
-            if !current.contains_key(part.as_str()) {
-                current.insert(part.clone(), toml::Value::Table(toml::map::Map::new()));
+            if current.get(part.as_str()).is_none() {
+                current.insert(part, toml_edit::Item::Table(toml_edit::Table::new()));
             }
             current = current
                 .get_mut(part.as_str())
@@ -2198,42 +2198,45 @@ impl Config {
                 .as_table_mut()
                 .with_context(|| format!("'{}' is not a table", part))?;
         }
-        let section_table = current;
 
         // Parse the value — try JSON array, integer, float, bool, then fall back to string
-        let parsed: toml::Value = if value.starts_with('[') && value.ends_with(']') {
+        let parsed: toml_edit::Item = if value.starts_with('[') && value.ends_with(']') {
             // Try parsing as JSON array → TOML array
             if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(value) {
-                let toml_arr: Vec<toml::Value> = arr
-                    .into_iter()
-                    .filter_map(|v| match v {
-                        serde_json::Value::String(s) => Some(toml::Value::String(s)),
+                let mut toml_arr = toml_edit::Array::new();
+                for v in arr {
+                    match v {
+                        serde_json::Value::String(s) => {
+                            toml_arr.push(s);
+                        }
                         serde_json::Value::Number(n) => {
                             if let Some(i) = n.as_i64() {
-                                Some(toml::Value::Integer(i))
-                            } else {
-                                n.as_f64().map(toml::Value::Float)
+                                toml_arr.push(i);
+                            } else if let Some(f) = n.as_f64() {
+                                toml_arr.push(f);
                             }
                         }
-                        serde_json::Value::Bool(b) => Some(toml::Value::Boolean(b)),
-                        _ => None,
-                    })
-                    .collect();
-                toml::Value::Array(toml_arr)
+                        serde_json::Value::Bool(b) => {
+                            toml_arr.push(b);
+                        }
+                        _ => {}
+                    }
+                }
+                toml_edit::value(toml_arr)
             } else {
-                toml::Value::String(value.to_string())
+                toml_edit::value(value)
             }
         } else if let Ok(v) = value.parse::<i64>() {
-            toml::Value::Integer(v)
+            toml_edit::value(v)
         } else if let Ok(v) = value.parse::<f64>() {
-            toml::Value::Float(v)
+            toml_edit::value(v)
         } else if let Ok(v) = value.parse::<bool>() {
-            toml::Value::Boolean(v)
+            toml_edit::value(v)
         } else {
-            toml::Value::String(value.to_string())
+            toml_edit::value(value)
         };
 
-        section_table.insert(key.to_string(), parsed);
+        current.insert(key, parsed);
 
         // Write back
         if let Some(parent) = path.parent() {
@@ -2243,8 +2246,7 @@ impl Config {
         // Back up before overwriting
         Self::backup_config(&path, 7);
 
-        let toml_str = toml::to_string_pretty(&doc)?;
-        fs::write(&path, toml_str)?;
+        fs::write(&path, doc.to_string())?;
         tracing::info!("Wrote config key [{section}].{key}");
         Ok(())
     }
@@ -2252,6 +2254,8 @@ impl Config {
     /// Remove a dotted section from config.toml.
     /// e.g. `remove_section("providers.custom.default")` removes `[providers.custom.default]`.
     pub fn remove_section(section: &str) -> Result<()> {
+        use toml_edit::DocumentMut;
+
         let _guard = CONFIG_FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         let path =
@@ -2260,8 +2264,7 @@ impl Config {
             return Ok(());
         }
 
-        let content = fs::read_to_string(&path)?;
-        let mut doc: toml::Value = toml::from_str(&content)?;
+        let mut doc: DocumentMut = fs::read_to_string(&path)?.parse()?;
 
         let parts: Vec<&str> = section.split('.').collect();
         if parts.is_empty() {
@@ -2272,9 +2275,9 @@ impl Config {
         let parent_parts = &parts[..parts.len() - 1];
         let leaf = parts[parts.len() - 1];
 
-        let mut current = doc.as_table_mut().context("config root is not a table")?;
+        let mut current = doc.as_table_mut();
         for part in parent_parts {
-            match current.get_mut(*part) {
+            match current.get_mut(part) {
                 Some(v) if v.is_table() => {
                     current = v.as_table_mut().unwrap();
                 }
@@ -2286,8 +2289,7 @@ impl Config {
         tracing::info!("Removed config section [{section}]");
 
         Self::backup_config(&path, 7);
-        let toml_str = toml::to_string_pretty(&doc)?;
-        fs::write(&path, toml_str)?;
+        fs::write(&path, doc.to_string())?;
         Ok(())
     }
 
@@ -2318,6 +2320,8 @@ impl Config {
 
     /// Remove ghost custom provider entries from keys.toml.
     fn cleanup_keys_custom_providers() {
+        use toml_edit::DocumentMut;
+
         let keys_file = keys_path();
         if !keys_file.exists() {
             return;
@@ -2325,14 +2329,14 @@ impl Config {
         let Ok(content) = std::fs::read_to_string(&keys_file) else {
             return;
         };
-        let Ok(mut doc) = content.parse::<toml::Value>() else {
+        let Ok(mut doc) = content.parse::<DocumentMut>() else {
             return;
         };
 
         // Navigate to providers.custom table
         let custom_table = match doc
             .as_table_mut()
-            .and_then(|t| t.get_mut("providers"))
+            .get_mut("providers")
             .and_then(|t| t.as_table_mut())
             .and_then(|t| t.get_mut("custom"))
             .and_then(|t| t.as_table_mut())
@@ -2348,9 +2352,9 @@ impl Config {
             .unwrap_or_default();
 
         let remove: Vec<String> = custom_table
-            .keys()
-            .filter(|k| k.is_empty() || !config_names.contains(*k))
-            .cloned()
+            .iter()
+            .map(|(k, _)| k.to_string())
+            .filter(|k| k.is_empty() || !config_names.contains(k))
             .collect();
 
         if remove.is_empty() {
@@ -2363,9 +2367,7 @@ impl Config {
         }
 
         daily_backup(&keys_file, 7);
-        if let Ok(toml_str) = toml::to_string_pretty(&doc)
-            && let Err(e) = std::fs::write(&keys_file, toml_str)
-        {
+        if let Err(e) = std::fs::write(&keys_file, doc.to_string()) {
             tracing::warn!("Failed to clean ghost keys from keys.toml: {e}");
         }
     }
@@ -2374,43 +2376,43 @@ impl Config {
     /// e.g. `write_array("channels.slack", "allowed_users", &["U123"])` →
     /// `[channels.slack] allowed_users = ["U123"]`
     pub fn write_array(section: &str, key: &str, values: &[String]) -> Result<()> {
+        use toml_edit::DocumentMut;
+
         let path =
             Self::system_config_path().unwrap_or_else(|| opencrabs_home().join("config.toml"));
 
-        let mut doc: toml::Value = if path.exists() {
-            let content = fs::read_to_string(&path)?;
-            toml::from_str(&content)?
+        let mut doc: DocumentMut = if path.exists() {
+            fs::read_to_string(&path)?.parse()?
         } else {
-            toml::Value::Table(toml::map::Map::new())
+            DocumentMut::new()
         };
 
         // Navigate/create nested section
         let parts: Vec<&str> = section.split('.').collect();
-        let mut current = doc.as_table_mut().context("config root is not a table")?;
+        let mut current = doc.as_table_mut();
 
         for part in &parts {
-            if !current.contains_key(*part) {
-                current.insert(part.to_string(), toml::Value::Table(toml::map::Map::new()));
+            if current.get(part).is_none() {
+                current.insert(part, toml_edit::Item::Table(toml_edit::Table::new()));
             }
             current = current
-                .get_mut(*part)
+                .get_mut(part)
                 .context("section not found after insert")?
                 .as_table_mut()
                 .with_context(|| format!("'{}' is not a table", part))?;
         }
 
-        let arr = values
-            .iter()
-            .map(|v| toml::Value::String(v.clone()))
-            .collect();
-        current.insert(key.to_string(), toml::Value::Array(arr));
+        let mut arr = toml_edit::Array::new();
+        for v in values {
+            arr.push(v.as_str());
+        }
+        current.insert(key, toml_edit::value(arr));
 
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
         Self::backup_config(&path, 7);
-        let toml_str = toml::to_string_pretty(&doc)?;
-        fs::write(&path, toml_str)?;
+        fs::write(&path, doc.to_string())?;
         tracing::info!(
             "Wrote config array [{section}].{key} ({} items)",
             values.len()
