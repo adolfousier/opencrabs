@@ -37,7 +37,7 @@ use unicode_width::UnicodeWidthStr;
 use chat::render_chat;
 use dialogs::{
     render_directory_picker, render_file_picker, render_model_selector, render_restart_dialog,
-    render_update_dialog, render_usage_dialog,
+    render_update_dialog,
 };
 use help::{render_help, render_settings};
 use input::{render_emoji_picker, render_input, render_slash_autocomplete, render_status_bar};
@@ -160,14 +160,16 @@ pub fn render(f: &mut Frame, app: &mut App) {
             render_status_bar(f, app, chunks[3]);
             render_model_selector(f, app, f.area());
         }
-        AppMode::UsageDialog => {
+        AppMode::UsageDashboard => {
             render_chat(f, app, chunks[0]);
             if plan_height > 0 {
                 render_plan_checklist(f, app, chunks[1]);
             }
             render_input(f, app, chunks[2]);
             render_status_bar(f, app, chunks[3]);
-            render_usage_dialog(f, app, f.area());
+            if let Some(ref ds) = app.dashboard_state {
+                crate::usage::dashboard::render(f, ds, f.area());
+            }
         }
         AppMode::RestartPending => {
             render_chat(f, app, chunks[0]);

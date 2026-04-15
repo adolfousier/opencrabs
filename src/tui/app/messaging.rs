@@ -435,7 +435,8 @@ impl App {
                 true
             }
             "/usage" => {
-                self.mode = AppMode::UsageDialog;
+                self.open_usage_dashboard().await;
+                self.mode = AppMode::UsageDashboard;
                 true
             }
             s if s.starts_with("/onboard") || s == "/doctor" => {
