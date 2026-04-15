@@ -151,16 +151,17 @@ pub fn render_projects(f: &mut Frame, projects: &[ProjectStats], area: Rect, foc
         .max()
         .unwrap_or(1);
 
-    // Minimum 2 spaces between columns for readability
+    // Data columns get guaranteed space; name column fills whatever is left
     let spacing = 2;
-    let total_needed = max_name_len + max_cost_len + max_tok_len + max_sess_len + spacing * 3;
-    let total_needed = (inner.width as usize).min(total_needed);
-    let name_width = total_needed
-        .saturating_sub(max_cost_len + max_tok_len + max_sess_len + spacing * 3)
-        .max(max_name_len.min(6));
     let cost_width = max_cost_len;
     let tok_width = max_tok_len;
     let sess_width = max_sess_len;
+    // +1 for leading space on name, +1 for trailing 's' on sessions
+    let fixed = cost_width + tok_width + sess_width + spacing * 3 + 2;
+    let name_width = (inner.width as usize)
+        .saturating_sub(fixed)
+        .max(4)
+        .min(max_name_len);
 
     let mut lines: Vec<Line> = Vec::new();
     let visible = (inner.height as usize).min(projects.len());
@@ -237,15 +238,16 @@ pub fn render_models(f: &mut Frame, models: &[ModelStats], area: Rect, focused: 
         .max()
         .unwrap_or(6);
 
-    // Minimum 2 spaces between columns for readability
+    // Data columns get guaranteed space; name column fills whatever is left
     let spacing = 2;
-    let total_needed = max_name_len + max_cost_len + max_tok_len + spacing * 2;
-    let total_needed = (inner.width as usize).min(total_needed);
-    let name_width = total_needed
-        .saturating_sub(max_cost_len + max_tok_len + spacing * 2)
-        .max(max_name_len.min(4));
     let cost_width = max_cost_len;
     let tok_width = max_tok_len;
+    // +1 for leading space on name
+    let fixed = cost_width + tok_width + spacing * 2 + 1;
+    let name_width = (inner.width as usize)
+        .saturating_sub(fixed)
+        .max(4)
+        .min(max_name_len);
 
     let mut lines: Vec<Line> = Vec::new();
     for m in models.iter().take(visible) {
