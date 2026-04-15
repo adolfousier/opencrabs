@@ -1901,6 +1901,9 @@ impl Config {
     /// Currently handles: `channels.trello.allowed_channels` → `board_ids`.
     /// Called once after loading so old configs are silently upgraded on first run.
     fn migrate_if_needed(path: &Path) {
+        // Hold lock to prevent races between main thread and config watcher
+        let _guard = CONFIG_FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
         let Ok(content) = fs::read_to_string(path) else {
             return;
         };
@@ -2028,33 +2031,48 @@ impl Config {
                         path.display()
                     ),
                 }
-                return;
             }
-        }
-
-        // Migration 3: also inject subagent defaults when other migrations occurred
-        let final_content = toml::to_string_pretty(&doc).unwrap_or_default();
-        let has_subagent =
-            final_content.contains("subagent_provider") || final_content.contains("subagent_model");
-        if !has_subagent && let Ok(injected) = inject_subagent_defaults(&final_content) {
-            Self::backup_config(path, 7);
-            match fs::write(path, &injected) {
-                Ok(()) => tracing::info!(
-                    "Config migrated: [voice] → providers.stt/tts + subagent defaults"
-                ),
-                Err(e) => tracing::warn!(
-                    "Config migration: failed to write injected defaults to {}: {e}",
-                    path.display()
-                ),
-            }
+            // No structural migration needed — do NOT re-serialize with
+            // toml::to_string_pretty as that destroys comments and ordering.
             return;
         }
 
-        Self::backup_config(path, 7);
-        if let Ok(toml_str) = toml::to_string_pretty(&doc)
-            && fs::write(path, toml_str).is_ok()
+        // Voice/trello migration occurred — need to write structural changes.
+        // Use toml_edit to preserve formatting of untouched sections.
+        let Ok(mut edit_doc) = content.parse::<toml_edit::DocumentMut>() else {
+            tracing::warn!("Config migration: failed to parse config.toml for format-preserving write");
+            return;
+        };
+
+        // Apply the same structural changes via toml_edit
+        // Migration 1: trello rename
+        if let Some(trello) = edit_doc
+            .get_mut("channels")
+            .and_then(|c| c.as_table_mut())
+            .and_then(|c| c.get_mut("trello"))
+            .and_then(|t| t.as_table_mut())
+            && let Some(val) = trello.remove("allowed_channels")
+            && trello.get("board_ids").is_none()
         {
+            trello.insert("board_ids", val);
+        }
+        // Migration 2: remove [voice] section
+        edit_doc.as_table_mut().remove("voice");
+
+        Self::backup_config(path, 7);
+        if fs::write(path, edit_doc.to_string()).is_ok() {
             tracing::info!("Config migrated: [voice] → providers.stt/tts");
+        }
+
+        // Migration 3: inject subagent defaults after structural migration
+        let updated_content = fs::read_to_string(path).unwrap_or_default();
+        let has_subagent =
+            updated_content.contains("subagent_provider") || updated_content.contains("subagent_model");
+        if !has_subagent
+            && let Ok(injected) = inject_subagent_defaults(&updated_content)
+            && let Err(e) = fs::write(path, &injected)
+        {
+            tracing::warn!("Config migration: failed to inject subagent defaults: {e}");
         }
     }
 
