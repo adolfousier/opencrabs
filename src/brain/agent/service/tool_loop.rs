@@ -113,7 +113,7 @@ impl AgentService {
                 context.token_count,
             );
 
-            // Truncate to 80%
+            // Truncate to 80% — keeps last 20 messages minimum (10 pairs)
             let target = (effective_max as f64 * 0.80) as usize;
             context.hard_truncate_to(target);
             context.trim_to_fit(0);
@@ -2499,9 +2499,12 @@ impl AgentService {
                                             let tname = tool_name.clone();
                                             let status = if success { "success" } else { "error" };
                                             tokio::spawn(async move {
-                                                let _ = tool_repo
+                                                if let Err(e) = tool_repo
                                                     .record(&exec_id, &mid, &sid, &tname, status)
-                                                    .await;
+                                                    .await
+                                                {
+                                                    tracing::error!("[TOOL_EXEC] Failed to record tool execution: {}", e);
+                                                }
                                             });
                                         }
 
@@ -2560,9 +2563,12 @@ impl AgentService {
                                             let sid = session_id.to_string();
                                             let tname = tool_name.clone();
                                             tokio::spawn(async move {
-                                                let _ = tool_repo
+                                                if let Err(e) = tool_repo
                                                     .record(&exec_id, &mid, &sid, &tname, "error")
-                                                    .await;
+                                                    .await
+                                                {
+                                                    tracing::error!("[TOOL_EXEC] Failed to record tool execution: {}", e);
+                                                }
                                             });
                                         }
                                         let output_summary: String =
@@ -2675,8 +2681,9 @@ impl AgentService {
                             let tname = tool_name.clone();
                             let status = if success { "success" } else { "error" };
                             tokio::spawn(async move {
-                                let _ =
-                                    tool_repo.record(&exec_id, &mid, &sid, &tname, status).await;
+                                if let Err(e) = tool_repo.record(&exec_id, &mid, &sid, &tname, status).await {
+                                    tracing::error!("[TOOL_EXEC] Failed to record tool execution: {}", e);
+                                }
                             });
                         }
 
@@ -2722,9 +2729,9 @@ impl AgentService {
                             let sid = session_id.to_string();
                             let tname = tool_name.clone();
                             tokio::spawn(async move {
-                                let _ = tool_repo
-                                    .record(&exec_id, &mid, &sid, &tname, "error")
-                                    .await;
+                                if let Err(e) = tool_repo.record(&exec_id, &mid, &sid, &tname, "error").await {
+                                    tracing::error!("[TOOL_EXEC] Failed to record tool execution: {}", e);
+                                }
                             });
                         }
                         let output_summary: String = err_msg.chars().take(2000).collect();
