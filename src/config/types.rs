@@ -17,7 +17,7 @@ static CONFIG_TYPO_WARNINGS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::n
 /// Without this, concurrent `write_key` calls can race: one reads while
 /// another is mid-write, gets a partial/empty file, parses it as empty,
 /// and overwrites the real config with an empty table.
-static CONFIG_FILE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub static CONFIG_FILE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Main configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2261,8 +2261,7 @@ impl Config {
         }
 
         let content = fs::read_to_string(&path)?;
-        let mut doc: toml::Value =
-            toml::from_str(&content)?;
+        let mut doc: toml::Value = toml::from_str(&content)?;
 
         let parts: Vec<&str> = section.split('.').collect();
         if parts.is_empty() {
