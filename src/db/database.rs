@@ -141,7 +141,7 @@ impl Database {
     }
 
     /// Total number of migrations defined below — keep in sync when adding new ones.
-    const MIGRATION_COUNT: usize = 16;
+    const MIGRATION_COUNT: usize = 17;
 
     /// Run database migrations
     pub async fn run_migrations(&self) -> Result<()> {
@@ -191,6 +191,9 @@ impl Database {
             )),
             M::up(include_str!(
                 "../migrations/20260415000002_add_session_category.sql"
+            )),
+            M::up(include_str!(
+                "../migrations/20260415000003_fix_tool_executions_schema.sql"
             )),
         ]);
 
