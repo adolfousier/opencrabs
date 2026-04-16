@@ -170,9 +170,12 @@ pub async fn fetch_provider_models(
     api_key: Option<&str>,
     zhipu_endpoint_type: Option<&str>,
 ) -> Vec<String> {
+    use crate::tui::onboarding::PROVIDERS;
+    let provider_id = PROVIDERS.get(provider_index).map(|p| p.id).unwrap_or("");
     tracing::info!(
-        "[fetch_provider_models] provider_index={}, has_api_key={}",
+        "[fetch_provider_models] provider_index={}, provider_id={}, has_api_key={}",
         provider_index,
+        provider_id,
         api_key.is_some(),
     );
     #[derive(serde::Deserialize)]
@@ -187,7 +190,7 @@ pub async fn fetch_provider_models(
     }
 
     // Claude CLI — models are fixed (sonnet/opus/haiku), no API needed
-    if provider_index == 7 {
+    if provider_id == "claude-cli" {
         return vec![
             "sonnet".to_string(),
             "opus".to_string(),
@@ -196,14 +199,14 @@ pub async fn fetch_provider_models(
     }
 
     // OpenCode CLI — fetch models via `opencode models` command
-    if provider_index == 8 {
+    if provider_id == "opencode-cli" {
         return fetch_opencode_models().await;
     }
 
     // Qwen CLI — static models only. Never invoke `qwen` subprocess (it can hang
     // and there's no models discovery command). Always returns the hardcoded list
     // from config.toml.example.
-    if provider_index == 9 {
+    if provider_id == "qwen-code-cli" {
         let models = crate::tui::provider_selector::load_default_models("qwen-code-cli");
         if !models.is_empty() {
             return models;
@@ -218,7 +221,7 @@ pub async fn fetch_provider_models(
     // Qwen (DashScope): no /v1/models endpoint on the OpenAI-compat path,
     // so we read the curated list from config.toml.example. Users can
     // override via `models = [...]` in their own config.toml.
-    if provider_index == 10 {
+    if provider_id == "qwen" {
         let models = crate::tui::provider_selector::load_default_models("qwen");
         if !models.is_empty() {
             return models;
@@ -235,7 +238,7 @@ pub async fn fetch_provider_models(
     }
 
     // Handle Minimax specially - no /models API, must use config
-    if provider_index == 5 {
+    if provider_id == "minimax" {
         // Minimax — NO /models API endpoint, must use config.models
         if let Ok(config) = crate::config::Config::load()
             && let Some(p) = &config.providers.minimax
@@ -258,8 +261,8 @@ pub async fn fetch_provider_models(
 
     let client = reqwest::Client::new();
 
-    let result = match provider_index {
-        0 => {
+    let result = match provider_id {
+        "anthropic" => {
             // Anthropic — /v1/models is public
             let mut req = client
                 .get("https://api.anthropic.com/v1/models")
@@ -278,7 +281,7 @@ pub async fn fetch_provider_models(
 
             req.send().await
         }
-        1 => {
+        "openai" => {
             // OpenAI — /v1/models
             let mut req = client.get("https://api.openai.com/v1/models");
             if let Some(key) = api_key
@@ -288,7 +291,7 @@ pub async fn fetch_provider_models(
             }
             req.send().await
         }
-        2 => {
+        "github" => {
             // GitHub Copilot — fetch from Copilot API using OAuth token
             if let Some(key) = api_key
                 && !key.is_empty()
@@ -312,7 +315,7 @@ pub async fn fetch_provider_models(
             }
             return crate::tui::provider_selector::load_default_models("github");
         }
-        3 => {
+        "gemini" => {
             // Google Gemini — list models via generativelanguage API
             let key = match api_key {
                 Some(k) if !k.is_empty() => k,
@@ -380,7 +383,7 @@ pub async fn fetch_provider_models(
                 }
             }
         }
-        4 => {
+        "openrouter" => {
             // OpenRouter — /api/v1/models
             let mut req = client.get("https://openrouter.ai/api/v1/models");
             if let Some(key) = api_key
@@ -390,7 +393,7 @@ pub async fn fetch_provider_models(
             }
             req.send().await
         }
-        6 => {
+        "zhipu" => {
             // z.ai GLM — /api/paas/v4/models or /api/coding/paas/v4/models
             // Use passed endpoint_type (from wizard state), fall back to config, then default "api"
             let endpoint_type = zhipu_endpoint_type

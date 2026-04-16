@@ -397,37 +397,31 @@ impl OnboardingWizard {
                 }
                 KeyCode::Enter | KeyCode::Tab => {
                     self.ps.detect_existing_key();
-                    if self.ps.selected_provider == 2 {
+                    if self.ps.provider_id() == "github" {
                         // GitHub Copilot: if already authenticated, go to model select
                         if self.ps.has_existing_key_sentinel() {
                             self.auth_field = AuthField::Model;
-                            // Copilot supports live model fetch
                             self.ps.models.clear();
                             self.ps.selected_model = 0;
                             return WizardAction::FetchModels;
                         }
                         // Not yet authenticated — start device flow
                         return WizardAction::GitHubDeviceFlow;
-                    } else if self.ps.selected_provider == 10 {
-                        // Qwen native: always go to ApiKey field first (shows
-                        // auth status + rotation toggle, like other providers
-                        // show their key field)
-                        self.auth_field = AuthField::ApiKey;
                     } else if self.ps.is_custom() {
                         self.auth_field = AuthField::CustomName;
                     } else if self.ps.is_cli() {
-                        // CLI providers (Claude CLI, OpenCode CLI): no API key — skip to model
+                        // CLI providers: no API key — skip to model
                         self.auth_field = AuthField::Model;
                         self.ps.models.clear();
                         self.ps.selected_model = 0;
                         if self.ps.supports_model_fetch() {
                             return WizardAction::FetchModels;
                         }
-                        // No live fetch (e.g. Qwen CLI) — load static models immediately
+                        // No live fetch — load static models from the example config
                         self.ps.config_models = crate::tui::provider_selector::load_default_models(
                             self.ps.provider_id(),
                         );
-                    } else if self.ps.selected_provider == 6 {
+                    } else if self.ps.provider_id() == "zhipu" {
                         // z.ai GLM: endpoint type first, then API key
                         self.auth_field = AuthField::ZhipuEndpointType;
                     } else {
@@ -478,7 +472,7 @@ impl OnboardingWizard {
                     }
                 }
                 KeyCode::BackTab | KeyCode::Up => {
-                    if self.ps.selected_provider == 6 {
+                    if self.ps.provider_id() == "zhipu" {
                         self.auth_field = AuthField::ZhipuEndpointType;
                     } else {
                         self.auth_field = AuthField::Provider;

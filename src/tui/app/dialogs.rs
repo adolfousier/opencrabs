@@ -212,7 +212,7 @@ impl App {
         use super::events::keys;
         use super::onboarding::PROVIDERS;
 
-        let is_zhipu = self.ps.selected_provider == 6;
+        let is_zhipu = self.ps.provider_id() == "zhipu";
 
         if keys::is_cancel(&event) {
             self.switch_mode(AppMode::Chat).await?;
@@ -309,28 +309,24 @@ impl App {
                 }
 
                 // Re-fetch models for the new provider — load API key from config
+                let provider_id = self.ps.provider_id();
+                let custom_idx = provider_idx
+                    .checked_sub(CUSTOM_INSTANCES_START)
+                    .and_then(|i| self.ps.custom_names.get(i).cloned());
                 let api_key = crate::config::Config::load().ok().and_then(|c| {
-                    match provider_idx {
-                        0 => c.providers.anthropic.and_then(|p| p.api_key),
-                        1 => c.providers.openai.and_then(|p| p.api_key),
-                        2 => c.providers.github.and_then(|p| p.api_key),
-                        3 => c.providers.gemini.and_then(|p| p.api_key),
-                        4 => c.providers.openrouter.and_then(|p| p.api_key),
-                        5 => c.providers.minimax.and_then(|p| p.api_key),
-                        6 => c.providers.zhipu.and_then(|p| p.api_key),
-                        idx if idx >= 10 => {
-                            let custom_idx = idx - 10;
-                            self.ps.custom_names.get(custom_idx).and_then(|name| {
-                                c.providers
-                                    .custom_by_name(name)
-                                    .and_then(|p| p.api_key.clone())
-                            })
-                        }
-                        _ => None,
+                    if provider_id.is_empty() {
+                        custom_idx.as_ref().and_then(|name| {
+                            c.providers
+                                .custom_by_name(name)
+                                .and_then(|p| p.api_key.clone())
+                        })
+                    } else {
+                        crate::utils::providers::config_for(&c.providers, provider_id)
+                            .and_then(|p| p.api_key.clone())
                     }
                     .filter(|k| !k.is_empty())
                 });
-                let zhipu_et = if provider_idx == 6 {
+                let zhipu_et = if provider_id == "zhipu" {
                     Some(
                         if self.ps.zhipu_endpoint_type == 1 {
                             "coding"
@@ -1372,7 +1368,7 @@ impl App {
                     wizard.ps.models_fetching = true;
 
                     // Capture zhipu endpoint type from wizard state (not yet saved to config)
-                    let zhipu_et = if provider_idx == 6 {
+                    let zhipu_et = if wizard.ps.provider_id() == "zhipu" {
                         Some(if wizard.ps.zhipu_endpoint_type == 1 {
                             "coding".to_string()
                         } else {

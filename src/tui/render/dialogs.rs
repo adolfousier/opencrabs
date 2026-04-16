@@ -316,9 +316,6 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     // Base URL(2) + API Key(2) + Model text(1) + Name(2) + Context Window(1) + spacing(2) + help(2) = 12
     let form_lines: u16 = if is_custom_selected {
         12
-    } else if provider_idx == 10 {
-        // Qwen: rotation toggle(2) + auth status(3) + model section(4) + footer(2) + padding(3)
-        14 + model_count as u16
     } else {
         4 + model_count as u16 + 4 // key/filter chrome + model list + footer
     };
@@ -446,7 +443,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     }
 
     // z.ai GLM endpoint type toggle (before API key)
-    if provider_idx == 6 {
+    if selected_provider.id == "zhipu" {
         let et_focused = focused_field == 1; // field 1 for zhipu = endpoint type
         let api_marker = if app.ps.zhipu_endpoint_type == 0 {
             "[*]"
@@ -491,7 +488,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     // CLI providers have no API key — skip entirely.
     let is_cli_provider = app.ps.is_cli();
     if !is_cli_provider {
-        let is_zhipu = provider_idx == 6;
+        let is_zhipu = selected_provider.id == "zhipu";
         let key_focused = (focused_field == 1 && !is_custom && !is_zhipu)
             || (focused_field == 2 && (is_custom || is_zhipu));
         let key_label = selected_provider.key_label;
@@ -563,7 +560,7 @@ pub(super) fn render_model_selector(f: &mut Frame, app: &App, area: Rect) {
     }
 
     // Model selection (field 2 for non-Custom, field 3 for Custom/zhipu)
-    let is_zhipu_model = provider_idx == 6;
+    let is_zhipu_model = selected_provider.id == "zhipu";
     let model_focused = (focused_field == 2 && !is_custom && !is_zhipu_model)
         || (focused_field == 3 && (is_custom || is_zhipu_model));
     const MAX_VISIBLE_MODELS: usize = 8;

@@ -731,7 +731,7 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
                 }),
             ),
         ]));
-    } else if wizard.ps.selected_provider == 2 {
+    } else if wizard.ps.provider_id() == "github" {
         // GitHub Copilot — OAuth device flow
         use crate::tui::onboarding::GitHubDeviceFlowStatus;
 
@@ -819,7 +819,7 @@ fn render_provider_auth(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizar
         lines.push(Line::from(""));
 
         // z.ai GLM endpoint type toggle (api vs coding) — BEFORE API key
-        if wizard.ps.selected_provider == 6 {
+        if wizard.ps.provider_id() == "zhipu" {
             let et_focused = wizard.auth_field == AuthField::ZhipuEndpointType;
             let api_marker = if wizard.ps.zhipu_endpoint_type == 0 {
                 "[*]"
