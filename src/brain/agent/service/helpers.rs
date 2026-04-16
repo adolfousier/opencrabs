@@ -1412,8 +1412,30 @@ pub fn has_phantom_tool_intent(text: &str) -> bool {
         "let me change",
         "let me commit",
         "let me amend",
+        // Read/inspection intents — these need tools too. A bare
+        // "Let me check X:" with no tool_call is phantom.
+        "let me see",
+        "let me check",
+        "let me look",
+        "let me read",
+        "let me examine",
+        "let me verify",
+        "let me inspect",
+        "let me review",
     ];
     let has_intent = INTENT_PHRASES.iter().any(|v| lower.contains(v));
+
+    // Trailing-colon "Let me X:" at end of response is a strong signal all
+    // on its own — the model set up an action then emitted nothing after.
+    // No path corroboration needed: the colon announces a follow-up that
+    // never came.
+    let trailing_colon_intent = Regex::new(
+        r"(?im)(?:^|\n)\s*(?:let\s+me|i'll|i\s+will|now\s+let\s+me|now\s+i'll)\s+\w[^:\n]{0,80}:\s*$",
+    )
+    .unwrap();
+    if trailing_colon_intent.is_match(trimmed) {
+        return true;
+    }
 
     if has_intent {
         // Corroborate: does the text reference file paths or code identifiers?

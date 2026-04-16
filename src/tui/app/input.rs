@@ -1185,7 +1185,37 @@ impl App {
                         self.streaming_reasoning = None;
                         self.cancel_token = None;
                         self.escape_pending_at = None;
-                        self.active_tool_group = None;
+                        // Flush any in-flight tool group into the message list
+                        // BEFORE clearing. Per-tool DB persistence already wrote
+                        // them to the message row, but the TUI's DisplayMessage
+                        // for the group only exists as `active_tool_group` until
+                        // the next flush point. Without this, the user watches
+                        // tools execute, hits Escape-twice, and the whole group
+                        // vanishes from view — only reappearing on session
+                        // reload from DB. Commit it to `self.messages` so the
+                        // history stays stable across cancel.
+                        if let Some(group) = self.active_tool_group.take()
+                            && !group.calls.is_empty()
+                        {
+                            let count = group.calls.len();
+                            self.messages.push(DisplayMessage {
+                                id: Uuid::new_v4(),
+                                role: "tool_group".to_string(),
+                                content: format!(
+                                    "{} tool call{}",
+                                    count,
+                                    if count == 1 { "" } else { "s" }
+                                ),
+                                timestamp: chrono::Utc::now(),
+                                token_count: None,
+                                cost: None,
+                                approval: None,
+                                approve_menu: None,
+                                details: None,
+                                expanded: false,
+                                tool_group: Some(group),
+                            });
+                        }
                         self.streaming_output_tokens = 0;
                         self.intermediate_text_received = false;
                         // Drop any queued user message — otherwise it would
