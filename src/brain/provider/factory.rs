@@ -2,10 +2,7 @@
 //!
 //! Creates providers based on config.toml settings.
 
-use super::qwen::{
-    QWEN_DEFAULT_CHAT_URL, QWEN_OAUTH_MODEL, QwenCredentials, QwenTokenManager,
-    qwen_body_transform, qwen_extra_headers,
-};
+use super::qwen::{qwen_body_transform, qwen_extra_headers};
 use super::{
     Provider, anthropic::AnthropicProvider, claude_cli::ClaudeCliProvider,
     custom_openai_compatible::OpenAIProvider, gemini::GeminiProvider,
@@ -453,237 +450,65 @@ fn try_create_github(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     Ok(Some(Arc::new(provider)))
 }
 
-/// Build a single Qwen OpenAI-compatible provider from credentials and config.
-/// Extracted so both single-account and rotation paths can reuse it.
-fn build_single_qwen_provider(
-    creds: QwenCredentials,
-    qwen_config: &ProviderConfig,
-) -> Arc<dyn Provider> {
-    build_qwen_provider_inner(creds, qwen_config, false, None)
-}
+/// Default DashScope OpenAI-compatible chat-completions URL (China region).
+/// Users can override via `[providers.qwen].base_url` for Singapore
+/// (`dashscope-intl`), US (`dashscope-us`), or Coding Plan
+/// (`coding.dashscope.aliyuncs.com/v1`).
+const QWEN_DEFAULT_DASHSCOPE_URL: &str =
+    "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
 
-/// Build a single Qwen OpenAI-compatible provider from credentials.
+/// Try to create the **Qwen** provider backed by a DashScope API key.
 ///
-/// When `for_rotation` is true, the provider uses `RetryConfig::qwen_rotation()`
-/// which disables retry-on-rate-limit — the `RotatingQwenProvider` handles 429s
-/// by switching accounts immediately instead of burning ~45s in backoff.
-///
-/// `rotation_index` is `Some(idx)` for rotation accounts so the background
-/// refresher persists tokens to `[[providers.qwen_accounts]][idx]` instead
-/// of the single-account `[providers.qwen]`.
-fn build_qwen_provider_inner(
-    creds: QwenCredentials,
-    qwen_config: &ProviderConfig,
-    for_rotation: bool,
-    rotation_index: Option<usize>,
-) -> Arc<dyn Provider> {
-    let manager = Arc::new(match rotation_index {
-        Some(idx) => QwenTokenManager::new_rotation(creds, idx),
-        None => QwenTokenManager::new(creds),
-    });
-    manager.clone().start_background_refresh();
-
-    let mgr_for_token = manager.clone();
-    let token_fn: super::custom_openai_compatible::TokenFn =
-        Arc::new(move || mgr_for_token.current_access_token());
-
-    let mgr_for_url = manager.clone();
-    let qwen_override_url = qwen_config.base_url.clone();
-    let base_url_fn: super::custom_openai_compatible::BaseUrlFn = Arc::new(move || {
-        if let Some(ref u) = qwen_override_url
-            && !u.is_empty()
-        {
-            return u.clone();
-        }
-        let live = mgr_for_url.current_chat_url();
-        if live.is_empty() {
-            QWEN_DEFAULT_CHAT_URL.to_string()
-        } else {
-            live
-        }
-    });
-
-    let mgr_for_auth = manager.clone();
-    let auth_refresh_fn: super::custom_openai_compatible::AuthRefreshFn = Arc::new(move || {
-        let mgr = mgr_for_auth.clone();
-        Box::pin(async move {
-            mgr.force_refresh()
-                .await
-                .map_err(|e| format!("qwen force_refresh failed: {}", e))
-        })
-    });
-
-    let mgr_for_invalidate = manager.clone();
-    let auth_invalidate_fn: super::custom_openai_compatible::AuthInvalidateFn =
-        Arc::new(move || {
-            mgr_for_invalidate.invalidate();
-        });
-
-    let base_url = qwen_config
-        .base_url
-        .clone()
-        .unwrap_or_else(|| manager.current_chat_url());
-    let base_url = if base_url.is_empty() {
-        QWEN_DEFAULT_CHAT_URL.to_string()
-    } else {
-        base_url
-    };
-
-    let mut effective_config = qwen_config.clone();
-    if effective_config.default_model.is_none() {
-        effective_config.default_model = Some(QWEN_OAUTH_MODEL.to_string());
-    }
-
-    let qwen_limiter = Arc::clone(&super::rate_limiter::QWEN_OAUTH_LIMITER);
-
-    let mut builder = OpenAIProvider::with_base_url("qwen-managed".to_string(), base_url)
-        .with_name("qwen")
-        .with_token_fn(token_fn)
-        .with_base_url_fn(base_url_fn)
-        .with_auth_refresh_fn(auth_refresh_fn)
-        .with_auth_invalidate_fn(auth_invalidate_fn)
-        .with_extra_headers(qwen_extra_headers())
-        .with_body_transform({
-            let enable_thinking = effective_config.enable_thinking;
-            Arc::new(move |body| {
-                let mut body = qwen_body_transform(body);
-                if let Some(enable) = enable_thinking
-                    && let Some(obj) = body.as_object_mut()
-                {
-                    obj.insert(
-                        "enable_thinking".to_string(),
-                        serde_json::Value::Bool(enable),
-                    );
-                }
-                body
-            })
-        })
-        .with_rate_limiter(qwen_limiter);
-
-    // Inside RotatingQwenProvider, 429s should rotate immediately to the
-    // next account instead of retrying in-place with exponential backoff.
-    // Without this, each account burns ~45s (3s→6s→12s→24s) before
-    // rotation kicks in, causing 2–3 minute response delays.
-    if for_rotation {
-        builder = builder.with_retry_config(super::retry::RetryConfig::qwen_rotation());
-    }
-
-    let provider = configure_openai_compatible(builder, &effective_config);
-    Arc::new(provider)
-}
-
-/// Try to create the native **Qwen** provider (OAuth + DashScope OpenAI-compatible).
-///
-/// **Zero network calls at startup.** Token freshness is checked locally only
-/// (expiry timestamp). Expired accounts are skipped and wiped from keys.toml.
-/// `QwenTokenManager::start_background_refresh()` and `auth_refresh_fn`
-/// (on 401) handle refresh lazily at runtime.
-///
-/// If `[[providers.qwen_accounts]]` has ≥ 2 entries, builds a
-/// `RotatingQwenProvider` that round-robins on rate-limit instead of
-/// immediately falling to the outer fallback chain.
-///
-/// Otherwise falls back to the single-account path from `[providers.qwen]`
-/// (including transparent import from `~/.qwen/oauth_creds.json`).
+/// OAuth and multi-account rotation were removed after Alibaba discontinued
+/// Qwen OAuth. The provider now behaves like any other OpenAI-compatible
+/// key-based provider (zhipu, openai, …): `api_key` + `base_url` +
+/// `default_model` from `[providers.qwen]`.
 async fn try_create_qwen(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     let qwen_config = match &config.providers.qwen {
         Some(cfg) => cfg,
         None => return Ok(None),
     };
 
-    // ── Rotation path: [[providers.qwen_accounts]] with ≥ 2 entries ─────
-    if let Some(account_cfgs) = &config.providers.qwen_accounts {
-        let accounts_creds = QwenCredentials::from_account_configs(account_cfgs);
-        if accounts_creds.len() >= 2 {
-            let total = accounts_creds.len();
-            // Preserve original indices so each account's background refresh
-            // persists to the correct slot in [[providers.qwen_accounts]].
-            let valid_indexed: Vec<(usize, QwenCredentials)> = accounts_creds
-                .iter()
-                .enumerate()
-                .filter(|(_, c)| c.is_valid())
-                .map(|(i, c)| (i, c.clone()))
-                .collect();
-            let expired = total - valid_indexed.len();
-
-            if expired > 0 {
-                tracing::warn!(
-                    "Qwen rotation: {} of {} accounts expired, {} still valid",
-                    expired,
-                    total,
-                    valid_indexed.len()
-                );
-                // Clear secrets for expired accounts in keys.toml but keep
-                // ALL accounts in config.toml so the user can re-auth later.
-                if let Err(e) = QwenCredentials::clear_expired_account_secrets(&accounts_creds) {
-                    tracing::warn!("Failed to clean expired account secrets: {}", e);
-                }
-            }
-
-            if valid_indexed.len() >= 2 {
-                let usable_providers: Vec<Arc<dyn Provider>> = valid_indexed
-                    .into_iter()
-                    .map(|(original_idx, creds)| {
-                        tracing::info!("  Qwen rotation account {} valid", original_idx);
-                        build_qwen_provider_inner(creds, qwen_config, true, Some(original_idx))
-                    })
-                    .collect();
-                return Ok(Some(Arc::new(super::RotatingQwenProvider::new(
-                    usable_providers,
-                ))));
-            }
-            tracing::warn!(
-                "Qwen rotation: only {} valid accounts (need ≥2) — falling to single-account path",
-                valid_indexed.len()
-            );
-        }
-    }
-
-    // ── Single-account path ─────────────────────────────────────────────
-    let mut creds = QwenCredentials::from_provider_config(qwen_config);
-
-    if let Some(imported) = QwenCredentials::import_from_qwen_cli() {
-        let should_use_file = match &creds {
-            None => true,
-            Some(existing) => imported.expiry_date > existing.expiry_date,
-        };
-        if should_use_file {
-            if let Err(e) = imported.persist_to_keys() {
-                tracing::warn!(
-                    "Failed to sync ~/.qwen/oauth_creds.json into keys.toml: {}",
-                    e
-                );
-            } else {
-                tracing::info!(
-                    "Synced Qwen credentials from ~/.qwen/oauth_creds.json into keys.toml \
-                     (file expiry={}, keys.toml expiry={:?})",
-                    imported.expiry_date,
-                    creds.as_ref().map(|c| c.expiry_date)
-                );
-            }
-            creds = Some(imported);
-        }
-    }
-
-    let Some(creds) = creds else {
-        tracing::warn!(
-            "Qwen enabled but no OAuth credentials found in keys.toml \
-             or ~/.qwen/oauth_creds.json. Run /onboard:provider to authenticate."
-        );
+    let Some(api_key) = qwen_config.api_key.as_ref().filter(|k| !k.is_empty()) else {
+        tracing::warn!("Qwen enabled but no API key configured — run /onboard:provider");
         return Ok(None);
     };
 
-    if !creds.is_valid() {
-        tracing::warn!(
-            "Qwen token expired — provider unavailable. \
-             Run /onboard:provider to re-authenticate."
-        );
-        QwenCredentials::wipe_dead_credentials();
-        return Ok(None);
-    }
+    let base_url = qwen_config
+        .base_url
+        .clone()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| QWEN_DEFAULT_DASHSCOPE_URL.to_string());
+    let base_url = if base_url.contains("/chat/completions") {
+        base_url
+    } else {
+        format!("{}/chat/completions", base_url.trim_end_matches('/'))
+    };
 
-    tracing::info!("Using Qwen native provider (single account)");
-    Ok(Some(build_single_qwen_provider(creds, qwen_config)))
+    tracing::info!("Using Qwen (DashScope) at: {}", base_url);
+
+    let qwen_limiter = Arc::clone(&super::rate_limiter::QWEN_OAUTH_LIMITER);
+
+    let enable_thinking = qwen_config.enable_thinking;
+    let builder = OpenAIProvider::with_base_url(api_key.clone(), base_url)
+        .with_name("qwen")
+        .with_extra_headers(qwen_extra_headers())
+        .with_body_transform(Arc::new(move |body| {
+            let mut body = qwen_body_transform(body);
+            if let Some(enable) = enable_thinking
+                && let Some(obj) = body.as_object_mut()
+            {
+                obj.insert(
+                    "enable_thinking".to_string(),
+                    serde_json::Value::Bool(enable),
+                );
+            }
+            body
+        }))
+        .with_rate_limiter(qwen_limiter);
+
+    let provider = configure_openai_compatible(builder, qwen_config);
+    Ok(Some(Arc::new(provider)))
 }
 
 /// Try to create OpenRouter provider if configured

@@ -28,7 +28,6 @@ pub(crate) mod nonstream_compat;
 pub mod opencode_cli;
 pub mod qwen;
 pub mod qwen_code;
-pub mod rotating_qwen;
 
 pub use anthropic::AnthropicProvider;
 pub use claude_cli::ClaudeCliProvider;
@@ -38,7 +37,6 @@ pub use fallback::{FallbackProvider, SwapEvent};
 pub use gemini::GeminiProvider;
 pub use opencode_cli::OpenCodeCliProvider;
 pub use qwen_code::QwenCodeCliProvider;
-pub use rotating_qwen::RotatingQwenProvider;
 
 /// Cross-platform binary lookup. Uses `where.exe` on Windows, `which` elsewhere.
 /// Returns the resolved path if found on PATH, or None.
