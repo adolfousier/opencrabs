@@ -224,6 +224,7 @@ pub async fn fetch_provider_models(
             return models;
         }
         return vec![
+            "qwen3.6-plus".to_string(),
             "qwen3-max".to_string(),
             "qwen3-coder-plus".to_string(),
             "qwen3.5-plus".to_string(),
