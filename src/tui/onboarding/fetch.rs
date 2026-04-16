@@ -146,11 +146,6 @@ pub fn is_first_time() -> bool {
             .opencode_cli
             .as_ref()
             .is_some_and(|p| p.enabled)
-        || config
-            .providers
-            .qwen_code_cli
-            .as_ref()
-            .is_some_and(|p| p.enabled)
         || config.providers.qwen.as_ref().is_some_and(|p| p.enabled)
         || config.providers.active_custom().is_some();
 
@@ -201,21 +196,6 @@ pub async fn fetch_provider_models(
     // OpenCode CLI — fetch models via `opencode models` command
     if provider_id == "opencode-cli" {
         return fetch_opencode_models().await;
-    }
-
-    // Qwen CLI — static models only. Never invoke `qwen` subprocess (it can hang
-    // and there's no models discovery command). Always returns the hardcoded list
-    // from config.toml.example.
-    if provider_id == "qwen-code-cli" {
-        let models = crate::tui::provider_selector::load_default_models("qwen-code-cli");
-        if !models.is_empty() {
-            return models;
-        }
-        return vec![
-            "qwen3.6-plus".to_string(),
-            "qwen3.5-plus".to_string(),
-            "qwen3-coder-plus".to_string(),
-        ];
     }
 
     // Qwen (DashScope): no /v1/models endpoint on the OpenAI-compat path,

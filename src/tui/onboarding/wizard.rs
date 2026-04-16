@@ -228,24 +228,28 @@ impl OnboardingWizard {
                     .as_ref()
                     .is_some_and(|p| p.enabled)
                 {
-                    (7, String::new(), String::new(), String::new())
+                    (
+                        crate::tui::provider_selector::index_of_provider("claude-cli").unwrap_or(0),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                    )
                 } else if config
                     .providers
                     .opencode_cli
                     .as_ref()
                     .is_some_and(|p| p.enabled)
                 {
-                    (8, String::new(), String::new(), String::new())
-                } else if config
-                    .providers
-                    .qwen_code_cli
-                    .as_ref()
-                    .is_some_and(|p| p.enabled)
-                {
-                    (9, String::new(), String::new(), String::new())
+                    (
+                        crate::tui::provider_selector::index_of_provider("opencode-cli")
+                            .unwrap_or(0),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                    )
                 } else if config.providers.qwen.as_ref().is_some_and(|p| p.enabled) {
                     (
-                        10,
+                        crate::tui::provider_selector::index_of_provider("qwen").unwrap_or(0),
                         EXISTING_KEY_SENTINEL.to_string(),
                         String::new(),
                         String::new(),

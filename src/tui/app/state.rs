@@ -1967,34 +1967,26 @@ impl App {
                     && provider_idx == self.ps.selected_provider
                 {
                     // Read the provider's saved default_model from config
-                    let saved_model =
-                        crate::config::Config::load()
-                            .ok()
-                            .and_then(|c| match provider_idx {
-                                0 => c.providers.anthropic.and_then(|p| p.default_model),
-                                1 => c.providers.openai.and_then(|p| p.default_model),
-                                2 => c.providers.github.and_then(|p| p.default_model),
-                                3 => c.providers.gemini.and_then(|p| p.default_model),
-                                4 => c.providers.openrouter.and_then(|p| p.default_model),
-                                5 => c.providers.minimax.and_then(|p| p.default_model),
-                                6 => c.providers.zhipu.and_then(|p| p.default_model),
-                                7 => c.providers.claude_cli.and_then(|p| p.default_model),
-                                8 => c.providers.opencode_cli.and_then(|p| p.default_model),
-                                9 => c.providers.qwen_code_cli.and_then(|p| p.default_model),
-                                10 => c.providers.qwen.and_then(|p| p.default_model),
-                                idx if idx
-                                    >= crate::tui::provider_selector::CUSTOM_INSTANCES_START =>
-                                {
-                                    let ci =
-                                        idx - crate::tui::provider_selector::CUSTOM_INSTANCES_START;
-                                    self.ps.custom_names.get(ci).and_then(|name| {
-                                        c.providers
-                                            .custom_by_name(name)
-                                            .and_then(|p| p.default_model.clone())
-                                    })
-                                }
-                                _ => None,
-                            });
+                    let provider_id = crate::tui::onboarding::PROVIDERS
+                        .get(provider_idx)
+                        .map(|p| p.id)
+                        .unwrap_or("");
+                    let saved_model = crate::config::Config::load().ok().and_then(|c| {
+                        if provider_idx >= crate::tui::provider_selector::CUSTOM_INSTANCES_START {
+                            let ci = provider_idx
+                                - crate::tui::provider_selector::CUSTOM_INSTANCES_START;
+                            self.ps.custom_names.get(ci).and_then(|name| {
+                                c.providers
+                                    .custom_by_name(name)
+                                    .and_then(|p| p.default_model.clone())
+                            })
+                        } else if !provider_id.is_empty() {
+                            crate::utils::providers::config_for(&c.providers, provider_id)
+                                .and_then(|p| p.default_model.clone())
+                        } else {
+                            None
+                        }
+                    });
                     let target = saved_model.as_deref().unwrap_or(&self.default_model_name);
                     let selected = models.iter().position(|m| m == target).unwrap_or(0);
                     self.ps.models = models;

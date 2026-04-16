@@ -767,21 +767,12 @@ impl App {
         // - On provider switch (close_dialog=false): preserve existing config model
         let default_model = if !close_dialog {
             // Preserve whatever is already saved in config for this provider
+            let provider_id = self.ps.provider_id();
             crate::config::Config::load()
                 .ok()
-                .and_then(|c| match provider_idx {
-                    0 => c.providers.anthropic.and_then(|p| p.default_model),
-                    1 => c.providers.openai.and_then(|p| p.default_model),
-                    2 => c.providers.github.and_then(|p| p.default_model),
-                    3 => c.providers.gemini.and_then(|p| p.default_model),
-                    4 => c.providers.openrouter.and_then(|p| p.default_model),
-                    5 => c.providers.minimax.and_then(|p| p.default_model),
-                    6 => c.providers.zhipu.and_then(|p| p.default_model),
-                    7 => c.providers.claude_cli.and_then(|p| p.default_model),
-                    8 => c.providers.opencode_cli.and_then(|p| p.default_model),
-                    9 => c.providers.qwen_code_cli.and_then(|p| p.default_model),
-                    10 => c.providers.qwen.and_then(|p| p.default_model),
-                    _ => None,
+                .and_then(|c| {
+                    crate::utils::providers::config_for(&c.providers, provider_id)
+                        .and_then(|p| p.default_model.clone())
                 })
                 .unwrap_or_else(|| {
                     provider
@@ -934,21 +925,9 @@ impl App {
                 });
             }
             9 => {
-                // Qwen Code CLI — no API key needed
-                config.providers.qwen_code_cli = Some(ProviderConfig {
-                    enabled: true,
-                    api_key: None,
-                    base_url: None,
-                    default_model: Some(default_model.to_string()),
-                    models: vec![],
-                    vision_model: None,
-                    ..Default::default()
-                });
-            }
-            10 => {
-                // Qwen (native) — OAuth credentials already stored in keys.toml
-                // by the device flow handler. Here we just ensure the config
-                // section exists and is enabled with the chosen default model.
+                // Qwen (DashScope API key) — factory reads keys.toml for the
+                // secret. Here we just ensure the config section exists and
+                // is enabled with the chosen default model.
                 let merged = config.providers.qwen.clone().unwrap_or_default();
                 config.providers.qwen = Some(ProviderConfig {
                     enabled: true,
@@ -956,7 +935,7 @@ impl App {
                     ..merged
                 });
             }
-            11 if !self.ps.custom_name.is_empty() => {
+            10 if !self.ps.custom_name.is_empty() => {
                 let custom_model = self.ps.custom_model.clone();
                 let custom_name = self.ps.custom_name.clone();
                 let mut customs = config.providers.custom.unwrap_or_default();
@@ -991,9 +970,8 @@ impl App {
             6 => "providers.zhipu",
             7 => "providers.claude_cli",
             8 => "providers.opencode_cli",
-            9 => "providers.qwen_code_cli",
-            10 => "providers.qwen",
-            11 => {
+            9 => "providers.qwen",
+            10 => {
                 // Resolve custom provider name: UI field > config active
                 let cname = if !self.ps.custom_name.is_empty() {
                     self.ps.custom_name.clone()
@@ -1030,7 +1008,6 @@ impl App {
             "providers.zhipu",
             "providers.claude_cli",
             "providers.opencode_cli",
-            "providers.qwen_code_cli",
             "providers.qwen",
         ] {
             if s != section {

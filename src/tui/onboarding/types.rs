@@ -77,16 +77,6 @@ pub const PROVIDERS: &[ProviderInfo] = &[
         ],
     },
     ProviderInfo {
-        id: "qwen-code-cli",
-        name: "Qwen CLI",
-        models: &["qwen3.6-plus", "qwen3-coder-plus", "qwen3.5-plus"],
-        key_label: "",
-        help_lines: &[
-            "Uses local 'qwen' CLI subprocess (Alibaba Coding Plan or DashScope key)",
-            "Requires: npm install -g @qwen-code/qwen-code  OR  brew install qwen-code",
-        ],
-    },
-    ProviderInfo {
         id: "qwen",
         name: "Qwen",
         models: &[

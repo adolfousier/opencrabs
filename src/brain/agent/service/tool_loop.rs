@@ -428,11 +428,6 @@ impl AgentService {
         // `is_cli_provider` controls TWO unrelated behaviors:
         //   1. Skip local tool execution (CLI runs tools internally)
         //   2. Skip OpenCrabs-side context compaction (CLI persists session)
-        //
-        // Both used to read `cli_handles_tools()`, but qwen-code-cli runs tools
-        // internally yet has NO persistent session — every spawn is cold and
-        // we re-send the entire history. For qwen we still want the local
-        // compaction; only the tool-execution skip applies.
         let (is_cli_provider, cli_owns_context, is_dialagram) = self
             .provider
             .read()

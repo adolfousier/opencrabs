@@ -27,7 +27,6 @@ pub mod gemini;
 pub(crate) mod nonstream_compat;
 pub mod opencode_cli;
 pub mod qwen;
-pub mod qwen_code;
 
 pub use anthropic::AnthropicProvider;
 pub use claude_cli::ClaudeCliProvider;
@@ -36,7 +35,6 @@ pub use factory::{create_provider, create_provider_by_name, create_provider_with
 pub use fallback::{FallbackProvider, SwapEvent};
 pub use gemini::GeminiProvider;
 pub use opencode_cli::OpenCodeCliProvider;
-pub use qwen_code::QwenCodeCliProvider;
 
 /// Cross-platform binary lookup. Uses `where.exe` on Windows, `which` elsewhere.
 /// Returns the resolved path if found on PATH, or None.

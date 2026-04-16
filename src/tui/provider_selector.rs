@@ -77,7 +77,7 @@ impl ProviderSelectorState {
 
     pub fn is_cli(&self) -> bool {
         let id = self.provider_id();
-        id == "claude-cli" || id == "opencode-cli" || id == "qwen-code-cli"
+        id == "claude-cli" || id == "opencode-cli"
     }
 
     pub fn is_zhipu(&self) -> bool {
@@ -92,7 +92,16 @@ impl ProviderSelectorState {
             "" // custom
         }
     }
+}
 
+/// Look up the index of a provider by its canonical id. Returns `None`
+/// if the id isn't in `PROVIDERS`. Lets call-sites avoid hardcoding
+/// positions so reordering the array doesn't cascade into the TUI.
+pub fn index_of_provider(id: &str) -> Option<usize> {
+    PROVIDERS.iter().position(|p| p.id == id)
+}
+
+impl ProviderSelectorState {
     /// Whether the current provider supports live model fetching from API.
     pub fn supports_model_fetch(&self) -> bool {
         matches!(
@@ -144,11 +153,11 @@ impl ProviderSelectorState {
             let id = PROVIDERS[idx].id;
             match id {
                 // CLI providers — always "configured" if binary exists
-                "claude-cli" | "opencode-cli" | "qwen-code-cli" => {
-                    let bin = match id {
-                        "claude-cli" => "claude",
-                        "qwen-code-cli" => "qwen",
-                        _ => "opencode",
+                "claude-cli" | "opencode-cli" => {
+                    let bin = if id == "claude-cli" {
+                        "claude"
+                    } else {
+                        "opencode"
                     };
                     which::which(bin).is_ok()
                 }
@@ -451,7 +460,6 @@ pub fn load_default_models(provider_id: &str) -> Vec<String> {
         let section_key = match provider_id {
             "claude-cli" => "claude_cli",
             "opencode-cli" => "opencode_cli",
-            "qwen-code-cli" => "qwen_code_cli",
             "" => "custom", // empty id = custom providers
             other => other,
         };

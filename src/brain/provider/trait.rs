@@ -58,9 +58,7 @@ pub trait Provider: Send + Sync {
     /// `false`, OpenCrabs sends the full message history on every spawn
     /// and MUST run its own compaction to stay within the model's window.
     ///
-    /// Defaults to `cli_handles_tools()` for backwards compatibility — but
-    /// providers like qwen-code-cli that re-spawn cold every turn override
-    /// this to `false` so we compact for them.
+    /// Defaults to `cli_handles_tools()` for backwards compatibility.
     fn cli_manages_context(&self) -> bool {
         self.cli_handles_tools()
     }

@@ -152,10 +152,10 @@ impl OnboardingWizard {
         // Check 1: API key / CLI binary present
         self.health_results[0].1 = if self.ps.is_cli() {
             // CLI providers: check if the binary is installed
-            let binary = match self.ps.provider_id() {
-                "claude-cli" => "claude",
-                "qwen-code-cli" => "qwen",
-                _ => "opencode",
+            let binary = if self.ps.provider_id() == "claude-cli" {
+                "claude"
+            } else {
+                "opencode"
             };
             if which::which(binary).is_ok() {
                 HealthStatus::Pass

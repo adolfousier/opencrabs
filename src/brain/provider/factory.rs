@@ -6,7 +6,7 @@ use super::qwen::{qwen_body_transform, qwen_extra_headers};
 use super::{
     Provider, anthropic::AnthropicProvider, claude_cli::ClaudeCliProvider,
     custom_openai_compatible::OpenAIProvider, gemini::GeminiProvider,
-    opencode_cli::OpenCodeCliProvider, qwen_code::QwenCodeCliProvider,
+    opencode_cli::OpenCodeCliProvider,
 };
 use crate::config::{Config, ProviderConfig};
 use anyhow::Result;
@@ -18,7 +18,6 @@ async fn try_create_by_name(config: &Config, name: &str) -> Result<Option<Arc<dy
     match name {
         "Claude CLI" => try_create_claude_cli(config),
         "OpenCode CLI" => try_create_opencode_cli(config),
-        "Qwen CLI" => try_create_qwen_code(config),
         "Qwen" => try_create_qwen(config).await,
         "Anthropic" => try_create_anthropic(config),
         "OpenAI" => try_create_openai(config),
@@ -36,7 +35,6 @@ async fn try_create_by_name(config: &Config, name: &str) -> Result<Option<Arc<dy
 const PROVIDER_NAMES: &[&str] = &[
     "Claude CLI",
     "OpenCode CLI",
-    "Qwen CLI",
     "Qwen",
     "Anthropic",
     "OpenAI",
@@ -61,28 +59,23 @@ fn provider_enabled(config: &Config, idx: usize) -> bool {
             .opencode_cli
             .as_ref()
             .is_some_and(|p| p.enabled),
-        2 => config
-            .providers
-            .qwen_code_cli
-            .as_ref()
-            .is_some_and(|p| p.enabled),
-        3 => config.providers.qwen.as_ref().is_some_and(|p| p.enabled),
-        4 => config
+        2 => config.providers.qwen.as_ref().is_some_and(|p| p.enabled),
+        3 => config
             .providers
             .anthropic
             .as_ref()
             .is_some_and(|p| p.enabled),
-        5 => config.providers.openai.as_ref().is_some_and(|p| p.enabled),
-        6 => config.providers.github.as_ref().is_some_and(|p| p.enabled),
-        7 => config.providers.gemini.as_ref().is_some_and(|p| p.enabled),
-        8 => config
+        4 => config.providers.openai.as_ref().is_some_and(|p| p.enabled),
+        5 => config.providers.github.as_ref().is_some_and(|p| p.enabled),
+        6 => config.providers.gemini.as_ref().is_some_and(|p| p.enabled),
+        7 => config
             .providers
             .openrouter
             .as_ref()
             .is_some_and(|p| p.enabled),
-        9 => config.providers.minimax.as_ref().is_some_and(|p| p.enabled),
-        10 => config.providers.zhipu.as_ref().is_some_and(|p| p.enabled),
-        11 => config.providers.active_custom().is_some(),
+        8 => config.providers.minimax.as_ref().is_some_and(|p| p.enabled),
+        9 => config.providers.zhipu.as_ref().is_some_and(|p| p.enabled),
+        10 => config.providers.active_custom().is_some(),
         _ => false,
     }
 }
@@ -233,23 +226,6 @@ pub async fn create_provider_by_name(config: &Config, name: &str) -> Result<Arc<
                 Err(e) => Err(anyhow::anyhow!("OpenCode CLI binary not found: {}", e)),
             }
         }
-        "qwen-cli" | "qwen-code" | "qwen_code" | "qwen-code-cli" | "qwen_code_cli" => {
-            // Bypass enabled check — session explicitly requested this provider
-            let model = config
-                .providers
-                .qwen_code_cli
-                .as_ref()
-                .and_then(|c| c.default_model.clone());
-            match QwenCodeCliProvider::new() {
-                Ok(mut provider) => {
-                    if let Some(m) = model {
-                        provider = provider.with_default_model(m);
-                    }
-                    Ok(Arc::new(provider))
-                }
-                Err(e) => Err(anyhow::anyhow!("Qwen Code binary not found: {}", e)),
-            }
-        }
         "anthropic" => try_create_anthropic(config)?
             .ok_or_else(|| anyhow::anyhow!("Anthropic not configured (missing API key)")),
         "openai" => try_create_openai(config)?
@@ -375,10 +351,6 @@ async fn create_fallback(config: &Config, fallback_type: &str) -> Result<Arc<dyn
         "gemini" => {
             tracing::info!("Using fallback: Gemini");
             try_create_gemini(config)?.ok_or_else(|| anyhow::anyhow!("Gemini not configured"))
-        }
-        "qwen-cli" | "qwen-code" | "qwen_code" | "qwen-code-cli" | "qwen_code_cli" => {
-            tracing::info!("Using fallback: Qwen Code");
-            try_create_qwen_code(config)?.ok_or_else(|| anyhow::anyhow!("Qwen Code not available"))
         }
         "qwen" => {
             tracing::info!("Using fallback: Qwen native");
@@ -796,28 +768,6 @@ fn try_create_claude_cli(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     }
 }
 
-/// Try to create Qwen Code CLI provider if configured and binary is available.
-fn try_create_qwen_code(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
-    let cli_config = match &config.providers.qwen_code_cli {
-        Some(cfg) if cfg.enabled => cfg,
-        _ => return Ok(None),
-    };
-
-    match QwenCodeCliProvider::new() {
-        Ok(mut provider) => {
-            if let Some(model) = &cli_config.default_model {
-                provider = provider.with_default_model(model.clone());
-            }
-            tracing::info!("Using Qwen Code CLI provider (1k free req/day via Qwen OAuth)");
-            Ok(Some(Arc::new(provider)))
-        }
-        Err(e) => {
-            tracing::warn!("Qwen Code enabled but binary not found: {}", e);
-            Ok(None)
-        }
-    }
-}
-
 /// Try to create OpenCode CLI provider if configured and binary is available.
 fn try_create_opencode_cli(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
     let cli_config = match &config.providers.opencode_cli {
@@ -885,9 +835,6 @@ pub fn active_provider_vision(config: &Config) -> Option<(String, String, String
         "gemini" => config.providers.gemini.as_ref(),
         "claude-cli" | "claude_cli" => config.providers.claude_cli.as_ref(),
         "opencode" | "opencode-cli" | "opencode_cli" => config.providers.opencode_cli.as_ref(),
-        "qwen-cli" | "qwen-code" | "qwen_code" | "qwen-code-cli" | "qwen_code_cli" => {
-            config.providers.qwen_code_cli.as_ref()
-        }
         "qwen" => config.providers.qwen.as_ref(),
         cn if cn.starts_with("custom:") => config
             .providers

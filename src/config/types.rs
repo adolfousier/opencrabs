@@ -609,10 +609,6 @@ pub struct ProviderConfigs {
     #[serde(default)]
     pub opencode_cli: Option<ProviderConfig>,
 
-    /// Qwen Code CLI — direct subprocess, Qwen OAuth (1k free/day) or custom APIs
-    #[serde(default)]
-    pub qwen_code_cli: Option<ProviderConfig>,
-
     /// Qwen (DashScope OpenAI-compatible) — standard API-key provider.
     #[serde(default)]
     pub qwen: Option<ProviderConfig>,
@@ -683,15 +679,6 @@ impl ProviderConfigs {
                 .clone()
                 .unwrap_or_else(|| "opencode/gpt-5-nano".to_string());
             return ("opencode".to_string(), model);
-        }
-        if let Some(c) = self.qwen_code_cli.as_ref()
-            && c.enabled
-        {
-            let model = c
-                .default_model
-                .clone()
-                .unwrap_or_else(|| "qwen3-coder-plus".to_string());
-            return ("qwen-cli".to_string(), model);
         }
         let candidates: &[(&str, Option<&ProviderConfig>)] = &[
             ("qwen", self.qwen.as_ref()),
@@ -2867,20 +2854,6 @@ pub fn resolve_provider_from_config(config: &Config) -> (&str, &str) {
             .and_then(|p| p.default_model.as_deref())
             .unwrap_or("qwen3.6-plus");
         return ("Qwen", model);
-    }
-    if config
-        .providers
-        .qwen_code_cli
-        .as_ref()
-        .is_some_and(|p| p.enabled)
-    {
-        let model = config
-            .providers
-            .qwen_code_cli
-            .as_ref()
-            .and_then(|p| p.default_model.as_deref())
-            .unwrap_or("qwen3-coder-plus");
-        return ("Qwen CLI", model);
     }
     if let Some((name, cfg)) = config.providers.active_custom() {
         let model = cfg.default_model.as_deref().unwrap_or("default");
