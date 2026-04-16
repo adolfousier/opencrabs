@@ -1551,16 +1551,16 @@ pub(crate) async fn handle_message(
                         sent.len()
                     );
                 }
-                // If dedup would wipe the final response to nothing, keep the
-                // original — losing a near-duplicate is strictly better than
-                // losing the whole answer. Prior behavior silently dropped
-                // the reply when an intermediate matched the final byte-for-byte.
-                if result.is_empty() && !text_only.trim().is_empty() {
-                    tracing::warn!(
-                        "Telegram dedup would empty the final response (len={}) — keeping original instead of dropping the whole reply",
+                // If dedup stripped everything, the intermediates already
+                // cover the full response — nothing new to send. Safe now
+                // that sent_intermediates only gets pushed on confirmed
+                // successful send (see the intermediate handler above).
+                if result.is_empty() {
+                    tracing::info!(
+                        "Telegram dedup: result empty after stripping — intermediates already delivered full response (len={})",
                         text_only.len()
                     );
-                    text_only
+                    String::new()
                 } else {
                     result
                 }
@@ -2043,10 +2043,8 @@ pub(crate) async fn resume_session(
             let text_only = crate::utils::sanitize::strip_llm_artifacts(&text_only);
             let text_only = redact_secrets(&text_only);
 
-            // Dedup intermediates — but NEVER strip down to empty.
-            // Losing a near-duplicate paragraph is strictly better than losing
-            // the entire response (which can happen when an intermediate and
-            // the final are byte-identical, as we've seen with long comparisons).
+            // Dedup intermediates. Safe to strip to empty — the intermediate
+            // handler only pushes to sent_intermediates on confirmed delivery.
             let sent = {
                 let s = streaming.lock().unwrap_or_else(|e| e.into_inner());
                 s.sent_intermediates.clone()
@@ -2056,16 +2054,7 @@ pub(crate) async fn resume_session(
                 for intermediate in &sent {
                     remaining = remaining.replace(intermediate.as_str(), "");
                 }
-                let stripped = remaining.trim().to_string();
-                if stripped.is_empty() && !text_only.trim().is_empty() {
-                    tracing::warn!(
-                        "Telegram (DM) dedup would empty the final response (len={}) — keeping original",
-                        text_only.len()
-                    );
-                    text_only
-                } else {
-                    stripped
-                }
+                remaining.trim().to_string()
             } else {
                 text_only
             };

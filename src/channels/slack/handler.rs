@@ -1377,16 +1377,16 @@ async fn handle_message(
                         sent.len()
                     );
                 }
-                // Never strip down to empty. Losing a near-duplicate paragraph
-                // is strictly better than silently dropping the whole reply,
-                // which happens when an intermediate matches the final
-                // byte-for-byte (e.g. long comparisons the model repeats).
-                if result.is_empty() && !text_only.trim().is_empty() {
-                    tracing::warn!(
-                        "Slack dedup would empty the final response (len={}) — keeping original instead of dropping the whole reply",
+                // If dedup stripped everything, the intermediates already
+                // cover the full response — nothing new to send. Safe here
+                // because Slack's intermediate handler only pushes to
+                // sent_intermediates on confirmed successful post.
+                if result.is_empty() {
+                    tracing::info!(
+                        "Slack dedup: result empty after stripping — intermediates already delivered full response (len={})",
                         text_only.len()
                     );
-                    text_only
+                    String::new()
                 } else {
                     result
                 }
