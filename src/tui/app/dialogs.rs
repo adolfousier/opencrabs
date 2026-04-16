@@ -445,7 +445,7 @@ impl App {
                     // Keep selection valid after filter change
                     let filter = self.ps.model_filter.to_lowercase();
                     let count = if self.ps.models.is_empty() {
-                        PROVIDERS[self.ps.selected_provider].models.len()
+                        self.ps.current_provider().models.len()
                     } else {
                         self.ps
                             .models
@@ -469,7 +469,7 @@ impl App {
                         // Get filtered count
                         let filter = self.ps.model_filter.to_lowercase();
                         let max_models = if self.ps.models.is_empty() {
-                            PROVIDERS[self.ps.selected_provider].models.len()
+                            self.ps.current_provider().models.len()
                         } else {
                             self.ps
                                 .models
@@ -499,12 +499,13 @@ impl App {
                 self.ps.base_url,
             );
 
-            let is_cli_provider = matches!(self.ps.selected_provider, 7..=9);
+            let is_cli_provider = self.ps.is_cli();
 
             if self.ps.focused_field == 0 {
-                // On provider field - save config, DON'T close dialog
-                // Map indices >= 12 back to 11 for save (custom provider)
-                let save_idx = self.ps.selected_provider.min(11);
+                // On provider field - save config, DON'T close dialog.
+                // Existing-custom indices (>= CUSTOM_INSTANCES_START) collapse
+                // back onto the single "Custom" sentinel for persistence.
+                let save_idx = self.ps.selected_provider.min(CUSTOM_PROVIDER_IDX);
                 if let Err(e) = self
                     .save_provider_selection_internal(save_idx, false, false)
                     .await
@@ -524,37 +525,33 @@ impl App {
                 || (self.ps.focused_field == 2 && (is_custom || is_zhipu))
             {
                 // On API key field (field 1 for non-Custom non-zhipu, field 2 for zhipu/Custom)
-                // Map >= 11 back to 11 for save (all custom providers use idx 11+)
-                let provider_idx = self.ps.selected_provider.min(11);
+                let provider_idx = self.ps.selected_provider.min(CUSTOM_PROVIDER_IDX);
 
                 // User typed a new key — sentinel means key was pre-populated and not changed
                 let key_changed =
                     !self.ps.api_key_input.is_empty() && !self.ps.has_existing_key_sentinel();
+                let provider_id = self.ps.provider_id();
                 let api_key = if key_changed {
                     Some(self.ps.api_key_input.clone())
+                } else if provider_id.is_empty() {
+                    // Custom provider — read from the active custom entry
+                    crate::config::Config::load()
+                        .ok()
+                        .and_then(|c| {
+                            c.providers
+                                .active_custom()
+                                .and_then(|(_, p)| p.api_key.clone())
+                        })
+                        .filter(|k| !k.is_empty())
                 } else {
                     // Existing key untouched — load from config (merged with keys.toml)
-                    crate::config::Config::load().ok().and_then(|c| {
-                        match provider_idx {
-                            0 => c.providers.anthropic.and_then(|p| p.api_key),
-                            1 => c.providers.openai.and_then(|p| p.api_key),
-                            2 => c.providers.github.and_then(|p| p.api_key),
-                            3 => c.providers.gemini.and_then(|p| p.api_key),
-                            4 => c.providers.openrouter.and_then(|p| p.api_key),
-                            5 => c.providers.minimax.and_then(|p| p.api_key),
-                            6 => c.providers.zhipu.and_then(|p| p.api_key),
-                            7 => None, // Claude CLI — no API key
-                            8 => None, // OpenCode CLI — no API key
-                            9 => None, // Qwen Code CLI — no API key
-                            10 => c.providers.qwen.and_then(|p| p.api_key),
-                            11 => c
-                                .providers
-                                .active_custom()
-                                .and_then(|(_, p)| p.api_key.clone()),
-                            _ => None,
-                        }
+                    crate::config::Config::load()
+                        .ok()
+                        .and_then(|c| {
+                            crate::utils::providers::config_for(&c.providers, provider_id)
+                                .and_then(|p| p.api_key.clone())
+                        })
                         .filter(|k| !k.is_empty())
-                    })
                 };
 
                 // Save provider config - DON'T close
@@ -604,12 +601,18 @@ impl App {
                 }
             } else if is_custom && self.ps.focused_field == 5 {
                 // Custom: on context window field — save
-                self.save_provider_selection(self.ps.selected_provider.min(11), false)
-                    .await?;
+                self.save_provider_selection(
+                    self.ps.selected_provider.min(CUSTOM_PROVIDER_IDX),
+                    false,
+                )
+                .await?;
             } else {
                 // Non-custom: on model field — save and close
-                self.save_provider_selection(self.ps.selected_provider.min(11), false)
-                    .await?;
+                self.save_provider_selection(
+                    self.ps.selected_provider.min(CUSTOM_PROVIDER_IDX),
+                    false,
+                )
+                .await?;
             }
         }
 
@@ -638,7 +641,10 @@ impl App {
         use super::onboarding::PROVIDERS;
         use crate::config::ProviderConfig;
 
-        let provider = &PROVIDERS[provider_idx];
+        // Defensive clamp: callers already map existing-custom indices back
+        // to CUSTOM_PROVIDER_IDX, but guard in case a future caller forgets.
+        let clamped_idx = provider_idx.min(CUSTOM_PROVIDER_IDX);
+        let provider = &PROVIDERS[clamped_idx];
 
         // Load existing config to merge — CRITICAL: empty defaults would wipe all settings
         let mut config = crate::config::Config::load().map_err(|e| {
@@ -677,75 +683,21 @@ impl App {
             p.enabled = false;
         }
 
-        // Get existing key from config if not changing
-        // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=z.ai GLM, 7=Claude CLI, 8=OpenCode CLI, 9=Qwen Code, 10=Qwen (native), 11=Custom
-        let existing_key = match provider_idx {
-            0 => config
-                .providers
-                .anthropic
-                .as_ref()
-                .and_then(|p| p.api_key.as_ref())
-                .filter(|k| !k.is_empty())
-                .cloned(),
-            1 => config
-                .providers
-                .openai
-                .as_ref()
-                .and_then(|p| p.api_key.as_ref())
-                .filter(|k| !k.is_empty())
-                .cloned(),
-            2 => config
-                .providers
-                .github
-                .as_ref()
-                .and_then(|p| p.api_key.as_ref())
-                .filter(|k| !k.is_empty())
-                .cloned(),
-            3 => config
-                .providers
-                .gemini
-                .as_ref()
-                .and_then(|p| p.api_key.as_ref())
-                .filter(|k| !k.is_empty())
-                .cloned(),
-            4 => config
-                .providers
-                .openrouter
-                .as_ref()
-                .and_then(|p| p.api_key.as_ref())
-                .filter(|k| !k.is_empty())
-                .cloned(),
-            5 => config
-                .providers
-                .minimax
-                .as_ref()
-                .and_then(|p| p.api_key.as_ref())
-                .filter(|k| !k.is_empty())
-                .cloned(),
-            6 => config
-                .providers
-                .zhipu
-                .as_ref()
-                .and_then(|p| p.api_key.as_ref())
-                .filter(|k| !k.is_empty())
-                .cloned(),
-            7 => None, // Claude CLI — no API key needed
-            8 => None, // OpenCode CLI — no API key needed
-            9 => None, // Qwen Code CLI — no API key needed
-            10 => config
-                .providers
-                .qwen
-                .as_ref()
-                .and_then(|p| p.api_key.as_ref())
-                .filter(|k| !k.is_empty())
-                .cloned(),
-            11 => config
+        // Get existing key from config if not changing. Routes by provider
+        // id so reordering PROVIDERS doesn't break the match.
+        let existing_key = if provider.id.is_empty() {
+            // Custom — pull key from the currently active custom entry
+            config
                 .providers
                 .active_custom()
                 .and_then(|(_, p)| p.api_key.as_ref())
                 .filter(|k| !k.is_empty())
-                .cloned(),
-            _ => None,
+                .cloned()
+        } else {
+            crate::utils::providers::config_for(&config.providers, provider.id)
+                .and_then(|p| p.api_key.as_ref())
+                .filter(|k| !k.is_empty())
+                .cloned()
         };
 
         // Only use a key if the user actually typed one — never pull from config
@@ -805,7 +757,9 @@ impl App {
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| "default".to_string())
         };
-        // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter, 5=Minimax, 6=z.ai GLM, 7=Claude CLI, 8=OpenCode CLI, 9=Qwen Code, 10=Qwen (native), 11=Custom
+        // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter,
+        // 5=Minimax, 6=z.ai GLM, 7=Claude CLI, 8=OpenCode CLI, 9=Qwen (native),
+        // 10=Custom (CUSTOM_PROVIDER_IDX). Keep this in sync with PROVIDERS.
         match provider_idx {
             0 => {
                 // Anthropic
@@ -1025,7 +979,7 @@ impl App {
 
         try_write(section, "enabled", "true");
 
-        // Write base_url if applicable
+        // Write base_url if applicable (indices match PROVIDERS)
         match provider_idx {
             2 => {
                 try_write(
@@ -1053,13 +1007,7 @@ impl App {
                 };
                 try_write(section, "endpoint_type", endpoint_type);
             }
-            10 if !self.ps.base_url.is_empty() => {
-                try_write(section, "base_url", &self.ps.base_url);
-                if !self.ps.context_window.is_empty() {
-                    try_write(section, "context_window", &self.ps.context_window);
-                }
-            }
-            11 => {
+            idx if idx == CUSTOM_PROVIDER_IDX && !self.ps.base_url.is_empty() => {
                 try_write(section, "base_url", &self.ps.base_url);
                 if !self.ps.context_window.is_empty() {
                     try_write(section, "context_window", &self.ps.context_window);
