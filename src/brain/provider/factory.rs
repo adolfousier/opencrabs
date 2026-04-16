@@ -513,6 +513,12 @@ fn build_qwen_provider_inner(
         })
     });
 
+    let mgr_for_invalidate = manager.clone();
+    let auth_invalidate_fn: super::custom_openai_compatible::AuthInvalidateFn =
+        Arc::new(move || {
+            mgr_for_invalidate.invalidate();
+        });
+
     let base_url = qwen_config
         .base_url
         .clone()
@@ -535,6 +541,7 @@ fn build_qwen_provider_inner(
         .with_token_fn(token_fn)
         .with_base_url_fn(base_url_fn)
         .with_auth_refresh_fn(auth_refresh_fn)
+        .with_auth_invalidate_fn(auth_invalidate_fn)
         .with_extra_headers(qwen_extra_headers())
         .with_body_transform({
             let enable_thinking = effective_config.enable_thinking;

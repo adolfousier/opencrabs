@@ -232,6 +232,11 @@ pub type AuthRefreshFn = Arc<
         + Sync,
 >;
 
+/// Auth-invalidate hook. Called when a refreshed token is *still* rejected
+/// (401/403 after retry), meaning the account's OAuth credentials are dead.
+/// The callback should clear persisted credentials so re-auth is triggered.
+pub type AuthInvalidateFn = Arc<dyn Fn() + Send + Sync>;
+
 /// OpenAI provider for GPT models
 #[derive(Clone)]
 pub struct OpenAIProvider {
@@ -261,6 +266,9 @@ pub struct OpenAIProvider {
     /// Optional async auth-refresh hook. When set, a 401/403 response
     /// triggers a single retry after calling this hook.
     auth_refresh_fn: Option<AuthRefreshFn>,
+    /// Called when refresh + retry still gets 401/403 — account is dead,
+    /// credentials should be cleared so re-auth is required.
+    auth_invalidate_fn: Option<AuthInvalidateFn>,
     /// When set, overrides the automatic retry config selection in
     /// `retry_config()`. Used by `RotatingQwenProvider` to disable
     /// retry-on-rate-limit for sub-providers (rotation handles 429).
@@ -327,6 +335,7 @@ impl OpenAIProvider {
             body_transform: None,
             base_url_fn: None,
             auth_refresh_fn: None,
+            auth_invalidate_fn: None,
             retry_config_override: None,
         }
     }
@@ -355,6 +364,7 @@ impl OpenAIProvider {
             body_transform: None,
             base_url_fn: None,
             auth_refresh_fn: None,
+            auth_invalidate_fn: None,
             retry_config_override: None,
         }
     }
@@ -383,6 +393,7 @@ impl OpenAIProvider {
             body_transform: None,
             base_url_fn: None,
             auth_refresh_fn: None,
+            auth_invalidate_fn: None,
             retry_config_override: None,
         }
     }
@@ -455,6 +466,14 @@ impl OpenAIProvider {
     /// retry the failed request exactly once with the refreshed token.
     pub fn with_auth_refresh_fn(mut self, f: AuthRefreshFn) -> Self {
         self.auth_refresh_fn = Some(f);
+        self
+    }
+
+    /// Install an auth-invalidate hook. Called when a refreshed token is
+    /// *still* rejected (401/403 after retry), meaning the OAuth credentials
+    /// are dead and must be cleared so re-auth is triggered.
+    pub fn with_auth_invalidate_fn(mut self, f: AuthInvalidateFn) -> Self {
+        self.auth_invalidate_fn = Some(f);
         self
     }
 
@@ -1533,7 +1552,7 @@ impl Provider for OpenAIProvider {
                 tracing::warn!("{} auth error — refreshing and retrying", self.name);
                 match refresh().await {
                     Ok(()) => {
-                        return retry_with_backoff(
+                        let result = retry_with_backoff(
                             || async {
                                 let body = self.encode_body(&openai_request)?;
                                 let response = self
@@ -1552,9 +1571,24 @@ impl Provider for OpenAIProvider {
                             &retry_config,
                         )
                         .await;
+                        // If the retry *still* hit a 401/403, the new token is
+                        // also dead — invalidate the account so re-auth triggers.
+                        if let Err(ref retry_err) = result
+                            && Self::is_auth_error(retry_err)
+                            && let Some(ref invalidate) = self.auth_invalidate_fn
+                        {
+                            tracing::warn!("{} token still dead after refresh — invalidating account", self.name);
+                            invalidate();
+                        }
+                        return result;
                     }
                     Err(msg) => {
                         tracing::error!("{} auth refresh failed: {}", self.name, msg);
+                        // Refresh itself failed (e.g. refresh_token dead) — invalidate.
+                        if let Some(ref invalidate) = self.auth_invalidate_fn {
+                            tracing::warn!("{} refresh failed — invalidating account", self.name);
+                            invalidate();
+                        }
                     }
                 }
             }
@@ -1719,9 +1753,23 @@ impl Provider for OpenAIProvider {
                         &retry_config,
                     )
                     .await;
+                    // If the retry *still* hit a 401/403, the new token is
+                    // also dead — invalidate the account.
+                    if let Err(ref retry_err) = response
+                        && Self::is_auth_error(retry_err)
+                        && let Some(ref invalidate) = self.auth_invalidate_fn
+                    {
+                        tracing::warn!("{} token still dead after refresh — invalidating account", self.name);
+                        invalidate();
+                    }
                 }
                 Err(msg) => {
                     tracing::error!("{} stream auth refresh failed: {}", self.name, msg);
+                    // Refresh itself failed — invalidate.
+                    if let Some(ref invalidate) = self.auth_invalidate_fn {
+                        tracing::warn!("{} refresh failed — invalidating account", self.name);
+                        invalidate();
+                    }
                 }
             }
         }

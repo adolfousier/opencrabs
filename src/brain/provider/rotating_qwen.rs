@@ -70,7 +70,10 @@ impl RotatingQwenProvider {
         // failed — the OAuth token is dead. Rotate to the next account.
         matches!(
             err,
-            ProviderError::ApiError { status: 401 | 403, .. }
+            ProviderError::ApiError {
+                status: 401 | 403,
+                ..
+            }
         )
     }
 }

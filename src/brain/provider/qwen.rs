@@ -1166,6 +1166,36 @@ impl QwenTokenManager {
         Ok(())
     }
 
+    /// Invalidate this account's credentials. Called when refresh + retry
+    /// still gets 401 — the OAuth tokens are permanently dead.
+    /// Clears in-memory state and persists empty credentials to keys.toml
+    /// so the account is excluded from rotation until re-authenticated.
+    pub fn invalidate(&self) {
+        tracing::warn!(
+            "Qwen account {:?} invalidated — clearing credentials",
+            self.account_index
+        );
+        // Clear in-memory state
+        if let Ok(mut w) = self.state.write() {
+            *w = QwenCredentials {
+                access_token: String::new(),
+                token_type: "Bearer".into(),
+                refresh_token: String::new(),
+                resource_url: String::new(),
+                expiry_date: 0,
+            };
+        }
+        // Persist cleared credentials to keys.toml
+        let dead_creds = QwenCredentials {
+            access_token: String::new(),
+            token_type: "Bearer".into(),
+            refresh_token: String::new(),
+            resource_url: String::new(),
+            expiry_date: 0,
+        };
+        self.persist_refreshed(&dead_creds);
+    }
+
     /// Check `~/.qwen/oauth_creds.json` mtime; if it moved forward since we
     /// last looked, re-import the credentials from disk. Returns `true` if
     /// creds were reloaded.
