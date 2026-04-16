@@ -63,7 +63,15 @@ impl RotatingQwenProvider {
     }
 
     fn should_rotate(err: &ProviderError) -> bool {
-        err.is_retryable()
+        if err.is_retryable() {
+            return true;
+        }
+        // Auth errors (401/403) after the per-account refresh hook already
+        // failed — the OAuth token is dead. Rotate to the next account.
+        matches!(
+            err,
+            ProviderError::ApiError { status: 401 | 403, .. }
+        )
     }
 }
 
