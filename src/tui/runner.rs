@@ -20,13 +20,69 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
 
-/// Captures `file:line:col` of the last panic so the render loop can
-/// correlate a caught panic with its source. `catch_unwind` only hands
-/// back the payload message, not the location — so we stash it via the
-/// panic hook (which runs before `catch_unwind` swallows it) and read
-/// it out after.
-static LAST_PANIC_LOCATION: LazyLock<Mutex<Option<(String, u32, u32)>>> =
-    LazyLock::new(|| Mutex::new(None));
+/// Captures location + filtered backtrace of the last panic so the
+/// render loop can correlate a caught panic with its source. `catch_unwind`
+/// only hands back the payload message, not the location — so we stash
+/// both via the panic hook (which runs before `catch_unwind` swallows it)
+/// and read them out after.
+///
+/// The `file:line:col` alone usually points at ratatui internals
+/// (e.g. `ratatui-core/.../buffer.rs:250`) — useless without knowing
+/// which of *our* widgets called in. The filtered backtrace picks the
+/// first frame under `opencrabs::tui::` so the caller widget is named.
+static LAST_PANIC_LOCATION: LazyLock<Mutex<Option<PanicInfo>>> = LazyLock::new(|| Mutex::new(None));
+
+#[derive(Clone)]
+struct PanicInfo {
+    file: String,
+    line: u32,
+    column: u32,
+    /// First OpenCrabs frame pulled out of the backtrace, if any.
+    /// Format `module::fn at path:line` — typically the widget render call
+    /// that fed ratatui an out-of-bounds coord.
+    opencrabs_frame: Option<String>,
+}
+
+/// Walk a captured `Backtrace` and return the first frame whose symbol
+/// name starts with `opencrabs::`. `Backtrace`'s `Display` impl renders
+/// one frame per two lines:
+///
+/// ```text
+///    N: symbol_name
+///              at src/path.rs:LINE:COL
+/// ```
+///
+/// We scan for any line containing `opencrabs::` (skipping the panic
+/// hook itself), pull the symbol + `at ...` pair, and return them so
+/// the render-panic log points at the actual widget that called
+/// ratatui with an out-of-bounds coord, not ratatui's internal bounds
+/// check.
+fn first_opencrabs_frame(bt: &std::backtrace::Backtrace) -> Option<String> {
+    let text = format!("{}", bt);
+    let mut lines = text.lines().peekable();
+    while let Some(line) = lines.next() {
+        let trimmed = line.trim();
+        if trimmed.contains("opencrabs::")
+            && !trimmed.contains("first_opencrabs_frame")
+            && !trimmed.contains("runner::")
+        {
+            let symbol = trimmed
+                .trim_start_matches(|c: char| c.is_ascii_digit() || c == ':' || c == ' ')
+                .to_string();
+            let at = lines
+                .peek()
+                .filter(|l| l.trim().starts_with("at "))
+                .map(|l| l.trim().to_string())
+                .unwrap_or_default();
+            return Some(if at.is_empty() {
+                symbol
+            } else {
+                format!("{} {}", symbol, at)
+            });
+        }
+    }
+    None
+}
 
 /// Force-restore terminal state. Safe to call from signal handlers and panic hooks.
 fn force_restore_terminal() {
@@ -50,10 +106,19 @@ pub async fn run(mut app: App) -> Result<()> {
     // the message, not the source location).
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        if let Some(loc) = info.location()
-            && let Ok(mut slot) = LAST_PANIC_LOCATION.lock()
-        {
-            *slot = Some((loc.file().to_string(), loc.line(), loc.column()));
+        if let Some(loc) = info.location() {
+            // Force-capture unconditionally — render panics are rare,
+            // and RUST_BACKTRACE=1 is usually unset in TUI sessions.
+            let bt = std::backtrace::Backtrace::force_capture();
+            let opencrabs_frame = first_opencrabs_frame(&bt);
+            if let Ok(mut slot) = LAST_PANIC_LOCATION.lock() {
+                *slot = Some(PanicInfo {
+                    file: loc.file().to_string(),
+                    line: loc.line(),
+                    column: loc.column(),
+                    opencrabs_frame,
+                });
+            }
         }
         force_restore_terminal();
         default_hook(info);
@@ -218,14 +283,21 @@ async fn run_loop(
                 } else {
                     "unknown render panic".to_string()
                 };
-                let loc = LAST_PANIC_LOCATION
+                let (loc, caller) = LAST_PANIC_LOCATION
                     .lock()
                     .ok()
                     .and_then(|slot| slot.clone())
-                    .map(|(f, l, c)| format!(" at {}:{}:{}", f, l, c))
+                    .map(|info| {
+                        let loc = format!(" at {}:{}:{}", info.file, info.line, info.column);
+                        let caller = info
+                            .opencrabs_frame
+                            .map(|f| format!(" — caller: {}", f))
+                            .unwrap_or_default();
+                        (loc, caller)
+                    })
                     .unwrap_or_default();
-                tracing::error!("[TUI] render panic caught{}: {}", loc, msg);
-                app.error_message = Some(format!("render panic{}: {}", loc, msg));
+                tracing::error!("[TUI] render panic caught{}{}: {}", loc, caller, msg);
+                app.error_message = Some(format!("render panic{}{}: {}", loc, caller, msg));
                 // Try to recover the terminal state for the next frame.
                 let _ = terminal.clear();
             }
