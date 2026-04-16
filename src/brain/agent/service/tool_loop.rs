@@ -2997,9 +2997,17 @@ impl AgentService {
                 total_cache_read,
             );
 
-        // Update message with usage info
+        // Update message with usage info. Stash the full prompt token count
+        // (billable_input = non-cached + cache_creation + cache_read) as the
+        // authoritative "context size at this turn" so session reload reads
+        // it directly without re-tokenizing message content.
         message_service
-            .update_message_usage(assistant_db_msg.id, total_tokens as i32, cost)
+            .update_message_usage(
+                assistant_db_msg.id,
+                total_tokens as i32,
+                cost,
+                Some(billable_input as i32),
+            )
             .await
             .map_err(|e| AgentError::Database(e.to_string()))?;
 

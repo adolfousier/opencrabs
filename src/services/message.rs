@@ -41,6 +41,7 @@ impl MessageService {
             created_at: Utc::now(),
             token_count: None,
             cost: None,
+            input_tokens: None,
         };
 
         repo.create(&message)
@@ -88,11 +89,23 @@ impl MessageService {
         Ok(())
     }
 
-    /// Update message usage statistics
-    pub async fn update_message_usage(&self, id: Uuid, token_count: i32, cost: f64) -> Result<()> {
+    /// Update message usage statistics.
+    /// `input_tokens` is the server-reported prompt token count for the
+    /// request that produced this assistant response. It overrides the
+    /// prior value if any (always the latest server reading).
+    pub async fn update_message_usage(
+        &self,
+        id: Uuid,
+        token_count: i32,
+        cost: f64,
+        input_tokens: Option<i32>,
+    ) -> Result<()> {
         let mut message = self.get_message_required(id).await?;
         message.token_count = Some(token_count);
         message.cost = Some(cost);
+        if input_tokens.is_some() {
+            message.input_tokens = input_tokens;
+        }
 
         let repo = MessageRepository::new(self.context.pool());
         repo.update(&message)
@@ -100,12 +113,25 @@ impl MessageService {
             .context("Failed to update message usage")?;
 
         tracing::debug!(
-            "Updated message usage: {} ({} tokens, ${:.4})",
+            "Updated message usage: {} ({} output, {} input, ${:.4})",
             id,
             token_count,
+            input_tokens
+                .map(|t| t.to_string())
+                .unwrap_or_else(|| "—".to_string()),
             cost
         );
         Ok(())
+    }
+
+    /// Server-reported prompt tokens from the most recent assistant
+    /// response in this session. Authoritative "last known context size"
+    /// — no estimation, no mirror cache.
+    pub async fn last_assistant_input_tokens(&self, session_id: Uuid) -> Result<Option<i32>> {
+        let repo = MessageRepository::new(self.context.pool());
+        repo.last_assistant_input_tokens(session_id)
+            .await
+            .context("Failed to read last assistant input_tokens")
     }
 
     /// Append content to an existing message (for real-time history persistence)
@@ -274,7 +300,7 @@ mod tests {
             .unwrap();
 
         message_service
-            .update_message_usage(message.id, 100, 0.05)
+            .update_message_usage(message.id, 100, 0.05, None)
             .await
             .unwrap();
 
@@ -431,7 +457,7 @@ mod tests {
             .await
             .unwrap();
         message_service
-            .update_message_usage(msg1.id, 100, 0.05)
+            .update_message_usage(msg1.id, 100, 0.05, None)
             .await
             .unwrap();
 
@@ -440,7 +466,7 @@ mod tests {
             .await
             .unwrap();
         message_service
-            .update_message_usage(msg2.id, 200, 0.10)
+            .update_message_usage(msg2.id, 200, 0.10, None)
             .await
             .unwrap();
 

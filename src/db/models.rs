@@ -128,8 +128,16 @@ pub struct Message {
     pub content: String,
     pub sequence: i32,
     pub created_at: DateTime<Utc>,
+    /// Output tokens (completion) reported by the provider. For assistant
+    /// messages this is `usage.completion_tokens` / `output_tokens`.
     pub token_count: Option<i32>,
     pub cost: Option<f64>,
+    /// Server-reported prompt token count for the request that produced
+    /// this assistant message (`usage.prompt_tokens` / `input_tokens`).
+    /// Populated only on assistant rows; always `None` for user rows.
+    /// Used as the authoritative "last known context size" on session load
+    /// — no more tokenizing raw message content to estimate.
+    pub input_tokens: Option<i32>,
 }
 
 impl Message {
@@ -143,6 +151,7 @@ impl Message {
             created_at: timestamp_col(row, "created_at")?,
             token_count: row.get("token_count")?,
             cost: row.get("cost")?,
+            input_tokens: row.get("input_tokens").ok(),
         })
     }
 
@@ -157,6 +166,7 @@ impl Message {
             created_at: Utc::now(),
             token_count: None,
             cost: None,
+            input_tokens: None,
         }
     }
 }

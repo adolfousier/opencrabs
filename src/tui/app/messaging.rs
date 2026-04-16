@@ -138,18 +138,6 @@ impl App {
         // Sync is_processing flag with per-session state
         self.is_processing = self.processing_sessions.contains(&session.id);
 
-        // Calculate context tokens from compaction point (what the agent actually sends)
-        // BEFORE display trimming, so we don't need to clone messages.
-        let compaction_messages =
-            crate::brain::agent::service::AgentService::messages_from_last_compaction(
-                messages.clone(),
-            );
-        let compaction_token_count: usize = compaction_messages
-            .iter()
-            .filter(|m| !m.content.is_empty())
-            .map(|m| crate::brain::tokenizer::count_tokens(&m.content))
-            .sum();
-
         let (display, hidden) = Self::trim_messages_to_display_budget(&messages, 200_000);
         self.hidden_older_messages = hidden;
         self.oldest_displayed_sequence = display.first().map(|m| m.sequence).unwrap_or(0);
@@ -172,21 +160,18 @@ impl App {
         // Sync shared session ID for channels (Telegram, WhatsApp)
         *self.shared_session_id.lock().await = Some(session.id);
 
-        // Restore last known context size for this session.
-        // Priority: cached value from a real response > compaction-aware token sum > agent baseline.
-        // Uses compaction_token_count (from last compaction point) — NOT all displayed messages.
+        // Restore last known context size from the server-reported value
+        // persisted on the most recent assistant message (see
+        // MessageRepository::last_assistant_input_tokens). No estimation,
+        // no mirror cache — the provider already told us the real count.
         let base = self.agent_service.base_context_tokens();
         self.last_input_tokens = self
-            .session_context_cache
-            .get(&session_id)
-            .copied()
-            .or_else(|| {
-                if compaction_token_count > 0 {
-                    Some(compaction_token_count as u32 + base)
-                } else {
-                    None
-                }
-            })
+            .message_service
+            .last_assistant_input_tokens(session_id)
+            .await
+            .ok()
+            .flatten()
+            .map(|t| t as u32)
             .or(Some(base));
 
         // Clear unread indicator for this session
@@ -1690,12 +1675,10 @@ impl App {
         // Reload user commands (agent may have written new ones to commands.json)
         self.reload_user_commands();
 
-        // Track context usage from latest response and cache per session
+        // Track context usage from latest response. Persistence to DB is
+        // handled downstream by update_message_usage (stores on the
+        // assistant message row); no separate in-memory cache needed.
         self.last_input_tokens = Some(response.context_tokens);
-        if let Some(ref session) = self.current_session {
-            self.session_context_cache
-                .insert(session.id, response.context_tokens);
-        }
 
         // Strip LLM artifacts (<!-- reasoning -->, </invoke>, XML tool blocks)
         // before displaying in TUI — same sanitization as Telegram/external channels.

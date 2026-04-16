@@ -1771,7 +1771,6 @@ impl App {
                     .unwrap_or(false);
                 self.session_service.delete_session(session_id).await?;
                 // Clean up all cached state for this session
-                self.session_context_cache.remove(&session_id);
                 self.pane_message_cache.remove(&session_id);
                 self.queued_messages.remove(&session_id);
                 self.session_cancel_tokens.remove(&session_id);

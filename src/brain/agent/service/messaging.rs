@@ -61,9 +61,15 @@ impl AgentService {
                 response.usage.cache_read_tokens,
             );
 
-        // Update message with usage info
+        // Update message with usage info, stashing the server-reported
+        // prompt token count so session reload reads it directly.
         message_service
-            .update_message_usage(assistant_db_msg.id, total_tokens as i32, cost)
+            .update_message_usage(
+                assistant_db_msg.id,
+                total_tokens as i32,
+                cost,
+                Some(billable_input as i32),
+            )
             .await
             .map_err(|e| AgentError::Database(e.to_string()))?;
 

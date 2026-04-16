@@ -103,9 +103,15 @@ impl MessageRepository {
             .interact(move |conn| {
                 conn.execute(
                     "UPDATE messages
-                     SET content = ?1, token_count = ?2, cost = ?3
-                     WHERE id = ?4",
-                    params![m.content, m.token_count, m.cost, m.id.to_string()],
+                     SET content = ?1, token_count = ?2, cost = ?3, input_tokens = ?4
+                     WHERE id = ?5",
+                    params![
+                        m.content,
+                        m.token_count,
+                        m.cost,
+                        m.input_tokens,
+                        m.id.to_string()
+                    ],
                 )
             })
             .await
@@ -114,6 +120,36 @@ impl MessageRepository {
 
         tracing::debug!("Updated message: {}", message.id);
         Ok(())
+    }
+
+    /// Fetch the server-reported `input_tokens` from the most recent
+    /// assistant message in a session that has one set. Returns `None`
+    /// when the session has no assistant responses yet (first turn, or
+    /// a fresh session where every assistant row is still streaming).
+    /// Used on session load as the authoritative "last known context
+    /// size" — no need to tokenize raw content to guess.
+    pub async fn last_assistant_input_tokens(&self, session_id: Uuid) -> Result<Option<i32>> {
+        let sid = session_id.to_string();
+        let tokens = self
+            .pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.query_row(
+                    "SELECT input_tokens FROM messages \
+                     WHERE session_id = ?1 AND role = 'assistant' \
+                     AND input_tokens IS NOT NULL \
+                     ORDER BY sequence DESC LIMIT 1",
+                    params![sid],
+                    |r| r.get::<_, Option<i32>>(0),
+                )
+                .optional()
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to query last assistant input_tokens")?;
+        Ok(tokens.flatten())
     }
 
     /// Append content to an existing message (for real-time history persistence)

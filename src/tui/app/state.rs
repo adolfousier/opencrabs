@@ -407,8 +407,6 @@ pub struct App {
     pub last_input_tokens: Option<u32>,
     /// Per-response output token count (streaming, counted via tiktoken)
     pub streaming_output_tokens: u32,
-    /// Per-session cache of last known input token count — survives session switches
-    pub(crate) session_context_cache: HashMap<Uuid, u32>,
 
     /// Active tool call group (during processing)
     pub active_tool_group: Option<ToolCallGroup>,
@@ -589,7 +587,6 @@ impl App {
                 .context_window_for_model(&agent_service.provider_model()),
             last_input_tokens: None,
             streaming_output_tokens: 0,
-            session_context_cache: HashMap::new(),
             active_tool_group: None,
             rebuild_status: None,
             update_available_version: None,
@@ -2868,6 +2865,7 @@ mod tests {
             created_at: chrono::Utc::now(),
             token_count: Some(10),
             cost: Some(0.001),
+            input_tokens: None,
         };
 
         let display_msg: DisplayMessage = msg.into();

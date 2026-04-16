@@ -222,33 +222,29 @@ The summary above is NOT sufficient for implementation work.
             })
             .unwrap_or(context.messages.len());
 
-        // Cap the messages sent to the summarizer so the compaction request itself
-        // never exceeds the provider's context window. Reserve enough tokens for:
-        // - compaction prompt (~1k tokens)
-        // - system prompt (~1k tokens)
-        // - output budget (8k tokens)
-        // - safety margin (6k tokens)
-        // Total overhead: 16k tokens. Take the LAST N messages (most recent = most useful).
-        let compaction_overhead = 16_000usize;
-        // Also cap at 75% of context window to leave headroom — compaction request
-        // must itself fit within the provider limit.
-        let max_budget = (context.max_tokens as f64 * 0.75) as usize;
-        let summary_budget = context
-            .max_tokens
-            .saturating_sub(compaction_overhead)
-            .min(max_budget);
-        let mut running_tokens = 0usize;
+        // Send EVERY message since the last compaction. Compaction should
+        // see exactly what the agent was running under, not a trimmed slice
+        // — otherwise the summary silently loses the oldest turns whenever
+        // the budget was smaller than the window. Reserve room only for
+        // the summarizer's OUTPUT budget (8k) + compaction prompt (~1k).
+        let output_reserve = 8_000usize + 1_000usize;
+        let max_input_budget = context.max_tokens.saturating_sub(output_reserve);
         let all_msgs = &context.messages[start..];
-        // Walk backwards from most-recent until we hit the budget
+        let mut running_tokens = 0usize;
         let msgs_to_include: Vec<&Message> = all_msgs
             .iter()
             .rev()
             .take_while(|m| {
                 let t = AgentContext::estimate_tokens_static(m);
-                if running_tokens + t <= summary_budget {
+                if running_tokens + t <= max_input_budget {
                     running_tokens += t;
                     true
                 } else {
+                    tracing::warn!(
+                        "Compaction: dropping oldest messages to fit input budget ({}/{} tokens used)",
+                        running_tokens,
+                        max_input_budget,
+                    );
                     false
                 }
             })
@@ -258,11 +254,12 @@ The summary above is NOT sufficient for implementation work.
             .collect();
 
         tracing::info!(
-            "Compaction: sending {} / {} messages to summarizer ({} / {} tokens)",
+            "Compaction: sending {} / {} messages to summarizer ({} / {} input tokens, reserving {} for output)",
             msgs_to_include.len(),
             all_msgs.len(),
             running_tokens,
             context.max_tokens,
+            output_reserve,
         );
 
         for msg in msgs_to_include {
