@@ -57,10 +57,11 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
     // Compute queue height (1 row if current session has queued message)
     let queue_height: u16 = {
-        let has_queue = app
-            .current_session
-            .as_ref()
-            .is_some_and(|s| app.queued_messages.contains_key(&s.id));
+        let has_queue = app.current_session.as_ref().is_some_and(|s| {
+            app.queued_messages
+                .get(&s.id)
+                .is_some_and(|v| !v.is_empty())
+        });
         if has_queue { 2 } else { 0 }
     };
 

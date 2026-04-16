@@ -81,14 +81,19 @@ pub(super) fn render_queue(f: &mut Frame, app: &App, area: Rect) -> u16 {
     let Some(session) = &app.current_session else {
         return 0;
     };
-    let Some(queued) = app.queued_messages.get(&session.id) else {
+    let Some(msgs) = app.queued_messages.get(&session.id) else {
         return 0;
     };
+    if msgs.is_empty() {
+        return 0;
+    }
 
     let dim_style = Style::default().fg(Color::Rgb(100, 100, 100));
-    let flat = queued.replace('\n', " ");
+    // Show the last queued message as preview
+    let last = msgs.last().unwrap();
+    let flat = last.replace('\n', " ");
     let content_width = area.width.saturating_sub(2) as usize; // borders
-    let max_preview = content_width.saturating_sub(25);
+    let max_preview = content_width.saturating_sub(30);
     let preview: String = if flat.chars().count() > max_preview {
         let truncated: String = flat.chars().take(max_preview).collect();
         format!("{}...", truncated)
@@ -96,8 +101,14 @@ pub(super) fn render_queue(f: &mut Frame, app: &App, area: Rect) -> u16 {
         flat
     };
 
+    let count_label = if msgs.len() > 1 {
+        format!("⏳ queued ({}): ", msgs.len())
+    } else {
+        "⏳ queued: ".to_string()
+    };
+
     let line = Line::from(vec![
-        Span::styled("⏳ queued: ", dim_style),
+        Span::styled(count_label, dim_style),
         Span::styled(preview, dim_style.add_modifier(Modifier::ITALIC)),
         Span::styled(
             "  (Up to edit)",

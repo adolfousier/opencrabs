@@ -1465,10 +1465,10 @@ impl App {
             // The queued message is stored in queued_messages (per-session HashMap).
             // Moves it into the input_buffer for editing, removing from the queue.
             if let Some(sid) = self.current_session.as_ref().map(|s| s.id)
-                && let Some(text) = self.queued_messages.remove(&sid)
+                && let Some(msgs) = self.queued_messages.remove(&sid)
             {
                 *self.message_queue.lock().await = None;
-                self.input_buffer = text;
+                self.input_buffer = msgs.join("\n");
                 self.cursor_position = self.input_buffer.len();
             }
         } else if keys::is_up(&event)

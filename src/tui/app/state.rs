@@ -394,10 +394,10 @@ pub struct App {
     /// Queued message — shared with agent so it can be injected between tool calls
     pub(crate) message_queue: Arc<tokio::sync::Mutex<Option<String>>>,
 
-    /// Per-session queued message previews.
-    /// Key: session_id, Value: queued text. Rendered as a dimmed line above the input area.
-    /// Isolated per session — switching sessions preserves each queue independently.
-    pub(crate) queued_messages: HashMap<Uuid, String>,
+    /// Per-session queued message stack.
+    /// Key: session_id, Value: stacked messages. Multiple sends while processing
+    /// accumulate and get joined with newlines when injected.
+    pub(crate) queued_messages: HashMap<Uuid, Vec<String>>,
 
     /// Shared session ID — channels (Telegram, WhatsApp) read this to use the same session
     pub(crate) shared_session_id: Arc<tokio::sync::Mutex<Option<Uuid>>>,

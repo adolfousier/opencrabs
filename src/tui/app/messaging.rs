@@ -1442,15 +1442,26 @@ impl App {
                 session.id
             );
 
-            // Put queued text back in the input buffer so the user can see it
-            // and press Up to edit. It stays visible until actually injected.
+            // Stack queued messages — multiple sends accumulate.
             if let Some(sid) = self.current_session.as_ref().map(|s| s.id) {
-                self.queued_messages.insert(sid, content.clone());
+                self.queued_messages
+                    .entry(sid)
+                    .or_default()
+                    .push(content.clone());
             }
             self.cursor_position = self.input_buffer.len();
 
-            // Queue for injection between tool calls
-            *self.message_queue.lock().await = Some(content);
+            // Queue for injection between tool calls — join all stacked messages
+            {
+                let mut lock = self.message_queue.lock().await;
+                match lock.as_mut() {
+                    Some(existing) => {
+                        existing.push('\n');
+                        existing.push_str(&content);
+                    }
+                    None => *lock = Some(content),
+                }
+            }
             return Ok(());
         }
         if let Some(session) = &self.current_session {
