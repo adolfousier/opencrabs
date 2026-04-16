@@ -1464,22 +1464,26 @@ impl AgentService {
             }
 
             // Track token usage — fall back to tiktoken estimate when provider
-            // doesn't report usage (e.g. MiniMax streaming ignores include_usage)
+            // doesn't report usage (e.g. MiniMax streaming ignores include_usage,
+            // some MLX streaming paths drop the final usage chunk).
+            //
+            // The fallback must match the server's `prompt_tokens` semantic:
+            // messages + system prompt + tool schemas. `base_context_tokens()`
+            // already sums system + tool schemas, so we add
+            // `context.token_count` (messages) on top. Previously we only
+            // added tool tokens and dropped the 20k system prompt baseline,
+            // producing a ~20k undercount that made the UI ctx counter
+            // display 7k when the real prompt was 23k+ (post-compaction).
             let call_input_tokens = if response.usage.input_tokens > 0 {
                 response.usage.input_tokens
             } else {
-                // Serialize actual tool definitions to count their real token cost,
-                // matching how the provider computes it before each request.
-                let tool_defs = self.tool_registry.get_tool_definitions();
-                let tool_tokens = crate::brain::tokenizer::count_tokens(
-                    &serde_json::to_string(&tool_defs).unwrap_or_default(),
-                ) as u32;
-                let estimate = context.token_count as u32 + tool_tokens;
+                let baseline = self.base_context_tokens();
+                let estimate = context.token_count as u32 + baseline;
                 tracing::debug!(
-                    "Provider reported 0 input tokens, using tiktoken estimate: {} ({} msg + {} tool schemas)",
+                    "Provider reported 0 input tokens, using tiktoken estimate: {} ({} msg + {} baseline (system + tool schemas))",
                     estimate,
                     context.token_count,
-                    tool_tokens
+                    baseline
                 );
                 estimate
             };
@@ -2997,16 +3001,26 @@ impl AgentService {
                 total_cache_read,
             );
 
-        // Update message with usage info. Stash the full prompt token count
-        // (billable_input = non-cached + cache_creation + cache_read) as the
-        // authoritative "context size at this turn" so session reload reads
-        // it directly without re-tokenizing message content.
+        // Update message with usage info. For the stashed prompt-token
+        // count we prefer `billable_input` (non-cached + cache_create +
+        // cache_read == real prompt size the provider billed us for), but
+        // fall back to `context.token_count + base_context_tokens()` when
+        // the provider never emitted a usage chunk (streaming edge cases
+        // on some gateways). The latter is still an estimate, but at
+        // least includes the system + tool-schema overhead so it won't
+        // under-report by 20k when shown on the UI post-compaction.
+        let stored_input_tokens: i32 = if billable_input > 0 {
+            billable_input as i32
+        } else {
+            let overhead = self.base_context_tokens();
+            (context.token_count.saturating_add(overhead as usize)) as i32
+        };
         message_service
             .update_message_usage(
                 assistant_db_msg.id,
                 total_tokens as i32,
                 cost,
-                Some(billable_input as i32),
+                Some(stored_input_tokens),
             )
             .await
             .map_err(|e| AgentError::Database(e.to_string()))?;
