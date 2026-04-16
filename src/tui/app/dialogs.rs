@@ -16,6 +16,16 @@ impl App {
     pub(crate) fn spawn_qwen_device_flow(&self) {
         use crate::brain::provider::qwen;
         let sender = self.event_sender();
+        // When the rotation flow is active, each device-flow completion is
+        // one account out of N. Writing to the single-account `[providers.qwen]`
+        // slot 5x in a row would overwrite stale creds repeatedly and leave
+        // the wrong account as the "single" fallback. Rotation persistence
+        // happens later via `persist_all_accounts` once all accounts are collected.
+        let rotation_active = self
+            .onboarding
+            .as_ref()
+            .is_some_and(|w| w.ps.qwen_rotation_enabled)
+            || self.ps.qwen_rotation_enabled;
         tokio::spawn(async move {
             // Retry loop: on poll failure (expired code, WAF, etc.), generate
             // a fresh device code and URL automatically. The user can also
@@ -53,7 +63,12 @@ impl App {
 
                 match qwen::poll_for_token(&device.device_code, &pkce).await {
                     Ok(creds) => {
-                        if let Err(e) = creds.persist_to_keys() {
+                        // Single-account: persist now so the creds are safe
+                        // even if the app exits before the event is handled.
+                        // Rotation: skip — persistence is batched by the
+                        // QwenRotationAccountDone handler once all accounts
+                        // are collected.
+                        if !rotation_active && let Err(e) = creds.persist_to_keys() {
                             let _ = sender.send(TuiEvent::QwenOAuthError(format!(
                                 "Authorized but failed to save credentials: {}",
                                 e

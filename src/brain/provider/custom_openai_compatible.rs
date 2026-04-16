@@ -1551,6 +1551,10 @@ impl Provider for OpenAIProvider {
                 tracing::warn!("{} auth error — refreshing and retrying", self.name);
                 match refresh().await {
                     Ok(()) => {
+                        // Retry once with the new token. If this STILL returns
+                        // 401, do NOT invalidate — could be transient server
+                        // propagation delay. Let the outer rotation/fallback
+                        // handle it; the next request cycle will try again.
                         return retry_with_backoff(
                             || async {
                                 let body = self.encode_body(&openai_request)?;
@@ -1573,6 +1577,18 @@ impl Provider for OpenAIProvider {
                     }
                     Err(msg) => {
                         tracing::error!("{} auth refresh failed: {}", self.name, msg);
+                        // Only invalidate when the refresh_token itself is dead
+                        // (HTTP 400 from the token endpoint). Other errors
+                        // (network, WAF, transient 5xx) must NOT invalidate.
+                        if msg.contains("HTTP 400")
+                            && let Some(ref invalidate) = self.auth_invalidate_fn
+                        {
+                            tracing::warn!(
+                                "{} refresh_token permanently dead — invalidating account",
+                                self.name
+                            );
+                            invalidate();
+                        }
                     }
                 }
             }
@@ -1719,6 +1735,8 @@ impl Provider for OpenAIProvider {
             tracing::warn!("{} stream auth error — refreshing and retrying", self.name);
             match refresh().await {
                 Ok(()) => {
+                    // Retry once with the new token. If it STILL returns 401,
+                    // do NOT invalidate — same rationale as non-streaming path.
                     response = retry_with_backoff(
                         || async {
                             let body = self.encode_body(&openai_request)?;
@@ -1740,6 +1758,17 @@ impl Provider for OpenAIProvider {
                 }
                 Err(msg) => {
                     tracing::error!("{} stream auth refresh failed: {}", self.name, msg);
+                    // Only invalidate when the refresh_token itself is dead
+                    // (HTTP 400 from the token endpoint).
+                    if msg.contains("HTTP 400")
+                        && let Some(ref invalidate) = self.auth_invalidate_fn
+                    {
+                        tracing::warn!(
+                            "{} refresh_token permanently dead — invalidating account",
+                            self.name
+                        );
+                        invalidate();
+                    }
                 }
             }
         }
