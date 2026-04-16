@@ -1285,7 +1285,7 @@ pub fn strip_gaslighting_preamble(text: &str) -> Option<String> {
 pub fn has_phantom_tool_intent(text: &str) -> bool {
     let trimmed = text.trim();
     // Short responses are usually direct answers, not phantom narrations
-    if trimmed.len() < 80 {
+    if trimmed.len() < 40 {
         return false;
     }
     let lower = trimmed.to_lowercase();
@@ -1416,8 +1416,8 @@ pub fn has_phantom_tool_intent(text: &str) -> bool {
     let has_intent = INTENT_PHRASES.iter().any(|v| lower.contains(v));
 
     if has_intent {
-        // Corroborate: does the text reference file paths?
-        // e.g. src/foo/bar.rs, ./config.toml, Cargo.toml
+        // Corroborate: does the text reference file paths or code identifiers?
+        // e.g. src/foo/bar.rs, ./config.toml, Cargo.toml, `some_function`
         let path_re =
             Regex::new(r"(?:^|[\s`(])(?:\./)?[a-zA-Z_][\w\-]*/[\w\-/]*\.\w{1,6}(?:[\s`),:;]|$)")
                 .unwrap();
@@ -1425,7 +1425,12 @@ pub fn has_phantom_tool_intent(text: &str) -> bool {
             r"(?:^|[\s`(])[\w\-]+\.(?:rs|py|ts|tsx|js|jsx|go|sh|toml|yaml|yml|json|md)(?:[\s`),:;]|$)",
         )
         .unwrap();
-        if path_re.is_match(trimmed) || ext_re.is_match(trimmed) {
+        // Backtick code references like `auth_invalidate_fn` or `MyStruct`
+        let backtick_code_re = Regex::new(r"`[a-zA-Z_]\w+`").unwrap();
+        if path_re.is_match(trimmed)
+            || ext_re.is_match(trimmed)
+            || backtick_code_re.is_match(trimmed)
+        {
             return true;
         }
     }

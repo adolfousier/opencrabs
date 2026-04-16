@@ -1161,6 +1161,23 @@ fn phantom_tool_intent_multi_now_narration() {
 }
 
 #[test]
+fn phantom_tool_intent_backtick_code_reference() {
+    use crate::brain::agent::service::has_phantom_tool_intent;
+
+    // Intent phrase + backtick code reference = phantom
+    assert!(has_phantom_tool_intent(
+        "Now let me add the `auth_invalidate_fn` field and builder method:"
+    ));
+    assert!(has_phantom_tool_intent(
+        "Let me update the `PaneManager` struct to handle the new layout"
+    ));
+    // Backtick alone without intent phrase = not phantom
+    assert!(!has_phantom_tool_intent(
+        "The `auth_invalidate_fn` field controls token invalidation."
+    ));
+}
+
+#[test]
 fn phantom_tool_intent_past_tense_standalone() {
     use crate::brain::agent::service::has_phantom_tool_intent;
 
