@@ -1444,8 +1444,9 @@ impl App {
 
             // Put queued text back in the input buffer so the user can see it
             // and press Up to edit. It stays visible until actually injected.
-            self.queued_message_preview = Some(content.clone());
-            self.input_buffer = content.clone();
+            if let Some(sid) = self.current_session.as_ref().map(|s| s.id) {
+                self.queued_messages.insert(sid, content.clone());
+            }
             self.cursor_position = self.input_buffer.len();
 
             // Queue for injection between tool calls
@@ -1671,7 +1672,9 @@ impl App {
         if self.message_queue.lock().await.take().is_some() {
             tracing::info!("[TUI] Discarding unconsumed queued message at response complete");
         }
-        self.queued_message_preview = None;
+        if let Some(sid) = self.current_session.as_ref().map(|s| s.id) {
+            self.queued_messages.remove(&sid);
+        }
 
         // Reload user commands (agent may have written new ones to commands.json)
         self.reload_user_commands();

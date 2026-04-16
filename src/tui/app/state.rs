@@ -394,9 +394,10 @@ pub struct App {
     /// Queued message — shared with agent so it can be injected between tool calls
     pub(crate) message_queue: Arc<tokio::sync::Mutex<Option<String>>>,
 
-    /// Local copy of queued message text for display in the input area.
-    /// Set when a message is queued, cleared when injected or recalled via Up.
-    pub(crate) queued_message_preview: Option<String>,
+    /// Per-session queued message previews.
+    /// Key: session_id, Value: queued text. Rendered as a dimmed line above the input area.
+    /// Isolated per session — switching sessions preserves each queue independently.
+    pub(crate) queued_messages: HashMap<Uuid, String>,
 
     /// Shared session ID — channels (Telegram, WhatsApp) read this to use the same session
     pub(crate) shared_session_id: Arc<tokio::sync::Mutex<Option<Uuid>>>,
@@ -581,7 +582,7 @@ impl App {
             cancel_token: None,
             task_abort_handle: None,
             message_queue: Arc::new(tokio::sync::Mutex::new(None)),
-            queued_message_preview: None,
+            queued_messages: HashMap::new(),
             shared_session_id: Arc::new(tokio::sync::Mutex::new(None)),
             default_model_name: agent_service.provider_model(),
             context_max_tokens: agent_service
@@ -1681,7 +1682,9 @@ impl App {
                 });
 
                 // Clear the preview and input buffer — message is now in the chat
-                self.queued_message_preview = None;
+                if let Some(sid) = self.current_session.as_ref().map(|s| s.id) {
+                    self.queued_messages.remove(&sid);
+                }
                 if !self.input_buffer.is_empty() {
                     self.input_buffer.clear();
                     self.cursor_position = 0;

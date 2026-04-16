@@ -75,11 +75,64 @@ fn spans_with_selection(
     Line::from(spans)
 }
 
+/// Render queued messages above the input area.
+/// Returns the height consumed (0 if no queue).
+pub(super) fn render_queue(f: &mut Frame, app: &App, area: Rect) -> u16 {
+    let Some(session) = &app.current_session else {
+        return 0;
+    };
+    let Some(queued) = app.queued_messages.get(&session.id) else {
+        return 0;
+    };
+
+    let dim_style = Style::default().fg(Color::Rgb(100, 100, 100));
+    let flat = queued.replace('\n', " ");
+    let content_width = area.width.saturating_sub(2) as usize; // borders
+    let max_preview = content_width.saturating_sub(25);
+    let preview: String = if flat.chars().count() > max_preview {
+        let truncated: String = flat.chars().take(max_preview).collect();
+        format!("{}...", truncated)
+    } else {
+        flat
+    };
+
+    let line = Line::from(vec![
+        Span::styled("⏳ queued: ", dim_style),
+        Span::styled(preview, dim_style.add_modifier(Modifier::ITALIC)),
+        Span::styled(
+            "  (Up to edit)",
+            Style::default().fg(Color::Rgb(70, 70, 70)),
+        ),
+    ]);
+
+    let queue_height = 1u16;
+    let queue_area = Rect {
+        x: area.x,
+        y: area.y,
+        width: area.width,
+        height: queue_height,
+    };
+
+    let para = Paragraph::new(vec![line]).block(
+        Block::default()
+            .borders(Borders::TOP)
+            .border_style(Style::default().fg(Color::Rgb(80, 80, 80))),
+    );
+    f.render_widget(para, queue_area);
+    queue_height
+}
+
 /// Render the input box
 pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
     let input_content_width = area.width.saturating_sub(2) as usize; // borders
     let mut input_lines: Vec<Line> = Vec::new();
     let mut cursor_row: usize = 0;
+
+    // Check if current session has a queued message (for prefix styling)
+    let has_queue = app
+        .current_session
+        .as_ref()
+        .is_some_and(|s| app.queued_messages.contains_key(&s.id));
 
     let cursor_style = Style::default()
         .fg(Color::Black)
@@ -181,7 +234,7 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
     } else {
         let buf = &app.input_buffer;
         let cursor_pos = app.cursor_position;
-        let is_queued = app.queued_message_preview.is_some();
+        let is_queued = has_queue;
 
         // Build visual rows from logical lines with wrapping
         let mut line_start = 0usize;
@@ -307,27 +360,6 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
             ]));
             cursor_row = input_lines.len() - 1;
         }
-    }
-
-    // Show queued message preview below the input (dimmed, with Up hint)
-    if let Some(ref queued) = app.queued_message_preview {
-        let flat = queued.replace('\n', " ");
-        let max_preview = input_content_width.saturating_sub(25);
-        let preview: String = if flat.chars().count() > max_preview {
-            let truncated: String = flat.chars().take(max_preview).collect();
-            format!("{}...", truncated)
-        } else {
-            flat
-        };
-        let dim_style = Style::default().fg(Color::Rgb(100, 100, 100));
-        input_lines.push(Line::from(vec![
-            Span::styled("  queued: ", dim_style),
-            Span::styled(preview, dim_style.add_modifier(Modifier::ITALIC)),
-            Span::styled(
-                "  (Up to edit)",
-                Style::default().fg(Color::Rgb(70, 70, 70)),
-            ),
-        ]));
     }
 
     let border_style = Style::default().fg(Color::Rgb(120, 120, 120));

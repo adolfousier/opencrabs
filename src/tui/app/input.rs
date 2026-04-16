@@ -1192,7 +1192,9 @@ impl App {
                         // survive the cancel and get injected into the NEXT
                         // unrelated turn, appearing as a duplicate in chat.
                         *self.message_queue.lock().await = None;
-                        self.queued_message_preview = None;
+                        if let Some(sid) = self.current_session.as_ref().map(|s| s.id) {
+                            self.queued_messages.remove(&sid);
+                        }
                         // Deny any pending approvals so agent callbacks don't hang
                         for msg in &mut self.messages {
                             if let Some(ref mut approval) = msg.approval
@@ -1453,17 +1455,22 @@ impl App {
             self.focused_attachment = Some(self.attachments.len() - 1);
         } else if keys::is_up(&event)
             && !self.slash_suggestions_active
-            && self.queued_message_preview.is_some()
+            && {
+                let sid = self.current_session.as_ref().map(|s| s.id);
+                sid.is_some() && self.queued_messages.contains_key(&sid.unwrap())
+            }
             && self.input_history_index.is_none()
         {
             // Arrow Up while a message is queued — dequeue it for editing.
-            // The queue puts the text in input_buffer too, so this works
-            // regardless of whether the buffer is empty or matches the queued text.
-            // Removes from the queue so the user can modify and re-send via Enter.
-            self.queued_message_preview.take();
-            *self.message_queue.lock().await = None;
-            // Keep current input_buffer as-is (already has the queued text)
-            self.cursor_position = self.input_buffer.len();
+            // The queued message is stored in queued_messages (per-session HashMap).
+            // Moves it into the input_buffer for editing, removing from the queue.
+            if let Some(sid) = self.current_session.as_ref().map(|s| s.id)
+                && let Some(text) = self.queued_messages.remove(&sid)
+            {
+                *self.message_queue.lock().await = None;
+                self.input_buffer = text;
+                self.cursor_position = self.input_buffer.len();
+            }
         } else if keys::is_up(&event)
             && !self.slash_suggestions_active
             && self.input_buffer.is_empty()
@@ -1736,6 +1743,7 @@ impl App {
                 // Clean up all cached state for this session
                 self.session_context_cache.remove(&session_id);
                 self.pane_message_cache.remove(&session_id);
+                self.queued_messages.remove(&session_id);
                 self.session_cancel_tokens.remove(&session_id);
                 self.processing_sessions.remove(&session_id);
                 if is_current {
