@@ -1282,6 +1282,84 @@ pub fn strip_gaslighting_preamble(text: &str) -> Option<String> {
 ///
 /// Deliberately conservative: requires BOTH an action verb AND a file
 /// path pattern to avoid false-positives on conversational responses.
+/// Shared intent phrases used by both the strict and relaxed phantom
+/// detectors. Action verbs + read/inspection verbs + "I'll proceed"
+/// variants. Lowered-cased match.
+const INTENT_PHRASES: &[&str] = &[
+    "now let me ",
+    "now update ",
+    "now fix ",
+    "now add ",
+    "now bump ",
+    "now run ",
+    "now check ",
+    "now read ",
+    "now commit",
+    "now amend",
+    "i'll update",
+    "i'll fix",
+    "i'll modify",
+    "i'll create",
+    "i'll write",
+    "i'll edit",
+    "i'll add",
+    "i'll change",
+    "i'll replace",
+    "i'll commit",
+    "i'll amend",
+    "i'll proceed",
+    "i'll start",
+    "i'll finish",
+    "i'll run",
+    "i'll check",
+    "i'll see",
+    "i'll look",
+    "i'll prepare",
+    "i'll take a look",
+    "i will proceed",
+    "let me update",
+    "let me fix",
+    "let me modify",
+    "let me create",
+    "let me write",
+    "let me edit",
+    "let me add",
+    "let me change",
+    "let me commit",
+    "let me amend",
+    "let me see",
+    "let me check",
+    "let me look",
+    "let me read",
+    "let me examine",
+    "let me verify",
+    "let me inspect",
+    "let me review",
+    "let me take",     // "let me take a look"
+    "let me actually", // "let me actually look at the commits"
+    "let me prepare",
+    "let me proceed",
+    "let me start",
+    "let me first", // "let me first see where we stand"
+    "let me finish",
+    "let me finalize",
+    "let me run",
+];
+
+/// Relaxed phantom detection used when the caller already knows the
+/// model emitted **zero tool_use blocks** this iteration. In that case
+/// any bare intent phrase is phantom — no path or extension
+/// corroboration required, because the tool count already proves
+/// nothing happened.
+pub fn has_phantom_tool_intent_no_tools(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.len() < 20 {
+        return false;
+    }
+    let lower = trimmed.to_lowercase();
+    INTENT_PHRASES.iter().any(|p| lower.contains(p))
+}
+
 pub fn has_phantom_tool_intent(text: &str) -> bool {
     let trimmed = text.trim();
     // Short responses are usually direct answers, not phantom narrations
@@ -1380,49 +1458,6 @@ pub fn has_phantom_tool_intent(text: &str) -> bool {
     // meaning the model is narrating specific file operations it should
     // be executing via tools.
 
-    const INTENT_PHRASES: &[&str] = &[
-        "now let me ",
-        "now update ",
-        "now fix ",
-        "now add ",
-        "now bump ",
-        "now run ",
-        "now check ",
-        "now read ",
-        "now commit",
-        "now amend",
-        "i'll update",
-        "i'll fix",
-        "i'll modify",
-        "i'll create",
-        "i'll write",
-        "i'll edit",
-        "i'll add",
-        "i'll change",
-        "i'll replace",
-        "i'll commit",
-        "i'll amend",
-        "let me update",
-        "let me fix",
-        "let me modify",
-        "let me create",
-        "let me write",
-        "let me edit",
-        "let me add",
-        "let me change",
-        "let me commit",
-        "let me amend",
-        // Read/inspection intents — these need tools too. A bare
-        // "Let me check X:" with no tool_call is phantom.
-        "let me see",
-        "let me check",
-        "let me look",
-        "let me read",
-        "let me examine",
-        "let me verify",
-        "let me inspect",
-        "let me review",
-    ];
     let has_intent = INTENT_PHRASES.iter().any(|v| lower.contains(v));
 
     // Trailing-colon "Let me X:" at end of response is a strong signal all

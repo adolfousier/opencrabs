@@ -673,7 +673,13 @@ impl AgentService {
         let mut recent_tool_calls: Vec<String> = Vec::new(); // Track tool calls to detect loops
         let mut stream_retry_count = 0u32; // Track consecutive stream drop retries
         const MAX_STREAM_RETRIES: u32 = 2; // Retry up to 2 times on dropped streams
-        let mut phantom_retry_used = false; // Single retry for phantom tool call detection
+        // Phantom-retry budget per turn. Single-shot proved insufficient —
+        // when the model is stuck in a "Let me check…" narration loop, one
+        // correction nudges it for one iteration and it drifts right back.
+        // Three retries per turn is enough to break the loop without
+        // letting pathological cases chew quota forever.
+        let mut phantom_retries_used: u32 = 0;
+        const MAX_PHANTOM_RETRIES: u32 = 3;
         let mut rotation_retry_used = false; // Single retry when Qwen rotation yields 0 tools
 
         // Ordered content segments for CLI providers — tracks text and tool markers
@@ -2150,14 +2156,21 @@ impl AgentService {
                 }
 
                 // ── Phantom tool call detection ──────────────────────────
-                // The model narrated actions (verbs + file paths) but never
-                // executed any tool calls. Inject a correction prompt and
-                // retry once so the model actually performs the work.
-                if !phantom_retry_used
+                // The model narrated actions but never executed any tool
+                // calls this iteration. Because we're already inside
+                // `if tool_uses.is_empty()`, the tool count is a stronger
+                // signal than the file-path corroboration the strict
+                // `has_phantom_tool_intent` requires — any intent phrase
+                // without a tool call means the model talked itself into
+                // thinking it did something it didn't. Use the relaxed
+                // detector and allow up to MAX_PHANTOM_RETRIES corrections
+                // per turn (vs the old single-shot, which let "Let me
+                // check…" loops slide after the first warning).
+                if phantom_retries_used < MAX_PHANTOM_RETRIES
                     && !is_cli_provider
-                    && super::helpers::has_phantom_tool_intent(&iteration_text)
+                    && super::helpers::has_phantom_tool_intent_no_tools(&iteration_text)
                 {
-                    phantom_retry_used = true;
+                    phantom_retries_used += 1;
                     tracing::warn!(
                         "Phantom tool call detected — model described actions without executing tools. \
                          Injecting retry prompt."
