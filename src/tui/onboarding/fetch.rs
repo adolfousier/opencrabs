@@ -215,15 +215,22 @@ pub async fn fetch_provider_models(
         ];
     }
 
-    // Qwen native — OAuth path only exposes `coder-model` on the free tier.
-    // (qwen-cli hardcodes a single model `coder-model` for the qwen-oauth
-    // authType — there is no live /models endpoint to fetch.)
+    // Qwen (DashScope): no /v1/models endpoint on the OpenAI-compat path,
+    // so we read the curated list from config.toml.example. Users can
+    // override via `models = [...]` in their own config.toml.
     if provider_index == 10 {
         let models = crate::tui::provider_selector::load_default_models("qwen");
         if !models.is_empty() {
             return models;
         }
-        return vec!["coder-model".to_string()];
+        return vec![
+            "qwen3-max".to_string(),
+            "qwen3-coder-plus".to_string(),
+            "qwen3.5-plus".to_string(),
+            "qwen-max".to_string(),
+            "qwen-plus".to_string(),
+            "qwen-flash".to_string(),
+        ];
     }
 
     // Handle Minimax specially - no /models API, must use config

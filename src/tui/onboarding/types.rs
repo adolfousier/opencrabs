@@ -79,21 +79,28 @@ pub const PROVIDERS: &[ProviderInfo] = &[
     ProviderInfo {
         id: "qwen-code-cli",
         name: "Qwen CLI",
-        models: &["qwen3.6-plus", "qwen3.5-plus", "qwen3-coder-plus"],
+        models: &["qwen3-max", "qwen3-coder-plus", "qwen3.5-plus"],
         key_label: "",
         help_lines: &[
-            "Uses local 'qwen' CLI subprocess — 1k free req/day via Qwen OAuth",
+            "Uses local 'qwen' CLI subprocess (Alibaba Coding Plan or DashScope key)",
             "Requires: npm install -g @qwen-code/qwen-code  OR  brew install qwen-code",
         ],
     },
     ProviderInfo {
         id: "qwen",
         name: "Qwen",
-        models: &["qwen3.6-plus"],
-        key_label: "OAuth",
+        models: &[
+            "qwen3-max",
+            "qwen3-coder-plus",
+            "qwen3.5-plus",
+            "qwen-max",
+            "qwen-plus",
+            "qwen-flash",
+        ],
+        key_label: "API Key",
         help_lines: &[
-            "Sign in with qwen.ai — OpenCrabs orchestrates tools and context natively",
-            "Free tier: 60 req/min, 1000 req/day",
+            "DashScope OpenAI-compatible API (Alibaba Cloud Model Studio)",
+            "Get key from bailian.console.aliyun.com or qwen.ai/apiplatform",
         ],
     },
     ProviderInfo {
