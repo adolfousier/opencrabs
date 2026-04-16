@@ -18,6 +18,15 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{LazyLock, Mutex};
+
+/// Captures `file:line:col` of the last panic so the render loop can
+/// correlate a caught panic with its source. `catch_unwind` only hands
+/// back the payload message, not the location — so we stash it via the
+/// panic hook (which runs before `catch_unwind` swallows it) and read
+/// it out after.
+static LAST_PANIC_LOCATION: LazyLock<Mutex<Option<(String, u32, u32)>>> =
+    LazyLock::new(|| Mutex::new(None));
 
 /// Force-restore terminal state. Safe to call from signal handlers and panic hooks.
 fn force_restore_terminal() {
@@ -36,8 +45,16 @@ fn force_restore_terminal() {
 pub async fn run(mut app: App) -> Result<()> {
     // Install panic hook that restores terminal before printing the panic.
     // Without this, a panic leaves the terminal in raw mode with no cursor.
+    // Also stash the panic location so the render `catch_unwind` path can
+    // log WHERE a caught render panic happened (the payload only carries
+    // the message, not the source location).
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        if let Some(loc) = info.location()
+            && let Ok(mut slot) = LAST_PANIC_LOCATION.lock()
+        {
+            *slot = Some((loc.file().to_string(), loc.line(), loc.column()));
+        }
         force_restore_terminal();
         default_hook(info);
     }));
@@ -181,6 +198,12 @@ async fn run_loop(
         // consume the outer references permanently.
         let term_ref: &mut Terminal<CrosstermBackend<io::Stdout>> = &mut *terminal;
         let app_ref: &mut App = &mut *app;
+        // Clear prior location before each draw so we only see what THIS
+        // frame hit (panic hook overwrites the slot unconditionally, but
+        // being explicit is cheap insurance).
+        if let Ok(mut slot) = LAST_PANIC_LOCATION.lock() {
+            *slot = None;
+        }
         let draw_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
             term_ref.draw(move |f| render::render(f, app_ref))
         }));
@@ -195,8 +218,14 @@ async fn run_loop(
                 } else {
                     "unknown render panic".to_string()
                 };
-                tracing::error!("[TUI] render panic caught: {}", msg);
-                app.error_message = Some(format!("render panic: {}", msg));
+                let loc = LAST_PANIC_LOCATION
+                    .lock()
+                    .ok()
+                    .and_then(|slot| slot.clone())
+                    .map(|(f, l, c)| format!(" at {}:{}:{}", f, l, c))
+                    .unwrap_or_default();
+                tracing::error!("[TUI] render panic caught{}: {}", loc, msg);
+                app.error_message = Some(format!("render panic{}: {}", loc, msg));
                 // Try to recover the terminal state for the next frame.
                 let _ = terminal.clear();
             }
