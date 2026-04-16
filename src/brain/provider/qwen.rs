@@ -1,1314 +1,20 @@
-//! Qwen native provider — OAuth device flow + DashScope OpenAI-compatible API.
+//! Qwen (DashScope) header + body-transform helpers.
 //!
-//! This is the **native** Qwen integration: OpenCrabs talks directly to
-//! `portal.qwen.ai/v1/chat/completions` and orchestrates tools, context, and
-//! caching itself. It does NOT shell out to the `qwen` CLI binary (see
-//! `qwen_code.rs` for the subprocess-based path).
+//! OpenCrabs talks to Qwen through the standard OpenAI-compatible DashScope
+//! endpoint with a regular API key (DashScope or Alibaba Coding Plan). This
+//! file only contains the wire-level fingerprinting logic that the factory
+//! layers on top of `OpenAIProvider`:
 //!
-//! ## Authentication
+//! - `qwen_extra_headers()` — the four `X-DashScope-*` / `User-Agent`
+//!   headers that qwen-cli emits. Matching them keeps us out of the
+//!   stricter rate-limit bucket the gateway applies to unknown clients.
+//! - `qwen_body_transform()` — the DashScope cache-control + metadata
+//!   shape that qwen-cli posts alongside the OpenAI-compatible request.
 //!
-//! Mirrors `qwen-code-cli` byte-for-byte so users who already authenticated
-//! with the CLI can use OpenCrabs immediately — credentials are read from
-//! and written to the same `~/.qwen/oauth_creds.json` file.
-//!
-//! Flow (RFC 8628 Device Authorization Grant + PKCE S256):
-//! 1. POST `https://chat.qwen.ai/api/v1/oauth2/device/code` with the public
-//!    client_id, requested scope, and a SHA-256 PKCE challenge.
-//! 2. Show the user `verification_uri_complete` (or open it in their browser)
-//!    plus the short `user_code`.
-//! 3. Poll `https://chat.qwen.ai/api/v1/oauth2/token` every ~2s until the user
-//!    authorizes (or the device code expires).
-//! 4. Persist `{access_token, refresh_token, resource_url, expiry_date}` to
-//!    `~/.qwen/oauth_creds.json` (mode 0600).
-//! 5. On every API call, refresh proactively if `expiry_date - 30s` is past.
-//! 6. On 401/403, force-refresh once and retry.
-//!
-//! Free tier: 60 req/minute, 1000 req/day, model `coder-model` only.
-
-use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-use base64::Engine;
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-
-// ── Constants ──────────────────────────────────────────────────────────────
-
-/// OAuth public client_id baked into qwen-code-cli. Public client (no secret).
-pub const QWEN_OAUTH_CLIENT_ID: &str = "f0304373b74a44d2b584a3fb70ca9e56";
-
-/// OAuth scopes — `openid profile email model.completion`.
-pub const QWEN_OAUTH_SCOPE: &str = "openid profile email model.completion";
-
-/// Device-code endpoint.
-pub const QWEN_DEVICE_CODE_URL: &str = "https://chat.qwen.ai/api/v1/oauth2/device/code";
-
-/// Token endpoint (used for both initial poll and refresh).
-pub const QWEN_TOKEN_URL: &str = "https://chat.qwen.ai/api/v1/oauth2/token";
-
-/// Device-code grant URN.
-pub const DEVICE_CODE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
-
-/// Default chat host when the OAuth response doesn't include a `resource_url`.
-pub const QWEN_DEFAULT_API_HOST: &str = "dashscope.aliyuncs.com/compatible-mode/v1";
-
-/// Default chat completions URL when the OAuth response gives `portal.qwen.ai`.
-pub const QWEN_DEFAULT_CHAT_URL: &str = "https://portal.qwen.ai/v1/chat/completions";
-
-/// Free-tier model id (the only model available on the OAuth path).
-/// API id is `coder-model`; display label is "Qwen 3.6 Plus".
-pub const QWEN_OAUTH_MODEL: &str = "coder-model";
-
-/// Refresh tokens this many ms before they expire (matches qwen-cli's 30s).
-const REFRESH_BUFFER_MS: u64 = 30_000;
-
-// ── Persisted credentials ─────────────────────────────────────────────────
-
-/// On-disk shape of `~/.qwen/oauth_creds.json` — matches qwen-code-cli exactly
-/// so the two tools share authentication state.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct QwenCredentials {
-    pub access_token: String,
-    pub token_type: String,
-    pub refresh_token: String,
-    /// Hostname (no scheme, no path) of the API to call. Typically
-    /// `portal.qwen.ai`. May be omitted on legacy creds.
-    #[serde(default)]
-    pub resource_url: String,
-    /// Absolute expiry as ms since UNIX epoch.
-    pub expiry_date: u64,
-}
-
-impl QwenCredentials {
-    /// Path to the shared `qwen-code-cli` credentials file. Used **only** as
-    /// an import source during onboarding so users who already authenticated
-    /// with the CLI get instant access. The canonical store is `keys.toml`
-    /// under `[providers.qwen]` — see `persist_to_keys`.
-    pub fn qwen_cli_path() -> PathBuf {
-        dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("/"))
-            .join(".qwen")
-            .join("oauth_creds.json")
-    }
-
-    /// One-shot import from `~/.qwen/oauth_creds.json`. Returns `None` if
-    /// missing or invalid. Onboarding may call this to skip the device flow
-    /// when the user already authenticated via qwen-cli.
-    pub fn import_from_qwen_cli() -> Option<Self> {
-        let path = Self::qwen_cli_path();
-        let bytes = std::fs::read(&path).ok()?;
-        let creds: Self = serde_json::from_slice(&bytes).ok()?;
-        if creds.access_token.is_empty() || creds.refresh_token.is_empty() {
-            return None;
-        }
-        Some(creds)
-    }
-
-    /// Last-modified time of `~/.qwen/oauth_creds.json` in whole seconds
-    /// since UNIX epoch, or 0 if the file is missing / unreadable. Used by
-    /// `QwenTokenManager` to detect when qwen-cli has rotated the token on
-    /// disk so we can live-reload without restarting.
-    pub fn qwen_cli_mtime() -> u64 {
-        let path = Self::qwen_cli_path();
-        std::fs::metadata(&path)
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_secs())
-            .unwrap_or(0)
-    }
-
-    /// Write credentials back to `~/.qwen/oauth_creds.json` so qwen-cli
-    /// running alongside us sees the refreshed token and doesn't burn
-    /// its own refresh. Best-effort: logs a warning on failure instead
-    /// of propagating it.
-    pub fn write_back_to_qwen_cli(&self) {
-        let path = Self::qwen_cli_path();
-        let Ok(json) = serde_json::to_vec_pretty(self) else {
-            tracing::warn!("Failed to serialize Qwen creds for qwen-cli write-back");
-            return;
-        };
-        if let Some(parent) = path.parent()
-            && let Err(e) = std::fs::create_dir_all(parent)
-        {
-            tracing::warn!("Failed to create {} parent dir: {}", parent.display(), e);
-            return;
-        }
-        if let Err(e) = std::fs::write(&path, &json) {
-            tracing::warn!("Failed to write back to {}: {}", path.display(), e);
-            return;
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-        }
-    }
-
-    /// Build credentials from a `ProviderConfig` (loaded from keys.toml).
-    /// Returns `None` if the config doesn't have the required OAuth fields.
-    pub fn from_provider_config(cfg: &crate::config::ProviderConfig) -> Option<Self> {
-        let access_token = cfg.api_key.as_ref().filter(|s| !s.is_empty())?.clone();
-        let refresh_token = cfg
-            .refresh_token
-            .as_ref()
-            .filter(|s| !s.is_empty())?
-            .clone();
-        Some(Self {
-            access_token,
-            token_type: "Bearer".to_string(),
-            refresh_token,
-            resource_url: cfg.resource_url.clone().unwrap_or_default(),
-            expiry_date: cfg.expiry_date.unwrap_or(0),
-        })
-    }
-
-    /// Wipe single-account credentials from `keys.toml` (`[providers.qwen]`)
-    /// and `~/.qwen/oauth_creds.json`. Called when token is expired so stale
-    /// creds don't linger. Rotation accounts are handled separately via
-    /// `persist_all_accounts` with only the valid subset.
-    ///
-    /// Idempotent: skips write if there are no creds to remove. Uses a static
-    /// guard to prevent multiple threads racing to wipe simultaneously.
-    pub fn wipe_dead_credentials() {
-        use crate::config::CONFIG_FILE_LOCK;
-        use std::sync::atomic::{AtomicBool, Ordering};
-        static WIPE_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
-
-        // Prevent concurrent wipe races (multiple background threads)
-        if WIPE_IN_PROGRESS
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_err()
-        {
-            return;
-        }
-        struct WipeGuard;
-        impl Drop for WipeGuard {
-            fn drop(&mut self) {
-                WIPE_IN_PROGRESS.store(false, Ordering::SeqCst);
-            }
-        }
-        let _guard = WipeGuard;
-
-        // Hold the global config lock to prevent races with other writers.
-        let _lock = CONFIG_FILE_LOCK.lock();
-
-        if let Ok(path) = std::panic::catch_unwind(crate::config::keys_path)
-            && path.exists()
-            && let Ok(raw) = std::fs::read_to_string(&path)
-        {
-            // Text-level surgery: remove only the 4 specific key lines from
-            // under [providers.qwen] WITHOUT re-serializing the entire file.
-            // The toml::to_string_pretty round-trip was destroying other
-            // sections (custom providers, etc.) by reordering/dropping data.
-            let keys_to_remove = ["api_key", "refresh_token", "expiry_date", "resource_url"];
-
-            let mut in_qwen_section = false;
-            let mut changed = false;
-            let mut output_lines: Vec<&str> = Vec::with_capacity(raw.lines().count());
-
-            for line in raw.lines() {
-                let trimmed = line.trim();
-
-                // Detect section headers
-                if trimmed.starts_with('[') {
-                    // Check if this is [providers.qwen] (not [[providers.qwen_accounts]])
-                    in_qwen_section = trimmed == "[providers.qwen]";
-                }
-
-                // If inside [providers.qwen], strip the 4 credential keys
-                if in_qwen_section {
-                    let is_target_key = keys_to_remove.iter().any(|k| {
-                        trimmed.starts_with(k) && trimmed[k.len()..].trim_start().starts_with('=')
-                    });
-                    if is_target_key {
-                        changed = true;
-                        continue; // skip this line
-                    }
-                }
-
-                output_lines.push(line);
-            }
-
-            if changed {
-                let out = output_lines.join("\n");
-                // Preserve trailing newline if original had one
-                let out = if raw.ends_with('\n') && !out.ends_with('\n') {
-                    format!("{}\n", out)
-                } else {
-                    out
-                };
-                if let Err(e) = std::fs::write(&path, &out) {
-                    tracing::error!("Failed to write keys.toml after wiping Qwen creds: {}", e);
-                }
-                tracing::info!("Wiped dead Qwen single-account creds from keys.toml");
-            }
-        }
-        let cli_path = Self::qwen_cli_path();
-        if cli_path.exists() {
-            let _ = std::fs::remove_file(&cli_path);
-            tracing::info!("Wiped dead Qwen creds from {}", cli_path.display());
-        }
-    }
-
-    /// Persist credentials to `keys.toml` under `[providers.qwen]`.
-    /// This is the canonical store. Background refresh writes here too.
-    ///
-    /// Manipulates the TOML document directly so we can write the
-    /// `expiry_date` as a real integer (the existing `write_secret_key`
-    /// helper is string-only).
-    pub fn persist_to_keys(&self) -> anyhow::Result<()> {
-        use crate::config::{CONFIG_FILE_LOCK, daily_backup, keys_path};
-        use toml_edit::DocumentMut;
-
-        let _lock = CONFIG_FILE_LOCK.lock();
-        let path = keys_path();
-
-        let mut doc: DocumentMut = if path.exists() {
-            std::fs::read_to_string(&path)?.parse()?
-        } else {
-            DocumentMut::new()
-        };
-
-        // Ensure [providers.qwen] exists
-        doc.entry("providers")
-            .or_insert(toml_edit::Item::Table(toml_edit::Table::new()));
-        doc["providers"]
-            .as_table_mut()
-            .unwrap()
-            .entry("qwen")
-            .or_insert(toml_edit::Item::Table(toml_edit::Table::new()));
-
-        let qwen = doc["providers"]["qwen"].as_table_mut().unwrap();
-        qwen.insert("api_key", toml_edit::value(&self.access_token));
-        qwen.insert("refresh_token", toml_edit::value(&self.refresh_token));
-        qwen.insert("expiry_date", toml_edit::value(self.expiry_date as i64));
-        if !self.resource_url.is_empty() {
-            qwen.insert("resource_url", toml_edit::value(&self.resource_url));
-        }
-        // Scrub any legacy non-secret fields from prior versions.
-        qwen.remove("enabled");
-        qwen.remove("default_model");
-
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        daily_backup(&path, 7);
-        std::fs::write(&path, doc.to_string())?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-        }
-        tracing::debug!("Persisted Qwen credentials to keys.toml");
-        Ok(())
-    }
-
-    /// Build a vec of credentials from a `[[providers.qwen_accounts]]` array.
-    pub fn from_account_configs(cfgs: &[crate::config::ProviderConfig]) -> Vec<Self> {
-        cfgs.iter().filter_map(Self::from_provider_config).collect()
-    }
-
-    /// Persist refreshed credentials to a specific slot in `[[providers.qwen_accounts]]`
-    /// in keys.toml. Used by rotation account background refresh so each account
-    /// updates its own slot instead of overwriting `[providers.qwen]`.
-    pub fn persist_to_account_slot(&self, index: usize) -> anyhow::Result<()> {
-        use crate::config::{CONFIG_FILE_LOCK, daily_backup, keys_path};
-        use toml_edit::DocumentMut;
-
-        let _lock = CONFIG_FILE_LOCK.lock();
-        let path = keys_path();
-
-        if !path.exists() {
-            return Ok(());
-        }
-
-        let mut doc: DocumentMut = std::fs::read_to_string(&path)?.parse()?;
-
-        let arr = doc["providers"]["qwen_accounts"]
-            .as_array_of_tables_mut()
-            .ok_or_else(|| anyhow::anyhow!("[[providers.qwen_accounts]] not found in keys.toml"))?;
-
-        // Ensure the array is large enough
-        while arr.len() <= index {
-            arr.push(toml_edit::Table::new());
-        }
-
-        let slot = arr
-            .iter_mut()
-            .nth(index)
-            .ok_or_else(|| anyhow::anyhow!("qwen_accounts slot {} not found", index))?;
-        slot.insert("api_key", toml_edit::value(&self.access_token));
-        slot.insert("refresh_token", toml_edit::value(&self.refresh_token));
-
-        daily_backup(&path, 7);
-        std::fs::write(&path, doc.to_string())?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-        }
-
-        // Update expiry_date in config.toml (metadata lives there)
-        Self::update_account_expiry_in_config_inner(index, self.expiry_date)?;
-
-        tracing::debug!(
-            "Persisted refreshed Qwen rotation account {} to keys.toml",
-            index
-        );
-        Ok(())
-    }
-
-    /// Update expiry_date for a single rotation account slot in config.toml.
-    /// Caller must already hold `CONFIG_FILE_LOCK`.
-    fn update_account_expiry_in_config_inner(index: usize, expiry_date: u64) -> anyhow::Result<()> {
-        use toml_edit::DocumentMut;
-
-        let path = crate::config::opencrabs_home().join("config.toml");
-        if !path.exists() {
-            return Ok(());
-        }
-        let mut doc: DocumentMut = std::fs::read_to_string(&path)?.parse()?;
-
-        if let Some(arr) = doc
-            .get_mut("providers")
-            .and_then(|p| p.get_mut("qwen_accounts"))
-            .and_then(|a| a.as_array_of_tables_mut())
-            && index < arr.len()
-        {
-            if let Some(slot) = arr.iter_mut().nth(index) {
-                slot.insert("expiry_date", toml_edit::value(expiry_date as i64));
-            }
-            std::fs::write(&path, doc.to_string())?;
-        }
-        Ok(())
-    }
-
-    /// Clear secrets from keys.toml for expired accounts only.
-    /// Config.toml is NOT touched — all accounts remain listed so the user
-    /// can re-auth expired ones later via the UI.
-    ///
-    /// In keys.toml, expired account slots become `{}` (empty table) while
-    /// valid accounts keep their `api_key` + `refresh_token`.
-    pub fn clear_expired_account_secrets(all_creds: &[Self]) -> anyhow::Result<()> {
-        use crate::config::{CONFIG_FILE_LOCK, daily_backup, keys_path};
-        use toml_edit::DocumentMut;
-
-        let _lock = CONFIG_FILE_LOCK.lock();
-        let path = keys_path();
-
-        if !path.exists() {
-            return Ok(());
-        }
-
-        let mut doc: DocumentMut = std::fs::read_to_string(&path)?.parse()?;
-
-        let arr = doc
-            .get_mut("providers")
-            .and_then(|p| p.get_mut("qwen_accounts"))
-            .and_then(|a| a.as_array_of_tables_mut())
-            .ok_or_else(|| anyhow::anyhow!("[[providers.qwen_accounts]] not found"))?;
-
-        // For each slot: valid accounts keep secrets, expired get cleared
-        for (slot, cred) in arr.iter_mut().zip(all_creds.iter()) {
-            if cred.is_valid() {
-                slot.insert("api_key", toml_edit::value(&cred.access_token));
-                slot.insert("refresh_token", toml_edit::value(&cred.refresh_token));
-            } else {
-                slot.remove("api_key");
-                slot.remove("refresh_token");
-            }
-        }
-
-        daily_backup(&path, 7);
-        std::fs::write(&path, doc.to_string())?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-        }
-
-        let valid = all_creds.iter().filter(|c| c.is_valid()).count();
-        tracing::info!(
-            "Cleared secrets for {} expired accounts, kept {} valid (keys.toml only)",
-            all_creds.len() - valid,
-            valid
-        );
-        Ok(())
-    }
-
-    /// Persist multiple rotation accounts with proper separation:
-    /// - **keys.toml**: secrets only (`api_key`, `refresh_token`)
-    /// - **config.toml**: metadata (`name`, `expiry_date`, `resource_url`)
-    pub fn persist_all_accounts(accounts: &[Self]) -> anyhow::Result<()> {
-        Self::persist_accounts_keys(accounts)?;
-        Self::persist_accounts_config(accounts)?;
-        tracing::debug!(
-            "Persisted {} Qwen rotation accounts (keys.toml + config.toml)",
-            accounts.len()
-        );
-        Ok(())
-    }
-
-    /// Write secrets only (`api_key`, `refresh_token`) to keys.toml.
-    fn persist_accounts_keys(accounts: &[Self]) -> anyhow::Result<()> {
-        use crate::config::{CONFIG_FILE_LOCK, daily_backup, keys_path};
-        use toml_edit::DocumentMut;
-
-        let _guard = CONFIG_FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
-        let path = keys_path();
-        let mut doc: DocumentMut = if path.exists() {
-            std::fs::read_to_string(&path)?.parse()?
-        } else {
-            DocumentMut::new()
-        };
-
-        // Ensure [providers] exists
-        doc.entry("providers")
-            .or_insert(toml_edit::Item::Table(toml_edit::Table::new()));
-
-        // Remove old qwen_accounts if present, then rebuild
-        if let Some(providers) = doc["providers"].as_table_mut() {
-            providers.remove("qwen_accounts");
-        }
-
-        // Build [[providers.qwen_accounts]] array of tables
-        let mut arr = toml_edit::ArrayOfTables::new();
-        for a in accounts {
-            let mut tbl = toml_edit::Table::new();
-            tbl.insert("api_key", toml_edit::value(&a.access_token));
-            tbl.insert("refresh_token", toml_edit::value(&a.refresh_token));
-            arr.push(tbl);
-        }
-        if let Some(providers) = doc["providers"].as_table_mut() {
-            providers.insert("qwen_accounts", toml_edit::Item::ArrayOfTables(arr));
-        }
-
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        daily_backup(&path, 7);
-        std::fs::write(&path, doc.to_string())?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-        }
-        Ok(())
-    }
-
-    /// Write metadata (`name`, `expiry_date`, `resource_url`) to config.toml.
-    fn persist_accounts_config(accounts: &[Self]) -> anyhow::Result<()> {
-        use crate::config::CONFIG_FILE_LOCK;
-        use toml_edit::DocumentMut;
-
-        let _guard = CONFIG_FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
-        let path = crate::config::opencrabs_home().join("config.toml");
-        let mut doc: DocumentMut = if path.exists() {
-            std::fs::read_to_string(&path)?.parse()?
-        } else {
-            DocumentMut::new()
-        };
-
-        // Ensure [providers] exists
-        doc.entry("providers")
-            .or_insert(toml_edit::Item::Table(toml_edit::Table::new()));
-
-        // Remove old qwen_accounts, rebuild
-        if let Some(providers) = doc["providers"].as_table_mut() {
-            providers.remove("qwen_accounts");
-        }
-
-        let mut arr = toml_edit::ArrayOfTables::new();
-        for (i, a) in accounts.iter().enumerate() {
-            let mut tbl = toml_edit::Table::new();
-            tbl.insert("name", toml_edit::value(format!("Account {}", i + 1)));
-            tbl.insert("expiry_date", toml_edit::value(a.expiry_date as i64));
-            if !a.resource_url.is_empty() {
-                tbl.insert("resource_url", toml_edit::value(&a.resource_url));
-            }
-            arr.push(tbl);
-        }
-        if let Some(providers) = doc["providers"].as_table_mut() {
-            providers.insert("qwen_accounts", toml_edit::Item::ArrayOfTables(arr));
-        }
-
-        std::fs::write(&path, doc.to_string())?;
-        Ok(())
-    }
-
-    /// Migrate legacy keys.toml `[[providers.qwen_accounts]]` that had
-    /// everything (secrets + metadata) into the split format:
-    /// - Move `expiry_date`, `resource_url` to config.toml, add `name`
-    /// - Keep only `api_key`, `refresh_token` in keys.toml
-    ///
-    /// Called once at startup. No-op if config.toml already has the entries.
-    pub fn migrate_accounts_split() {
-        use crate::config::CONFIG_FILE_LOCK;
-        use toml_edit::DocumentMut;
-
-        let _lock = CONFIG_FILE_LOCK.lock();
-        let keys_path = crate::config::keys_path();
-        let config_path = crate::config::opencrabs_home().join("config.toml");
-
-        let keys_raw = match std::fs::read_to_string(&keys_path) {
-            Ok(r) => r,
-            Err(_) => return,
-        };
-        let mut keys_doc: DocumentMut = match keys_raw.parse() {
-            Ok(d) => d,
-            Err(_) => return,
-        };
-
-        // Check if keys.toml has qwen_accounts with expiry_date (pre-migration)
-        let needs_migration = keys_doc
-            .get("providers")
-            .and_then(|p| p.get("qwen_accounts"))
-            .and_then(|a| a.as_array_of_tables())
-            .is_some_and(|arr| arr.iter().any(|entry| entry.get("expiry_date").is_some()));
-
-        if !needs_migration {
-            return;
-        }
-
-        // Check if config.toml already has qwen_accounts (already migrated)
-        let config_raw = std::fs::read_to_string(&config_path).unwrap_or_default();
-        let config_check: Result<DocumentMut, _> = config_raw.parse();
-        if let Ok(ref cdoc) = config_check {
-            let config_has_accounts = cdoc
-                .get("providers")
-                .and_then(|p| p.get("qwen_accounts"))
-                .and_then(|a| a.as_array_of_tables())
-                .is_some_and(|arr| !arr.is_empty());
-            if config_has_accounts {
-                return;
-            }
-        }
-
-        tracing::info!(
-            "Migrating Qwen rotation accounts: splitting keys.toml -> config.toml + keys.toml"
-        );
-
-        // Collect account data from keys.toml before mutating
-        // (api_key, refresh_token, expiry_date, resource_url)
-        type AcctTuple = (Option<String>, Option<String>, Option<i64>, Option<String>);
-        let accounts: Vec<AcctTuple> = keys_doc
-            .get("providers")
-            .and_then(|p| p.get("qwen_accounts"))
-            .and_then(|a| a.as_array_of_tables())
-            .map(|arr| {
-                arr.iter()
-                    .map(|entry| {
-                        (
-                            entry
-                                .get("api_key")
-                                .and_then(|v| v.as_str())
-                                .map(String::from),
-                            entry
-                                .get("refresh_token")
-                                .and_then(|v| v.as_str())
-                                .map(String::from),
-                            entry.get("expiry_date").and_then(|v| v.as_integer()),
-                            entry
-                                .get("resource_url")
-                                .and_then(|v| v.as_str())
-                                .map(String::from),
-                        )
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        // Write config.toml entries (metadata only) — surgical via toml_edit
-        let mut cfg_doc: DocumentMut = match config_raw.parse() {
-            Ok(v) => v,
-            Err(e) => {
-                tracing::error!("config.toml corrupt during Qwen migration, skipping: {e}");
-                return;
-            }
-        };
-
-        cfg_doc
-            .entry("providers")
-            .or_insert(toml_edit::Item::Table(toml_edit::Table::new()));
-        if let Some(providers) = cfg_doc["providers"].as_table_mut() {
-            providers.remove("qwen_accounts");
-            let mut arr = toml_edit::ArrayOfTables::new();
-            for (i, (_, _, expiry, url)) in accounts.iter().enumerate() {
-                let mut tbl = toml_edit::Table::new();
-                tbl.insert("name", toml_edit::value(format!("Account {}", i + 1)));
-                if let Some(exp) = expiry {
-                    tbl.insert("expiry_date", toml_edit::value(*exp));
-                }
-                if let Some(u) = url {
-                    tbl.insert("resource_url", toml_edit::value(u));
-                }
-                arr.push(tbl);
-            }
-            providers.insert("qwen_accounts", toml_edit::Item::ArrayOfTables(arr));
-        }
-        if let Err(e) = std::fs::write(&config_path, cfg_doc.to_string()) {
-            tracing::error!("Failed to write config.toml during Qwen migration: {e}");
-        }
-
-        // Strip metadata from keys.toml (keep only api_key + refresh_token)
-        if let Some(providers) = keys_doc.get_mut("providers").and_then(|p| p.as_table_mut()) {
-            providers.remove("qwen_accounts");
-            let mut arr = toml_edit::ArrayOfTables::new();
-            for (api_key, refresh_token, _, _) in &accounts {
-                let mut tbl = toml_edit::Table::new();
-                if let Some(k) = api_key {
-                    tbl.insert("api_key", toml_edit::value(k));
-                }
-                if let Some(rt) = refresh_token {
-                    tbl.insert("refresh_token", toml_edit::value(rt));
-                }
-                if !tbl.is_empty() {
-                    arr.push(tbl);
-                }
-            }
-            providers.insert("qwen_accounts", toml_edit::Item::ArrayOfTables(arr));
-        }
-        if let Err(e) = std::fs::write(&keys_path, keys_doc.to_string()) {
-            tracing::error!("Failed to write keys.toml during Qwen migration: {e}");
-        }
-
-        tracing::info!("Qwen rotation account migration complete");
-    }
-
-    /// True if the access_token is still valid (with the 30s safety buffer).
-    pub fn is_valid(&self) -> bool {
-        let now_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
-        now_ms + REFRESH_BUFFER_MS < self.expiry_date
-    }
-
-    /// Resolve the chat completions URL from `resource_url`.
-    /// Logic mirrors qwen-cli's `getCurrentEndpoint`.
-    pub fn chat_completions_url(&self) -> String {
-        let host = if self.resource_url.is_empty() {
-            QWEN_DEFAULT_API_HOST.to_string()
-        } else {
-            self.resource_url.clone()
-        };
-        let with_scheme = if host.starts_with("http://") || host.starts_with("https://") {
-            host
-        } else {
-            format!("https://{}", host)
-        };
-        let with_v1 = if with_scheme.ends_with("/v1") {
-            with_scheme
-        } else {
-            format!("{}/v1", with_scheme.trim_end_matches('/'))
-        };
-        format!("{}/chat/completions", with_v1)
-    }
-}
-
-// ── PKCE ──────────────────────────────────────────────────────────────────
-
-/// PKCE pair: random verifier + its SHA-256 base64url challenge.
-#[derive(Debug, Clone)]
-pub struct PkcePair {
-    pub verifier: String,
-    pub challenge: String,
-}
-
-impl PkcePair {
-    /// Generate a fresh PKCE pair (32-byte verifier, S256 challenge).
-    pub fn generate() -> Self {
-        use rand::RngCore;
-        let mut bytes = [0u8; 32];
-        rand::rng().fill_bytes(&mut bytes);
-        let verifier = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
-
-        let mut hasher = Sha256::new();
-        hasher.update(verifier.as_bytes());
-        let digest = hasher.finalize();
-        let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest);
-
-        Self {
-            verifier,
-            challenge,
-        }
-    }
-}
-
-// ── Device flow request / response ────────────────────────────────────────
-
-/// Response from the device-code endpoint.
-#[derive(Debug, Clone, Deserialize)]
-pub struct DeviceCodeResponse {
-    pub device_code: String,
-    pub user_code: String,
-    pub verification_uri: String,
-    /// Pre-filled URL containing the user_code — preferred for browser open.
-    #[serde(default)]
-    pub verification_uri_complete: Option<String>,
-    pub expires_in: u64,
-    #[serde(default)]
-    pub interval: Option<u64>,
-}
-
-/// Token poll response — either success (access_token populated) or pending
-/// (error == "authorization_pending" / "slow_down").
-#[derive(Debug, Deserialize)]
-struct TokenPollResponse {
-    #[serde(default)]
-    access_token: Option<String>,
-    #[serde(default)]
-    refresh_token: Option<String>,
-    #[serde(default)]
-    token_type: Option<String>,
-    #[serde(default)]
-    resource_url: Option<String>,
-    #[serde(default)]
-    expires_in: Option<u64>,
-    #[serde(default)]
-    error: Option<String>,
-    #[serde(default)]
-    error_description: Option<String>,
-}
-
-/// Kick off the OAuth device flow. Returns the device-code response so the
-/// caller (onboarding wizard) can display the user code and verification URI
-/// before calling `poll_for_token`.
-pub async fn start_device_flow(pkce: &PkcePair) -> anyhow::Result<DeviceCodeResponse> {
-    let client = reqwest::Client::new();
-    let resp = client
-        .post(QWEN_DEVICE_CODE_URL)
-        .header("content-type", "application/x-www-form-urlencoded")
-        .header("accept", "application/json")
-        .header("x-request-id", uuid::Uuid::new_v4().to_string())
-        .form(&[
-            ("client_id", QWEN_OAUTH_CLIENT_ID),
-            ("scope", QWEN_OAUTH_SCOPE),
-            ("code_challenge", pkce.challenge.as_str()),
-            ("code_challenge_method", "S256"),
-        ])
-        .send()
-        .await?;
-
-    let status = resp.status();
-    if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        anyhow::bail!("Qwen device flow request failed ({}): {}", status, body);
-    }
-
-    let raw = resp.text().await?;
-    if raw.starts_with("<!doctype") || raw.starts_with("<!DOCTYPE") || raw.starts_with("<html") {
-        anyhow::bail!(
-            "Qwen device flow blocked by WAF (bot detection). \
-             Try again in a few minutes or use a different network."
-        );
-    }
-    let dcr: DeviceCodeResponse = serde_json::from_str(&raw)?;
-    Ok(dcr)
-}
-
-/// Poll the token endpoint until the user authorizes (or the device code
-/// expires). Returns the freshly-built `QwenCredentials` on success — the
-/// caller is responsible for persisting them.
-pub async fn poll_for_token(device_code: &str, pkce: &PkcePair) -> anyhow::Result<QwenCredentials> {
-    let client = reqwest::Client::new();
-    // qwen-cli starts at 2s and ignores the server interval. Honor that.
-    let mut interval = Duration::from_secs(2);
-    const MAX_ATTEMPTS: u32 = 600; // ~20 min ceiling
-
-    for _ in 0..MAX_ATTEMPTS {
-        tokio::time::sleep(interval).await;
-
-        let resp = client
-            .post(QWEN_TOKEN_URL)
-            .header("content-type", "application/x-www-form-urlencoded")
-            .header("accept", "application/json")
-            .form(&[
-                ("grant_type", DEVICE_CODE_GRANT),
-                ("client_id", QWEN_OAUTH_CLIENT_ID),
-                ("device_code", device_code),
-                ("code_verifier", pkce.verifier.as_str()),
-            ])
-            .send()
-            .await?;
-
-        let status = resp.status();
-        let raw = match resp.text().await {
-            Ok(t) => t,
-            Err(e) => {
-                tracing::warn!("Qwen token poll: failed to read body: {}", e);
-                continue;
-            }
-        };
-        // WAF/bot-detection: Alibaba Cloud WAF returns HTML instead of JSON.
-        // Fail immediately — retrying won't help.
-        if raw.starts_with("<!doctype") || raw.starts_with("<!DOCTYPE") || raw.starts_with("<html")
-        {
-            anyhow::bail!(
-                "Qwen token endpoint blocked by WAF (bot detection). \
-                 Try again in a few minutes or use a different network."
-            );
-        }
-        let body: TokenPollResponse = match serde_json::from_str(&raw) {
-            Ok(b) => b,
-            Err(e) => {
-                tracing::warn!(
-                    "Qwen token poll: parse error: {} (status={}, body={})",
-                    e,
-                    status,
-                    &raw[..raw.len().min(500)]
-                );
-                continue;
-            }
-        };
-
-        if let Some(access_token) = body.access_token
-            && !access_token.is_empty()
-        {
-            let now_ms = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0);
-            let expires_in_ms = body.expires_in.unwrap_or(3600).saturating_mul(1000);
-            return Ok(QwenCredentials {
-                access_token,
-                token_type: body.token_type.unwrap_or_else(|| "Bearer".into()),
-                refresh_token: body.refresh_token.unwrap_or_default(),
-                resource_url: body.resource_url.unwrap_or_default(),
-                expiry_date: now_ms + expires_in_ms,
-            });
-        }
-
-        match body.error.as_deref() {
-            Some("authorization_pending") => continue,
-            Some("slow_down") => {
-                // qwen-cli multiplies by 1.5 capped at 10s
-                let new_secs = (interval.as_secs_f32() * 1.5).min(10.0);
-                interval = Duration::from_secs_f32(new_secs);
-                continue;
-            }
-            Some("expired_token") | Some("access_denied") => {
-                anyhow::bail!(
-                    "Qwen device authorization {} ({}). Please retry.",
-                    body.error.as_deref().unwrap_or("failed"),
-                    body.error_description.unwrap_or_default()
-                );
-            }
-            Some(other) if status.as_u16() == 401 => {
-                anyhow::bail!("Qwen device code expired ({}). Please retry.", other);
-            }
-            Some(other) => {
-                anyhow::bail!(
-                    "Qwen token poll error: {} ({})",
-                    other,
-                    body.error_description.unwrap_or_default()
-                );
-            }
-            None => continue,
-        }
-    }
-
-    anyhow::bail!("Qwen device flow timed out before authorization completed");
-}
-
-/// Refresh an expired access token using the refresh_token grant.
-pub async fn refresh_credentials(creds: &QwenCredentials) -> anyhow::Result<QwenCredentials> {
-    if creds.refresh_token.is_empty() {
-        anyhow::bail!("Qwen refresh: no refresh_token stored — re-authentication required");
-    }
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .connect_timeout(std::time::Duration::from_secs(5))
-        .build()?;
-    let resp = client
-        .post(QWEN_TOKEN_URL)
-        .header("content-type", "application/x-www-form-urlencoded")
-        .header("accept", "application/json")
-        .form(&[
-            ("grant_type", "refresh_token"),
-            ("refresh_token", creds.refresh_token.as_str()),
-            ("client_id", QWEN_OAUTH_CLIENT_ID),
-        ])
-        .send()
-        .await?;
-
-    let status = resp.status();
-    if status.as_u16() == 400 {
-        // qwen-cli treats 400 as "refresh token dead — re-auth required".
-        anyhow::bail!(
-            "Qwen refresh_token invalid (HTTP 400). Run /onboard:provider to re-authenticate."
-        );
-    }
-    if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        anyhow::bail!("Qwen refresh failed ({}): {}", status, body);
-    }
-
-    let raw = resp.text().await?;
-    if raw.starts_with("<!doctype") || raw.starts_with("<!DOCTYPE") || raw.starts_with("<html") {
-        anyhow::bail!(
-            "Qwen refresh blocked by WAF (bot detection). \
-             Try again in a few minutes or use a different network."
-        );
-    }
-    let body: TokenPollResponse = serde_json::from_str(&raw)?;
-    let access_token = body
-        .access_token
-        .ok_or_else(|| anyhow::anyhow!("Qwen refresh response missing access_token"))?;
-
-    let now_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
-    let expires_in_ms = body.expires_in.unwrap_or(3600).saturating_mul(1000);
-
-    Ok(QwenCredentials {
-        access_token,
-        token_type: body.token_type.unwrap_or_else(|| creds.token_type.clone()),
-        // Keep the previous refresh_token if the response omits one.
-        refresh_token: body
-            .refresh_token
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| creds.refresh_token.clone()),
-        resource_url: body
-            .resource_url
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| creds.resource_url.clone()),
-        expiry_date: now_ms + expires_in_ms,
-    })
-}
-
-// ── Browser helper ────────────────────────────────────────────────────────
-
-/// Best-effort browser open. Falls back to printing — caller should always
-/// also display the URL so the user can copy/paste manually.
-pub fn open_browser(url: &str) -> bool {
-    let cmd = if cfg!(target_os = "macos") {
-        "open"
-    } else if cfg!(target_os = "windows") {
-        "cmd"
-    } else {
-        "xdg-open"
-    };
-
-    let result = if cfg!(target_os = "windows") {
-        std::process::Command::new(cmd)
-            .args(["/C", "start", "", url])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-    } else {
-        std::process::Command::new(cmd)
-            .arg(url)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-    };
-
-    result.is_ok()
-}
-
-// ── Token manager ─────────────────────────────────────────────────────────
-
-/// Runtime manager for the Qwen OAuth credentials. Holds the current
-/// `QwenCredentials` behind an `RwLock` so the synchronous `token_fn` callback
-/// from `OpenAIProvider` can read the live access token, and a background
-/// task can rotate it before expiry.
-pub struct QwenTokenManager {
-    state: RwLock<QwenCredentials>,
-    /// Last observed mtime (seconds since epoch) of `~/.qwen/oauth_creds.json`.
-    /// Used by the background task to detect out-of-band refreshes by qwen-cli.
-    last_cli_mtime: RwLock<u64>,
-    /// If `Some(idx)`, this manager belongs to rotation account `idx` and
-    /// persists refreshed tokens to `[[providers.qwen_accounts]][idx]`
-    /// instead of the single-account `[providers.qwen]`.
-    account_index: Option<usize>,
-}
-
-impl QwenTokenManager {
-    pub fn new(creds: QwenCredentials) -> Self {
-        Self {
-            state: RwLock::new(creds),
-            last_cli_mtime: RwLock::new(QwenCredentials::qwen_cli_mtime()),
-            account_index: None,
-        }
-    }
-
-    /// Create a token manager for a rotation account at the given index.
-    pub fn new_rotation(creds: QwenCredentials, index: usize) -> Self {
-        Self {
-            state: RwLock::new(creds),
-            last_cli_mtime: RwLock::new(QwenCredentials::qwen_cli_mtime()),
-            account_index: Some(index),
-        }
-    }
-
-    /// Read the current access token (sync, for the OpenAIProvider header callback).
-    pub fn current_access_token(&self) -> String {
-        self.state
-            .read()
-            .map(|c| c.access_token.clone())
-            .unwrap_or_default()
-    }
-
-    /// Read the current chat-completions base URL (resource_url-derived).
-    pub fn current_chat_url(&self) -> String {
-        self.state
-            .read()
-            .map(|c| c.chat_completions_url())
-            .unwrap_or_else(|_| QWEN_DEFAULT_CHAT_URL.to_string())
-    }
-
-    /// Snapshot the credentials.
-    pub fn snapshot(&self) -> QwenCredentials {
-        self.state
-            .read()
-            .map(|c| c.clone())
-            .unwrap_or_else(|_| QwenCredentials {
-                access_token: String::new(),
-                token_type: "Bearer".into(),
-                refresh_token: String::new(),
-                resource_url: String::new(),
-                expiry_date: 0,
-            })
-    }
-
-    /// Persist refreshed credentials to the correct location based on whether
-    /// this is a single-account or rotation account manager.
-    fn persist_refreshed(&self, creds: &QwenCredentials) {
-        match self.account_index {
-            Some(idx) => {
-                if let Err(e) = creds.persist_to_account_slot(idx) {
-                    tracing::warn!(
-                        "Failed to persist refreshed Qwen rotation account {}: {}",
-                        idx,
-                        e
-                    );
-                }
-                // Rotation accounts do NOT touch ~/.qwen/oauth_creds.json —
-                // that file is single-account territory shared with qwen-cli.
-            }
-            None => {
-                if let Err(e) = creds.persist_to_keys() {
-                    tracing::warn!("Failed to persist refreshed Qwen credentials: {}", e);
-                }
-                // Write back to ~/.qwen/oauth_creds.json so qwen-cli sees the
-                // new token too. Keeps the two clients from fighting over refreshes.
-                creds.write_back_to_qwen_cli();
-            }
-        }
-    }
-
-    /// Refresh the token if it's about to expire. Persists the new creds on success.
-    pub async fn ensure_fresh(&self) -> anyhow::Result<()> {
-        // First, check if qwen-cli has rotated the token on disk. If its
-        // mtime moved forward, import the new creds before deciding whether
-        // we still need to refresh — avoids burning our refresh_token when
-        // qwen-cli already did the work.
-        // (Only for single-account — rotation accounts don't share the cli file.)
-        if self.account_index.is_none() {
-            self.reload_from_qwen_cli_if_changed();
-        }
-
-        let needs_refresh = {
-            let c = self
-                .state
-                .read()
-                .map_err(|_| anyhow::anyhow!("Qwen token state poisoned"))?;
-            !c.is_valid()
-        };
-        if !needs_refresh {
-            return Ok(());
-        }
-        let snap = self.snapshot();
-        let new_creds = refresh_credentials(&snap).await?;
-        self.persist_refreshed(&new_creds);
-        if let Ok(mut w) = self.state.write() {
-            *w = new_creds;
-        }
-        if self.account_index.is_none()
-            && let Ok(mut m) = self.last_cli_mtime.write()
-        {
-            *m = QwenCredentials::qwen_cli_mtime();
-        }
-        tracing::debug!(
-            "Qwen access token refreshed (account: {:?})",
-            self.account_index
-        );
-        Ok(())
-    }
-
-    /// Force refresh regardless of current expiry. Used after a 401/403.
-    pub async fn force_refresh(&self) -> anyhow::Result<()> {
-        // Check qwen-cli's file first — if it rotated the token since we
-        // last looked, we can avoid burning our own refresh quota.
-        // (Only for single-account — rotation accounts don't share the cli file.)
-        if self.account_index.is_none() && self.reload_from_qwen_cli_if_changed() {
-            tracing::info!("Qwen: picked up rotated token from qwen-cli — no refresh needed");
-            return Ok(());
-        }
-        let snap = self.snapshot();
-        let new_creds = refresh_credentials(&snap).await?;
-        self.persist_refreshed(&new_creds);
-        if let Ok(mut w) = self.state.write() {
-            *w = new_creds;
-        }
-        if self.account_index.is_none()
-            && let Ok(mut m) = self.last_cli_mtime.write()
-        {
-            *m = QwenCredentials::qwen_cli_mtime();
-        }
-        Ok(())
-    }
-
-    /// Invalidate this account's credentials. Called when refresh + retry
-    /// still gets 401 — the OAuth tokens are permanently dead.
-    /// Clears in-memory state and persists empty credentials to keys.toml
-    /// so the account is excluded from rotation until re-authenticated.
-    pub fn invalidate(&self) {
-        tracing::warn!(
-            "Qwen account {:?} invalidated — clearing credentials",
-            self.account_index
-        );
-        // Clear in-memory state
-        if let Ok(mut w) = self.state.write() {
-            *w = QwenCredentials {
-                access_token: String::new(),
-                token_type: "Bearer".into(),
-                refresh_token: String::new(),
-                resource_url: String::new(),
-                expiry_date: 0,
-            };
-        }
-        // Persist cleared credentials to keys.toml
-        let dead_creds = QwenCredentials {
-            access_token: String::new(),
-            token_type: "Bearer".into(),
-            refresh_token: String::new(),
-            resource_url: String::new(),
-            expiry_date: 0,
-        };
-        self.persist_refreshed(&dead_creds);
-    }
-
-    /// Check `~/.qwen/oauth_creds.json` mtime; if it moved forward since we
-    /// last looked, re-import the credentials from disk. Returns `true` if
-    /// creds were reloaded.
-    fn reload_from_qwen_cli_if_changed(&self) -> bool {
-        let current_mtime = QwenCredentials::qwen_cli_mtime();
-        if current_mtime == 0 {
-            return false;
-        }
-        let last = self.last_cli_mtime.read().map(|g| *g).unwrap_or(0);
-        if current_mtime <= last {
-            return false;
-        }
-        match QwenCredentials::import_from_qwen_cli() {
-            Some(fresh) => {
-                tracing::info!(
-                    "Qwen: detected oauth_creds.json update (mtime {} -> {}) — reloading",
-                    last,
-                    current_mtime
-                );
-                if let Err(e) = fresh.persist_to_keys() {
-                    tracing::warn!("Failed to persist reloaded Qwen creds to keys.toml: {}", e);
-                }
-                if let Ok(mut w) = self.state.write() {
-                    *w = fresh;
-                }
-                if let Ok(mut m) = self.last_cli_mtime.write() {
-                    *m = current_mtime;
-                }
-                true
-            }
-            None => {
-                tracing::warn!("Qwen: oauth_creds.json changed but could not be parsed");
-                false
-            }
-        }
-    }
-
-    /// Spawn a background task that proactively refreshes the token before
-    /// it expires AND polls `~/.qwen/oauth_creds.json` every 30s for
-    /// out-of-band updates from qwen-cli.
-    pub fn start_background_refresh(self: Arc<Self>) {
-        let acct_label = match self.account_index {
-            Some(idx) => format!("rotation-{}", idx),
-            None => "single".to_string(),
-        };
-        tokio::spawn(async move {
-            // Initial check on startup
-            if let Err(e) = self.ensure_fresh().await {
-                tracing::warn!("Qwen [{}] initial token refresh failed: {}", acct_label, e);
-            }
-
-            loop {
-                // Compute time until ~60s before expiry.
-                let deadline_secs = {
-                    let snap = self.snapshot();
-                    let now_ms = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .map(|d| d.as_millis() as u64)
-                        .unwrap_or(0);
-                    let remaining_ms = snap.expiry_date.saturating_sub(now_ms);
-                    let remaining_secs = remaining_ms / 1000;
-                    remaining_secs.saturating_sub(60).max(30)
-                };
-
-                // Wake every 30s (or at the refresh deadline, whichever is
-                // sooner) to check qwen-cli's mtime.
-                let tick_secs = deadline_secs.min(30);
-                tokio::time::sleep(Duration::from_secs(tick_secs)).await;
-
-                // Out-of-band pickup from qwen-cli — only for single-account.
-                // Rotation accounts each have their own refresh_token and must
-                // not read/write ~/.qwen/oauth_creds.json.
-                if self.account_index.is_none() && self.reload_from_qwen_cli_if_changed() {
-                    continue;
-                }
-
-                // Normal proactive refresh window?
-                let should_refresh = {
-                    let snap = self.snapshot();
-                    !snap.is_valid()
-                };
-                if should_refresh && let Err(e) = self.ensure_fresh().await {
-                    let msg = e.to_string();
-                    if msg.contains("HTTP 400") {
-                        if self.account_index.is_some() {
-                            // Rotation account: just stop refreshing this account.
-                            // The factory will see it as expired on next rebuild.
-                            // Do NOT wipe single-account creds or qwen-cli file.
-                            tracing::error!(
-                                "Qwen [{}] refresh_token permanently dead — \
-                                 stopping background refresh for this account.",
-                                acct_label
-                            );
-                        } else {
-                            tracing::error!(
-                                "Qwen refresh_token permanently dead — wiping credentials. \
-                                 Run /onboard:provider to re-authenticate."
-                            );
-                            QwenCredentials::wipe_dead_credentials();
-                        }
-                        break;
-                    }
-                    tracing::warn!(
-                        "Qwen [{}] background token refresh failed: {}",
-                        acct_label,
-                        e
-                    );
-                    tokio::time::sleep(Duration::from_secs(30)).await;
-                }
-            }
-        });
-    }
-}
+//! The older OAuth device flow, token manager, multi-account rotation, and
+//! `~/.qwen/oauth_creds.json` sync were removed when Alibaba discontinued
+//! Qwen OAuth — the `portal.qwen.ai` endpoint now only accepts DashScope /
+//! Coding Plan API keys, and the CLI itself dropped the OAuth option.
 
 // ── DashScope headers ─────────────────────────────────────────────────────
 
@@ -1335,17 +41,16 @@ fn user_agent_platform() -> String {
     let os = match std::env::consts::OS {
         "macos" => "darwin",
         "windows" => "win32",
-        other => other, // linux, freebsd, openbsd, android stay as-is
+        other => other,
     };
     format!("{}; {}", os, node_arch())
 }
 
-/// Extra headers sent with every request to `portal.qwen.ai`.
+/// Extra headers sent with every DashScope request.
 ///
 /// These are the **exact four** headers that
 /// `DashScopeOpenAICompatibleProvider.buildHeaders()` emits in
-/// `@qwen-code/qwen-code`'s bundle (verified against
-/// `packages/core/dist/src/core/openaiContentGenerator/provider/dashscope.js`):
+/// `@qwen-code/qwen-code`:
 ///
 /// ```text
 /// User-Agent: QwenCode/<version> (<platform>; <arch>)
@@ -1354,14 +59,9 @@ fn user_agent_platform() -> String {
 /// X-DashScope-AuthType: qwen-oauth
 /// ```
 ///
-/// The `openai` npm SDK auto-injects its own `x-stainless-*` telemetry
-/// at runtime. We used to hardcode those values, but any byte-level
-/// mismatch with what the real node+openai-v5.x combo produces gets
-/// fingerprinted by the gateway and downgraded to a tight rate-limit
-/// bucket — even on a token the CLI is happily using. The safest
-/// behavior is to **not** send those headers at all and let the HTTP
-/// stack emit its natural defaults. DashScope only gates on the four
-/// headers above.
+/// The gateway fingerprints the full header set; sending any additional
+/// `x-stainless-*` / SDK telemetry headers drops us into a tighter
+/// rate-limit bucket, so we stick to these four.
 pub fn qwen_extra_headers() -> Vec<(String, String)> {
     let ua = format!("QwenCode/{} ({})", QWEN_CLI_VERSION, user_agent_platform());
     vec![
@@ -1375,9 +75,9 @@ pub fn qwen_extra_headers() -> Vec<(String, String)> {
 // ── DashScope body shape ──────────────────────────────────────────────────
 
 /// Stable per-process session id, mirroring qwen-cli's `metadata.sessionId`.
-/// DashScope appears to use this for per-session quota tracking; reusing one
-/// id for the lifetime of the process keeps us inside a single quota bucket
-/// instead of looking like a fresh client every request.
+/// DashScope tracks per-session quota, so reusing one id across the process
+/// lifetime keeps us in a single bucket instead of looking like a fresh
+/// client on every request.
 fn qwen_session_id() -> &'static str {
     use std::sync::OnceLock;
     static SESSION: OnceLock<String> = OnceLock::new();
@@ -1385,14 +85,13 @@ fn qwen_session_id() -> &'static str {
 }
 
 /// Per-request id, mirroring qwen-cli's `metadata.promptId`. qwen-cli uses
-/// a short hex string; we use 12 hex chars derived from a random u64.
+/// a short hex string; we use 13 hex chars derived from a random u64.
 fn qwen_prompt_id() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    // Simple xorshift for variability without pulling in `rand`.
     let mut x = nanos as u64 ^ 0x9E37_79B9_7F4A_7C15;
     x ^= x << 13;
     x ^= x >> 7;
@@ -1401,10 +100,8 @@ fn qwen_prompt_id() -> String {
 }
 
 /// Vision-capable model identifiers recognized by qwen-cli's
-/// `DashScopeOpenAICompatibleProvider.isVisionModel()`. The exact set
-/// lives in the bundled CLI (`packages/core/.../provider/dashscope.js`):
-/// exact match on `coder-model`, or prefix on `qwen-vl`, `qwen3-vl-plus`,
-/// `qwen3.5-plus`.
+/// `DashScopeOpenAICompatibleProvider.isVisionModel()`: exact match on
+/// `coder-model`, or prefix on `qwen-vl`, `qwen3-vl-plus`, `qwen3.5-plus`.
 fn is_vision_model(model: &str) -> bool {
     let m = model.to_ascii_lowercase();
     if m == "coder-model" {
@@ -1419,9 +116,7 @@ fn is_vision_model(model: &str) -> bool {
 }
 
 /// Normalize an OpenAI `content` field to the array form qwen-cli uses
-/// when attaching cache control. Mirrors `normalizeContentToArray`:
-///   - `"hello"` → `[{"type":"text","text":"hello"}]`
-///   - existing array → returned as-is (multi-modal user messages)
+/// when attaching cache control. Mirrors `normalizeContentToArray`.
 fn normalize_content_to_array(content: &serde_json::Value) -> Vec<serde_json::Value> {
     match content {
         serde_json::Value::String(s) => {
@@ -1448,43 +143,25 @@ fn add_cache_control_to_content(content: &serde_json::Value) -> serde_json::Valu
 }
 
 /// Rewrite a serialized OpenAI chat-completions body into the exact dialect
-/// that qwen-cli's `DashScopeOpenAICompatibleProvider.buildRequest` emits
-/// against `portal.qwen.ai`.
-///
-/// Byte-for-byte behavior reference:
-/// `packages/core/dist/src/core/openaiContentGenerator/provider/dashscope.js`
+/// that qwen-cli's `DashScopeOpenAICompatibleProvider.buildRequest` emits.
 ///
 /// Transforms applied:
 ///   1. **Cache control** — `addDashScopeCacheControl(request, stream ? "all" : "system_only")`:
-///      - System message (if any): content array-ified, last part tagged
-///        `cache_control: {type: "ephemeral"}`.
-///      - If `stream === true`: the **last message regardless of role**
-///        gets the same treatment.
-///      - If `stream === true` AND there are tools: the **last tool** gets
-///        `cache_control: {type: "ephemeral"}` appended at the top level.
-///      - All other messages are left untouched (plain strings stay strings).
+///      system message (if any) gets `cache_control: {type: "ephemeral"}`
+///      on its last content part; when streaming, the LAST message
+///      (regardless of role) and the LAST tool also get the same tag.
 ///   2. **metadata** — `{sessionId, promptId}` added at the top level.
-///      (qwen-cli also includes `channel` if it has one; OpenCrabs doesn't
-///      surface a channel at this layer, so we omit it — the field is
-///      optional in the CLI too.)
-///   3. **vl_high_resolution_images: true** — added **only** when the
-///      model is in the vision list. Previously we added this unconditionally,
-///      which flagged text-only requests as non-cli traffic.
-///   4. **No field stripping.** `temperature`, `top_p`, `tool_choice`,
-///      `max_completion_tokens`, `include_reasoning` etc. pass through.
-///      DashScope's fingerprint expects these to be present when the
-///      client supplies them.
-///   5. **No forced max_tokens.** qwen-cli runs `applyOutputTokenLimit`
-///      which caps but never synthesizes the field. We leave it absent
-///      when the caller didn't provide one.
+///   3. **vl_high_resolution_images: true** — added only when the model
+///      is in the vision list.
+///   4. No field stripping. `temperature`, `top_p`, `tool_choice`, etc.
+///      pass through. DashScope's fingerprint expects these to be present
+///      when the client supplies them. `max_tokens` is never synthesized.
 pub fn qwen_body_transform(mut body: serde_json::Value) -> serde_json::Value {
     let obj = match body.as_object_mut() {
         Some(o) => o,
         None => return body,
     };
 
-    // Streaming flag drives the cache-control scope: "all" (system + last
-    // message + last tool) vs. "system_only" (system only).
     let is_streaming = obj.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
 
     // ── 1. Cache control on messages ────────────────────────────────────
@@ -1504,8 +181,6 @@ pub fn qwen_body_transform(mut body: serde_json::Value) -> serde_json::Value {
                 let Some(msg_obj) = msg.as_object_mut() else {
                     continue;
                 };
-                // Skip messages with null / missing content — qwen-cli
-                // returns them unchanged.
                 let content = match msg_obj.get("content") {
                     Some(c) if !c.is_null() => c.clone(),
                     _ => continue,
@@ -1560,77 +235,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pkce_pair_is_well_formed() {
-        let p = PkcePair::generate();
-        // base64url-no-pad of 32 bytes is 43 chars
-        assert_eq!(p.verifier.len(), 43);
-        // sha256 -> 32 bytes -> base64url-no-pad -> 43 chars
-        assert_eq!(p.challenge.len(), 43);
-        assert!(!p.verifier.contains('='));
-        assert!(!p.challenge.contains('='));
-    }
-
-    #[test]
-    fn chat_url_default() {
-        let creds = QwenCredentials {
-            access_token: "x".into(),
-            token_type: "Bearer".into(),
-            refresh_token: "y".into(),
-            resource_url: String::new(),
-            expiry_date: 0,
-        };
-        let url = creds.chat_completions_url();
-        assert!(url.ends_with("/v1/chat/completions"));
-        assert!(url.starts_with("https://"));
-    }
-
-    #[test]
-    fn chat_url_from_resource_url() {
-        let creds = QwenCredentials {
-            access_token: "x".into(),
-            token_type: "Bearer".into(),
-            refresh_token: "y".into(),
-            resource_url: "portal.qwen.ai".into(),
-            expiry_date: 0,
-        };
-        assert_eq!(
-            creds.chat_completions_url(),
-            "https://portal.qwen.ai/v1/chat/completions"
-        );
-    }
-
-    #[test]
-    fn chat_url_handles_existing_v1() {
-        let creds = QwenCredentials {
-            access_token: "x".into(),
-            token_type: "Bearer".into(),
-            refresh_token: "y".into(),
-            resource_url: "https://example.com/v1".into(),
-            expiry_date: 0,
-        };
-        assert_eq!(
-            creds.chat_completions_url(),
-            "https://example.com/v1/chat/completions"
-        );
-    }
-
-    #[test]
-    fn is_valid_returns_false_for_expired() {
-        let creds = QwenCredentials {
-            access_token: "x".into(),
-            token_type: "Bearer".into(),
-            refresh_token: "y".into(),
-            resource_url: String::new(),
-            expiry_date: 0,
-        };
-        assert!(!creds.is_valid());
-    }
-
-    #[test]
     fn extra_headers_match_qwen_cli_exactly() {
-        // qwen-cli's DashScopeOpenAICompatibleProvider.buildHeaders() emits
-        // exactly these 4 headers. Any extras (x-stainless-*, etc.) were
-        // getting fingerprinted and downgraded to a tight rate-limit bucket.
         let h = qwen_extra_headers();
         let names: Vec<&str> = h.iter().map(|(k, _)| k.as_str()).collect();
         assert_eq!(h.len(), 4, "expected exactly 4 headers, got {:?}", names);
@@ -1638,7 +243,6 @@ mod tests {
         assert!(names.contains(&"X-DashScope-CacheControl"));
         assert!(names.contains(&"X-DashScope-UserAgent"));
         assert!(names.contains(&"X-DashScope-AuthType"));
-        // UA and X-DashScope-UserAgent must be identical byte strings.
         let ua = h
             .iter()
             .find(|(k, _)| k == "User-Agent")
@@ -1651,7 +255,6 @@ mod tests {
             .unwrap();
         assert_eq!(ua, ds_ua);
         assert!(ua.starts_with("QwenCode/"));
-        // X-DashScope-AuthType: qwen-oauth
         let auth = h
             .iter()
             .find(|(k, _)| k == "X-DashScope-AuthType")
@@ -1660,9 +263,6 @@ mod tests {
         assert_eq!(auth, "qwen-oauth");
     }
 
-    /// Baseline body resembling what OpenAIRequest serializes to for a small
-    /// chat turn with one tool. The transform must convert it into the exact
-    /// qwen-cli dialect captured in `/tmp/qwen-req.json`.
     fn sample_body() -> serde_json::Value {
         serde_json::json!({
             "model": "coder-model",
@@ -1694,34 +294,18 @@ mod tests {
 
     #[test]
     fn body_transform_cache_control_streaming_system_and_last_message() {
-        // Streaming body → cacheControl = "all". System gets cache_control
-        // on its last content part; the LAST message (index 3, a user)
-        // also gets cache_control. First user (index 1) and assistant
-        // (index 2) are left untouched as plain strings — qwen-cli does
-        // NOT array-ify non-cached messages.
         let out = qwen_body_transform(sample_body());
         let msgs = out.get("messages").and_then(|v| v.as_array()).unwrap();
 
-        // [0] system — array with cache_control on last part
         let sys = &msgs[0];
         assert_eq!(sys["role"], "system");
         assert!(sys["content"].is_array());
         assert_eq!(sys["content"][0]["type"], "text");
         assert_eq!(sys["content"][0]["cache_control"]["type"], "ephemeral");
 
-        // [1] first user — UNTOUCHED, still a plain string
-        let u1 = &msgs[1];
-        assert!(
-            u1["content"].is_string(),
-            "first user should stay as plain string, got {:?}",
-            u1["content"]
-        );
+        assert!(msgs[1]["content"].is_string());
+        assert!(msgs[2]["content"].is_string());
 
-        // [2] assistant — UNTOUCHED, still a plain string
-        let asst = &msgs[2];
-        assert!(asst["content"].is_string());
-
-        // [3] last user (== last message overall) — array with cache_control
         let u2 = &msgs[3];
         assert!(u2["content"].is_array());
         assert_eq!(u2["content"][0]["cache_control"]["type"], "ephemeral");
@@ -1729,26 +313,18 @@ mod tests {
 
     #[test]
     fn body_transform_non_streaming_only_tags_system() {
-        // Non-streaming → cacheControl = "system_only". Last message is
-        // left untouched even though it's a user message.
         let mut body = sample_body();
         body["stream"] = serde_json::json!(false);
         let out = qwen_body_transform(body);
         let msgs = out.get("messages").and_then(|v| v.as_array()).unwrap();
 
-        // system still gets tagged
         assert!(msgs[0]["content"].is_array());
         assert_eq!(msgs[0]["content"][0]["cache_control"]["type"], "ephemeral");
-
-        // last message (user) untouched
         assert!(msgs[3]["content"].is_string());
     }
 
     #[test]
     fn body_transform_preserves_all_fields() {
-        // Verify we no longer strip temperature, top_p, tool_choice,
-        // max_completion_tokens, include_reasoning — DashScope expects
-        // these to pass through when the caller supplies them.
         let out = qwen_body_transform(sample_body());
         let obj = out.as_object().unwrap();
         assert_eq!(obj.get("temperature"), Some(&serde_json::json!(0.7)));
@@ -1771,11 +347,9 @@ mod tests {
 
     #[test]
     fn body_transform_vl_flag_only_for_vision_models() {
-        // coder-model is in the vision list → flag present
         let out = qwen_body_transform(sample_body());
         assert_eq!(out["vl_high_resolution_images"], true);
 
-        // A non-vision model → flag absent (previously we forced it on)
         let mut body = sample_body();
         body["model"] = serde_json::json!("qwen3-32b");
         let out = qwen_body_transform(body);
@@ -1790,9 +364,6 @@ mod tests {
 
     #[test]
     fn body_transform_does_not_force_max_tokens() {
-        // qwen-cli never synthesizes max_tokens. Body without it should
-        // stay without it — previously we forced 32000 and widened the
-        // fingerprint gap.
         let mut body = sample_body();
         body.as_object_mut().unwrap().remove("max_tokens");
         let out = qwen_body_transform(body);
@@ -1801,13 +372,11 @@ mod tests {
 
     #[test]
     fn body_transform_tags_last_tool_only_when_streaming() {
-        // Streaming → last tool gets cache_control
         let out = qwen_body_transform(sample_body());
         let tools = out.get("tools").and_then(|v| v.as_array()).unwrap();
         assert!(tools[0].get("cache_control").is_none());
         assert_eq!(tools[1]["cache_control"]["type"], "ephemeral");
 
-        // Non-streaming → tools untouched
         let mut body = sample_body();
         body["stream"] = serde_json::json!(false);
         let out = qwen_body_transform(body);
@@ -1826,9 +395,6 @@ mod tests {
 
     #[test]
     fn body_transform_cache_control_on_multimodal_last_message() {
-        // Last message is already an array (multi-modal image+text user).
-        // Streaming → cache_control should be added to the LAST content
-        // part of that array, not destroy the existing structure.
         let body = serde_json::json!({
             "model": "coder-model",
             "stream": true,
@@ -1848,8 +414,6 @@ mod tests {
         let u = &msgs[1];
         let content = u["content"].as_array().unwrap();
         assert_eq!(content.len(), 2);
-        // original image_url part preserved + tagged with cache_control
-        // because it's the LAST part of the LAST message
         assert_eq!(content[0]["type"], "text");
         assert_eq!(content[1]["type"], "image_url");
         assert_eq!(content[1]["cache_control"]["type"], "ephemeral");
@@ -1862,7 +426,7 @@ mod tests {
         assert!(is_vision_model("qwen-vl-max-latest"));
         assert!(is_vision_model("qwen3-vl-plus"));
         assert!(is_vision_model("qwen3.5-plus"));
-        assert!(is_vision_model("CODER-MODEL")); // case-insensitive
+        assert!(is_vision_model("CODER-MODEL"));
         assert!(!is_vision_model("qwen3-32b"));
         assert!(!is_vision_model("qwen-max"));
         assert!(!is_vision_model(""));

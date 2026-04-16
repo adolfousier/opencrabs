@@ -948,21 +948,6 @@ pub struct ProviderConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
 
-    // ── OAuth fields (currently used by [providers.qwen]) ────────────────
-    /// OAuth refresh token. Only set for providers using a device-code flow
-    /// where OpenCrabs handles refresh itself (currently: Qwen native).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub refresh_token: Option<String>,
-
-    /// OAuth bearer token expiry as ms since UNIX epoch.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expiry_date: Option<u64>,
-
-    /// API host returned by the OAuth provider (e.g. `portal.qwen.ai`).
-    /// No scheme, no path — used to derive the chat completions URL.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub resource_url: Option<String>,
-
     /// Opt-in toggle for Qwen3 hybrid thinking mode.
     /// Qwen3 is a single model with a runtime switch — set `enable_thinking =
     /// true` in `[providers.qwen]` to ask the gateway to emit reasoning
@@ -1373,26 +1358,23 @@ fn merge_provider_keys(mut base: ProviderConfigs, keys: ProviderConfigs) -> Prov
         let entry = base.zhipu.get_or_insert_with(ProviderConfig::default);
         entry.api_key = Some(key);
     }
-    // Merge qwen native (OAuth) — copies api_key + refresh_token + expiry + resource_url.
-    // Auto-enables and creates the entry if keys.toml has credentials but config.toml doesn't,
-    // since the user explicitly authenticated through onboarding.
-    if let Some(k) = keys.qwen {
-        let has_credentials = k.api_key.as_ref().map(|s| is_real_key(s)).unwrap_or(false)
-            && k.refresh_token.as_ref().is_some_and(|s| !s.is_empty());
-        if has_credentials {
-            let entry = base.qwen.get_or_insert_with(|| ProviderConfig {
-                enabled: true,
-                ..Default::default()
-            });
-            entry.api_key = k.api_key;
-            entry.refresh_token = k.refresh_token;
-            entry.expiry_date = k.expiry_date;
-            if k.resource_url.is_some() {
-                entry.resource_url = k.resource_url;
-            }
-            if entry.default_model.is_none() && k.default_model.is_some() {
-                entry.default_model = k.default_model;
-            }
+    // Merge qwen (DashScope API key). Auto-enable + create the entry if
+    // keys.toml has a key but config.toml doesn't — the user authenticated
+    // through onboarding and wants Qwen on.
+    if let Some(k) = keys.qwen
+        && let Some(key) = k.api_key
+        && is_real_key(&key)
+    {
+        let entry = base.qwen.get_or_insert_with(|| ProviderConfig {
+            enabled: true,
+            ..Default::default()
+        });
+        entry.api_key = Some(key);
+        if entry.default_model.is_none() && k.default_model.is_some() {
+            entry.default_model = k.default_model;
+        }
+        if entry.base_url.is_none() && k.base_url.is_some() {
+            entry.base_url = k.base_url;
         }
     }
     if let Some(custom_keys) = keys.custom
