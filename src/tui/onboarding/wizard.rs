@@ -284,7 +284,7 @@ impl OnboardingWizard {
                 (0, String::new(), String::new(), String::new())
             };
 
-        let mut ps = crate::tui::provider_selector::ProviderSelectorState {
+        let ps = crate::tui::provider_selector::ProviderSelectorState {
             selected_provider,
             api_key_input,
             api_key_cursor: 0,
@@ -305,8 +305,6 @@ impl OnboardingWizard {
             model_filter: String::new(),
             ..Default::default()
         };
-        // Load Qwen rotation state from config (shared logic)
-        ps.load_qwen_rotation_from_config();
 
         let mut wizard = Self {
             step: OnboardingStep::ModeSelect,

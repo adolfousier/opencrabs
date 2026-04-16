@@ -23,13 +23,6 @@ pub const CUSTOM_INSTANCES_START: usize = PROVIDERS.len();
 /// Both `/models` dialog and `/onboard` wizard embed this struct.
 #[derive(Default)]
 pub struct ProviderSelectorState {
-    /// Qwen OAuth device flow status. Lives here (not on OnboardingWizard) so
-    /// both the `/onboard` wizard and the `/models` dialog can share the same
-    /// rendering path and event handlers. `Idle` when no flow is active.
-    pub qwen_device_flow_status: crate::tui::onboarding::QwenDeviceFlowStatus,
-    /// User-facing device code shown during Qwen OAuth device flow.
-    pub qwen_user_code: Option<String>,
-
     /// Currently selected provider index (0..CUSTOM_PROVIDER_IDX = static,
     /// CUSTOM_PROVIDER_IDX = new custom, CUSTOM_INSTANCES_START+ = existing customs)
     pub selected_provider: usize,
@@ -65,18 +58,6 @@ pub struct ProviderSelectorState {
     pub focused_field: usize,
     /// Whether the provider list is expanded/visible
     pub showing_providers: bool,
-
-    // ── Qwen rotation ──────────────────────────────────────────────
-    /// Whether multi-account rotation is enabled for Qwen
-    pub qwen_rotation_enabled: bool,
-    /// Number of accounts to configure (2–10)
-    pub qwen_rotation_count: usize,
-    /// Credentials collected so far during rotation setup
-    pub qwen_rotation_collected: Vec<crate::brain::provider::qwen::QwenCredentials>,
-    /// Which account is currently being authenticated (0-based)
-    pub qwen_rotation_current: usize,
-    /// Number of rotation accounts with expired/dead tokens
-    pub qwen_rotation_expired_count: usize,
 }
 
 impl ProviderSelectorState {
@@ -178,27 +159,12 @@ impl ProviderSelectorState {
                     .as_ref()
                     .and_then(|p| p.api_key.as_ref())
                     .is_some_and(|k| !k.is_empty()),
-                "qwen" => {
-                    // Rotation accounts: "configured" if ≥2 have valid (non-expired) tokens
-                    if let Some(accounts) = config.providers.qwen_accounts.as_ref()
-                        && accounts.len() >= 2
-                    {
-                        let creds =
-                            crate::brain::provider::qwen::QwenCredentials::from_account_configs(
-                                accounts,
-                            );
-                        let valid = creds.iter().filter(|c| c.is_valid()).count();
-                        valid >= 2
-                    } else {
-                        // Single OAuth — check api_key exists
-                        config
-                            .providers
-                            .qwen
-                            .as_ref()
-                            .and_then(|p| p.api_key.as_ref())
-                            .is_some_and(|k| !k.is_empty())
-                    }
-                }
+                "qwen" => config
+                    .providers
+                    .qwen
+                    .as_ref()
+                    .and_then(|p| p.api_key.as_ref())
+                    .is_some_and(|k| !k.is_empty()),
                 // Standard API key providers
                 _ => crate::utils::providers::config_for(&config.providers, id)
                     .and_then(|p| p.api_key.as_ref())
@@ -360,140 +326,6 @@ impl ProviderSelectorState {
         } else {
             None
         }
-    }
-
-    // ── Qwen rotation helpers (shared by /models + onboarding) ────
-
-    /// Load Qwen rotation state from persisted config.
-    /// Sets `qwen_rotation_enabled`, `qwen_rotation_count`, and
-    /// `qwen_device_flow_status` so both `/models` and onboarding show the
-    /// correct status on dialog open without duplicating this logic.
-    pub fn load_qwen_rotation_from_config(&mut self) {
-        use crate::brain::provider::qwen::QwenCredentials;
-        use crate::tui::onboarding::QwenDeviceFlowStatus;
-        if let Ok(config) = crate::config::Config::load()
-            && let Some(accounts) = config.providers.qwen_accounts.as_ref()
-            && accounts.len() >= 2
-        {
-            self.qwen_rotation_enabled = true;
-            self.qwen_rotation_count = accounts.len();
-            // from_account_configs skips accounts with empty api_key (wiped
-            // secrets), so compare loaded count against total slots to detect
-            // expired/wiped accounts that can no longer authenticate.
-            let creds = QwenCredentials::from_account_configs(accounts);
-            let loaded = creds.len();
-            let valid = creds.iter().filter(|c| c.is_valid()).count();
-            // expired = accounts with wiped secrets + accounts with expired tokens
-            let expired = accounts.len() - valid;
-            if expired == 0 && loaded == accounts.len() {
-                self.qwen_device_flow_status = QwenDeviceFlowStatus::RotationComplete;
-            } else {
-                self.qwen_rotation_expired_count = expired;
-                self.qwen_device_flow_status = QwenDeviceFlowStatus::Idle;
-            }
-            return;
-        }
-        self.qwen_rotation_enabled = false;
-        self.qwen_rotation_count = 2;
-    }
-
-    /// Number of Qwen rotation accounts persisted in keys.toml.
-    pub fn qwen_persisted_account_count(&self) -> usize {
-        crate::config::Config::load()
-            .ok()
-            .and_then(|c| c.providers.qwen_accounts)
-            .map(|a| a.len())
-            .unwrap_or(0)
-    }
-
-    /// Whether Enter on Qwen auth field should skip auth (accounts already
-    /// configured and count matches what the user selected).
-    /// Returns false if any accounts have expired tokens — forces re-auth.
-    pub fn qwen_should_skip_auth(&self) -> bool {
-        let persisted = self.qwen_persisted_account_count();
-        self.qwen_rotation_enabled
-            && self.qwen_rotation_count >= 2
-            && persisted >= 2
-            && persisted == self.qwen_rotation_count
-            && self.qwen_rotation_expired_count == 0
-    }
-
-    /// Prepare state for starting a rotation auth flow.
-    /// If accounts already exist (e.g. going 3→5), pre-loads them into
-    /// `qwen_rotation_collected` so the flow only auths the new ones.
-    /// Returns the starting account index.
-    pub fn qwen_rotation_prepare_flow(&mut self) -> usize {
-        let existing = crate::config::Config::load()
-            .ok()
-            .and_then(|c| c.providers.qwen_accounts)
-            .map(|cfgs| crate::brain::provider::qwen::QwenCredentials::from_account_configs(&cfgs))
-            .unwrap_or_default();
-
-        // Keep only accounts with valid (non-expired) tokens, re-auth the rest
-        let valid: Vec<_> = existing.into_iter().filter(|c| c.is_valid()).collect();
-        let valid_count = valid.len();
-
-        if valid_count > 0 && valid_count < self.qwen_rotation_count {
-            // Incremental: keep valid accounts, auth the rest
-            self.qwen_rotation_collected = valid;
-            self.qwen_rotation_current = valid_count;
-            valid_count
-        } else if valid_count >= self.qwen_rotation_count {
-            // All slots filled with valid accounts — nothing to do
-            self.qwen_rotation_collected = valid;
-            self.qwen_rotation_current = self.qwen_rotation_count;
-            self.qwen_rotation_count
-        } else {
-            // No valid accounts at all — fresh start
-            self.qwen_rotation_collected.clear();
-            self.qwen_rotation_current = 0;
-            0
-        }
-    }
-
-    /// Call when the user changes the rotation count or toggles rotation.
-    /// Clears `RotationComplete` so Enter re-evaluates instead of skipping.
-    pub fn qwen_rotation_count_changed(&mut self) {
-        use crate::tui::onboarding::QwenDeviceFlowStatus;
-        if matches!(
-            self.qwen_device_flow_status,
-            QwenDeviceFlowStatus::RotationComplete
-        ) {
-            self.qwen_device_flow_status = QwenDeviceFlowStatus::Idle;
-        }
-    }
-
-    /// Wipe all Qwen rotation accounts from keys.toml and reset state
-    /// so the user can re-authenticate from scratch. Triggered by Alt+Backspace.
-    pub fn qwen_wipe_rotation_accounts(&mut self) {
-        use crate::config::keys_path;
-        use crate::tui::onboarding::QwenDeviceFlowStatus;
-
-        // Remove [[providers.qwen_accounts]] from keys.toml and config.toml
-        for path in [
-            keys_path(),
-            crate::config::opencrabs_home().join("config.toml"),
-        ] {
-            if path.exists()
-                && let Ok(content) = std::fs::read_to_string(&path)
-                && let Ok(mut doc) = content.parse::<toml_edit::DocumentMut>()
-                && let Some(providers) = doc.get_mut("providers")
-                && let Some(tbl) = providers.as_table_mut()
-                && tbl.remove("qwen_accounts").is_some()
-            {
-                let _ = std::fs::write(&path, doc.to_string());
-            }
-        }
-
-        // Reset UI state
-        self.qwen_rotation_enabled = false;
-        self.qwen_rotation_count = 2;
-        self.qwen_rotation_expired_count = 0;
-        self.qwen_rotation_collected.clear();
-        self.qwen_rotation_current = 0;
-        self.qwen_device_flow_status = QwenDeviceFlowStatus::Idle;
-        self.has_existing_key = false;
-        tracing::info!("Wiped all Qwen rotation accounts — user can re-authenticate");
     }
 
     // ── Model list management ───────────────────────────────────────

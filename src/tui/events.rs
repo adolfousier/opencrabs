@@ -152,28 +152,6 @@ pub enum TuiEvent {
     /// GitHub Copilot device flow: failed
     GitHubOAuthError(String),
 
-    /// Qwen native device flow: user_code + verification URI to display
-    QwenDeviceCode {
-        user_code: String,
-        verification_uri: String,
-    },
-    /// Qwen native device flow: credentials obtained and persisted.
-    /// Carries the freshly-obtained credentials so handlers don't need to
-    /// re-read from disk (which was fragile and caused credential loss).
-    QwenOAuthComplete(crate::brain::provider::qwen::QwenCredentials),
-    /// Qwen native device flow: failed
-    QwenOAuthError(String),
-
-    /// Qwen rotation: single account done (idx 0-based, total).
-    /// Carries the credentials directly from the OAuth flow.
-    QwenRotationAccountDone {
-        idx: usize,
-        total: usize,
-        creds: crate::brain::provider::qwen::QwenCredentials,
-    },
-    /// Qwen rotation: all accounts collected and persisted
-    QwenRotationComplete,
-
     /// A system message to display in chat
     SystemMessage(String),
 

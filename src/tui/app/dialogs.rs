@@ -9,87 +9,6 @@ use anyhow::Result;
 use std::path::PathBuf;
 
 impl App {
-    /// Spawn the Qwen OAuth device flow task. Shared by `/onboard` (wizard)
-    /// and `/models` (dialog). Emits `TuiEvent::QwenDeviceCode` /
-    /// `QwenOAuthComplete` / `QwenOAuthError` which both rendering paths
-    /// consume via `self.ps.qwen_device_flow_status`.
-    pub(crate) fn spawn_qwen_device_flow(&self) {
-        use crate::brain::provider::qwen;
-        let sender = self.event_sender();
-        // When the rotation flow is active, each device-flow completion is
-        // one account out of N. Writing to the single-account `[providers.qwen]`
-        // slot 5x in a row would overwrite stale creds repeatedly and leave
-        // the wrong account as the "single" fallback. Rotation persistence
-        // happens later via `persist_all_accounts` once all accounts are collected.
-        let rotation_active = self
-            .onboarding
-            .as_ref()
-            .is_some_and(|w| w.ps.qwen_rotation_enabled)
-            || self.ps.qwen_rotation_enabled;
-        tokio::spawn(async move {
-            // Retry loop: on poll failure (expired code, WAF, etc.), generate
-            // a fresh device code and URL automatically. The user can also
-            // hit Enter to restart (which spawns a new task, orphaning this one).
-            const MAX_RETRIES: u32 = 5;
-            for attempt in 0..MAX_RETRIES {
-                if attempt > 0 {
-                    tracing::info!(
-                        "Qwen OAuth: auto-retrying with new device code (attempt {})",
-                        attempt + 1
-                    );
-                }
-
-                let pkce = qwen::PkcePair::generate();
-                let device = match qwen::start_device_flow(&pkce).await {
-                    Ok(d) => d,
-                    Err(e) => {
-                        let _ = sender.send(TuiEvent::QwenOAuthError(e.to_string()));
-                        // Brief pause before retry
-                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                        continue;
-                    }
-                };
-
-                let url = device
-                    .verification_uri_complete
-                    .clone()
-                    .unwrap_or_else(|| device.verification_uri.clone());
-                let _ = qwen::open_browser(&url);
-
-                let _ = sender.send(TuiEvent::QwenDeviceCode {
-                    user_code: device.user_code.clone(),
-                    verification_uri: url,
-                });
-
-                match qwen::poll_for_token(&device.device_code, &pkce).await {
-                    Ok(creds) => {
-                        // Single-account: persist now so the creds are safe
-                        // even if the app exits before the event is handled.
-                        // Rotation: skip — persistence is batched by the
-                        // QwenRotationAccountDone handler once all accounts
-                        // are collected.
-                        if !rotation_active && let Err(e) = creds.persist_to_keys() {
-                            let _ = sender.send(TuiEvent::QwenOAuthError(format!(
-                                "Authorized but failed to save credentials: {}",
-                                e
-                            )));
-                            return;
-                        }
-                        let _ = sender.send(TuiEvent::QwenOAuthComplete(creds));
-                        return;
-                    }
-                    Err(e) => {
-                        tracing::warn!("Qwen OAuth poll failed: {} — will retry", e);
-                        // Don't send error event on non-final attempts
-                        if attempt == MAX_RETRIES - 1 {
-                            let _ = sender.send(TuiEvent::QwenOAuthError(e.to_string()));
-                        }
-                    }
-                }
-            }
-        });
-    }
-
     /// Detect existing API key for the currently selected provider in model selector.
     /// Delegates to `ProviderSelectorState::detect_existing_key()`.
     pub(crate) fn detect_model_selector_key_for_provider(&mut self) {
@@ -264,9 +183,6 @@ impl App {
         self.ps.has_existing_key = api_key.is_some();
         self.ps.api_key_input.clear();
 
-        // Load Qwen rotation state from persisted config (single source of truth)
-        self.ps.load_qwen_rotation_from_config();
-
         // Spawn async model fetch — dialog opens immediately, models arrive via event
         let sender = self.event_sender();
         tokio::spawn(async move {
@@ -439,32 +355,6 @@ impl App {
                 self.ps.models.clear();
                 self.ps.selected_model = 0;
             }
-        } else if self.ps.focused_field == 1 && self.ps.selected_provider == 10 {
-            // Qwen native: auth/rotation area (field 1)
-            match event.code {
-                crossterm::event::KeyCode::Char(' ') => {
-                    self.ps.qwen_rotation_enabled = !self.ps.qwen_rotation_enabled;
-                    if self.ps.qwen_rotation_enabled && self.ps.qwen_rotation_count < 2 {
-                        self.ps.qwen_rotation_count = 2;
-                    }
-                }
-                crossterm::event::KeyCode::Char(c @ '2'..='9') if self.ps.qwen_rotation_enabled => {
-                    self.ps.qwen_rotation_count = (c as usize) - ('0' as usize);
-                    self.ps.qwen_rotation_count_changed();
-                }
-                crossterm::event::KeyCode::Char('1') if self.ps.qwen_rotation_enabled => {
-                    self.ps.qwen_rotation_count = 10;
-                    self.ps.qwen_rotation_count_changed();
-                }
-                crossterm::event::KeyCode::Backspace
-                    if event
-                        .modifiers
-                        .contains(crossterm::event::KeyModifiers::ALT) =>
-                {
-                    self.ps.qwen_wipe_rotation_accounts();
-                }
-                _ => {}
-            }
         } else if self.ps.focused_field == 1 && is_zhipu {
             // z.ai GLM endpoint type toggle (field 1)
             match event.code {
@@ -627,96 +517,6 @@ impl App {
                 } else {
                     // CLI providers have no API key — skip straight to model field
                     self.ps.focused_field = if is_cli_provider { 2 } else { 1 };
-                }
-            } else if self.ps.focused_field == 1 && self.ps.selected_provider == 10 {
-                // Qwen native: field 1 is auth/rotation area
-                use super::onboarding::QwenDeviceFlowStatus;
-
-                // RotationStep means we're actively starting a flow — ignore Enter
-                if matches!(
-                    self.ps.qwen_device_flow_status,
-                    QwenDeviceFlowStatus::RotationStep { .. }
-                ) {
-                    return Ok(());
-                }
-
-                // WaitingForUser: user hit Enter again before verifying —
-                // restart with a fresh device code/URL
-                if matches!(
-                    self.ps.qwen_device_flow_status,
-                    QwenDeviceFlowStatus::WaitingForUser { .. }
-                ) {
-                    tracing::info!(
-                        "Qwen OAuth: user requested new device code (Enter while waiting)"
-                    );
-                    if self.ps.qwen_rotation_enabled {
-                        let current = self.ps.qwen_rotation_current;
-                        let total = self.ps.qwen_rotation_count;
-                        self.ps.qwen_device_flow_status =
-                            QwenDeviceFlowStatus::RotationStep { current, total };
-                    }
-                    self.spawn_qwen_device_flow();
-                    return Ok(());
-                }
-
-                // Handle signout confirmation during rotation
-                if matches!(
-                    self.ps.qwen_device_flow_status,
-                    QwenDeviceFlowStatus::RotationSignout { .. }
-                ) {
-                    let cli_path = crate::brain::provider::qwen::QwenCredentials::qwen_cli_path();
-                    let _ = std::fs::remove_file(&cli_path);
-                    let current = self.ps.qwen_rotation_current;
-                    let total = self.ps.qwen_rotation_count;
-                    self.ps.qwen_device_flow_status =
-                        QwenDeviceFlowStatus::RotationStep { current, total };
-                    self.spawn_qwen_device_flow();
-                    return Ok(());
-                }
-
-                // Rotation complete → advance to model
-                if matches!(
-                    self.ps.qwen_device_flow_status,
-                    QwenDeviceFlowStatus::RotationComplete
-                ) {
-                    self.ps.focused_field = 2;
-                    self.ps.selected_model = 0;
-                    return Ok(());
-                }
-
-                // If rotation accounts already exist in config, skip auth — just
-                // advance to model selection. Only re-trigger the rotation flow when
-                // the user explicitly changed the count (collected is empty means
-                // we haven't started a new flow this dialog session).
-                if self.ps.qwen_should_skip_auth() {
-                    // Accounts already set up with matching count — advance to model
-                    self.ps.focused_field = 2;
-                    self.ps.selected_model = 0;
-                    return Ok(());
-                } else if self.ps.qwen_rotation_enabled && self.ps.qwen_rotation_count >= 2 {
-                    // Rotation setup — incremental if accounts already exist
-                    let start_from = self.ps.qwen_rotation_prepare_flow();
-                    self.ps.qwen_device_flow_status = QwenDeviceFlowStatus::RotationStep {
-                        current: start_from,
-                        total: self.ps.qwen_rotation_count,
-                    };
-                    let cli_path = crate::brain::provider::qwen::QwenCredentials::qwen_cli_path();
-                    let _ = std::fs::remove_file(&cli_path);
-                    self.spawn_qwen_device_flow();
-                } else if matches!(
-                    self.ps.qwen_device_flow_status,
-                    QwenDeviceFlowStatus::Complete
-                ) || self.ps.has_existing_key
-                {
-                    // Single-account already authenticated → advance to model
-                    self.ps.focused_field = 2;
-                    self.ps.selected_model = 0;
-                    return Ok(());
-                } else {
-                    self.ps.qwen_device_flow_status = QwenDeviceFlowStatus::WaitingForUser {
-                        verification_uri: String::new(),
-                    };
-                    self.spawn_qwen_device_flow();
                 }
             } else if self.ps.focused_field == 1 && is_zhipu {
                 // z.ai GLM: field 1 is endpoint type, move to field 2 (api_key)
@@ -1593,13 +1393,6 @@ impl App {
                         let _ = sender.send(TuiEvent::OnboardingModelsFetched(models));
                     });
                 }
-                WizardAction::QwenDeviceFlow => {
-                    wizard.ps.qwen_device_flow_status =
-                        super::onboarding::QwenDeviceFlowStatus::WaitingForUser {
-                            verification_uri: String::new(),
-                        };
-                    self.spawn_qwen_device_flow();
-                }
                 WizardAction::GitHubDeviceFlow => {
                     wizard.github_device_flow_status =
                         super::onboarding::GitHubDeviceFlowStatus::WaitingForUser;
@@ -2016,29 +1809,6 @@ impl App {
                             }
                         }
                     }
-                }
-                WizardAction::QwenRotationFlow => {
-                    // Start multi-account rotation setup (incremental if accounts exist)
-                    let start_from = wizard.ps.qwen_rotation_prepare_flow();
-                    wizard.ps.qwen_device_flow_status =
-                        super::onboarding::QwenDeviceFlowStatus::RotationStep {
-                            current: start_from,
-                            total: wizard.ps.qwen_rotation_count,
-                        };
-                    // Clear any stale qwen-cli creds so browser prompts fresh login
-                    let cli_path = crate::brain::provider::qwen::QwenCredentials::qwen_cli_path();
-                    let _ = std::fs::remove_file(&cli_path);
-                    self.spawn_qwen_device_flow();
-                }
-                WizardAction::QwenRotationNext => {
-                    // User confirmed signout — kick off next account's device flow
-                    let cli_path = crate::brain::provider::qwen::QwenCredentials::qwen_cli_path();
-                    let _ = std::fs::remove_file(&cli_path);
-                    let current = wizard.ps.qwen_rotation_current;
-                    let total = wizard.ps.qwen_rotation_count;
-                    wizard.ps.qwen_device_flow_status =
-                        super::onboarding::QwenDeviceFlowStatus::RotationStep { current, total };
-                    self.spawn_qwen_device_flow();
                 }
                 WizardAction::None => {
                     // Stay in onboarding

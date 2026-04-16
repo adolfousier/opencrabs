@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent};
 
 use super::helpers::{handle_text_paste, is_clear_field};
 use super::types::*;
@@ -436,101 +436,6 @@ impl OnboardingWizard {
                 }
                 _ => {}
             },
-            AuthField::ApiKey if self.ps.selected_provider == 10 => {
-                // Qwen native: ApiKey field shows auth status + rotation toggle
-                use crate::tui::onboarding::QwenDeviceFlowStatus;
-                match event.code {
-                    KeyCode::Char(' ') => {
-                        // Toggle rotation
-                        self.ps.qwen_rotation_enabled = !self.ps.qwen_rotation_enabled;
-                        if self.ps.qwen_rotation_enabled && self.ps.qwen_rotation_count < 2 {
-                            self.ps.qwen_rotation_count = 2;
-                        }
-                    }
-                    KeyCode::Char(c @ '2'..='9') if self.ps.qwen_rotation_enabled => {
-                        self.ps.qwen_rotation_count = (c as usize) - ('0' as usize);
-                        self.ps.qwen_rotation_count_changed();
-                    }
-                    KeyCode::Char('1') if self.ps.qwen_rotation_enabled => {
-                        self.ps.qwen_rotation_count = 10;
-                        self.ps.qwen_rotation_count_changed();
-                    }
-                    KeyCode::Backspace if event.modifiers.contains(KeyModifiers::ALT) => {
-                        self.ps.qwen_wipe_rotation_accounts();
-                        return WizardAction::None;
-                    }
-                    KeyCode::Enter => {
-                        // RotationStep means we're starting a flow — ignore
-                        if matches!(
-                            self.ps.qwen_device_flow_status,
-                            QwenDeviceFlowStatus::RotationStep { .. }
-                        ) {
-                            return WizardAction::None;
-                        }
-                        // WaitingForUser: Enter restarts with fresh code/URL
-                        if matches!(
-                            self.ps.qwen_device_flow_status,
-                            QwenDeviceFlowStatus::WaitingForUser { .. }
-                        ) {
-                            return WizardAction::QwenRotationFlow;
-                        }
-                        // Handle signout confirmation during rotation
-                        if matches!(
-                            self.ps.qwen_device_flow_status,
-                            QwenDeviceFlowStatus::RotationSignout { .. }
-                        ) {
-                            return WizardAction::QwenRotationNext;
-                        }
-                        // Rotation complete → advance to model
-                        if matches!(
-                            self.ps.qwen_device_flow_status,
-                            QwenDeviceFlowStatus::RotationComplete
-                        ) {
-                            self.auth_field = AuthField::Model;
-                            self.ps.models.clear();
-                            self.ps.selected_model = 0;
-                            self.ps.config_models =
-                                crate::tui::provider_selector::load_default_models("qwen");
-                            return WizardAction::None;
-                        }
-                        // Rotation accounts already match desired count — skip auth
-                        if self.ps.qwen_should_skip_auth() {
-                            self.auth_field = AuthField::Model;
-                            self.ps.models.clear();
-                            self.ps.selected_model = 0;
-                            self.ps.config_models =
-                                crate::tui::provider_selector::load_default_models("qwen");
-                            return WizardAction::None;
-                        }
-                        // Start rotation flow (need new/different account count)
-                        if self.ps.qwen_rotation_enabled && self.ps.qwen_rotation_count >= 2 {
-                            return WizardAction::QwenRotationFlow;
-                        }
-                        // Single-account complete → advance to model
-                        if matches!(
-                            self.ps.qwen_device_flow_status,
-                            QwenDeviceFlowStatus::Complete
-                        ) || self.ps.has_existing_key_sentinel()
-                        {
-                            self.auth_field = AuthField::Model;
-                            self.ps.models.clear();
-                            self.ps.selected_model = 0;
-                            self.ps.config_models =
-                                crate::tui::provider_selector::load_default_models("qwen");
-                            return WizardAction::None;
-                        }
-                        // Start single device flow
-                        return WizardAction::QwenDeviceFlow;
-                    }
-                    KeyCode::Backspace | KeyCode::BackTab | KeyCode::Up => {
-                        self.auth_field = AuthField::Provider;
-                    }
-                    KeyCode::Esc => {
-                        self.auth_field = AuthField::Provider;
-                    }
-                    _ => {}
-                }
-            }
             AuthField::ApiKey => match event.code {
                 KeyCode::Char(c) => {
                     // If existing key is loaded and user starts typing, clear it (replace mode)
