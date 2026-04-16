@@ -105,7 +105,7 @@ pub(super) fn render_queue(f: &mut Frame, app: &App, area: Rect) -> u16 {
         ),
     ]);
 
-    let queue_height = 1u16;
+    let queue_height = 2u16;
     let queue_area = Rect {
         x: area.x,
         y: area.y,
