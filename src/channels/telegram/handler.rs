@@ -1478,12 +1478,28 @@ pub(crate) async fn handle_message(
                 let text = crate::utils::sanitize::strip_llm_artifacts(&text);
                 let html = markdown_to_telegram_html(&text);
                 if !html.is_empty() {
-                    let _ = bot
-                        .send_message(msg.chat.id, &html)
-                        .parse_mode(ParseMode::Html)
-                        .await;
-                    let mut s = streaming.lock().unwrap_or_else(|e| e.into_inner());
-                    s.sent_intermediates.push(text.clone());
+                    // Chunk to Telegram's 4096-char limit and send each chunk.
+                    // Only record as "sent" if every chunk succeeded — otherwise
+                    // the dedup pass on the final response would strip a message
+                    // the user never actually saw, leaving them with no reply.
+                    let chunks: Vec<String> = split_message(&html, 4096)
+                        .into_iter()
+                        .map(|s| s.to_string())
+                        .collect();
+                    let mut all_ok = true;
+                    for chunk in &chunks {
+                        if let Err(e) = send_html_or_plain(&bot, msg.chat.id, chunk).await {
+                            tracing::warn!(
+                                "Telegram intermediate send failed ({e}) — NOT marking as delivered; final response will carry it",
+                            );
+                            all_ok = false;
+                            break;
+                        }
+                    }
+                    if all_ok {
+                        let mut s = streaming.lock().unwrap_or_else(|e| e.into_inner());
+                        s.sent_intermediates.push(text.clone());
+                    }
                 }
             }
         }
@@ -1535,14 +1551,16 @@ pub(crate) async fn handle_message(
                         sent.len()
                     );
                 }
-                // If dedup stripped everything, the intermediates already
-                // cover the full response — nothing new to send.
-                if result.is_empty() {
-                    tracing::info!(
-                        "Telegram dedup: result empty after stripping — intermediates already delivered full response (len={})",
+                // If dedup would wipe the final response to nothing, keep the
+                // original — losing a near-duplicate is strictly better than
+                // losing the whole answer. Prior behavior silently dropped
+                // the reply when an intermediate matched the final byte-for-byte.
+                if result.is_empty() && !text_only.trim().is_empty() {
+                    tracing::warn!(
+                        "Telegram dedup would empty the final response (len={}) — keeping original instead of dropping the whole reply",
                         text_only.len()
                     );
-                    String::new()
+                    text_only
                 } else {
                     result
                 }
@@ -1993,12 +2011,27 @@ pub(crate) async fn resume_session(
                 let text = crate::utils::sanitize::strip_llm_artifacts(&text);
                 let html = markdown_to_telegram_html(&text);
                 if !html.is_empty() {
-                    let _ = bot
-                        .send_message(chat_id, &html)
-                        .parse_mode(ParseMode::Html)
-                        .await;
-                    let mut s = streaming.lock().unwrap_or_else(|e| e.into_inner());
-                    s.sent_intermediates.push(text.clone());
+                    // Same chunk-and-confirm pattern as the group handler —
+                    // don't mark as delivered unless every chunk succeeded,
+                    // otherwise dedup will strip a message the user never saw.
+                    let chunks: Vec<String> = split_message(&html, 4096)
+                        .into_iter()
+                        .map(|s| s.to_string())
+                        .collect();
+                    let mut all_ok = true;
+                    for chunk in &chunks {
+                        if let Err(e) = send_html_or_plain(&bot, chat_id, chunk).await {
+                            tracing::warn!(
+                                "Telegram (DM) intermediate send failed ({e}) — NOT marking as delivered",
+                            );
+                            all_ok = false;
+                            break;
+                        }
+                    }
+                    if all_ok {
+                        let mut s = streaming.lock().unwrap_or_else(|e| e.into_inner());
+                        s.sent_intermediates.push(text.clone());
+                    }
                 }
             }
         }
@@ -2010,7 +2043,10 @@ pub(crate) async fn resume_session(
             let text_only = crate::utils::sanitize::strip_llm_artifacts(&text_only);
             let text_only = redact_secrets(&text_only);
 
-            // Dedup intermediates
+            // Dedup intermediates — but NEVER strip down to empty.
+            // Losing a near-duplicate paragraph is strictly better than losing
+            // the entire response (which can happen when an intermediate and
+            // the final are byte-identical, as we've seen with long comparisons).
             let sent = {
                 let s = streaming.lock().unwrap_or_else(|e| e.into_inner());
                 s.sent_intermediates.clone()
@@ -2020,7 +2056,16 @@ pub(crate) async fn resume_session(
                 for intermediate in &sent {
                     remaining = remaining.replace(intermediate.as_str(), "");
                 }
-                remaining.trim().to_string()
+                let stripped = remaining.trim().to_string();
+                if stripped.is_empty() && !text_only.trim().is_empty() {
+                    tracing::warn!(
+                        "Telegram (DM) dedup would empty the final response (len={}) — keeping original",
+                        text_only.len()
+                    );
+                    text_only
+                } else {
+                    stripped
+                }
             } else {
                 text_only
             };
