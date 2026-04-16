@@ -133,17 +133,17 @@ pub fn render(f: &mut Frame, app: &mut App) {
                 render_queue(f, app, chunks[2]);
             }
             // Store input area coordinates for mouse event mapping
-            let input_chunk = if queue_height > 0 { 3 } else { 2 };
-            app.input_area_x = chunks[input_chunk].x;
-            app.input_area_y = chunks[input_chunk].y;
-            app.input_area_width = chunks[input_chunk].width;
-            app.input_area_height = chunks[input_chunk].height;
-            render_input(f, app, chunks[input_chunk]);
+            // chunks[3] is always the input slot (indices are fixed)
+            app.input_area_x = chunks[3].x;
+            app.input_area_y = chunks[3].y;
+            app.input_area_width = chunks[3].width;
+            app.input_area_height = chunks[3].height;
+            render_input(f, app, chunks[3]);
             render_status_bar(f, app, chunks[4]);
             if app.slash_suggestions_active {
-                render_slash_autocomplete(f, app, chunks[input_chunk]);
+                render_slash_autocomplete(f, app, chunks[3]);
             } else if app.emoji_picker_active {
-                render_emoji_picker(f, app, chunks[input_chunk]);
+                render_emoji_picker(f, app, chunks[3]);
             }
         }
         AppMode::Sessions => {
@@ -174,13 +174,14 @@ pub fn render(f: &mut Frame, app: &mut App) {
             if plan_height > 0 {
                 render_plan_checklist(f, app, chunks[1]);
             }
-            let input_chunk = 2 + queue_height as usize;
-            render_queue(f, app, chunks[2]);
-            app.input_area_x = chunks[input_chunk].x;
-            app.input_area_y = chunks[input_chunk].y;
-            app.input_area_width = chunks[input_chunk].width;
-            app.input_area_height = chunks[input_chunk].height;
-            render_input(f, app, chunks[input_chunk]);
+            if queue_height > 0 {
+                render_queue(f, app, chunks[2]);
+            }
+            app.input_area_x = chunks[3].x;
+            app.input_area_y = chunks[3].y;
+            app.input_area_width = chunks[3].width;
+            app.input_area_height = chunks[3].height;
+            render_input(f, app, chunks[3]);
             render_status_bar(f, app, chunks[4]);
             render_model_selector(f, app, f.area());
         }
@@ -189,13 +190,14 @@ pub fn render(f: &mut Frame, app: &mut App) {
             if plan_height > 0 {
                 render_plan_checklist(f, app, chunks[1]);
             }
-            let input_chunk = 2 + queue_height as usize;
-            render_queue(f, app, chunks[2]);
-            app.input_area_x = chunks[input_chunk].x;
-            app.input_area_y = chunks[input_chunk].y;
-            app.input_area_width = chunks[input_chunk].width;
-            app.input_area_height = chunks[input_chunk].height;
-            render_input(f, app, chunks[input_chunk]);
+            if queue_height > 0 {
+                render_queue(f, app, chunks[2]);
+            }
+            app.input_area_x = chunks[3].x;
+            app.input_area_y = chunks[3].y;
+            app.input_area_width = chunks[3].width;
+            app.input_area_height = chunks[3].height;
+            render_input(f, app, chunks[3]);
             render_status_bar(f, app, chunks[4]);
             if let Some(ref ds) = app.dashboard_state {
                 crate::usage::dashboard::render(f, ds, f.area());
@@ -206,13 +208,14 @@ pub fn render(f: &mut Frame, app: &mut App) {
             if plan_height > 0 {
                 render_plan_checklist(f, app, chunks[1]);
             }
-            let input_chunk = 2 + queue_height as usize;
-            render_queue(f, app, chunks[2]);
-            app.input_area_x = chunks[input_chunk].x;
-            app.input_area_y = chunks[input_chunk].y;
-            app.input_area_width = chunks[input_chunk].width;
-            app.input_area_height = chunks[input_chunk].height;
-            render_input(f, app, chunks[input_chunk]);
+            if queue_height > 0 {
+                render_queue(f, app, chunks[2]);
+            }
+            app.input_area_x = chunks[3].x;
+            app.input_area_y = chunks[3].y;
+            app.input_area_width = chunks[3].width;
+            app.input_area_height = chunks[3].height;
+            render_input(f, app, chunks[3]);
             render_status_bar(f, app, chunks[4]);
             render_restart_dialog(f, app, f.area());
         }
@@ -226,13 +229,14 @@ pub fn render(f: &mut Frame, app: &mut App) {
             if plan_height > 0 {
                 render_plan_checklist(f, app, chunks[1]);
             }
-            let input_chunk = 2 + queue_height as usize;
-            render_queue(f, app, chunks[2]);
-            app.input_area_x = chunks[input_chunk].x;
-            app.input_area_y = chunks[input_chunk].y;
-            app.input_area_width = chunks[input_chunk].width;
-            app.input_area_height = chunks[input_chunk].height;
-            render_input(f, app, chunks[input_chunk]);
+            if queue_height > 0 {
+                render_queue(f, app, chunks[2]);
+            }
+            app.input_area_x = chunks[3].x;
+            app.input_area_y = chunks[3].y;
+            app.input_area_width = chunks[3].width;
+            app.input_area_height = chunks[3].height;
+            render_input(f, app, chunks[3]);
             render_status_bar(f, app, chunks[4]);
             render_update_dialog(f, app, f.area());
         }

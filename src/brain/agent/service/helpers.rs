@@ -494,26 +494,41 @@ impl AgentService {
                     .collect();
                 let trimmed = text.trim();
                 if trimmed.ends_with(':') || trimmed.ends_with("...") {
-                    let preview = if trimmed.len() > 80 {
-                        &trimmed[trimmed.len() - 80..]
-                    } else {
-                        trimmed
-                    };
-                    let msg = format!(
-                        "Self-heal: provider sent stop after only {} output tokens — \
-                         response appears truncated: \"{}\"",
-                        output_tokens, preview,
-                    );
-                    tracing::warn!("⚠️ {}", msg);
-                    if let Some(cb) = effective_cb {
-                        cb(
-                            session_id,
-                            ProgressEvent::SelfHealingAlert {
-                                message: msg.clone(),
-                            },
+                    // Heuristic to reduce false positives: if the text contains
+                    // multiple sentences (period, exclamation) it's more likely
+                    // a legitimate short instruction than a truncated preamble.
+                    // Real truncations are single preamble sentences like
+                    // "Let me check the current state:" — no prior punctuation.
+                    let has_prior_sentence = trimmed[..trimmed.len().saturating_sub(1)]
+                        .contains('.')
+                        || trimmed[..trimmed.len().saturating_sub(1)].contains('!');
+                    if has_prior_sentence {
+                        tracing::debug!(
+                            "Self-heal: skipping truncation check — text contains \
+                             prior sentences (likely deliberate short response)"
                         );
+                    } else {
+                        let preview = if trimmed.len() > 80 {
+                            &trimmed[trimmed.len() - 80..]
+                        } else {
+                            trimmed
+                        };
+                        let msg = format!(
+                            "Self-heal: provider sent stop after only {} output tokens — \
+                             response appears truncated: \"{}\"",
+                            output_tokens, preview,
+                        );
+                        tracing::warn!("⚠️ {}", msg);
+                        if let Some(cb) = effective_cb {
+                            cb(
+                                session_id,
+                                ProgressEvent::SelfHealingAlert {
+                                    message: msg.clone(),
+                                },
+                            );
+                        }
+                        return Err(crate::brain::provider::ProviderError::StreamError(msg));
                     }
-                    return Err(crate::brain::provider::ProviderError::StreamError(msg));
                 }
             }
         }

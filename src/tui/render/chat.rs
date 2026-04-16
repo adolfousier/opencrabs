@@ -105,7 +105,10 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                         Style::default().fg(Color::Rgb(120, 120, 120)),
                     ));
                 }
-                lines.push(Line::from(spans));
+                let line = Line::from(spans);
+                for wrapped in wrap_line_with_padding(line, content_width, "    ") {
+                    lines.push(wrapped);
+                }
             }
 
             // Show expanded details (e.g. tool output, compaction summary)
