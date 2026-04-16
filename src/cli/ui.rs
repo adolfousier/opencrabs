@@ -62,9 +62,6 @@ async fn cmd_chat_inner(
         tracing::warn!("Session auto-categorization failed: {}", e);
     }
 
-    // Migrate legacy qwen_accounts (all-in-keys.toml → split config/keys) for existing users
-    crate::brain::provider::qwen::QwenCredentials::migrate_accounts_split();
-
     // Select provider based on configuration using factory
     // Returns placeholder provider if none configured, so app can start and show onboarding
     let provider = match crate::brain::provider::create_provider(config).await {
