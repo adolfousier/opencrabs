@@ -11,7 +11,7 @@ pub mod providers;
 pub mod retry;
 pub mod sanitize;
 pub mod slack_fmt;
-mod string;
+pub mod string;
 mod tool_context;
 
 pub use approval::{

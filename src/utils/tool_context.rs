@@ -4,7 +4,7 @@
 //! so channels can show what each tool call is doing (e.g. "grep (`pattern`)").
 
 use super::sanitize::redact_tool_input;
-use super::string::truncate_str;
+use super::string::{tilde_home, truncate_middle};
 
 /// Extract a short, meaningful context hint from a tool's input for channel display.
 /// Runs the input through the secret sanitizer first so no API keys or tokens
@@ -129,7 +129,13 @@ pub fn tool_context_hint(name: &str, input: &serde_json::Value) -> String {
     };
     match hint {
         Some(h) if !h.is_empty() => {
-            let truncated = truncate_str(&h, 60);
+            // Collapse $HOME → ~ first so the truncation budget is spent on
+            // meaningful suffix instead of the user's home prefix. Then
+            // middle-truncate so filenames / final args survive (much more
+            // informative than the leading directory components that the
+            // old tail-truncation kept).
+            let tilde = tilde_home(&h);
+            let truncated = truncate_middle(&tilde, 80);
             format!(" (`{truncated}`)")
         }
         _ => String::new(),

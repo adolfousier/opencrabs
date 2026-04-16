@@ -666,15 +666,19 @@ impl AgentService {
         }
     }
 
-    /// Compact tool description for DB persistence (mirrors TUI's format_tool_description)
+    /// Compact tool description for DB persistence (mirrors TUI's format_tool_description).
+    /// Paths / commands collapse `$HOME` → `~` so channel displays don't expose
+    /// the user's full home path and don't waste the truncation budget on
+    /// a constant prefix.
     pub(super) fn format_tool_summary(tool_name: &str, tool_input: &Value) -> String {
+        use crate::utils::string::tilde_home;
         match tool_name {
             "bash" => {
                 let cmd = tool_input
                     .get("command")
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
-                format!("bash: {}", cmd)
+                format!("bash: {}", tilde_home(cmd))
             }
             "read_file" | "read" => {
                 let path = tool_input
@@ -683,7 +687,7 @@ impl AgentService {
                     .or_else(|| tool_input.get("filePath"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
-                format!("Read {}", path)
+                format!("Read {}", tilde_home(path))
             }
             "write_file" | "write" => {
                 let path = tool_input
@@ -692,7 +696,7 @@ impl AgentService {
                     .or_else(|| tool_input.get("filePath"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
-                format!("Write {}", path)
+                format!("Write {}", tilde_home(path))
             }
             "edit_file" | "edit" => {
                 let path = tool_input
@@ -701,14 +705,14 @@ impl AgentService {
                     .or_else(|| tool_input.get("filePath"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
-                format!("Edit {}", path)
+                format!("Edit {}", tilde_home(path))
             }
             "ls" => {
                 let path = tool_input
                     .get("path")
                     .and_then(|v| v.as_str())
                     .unwrap_or(".");
-                format!("ls {}", path)
+                format!("ls {}", tilde_home(path))
             }
             "glob" => {
                 let p = tool_input
@@ -729,7 +733,7 @@ impl AgentService {
                 if path.is_empty() {
                     format!("Grep '{}'", p)
                 } else {
-                    format!("Grep '{}' in {}", p, path)
+                    format!("Grep '{}' in {}", p, tilde_home(path))
                 }
             }
             "web_search" | "exa_search" | "brave_search" => {
