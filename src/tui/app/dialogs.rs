@@ -601,16 +601,20 @@ impl App {
                 }
             } else if is_custom && self.ps.focused_field == 5 {
                 // Custom: on context window field — save
+                let key_changed =
+                    !self.ps.api_key_input.is_empty() && !self.ps.has_existing_key_sentinel();
                 self.save_provider_selection(
                     self.ps.selected_provider.min(CUSTOM_PROVIDER_IDX),
-                    false,
+                    key_changed,
                 )
                 .await?;
             } else {
                 // Non-custom: on model field — save and close
+                let key_changed =
+                    !self.ps.api_key_input.is_empty() && !self.ps.has_existing_key_sentinel();
                 self.save_provider_selection(
                     self.ps.selected_provider.min(CUSTOM_PROVIDER_IDX),
-                    false,
+                    key_changed,
                 )
                 .await?;
             }
