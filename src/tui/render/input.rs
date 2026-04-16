@@ -266,6 +266,15 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
             let prefix = if line_idx == 0 {
                 if is_queued {
                     Span::styled("⏳", Style::default().fg(Color::Rgb(215, 100, 20)))
+                } else if buf.starts_with('!') {
+                    // Shell-mode prefix: brighter + orange so the prompt
+                    // caret itself screams "this is shell, not LLM".
+                    Span::styled(
+                        "$ ",
+                        Style::default()
+                            .fg(Color::Rgb(215, 100, 20))
+                            .add_modifier(Modifier::BOLD),
+                    )
                 } else {
                     Span::styled("\u{276F} ", Style::default().fg(Color::Rgb(100, 100, 100)))
                 }
@@ -373,7 +382,15 @@ pub(super) fn render_input(f: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    let border_style = Style::default().fg(Color::Rgb(120, 120, 120));
+    // Shell-mode visual cue: tint the border orange when the buffer starts
+    // with `!` so the user sees at-a-glance that Enter will run the rest
+    // as a shell command (via `sh -c`) instead of sending it to the LLM.
+    // This cue existed pre-drag-copy refactor and was lost in the rewrite.
+    let border_style = if app.input_buffer.starts_with('!') {
+        Style::default().fg(Color::Rgb(215, 100, 20)) // ACCENT_GOLD / shell mode
+    } else {
+        Style::default().fg(Color::Rgb(120, 120, 120))
+    };
 
     // Context usage indicator (right-side bottom title)
     let context_title = if let Some(input_tok) = app.last_input_tokens {
