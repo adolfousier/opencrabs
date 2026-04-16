@@ -16,10 +16,16 @@ use async_trait::async_trait;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+/// Callback invoked when ALL rotation accounts are exhausted due to auth
+/// errors. Used by `QwenAccountManager` to invalidate stale credentials so
+/// the user sees "re-auth needed" instead of "5 accounts valid".
+type AllExhaustedFn = Arc<dyn Fn() + Send + Sync>;
+
 pub struct RotatingQwenProvider {
     accounts: Vec<Arc<dyn Provider>>,
     active: AtomicUsize,
     pending_swap: Mutex<Option<SwapEvent>>,
+    on_all_exhausted: Option<AllExhaustedFn>,
 }
 
 impl RotatingQwenProvider {
@@ -32,7 +38,13 @@ impl RotatingQwenProvider {
             accounts,
             active: AtomicUsize::new(0),
             pending_swap: Mutex::new(None),
+            on_all_exhausted: None,
         }
+    }
+
+    pub fn with_on_all_exhausted(mut self, f: AllExhaustedFn) -> Self {
+        self.on_all_exhausted = Some(f);
+        self
     }
 
     fn advance(&self, from: usize) -> usize {
@@ -62,18 +74,30 @@ impl RotatingQwenProvider {
         }
     }
 
+    fn is_auth_error(err: &ProviderError) -> bool {
+        matches!(
+            err,
+            ProviderError::InvalidApiKey
+                | ProviderError::ApiError {
+                    status: 401 | 403,
+                    ..
+                }
+        )
+    }
+
     fn should_rotate(err: &ProviderError) -> bool {
         if err.is_retryable() {
             return true;
         }
-        // Auth errors (401/403) after the per-account refresh hook already
-        // failed — the OAuth token is dead. Rotate to the next account.
+        // Auth failures (401/403) — the per-account refresh hook already
+        // tried and failed. Rotate to the next account.
         matches!(
             err,
-            ProviderError::ApiError {
-                status: 401 | 403,
-                ..
-            }
+            ProviderError::InvalidApiKey
+                | ProviderError::ApiError {
+                    status: 401 | 403,
+                    ..
+                }
         )
     }
 }
@@ -116,6 +140,19 @@ impl Provider for RotatingQwenProvider {
         // from the next account (spread the load).
         self.advance(start);
 
+        // If every failure was an auth error, fire the exhaustion callback
+        // so stale credentials get cleared and the user sees "re-auth needed".
+        let all_auth = last_err.as_ref().is_some_and(Self::is_auth_error);
+        if all_auth {
+            tracing::warn!(
+                "All {} Qwen accounts failed with auth errors — invalidating credentials",
+                n
+            );
+            if let Some(ref f) = self.on_all_exhausted {
+                f();
+            }
+        }
+
         Err(last_err.unwrap_or_else(|| {
             ProviderError::Internal("RotatingQwenProvider: all accounts exhausted".into())
         }))
@@ -154,6 +191,17 @@ impl Provider for RotatingQwenProvider {
         }
 
         self.advance(start);
+
+        let all_auth = last_err.as_ref().is_some_and(Self::is_auth_error);
+        if all_auth {
+            tracing::warn!(
+                "All {} Qwen accounts failed with auth errors — invalidating credentials",
+                n
+            );
+            if let Some(ref f) = self.on_all_exhausted {
+                f();
+            }
+        }
 
         Err(last_err.unwrap_or_else(|| {
             ProviderError::Internal("RotatingQwenProvider: all accounts exhausted".into())

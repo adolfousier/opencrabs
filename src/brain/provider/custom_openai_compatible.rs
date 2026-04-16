@@ -232,9 +232,6 @@ pub type AuthRefreshFn = Arc<
         + Sync,
 >;
 
-/// Auth-invalidate hook. Called when a refreshed token is *still* rejected
-/// (401/403 after retry), meaning the account's OAuth credentials are dead.
-/// The callback should clear persisted credentials so re-auth is triggered.
 pub type AuthInvalidateFn = Arc<dyn Fn() + Send + Sync>;
 
 /// OpenAI provider for GPT models
@@ -266,8 +263,10 @@ pub struct OpenAIProvider {
     /// Optional async auth-refresh hook. When set, a 401/403 response
     /// triggers a single retry after calling this hook.
     auth_refresh_fn: Option<AuthRefreshFn>,
-    /// Called when refresh + retry still gets 401/403 — account is dead,
-    /// credentials should be cleared so re-auth is required.
+    /// Optional auth-invalidate hook. Called when the refresh hook succeeds
+    /// but the retried request STILL gets 401/403 — meaning the refreshed
+    /// token is also dead. The callback clears credentials so re-auth is
+    /// triggered on next startup.
     auth_invalidate_fn: Option<AuthInvalidateFn>,
     /// When set, overrides the automatic retry config selection in
     /// `retry_config()`. Used by `RotatingQwenProvider` to disable
@@ -1552,7 +1551,7 @@ impl Provider for OpenAIProvider {
                 tracing::warn!("{} auth error — refreshing and retrying", self.name);
                 match refresh().await {
                     Ok(()) => {
-                        let result = retry_with_backoff(
+                        return retry_with_backoff(
                             || async {
                                 let body = self.encode_body(&openai_request)?;
                                 let response = self
@@ -1571,24 +1570,9 @@ impl Provider for OpenAIProvider {
                             &retry_config,
                         )
                         .await;
-                        // If the retry *still* hit a 401/403, the new token is
-                        // also dead — invalidate the account so re-auth triggers.
-                        if let Err(ref retry_err) = result
-                            && Self::is_auth_error(retry_err)
-                            && let Some(ref invalidate) = self.auth_invalidate_fn
-                        {
-                            tracing::warn!("{} token still dead after refresh — invalidating account", self.name);
-                            invalidate();
-                        }
-                        return result;
                     }
                     Err(msg) => {
                         tracing::error!("{} auth refresh failed: {}", self.name, msg);
-                        // Refresh itself failed (e.g. refresh_token dead) — invalidate.
-                        if let Some(ref invalidate) = self.auth_invalidate_fn {
-                            tracing::warn!("{} refresh failed — invalidating account", self.name);
-                            invalidate();
-                        }
                     }
                 }
             }
@@ -1753,23 +1737,9 @@ impl Provider for OpenAIProvider {
                         &retry_config,
                     )
                     .await;
-                    // If the retry *still* hit a 401/403, the new token is
-                    // also dead — invalidate the account.
-                    if let Err(ref retry_err) = response
-                        && Self::is_auth_error(retry_err)
-                        && let Some(ref invalidate) = self.auth_invalidate_fn
-                    {
-                        tracing::warn!("{} token still dead after refresh — invalidating account", self.name);
-                        invalidate();
-                    }
                 }
                 Err(msg) => {
                     tracing::error!("{} stream auth refresh failed: {}", self.name, msg);
-                    // Refresh itself failed — invalidate.
-                    if let Some(ref invalidate) = self.auth_invalidate_fn {
-                        tracing::warn!("{} refresh failed — invalidating account", self.name);
-                        invalidate();
-                    }
                 }
             }
         }

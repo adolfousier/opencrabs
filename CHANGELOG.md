@@ -5,6 +5,54 @@ All notable changes to OpenCrabs will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.11] - 2026-04-16
+
+TUI reliability fixes, per-session message queue, and Qwen OAuth rotation
+hardening.
+
+Queue messages are now fully isolated per session with a visible ⏳ indicator
+above the input box. Switching sessions preserves each session's queue state
+independently.
+
+System messages (RSI summaries, compaction notices) now wrap to terminal width
+instead of clipping. The truncation warning heuristic was tightened to reduce
+false positives on legitimate short instructions.
+
+Qwen OAuth rotation now treats 401/403 as rotation-worthy. When an account's
+refresh token is also dead, credentials are invalidated and persisted to
+keys.toml so re-authentication is triggered on next startup.
+
+### Fixed
+
+#### TUI
+- **Per-session message queue with isolated display** — queue messages no
+  longer live in the shared input buffer. Each session has its own queue
+  via `HashMap<Uuid, String>`. The queued message renders as a dimmed ⏳
+  line above the input area, pushing chat history up. Switching sessions
+  preserves queue state independently. Up-arrow dequeue and Esc cancel
+  behavior unchanged.
+- **Queue preview was invisible** — `queue_height` was 1 but the top border
+  consumed the only row, leaving zero rows for text. Fixed to height 2.
+- **Wrap system messages to terminal width** — long RSI summaries and
+  compaction notices no longer clip at the right edge. System message lines
+  now wrap using `content_width`.
+- **Reduce truncation warning false positives** — responses ending with `:`
+  that contain multiple sentences (periods, exclamation marks) are no longer
+  flagged as truncated. Only single-sentence preambles trigger the warning.
+
+#### Qwen OAuth
+- **401/403 now trigger account rotation** — `should_rotate()` previously
+  only checked `is_retryable()`, which returns false for auth errors. Dead
+  OAuth tokens now cause the RotatingQwenProvider to advance to the next
+  account instead of immediately propagating the error.
+- **Invalidate dead account credentials** — when both refresh and retry
+  fail with 401, the account's credentials are cleared (access_token,
+  refresh_token, expiry_date zeroed) and persisted to keys.toml. On next
+  startup, `is_valid()` returns false, excluding the dead account from
+  rotation and triggering re-auth.
+
+[0.3.11]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.11
+
 ## [0.3.10] - 2026-04-15
 
 RSI reliability hardening — cycle summaries no longer truncated, phantom
@@ -2883,7 +2931,7 @@ fixes.
 - Sprint history and "coming soon" filler from README
 - Old "Crusty" branding and attribution
 
-[0.3.10]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.10
+[0.3.10]: https://github.com/adolfousier/opencrabs/compare/v0.3.10...v0.3.11
 [0.3.9]: https://github.com/adolfousier/opencrabs/compare/v0.3.9...v0.3.10
 [0.3.8]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.8
 [0.3.7]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.7
