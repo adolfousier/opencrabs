@@ -1355,13 +1355,57 @@ const INTENT_PHRASES: &[&str] = &[
 /// any bare intent phrase is phantom — no path or extension
 /// corroboration required, because the tool count already proves
 /// nothing happened.
+///
+/// Structured answers are exempt. Commit-log tables, code blocks, and
+/// long bulleted lists inevitably contain intent-phrase substrings
+/// (e.g. a commit message literally titled
+/// `"fix(heal): phantom detector lets 'Let me check...' loops slide"`
+/// — seen in logs 2026-04-17 03:38:37 — triggered this detector on
+/// itself). A legitimate answer rendered as a table is NEVER a phantom,
+/// even if its content happens to quote a phrase we watch for.
 pub fn has_phantom_tool_intent_no_tools(text: &str) -> bool {
     let trimmed = text.trim();
     if trimmed.len() < 20 {
         return false;
     }
+    if looks_like_structured_answer(trimmed) {
+        return false;
+    }
     let lower = trimmed.to_lowercase();
     INTENT_PHRASES.iter().any(|p| lower.contains(p))
+}
+
+/// Heuristic: does `text` look like a concrete answer (table, code
+/// block, long list) rather than intent narration?
+///
+/// Cheap line-counting — we only need to catch the common case where a
+/// model's reply is rendered as a structured artifact. Short prose with
+/// a stray pipe or dash stays eligible for phantom detection.
+fn looks_like_structured_answer(text: &str) -> bool {
+    // Markdown table — three or more rows with at least 3 pipes each.
+    let table_rows = text.lines().filter(|l| l.matches('|').count() >= 3).count();
+    if table_rows >= 3 {
+        return true;
+    }
+    // Fenced code block with both open and close fences.
+    if text.matches("```").count() >= 2 {
+        return true;
+    }
+    // Substantial list — five or more list items.
+    let list_items = text
+        .lines()
+        .filter(|l| {
+            let t = l.trim_start();
+            t.starts_with("- ")
+                || t.starts_with("* ")
+                || t.starts_with("• ")
+                || t.chars().next().is_some_and(|c| c.is_ascii_digit()) && t.contains(". ")
+        })
+        .count();
+    if list_items >= 5 {
+        return true;
+    }
+    false
 }
 
 pub fn has_phantom_tool_intent(text: &str) -> bool {

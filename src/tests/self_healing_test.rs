@@ -1090,6 +1090,66 @@ fn phantom_tool_intent_false_positives() {
 }
 
 #[test]
+fn phantom_no_tools_skips_structured_answers() {
+    // Regression for 2026-04-17 03:38:37: the model answered a
+    // "put commits in a table" request with a markdown table whose
+    // cells quoted earlier commit messages. One of those commit messages
+    // literally contained the phrase "Let me check…" as part of its
+    // title — the zero-tools detector matched the substring and fired a
+    // spurious phantom retry, looping on a legitimate answer.
+    //
+    // Tables, code blocks, and long lists are answers, not narration.
+    // They must NEVER trigger phantom detection, even if their content
+    // incidentally quotes an intent phrase.
+    use crate::brain::agent::service::has_phantom_tool_intent_no_tools;
+
+    let table_with_intent_phrase_in_cell = "\
+        | Date | Commit | Summary |\n\
+        |------|--------|---------|\n\
+        | 2026-04-17 | `ce86afd` | fix(heal): phantom detector lets 'Let me check…' loops slide after one retry |\n\
+        | 2026-04-17 | `3089213` | fix(heal): broaden phantom-retry gate for local providers + blunter nudge |\n\
+        | 2026-04-17 | `6f5c191` | feat(provider): inject chat_template_kwargs for local thinking models |\n";
+    assert!(
+        !has_phantom_tool_intent_no_tools(table_with_intent_phrase_in_cell),
+        "commit-log table containing quoted 'Let me check' must NOT phantom"
+    );
+
+    let code_block_with_intent_phrase = "\
+        Here's the relevant code:\n\n\
+        ```rust\n\
+        // let me check if the user is admin\n\
+        fn is_admin(u: &User) -> bool { u.role == Role::Admin }\n\
+        ```\n\
+        That handles the auth branch.";
+    assert!(
+        !has_phantom_tool_intent_no_tools(code_block_with_intent_phrase),
+        "code block with 'let me check' comment must NOT phantom"
+    );
+
+    let long_list_answer = "\
+        Here are the providers:\n\
+        - anthropic — fast, reliable\n\
+        - openai — let me check that still works\n\
+        - gemini — free tier, generous\n\
+        - openrouter — 400+ models\n\
+        - minimax — vision strong\n\
+        - qwen — dashscope\n";
+    assert!(
+        !has_phantom_tool_intent_no_tools(long_list_answer),
+        "long bulleted list with an intent phrase in one item must NOT phantom"
+    );
+
+    // Sanity — genuine phantom narration with NO structured content
+    // still fires.
+    let real_phantom = "Let me check the git log to see recent changes. \
+                        I'll look at the last few commits.";
+    assert!(
+        has_phantom_tool_intent_no_tools(real_phantom),
+        "pure narration with intent phrases must still phantom"
+    );
+}
+
+#[test]
 fn phantom_tool_intent_numbered_step_narration() {
     use crate::brain::agent::service::has_phantom_tool_intent;
 

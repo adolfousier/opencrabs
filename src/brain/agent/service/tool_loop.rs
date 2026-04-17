@@ -693,6 +693,13 @@ impl AgentService {
         // letting pathological cases chew quota forever.
         let mut phantom_retries_used: u32 = 0;
         const MAX_PHANTOM_RETRIES: u32 = 3;
+        // Bounded retry for the "reasoning-only, no answer" failure mode:
+        // MLX Qwen models periodically emit finish_reason=stop after only
+        // reasoning_content chunks — zero text, zero tool calls — so the
+        // user sees a dropped request. We nudge the model once to actually
+        // produce the answer; repeated loops are unlikely to recover so
+        // one retry is enough.
+        let mut empty_reasoning_retry_used: bool = false;
         let mut rotation_retry_used = false; // Single retry when Qwen rotation yields 0 tools
 
         // Ordered content segments for CLI providers — tracks text and tool markers
@@ -2170,43 +2177,36 @@ impl AgentService {
 
                 // ── Phantom tool call detection ──────────────────────────
                 // The model narrated actions but never executed any tool
-                // calls this iteration. Because we're already inside
-                // `if tool_uses.is_empty()`, the tool count is a stronger
-                // signal than the file-path corroboration the strict
-                // `has_phantom_tool_intent` requires — any intent phrase
-                // without a tool call means the model talked itself into
-                // thinking it did something it didn't. Use the relaxed
-                // detector and allow up to MAX_PHANTOM_RETRIES corrections
-                // per turn (vs the old single-shot, which let "Let me
-                // check…" loops slide after the first warning).
+                // calls this iteration. We're already inside
+                // `if tool_uses.is_empty()`, so the relaxed detector
+                // `has_phantom_tool_intent_no_tools` is the right gate:
+                // it looks for intent phrases ("Let me check…", "I'll
+                // run…", "Now I…") that indicate the model BELIEVED it
+                // was calling a tool but didn't. Up to MAX_PHANTOM_RETRIES
+                // corrections per turn.
                 //
-                // For local llama.cpp/MLX providers we widen the gate:
-                // Unsloth's Studio parser fires on any short response that
-                // didn't produce tool calls (bounded by length), not just
-                // responses matching our intent-phrase whitelist — local
-                // models often answer with a terse prose claim ("The file
-                // has 42 lines.") instead of calling the read tool, and
-                // the narrow detector lets those through. Keep the narrow
-                // gate for cloud providers where re-prompting is expensive
-                // and the intent-phrase check is the only reliable signal.
-                const LOCAL_PHANTOM_MAX_CHARS: usize = 2000;
-                let stripped_text = iteration_text.trim();
-                let phantom_matches_narrow =
-                    super::helpers::has_phantom_tool_intent_no_tools(&iteration_text);
-                let phantom_matches_local = is_local_provider
-                    && !stripped_text.is_empty()
-                    && stripped_text.len() < LOCAL_PHANTOM_MAX_CHARS;
+                // Earlier we broadened this for local providers to fire on
+                // ANY short response that produced zero tool_calls. That
+                // backfired: legitimate answers (tables, status rundowns,
+                // one-liner replies) from local models like MLX got
+                // flagged as phantom and replaced with a confused retry
+                // cycle — seen in logs 03:30:52 where a full status table
+                // triggered `intent_match=false, local=true` retry.
+                //
+                // Since the text-based tool-call extractor now recovers
+                // every Qwen/Kimi/DeepSeek leak format, if the model
+                // really tried to call a tool it's already been promoted
+                // to a real tool_use. Zero tool_uses + no intent phrases
+                // = a legitimate text answer. Keep the gate narrow.
                 if phantom_retries_used < MAX_PHANTOM_RETRIES
                     && !is_cli_provider
-                    && (phantom_matches_narrow || phantom_matches_local)
+                    && super::helpers::has_phantom_tool_intent_no_tools(&iteration_text)
                 {
                     phantom_retries_used += 1;
                     tracing::warn!(
-                        "Phantom tool call detected (local={}, intent_match={}) — \
-                         model described actions without executing tools. \
-                         Injecting retry prompt.",
-                        phantom_matches_local,
-                        phantom_matches_narrow
+                        "Phantom tool call detected (local={}) — model described \
+                         actions without executing tools. Injecting retry prompt.",
+                        is_local_provider
                     );
                     self.record_provider_feedback(
                         session_id,
@@ -2287,6 +2287,59 @@ impl AgentService {
                     continue;
                 }
 
+                // ── Empty-response + reasoning retry ─────────────────────
+                // Some local reasoning runtimes (notably MLX Qwen3) finish
+                // a turn with only `reasoning_content` chunks — zero visible
+                // text, zero tool calls — after an earlier tool iteration.
+                // The user sees the tool card and then nothing, which reads
+                // as a dropped request with no self-heal. Seen in logs at
+                // 2026-04-17 04:06:54 where finish_reason=stop fired right
+                // after reasoning wrapped.
+                //
+                // One-shot retry: ask the model to actually produce the
+                // answer. Bounded to avoid loops on models that will never
+                // emit content in this turn shape.
+                let has_meaningful_reasoning = reasoning_text
+                    .as_deref()
+                    .map(|r| r.trim().len() >= 40)
+                    .unwrap_or(false);
+                if !empty_reasoning_retry_used
+                    && iteration > 0
+                    && !is_cli_provider
+                    && iteration_text.trim().is_empty()
+                    && has_meaningful_reasoning
+                {
+                    empty_reasoning_retry_used = true;
+                    tracing::warn!(
+                        "Model ended turn with reasoning but no visible response \
+                         (reasoning_len={}, iteration={}) — nudging for the actual answer.",
+                        reasoning_text.as_deref().map(|r| r.len()).unwrap_or(0),
+                        iteration,
+                    );
+                    if let Some(ref cb) = progress_callback {
+                        cb(
+                            session_id,
+                            ProgressEvent::SelfHealingAlert {
+                                message: "Model reasoned without answering — nudging for response"
+                                    .into(),
+                            },
+                        );
+                    }
+                    // Preserve the reasoning on the (empty) assistant turn,
+                    // then inject a user nudge so the next iteration has to
+                    // produce the actual answer.
+                    context.add_message(Message::assistant(String::new()));
+                    context.add_message(Message::user(
+                        "[System: Your previous turn produced only internal reasoning \
+                         and no visible reply. The tool results above are sufficient — \
+                         write the answer now as plain text (tables, prose, or whatever \
+                         the user asked for). Do not re-reason, do not call more tools \
+                         unless strictly necessary.]"
+                            .to_string(),
+                    ));
+                    continue;
+                }
+
                 if iteration > 0 {
                     tracing::info!("Agent completed after {} tool iterations", iteration);
                     // Emit final text so TUI persists it as a permanent message.
@@ -2311,8 +2364,23 @@ impl AgentService {
                 break;
             }
 
-            // Emit intermediate text to TUI so it appears before the tool calls
-            if !iteration_text.is_empty()
+            // Emit intermediate text to TUI so it appears before the tool calls.
+            //
+            // Also emit when the iteration produced ONLY reasoning (no visible
+            // text) but is about to execute tool calls. Without this, a local
+            // reasoning model like MLX Qwen that emits
+            // `reasoning_content` + structured `tool_calls` never persists its
+            // per-iteration thinking — everything accumulates in
+            // `streaming_reasoning` until the FINAL turn bundles all four
+            // iterations' thoughts into one giant Thinking block at the
+            // bottom of the chat (screenshot 2026-04-17 04:17). Firing per
+            // iteration splits the thinking into its proper chronological
+            // slots: iter-1-thinking → tools → iter-2-thinking → tools …
+            let has_reasoning_to_persist = reasoning_text
+                .as_deref()
+                .map(|r| !r.trim().is_empty())
+                .unwrap_or(false);
+            if (!iteration_text.is_empty() || has_reasoning_to_persist)
                 && let Some(ref cb) = progress_callback
             {
                 cb(
