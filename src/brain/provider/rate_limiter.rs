@@ -122,7 +122,7 @@ pub struct GlobalRateLimiter {
 }
 
 impl GlobalRateLimiter {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             limiters: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -150,44 +150,3 @@ impl GlobalRateLimiter {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_rate_limiter_allows_first_request_immediately() {
-        let limiter = RateLimiter::new(Duration::from_millis(100));
-        let wait = limiter.wait().await;
-        assert!(wait.is_zero());
-    }
-
-    #[tokio::test]
-    async fn test_rate_limiter_enforces_interval() {
-        let limiter = RateLimiter::new(Duration::from_millis(100));
-        limiter.wait().await; // first, instant
-        let before = std::time::Instant::now();
-        limiter.wait().await; // second, should wait ~100ms
-        let actual = before.elapsed();
-        assert!(
-            actual.as_millis() >= 50,
-            "Expected ≥50ms wall-clock wait, got {}ms",
-            actual.as_millis()
-        );
-    }
-
-    #[tokio::test]
-    async fn test_global_limiter_returns_same_limiter_for_same_model() {
-        let global = GlobalRateLimiter::new();
-        let a = global.get("qwen/qwen3.6-plus:free");
-        let b = global.get("qwen/qwen3.6-plus:free");
-        assert!(Arc::ptr_eq(&a, &b));
-    }
-
-    #[tokio::test]
-    async fn test_global_limiter_returns_different_limiter_for_different_model() {
-        let global = GlobalRateLimiter::new();
-        let a = global.get("qwen/qwen3.6-plus:free");
-        let b = global.get("google/gemma-3-27b-it:free");
-        assert!(!Arc::ptr_eq(&a, &b));
-    }
-}

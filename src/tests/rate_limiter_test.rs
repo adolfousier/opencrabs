@@ -7,7 +7,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
 
-use crate::brain::provider::rate_limiter::{OPENROUTER_FREE_LIMITERS, RateLimiter};
+use crate::brain::provider::rate_limiter::{
+    GlobalRateLimiter, OPENROUTER_FREE_LIMITERS, RateLimiter,
+};
 
 // ── First-call-free ──────────────────────────────────────────────────
 // A newly created limiter grants the first slot immediately.
@@ -36,22 +38,34 @@ async fn first_request_instant() {
 
 #[tokio::test]
 async fn second_request_paces() {
-    let gap = Duration::from_millis(100);
+    // Under heavy parallel-test CPU contention the tokio scheduler can
+    // delay >90 ms between the first `wait()` returning and the second
+    // `Instant::now()` — making the second call see `elapsed >= interval`
+    // and skip its sleep, tripping the `>= 90 ms` floor. Widen the gap
+    // to 500 ms and also assert on the *returned* sleep duration (what
+    // the limiter computed before actually sleeping), which is
+    // scheduler-independent.
+    let gap = Duration::from_millis(500);
     let limiter = RateLimiter::new(gap);
 
     limiter.wait().await; // first — instant
 
     let start = Instant::now();
-    limiter.wait().await; // second — must sleep ~100 ms
+    let returned = limiter.wait().await; // second — must sleep
     let elapsed = start.elapsed();
 
     assert!(
-        elapsed >= Duration::from_millis(90),
-        "should have slept at least 90 ms, got {:?}",
+        returned >= Duration::from_millis(300),
+        "limiter should have computed ≥300 ms sleep, got {:?}",
+        returned
+    );
+    assert!(
+        elapsed >= Duration::from_millis(200),
+        "wall-clock should be ≥200 ms, got {:?}",
         elapsed
     );
     assert!(
-        elapsed < Duration::from_millis(200),
+        elapsed < Duration::from_millis(1500),
         "should not have overslept, got {:?}",
         elapsed
     );
@@ -147,4 +161,25 @@ async fn openrouter_free_static_exists() {
         "openrouter_free should be ~4 s, got {:?}",
         limiter.min_interval
     );
+}
+
+// ── GlobalRateLimiter identity ───────────────────────────────────────
+// Same model string → shared Arc. Different model strings → independent
+// limiters. These were previously inline `#[cfg(test)]` tests in
+// rate_limiter.rs; moved here to keep all tests under src/tests/.
+
+#[tokio::test]
+async fn global_limiter_returns_same_limiter_for_same_model() {
+    let global = GlobalRateLimiter::new();
+    let a = global.get("qwen/qwen3.6-plus:free");
+    let b = global.get("qwen/qwen3.6-plus:free");
+    assert!(Arc::ptr_eq(&a, &b));
+}
+
+#[tokio::test]
+async fn global_limiter_returns_different_limiter_for_different_model() {
+    let global = GlobalRateLimiter::new();
+    let a = global.get("qwen/qwen3.6-plus:free");
+    let b = global.get("google/gemma-3-27b-it:free");
+    assert!(!Arc::ptr_eq(&a, &b));
 }

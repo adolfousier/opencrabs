@@ -6,6 +6,7 @@ pub mod cli_arg_too_long_test;
 pub mod cli_test;
 pub mod collapse_build_output_test;
 pub mod compaction_test;
+pub mod config_watcher_test;
 pub mod context_window_test;
 pub mod cron_test;
 pub mod custom_provider_test;
