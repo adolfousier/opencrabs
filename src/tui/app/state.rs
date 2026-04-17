@@ -1443,11 +1443,21 @@ impl App {
                 self.processing_sessions.remove(&session_id);
                 self.session_cancel_tokens.remove(&session_id);
                 if self.is_current_session(session_id) {
-                    // Reload from DB to pick up any writes the agent made after
-                    // the Esc×2 cancel (tool blocks, reasoning, etc. persisted
-                    // between the initial reload and the Cancelled return).
-                    self.load_session(session_id).await?;
-                    if message != "Cancelled" {
+                    if message == "Cancelled" {
+                        // Esc×2: the input handler already promoted
+                        // in-flight streaming text, reasoning, and the
+                        // active tool group into `self.messages` BEFORE
+                        // aborting the agent task. Reloading from DB here
+                        // races the async persist_streaming_state writes
+                        // and wipes what the user just watched stream —
+                        // the cancel erased the visible chat until
+                        // restart. Leave the in-memory state alone; the
+                        // DB write is for restart-resume, not for this
+                        // render.
+                    } else {
+                        // Non-cancel errors: reload so the user sees
+                        // whatever DID get persisted and the error toast.
+                        self.load_session(session_id).await?;
                         self.show_error(message);
                     }
                 } else {

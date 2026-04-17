@@ -700,6 +700,12 @@ impl AgentService {
         // produce the answer; repeated loops are unlikely to recover so
         // one retry is enough.
         let mut empty_reasoning_retry_used: bool = false;
+        // Local reasoning models (notably Qwen3.6-35B on MLX) periodically
+        // emit an EOS token mid-sentence — the response looks complete from
+        // a protocol standpoint (proper finish_reason=stop + usage chunk)
+        // but the visible text ends mid-word ("Standard Get I"). One-shot
+        // nudge to continue from where they left off.
+        let mut truncated_mid_sentence_retry_used: bool = false;
         let mut rotation_retry_used = false; // Single retry when Qwen rotation yields 0 tools
 
         // Ordered content segments for CLI providers — tracks text and tool markers
@@ -2335,6 +2341,72 @@ impl AgentService {
                          write the answer now as plain text (tables, prose, or whatever \
                          the user asked for). Do not re-reason, do not call more tools \
                          unless strictly necessary.]"
+                            .to_string(),
+                    ));
+                    continue;
+                }
+
+                // ── Mid-sentence truncation retry ────────────────────────
+                // Local reasoning models sometimes hit an internal EOS mid-
+                // sentence. The response stream closes cleanly (finish_reason
+                // =stop + usage chunk), but the visible text ends in the
+                // middle of a word or clause: "Standard Get I", "Changelog
+                // automation, duplicate CI fix, 1,890", etc. Detect the
+                // truncation by looking at the last non-whitespace character
+                // — if it's not a terminal token (punctuation, close-tag,
+                // table pipe, code fence) we ask the model to continue once.
+                if !truncated_mid_sentence_retry_used
+                    && iteration > 0
+                    && !is_cli_provider
+                    && matches!(
+                        response.stop_reason,
+                        Some(crate::brain::provider::StopReason::EndTurn)
+                    )
+                    && super::helpers::looks_truncated_mid_sentence(iteration_text.trim_end())
+                {
+                    truncated_mid_sentence_retry_used = true;
+                    let preview: String = iteration_text
+                        .chars()
+                        .rev()
+                        .take(60)
+                        .collect::<String>()
+                        .chars()
+                        .rev()
+                        .collect();
+                    tracing::warn!(
+                        "Response ended with finish_reason=stop but last chars look \
+                         mid-sentence (tail={:?}) — asking model to continue once.",
+                        preview,
+                    );
+                    if let Some(ref cb) = progress_callback {
+                        cb(
+                            session_id,
+                            ProgressEvent::SelfHealingAlert {
+                                message:
+                                    "Response was cut off mid-sentence — asking model to continue"
+                                        .into(),
+                            },
+                        );
+                    }
+                    // Keep the partial as a real intermediate message so the
+                    // user sees what DID arrive, then nudge continuation.
+                    if !iteration_text.is_empty()
+                        && let Some(ref cb) = progress_callback
+                    {
+                        cb(
+                            session_id,
+                            ProgressEvent::IntermediateText {
+                                text: iteration_text.clone(),
+                                reasoning: reasoning_text.clone(),
+                            },
+                        );
+                    }
+                    context.add_message(Message::assistant(iteration_text));
+                    context.add_message(Message::user(
+                        "[System: Your previous reply was cut off mid-sentence (no terminal \
+                         punctuation). Continue from exactly where you left off — do NOT repeat \
+                         what you already wrote, do NOT restart the answer, do NOT re-plan. \
+                         Just keep writing.]"
                             .to_string(),
                     ));
                     continue;

@@ -1375,6 +1375,47 @@ pub fn has_phantom_tool_intent_no_tools(text: &str) -> bool {
     INTENT_PHRASES.iter().any(|p| lower.contains(p))
 }
 
+/// Heuristic: does `text` look like it was truncated mid-sentence?
+///
+/// Local reasoning models occasionally hit an internal EOS token
+/// mid-word ("Standard Get I", "…1,890"). The stream ends cleanly
+/// with finish_reason=stop + usage, so we can't use protocol signals
+/// — we have to look at the content. We call it "complete" when the
+/// trailing non-whitespace character is a terminal punctuation mark,
+/// a close-bracket / close-quote, a table pipe, or a code-fence
+/// closer. Anything else (letter, digit, open-punctuation, trailing
+/// comma or colon) counts as mid-sentence.
+///
+/// Returns `false` for very short texts so we don't retry one-word
+/// replies ("yes", "ok").
+pub fn looks_truncated_mid_sentence(text: &str) -> bool {
+    let trimmed = text.trim_end();
+    if trimmed.chars().count() < 40 {
+        return false;
+    }
+    // Fenced code block ending with ``` counts as complete.
+    if trimmed.ends_with("```") {
+        return false;
+    }
+    // Markdown table row ending with `|` is a complete row.
+    if trimmed.ends_with('|') {
+        return false;
+    }
+    let last = match trimmed.chars().next_back() {
+        Some(c) => c,
+        None => return false,
+    };
+    // Mid-word / mid-phrase: letters, digits, and tokens that signal
+    // "more is coming" (opening punctuation, trailing comma/colon, etc).
+    if last.is_alphanumeric() {
+        return true;
+    }
+    matches!(
+        last,
+        ',' | ';' | ':' | '-' | '(' | '[' | '{' | '<' | '/' | '\\' | '&' | '@' | '#'
+    )
+}
+
 /// Heuristic: does `text` look like a concrete answer (table, code
 /// block, long list) rather than intent narration?
 ///
