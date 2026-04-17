@@ -316,11 +316,15 @@ fn strip_think_blocks(text: &str) -> String {
 /// returned unchanged — safe to call on any content.
 pub(crate) fn extract_text_tool_calls(text: &str) -> (Vec<(String, serde_json::Value)>, String) {
     // Cheap pre-check so non-matching content pays nothing.
+    let has_claude_style = KNOWN_TOOL_NAMES
+        .iter()
+        .any(|t| text.contains(&format!("<{}>", t)));
     if !text.contains("<tool_call>")
         && !text.contains("<function=")
         && !text.contains("tool_call:")
         && !text.contains("\"tool_calls\"")
         && !text.contains("\"tool_call\"")
+        && !has_claude_style
     {
         return (Vec::new(), text.to_string());
     }
@@ -328,6 +332,20 @@ pub(crate) fn extract_text_tool_calls(text: &str) -> (Vec<(String, serde_json::V
     // Collect byte ranges of every matched block; strip them at the end.
     let mut tool_calls: Vec<(String, serde_json::Value)> = Vec::new();
     let mut strip_ranges: Vec<(usize, usize)> = Vec::new();
+
+    // Pass 1 — Claude-style `<TOOLNAME><PARAM>val</PARAM></TOOLNAME>`.
+    // Seen in logs 2026-04-17 14:27 where unsloth Qwen emitted a
+    // <bash><command>curl ...</command></bash> block instead of calling
+    // the structured `tool_calls` API. Run BEFORE the tag-based scan so
+    // `<bash>...</bash>` doesn't get mistaken for a prose <bash> mention
+    // elsewhere.
+    if has_claude_style {
+        for (start, end, name, input) in extract_claude_style_tool_calls(text) {
+            tool_calls.push((name, input));
+            strip_ranges.push((start, end));
+        }
+    }
+
     let mut i: usize = 0;
     let bytes = text.as_bytes();
 
@@ -583,6 +601,123 @@ pub(crate) fn extract_text_tool_calls(text: &str) -> (Vec<(String, serde_json::V
         out.push_str(&text[cursor..]);
     }
     (tool_calls, out.trim().to_string())
+}
+
+/// Tool names we recognise when the model emits Claude-style native XML
+/// invocations — `<TOOLNAME><PARAM>value</PARAM></TOOLNAME>`. Keeping the
+/// set explicit rather than matching any `<\w+>` pair avoids false
+/// positives on prose that mentions tags (e.g. `<html>`, `<body>`,
+/// `<script>`).
+const KNOWN_TOOL_NAMES: &[&str] = &[
+    "bash",
+    "ls",
+    "glob",
+    "grep",
+    "read_file",
+    "write_file",
+    "edit_file",
+    "patch_file",
+    "web_search",
+    "web_fetch",
+    "web_request",
+    "http_request",
+    "plan",
+    "task_manager",
+    "cron_manage",
+    "memory_search",
+    "session_search",
+    "lsp",
+    "agent",
+    "slack_send",
+    "telegram_send",
+    "discord_send",
+    "trello_send",
+];
+
+/// Extract `<TOOLNAME><PARAM>value</PARAM>…</TOOLNAME>` invocations. The
+/// outer tag name must be one of `KNOWN_TOOL_NAMES`; the body must
+/// contain at least one `<param>value</param>` pair with matching
+/// open/close tag. Returns `(start, end, name, args)` byte ranges so
+/// the caller can add them to `strip_ranges`.
+fn extract_claude_style_tool_calls(
+    text: &str,
+) -> Vec<(usize, usize, String, serde_json::Value)> {
+    let mut results = Vec::new();
+    let mut cursor = 0;
+
+    while cursor < text.len() {
+        // Find the next `<TOOLNAME>` from our allowlist.
+        let mut best: Option<(usize, &'static str)> = None;
+        for &tool in KNOWN_TOOL_NAMES {
+            let needle_owned = format!("<{}>", tool);
+            if let Some(rel) = text[cursor..].find(&needle_owned) {
+                let abs = cursor + rel;
+                if best.is_none_or(|(b, _)| abs < b) {
+                    best = Some((abs, tool));
+                }
+            }
+        }
+        let Some((start, tool_name)) = best else { break };
+        let open_tag_len = tool_name.len() + 2; // `<` + name + `>`
+        let body_start = start + open_tag_len;
+
+        let close_tag = format!("</{}>", tool_name);
+        let Some(close_rel) = text[body_start..].find(&close_tag) else {
+            // No close — advance past the open and keep scanning.
+            cursor = body_start;
+            continue;
+        };
+        let close_abs = body_start + close_rel;
+        let body = &text[body_start..close_abs];
+
+        let params = parse_xml_param_pairs(body);
+        if params.is_empty() {
+            cursor = close_abs + close_tag.len();
+            continue;
+        }
+
+        let mut map = serde_json::Map::new();
+        for (k, v) in params {
+            map.insert(k, serde_json::Value::String(v));
+        }
+        let end = close_abs + close_tag.len();
+        results.push((start, end, tool_name.to_string(), serde_json::Value::Object(map)));
+        cursor = end;
+    }
+    results
+}
+
+/// Extract `<name>value</name>` pairs from a Claude-style tool body.
+/// Only accepts alphanumeric+underscore tag names so arbitrary nested
+/// XML doesn't accidentally register as a parameter.
+fn parse_xml_param_pairs(body: &str) -> Vec<(String, String)> {
+    let mut pairs = Vec::new();
+    let mut cursor = 0;
+    while cursor < body.len() {
+        // Find next `<` followed by an identifier.
+        let Some(lt_rel) = body[cursor..].find('<') else { break };
+        let lt_abs = cursor + lt_rel;
+        let after_lt = &body[lt_abs + 1..];
+        // Identifier must be lowercase letters/digits/underscore.
+        let name_len = after_lt
+            .bytes()
+            .take_while(|&b| b.is_ascii_alphanumeric() || b == b'_')
+            .count();
+        if name_len == 0 || after_lt.as_bytes().get(name_len) != Some(&b'>') {
+            cursor = lt_abs + 1;
+            continue;
+        }
+        let name = &after_lt[..name_len];
+        let body_start = lt_abs + 1 + name_len + 1; // past `>`
+        let close = format!("</{}>", name);
+        let Some(close_rel) = body[body_start..].find(&close) else {
+            break;
+        };
+        let value = body[body_start..body_start + close_rel].trim().to_string();
+        pairs.push((name.to_string(), value));
+        cursor = body_start + close_rel + close.len();
+    }
+    pairs
 }
 
 /// Consume a balanced JSON object starting at `s[0] == '{'`. Returns the byte

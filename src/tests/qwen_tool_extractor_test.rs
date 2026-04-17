@@ -247,6 +247,59 @@ fn singular_envelope_rejects_plural_match() {
 }
 
 #[test]
+fn extract_claude_style_bash_invocation() {
+    // Regression for 2026-04-17 14:27 — unsloth Qwen emitted a
+    // `<bash><command>...</command></bash>` block and our parser missed
+    // it entirely because the outer tag was the tool NAME, not one of
+    // our known `<tool_call>` / `<function=` markers.
+    let text = "Let me search for the OpenCode repo.\n\n\
+        <bash>\n\
+        <command>\n\
+        curl -s \"https://api.github.com/search/repositories?q=opencode+oauth\" | python3 -c \"import json,sys; print(json.load(sys.stdin))\"\n\
+        </command>\n\
+        </bash>";
+    let (calls, cleaned) = extract_text_tool_calls(text);
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0, "bash");
+    assert!(
+        calls[0].1["command"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("curl"),
+        "command arg must round-trip"
+    );
+    assert!(cleaned.contains("Let me search"));
+    assert!(!cleaned.contains("<bash>"));
+    assert!(!cleaned.contains("</bash>"));
+}
+
+#[test]
+fn claude_style_multiple_params() {
+    let text = "<edit_file>\n\
+        <path>src/main.rs</path>\n\
+        <old_string>foo</old_string>\n\
+        <new_string>bar</new_string>\n\
+        </edit_file>";
+    let (calls, cleaned) = extract_text_tool_calls(text);
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0, "edit_file");
+    assert_eq!(calls[0].1["path"], "src/main.rs");
+    assert_eq!(calls[0].1["old_string"], "foo");
+    assert_eq!(calls[0].1["new_string"], "bar");
+    assert!(cleaned.trim().is_empty());
+}
+
+#[test]
+fn claude_style_ignores_unknown_tag_names() {
+    // `<html>` and `<script>` aren't in KNOWN_TOOL_NAMES — prose mentions
+    // of HTML in a chat response must NOT get extracted as tool calls.
+    let text = "The page has a <html><body>Hello</body></html> structure.";
+    let (calls, cleaned) = extract_text_tool_calls(text);
+    assert_eq!(calls.len(), 0);
+    assert_eq!(cleaned, text);
+}
+
+#[test]
 fn tool_calls_inside_prose_is_ignored() {
     // Prose like `the "tool_calls" field carries tool calls` must not
     // match — the wrapping `{` is far away and belongs to something else.
