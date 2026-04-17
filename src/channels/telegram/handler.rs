@@ -97,6 +97,11 @@ struct StreamingState {
     status_shown_at: Option<std::time::Instant>,
     /// Intermediate texts already sent — used to dedup final response
     sent_intermediates: Vec<String>,
+    /// Message IDs of every intermediate chunk delivered to Telegram, so a
+    /// cancelled in-flight call can clean up after itself. Without this, a
+    /// cancelled old call leaves its intermediate visible and the new call
+    /// re-sends the same text — the exact-match duplicate the user reported.
+    intermediate_msg_ids: Vec<MessageId>,
     /// True from start until first response text arrives — enables rolling messages for CLI providers
     /// where tools complete instantly (ToolStarted+ToolCompleted back-to-back)
     processing: bool,
@@ -954,6 +959,7 @@ pub(crate) async fn handle_message(
         quip_index: 0,
         status_shown_at: None,
         sent_intermediates: Vec::new(),
+        intermediate_msg_ids: Vec::new(),
         processing: true,
     }));
 
@@ -1095,13 +1101,32 @@ pub(crate) async fn handle_message(
                                     let text = crate::utils::sanitize::strip_llm_artifacts(text);
                                     let html = markdown_to_telegram_html(&text);
                                     if !html.is_empty() {
-                                        let _ = bot
-                                            .send_message(chat, &html)
-                                            .parse_mode(ParseMode::Html)
-                                            .await;
-                                        // Track for dedup against final response
-                                        let mut s = st.lock().unwrap_or_else(|e| e.into_inner());
-                                        s.sent_intermediates.push(text.clone());
+                                        // Chunk to 4096 and only record as delivered if every
+                                        // chunk succeeded — if we record on failure, dedup later
+                                        // strips text the user never saw.
+                                        let chunks: Vec<String> = split_message(&html, 4096)
+                                            .into_iter()
+                                            .map(|s| s.to_string())
+                                            .collect();
+                                        let mut sent_ids: Vec<MessageId> = Vec::new();
+                                        let mut all_ok = true;
+                                        for chunk in &chunks {
+                                            match send_html_or_plain(&bot, chat, chunk).await {
+                                                Ok(id) => sent_ids.push(id),
+                                                Err(e) => {
+                                                    tracing::warn!(
+                                                        "Telegram edit-loop intermediate send failed ({e}) — NOT marking as delivered; final response will carry it",
+                                                    );
+                                                    all_ok = false;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        if all_ok {
+                                            let mut s = st.lock().unwrap_or_else(|e| e.into_inner());
+                                            s.sent_intermediates.push(text.clone());
+                                            s.intermediate_msg_ids.extend(sent_ids);
+                                        }
                                     }
                                 }
                             }
@@ -1433,11 +1458,22 @@ pub(crate) async fn handle_message(
         if let Some(mid) = streaming_msg_id {
             let _ = bot.delete_message(msg.chat.id, mid).await;
         }
-        let tool_msg_ids: Vec<teloxide::types::MessageId> = {
+        let (tool_msg_ids, intermediate_ids): (
+            Vec<teloxide::types::MessageId>,
+            Vec<teloxide::types::MessageId>,
+        ) = {
             let s = streaming.lock().unwrap_or_else(|e| e.into_inner());
-            s.tool_msgs.iter().filter_map(|t| t.msg_id).collect()
+            (
+                s.tool_msgs.iter().filter_map(|t| t.msg_id).collect(),
+                s.intermediate_msg_ids.clone(),
+            )
         };
         for mid in tool_msg_ids {
+            let _ = bot.delete_message(msg.chat.id, mid).await;
+        }
+        // Intermediates too — otherwise they stay visible and the replacement
+        // call re-sends the same text, producing exact-match duplicates.
+        for mid in intermediate_ids {
             let _ = bot.delete_message(msg.chat.id, mid).await;
         }
         return Ok(());
@@ -1486,19 +1522,24 @@ pub(crate) async fn handle_message(
                         .into_iter()
                         .map(|s| s.to_string())
                         .collect();
+                    let mut sent_ids: Vec<MessageId> = Vec::new();
                     let mut all_ok = true;
                     for chunk in &chunks {
-                        if let Err(e) = send_html_or_plain(&bot, msg.chat.id, chunk).await {
-                            tracing::warn!(
-                                "Telegram intermediate send failed ({e}) — NOT marking as delivered; final response will carry it",
-                            );
-                            all_ok = false;
-                            break;
+                        match send_html_or_plain(&bot, msg.chat.id, chunk).await {
+                            Ok(id) => sent_ids.push(id),
+                            Err(e) => {
+                                tracing::warn!(
+                                    "Telegram intermediate send failed ({e}) — NOT marking as delivered; final response will carry it",
+                                );
+                                all_ok = false;
+                                break;
+                            }
                         }
                     }
                     if all_ok {
                         let mut s = streaming.lock().unwrap_or_else(|e| e.into_inner());
                         s.sent_intermediates.push(text.clone());
+                        s.intermediate_msg_ids.extend(sent_ids);
                     }
                 }
             }
@@ -1727,6 +1768,7 @@ pub(crate) async fn resume_session(
         quip_index: 0,
         status_shown_at: None,
         sent_intermediates: Vec::new(),
+        intermediate_msg_ids: Vec::new(),
         processing: true,
     }));
 
@@ -1803,12 +1845,29 @@ pub(crate) async fn resume_session(
                                     let text = crate::utils::sanitize::strip_llm_artifacts(&text);
                                     let html = markdown_to_telegram_html(&text);
                                     if !html.is_empty() {
-                                        let _ = bot
-                                            .send_message(chat_id, &html)
-                                            .parse_mode(ParseMode::Html)
-                                            .await;
-                                        let mut s = st.lock().unwrap_or_else(|e| e.into_inner());
-                                        s.sent_intermediates.push(text.clone());
+                                        let chunks: Vec<String> = split_message(&html, 4096)
+                                            .into_iter()
+                                            .map(|s| s.to_string())
+                                            .collect();
+                                        let mut sent_ids: Vec<MessageId> = Vec::new();
+                                        let mut all_ok = true;
+                                        for chunk in &chunks {
+                                            match send_html_or_plain(&bot, chat_id, chunk).await {
+                                                Ok(id) => sent_ids.push(id),
+                                                Err(e) => {
+                                                    tracing::warn!(
+                                                        "Telegram (voice) edit-loop intermediate send failed ({e}) — NOT marking as delivered",
+                                                    );
+                                                    all_ok = false;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        if all_ok {
+                                            let mut s = st.lock().unwrap_or_else(|e| e.into_inner());
+                                            s.sent_intermediates.push(text.clone());
+                                            s.intermediate_msg_ids.extend(sent_ids);
+                                        }
                                     }
                                 }
                             }
@@ -1978,6 +2037,21 @@ pub(crate) async fn resume_session(
         if let Some(mid) = streaming_msg_id {
             let _ = bot.delete_message(chat_id, mid).await;
         }
+        // Delete tool messages and intermediates sent by this stale call so
+        // the replacement call doesn't race them into exact-match duplicates.
+        let (tool_msg_ids, intermediate_ids): (Vec<MessageId>, Vec<MessageId>) = {
+            let s = streaming.lock().unwrap_or_else(|e| e.into_inner());
+            (
+                s.tool_msgs.iter().filter_map(|t| t.msg_id).collect(),
+                s.intermediate_msg_ids.clone(),
+            )
+        };
+        for mid in tool_msg_ids {
+            let _ = bot.delete_message(chat_id, mid).await;
+        }
+        for mid in intermediate_ids {
+            let _ = bot.delete_message(chat_id, mid).await;
+        }
         return Ok(());
     }
 
@@ -2018,19 +2092,24 @@ pub(crate) async fn resume_session(
                         .into_iter()
                         .map(|s| s.to_string())
                         .collect();
+                    let mut sent_ids: Vec<MessageId> = Vec::new();
                     let mut all_ok = true;
                     for chunk in &chunks {
-                        if let Err(e) = send_html_or_plain(&bot, chat_id, chunk).await {
-                            tracing::warn!(
-                                "Telegram (DM) intermediate send failed ({e}) — NOT marking as delivered",
-                            );
-                            all_ok = false;
-                            break;
+                        match send_html_or_plain(&bot, chat_id, chunk).await {
+                            Ok(id) => sent_ids.push(id),
+                            Err(e) => {
+                                tracing::warn!(
+                                    "Telegram (DM) intermediate send failed ({e}) — NOT marking as delivered",
+                                );
+                                all_ok = false;
+                                break;
+                            }
                         }
                     }
                     if all_ok {
                         let mut s = streaming.lock().unwrap_or_else(|e| e.into_inner());
                         s.sent_intermediates.push(text.clone());
+                        s.intermediate_msg_ids.extend(sent_ids);
                     }
                 }
             }
@@ -2152,17 +2231,19 @@ fn tool_context(name: &str, input: &serde_json::Value) -> String {
 }
 
 /// Send an HTML message, falling back to plain text if Telegram rejects the HTML.
+/// Returns the resulting `MessageId` so callers that need to track or later delete
+/// the message (e.g. intermediate cleanup on cancellation) can do so.
 async fn send_html_or_plain(
     bot: &Bot,
     chat_id: ChatId,
     html: &str,
-) -> std::result::Result<(), teloxide::RequestError> {
+) -> std::result::Result<MessageId, teloxide::RequestError> {
     match bot
         .send_message(chat_id, html)
         .parse_mode(ParseMode::Html)
         .await
     {
-        Ok(_) => Ok(()),
+        Ok(m) => Ok(m.id),
         Err(teloxide::RequestError::RetryAfter(secs)) => {
             tracing::warn!(
                 "Telegram: HTML send rate-limited, waiting {}s before retry",
@@ -2175,18 +2256,18 @@ async fn send_html_or_plain(
                 .parse_mode(ParseMode::Html)
                 .await
             {
-                Ok(_) => Ok(()),
+                Ok(m) => Ok(m.id),
                 Err(e) => {
                     tracing::warn!("Telegram: HTML retry failed ({e}), sending as plain text");
                     let plain = strip_html_tags(html);
-                    bot.send_message(chat_id, plain).await.map(|_| ())
+                    bot.send_message(chat_id, plain).await.map(|m| m.id)
                 }
             }
         }
         Err(e) => {
             tracing::warn!("Telegram: HTML send failed ({e}), retrying as plain text");
             let plain = strip_html_tags(html);
-            bot.send_message(chat_id, plain).await.map(|_| ())
+            bot.send_message(chat_id, plain).await.map(|m| m.id)
         }
     }
 }
