@@ -133,18 +133,30 @@ impl AgentService {
         // silently without sending [DONE] — this timeout lets the retry logic
         // in tool_loop.rs recover instead of blocking the TUI forever.
         //
-        // 90s covers the slow-prompt-processing case for large local models
-        // (a cold 35B model on first inference spends real time just filling
-        // its KV cache before emitting the first token). Shorter budgets
-        // dropped genuine requests; see handshake_timeout above.
+        // Three-way split:
         //
-        // CLI providers need a much longer timeout: they run tools internally
-        // (cargo build, cargo test, gh commands) that can take several minutes
-        // without producing any stream events. 60s is too short and causes
-        // premature stream termination → retry → fresh CLI session that
-        // repeats all prior work from scratch.
+        //   CLI: 1h. Subprocess runs tools internally (cargo build, gh, etc.).
+        //
+        //   Local HTTP server (llama.cpp / Unsloth / LM Studio / Ollama / MLX):
+        //   15min. A cold 35B gguf on Apple Silicon spends *real* time filling
+        //   its KV cache on a large prompt — 85%-window turns on
+        //   localhost:8891 ran past 90s with no chunk emitted yet. 15min
+        //   gives prefill enough runway while still detecting a truly dead
+        //   connection within the retry budget (3 × 15min = 45min worst case;
+        //   the handshake timeout above catches genuine wedges in 90s first).
+        //
+        //   Remote HTTP: 90s. Cross-continent latency plus LLM warmup.
+        //   OpenAI/OpenRouter/etc. would emit stream events faster than a
+        //   local prefill, so 90s of silence there really does mean the
+        //   connection dropped.
+        let is_local = provider
+            .base_url()
+            .map(crate::brain::provider::factory::is_local_base_url)
+            .unwrap_or(false);
         let stream_idle_timeout = if is_cli {
-            std::time::Duration::from_secs(3600) // 1 hour — CLI agents can run 30min+
+            std::time::Duration::from_secs(3600)
+        } else if is_local {
+            std::time::Duration::from_secs(900)
         } else {
             std::time::Duration::from_secs(90)
         };
