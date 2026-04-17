@@ -1,2 +1,15 @@
 [target.aarch64-unknown-linux-gnu]
 linker = "aarch64-linux-gnu-gcc"
+
+# llama-cpp-sys-2 ≥ 0.1.143 pulls in cpp-httplib, which `#include
+# <openssl/err.h>`. On macOS with Homebrew the header lives outside
+# clang's default search path, so the build fails mid-compile with
+# "file not found". CPATH is additive: clang silently skips entries
+# that don't exist, so listing both Apple Silicon (/opt/homebrew) and
+# Intel (/usr/local) Homebrew prefixes is safe on either mac, and a
+# no-op on Linux (libssl-dev installs to /usr/include). Windows CI
+# builds with --no-default-features which excludes local-stt, so the
+# llama-cpp-sys-2 C++ wrapper still compiles fine without these.
+[env]
+CPATH = "/opt/homebrew/opt/openssl@3/include:/usr/local/opt/openssl@3/include"
+LIBRARY_PATH = "/opt/homebrew/opt/openssl@3/lib:/usr/local/opt/openssl@3/lib"

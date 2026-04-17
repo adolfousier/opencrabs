@@ -759,15 +759,14 @@ mod wait_agent_tool {
     }
 
     #[tokio::test]
-    async fn wait_timeout_returns_error() {
+    async fn wait_timeout_returns_progress_not_error() {
+        // New semantics: on timeout we return success with a progress
+        // preview (or "No output yet.") so the LLM sees work-in-flight
+        // and can keep polling. The old "Timed out" error wording drove
+        // LLMs to abandon the parent turn after a few retries — replaced
+        // by "still running after {secs}s" success messaging.
         let mgr = Arc::new(SubAgentManager::new());
         mgr.insert(make_running_agent("a1"));
-
-        // Create a task that takes forever
-        let handle = tokio::spawn(async {
-            tokio::time::sleep(std::time::Duration::from_secs(600)).await;
-        });
-        mgr.set_join_handle("a1", handle);
 
         let tool = WaitAgentTool::new(mgr);
         let ctx = test_context();
@@ -776,21 +775,32 @@ mod wait_agent_tool {
             .execute(json!({"agent_id": "a1", "timeout_secs": 1}), &ctx)
             .await
             .unwrap();
-        assert!(!result.success);
-        assert!(result.error.as_ref().unwrap().contains("Timed out"));
+        assert!(result.success);
+        assert!(result.output.contains("still running"));
     }
 
     #[tokio::test]
-    async fn wait_no_handle_returns_state() {
+    async fn wait_returns_round_output_on_awaiting_input() {
+        // Replaces the old no-handle test. The real fix for the
+        // 2026-04-17 deadlock: sub-agents transition to AwaitingInput
+        // at a round boundary, and wait_agent returns immediately with
+        // the buffered round output instead of blocking on task-join
+        // (which never resolves between rounds).
         let mgr = Arc::new(SubAgentManager::new());
-        mgr.insert(make_running_agent("a1")); // No join handle
+        mgr.insert(make_running_agent("a1"));
+        mgr.update_output("a1", "round 1 results go here".to_string());
+        mgr.mark_awaiting_input("a1");
 
         let tool = WaitAgentTool::new(mgr);
         let ctx = test_context();
 
-        let result = tool.execute(json!({"agent_id": "a1"}), &ctx).await.unwrap();
+        let result = tool
+            .execute(json!({"agent_id": "a1", "timeout_secs": 30}), &ctx)
+            .await
+            .unwrap();
         assert!(result.success);
-        assert!(result.output.contains("state"));
+        assert!(result.output.contains("paused for input"));
+        assert!(result.output.contains("round 1 results"));
     }
 }
 
