@@ -206,6 +206,265 @@ fn strip_think_blocks(text: &str) -> String {
     result.trim().to_string()
 }
 
+/// Extract Qwen-style tool_call blocks emitted as text content.
+///
+/// Local GGUF/MLX backends serving Qwen3 will often put tool calls into
+/// `message.content` instead of the structured `tool_calls` field when the
+/// runtime isn't in the right template + reasoning mode. Unsloth's parser
+/// (`studio/backend/routes/inference.py`) solves this by scanning the raw
+/// text for two formats and emitting structured tool calls anyway:
+///
+///   `<tool_call>{"name":"x","arguments":{...}}</tool_call>`
+///   `<function=x><parameter=k>v</parameter></function>`
+///
+/// Closing tags are treated as optional — models skip them constantly.
+/// JSON parsing uses balanced-brace counting with a string/escape guard so
+/// `{` or `}` inside argument strings doesn't confuse the extractor.
+///
+/// Returns `(tool_calls, cleaned_text)` where `cleaned_text` is the input
+/// with every matched block removed. If nothing matches, the text is
+/// returned unchanged — safe to call on any content.
+pub(crate) fn extract_text_tool_calls(text: &str) -> (Vec<(String, serde_json::Value)>, String) {
+    // Cheap pre-check so non-Qwen content pays nothing.
+    if !text.contains("<tool_call>") && !text.contains("<function=") {
+        return (Vec::new(), text.to_string());
+    }
+
+    // Collect byte ranges of every matched block; strip them at the end.
+    let mut tool_calls: Vec<(String, serde_json::Value)> = Vec::new();
+    let mut strip_ranges: Vec<(usize, usize)> = Vec::new();
+    let mut i: usize = 0;
+    let bytes = text.as_bytes();
+
+    while i < bytes.len() {
+        let tc_at = text[i..].find("<tool_call>").map(|r| i + r);
+        let fn_at = text[i..].find("<function=").map(|r| i + r);
+        let next = match (tc_at, fn_at) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+        let Some(start) = next else { break };
+
+        if tc_at == Some(start) {
+            // <tool_call>{json}</tool_call>? — closing tag optional
+            let body_start = start + "<tool_call>".len();
+            // Skip whitespace to the opening brace.
+            let brace_rel = text[body_start..]
+                .char_indices()
+                .find(|(_, c)| !c.is_whitespace())
+                .map(|(idx, _)| idx);
+            let brace_abs = match brace_rel {
+                Some(rel) if text.as_bytes().get(body_start + rel) == Some(&b'{') => {
+                    body_start + rel
+                }
+                _ => {
+                    // Not a JSON tool_call — advance past the tag and keep scanning.
+                    i = body_start;
+                    continue;
+                }
+            };
+            match extract_balanced_json(&text[brace_abs..]) {
+                Some(consumed) => {
+                    let json_slice = &text[brace_abs..brace_abs + consumed];
+                    if let Some(call) = parse_qwen_tool_json(json_slice) {
+                        tool_calls.push(call);
+                    }
+                    // Include the optional `</tool_call>` (and any whitespace
+                    // between `}` and it) in the strip range.
+                    let mut end = brace_abs + consumed;
+                    let after = &text[end..];
+                    let ws_len = after.len() - after.trim_start().len();
+                    if after.trim_start().starts_with("</tool_call>") {
+                        end += ws_len + "</tool_call>".len();
+                    }
+                    strip_ranges.push((start, end));
+                    i = end;
+                }
+                None => {
+                    // Unbalanced JSON — likely a prose mention like
+                    // "strip the <tool_call> tag". Don't strip; move on.
+                    i = body_start;
+                }
+            }
+        } else {
+            // <function=name>...</function>? — parameters optional
+            let tag_start = start;
+            // Find the `>` closing the opening tag.
+            let after = &text[tag_start..];
+            let open_end = match after.find('>') {
+                Some(r) => tag_start + r + 1,
+                None => {
+                    i = tag_start + "<function=".len();
+                    continue;
+                }
+            };
+            let name = text[tag_start + "<function=".len()..open_end - 1].trim();
+            if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                i = open_end;
+                continue;
+            }
+            // Body ends at first of: </tool_call>, next <function=, or </function>.
+            // Unsloth avoids </function> as boundary because code params can contain
+            // it literally — but we keep it as a last resort since our param set
+            // doesn't embed Python code that closes the tag name.
+            let tail = &text[open_end..];
+            let candidates = [
+                tail.find("</tool_call>").map(|r| (r, "</tool_call>".len())),
+                tail.find("<function=").map(|r| (r, 0usize)),
+                tail.find("</function>").map(|r| (r, "</function>".len())),
+            ];
+            let pick = candidates
+                .iter()
+                .filter_map(|o| *o)
+                .min_by_key(|(r, _)| *r);
+            let (body_rel, close_len) = match pick {
+                Some(p) => p,
+                None => {
+                    // No boundary — take until end of string (open-ended).
+                    (tail.len(), 0)
+                }
+            };
+            let body = &tail[..body_rel];
+            let input = parse_function_params(body);
+            tool_calls.push((name.to_string(), input));
+            let end = open_end + body_rel + close_len;
+            strip_ranges.push((start, end));
+            i = end;
+        }
+    }
+
+    if strip_ranges.is_empty() {
+        return (tool_calls, text.to_string());
+    }
+
+    // Rebuild text with blocks removed, keeping everything outside them.
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0;
+    for (s, e) in strip_ranges {
+        if s > cursor {
+            out.push_str(&text[cursor..s]);
+        }
+        cursor = e;
+    }
+    if cursor < text.len() {
+        out.push_str(&text[cursor..]);
+    }
+    (tool_calls, out.trim().to_string())
+}
+
+/// Consume a balanced JSON object starting at `s[0] == '{'`. Returns the byte
+/// length through the matching closing `}`, or `None` if unbalanced. Tracks
+/// string + escape state so braces inside argument strings don't confuse the
+/// depth counter.
+pub(crate) fn extract_balanced_json(s: &str) -> Option<usize> {
+    let bytes = s.as_bytes();
+    if bytes.first() != Some(&b'{') {
+        return None;
+    }
+    let mut depth: i32 = 0;
+    let mut in_string = false;
+    let mut escape = false;
+    for (idx, &b) in bytes.iter().enumerate() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if in_string {
+            match b {
+                b'\\' => escape = true,
+                b'"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match b {
+            b'"' => in_string = true,
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(idx + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Parse the JSON inside a `<tool_call>{...}</tool_call>` block. Accepts
+/// Qwen's canonical `{"name":"x","arguments":{...}}` and the variants
+/// other local models emit (`tool_name`, `args`, `input`, `parameters`,
+/// stringified arguments, etc.).
+fn parse_qwen_tool_json(json: &str) -> Option<(String, serde_json::Value)> {
+    let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    let name = v
+        .get("name")
+        .or_else(|| v.get("tool_name"))
+        .or_else(|| v.get("function"))
+        .and_then(|n| n.as_str())?
+        .to_string();
+    if name.is_empty() {
+        return None;
+    }
+    let args_val = v
+        .get("arguments")
+        .or_else(|| v.get("args"))
+        .or_else(|| v.get("input"))
+        .or_else(|| v.get("parameters"));
+    let input = match args_val {
+        Some(serde_json::Value::String(s)) => {
+            serde_json::from_str(s).unwrap_or(serde_json::json!({}))
+        }
+        Some(other) => other.clone(),
+        None => serde_json::json!({}),
+    };
+    Some((name, input))
+}
+
+/// Parse `<parameter=key>value</parameter>` pairs out of a function body.
+/// When the body contains none, returns an empty object — the caller may
+/// still have a valid tool call that just takes no arguments.
+fn parse_function_params(body: &str) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    let mut i = 0usize;
+    while let Some(rel) = body[i..].find("<parameter=") {
+        let tag_start = i + rel;
+        let after = &body[tag_start..];
+        let Some(gt) = after.find('>') else { break };
+        let key = body[tag_start + "<parameter=".len()..tag_start + gt].trim();
+        if key.is_empty() {
+            i = tag_start + gt + 1;
+            continue;
+        }
+        let val_start = tag_start + gt + 1;
+        let tail = &body[val_start..];
+        // Value ends at next `<parameter=` or `</parameter>` (whichever comes first).
+        let end_at_param = tail.find("</parameter>");
+        let end_at_next = tail.find("<parameter=");
+        let end = match (end_at_param, end_at_next) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+        let (val, next_i) = match end {
+            Some(rel) => {
+                // If we ended on </parameter>, skip past it; if on the next
+                // opening tag, leave cursor on it.
+                let skip = if end_at_param == Some(rel) {
+                    rel + "</parameter>".len()
+                } else {
+                    rel
+                };
+                (tail[..rel].trim().to_string(), val_start + skip)
+            }
+            None => (tail.trim().to_string(), body.len()),
+        };
+        map.insert(key.to_string(), serde_json::Value::String(val));
+        i = next_i;
+    }
+    serde_json::Value::Object(map)
+}
+
 /// Dynamic token provider — called on every request to get the current bearer token.
 /// Used by Copilot provider where the token rotates every ~30 minutes.
 pub type TokenFn = Arc<dyn Fn() -> String + Send + Sync>;
@@ -928,6 +1187,49 @@ impl OpenAIProvider {
                     content_blocks.push(ContentBlock::Text { text: clean });
                 }
             }
+        }
+
+        // Fallback: local GGUF/MLX backends (llama.cpp, MLX, LM Studio, Ollama)
+        // commonly emit Qwen tool calls as `<tool_call>{...}</tool_call>` text
+        // inside `content` instead of the structured `tool_calls` field — this
+        // happens whenever the runtime isn't launched with the right jinja +
+        // reasoning template. Scan the extracted Text blocks and promote any
+        // tool-call tags to ContentBlock::ToolUse so they actually execute.
+        let structured_tool_calls_present = choice
+            .message
+            .tool_calls
+            .as_ref()
+            .map(|v| !v.is_empty())
+            .unwrap_or(false);
+        if !structured_tool_calls_present {
+            let mut recovered: Vec<ContentBlock> = Vec::new();
+            for block in content_blocks.iter_mut() {
+                if let ContentBlock::Text { text } = block {
+                    let (calls, cleaned) = extract_text_tool_calls(text);
+                    if calls.is_empty() {
+                        continue;
+                    }
+                    tracing::info!(
+                        "Recovered {} tool call(s) from text content (local-model fallback)",
+                        calls.len()
+                    );
+                    *text = cleaned;
+                    for (idx, (name, input)) in calls.into_iter().enumerate() {
+                        recovered.push(ContentBlock::ToolUse {
+                            id: format!("call_text_{}", idx),
+                            name,
+                            input,
+                        });
+                    }
+                }
+            }
+            // Drop any Text blocks we just emptied, then append the recovered
+            // tool-use blocks in the order they appeared.
+            content_blocks.retain(|b| match b {
+                ContentBlock::Text { text } => !text.trim().is_empty(),
+                _ => true,
+            });
+            content_blocks.extend(recovered);
         }
 
         // Convert tool_calls to ToolUse content blocks
@@ -1824,6 +2126,14 @@ impl Provider for OpenAIProvider {
             /// content deltas are dropped for the remainder of the turn.
             leak_probe: String,
             leak_active: bool,
+            /// Rolling accumulator of every emitted TextDelta across the turn.
+            /// Scanned at `finish_reason` for `<tool_call>` / `<function=`
+            /// blocks that local GGUF/MLX backends sometimes drop into
+            /// content instead of the structured `tool_calls` field. Kept
+            /// separate from `leak_probe` because the leak filter rejects
+            /// text before emission, whereas this tracks what the consumer
+            /// actually received.
+            response_text_accum: String,
         }
 
         let state = std::sync::Arc::new(std::sync::Mutex::new(StreamState {
@@ -1839,6 +2149,7 @@ impl Provider for OpenAIProvider {
             pending_stop_reason: None,
             leak_probe: String::new(),
             leak_active: false,
+            response_text_accum: String::new(),
         }));
 
         let event_stream = byte_stream
@@ -2211,6 +2522,7 @@ impl Provider for OpenAIProvider {
                                                         }));
                                                     }
 
+                                                    st.response_text_accum.push_str(&filtered);
                                                     events.push(Ok(StreamEvent::ContentBlockDelta {
                                                         index: 0,
                                                         delta: ContentDelta::TextDelta {
@@ -2289,10 +2601,48 @@ impl Provider for OpenAIProvider {
                                                             content_block: ContentBlock::Text { text: String::new() },
                                                         }));
                                                     }
+                                                    st.response_text_accum.push_str(&filtered);
                                                     events.push(Ok(StreamEvent::ContentBlockDelta {
                                                         index: 0,
                                                         delta: ContentDelta::TextDelta { text: filtered },
                                                     }));
+                                                }
+                                            }
+                                            // Fallback: scan accumulated text for Qwen-style
+                                            // `<tool_call>` or `<function=` blocks a local GGUF/MLX
+                                            // backend dropped into content. Only fires when the
+                                            // structured `tool_calls` path produced nothing, so
+                                            // providers that already emit proper tool_calls pay
+                                            // no cost beyond the substring check.
+                                            if st.tool_calls.is_empty()
+                                                && (st.response_text_accum.contains("<tool_call>")
+                                                    || st.response_text_accum.contains("<function="))
+                                            {
+                                                let (recovered, _cleaned) =
+                                                    extract_text_tool_calls(&st.response_text_accum);
+                                                if !recovered.is_empty() {
+                                                    tracing::info!(
+                                                        "Recovered {} streaming tool call(s) from text content (local-model fallback)",
+                                                        recovered.len()
+                                                    );
+                                                    // Close the text block first so helpers.rs
+                                                    // finalizes it before the tool blocks arrive.
+                                                    if st.emitted_content_start && !st.emitted_content_stop {
+                                                        events.push(Ok(StreamEvent::ContentBlockStop { index: 0 }));
+                                                        st.emitted_content_stop = true;
+                                                    }
+                                                    for (tc_idx, (name, input)) in recovered.into_iter().enumerate() {
+                                                        let tool_index = tc_idx + 1;
+                                                        events.push(Ok(StreamEvent::ContentBlockStart {
+                                                            index: tool_index,
+                                                            content_block: ContentBlock::ToolUse {
+                                                                id: format!("call_text_{}", tc_idx),
+                                                                name,
+                                                                input,
+                                                            },
+                                                        }));
+                                                        events.push(Ok(StreamEvent::ContentBlockStop { index: tool_index }));
+                                                    }
                                                 }
                                             }
                                             // Close the text block (no tool path above will have
