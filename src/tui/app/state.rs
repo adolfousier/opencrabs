@@ -1612,21 +1612,56 @@ impl App {
                         tool_group: None,
                     });
                 } else if has_reasoning {
-                    // CLI step boundary with reasoning only — push thinking msg
-                    // BEFORE the tool group so order is: think → tools → next.
-                    self.messages.push(DisplayMessage {
-                        id: Uuid::new_v4(),
-                        role: "assistant".to_string(),
-                        content: String::new(),
-                        timestamp: chrono::Utc::now(),
-                        token_count: None,
-                        cost: None,
-                        approval: None,
-                        approve_menu: None,
-                        details: reasoning_details,
-                        expanded: false,
-                        tool_group: None,
-                    });
+                    // Reasoning-only iteration (no visible text, no new
+                    // tool_use blocks yet). Prefer MERGING with the
+                    // immediately preceding thinking-only assistant
+                    // message over pushing a fresh one — consecutive
+                    // `<think>…</think>` iterations without any tools or
+                    // text between them are really one logical thinking
+                    // phase, and rendering them as two separate
+                    // collapsible blocks (screenshot 2026-04-17 16:25)
+                    // is pure noise. Merge criteria: last message is an
+                    // assistant row with empty content, non-empty
+                    // details, no tool_group — i.e. the exact shape
+                    // THIS branch creates.
+                    let reasoning_text = reasoning_details.unwrap_or_default();
+                    let merged_into_prev = self
+                        .messages
+                        .last_mut()
+                        .filter(|m| {
+                            m.role == "assistant"
+                                && m.content.trim().is_empty()
+                                && m.tool_group.is_none()
+                                && m.details.as_deref().is_some_and(|d| !d.trim().is_empty())
+                        })
+                        .map(|prev| {
+                            let mut combined =
+                                prev.details.take().unwrap_or_default();
+                            if !combined.ends_with("\n\n") {
+                                combined.push_str("\n\n");
+                            }
+                            combined.push_str(&reasoning_text);
+                            prev.details = Some(combined);
+                            prev.timestamp = chrono::Utc::now();
+                        })
+                        .is_some();
+                    if !merged_into_prev {
+                        // CLI step boundary with reasoning only — push thinking msg
+                        // BEFORE the tool group so order is: think → tools → next.
+                        self.messages.push(DisplayMessage {
+                            id: Uuid::new_v4(),
+                            role: "assistant".to_string(),
+                            content: String::new(),
+                            timestamp: chrono::Utc::now(),
+                            token_count: None,
+                            cost: None,
+                            approval: None,
+                            approve_menu: None,
+                            details: Some(reasoning_text),
+                            expanded: false,
+                            tool_group: None,
+                        });
+                    }
                     if let Some(group) = self.active_tool_group.take() {
                         self.messages.push(make_tool_group(group));
                     }
