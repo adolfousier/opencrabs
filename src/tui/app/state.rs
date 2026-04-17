@@ -407,9 +407,20 @@ pub struct App {
     /// Shared session ID — channels (Telegram, WhatsApp) read this to use the same session
     pub(crate) shared_session_id: Arc<tokio::sync::Mutex<Option<Uuid>>>,
 
-    /// Context window tracking
+    /// Context window tracking — FOCUSED SESSION view. These are derived
+    /// from `session_input_tokens` / `session_context_max` on load_session
+    /// so split-pane / sessions-list navigation shows the right numbers
+    /// for whichever pane is focused. Agent events for a NON-focused
+    /// session write to the maps only; they don't touch these fields.
     pub context_max_tokens: u32,
     pub last_input_tokens: Option<u32>,
+    /// Per-session ctx indicators. Keyed by session_id so that a
+    /// background turn's token updates don't leak into the other pane's
+    /// ctx display. Without isolation, two panes racing to update
+    /// `last_input_tokens` showed each other's numbers — the user saw
+    /// "150K" on pane A sourced from pane B's long turn.
+    pub session_input_tokens: HashMap<Uuid, u32>,
+    pub session_context_max: HashMap<Uuid, u32>,
     /// Per-response output token count (streaming, counted via tiktoken)
     pub streaming_output_tokens: u32,
 
@@ -589,6 +600,8 @@ impl App {
             queued_messages: HashMap::new(),
             shared_session_id: Arc::new(tokio::sync::Mutex::new(None)),
             default_model_name: agent_service.provider_model(),
+            session_input_tokens: HashMap::new(),
+            session_context_max: HashMap::new(),
             context_max_tokens: agent_service
                 .context_window_for_model(&agent_service.provider_model()),
             last_input_tokens: None,
@@ -1900,16 +1913,18 @@ impl App {
                 // so it would fire on every single reload.
                 tracing::info!("Config reloaded — refreshed commands, approval policy, agent");
             }
-            TuiEvent::TokenCountUpdated { session_id, count }
-                if self.is_current_session(session_id) =>
-            {
-                self.display_token_count = count;
-                // Always reflect the latest token count from the tool loop.
-                // The CLI calibration (tool_loop.rs line ~870) overwrites the
-                // tiktoken estimate with the real value reported by Claude CLI,
-                // so this must be allowed to decrease — otherwise post-compaction
-                // counts get stuck at the pre-calibration tiktoken estimate.
-                self.last_input_tokens = Some(count as u32);
+            TuiEvent::TokenCountUpdated { session_id, count } => {
+                // Write to the session's slot regardless of focus so a
+                // background turn's counter stays accurate when the user
+                // switches back. Only mirror into the visible
+                // `last_input_tokens` when THIS session is the focused one —
+                // otherwise pane A's ctx display would jump around when
+                // pane B's turn emits token updates.
+                self.session_input_tokens.insert(session_id, count as u32);
+                if self.is_current_session(session_id) {
+                    self.display_token_count = count;
+                    self.last_input_tokens = Some(count as u32);
+                }
             }
             TuiEvent::StreamingOutputTokens { session_id, tokens }
                 if self.is_current_session(session_id) =>
@@ -1922,7 +1937,6 @@ impl App {
             | TuiEvent::IntermediateText { .. }
             | TuiEvent::QueuedUserMessage { .. }
             | TuiEvent::CompactionSummary { .. }
-            | TuiEvent::TokenCountUpdated { .. }
             | TuiEvent::StreamingOutputTokens { .. } => {}
 
             TuiEvent::SessionUpdated(session_id) => {

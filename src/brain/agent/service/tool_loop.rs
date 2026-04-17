@@ -676,6 +676,13 @@ impl AgentService {
         let mut total_output_tokens = 0u32;
         let mut total_cache_creation = 0u32;
         let mut total_cache_read = 0u32;
+        // Last iteration's prompt size, used for the "current context
+        // usage" indicator. Distinct from `total_input_tokens` which
+        // sums across every iteration for cost/billing. The UI ctx
+        // meter must show the LAST call's prompt — summing all
+        // iterations inflates by a factor of N and showed 150K for a
+        // turn whose final prompt was 22K (2026-04-17 05:55 logs).
+        let mut last_iter_input_tokens = 0u32;
         let mut final_response: Option<LLMResponse> = None;
         let mut accumulated_text = String::new(); // Collect text from all iterations (not just final)
         let mut recent_tool_calls: Vec<String> = Vec::new(); // Track tool calls to detect loops
@@ -1510,6 +1517,7 @@ impl AgentService {
                 estimate
             };
             total_input_tokens += call_input_tokens;
+            last_iter_input_tokens = call_input_tokens;
             total_output_tokens += response.usage.output_tokens;
             // Use billing fields (cumulative across CLI rounds) when available
             total_cache_creation += if response.usage.billing_cache_creation > 0 {
@@ -3180,24 +3188,26 @@ impl AgentService {
         // input_tokens = non-cached, cache_creation/read tracked separately.
         let billable_input = total_input_tokens + total_cache_creation + total_cache_read;
         let total_tokens = billable_input + total_output_tokens;
-        let cost = self.provider_for_session(session_id).calculate_cost_with_cache(
-            &response.model,
-            total_input_tokens,
-            total_output_tokens,
-            total_cache_creation,
-            total_cache_read,
-        );
+        let cost = self
+            .provider_for_session(session_id)
+            .calculate_cost_with_cache(
+                &response.model,
+                total_input_tokens,
+                total_output_tokens,
+                total_cache_creation,
+                total_cache_read,
+            );
 
-        // Update message with usage info. For the stashed prompt-token
-        // count we prefer `billable_input` (non-cached + cache_create +
-        // cache_read == real prompt size the provider billed us for), but
-        // fall back to `context.token_count + base_context_tokens()` when
-        // the provider never emitted a usage chunk (streaming edge cases
-        // on some gateways). The latter is still an estimate, but at
-        // least includes the system + tool-schema overhead so it won't
-        // under-report by 20k when shown on the UI post-compaction.
-        let stored_input_tokens: i32 = if billable_input > 0 {
-            billable_input as i32
+        // Update message with usage info. The stashed prompt-token count
+        // drives the UI ctx meter, which must show the LAST iteration's
+        // prompt size — i.e. the actual context window the model just
+        // saw. Summing across iterations (`billable_input`) inflates by
+        // factor N: a turn with 5 tool rounds against a 22K final prompt
+        // displayed as ~150K (2026-04-17 05:55 logs). Cost calculation
+        // still uses the cumulative billing fields above; only the
+        // displayed ctx number uses the last-iter value here.
+        let stored_input_tokens: i32 = if last_iter_input_tokens > 0 {
+            last_iter_input_tokens as i32
         } else {
             let overhead = self.base_context_tokens();
             (context.token_count.saturating_add(overhead as usize)) as i32

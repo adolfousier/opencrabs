@@ -68,7 +68,9 @@ impl App {
         (self.approval_auto_session, self.approval_auto_always) =
             Self::read_approval_policy_from_config();
         // Show the system prompt + tools baseline immediately — new sessions are never 0
-        self.last_input_tokens = Some(self.agent_service.base_context_tokens());
+        let base = self.agent_service.base_context_tokens();
+        self.session_input_tokens.insert(session.id, base);
+        self.last_input_tokens = Some(base);
 
         // Sync shared session ID for channels (Telegram, WhatsApp)
         *self.shared_session_id.lock().await = Some(session.id);
@@ -165,19 +167,29 @@ impl App {
         // Sync shared session ID for channels (Telegram, WhatsApp)
         *self.shared_session_id.lock().await = Some(session.id);
 
-        // Restore last known context size from the server-reported value
-        // persisted on the most recent assistant message (see
-        // MessageRepository::last_assistant_input_tokens). No estimation,
-        // no mirror cache — the provider already told us the real count.
+        // Restore last known context size, preferring the in-memory
+        // per-session cache over the DB. The cache is fed by live
+        // TokenCountUpdated events for this session's turns and is the
+        // most accurate "last observed prompt size" — the DB column
+        // still holds the cumulative `billable_input` from the
+        // multi-iter fix, which over-reports context on session reload.
         let base = self.agent_service.base_context_tokens();
-        self.last_input_tokens = self
-            .message_service
-            .last_assistant_input_tokens(session_id)
-            .await
-            .ok()
-            .flatten()
-            .map(|t| t as u32)
-            .or(Some(base));
+        let cached_tokens = self.session_input_tokens.get(&session_id).copied();
+        let restored_tokens = if let Some(c) = cached_tokens {
+            Some(c)
+        } else {
+            self.message_service
+                .last_assistant_input_tokens(session_id)
+                .await
+                .ok()
+                .flatten()
+                .map(|t| t as u32)
+                .or(Some(base))
+        };
+        if let Some(t) = restored_tokens {
+            self.session_input_tokens.insert(session_id, t);
+        }
+        self.last_input_tokens = restored_tokens;
 
         // Clear unread indicator for this session
         self.sessions_with_unread.remove(&session_id);
@@ -251,9 +263,15 @@ impl App {
             .model
             .clone()
             .unwrap_or_else(|| self.agent_service.provider_model_for_session(session.id));
-        self.context_max_tokens = self
+        // context_window is session-specific (different providers have
+        // different windows). Cache it per session_id so the indicator
+        // is correct even if the focused pane's provider differs from
+        // the global default.
+        let max_ctx = self
             .agent_service
             .context_window_for_model(&self.default_model_name);
+        self.context_max_tokens = max_ctx;
+        self.session_context_max.insert(session_id, max_ctx);
 
         // Keep focused pane in sync with loaded session
         if let Some(pane) = self.pane_manager.focused_pane_mut() {
@@ -1695,10 +1713,20 @@ impl App {
         // Reload user commands (agent may have written new ones to commands.json)
         self.reload_user_commands();
 
-        // Track context usage from latest response. Persistence to DB is
-        // handled downstream by update_message_usage (stores on the
-        // assistant message row); no separate in-memory cache needed.
-        self.last_input_tokens = Some(response.context_tokens);
+        // Track context usage from latest response. Write to the
+        // per-session cache first; only mirror into the focused-view
+        // fields if THIS response belongs to the focused session,
+        // otherwise a background turn's completion would overwrite the
+        // pane the user is actually looking at.
+        if let Some(ref session) = self.current_session {
+            self.session_input_tokens
+                .insert(session.id, response.context_tokens);
+            if self.is_current_session(session.id) {
+                self.last_input_tokens = Some(response.context_tokens);
+            }
+        } else {
+            self.last_input_tokens = Some(response.context_tokens);
+        }
 
         // Strip LLM artifacts (<!-- reasoning -->, </invoke>, XML tool blocks)
         // before displaying in TUI — same sanitization as Telegram/external channels.
