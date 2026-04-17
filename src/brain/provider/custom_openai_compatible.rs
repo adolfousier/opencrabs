@@ -2253,7 +2253,29 @@ impl Provider for OpenAIProvider {
             /// text before emission, whereas this tracks what the consumer
             /// actually received.
             response_text_accum: String,
+            /// Content suppressed by the tool-call marker filter (probe
+            /// + subsequent suppressed deltas). Never reaches the consumer
+            /// as text — scanned at `finish_reason` by `extract_text_tool_calls`
+            /// and promoted to real `ContentBlock::ToolUse` events. This is
+            /// how local-Qwen `tool_call:{...}` / `<tool_call>…` leaks become
+            /// indistinguishable from cloud providers' structured tool calls
+            /// in the TUI: the raw JSON never flows to the display layer.
+            tool_capture_buffer: String,
+            /// Once a tool-call marker has been seen in the stream we flip
+            /// this to `true` and silently route all subsequent content
+            /// deltas into `tool_capture_buffer` until the turn ends.
+            /// Without this the model's `<tool_call>...</tool_call>` or
+            /// `tool_call:{...}` text flashes in the TUI exactly the way
+            /// cloud providers' structured `tool_calls` never would.
+            tool_block_active: bool,
         }
+
+        // Detect whether this stream is talking to a local inference server
+        // (llama.cpp / MLX / LM Studio / Ollama). Local Qwen / Kimi / DeepSeek
+        // models leak tool calls as content text — we want to suppress those
+        // markers from the display stream so the TUI renders only structured
+        // `ContentBlock::ToolUse` events, matching the cloud-provider UX.
+        let is_local_stream = crate::brain::provider::factory::is_local_base_url(&self.base_url);
 
         let state = std::sync::Arc::new(std::sync::Mutex::new(StreamState {
             emitted_message_start: false,
@@ -2269,6 +2291,8 @@ impl Provider for OpenAIProvider {
             leak_probe: String::new(),
             leak_active: false,
             response_text_accum: String::new(),
+            tool_capture_buffer: String::new(),
+            tool_block_active: false,
         }));
 
         let event_stream = byte_stream
@@ -2632,7 +2656,49 @@ impl Provider for OpenAIProvider {
                                                 st.think_bytes_consumed = consumed;
                                                 st.think_carry = carry;
 
-                                                if !filtered.is_empty() {
+                                                // For local providers (llama.cpp/MLX/etc.) the model often
+                                                // leaks tool calls as content text. Partition the filtered
+                                                // text at the first tool-call marker: everything before
+                                                // stays visible (legitimate intermediate text like
+                                                // "I'll check git status. "), everything from the marker
+                                                // onwards is silently captured and promoted to a
+                                                // structured `ContentBlock::ToolUse` at `finish_reason`.
+                                                // Once the capture flag flips, subsequent deltas never
+                                                // reach the consumer as text — matching the UX of every
+                                                // other provider which emits structured tool_calls.
+                                                let mut display_text: String = filtered.clone();
+                                                if is_local_stream {
+                                                    if st.tool_block_active {
+                                                        // Already capturing — all further content is tool body.
+                                                        st.tool_capture_buffer.push_str(&filtered);
+                                                        display_text.clear();
+                                                    } else {
+                                                        const TOOL_MARKERS: &[&str] = &[
+                                                            "<tool_call>",
+                                                            "<function=",
+                                                            "tool_call:",
+                                                            "\"tool_calls\"",
+                                                        ];
+                                                        let first = TOOL_MARKERS
+                                                            .iter()
+                                                            .filter_map(|m| filtered.find(m).map(|p| (p, *m)))
+                                                            .min_by_key(|(p, _)| *p);
+                                                        if let Some((pos, _marker)) = first {
+                                                            // Keep everything before the marker visible.
+                                                            let before: String = filtered[..pos].to_string();
+                                                            let after = &filtered[pos..];
+                                                            st.tool_capture_buffer.push_str(after);
+                                                            st.tool_block_active = true;
+                                                            display_text = before;
+                                                            tracing::info!(
+                                                                "[STREAM_FILTER] Tool-call marker detected in stream — routing {} bytes to capture buffer",
+                                                                after.len()
+                                                            );
+                                                        }
+                                                    }
+                                                }
+
+                                                if !display_text.is_empty() {
                                                     if !st.emitted_content_start {
                                                         st.emitted_content_start = true;
                                                         events.push(Ok(StreamEvent::ContentBlockStart {
@@ -2641,14 +2707,17 @@ impl Provider for OpenAIProvider {
                                                         }));
                                                     }
 
-                                                    st.response_text_accum.push_str(&filtered);
+                                                    st.response_text_accum.push_str(&display_text);
                                                     events.push(Ok(StreamEvent::ContentBlockDelta {
                                                         index: 0,
                                                         delta: ContentDelta::TextDelta {
-                                                            text: filtered,
+                                                            text: display_text,
                                                         },
                                                     }));
-                                                } else if !st.emitted_content_start && flushed.is_empty() {
+                                                } else if !st.emitted_content_start
+                                                    && flushed.is_empty()
+                                                    && !st.tool_block_active
+                                                {
                                                     st.emitted_content_start = true;
                                                     events.push(Ok(StreamEvent::ContentBlockStart {
                                                         index: 0,
@@ -2727,24 +2796,44 @@ impl Provider for OpenAIProvider {
                                                     }));
                                                 }
                                             }
-                                            // Fallback: scan accumulated text for Qwen-style
-                                            // `<tool_call>` or `<function=` blocks a local GGUF/MLX
-                                            // backend dropped into content. Only fires when the
-                                            // structured `tool_calls` path produced nothing, so
-                                            // providers that already emit proper tool_calls pay
-                                            // no cost beyond the substring check.
-                                            if st.tool_calls.is_empty()
-                                                && (st.response_text_accum.contains("<tool_call>")
-                                                    || st.response_text_accum.contains("<function=")
-                                                    || st.response_text_accum.contains("tool_call:")
-                                                    || st.response_text_accum.contains("\"tool_calls\""))
+                                            // Fallback: scan accumulated text for tool-call blocks
+                                            // a local GGUF/MLX backend dropped into content. Two
+                                            // sources to check:
+                                            //   - `tool_capture_buffer` — marker-suppressed content
+                                            //     (primary source for local providers; display never
+                                            //     saw it)
+                                            //   - `response_text_accum` — what did reach display,
+                                            //     as a safety net in case the partitioning missed a
+                                            //     marker (e.g. split across chunk boundaries before
+                                            //     the first marker match).
+                                            // Only fires when the structured `tool_calls` path
+                                            // produced nothing, so providers that already emit
+                                            // proper tool_calls pay no cost beyond the substring check.
+                                            let has_markers_in_accum = st.response_text_accum.contains("<tool_call>")
+                                                || st.response_text_accum.contains("<function=")
+                                                || st.response_text_accum.contains("tool_call:")
+                                                || st.response_text_accum.contains("\"tool_calls\"");
+                                            let has_capture = !st.tool_capture_buffer.is_empty();
+                                            if st.tool_calls.is_empty() && (has_markers_in_accum || has_capture)
                                             {
+                                                let mut combined = st.tool_capture_buffer.clone();
+                                                if has_markers_in_accum {
+                                                    // Any markers still left in the display accum
+                                                    // get scanned too — prepend so positional order
+                                                    // roughly matches the stream order.
+                                                    let mut prefix = st.response_text_accum.clone();
+                                                    prefix.push('\n');
+                                                    prefix.push_str(&combined);
+                                                    combined = prefix;
+                                                }
                                                 let (recovered, _cleaned) =
-                                                    extract_text_tool_calls(&st.response_text_accum);
+                                                    extract_text_tool_calls(&combined);
                                                 if !recovered.is_empty() {
                                                     tracing::info!(
-                                                        "Recovered {} streaming tool call(s) from text content (local-model fallback)",
-                                                        recovered.len()
+                                                        "Recovered {} streaming tool call(s) from text content (local-model fallback; capture_bytes={}, display_markers={})",
+                                                        recovered.len(),
+                                                        st.tool_capture_buffer.len(),
+                                                        has_markers_in_accum,
                                                     );
                                                     // Close the text block first so helpers.rs
                                                     // finalizes it before the tool blocks arrive.
