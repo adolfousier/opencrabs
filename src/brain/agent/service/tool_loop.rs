@@ -423,25 +423,38 @@ impl AgentService {
         // and only load messages from there forward. No arbitrary trimming.
         let mut db_messages = Self::messages_from_last_compaction(all_db_messages);
 
-        // Detect CLI provider once (doesn't change during the loop).
+        // Detect CLI + local provider once (neither changes during the loop).
         //
         // `is_cli_provider` controls TWO unrelated behaviors:
         //   1. Skip local tool execution (CLI runs tools internally)
         //   2. Skip OpenCrabs-side context compaction (CLI persists session)
-        let (is_cli_provider, cli_owns_context, is_dialagram) = self
+        //
+        // `is_local_provider` relaxes the phantom-tool-call detector so
+        // local llama.cpp/MLX models that answer in prose when they should
+        // have called a tool get re-prompted, matching what Unsloth Studio
+        // does out of the box.
+        let (is_cli_provider, cli_owns_context, is_dialagram, is_local_provider) = self
             .provider
             .read()
             .map(|p| {
+                let base = p.base_url();
                 // Detect dialagram by base_url — users add it as a custom
                 // provider under any name they choose (typos included),
                 // but the proxy URL is always https://www.dialagram.me/...
-                let is_dialagram = p
-                    .base_url()
+                let is_dialagram = base
                     .map(|u| u.to_lowercase().contains("dialagram.me"))
                     .unwrap_or(false);
-                (p.cli_handles_tools(), p.cli_manages_context(), is_dialagram)
+                let is_local = base
+                    .map(crate::brain::provider::factory::is_local_base_url)
+                    .unwrap_or(false);
+                (
+                    p.cli_handles_tools(),
+                    p.cli_manages_context(),
+                    is_dialagram,
+                    is_local,
+                )
             })
-            .unwrap_or((false, false, false));
+            .unwrap_or((false, false, false, false));
 
         // For API providers ONLY: strip persisted `<!-- tools-v2: ... -->` and
         // `<!-- reasoning -->` markers from DB content before loading into the
@@ -2166,14 +2179,33 @@ impl AgentService {
                 // detector and allow up to MAX_PHANTOM_RETRIES corrections
                 // per turn (vs the old single-shot, which let "Let me
                 // check…" loops slide after the first warning).
+                //
+                // For local llama.cpp/MLX providers we widen the gate:
+                // Unsloth's Studio parser fires on any short response that
+                // didn't produce tool calls (bounded by length), not just
+                // responses matching our intent-phrase whitelist — local
+                // models often answer with a terse prose claim ("The file
+                // has 42 lines.") instead of calling the read tool, and
+                // the narrow detector lets those through. Keep the narrow
+                // gate for cloud providers where re-prompting is expensive
+                // and the intent-phrase check is the only reliable signal.
+                const LOCAL_PHANTOM_MAX_CHARS: usize = 2000;
+                let stripped_text = iteration_text.trim();
+                let phantom_matches_narrow =
+                    super::helpers::has_phantom_tool_intent_no_tools(&iteration_text);
+                let phantom_matches_local = is_local_provider
+                    && !stripped_text.is_empty()
+                    && stripped_text.len() < LOCAL_PHANTOM_MAX_CHARS;
                 if phantom_retries_used < MAX_PHANTOM_RETRIES
                     && !is_cli_provider
-                    && super::helpers::has_phantom_tool_intent_no_tools(&iteration_text)
+                    && (phantom_matches_narrow || phantom_matches_local)
                 {
                     phantom_retries_used += 1;
                     tracing::warn!(
-                        "Phantom tool call detected — model described actions without executing tools. \
-                         Injecting retry prompt."
+                        "Phantom tool call detected (local={}, intent_match={}) — \
+                         model described actions without executing tools. \
+                         Injecting retry prompt.",
+                        phantom_matches_local, phantom_matches_narrow
                     );
                     self.record_provider_feedback(
                         session_id,
@@ -2191,15 +2223,21 @@ impl AgentService {
                         );
                     }
                     // Add the narration as assistant context so the model sees
-                    // what it said, then inject a system correction.
+                    // what it said, then inject a system correction. Local
+                    // models respond better to Unsloth's blunter wording;
+                    // cloud models get our existing, more-specific nudge.
                     context.add_message(Message::assistant(iteration_text));
-                    context.add_message(Message::user(
+                    let nudge = if is_local_provider {
+                        "[System: STOP. Do NOT write code or explain. You MUST call a tool NOW. \
+                         Your last response contained zero tool_use blocks — pick the right tool \
+                         and invoke it immediately via the structured tool-call API. Do not narrate.]"
+                    } else {
                         "[System: You described changes to files but did not execute any tool \
                          calls. Your response contained action language and file paths but zero \
                          tool_use blocks. Execute the actual tool calls NOW. Do not narrate — \
                          call the tools.]"
-                            .to_string(),
-                    ));
+                    };
+                    context.add_message(Message::user(nudge.to_string()));
                     continue;
                 }
 
