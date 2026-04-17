@@ -1368,11 +1368,51 @@ pub fn has_phantom_tool_intent_no_tools(text: &str) -> bool {
     if trimmed.len() < 20 {
         return false;
     }
-    if looks_like_structured_answer(trimmed) {
+    // Check the PROSE LEAD-IN — everything before the first structural
+    // boundary (code fence, markdown table, numbered/bulleted list item).
+    // A legitimate "put these commits in a table" answer starts with the
+    // table itself; a phantom "Let me check the logs" followed by a
+    // markdown bash block starts with intent narration. Scoping the
+    // intent scan to the lead-in prevents both false positives (commit
+    // messages quoted inside tables) and false negatives (model writes
+    // `Let me check:\n\`\`\`bash...\`\`\`` instead of calling the tool).
+    let lead = prose_lead_in(trimmed);
+    if lead.is_empty() {
+        // No prose before the structural content — not a phantom.
         return false;
     }
-    let lower = trimmed.to_lowercase();
+    let lower = lead.to_lowercase();
     INTENT_PHRASES.iter().any(|p| lower.contains(p))
+}
+
+/// Slice of the text before the first code fence, markdown table row,
+/// or list-item line — the "narration" portion. If the text starts
+/// directly with structural content, returns an empty string.
+fn prose_lead_in(text: &str) -> &str {
+    // Check the first ~6 lines for a structural boundary.
+    let mut byte_offset: usize = 0;
+    for (idx, line) in text.lines().enumerate() {
+        let trimmed_line = line.trim_start();
+        let is_structural = trimmed_line.starts_with("```")
+            || (trimmed_line.starts_with('|') && trimmed_line.contains('|'))
+            || trimmed_line.starts_with("- ")
+            || trimmed_line.starts_with("* ")
+            || trimmed_line.starts_with("• ")
+            || (trimmed_line.chars().next().is_some_and(|c| c.is_ascii_digit())
+                && trimmed_line.contains(". "));
+        if is_structural {
+            return text[..byte_offset].trim_end();
+        }
+        // Cap the lead-in so we don't spend forever scanning a pure-prose
+        // response for structural content that doesn't exist — anything
+        // beyond 6 lines of prose is clearly not a "lead-in to a
+        // structured answer", just free-form narration.
+        if idx >= 6 {
+            break;
+        }
+        byte_offset += line.len() + 1; // +1 for the \n
+    }
+    text
 }
 
 /// Heuristic: does `text` look like it was truncated mid-sentence?
@@ -1414,39 +1454,6 @@ pub fn looks_truncated_mid_sentence(text: &str) -> bool {
         last,
         ',' | ';' | ':' | '-' | '(' | '[' | '{' | '<' | '/' | '\\' | '&' | '@' | '#'
     )
-}
-
-/// Heuristic: does `text` look like a concrete answer (table, code
-/// block, long list) rather than intent narration?
-///
-/// Cheap line-counting — we only need to catch the common case where a
-/// model's reply is rendered as a structured artifact. Short prose with
-/// a stray pipe or dash stays eligible for phantom detection.
-fn looks_like_structured_answer(text: &str) -> bool {
-    // Markdown table — three or more rows with at least 3 pipes each.
-    let table_rows = text.lines().filter(|l| l.matches('|').count() >= 3).count();
-    if table_rows >= 3 {
-        return true;
-    }
-    // Fenced code block with both open and close fences.
-    if text.matches("```").count() >= 2 {
-        return true;
-    }
-    // Substantial list — five or more list items.
-    let list_items = text
-        .lines()
-        .filter(|l| {
-            let t = l.trim_start();
-            t.starts_with("- ")
-                || t.starts_with("* ")
-                || t.starts_with("• ")
-                || t.chars().next().is_some_and(|c| c.is_ascii_digit()) && t.contains(". ")
-        })
-        .count();
-    if list_items >= 5 {
-        return true;
-    }
-    false
 }
 
 pub fn has_phantom_tool_intent(text: &str) -> bool {

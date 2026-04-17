@@ -1090,44 +1090,54 @@ fn phantom_tool_intent_false_positives() {
 }
 
 #[test]
-fn phantom_no_tools_skips_structured_answers() {
-    // Regression for 2026-04-17 03:38:37: the model answered a
-    // "put commits in a table" request with a markdown table whose
-    // cells quoted earlier commit messages. One of those commit messages
-    // literally contained the phrase "Let me check…" as part of its
-    // title — the zero-tools detector matched the substring and fired a
-    // spurious phantom retry, looping on a legitimate answer.
+fn phantom_no_tools_scope_is_prose_lead_in() {
+    // The detector only scans the prose BEFORE the first structural
+    // boundary (code fence / table / list). This pins two regressions:
     //
-    // Tables, code blocks, and long lists are answers, not narration.
-    // They must NEVER trigger phantom detection, even if their content
-    // incidentally quotes an intent phrase.
+    // (a) 2026-04-17 03:38:37 — a "put commits in a table" answer had
+    //     commit messages quoting intent phrases in table cells. The
+    //     old "contains" over the whole text phantom-fired on itself.
+    //     Now the scan starts at byte 0 and stops at the first `|`
+    //     table row — empty prose lead-in, no phantom.
+    //
+    // (b) 2026-04-17 05:39:34 — unsloth wrote "Let me check the git log
+    //     since 0.3.10." followed by a ```bash fenced block. A earlier
+    //     fix over-exempted this as a "structured answer" and missed
+    //     the phantom. Now the lead-in BEFORE the code fence contains
+    //     the intent phrase, so phantom fires.
     use crate::brain::agent::service::has_phantom_tool_intent_no_tools;
 
-    let table_with_intent_phrase_in_cell = "\
+    let table_with_intent_in_cell = "\
         | Date | Commit | Summary |\n\
         |------|--------|---------|\n\
         | 2026-04-17 | `ce86afd` | fix(heal): phantom detector lets 'Let me check…' loops slide after one retry |\n\
-        | 2026-04-17 | `3089213` | fix(heal): broaden phantom-retry gate for local providers + blunter nudge |\n\
-        | 2026-04-17 | `6f5c191` | feat(provider): inject chat_template_kwargs for local thinking models |\n";
+        | 2026-04-17 | `3089213` | fix(heal): broaden phantom-retry gate for local providers + blunter nudge |\n";
     assert!(
-        !has_phantom_tool_intent_no_tools(table_with_intent_phrase_in_cell),
-        "commit-log table containing quoted 'Let me check' must NOT phantom"
+        !has_phantom_tool_intent_no_tools(table_with_intent_in_cell),
+        "commit table starting with | must NOT phantom even if cells quote intent phrases"
     );
 
-    let code_block_with_intent_phrase = "\
-        Here's the relevant code:\n\n\
+    let unsloth_style_markdown_bash = "\
+        Let me check the git log since 0.3.10.\n\n\
+        ```bash\n\
+        cd /Users/adolfousierstudio/srv/rs/opencrabs && git log --oneline 0.3.10..HEAD\n\
+        ```";
+    assert!(
+        has_phantom_tool_intent_no_tools(unsloth_style_markdown_bash),
+        "intent phrase followed by bash code block must phantom — model wrote code instead of calling the tool"
+    );
+
+    let code_block_no_lead_intent = "\
         ```rust\n\
         // let me check if the user is admin\n\
         fn is_admin(u: &User) -> bool { u.role == Role::Admin }\n\
-        ```\n\
-        That handles the auth branch.";
+        ```";
     assert!(
-        !has_phantom_tool_intent_no_tools(code_block_with_intent_phrase),
-        "code block with 'let me check' comment must NOT phantom"
+        !has_phantom_tool_intent_no_tools(code_block_no_lead_intent),
+        "code block starting the response must NOT phantom even if comment quotes intent phrase"
     );
 
-    let long_list_answer = "\
-        Here are the providers:\n\
+    let list_intent_only_inside = "\
         - anthropic — fast, reliable\n\
         - openai — let me check that still works\n\
         - gemini — free tier, generous\n\
@@ -1135,12 +1145,10 @@ fn phantom_no_tools_skips_structured_answers() {
         - minimax — vision strong\n\
         - qwen — dashscope\n";
     assert!(
-        !has_phantom_tool_intent_no_tools(long_list_answer),
-        "long bulleted list with an intent phrase in one item must NOT phantom"
+        !has_phantom_tool_intent_no_tools(list_intent_only_inside),
+        "list starting with a bullet must NOT phantom — intent phrase in a list item is not narration"
     );
 
-    // Sanity — genuine phantom narration with NO structured content
-    // still fires.
     let real_phantom = "Let me check the git log to see recent changes. \
                         I'll look at the last few commits.";
     assert!(
