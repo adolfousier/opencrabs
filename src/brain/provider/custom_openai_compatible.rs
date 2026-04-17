@@ -48,13 +48,22 @@ const STRIP_CLOSE_TAGS: &[&[&str]] = &[
 ///
 /// Tracks state across chunks via `inside_think`. Returns the portion of `text`
 /// that is outside any stripped block. Handles tags split across chunk boundaries.
-/// Maximum bytes to consume inside a `<!-- ... -->` block before assuming the
-/// closing tag will never arrive.  When exceeded we abandon filtering and pass
-/// content through — the model likely hallucinated an open tag (e.g.
-/// `<!-- tools-v2:`) without ever sending `-->`. Kept small (v0.2.99 value) so
-/// the filter never holds large amounts of API streaming text hostage waiting
-/// for a close tag that is not coming.
-const THINK_BLOCK_MAX_BYTES: usize = 400;
+/// Maximum bytes to consume inside a `<think>...</think>` / `<!-- ... -->`
+/// block before we emit a one-time warning that the close tag seems delayed.
+///
+/// The old value (400 bytes) was chosen when DeepSeek-style `<think>` blocks
+/// were short. Qwen3 / Kimi / DeepSeek-R1 with `enable_thinking=true` routinely
+/// emit 5-20 KB of reasoning before closing — 400 bytes blew past on every
+/// turn, flipped `inside_think=false`, and leaked the rest of the reasoning
+/// (including the orphan `</think>` tag) straight to the display. Raised to
+/// 200 KB to fit real-world reasoning chains comfortably.
+///
+/// NOTE: when this cap is exceeded we no longer flip `inside_think=false`.
+/// The original behaviour was designed for hallucinated open tags (e.g.
+/// `<!-- tools-v2:` with no closer) — but flipping out of think mode in the
+/// common long-reasoning case is strictly worse than holding until the close
+/// actually arrives. We log once per block and keep suppressing.
+const THINK_BLOCK_MAX_BYTES: usize = 200_000;
 
 /// Longest open-tag-prefix we may have to hold back between chunks so
 /// an open tag split across chunk boundaries still gets detected.
@@ -85,22 +94,22 @@ fn filter_think_tags(
 
     loop {
         if *inside_think {
-            // Safety valve: if we've consumed too many bytes without finding the
-            // closing tag, the model probably hallucinated an unclosed open tag
-            // (e.g. `<!-- tools-v2: ...` with no `-->`).
-            // Discard the accumulated garbage (it's inside an HTML comment) and
-            // stop filtering — future chunks will pass through normally.
+            // Safety valve: if we've consumed an unusually large amount of
+            // content without finding the closing tag, log ONCE per block so
+            // operators can spot a genuinely hallucinated open tag — but keep
+            // `inside_think=true` and stay in suppress mode. Previously we
+            // flipped out of think mode here, which leaked the rest of long
+            // Qwen reasoning chains straight to the display.
             *bytes_consumed += remaining.len();
             if *bytes_consumed > THINK_BLOCK_MAX_BYTES {
                 tracing::warn!(
-                    "⚠️ Abandoned think-tag filter after {} bytes without close tag \
-                     (tag_idx={}) — discarding buffered content, future chunks pass through",
+                    "⚠️ Think-tag filter consumed {} bytes without close tag \
+                     (tag_idx={}) — still waiting for close, continuing to suppress",
                     *bytes_consumed,
                     *active_close_tag,
                 );
-                // Don't push remaining — it's inside the unclosed comment block.
-                // Just exit the think state so subsequent chunks pass through.
-                *inside_think = false;
+                // Reset the counter so we don't re-log every chunk; stay in
+                // suppress mode until the actual close tag arrives.
                 *bytes_consumed = 0;
                 break;
             }
