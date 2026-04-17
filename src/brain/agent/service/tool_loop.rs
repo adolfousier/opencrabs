@@ -1345,6 +1345,22 @@ impl AgentService {
                                 fb_name,
                                 fb_model
                             );
+                            // Tell the user which fallback we're attempting —
+                            // the earlier "Switching to fallback provider..."
+                            // banner named the origin but not the destination,
+                            // so after 3 retries users saw a provider swap
+                            // with no hint what they're now talking to.
+                            if let Some(ref cb) = progress_callback {
+                                cb(
+                                    session_id,
+                                    ProgressEvent::SelfHealingAlert {
+                                        message: format!(
+                                            "Trying fallback '{}/{}'...",
+                                            fb_name, fb_model
+                                        ),
+                                    },
+                                );
+                            }
 
                             let mut fb_req =
                                 LLMRequest::new(fb_model.clone(), context.messages.clone())

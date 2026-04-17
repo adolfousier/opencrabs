@@ -56,16 +56,18 @@ impl AgentService {
         // Bound the initial stream handshake (HTTP POST + response headers)
         // so a wedged local server — accepts TCP but never replies — can't
         // eat the full 300s reqwest timeout before the retry chain fires.
-        // Local: 30s. Remote: 90s (cross-continent latency + LLM warmup).
+        //
+        // Local: 90s. 30s looked right for a wedged server but killed real
+        // Unsloth cold starts: log 2026-04-17 20:18 had POST→30s timeout,
+        // retry1→30s timeout, retry2 succeeded at +38s — a 35B gguf loading
+        // its KV cache. 90s still fails an unrecoverable wedge in under
+        // 2min via the retry chain (3 × 90s = 270s max) and covers real
+        // cold-load latency.
+        //
+        // Remote: 90s matches — cross-continent + LLM warmup is similar.
         // CLI: 10min (local subprocess startup + auth refresh can be slow).
         let handshake_timeout = if provider.cli_handles_tools() {
             std::time::Duration::from_secs(600)
-        } else if provider
-            .base_url()
-            .map(crate::brain::provider::factory::is_local_base_url)
-            .unwrap_or(false)
-        {
-            std::time::Duration::from_secs(30)
         } else {
             std::time::Duration::from_secs(90)
         };
@@ -126,32 +128,25 @@ impl AgentService {
         // during streaming instead of one massive wall after stream ends.
         let mut cli_unflushed_text = String::new();
 
-        // Maximum idle time between SSE events before treating as a dropped connection.
-        // NVIDIA/Kimi and some other providers occasionally hang silently without sending
-        // [DONE] — this timeout lets the retry logic in tool_loop.rs recover instead of
-        // blocking the TUI forever.
+        // Maximum idle time between SSE events before treating as a dropped
+        // connection. NVIDIA/Kimi and some other providers occasionally hang
+        // silently without sending [DONE] — this timeout lets the retry logic
+        // in tool_loop.rs recover instead of blocking the TUI forever.
         //
-        // Local endpoints (llama.cpp, Unsloth Studio, LM Studio, Ollama, MLX) get a
-        // tighter budget: a wedged local server should not cost the user 60s of
-        // dead silence before the retry chain fires. The 2026-04-17 19:34 incident
-        // had Unsloth Studio accepting TCP but never emitting body; the user
-        // cancelled at 41s because no error had surfaced.
+        // 90s covers the slow-prompt-processing case for large local models
+        // (a cold 35B model on first inference spends real time just filling
+        // its KV cache before emitting the first token). Shorter budgets
+        // dropped genuine requests; see handshake_timeout above.
         //
         // CLI providers need a much longer timeout: they run tools internally
         // (cargo build, cargo test, gh commands) that can take several minutes
         // without producing any stream events. 60s is too short and causes
-        // premature stream termination → retry → fresh CLI session that repeats
-        // all prior work from scratch.
-        let is_local = provider
-            .base_url()
-            .map(crate::brain::provider::factory::is_local_base_url)
-            .unwrap_or(false);
+        // premature stream termination → retry → fresh CLI session that
+        // repeats all prior work from scratch.
         let stream_idle_timeout = if is_cli {
             std::time::Duration::from_secs(3600) // 1 hour — CLI agents can run 30min+
-        } else if is_local {
-            std::time::Duration::from_secs(30) // local server wedged → fail fast
         } else {
-            std::time::Duration::from_secs(60)
+            std::time::Duration::from_secs(90)
         };
 
         loop {
