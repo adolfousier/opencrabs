@@ -103,4 +103,3 @@ pub fn spawn(callbacks: Vec<ReloadCallback>) -> tokio::task::JoinHandle<()> {
         tracing::info!("ConfigWatcher: stopped");
     })
 }
-

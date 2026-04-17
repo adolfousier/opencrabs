@@ -293,7 +293,7 @@ pub async fn fetch_copilot_models(oauth_token: &str) -> anyhow::Result<Vec<Strin
     let body: ModelsResponse = resp.json().await?;
     let mut entries = body.data;
     // Sort newest first (by created timestamp descending)
-    entries.sort_by(|a, b| b.created.cmp(&a.created));
+    entries.sort_by_key(|e| std::cmp::Reverse(e.created));
     Ok(entries.into_iter().map(|m| m.id).collect())
 }
 

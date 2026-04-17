@@ -407,7 +407,7 @@ pub async fn fetch_provider_models(
             Ok(body) => {
                 let mut entries = body.data;
                 // Sort newest first (by created timestamp descending)
-                entries.sort_by(|a, b| b.created.cmp(&a.created));
+                entries.sort_by_key(|e| std::cmp::Reverse(e.created));
                 entries.into_iter().map(|m| m.id).collect()
             }
             Err(_) => Vec::new(),

@@ -82,11 +82,11 @@ impl OnboardingWizard {
                     self.active_brain_field_mut().pop();
                 }
             }
-            KeyCode::Delete => {
-                if !self.is_brain_field_edited() && !self.active_brain_field().is_empty() {
-                    self.active_brain_field_mut().clear();
-                    self.mark_brain_field_edited();
-                }
+            KeyCode::Delete
+                if !self.is_brain_field_edited() && !self.active_brain_field().is_empty() =>
+            {
+                self.active_brain_field_mut().clear();
+                self.mark_brain_field_edited();
             }
             KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
                 // Arrow navigation signals intent to edit — mark as touched
