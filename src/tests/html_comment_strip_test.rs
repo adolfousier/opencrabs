@@ -91,3 +91,31 @@ fn collapses_excessive_blank_lines() {
     assert!(result.contains("Before"));
     assert!(result.contains("After"));
 }
+
+#[test]
+fn tools_v2_with_rustc_arrow_in_output() {
+    // Regression: rustc error output contains ` --> src/foo.rs:10:5` span
+    // markers. A naive non-greedy `<!--.*?-->` terminates at the first
+    // inner `-->` and leaks the rest of the JSON as visible text (TUI
+    // screenshot 2026-04-17 16:58 — cargo check output bled into chat).
+    let input = r#"Compiling.<!-- tools-v2: [{"d":"bash: cargo check","s":false,"o":"error[E0119]\n --> src/foo.rs:10:5\n"}] -->Done."#;
+    let result = AgentService::strip_html_comments(input);
+    assert_eq!(result, "Compiling.Done.");
+    assert!(!result.contains("E0119"));
+    assert!(!result.contains("\"d\":"));
+}
+
+#[test]
+fn tools_v2_with_jsx_arrow_in_output() {
+    // JSX/HTML fragments also contain `-->` in escaped content.
+    let input = r#"Wrote.<!-- tools-v2: [{"d":"Write foo.tsx","s":true,"o":"<div>\n<!-- heading --> Hi\n</div>"}] -->!"#;
+    let result = AgentService::strip_html_comments(input);
+    assert_eq!(result, "Wrote.!");
+}
+
+#[test]
+fn tools_v2_multiple_tools_each_with_arrows() {
+    let input = r#"A<!-- tools-v2: [{"d":"bash","s":false,"o":"err\n --> f.rs:1\n"},{"d":"read","s":true,"o":"<!-- x -->"}] -->B<!-- tools-v2: [{"d":"more","s":true,"o":"--> more"}] -->C"#;
+    let result = AgentService::strip_html_comments(input);
+    assert_eq!(result, "ABC");
+}

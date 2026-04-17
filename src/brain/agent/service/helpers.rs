@@ -936,27 +936,105 @@ impl AgentService {
     ///
     /// LLMs echo or hallucinate various HTML comment markers from context:
     /// `<!-- tools-v2: ... -->`, `<!-- lens -->`, `<!-- /tools-v2>`, etc.
-    /// Rather than playing whack-a-mole with each pattern, strip everything
-    /// between `<!--` and `-->` (or end of string for malformed tags).
+    ///
+    /// `<!-- tools-v2: [JSON] -->` is special-cased because its JSON payload
+    /// embeds arbitrary tool output — including rustc's ` --> src/foo.rs:10`
+    /// span arrows, React/JSX `{/* --> */}` fragments, markdown arrow
+    /// glyphs, etc. A naive non-greedy `<!--.*?-->` terminates at the FIRST
+    /// inner `-->` and leaks the rest of the JSON array as visible text in
+    /// the TUI (screenshot 2026-04-17 16:58 — `cargo check` output bled
+    /// into chat). For the v2 marker we parse the balanced JSON array and
+    /// then consume the trailing ` -->`. Generic comments keep the regex.
     pub(crate) fn strip_html_comments(text: &str) -> String {
         use regex::Regex;
         use std::sync::LazyLock;
 
-        // Match only properly closed <!-- ... --> comments.
-        // Do NOT match unclosed comments — stripping to end-of-string would
-        // silently delete trailing response text mid-stream.
+        let mut stripped = String::with_capacity(text.len());
+        let mut rest = text;
+        while let Some(start) = rest.find("<!-- tools-v2:") {
+            stripped.push_str(&rest[..start]);
+            let after_prefix = &rest[start + "<!-- tools-v2:".len()..];
+            let array_start = match after_prefix.find('[') {
+                Some(i) => i,
+                None => {
+                    // Malformed — drop the opener and stop scanning v2.
+                    rest = after_prefix;
+                    break;
+                }
+            };
+            let scan = &after_prefix[array_start..];
+            let Some(array_end_rel) = find_balanced_json_end(scan) else {
+                // Array never closes: drop the whole tail (well-formed
+                // writers always close; an unclosed marker would dump raw
+                // JSON otherwise).
+                rest = "";
+                break;
+            };
+            let tail = &scan[array_end_rel..];
+            let tail_trim_len = tail.len() - tail.trim_start().len();
+            let post = &tail[tail_trim_len..];
+            if let Some(stripped_end) = post.strip_prefix("-->") {
+                rest = stripped_end;
+            } else {
+                // No closing ` -->` — conservatively skip just the array so
+                // downstream regex can still catch a stray `-->` later.
+                rest = tail;
+            }
+        }
+        stripped.push_str(rest);
+
+        // Generic HTML comments (reasoning, lens, etc.) — safe with non-greedy
+        // since none of those embed tool output.
         static HTML_COMMENT_RE: LazyLock<Regex> =
             LazyLock::new(|| Regex::new(r#"(?s)<!--.*?-->"#).unwrap());
+        let result = HTML_COMMENT_RE.replace_all(&stripped, "");
 
-        let result = HTML_COMMENT_RE.replace_all(text, "");
         // Collapse any runs of 3+ newlines left by stripping
         let collapsed = result.lines().collect::<Vec<_>>().join("\n");
         let trimmed = collapsed.trim().to_string();
-        // Collapse multiple blank lines
-        use std::sync::LazyLock as LL;
-        static MULTI_BLANK: LL<Regex> = LL::new(|| Regex::new(r"\n{3,}").unwrap());
+        static MULTI_BLANK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\n{3,}").unwrap());
         MULTI_BLANK.replace_all(&trimmed, "\n\n").to_string()
     }
+}
+
+/// Walk a JSON array starting at `s[0] == '['` and return the byte offset
+/// one-past the matching `]`. Tracks string + escape state so braces,
+/// brackets, quotes or `-->` arrows embedded in string values don't fool
+/// the depth counter. Returns `None` if the array never closes.
+fn find_balanced_json_end(s: &str) -> Option<usize> {
+    let bytes = s.as_bytes();
+    if bytes.first() != Some(&b'[') {
+        return None;
+    }
+    let mut depth: i32 = 0;
+    let mut in_string = false;
+    let mut escape = false;
+    for (idx, &b) in bytes.iter().enumerate() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if in_string {
+            match b {
+                b'\\' => escape = true,
+                b'"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match b {
+            b'"' => in_string = true,
+            b'[' | b'{' => depth += 1,
+            b']' | b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(idx + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Detect repetition in a streaming text window.

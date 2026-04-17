@@ -46,13 +46,15 @@ impl AgentService {
             + response.usage.cache_creation_tokens
             + response.usage.cache_read_tokens;
         let total_tokens = billable_input + response.usage.output_tokens;
-        let cost = self.provider_for_session(session_id).calculate_cost_with_cache(
-            &response.model,
-            response.usage.input_tokens,
-            response.usage.output_tokens,
-            response.usage.cache_creation_tokens,
-            response.usage.cache_read_tokens,
-        );
+        let cost = self
+            .provider_for_session(session_id)
+            .calculate_cost_with_cache(
+                &response.model,
+                response.usage.input_tokens,
+                response.usage.output_tokens,
+                response.usage.cache_creation_tokens,
+                response.usage.cache_read_tokens,
+            );
 
         // Update message with usage info, stashing the server-reported
         // prompt token count so session reload reads it directly.

@@ -23,8 +23,7 @@ pub struct AgentService {
     /// pointer — opening `/sessions` during a 47s cargo-clippy on one
     /// pane silently rewrote the running turn's endpoint to whatever
     /// the other session had saved (2026-04-17 17:01 logs).
-    pub(super) session_providers:
-        std::sync::RwLock<HashMap<Uuid, Arc<dyn Provider>>>,
+    pub(super) session_providers: std::sync::RwLock<HashMap<Uuid, Arc<dyn Provider>>>,
 
     /// Service context for database operations
     pub(super) context: ServiceContext,

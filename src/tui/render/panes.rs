@@ -140,13 +140,12 @@ fn render_simple_message(lines: &mut Vec<Line<'_>>, msg: &DisplayMessage) {
             content = content[..start].to_string();
         }
     }
-    // Remove <!-- tools-v2: ... --> markers
-    while let Some(start) = content.find("<!-- tools-v2:") {
-        if let Some(end) = content[start..].find("-->") {
-            content = format!("{}{}", &content[..start], &content[start + end + 3..]);
-        } else {
-            break;
-        }
+    // Remove <!-- tools-v2: [JSON] --> markers. Delegate to the shared
+    // stripper so rustc `--> src/foo.rs:10` arrows embedded in tool
+    // output don't truncate the match early and leak JSON into the
+    // preview (see strip_html_comments doc for screenshot reference).
+    if content.contains("<!-- tools-v2:") {
+        content = crate::brain::agent::AgentService::strip_html_comments(&content);
     }
     let content = content.trim().to_string();
 
