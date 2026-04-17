@@ -1235,9 +1235,7 @@ impl App {
                         if has_visible_text || has_visible_reasoning {
                             let content = stash_text
                                 .as_deref()
-                                .map(|s| {
-                                    crate::utils::sanitize::strip_llm_artifacts(s)
-                                })
+                                .map(crate::utils::sanitize::strip_llm_artifacts)
                                 .unwrap_or_default();
                             self.messages.push(DisplayMessage {
                                 id: Uuid::new_v4(),
