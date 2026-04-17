@@ -1348,6 +1348,34 @@ const INTENT_PHRASES: &[&str] = &[
     "let me finish",
     "let me finalize",
     "let me run",
+    // Investigative intents: model commits to research + never executes.
+    // Seen in logs 2026-04-17 14:23 — response was literally "Let me dig
+    // into this." (21 chars) for an "investigate opencode oauth" prompt,
+    // and no tool call followed. Must phantom-retry these.
+    "let me dig",
+    "let me investigate",
+    "let me explore",
+    "let me search",
+    "let me find",
+    "let me gather",
+    "let me pull",
+    "let me grab",
+    "let me get",
+    "let me fetch",
+    "let me query",
+    "let me scan",
+    "i'll dig",
+    "i'll investigate",
+    "i'll explore",
+    "i'll search",
+    "i'll find",
+    "i'll gather",
+    "i'll pull",
+    "i'll grab",
+    "i'll get",
+    "i'll fetch",
+    "i'll query",
+    "i'll scan",
 ];
 
 /// Relaxed phantom detection used when the caller already knows the
