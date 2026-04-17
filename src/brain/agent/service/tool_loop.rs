@@ -1214,10 +1214,18 @@ impl AgentService {
                     }
                 }
                 Err(e)
-                    if matches!(&e, crate::brain::provider::ProviderError::StreamError(_))
-                        && !e.to_string().contains("rate limit")
+                    if matches!(
+                        &e,
+                        crate::brain::provider::ProviderError::StreamError(_)
+                            | crate::brain::provider::ProviderError::Timeout(_)
+                    ) && !e.to_string().contains("rate limit")
                         && !e.to_string().contains("hit your limit") =>
                 {
+                    // Timeout covers the new handshake-timeout path: a wedged
+                    // local server that accepts TCP but never emits headers.
+                    // Funnel it into the same 3-retry + fallback chain as
+                    // mid-stream StreamError so the user sees recovery
+                    // activity instead of a dead turn.
                     let err_msg = e.to_string();
                     tracing::warn!("Mid-stream error: {} — retrying up to 3 times", err_msg);
                     self.record_provider_feedback(

@@ -52,13 +52,44 @@ impl AgentService {
 
         let request_model = request.model.clone();
         let provider = self.provider_for_session(session_id);
-        let mut stream = match provider.stream(request).await {
-            Ok(s) => s,
-            Err(e) => {
-                crate::config::health::record_failure(provider.name(), &e.to_string());
-                return Err(e);
-            }
+
+        // Bound the initial stream handshake (HTTP POST + response headers)
+        // so a wedged local server — accepts TCP but never replies — can't
+        // eat the full 300s reqwest timeout before the retry chain fires.
+        // Local: 30s. Remote: 90s (cross-continent latency + LLM warmup).
+        // CLI: 10min (local subprocess startup + auth refresh can be slow).
+        let handshake_timeout = if provider.cli_handles_tools() {
+            std::time::Duration::from_secs(600)
+        } else if provider
+            .base_url()
+            .map(crate::brain::provider::factory::is_local_base_url)
+            .unwrap_or(false)
+        {
+            std::time::Duration::from_secs(30)
+        } else {
+            std::time::Duration::from_secs(90)
         };
+        let mut stream =
+            match tokio::time::timeout(handshake_timeout, provider.stream(request)).await {
+                Ok(Ok(s)) => s,
+                Ok(Err(e)) => {
+                    crate::config::health::record_failure(provider.name(), &e.to_string());
+                    return Err(e);
+                }
+                Err(_elapsed) => {
+                    let secs = handshake_timeout.as_secs();
+                    tracing::warn!(
+                        "⏱️ stream handshake timeout after {}s ({}); retry chain will fire",
+                        secs,
+                        provider.base_url().unwrap_or("<no-base-url>"),
+                    );
+                    crate::config::health::record_failure(
+                        provider.name(),
+                        &format!("handshake timeout after {}s", secs),
+                    );
+                    return Err(crate::brain::provider::ProviderError::Timeout(secs));
+                }
+            };
 
         // Accumulate state from stream events
         let mut id = String::new();
