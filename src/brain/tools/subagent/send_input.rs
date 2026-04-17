@@ -73,7 +73,10 @@ impl Tool for SendInputTool {
                     agent_id
                 )));
             }
-            Some(SubAgentState::Running) => {}
+            // AwaitingInput is the intended target — the sub-agent paused
+            // at a round boundary and is literally waiting for this call.
+            // Running also accepts (a mid-round message queues up).
+            Some(SubAgentState::Running) | Some(SubAgentState::AwaitingInput) => {}
             Some(state) => {
                 return Ok(ToolResult::error(format!(
                     "Sub-agent {} is not running (state: {:?}). Cannot send input.",

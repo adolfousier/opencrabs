@@ -75,8 +75,11 @@ impl Tool for CloseAgentTool {
 
         let state = self.manager.get_state(agent_id);
 
-        // Cancel if running
-        if matches!(state, Some(SubAgentState::Running)) {
+        // Cancel if running or paused waiting for input
+        if matches!(
+            state,
+            Some(SubAgentState::Running) | Some(SubAgentState::AwaitingInput)
+        ) {
             self.manager.cancel(agent_id);
         }
 

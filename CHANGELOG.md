@@ -5,53 +5,201 @@ All notable changes to OpenCrabs will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.11] - 2026-04-16
+## [0.3.11] - 2026-04-17
 
-TUI reliability fixes, per-session message queue, and Qwen OAuth rotation
-hardening.
+Major refactor: Qwen OAuth rotation replaced with DashScope API-key provider,
+per-session provider isolation, local model tool-call extraction, and 40+ TUI
+and self-heal fixes.
 
-Queue messages are now fully isolated per session with a visible ⏳ indicator
-above the input box. Switching sessions preserves each session's queue state
-independently.
+The headline change is the DashScope migration: Qwen OAuth rotation (10+ files,
+device flow, credential persistence, rotation logic) was replaced with a simple
+API-key provider (`qwen3.6-plus` default). The CLI provider was also removed.
+This deletes ~2,500 lines of complexity.
 
-System messages (RSI summaries, compaction notices) now wrap to terminal width
-instead of clipping. The truncation warning heuristic was tightened to reduce
-false positives on legitimate short instructions.
+Local models (Qwen, Unsloth) now have their tool-call hallucinations
+auto-extracted from text content: bare JSON `{"tool_calls":[...]}` envelopes,
+Claude-style XML `<TOOLNAME><PARAM>value</PARAM></TOOLNAME>`, and
+Qwen-specific formats are all recovered into real executable tool calls.
 
-Qwen OAuth rotation now treats 401/403 as rotation-worthy. When an account's
-refresh token is also dead, credentials are invalidated and persisted to
-keys.toml so re-authentication is triggered on next startup.
+Per-session provider isolation means switching models in one session no longer
+affects Telegram, Discord, or other sessions. Each session carries its own
+provider and context budget.
+
+### Added
+
+#### Qwen/DashScope Migration
+- **DashScope API-key provider** — replaces OAuth rotation with a single
+  API key. `qwen3.6-plus` as default model.
+- **API-key onboarding with DashScope defaults** — `/models` and `/onboard`
+  walk through key entry; no more device flow or multi-account management.
+- **`qwen3.6-plus` default model** — added as the DashScope default.
+- **`chat_template_kwargs` injection** — local thinking models receive proper
+  `enable_thinking` flags via DashScope-compatible body transforms.
+- **Qwen-style tool call recovery from text content** — detects Qwen's
+  `<!-- tool_calls -->` or raw JSON in `delta.content` and converts into
+  real tool calls before the tool loop sees them.
+
+#### TUI
+- **Stack queued messages instead of replacing** — multiple messages queued
+  while the agent processes now stack visibly instead of overwriting each
+  other.
+- **Shell-mode visual cue** — input starting with `!` shows a visual `shell`
+  indicator matching the original design.
+- **Collapse `$HOME` → `~` and middle-truncate tool summaries** — channel
+  delivery paths and long tool descriptions are shortened for readability.
+
+#### Brain
+- **Anti-code-block nudge for local models** — brain instructions explicitly
+  tell the model to use `tool_calls`, not markdown code blocks.
+
+### Changed
+
+#### Qwen/DashScope Migration
+- **Rewrote `qwen.rs` as thin DashScope header/body helper** — the module is
+  now ~200 lines (was ~1,500 with rotation, device flow, and credential
+  management).
+- **Removed Qwen CLI provider entirely** — `qwen-code-cli` no longer appears
+  in the provider list; all routing goes through DashScope API.
+- **Dropped `qwen_accounts` rotation field** — config.toml no longer has
+  `[[providers.qwen_accounts]]`; replaced with single `api_key` in keys.toml.
+- **Stripped Qwen OAuth device flow and rotation wizard** — onboarding no
+  longer shows the multi-account setup screen.
+- **Route provider-specific branches by id, not index** — TUI dialogs match
+  on provider identifier strings instead of hardcoded numeric indices, so
+  removing the CLI provider doesn't shift everything.
+
+#### Agent
+- **Per-session provider isolation** — each session carries its own provider
+  instance; no more global swap that affected all sessions simultaneously.
+- **Per-session ctx budget isolation** — context budget calculated per session
+  with last-iteration prompt size tracking.
 
 ### Fixed
 
+#### Provider / Stream
+- **Extract bare OpenAI `tool_call` envelopes from text content** — local
+  models sometimes emit `{"tool_calls":[...]}` as plain text alongside (or
+  instead of) proper SSE tool_call chunks. These are now detected and
+  converted into executable tool calls.
+- **Extract Claude-style XML tool calls** — `<TOOLNAME><PARAM>value</PARAM>
+  </TOOLNAME>` patterns recovered into real tool calls.
+- **Handle singular `tool_call` envelope + malformed JSON** — some models
+  send `"tool_call"` (singular) or truncated JSON; both are handled.
+- **Suppress local tool-call markers from stream display** — `<!-- tool_calls
+  -->` and similar markers no longer appear as visible text in the TUI.
+- **Surface real 422 body + helpful hint for Unsloth Studio** — local
+  endpoints that return 422 now show the actual error body instead of a
+  generic connection error.
+- **Bound initial stream handshake + funnel timeouts into retry** — the POST
+  → response-headers phase is now time-limited (90s) so a local server that
+  accepts TCP but never replies surfaces a `Timeout` error into the existing
+  retry/fallback chain instead of sitting on reqwest's 300s default.
+- **1h stream idle for local endpoints** — handshake stays tight (90s) as
+  the "is the server alive?" detector, but once headers arrive the body
+  stream gets a full hour. Covers legitimate large-model prefill on
+  Unsloth / llama.cpp / LM Studio / Ollama / MLX where prompt processing
+  on a 70B at full context can run tens of minutes before the first token.
+  Earlier 30s / 90s / 15min tries all killed genuine turns.
+- **Name fallback target in TUI alert** — the stream-error arm now emits
+  `Trying fallback 'zhipu/glm-5.1'...` per attempt so users see which
+  provider the session is now on after retries exhaust.
+- **Sub-agent `AwaitingInput` state + wait_agent polling** — sub-agents now
+  transition to `AwaitingInput` at round boundaries instead of sitting in
+  `Running` forever. `wait_agent` polls state (250ms) and returns the
+  round's output immediately on pause, terminal state, or a partial
+  progress preview on timeout — eliminates the deadlock where `wait_agent`
+  blocked on `handle.await` for a task that only terminates on input or
+  cancel. LLMs no longer give up the parent turn after repeated empty
+  "still running" responses.
+
+#### Self-Heal / Phantom Detection
+- **Narrow phantom gate, recover empty-reasoning turns** — models that
+  produce only reasoning content (no text, no tools) are now recovered
+  instead of flagged as phantom.
+- **Split thinking per iteration** — reasoning state is cleared between tool
+  loop iterations so stale thinking doesn't carry over.
+- **Broaden phantom-retry gate for local providers** — local models trigger
+  the retry-and-nudge path more aggressively since they're more prone to
+  hallucinating tool calls.
+- **Adopt Unsloth's blunt anti-code-block nudge** — when a local model emits
+  code blocks instead of tool calls, the retry prompt is direct and explicit.
+- **Tighten phantom scope** — fewer false positives on legitimate responses
+  that happen to mention tools.
+- **Detect phantom intent with backtick code references** — models that say
+  "let me run `grep -r pattern`" without actually calling the tool are caught.
+- **Add investigative intent phrases to phantom detector** — "Let me check…",
+  "Let me see…", and similar phrases now trigger the detector.
+- **Phantom detector lets loops slide after one retry** — prevents infinite
+  retry loops when the model consistently fails to produce tool calls.
+- **Preserve tool group on Escape-twice** — cancelling no longer loses the
+  visible tool call history.
+- **Catch phantom "Let me see:" mid-turn** — the detector catches this
+  specific pattern that was slipping through.
+
 #### TUI
 - **Per-session message queue with isolated display** — queue messages no
-  longer live in the shared input buffer. Each session has its own queue
-  via `HashMap<Uuid, String>`. The queued message renders as a dimmed ⏳
-  line above the input area, pushing chat history up. Switching sessions
-  preserves queue state independently. Up-arrow dequeue and Esc cancel
-  behavior unchanged.
-- **Queue preview was invisible** — `queue_height` was 1 but the top border
-  consumed the only row, leaving zero rows for text. Fixed to height 2.
+  longer live in the shared input buffer; each session has its own queue.
+- **Queue preview was invisible** — height was 1 but the border consumed the
+  only row, leaving zero rows for text. Fixed to height 2.
 - **Wrap system messages to terminal width** — long RSI summaries and
-  compaction notices no longer clip at the right edge. System message lines
-  now wrap using `content_width`.
+  compaction notices no longer clip at the right edge.
 - **Reduce truncation warning false positives** — responses ending with `:`
-  that contain multiple sentences (periods, exclamation marks) are no longer
-  flagged as truncated. Only single-sentence preambles trigger the warning.
+  that contain multiple sentences no longer trigger the warning.
+- **Persist `last_session` on create_new_session** — restarting now resumes
+  the correct session instead of jumping to a different one.
+- **Drop ".." from file picker when searching** — Enter picks the top match
+  instead of navigating to the parent directory.
+- **Keep streaming text + reasoning visible after Escape-twice cancel** —
+  cancelled content is preserved in the display instead of vanishing.
+- **Mid-sentence truncation retry** — responses that appear truncated
+  mid-sentence are retried automatically.
+- **Stop reload-on-cancel wiping TUI push** — cancelling no longer triggers
+  a full session reload that wipes queued messages.
+- **Drop redundant closure around `strip_llm_artifacts`** — minor cleanup
+  that was allocating unnecessarily.
+- **Persist api_key on first save of custom provider** — custom provider
+  keys are now written immediately on first entry.
+- **Capture panic location in render `catch_unwind`** — TUI render panics
+  now log the exact file and line for easier debugging.
+- **Attach opencrabs-frame backtrace to render panic log** — panic traces
+  include the custom frame for better error reports.
+- **Dialogs.rs panicked indexing PROVIDERS** — fixed crash after Qwen CLI
+  provider removal shifted the provider list.
+- **Merge consecutive reasoning-only messages in IntermediateText** —
+  multiple reasoning blocks between tool calls collapse into one display.
+- **Stop tools-v2 JSON bleeding into chat** — `<!-- tools-v2: -->` markers
+  with rustc arrow formatting no longer appear as visible text.
+- **Route ```think...``` content to ReasoningDelta** — backtick-wrapped
+  thinking content renders in the thinking section and persists correctly.
 
-#### Qwen OAuth
-- **401/403 now trigger account rotation** — `should_rotate()` previously
-  only checked `is_retryable()`, which returns false for auth errors. Dead
-  OAuth tokens now cause the RotatingQwenProvider to advance to the next
-  account instead of immediately propagating the error.
-- **Invalidate dead account credentials** — when both refresh and retry
-  fail with 401, the account's credentials are cleared (access_token,
-  refresh_token, expiry_date zeroed) and persisted to keys.toml. On next
-  startup, `is_valid()` returns false, excluding the dead account from
-  rotation and triggering re-auth.
+#### Context / Token Counting
+- **Persist server `input_tokens` on messages** — server-reported token
+  counts are stored on each message instead of relying on in-memory cache.
+- **tiktoken fallback was missing system prompt** — counted only messages +
+  tools, underestimating context by ~2-4K tokens.
 
-[0.3.11]: https://github.com/adolfousier/opencrabs/releases/tag/v0.3.11
+#### Channels
+- **Stop silently wiping final response via bad dedup** — the dedup logic
+  was matching too aggressively and removing the agent's actual response.
+- **Revert 'never strip to empty' guard** — it caused duplicate messages
+  by preventing legitimate dedup.
+- **Delete stale intermediates on cancelled in-flight call** — Telegram
+  no longer leaves orphaned edit messages after cancellation.
+
+#### Qwen / DashScope (migration fixes)
+- **401/403 now trigger account rotation** — auth errors cause advancement
+  to the next credential instead of immediate failure (applies to remaining
+  rotation paths during migration).
+- **Invalidate dead OAuth accounts** — when both refresh and retry fail,
+  credentials are cleared and persisted so re-authentication is triggered.
+- **Tighten auth-invalidate trigger** — single-slot rotation writes are
+  skipped to avoid wiping the only valid credential.
+- **Handle 401/403 auth errors in stream rotation** — mid-stream auth
+  errors now trigger rotation and retry.
+- **Raise think-tag safety valve** — long Qwen reasoning blocks no longer
+  get partially stripped by the tag filter.
+
+[0.3.11]: https://github.com/adolfousier/opencrabs/compare/v0.3.10...v0.3.11
 
 ## [0.3.10] - 2026-04-15
 

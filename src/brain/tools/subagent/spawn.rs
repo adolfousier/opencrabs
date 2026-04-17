@@ -236,6 +236,13 @@ impl Tool for SpawnAgentTool {
                             .unwrap_or_else(|e| tracing::warn!("status write failed: {e}"));
 
                         manager.update_output(&agent_id_clone, response.content.clone());
+                        // Flip to AwaitingInput so wait_agent can observe
+                        // round-boundary progress instead of blocking on
+                        // task-join semantics (the task never terminates
+                        // at a round — only on input/cancel — so the old
+                        // `handle.await` in wait.rs always hit its
+                        // timeout_secs and the LLM gave up the turn).
+                        manager.mark_awaiting_input(&agent_id_clone);
                         tracing::info!(
                             "Sub-agent {} round {} complete, waiting for input",
                             agent_id_clone,
@@ -253,6 +260,7 @@ impl Tool for SpawnAgentTool {
 
                         match next {
                             Some(text) => {
+                                manager.mark_running_again(&agent_id_clone);
                                 tracing::info!(
                                     "Sub-agent {} received follow-up input",
                                     agent_id_clone

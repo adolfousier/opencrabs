@@ -12,9 +12,16 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 /// State of a spawned sub-agent.
+///
+/// `AwaitingInput` is the "round complete, paused for follow-up" state.
+/// Without it, `wait_agent` couldn't distinguish "still working" from
+/// "done with this round, output ready" — both looked like `Running`,
+/// so `handle.await` always timed out (sub-agent task only terminates
+/// on input channel close or cancel, never on round boundary).
 #[derive(Debug, Clone, PartialEq)]
 pub enum SubAgentState {
     Running,
+    AwaitingInput,
     Completed,
     Failed(String),
     Cancelled,
@@ -104,11 +111,14 @@ impl SubAgentManager {
             .and_then(|a| a.input_tx.clone())
     }
 
-    /// Cancel a running agent.
+    /// Cancel a running or paused agent.
     pub fn cancel(&self, id: &str) -> bool {
         let mut agents = self.agents.write().expect("subagent manager lock poisoned");
         if let Some(agent) = agents.get_mut(id)
-            && agent.state == SubAgentState::Running
+            && matches!(
+                agent.state,
+                SubAgentState::Running | SubAgentState::AwaitingInput
+            )
         {
             agent.cancel_token.cancel();
             agent.state = SubAgentState::Cancelled;
@@ -129,6 +139,28 @@ impl SubAgentManager {
         let mut agents = self.agents.write().expect("subagent manager lock poisoned");
         if let Some(agent) = agents.get_mut(id) {
             agent.output = Some(output);
+        }
+    }
+
+    /// Mark the agent as paused, waiting for a follow-up input. Pairs with
+    /// `mark_running_again` when input arrives. Only transitions from
+    /// `Running`; no-op if the agent already terminated.
+    pub fn mark_awaiting_input(&self, id: &str) {
+        let mut agents = self.agents.write().expect("subagent manager lock poisoned");
+        if let Some(agent) = agents.get_mut(id)
+            && agent.state == SubAgentState::Running
+        {
+            agent.state = SubAgentState::AwaitingInput;
+        }
+    }
+
+    /// Flip back to Running when follow-up input has been consumed.
+    pub fn mark_running_again(&self, id: &str) {
+        let mut agents = self.agents.write().expect("subagent manager lock poisoned");
+        if let Some(agent) = agents.get_mut(id)
+            && agent.state == SubAgentState::AwaitingInput
+        {
+            agent.state = SubAgentState::Running;
         }
     }
 
