@@ -166,6 +166,41 @@ fn filter_think_tags(
     result
 }
 
+/// Length of the longest suffix of `s` that's a strict prefix of any
+/// marker in `markers`. Used by the streaming tool-call partitioner to
+/// decide how many trailing bytes to hold back as carry when a marker
+/// could be split across chunk boundaries — the exact problem local
+/// llama.cpp/MLX backends create by streaming 1-3 bytes per SSE event.
+///
+/// Returns 0 when no suffix is a marker prefix, so the caller can emit
+/// the whole working string unchanged. Respects UTF-8 char boundaries so
+/// the carry always sits on a safe split point.
+pub(crate) fn tool_marker_prefix_len(s: &str, markers: &[&str]) -> usize {
+    let max_marker_len = markers.iter().map(|m| m.len()).max().unwrap_or(0);
+    if max_marker_len <= 1 {
+        return 0;
+    }
+    let start = s.len().saturating_sub(max_marker_len - 1);
+    // Walk forward from the earliest viable start — the first match we
+    // find is the longest suffix.
+    for i in start..s.len() {
+        if !s.is_char_boundary(i) {
+            continue;
+        }
+        let suffix = &s[i..];
+        if suffix.is_empty() {
+            continue;
+        }
+        if markers
+            .iter()
+            .any(|m| m.len() > suffix.len() && m.starts_with(suffix))
+        {
+            return suffix.len();
+        }
+    }
+    0
+}
+
 /// Return how many trailing bytes of `s` look like the beginning of any
 /// STRIP_OPEN_TAGS entry (but not a full match). These are withheld as
 /// carry so the open-tag detector can see the full tag on the next chunk.
@@ -246,6 +281,7 @@ pub(crate) fn extract_text_tool_calls(text: &str) -> (Vec<(String, serde_json::V
         && !text.contains("<function=")
         && !text.contains("tool_call:")
         && !text.contains("\"tool_calls\"")
+        && !text.contains("\"tool_call\"")
     {
         return (Vec::new(), text.to_string());
     }
@@ -261,7 +297,29 @@ pub(crate) fn extract_text_tool_calls(text: &str) -> (Vec<(String, serde_json::V
         let fn_at = text[i..].find("<function=").map(|r| i + r);
         let bare_at = text[i..].find("tool_call:").map(|r| i + r);
         let arr_at = text[i..].find("\"tool_calls\"").map(|r| i + r);
-        let next = [tc_at, fn_at, bare_at, arr_at].into_iter().flatten().min();
+        // Singular `{"tool_call": {...}}` envelope. Logs 2026-04-17 03:07
+        // confirmed Qwen3 emits this shape (often with the JSON colons
+        // missing between key and value — "tool_call" { ... }) when the
+        // template isn't fully in reasoning mode.
+        let sing_at = {
+            let candidate = text[i..].find("\"tool_call\"").map(|r| i + r);
+            // Skip matches that are actually the plural `"tool_calls"` —
+            // those are handled by arr_at with different extraction logic.
+            match candidate {
+                Some(p)
+                    if text.as_bytes().get(p + "\"tool_call\"".len() - 1).copied()
+                        != Some(b'"') =>
+                {
+                    None
+                }
+                Some(p) if text[p..].starts_with("\"tool_calls\"") => None,
+                other => other,
+            }
+        };
+        let next = [tc_at, fn_at, bare_at, arr_at, sing_at]
+            .into_iter()
+            .flatten()
+            .min();
         let Some(start) = next else { break };
 
         if bare_at == Some(start) {
@@ -350,6 +408,37 @@ pub(crate) fn extract_text_tool_calls(text: &str) -> (Vec<(String, serde_json::V
                 }
                 None => {
                     i = start + "\"tool_calls\"".len();
+                }
+            }
+            continue;
+        } else if sing_at == Some(start) {
+            // `{"tool_call": {...}}` singular envelope. Wrapper `{` within
+            // ~4 bytes of the key. Parse tolerantly — the model sometimes
+            // drops the colon between key and value (`"tool_call" {`) so
+            // strict serde_json fails. Fall back to recovering name /
+            // arguments from the inner object via regex.
+            let wrapper = text[..start].rfind('{');
+            let wrapper_start = match wrapper {
+                Some(br) if start - br <= 4 => br,
+                _ => {
+                    i = start + "\"tool_call\"".len();
+                    continue;
+                }
+            };
+            match extract_balanced_json_tolerant(&text[wrapper_start..]) {
+                Some(consumed) => {
+                    let env_slice = &text[wrapper_start..wrapper_start + consumed];
+                    let recovered = recover_tool_call_from_malformed_json(env_slice);
+                    if let Some(call) = recovered {
+                        tool_calls.push(call);
+                        strip_ranges.push((wrapper_start, wrapper_start + consumed));
+                        i = wrapper_start + consumed;
+                        continue;
+                    }
+                    i = start + "\"tool_call\"".len();
+                }
+                None => {
+                    i = start + "\"tool_call\"".len();
                 }
             }
             continue;
@@ -548,6 +637,98 @@ fn parse_tool_call_value(v: &serde_json::Value) -> Option<(String, serde_json::V
         None => serde_json::json!({}),
     };
     Some((name, input))
+}
+
+/// Balanced-brace walker that tolerates tokens where the model dropped
+/// structural characters (colons between key and value). Consumes as much
+/// as needed to find the matching closing `}`. Unlike `extract_balanced_json`
+/// this one is called only when we know the content is a malformed envelope
+/// emitted by a local model — the caller then runs `recover_tool_call_from_malformed_json`
+/// to extract name + arguments via regex rather than serde_json.
+fn extract_balanced_json_tolerant(s: &str) -> Option<usize> {
+    // Behaviour is identical to the strict version — the tolerance lives in
+    // the subsequent parser, not in brace matching.
+    extract_balanced_json(s)
+}
+
+/// Recover a tool call from a `{"tool_call": {"name": "...", "arguments": {...}}}`
+/// envelope even when the model mangled the JSON. Seen in the wild:
+///
+///   `{"tool_call" {"name" "bash", "arguments" {"command" "..."}}}`
+///
+/// (note the missing colons after the keys). Strict serde_json refuses these,
+/// so we walk via regex: find `"name"` followed by a string literal, find
+/// `"command"` / `"arguments"` similarly, and stitch the result into a clean
+/// `(name, input)` tuple.
+fn recover_tool_call_from_malformed_json(env: &str) -> Option<(String, serde_json::Value)> {
+    // First try strict parsing — cheap path for well-formed envelopes.
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(env) {
+        let inner = v
+            .get("tool_call")
+            .or_else(|| v.get("function"))
+            .cloned()
+            .unwrap_or(v);
+        if let Some(call) = parse_tool_call_value(&inner) {
+            return Some(call);
+        }
+    }
+
+    // Fallback: regex extract name + common arg fields. Keep the regex
+    // simple — we only handle the primitive value types local models
+    // commonly emit (strings, numbers, booleans). Nested object arguments
+    // need the strict path above.
+    use regex::Regex;
+    use std::sync::LazyLock;
+    static NAME_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#""name"\s*:?\s*"([^"]+)""#).unwrap());
+    // Capture every `"key" <optional-colon> <value>` pair inside the
+    // arguments block. Values can be strings, numbers, or booleans.
+    static ARG_RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r#""([a-zA-Z_][a-zA-Z0-9_]*)"\s*:?\s*("([^"\\]|\\.)*"|true|false|-?\d+(\.\d+)?)"#,
+        )
+        .unwrap()
+    });
+    let name_cap = NAME_RE.captures(env)?;
+    let name = name_cap.get(1)?.as_str().to_string();
+    if name.is_empty() {
+        return None;
+    }
+    // Skip the `"name"` match itself when collecting args.
+    let name_end = name_cap.get(0)?.end();
+    let args_region = &env[name_end..];
+    let mut map = serde_json::Map::new();
+    for cap in ARG_RE.captures_iter(args_region) {
+        let key = cap.get(1).map(|m| m.as_str().to_string());
+        let raw = cap.get(2).map(|m| m.as_str().to_string());
+        if let (Some(k), Some(r)) = (key, raw) {
+            // Reserved keys we don't want to treat as arguments.
+            if matches!(
+                k.as_str(),
+                "name" | "tool_call" | "type" | "id" | "function"
+            ) {
+                continue;
+            }
+            let val = if let Some(stripped) = r.strip_prefix('"').and_then(|s| s.strip_suffix('"'))
+            {
+                serde_json::Value::String(stripped.replace("\\\"", "\""))
+            } else if r == "true" {
+                serde_json::Value::Bool(true)
+            } else if r == "false" {
+                serde_json::Value::Bool(false)
+            } else if let Ok(n) = r.parse::<i64>() {
+                serde_json::Value::Number(n.into())
+            } else if let Ok(f) = r.parse::<f64>()
+                && let Some(n) = serde_json::Number::from_f64(f)
+            {
+                serde_json::Value::Number(n)
+            } else {
+                continue;
+            };
+            map.insert(k, val);
+        }
+    }
+    Some((name, serde_json::Value::Object(map)))
 }
 
 /// Parse `<parameter=key>value</parameter>` pairs out of a function body.
@@ -2277,6 +2458,13 @@ impl Provider for OpenAIProvider {
             /// `tool_call:{...}` text flashes in the TUI exactly the way
             /// cloud providers' structured `tool_calls` never would.
             tool_block_active: bool,
+            /// Trailing bytes carried across chunks so the marker detector
+            /// can match tokens that span chunk boundaries. Local models
+            /// stream 1-3 bytes per SSE event, so "tool_call:" arrives as
+            /// "too" + "l_" + "call:" — no single chunk contains the full
+            /// marker. Holding back a short suffix bridges the split,
+            /// mirroring `think_carry`'s role for `<think>` tag detection.
+            marker_carry: String,
         }
 
         // Detect whether this stream is talking to a local inference server
@@ -2302,6 +2490,7 @@ impl Provider for OpenAIProvider {
             response_text_accum: String::new(),
             tool_capture_buffer: String::new(),
             tool_block_active: false,
+            marker_carry: String::new(),
         }));
 
         let event_stream = byte_stream
@@ -2675,36 +2864,72 @@ impl Provider for OpenAIProvider {
                                                 // Once the capture flag flips, subsequent deltas never
                                                 // reach the consumer as text — matching the UX of every
                                                 // other provider which emits structured tool_calls.
-                                                let mut display_text: String = filtered.clone();
+                                                //
+                                                // Cross-chunk handling: local models stream 1-3 bytes per
+                                                // SSE event, so "tool_call:" arrives as "too" + "l_" +
+                                                // "call:" and no individual chunk contains the full
+                                                // marker. Before scanning, prepend `marker_carry` (bytes
+                                                // held back from the previous chunk's trailing prefix).
+                                                // After scanning, hold back any suffix that still looks
+                                                // like the start of a marker so the next chunk can close
+                                                // the match.
+                                                const TOOL_MARKERS: &[&str] = &[
+                                                    "<tool_call>",
+                                                    "<function=",
+                                                    "tool_call:",
+                                                    "\"tool_calls\"",
+                                                    "\"tool_call\"",
+                                                ];
+                                                let mut display_text: String = String::new();
                                                 if is_local_stream {
                                                     if st.tool_block_active {
                                                         // Already capturing — all further content is tool body.
                                                         st.tool_capture_buffer.push_str(&filtered);
-                                                        display_text.clear();
                                                     } else {
-                                                        const TOOL_MARKERS: &[&str] = &[
-                                                            "<tool_call>",
-                                                            "<function=",
-                                                            "tool_call:",
-                                                            "\"tool_calls\"",
-                                                        ];
+                                                        // Prepend carry so tokens split across chunk
+                                                        // boundaries still match as one unit.
+                                                        let mut working = std::mem::take(&mut st.marker_carry);
+                                                        working.push_str(&filtered);
+
                                                         let first = TOOL_MARKERS
                                                             .iter()
-                                                            .filter_map(|m| filtered.find(m).map(|p| (p, *m)))
+                                                            .filter_map(|m| working.find(m).map(|p| (p, *m)))
                                                             .min_by_key(|(p, _)| *p);
-                                                        if let Some((pos, _marker)) = first {
-                                                            // Keep everything before the marker visible.
-                                                            let before: String = filtered[..pos].to_string();
-                                                            let after = &filtered[pos..];
+
+                                                        if let Some((pos, marker)) = first {
+                                                            let before: String = working[..pos].to_string();
+                                                            let after = &working[pos..];
                                                             st.tool_capture_buffer.push_str(after);
                                                             st.tool_block_active = true;
                                                             display_text = before;
                                                             tracing::info!(
-                                                                "[STREAM_FILTER] Tool-call marker detected in stream — routing {} bytes to capture buffer",
-                                                                after.len()
+                                                                "[STREAM_FILTER] Tool-call marker {:?} detected — routing {} bytes to capture buffer",
+                                                                marker, after.len()
                                                             );
+                                                        } else {
+                                                            // No full marker match. Hold back any trailing
+                                                            // suffix that's a viable prefix of some marker
+                                                            // so the next chunk can finish the match.
+                                                            let tail_keep = tool_marker_prefix_len(
+                                                                &working,
+                                                                TOOL_MARKERS,
+                                                            );
+                                                            if tail_keep >= working.len() {
+                                                                // Entire working string is a viable prefix
+                                                                // — hold it all, emit nothing this tick.
+                                                                st.marker_carry = working;
+                                                            } else if tail_keep > 0 {
+                                                                let split = working.len() - tail_keep;
+                                                                display_text = working[..split].to_string();
+                                                                st.marker_carry =
+                                                                    working[split..].to_string();
+                                                            } else {
+                                                                display_text = working;
+                                                            }
                                                         }
                                                     }
+                                                } else {
+                                                    display_text = filtered.clone();
                                                 }
 
                                                 if !display_text.is_empty() {

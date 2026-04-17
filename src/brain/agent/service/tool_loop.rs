@@ -2229,9 +2229,19 @@ impl AgentService {
                     // cloud models get our existing, more-specific nudge.
                     context.add_message(Message::assistant(iteration_text));
                     let nudge = if is_local_provider {
-                        "[System: STOP. Do NOT write code or explain. You MUST call a tool NOW. \
-                         Your last response contained zero tool_use blocks — pick the right tool \
-                         and invoke it immediately via the structured tool-call API. Do not narrate.]"
+                        // Local models (Qwen/Kimi/DeepSeek) over-index on
+                        // "STOP" and interpret it as "wait for further
+                        // instruction" — they reply with acknowledgements
+                        // ("Under the STOP rule I'll wait") instead of
+                        // calling a tool. Also emphasise the STRUCTURED
+                        // API: when the prompt is ambiguous the model
+                        // writes JSON text like `{"tool_call":{...}}`
+                        // thinking that IS the invocation.
+                        "[System: Your last response produced ZERO tool_use blocks — the tool \
+                         was NOT executed. Do not write JSON, do not write markdown code blocks, \
+                         do not describe what you would do. Invoke the tool through the \
+                         provider's structured tool-call API (the same channel the function \
+                         schemas were registered on). Pick the correct tool and call it now.]"
                     } else {
                         "[System: You described changes to files but did not execute any tool \
                          calls. Your response contained action language and file paths but zero \

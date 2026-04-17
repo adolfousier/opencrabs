@@ -208,6 +208,45 @@ fn openai_nested_function_name_without_wrapper() {
 }
 
 #[test]
+fn extract_singular_tool_call_envelope() {
+    let text = r#"{"tool_call":{"name":"bash","arguments":{"command":"ls -la"}}}"#;
+    let (calls, cleaned) = extract_text_tool_calls(text);
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0, "bash");
+    assert_eq!(calls[0].1["command"], "ls -la");
+    assert!(cleaned.trim().is_empty());
+}
+
+#[test]
+fn extract_singular_envelope_with_malformed_json_missing_colons() {
+    // Seen in logs 2026-04-17 03:07 — Qwen dropped the colons after keys
+    // in its hallucinated envelope. Strict serde_json refuses this; the
+    // regex fallback must still recover name + primitive-valued args so
+    // the tool actually executes.
+    let text = r#"{"tool_call" {"name" "bash" "arguments" {"command" "git status"}}}"#;
+    let (calls, cleaned) = extract_text_tool_calls(text);
+    assert_eq!(
+        calls.len(),
+        1,
+        "malformed singular envelope must be recovered"
+    );
+    assert_eq!(calls[0].0, "bash");
+    assert_eq!(calls[0].1["command"], "git status");
+    assert!(cleaned.trim().is_empty());
+}
+
+#[test]
+fn singular_envelope_rejects_plural_match() {
+    // Sanity check — `"tool_calls"` (plural) must not be caught by the
+    // singular branch. The plural has its own handling.
+    let text = r#"{"tool_calls":[{"id":"c1","type":"function","function":{"name":"bash","arguments":{"command":"ls"}}}]}"#;
+    let (calls, _) = extract_text_tool_calls(text);
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0, "bash");
+    assert_eq!(calls[0].1["command"], "ls");
+}
+
+#[test]
 fn tool_calls_inside_prose_is_ignored() {
     // Prose like `the "tool_calls" field carries tool calls` must not
     // match — the wrapping `{` is far away and belongs to something else.
