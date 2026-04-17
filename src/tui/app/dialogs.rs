@@ -1890,7 +1890,11 @@ impl App {
     }
 
     /// Filter the file list based on the current search query.
-    /// ".." is always included so the user can navigate back.
+    /// `".."` shows when the query is empty so the user can still navigate
+    /// up a directory, but drops OUT of the filtered list as soon as the
+    /// user starts typing — otherwise `file_picker_selected = 0` lands on
+    /// `..` instead of the first real match, and hitting Enter navigates
+    /// up instead of picking the file the user was filtering for.
     fn apply_file_picker_filter(&mut self) {
         let query = self.file_picker_search.to_lowercase();
         self.file_picker_filtered = if query.is_empty() {
@@ -1900,9 +1904,8 @@ impl App {
                 .iter()
                 .enumerate()
                 .filter(|(_, path)| {
-                    // Always keep ".." visible
                     if path.ends_with("..") {
-                        return true;
+                        return false;
                     }
                     path.file_name()
                         .and_then(|n| n.to_str())
