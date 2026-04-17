@@ -639,9 +639,7 @@ const KNOWN_TOOL_NAMES: &[&str] = &[
 /// contain at least one `<param>value</param>` pair with matching
 /// open/close tag. Returns `(start, end, name, args)` byte ranges so
 /// the caller can add them to `strip_ranges`.
-fn extract_claude_style_tool_calls(
-    text: &str,
-) -> Vec<(usize, usize, String, serde_json::Value)> {
+fn extract_claude_style_tool_calls(text: &str) -> Vec<(usize, usize, String, serde_json::Value)> {
     let mut results = Vec::new();
     let mut cursor = 0;
 
@@ -657,7 +655,9 @@ fn extract_claude_style_tool_calls(
                 }
             }
         }
-        let Some((start, tool_name)) = best else { break };
+        let Some((start, tool_name)) = best else {
+            break;
+        };
         let open_tag_len = tool_name.len() + 2; // `<` + name + `>`
         let body_start = start + open_tag_len;
 
@@ -681,7 +681,12 @@ fn extract_claude_style_tool_calls(
             map.insert(k, serde_json::Value::String(v));
         }
         let end = close_abs + close_tag.len();
-        results.push((start, end, tool_name.to_string(), serde_json::Value::Object(map)));
+        results.push((
+            start,
+            end,
+            tool_name.to_string(),
+            serde_json::Value::Object(map),
+        ));
         cursor = end;
     }
     results
@@ -695,7 +700,9 @@ fn parse_xml_param_pairs(body: &str) -> Vec<(String, String)> {
     let mut cursor = 0;
     while cursor < body.len() {
         // Find next `<` followed by an identifier.
-        let Some(lt_rel) = body[cursor..].find('<') else { break };
+        let Some(lt_rel) = body[cursor..].find('<') else {
+            break;
+        };
         let lt_abs = cursor + lt_rel;
         let after_lt = &body[lt_abs + 1..];
         // Identifier must be lowercase letters/digits/underscore.
@@ -1807,10 +1814,16 @@ impl OpenAIProvider {
             })
         });
 
-        // Try to parse error body
-        if let Ok(error_body) = response.json::<OpenAIErrorResponse>().await {
+        let base_url_snapshot = self.base_url.clone();
+        // Read the body as raw text first so we can log AND still try both
+        // the OpenAI shape and any non-OpenAI shapes (Unsloth Studio's
+        // FastAPI pydantic 422, llama-server's plain `{error:{message}}`,
+        // etc.) without losing the actual validation details.
+        let body_text = response.text().await.unwrap_or_default();
+
+        // Try to parse OpenAI's `{error: {message, type}}` shape.
+        if let Ok(error_body) = serde_json::from_str::<OpenAIErrorResponse>(&body_text) {
             let message = if status == 429 {
-                // Enhance rate limit error message
                 if let Some(secs) = retry_after {
                     format!(
                         "{} (retry after {} seconds)",
@@ -1838,7 +1851,83 @@ impl OpenAIProvider {
             };
         }
 
-        // Fallback error
+        // 422 bodies from FastAPI/pydantic servers (notably Unsloth Studio)
+        // come back as `{detail: [{loc, msg, type}, ...]}`. The generic
+        // "Unknown error" fallback lost the per-field details, so operators
+        // had no way to see WHICH field the server rejected. Log the raw
+        // body and synthesize a readable summary.
+        if !body_text.is_empty() {
+            tracing::warn!(
+                "[HANDLE_ERROR] {} → {}: non-OpenAI error body (first 1000 chars): {}",
+                self.name,
+                status,
+                body_text.chars().take(1000).collect::<String>(),
+            );
+        }
+
+        if status == 422
+            && let Ok(pydantic) = serde_json::from_str::<PydanticValidationError>(&body_text)
+        {
+            // Build a concise summary of the offending fields.
+            let mut parts: Vec<String> = pydantic
+                .detail
+                .iter()
+                .take(5)
+                .map(|d| {
+                    let field = d
+                        .loc
+                        .iter()
+                        .map(|v| match v {
+                            serde_json::Value::String(s) => s.clone(),
+                            serde_json::Value::Number(n) => n.to_string(),
+                            _ => "?".to_string(),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(".");
+                    format!("{}: {}", field, d.msg)
+                })
+                .collect();
+            if pydantic.detail.len() > 5 {
+                parts.push(format!("… +{} more", pydantic.detail.len() - 5));
+            }
+            let fields_summary = parts.join("; ");
+
+            // Unsloth Studio's wrapper is NOT OpenAI-compatible (its
+            // pydantic schema rejects `tools`, `tool_choice`, `role:
+            // "tool"`, and the `chat_template_kwargs` object). Point the
+            // operator at the fix rather than leaving them to decode
+            // validation errors.
+            let unsloth_hint = if is_unsloth_studio_url(&base_url_snapshot) {
+                " — Unsloth Studio's API is NOT OpenAI-compat (rejects `tools`, `role:\"tool\"`, etc.). \
+                 Find the internal llama-server port with `lsof -iTCP -sTCP:LISTEN | grep llama-server` \
+                 and point base_url at that directly."
+            } else {
+                ""
+            };
+
+            return ProviderError::ApiError {
+                status,
+                message: format!(
+                    "Schema validation failed ({} field(s)): {}{}",
+                    pydantic.detail.len(),
+                    fields_summary,
+                    unsloth_hint,
+                ),
+                error_type: Some("validation_error".to_string()),
+            };
+        }
+
+        // Fallback error — include the first chunk of the raw body so
+        // operators aren't stuck with "Unknown error".
+        let fallback_message = if body_text.is_empty() {
+            "Unknown error".to_string()
+        } else {
+            format!(
+                "HTTP {}: {}",
+                status,
+                body_text.chars().take(400).collect::<String>()
+            )
+        };
         if status == 429 {
             let message = if let Some(secs) = retry_after {
                 format!("Rate limit exceeded (retry after {} seconds)", secs)
@@ -1849,7 +1938,7 @@ impl OpenAIProvider {
         } else {
             ProviderError::ApiError {
                 status,
-                message: "Unknown error".to_string(),
+                message: fallback_message,
                 error_type: None,
             }
         }
@@ -3855,4 +3944,35 @@ struct OpenAIError {
     message: String,
     #[serde(rename = "type")]
     error_type: Option<String>,
+}
+
+/// Pydantic / FastAPI default 422 body shape. Used by Unsloth Studio and
+/// other Python-backend wrappers in front of inference engines.
+#[derive(Debug, Clone, Deserialize)]
+struct PydanticValidationError {
+    detail: Vec<PydanticDetail>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct PydanticDetail {
+    loc: Vec<serde_json::Value>,
+    msg: String,
+    #[serde(rename = "type")]
+    _kind: Option<String>,
+}
+
+/// Best-effort check: does this base URL belong to Unsloth Studio's FastAPI
+/// wrapper rather than the raw llama-server the Studio spawns internally?
+/// We only need this accurate enough to produce a helpful error hint — a
+/// false positive just means the hint shows for a non-Unsloth 422, which
+/// still contains the raw pydantic details so the operator can tell.
+fn is_unsloth_studio_url(url: &str) -> bool {
+    // Unsloth Studio picks a port the user configures via `-p`, not a
+    // fixed one. The only reliable marker we have is: it's a localhost
+    // URL that historically returns 422 with pydantic `detail` on
+    // OpenAI-style bodies. If we wanted a positive signal we'd need to
+    // probe the server — for now treat any local base_url as a candidate
+    // since the hint is harmless elsewhere.
+    let lower = url.to_ascii_lowercase();
+    lower.contains("localhost") || lower.contains("127.0.0.1")
 }
