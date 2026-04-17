@@ -81,6 +81,7 @@ notify = "6"
 chrono = { version = "0.4", features = ["serde"] }
 regex = "1.11"
 glob = "0.3"
+ignore = "0.4"
 which = "8.0"
 rand = "0.9"
 urlencoding = "2.1"

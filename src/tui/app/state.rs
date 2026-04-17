@@ -323,6 +323,11 @@ pub struct App {
     pub file_picker_scroll_offset: usize,
     pub file_picker_current_dir: std::path::PathBuf,
     pub file_picker_search: String,
+    /// True when `file_picker_files` holds a recursive walk of the working
+    /// directory rather than a flat listing of `file_picker_current_dir`.
+    /// Flips on once the search query reaches 2 characters and flips off
+    /// when the query falls back below the threshold or the picker reopens.
+    pub file_picker_recursive: bool,
 
     /// Slash autocomplete state
     pub slash_suggestions_active: bool,
@@ -551,6 +556,7 @@ impl App {
             file_picker_scroll_offset: 0,
             file_picker_current_dir: std::env::current_dir().unwrap_or_default(),
             file_picker_search: String::new(),
+            file_picker_recursive: false,
             slash_suggestions_active: false,
             slash_filtered: Vec::new(),
             slash_selected_index: 0,
@@ -1073,7 +1079,17 @@ impl App {
             new_agent_service = new_agent_service.with_system_brain(brain);
         }
 
+        // Preserve per-session provider entries across the rebuild so
+        // other sessions (especially active pane-B turns) don't lose
+        // their provider choice when the user reconfigures via /models.
+        // Without this, any rebuild silently reverts every session to
+        // the new global default.
+        let preserved_session_providers = self.agent_service.session_provider_snapshot();
+
         let new_agent_service = Arc::new(new_agent_service);
+        for (sid, prov) in preserved_session_providers {
+            new_agent_service.swap_provider_for_session(sid, prov);
+        }
 
         // Update app state
         self.default_model_name = new_agent_service.provider_model();
@@ -1635,8 +1651,7 @@ impl App {
                                 && m.details.as_deref().is_some_and(|d| !d.trim().is_empty())
                         })
                         .map(|prev| {
-                            let mut combined =
-                                prev.details.take().unwrap_or_default();
+                            let mut combined = prev.details.take().unwrap_or_default();
                             if !combined.ends_with("\n\n") {
                                 combined.push_str("\n\n");
                             }

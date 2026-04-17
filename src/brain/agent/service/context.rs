@@ -33,9 +33,7 @@ impl AgentService {
             .map_err(|e| AgentError::Database(e.to_string()))?;
 
         let model_name = model.unwrap_or_else(|| {
-            self.provider
-                .read()
-                .expect("provider lock poisoned")
+            self.provider_for_session(session_id)
                 .default_model()
                 .to_string()
         });

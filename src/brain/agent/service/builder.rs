@@ -2,12 +2,29 @@ use super::types::*;
 use crate::brain::provider::Provider;
 use crate::brain::tools::ToolRegistry;
 use crate::services::ServiceContext;
+use std::collections::HashMap;
 use std::sync::Arc;
+use uuid::Uuid;
 
 /// Agent Service for managing AI conversations
 pub struct AgentService {
-    /// LLM provider (RwLock allows runtime swap for per-session providers)
+    /// Default LLM provider — used for brand-new sessions that haven't
+    /// had an explicit provider choice yet, and for channels / callers
+    /// that invoke the agent without a session_id.
     pub(super) provider: std::sync::RwLock<Arc<dyn Provider>>,
+
+    /// Per-session provider isolation. Every session that has ever been
+    /// seen (via `/models` pick, `load_session`, or first agent turn)
+    /// gets its own `Arc<dyn Provider>` here. In-flight agent turns
+    /// read their session's entry via `provider_for_session(id)` so a
+    /// foreground pane-switch or model-pick on a DIFFERENT session
+    /// can't yank the active provider out from under a background
+    /// turn. Before this map, `self.provider` was a single shared
+    /// pointer — opening `/sessions` during a 47s cargo-clippy on one
+    /// pane silently rewrote the running turn's endpoint to whatever
+    /// the other session had saved (2026-04-17 17:01 logs).
+    pub(super) session_providers:
+        std::sync::RwLock<HashMap<Uuid, Arc<dyn Provider>>>,
 
     /// Service context for database operations
     pub(super) context: ServiceContext,
@@ -69,6 +86,7 @@ impl AgentService {
     ) -> Self {
         Self {
             provider: std::sync::RwLock::new(provider),
+            session_providers: std::sync::RwLock::new(HashMap::new()),
             context,
             tool_registry: Arc::new(ToolRegistry::new()),
             max_tool_iterations: 0, // 0 = unlimited (loop detection is the safety net)
@@ -311,9 +329,78 @@ impl AgentService {
             .clone()
     }
 
-    /// Swap the active provider at runtime (for per-session provider switching)
+    /// Swap the DEFAULT provider at runtime. Used during bootstrap and by
+    /// callers without a session_id. Prefer `swap_provider_for_session` for
+    /// anything session-scoped — this does NOT affect sessions that already
+    /// have their own entry in `session_providers`.
     pub fn swap_provider(&self, new_provider: Arc<dyn Provider>) {
         *self.provider.write().expect("provider lock poisoned") = new_provider;
+    }
+
+    /// Look up the provider a specific session should use. Returns the
+    /// session's dedicated entry if one exists; otherwise falls back to
+    /// the global default. Read-path hot function — cheap Arc clone,
+    /// no allocation beyond lock acquisition.
+    pub fn provider_for_session(&self, session_id: Uuid) -> Arc<dyn Provider> {
+        if let Ok(map) = self.session_providers.read()
+            && let Some(p) = map.get(&session_id)
+        {
+            return p.clone();
+        }
+        self.provider
+            .read()
+            .expect("provider lock poisoned")
+            .clone()
+    }
+
+    /// Assign a provider specifically to `session_id`. Subsequent agent
+    /// turns for that session use this provider; other sessions and the
+    /// global default are untouched. Called by `/models` dialog on model
+    /// pick and by `load_session` when restoring a session's saved
+    /// `provider_name`.
+    pub fn swap_provider_for_session(&self, session_id: Uuid, new_provider: Arc<dyn Provider>) {
+        self.session_providers
+            .write()
+            .expect("session_providers lock poisoned")
+            .insert(session_id, new_provider);
+    }
+
+    /// Drop a session's provider entry (e.g. session deleted). Noop if
+    /// no entry exists. Does NOT affect the global default or other
+    /// sessions.
+    pub fn remove_session_provider(&self, session_id: Uuid) {
+        self.session_providers
+            .write()
+            .expect("session_providers lock poisoned")
+            .remove(&session_id);
+    }
+
+    /// Snapshot of every per-session provider binding. Used by
+    /// `rebuild_agent_service` to carry session→provider pins across
+    /// the rebuild so live sessions on other panes don't lose their
+    /// provider when the user reconfigures via `/models`.
+    pub fn session_provider_snapshot(&self) -> Vec<(Uuid, Arc<dyn Provider>)> {
+        let map = self
+            .session_providers
+            .read()
+            .expect("session_providers lock poisoned");
+        map.iter().map(|(k, v)| (*k, v.clone())).collect()
+    }
+
+    /// Provider name for a specific session, including sticky-fallback
+    /// active sub-provider.
+    pub fn provider_name_for_session(&self, session_id: Uuid) -> String {
+        let p = self.provider_for_session(session_id);
+        p.active_subprovider_name()
+            .unwrap_or_else(|| p.name().to_string())
+    }
+
+    /// Default model for a specific session, including sticky-fallback
+    /// active sub-model.
+    pub fn provider_model_for_session(&self, session_id: Uuid) -> String {
+        let p = self.provider_for_session(session_id);
+        p.active_subprovider_model()
+            .unwrap_or_else(|| p.default_model().to_string())
     }
 
     /// Get context window size for a given model.

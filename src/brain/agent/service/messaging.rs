@@ -24,12 +24,9 @@ impl AgentService {
             .prepare_message_context(session_id, user_message, model)
             .await?;
 
-        // Send to provider
-        let provider = self
-            .provider
-            .read()
-            .expect("provider lock poisoned")
-            .clone();
+        // Send to provider — use session's provider so a concurrent
+        // foreground swap on another pane can't hijack this turn.
+        let provider = self.provider_for_session(session_id);
         let response = provider
             .complete(request)
             .await
@@ -49,17 +46,13 @@ impl AgentService {
             + response.usage.cache_creation_tokens
             + response.usage.cache_read_tokens;
         let total_tokens = billable_input + response.usage.output_tokens;
-        let cost = self
-            .provider
-            .read()
-            .expect("provider lock poisoned")
-            .calculate_cost_with_cache(
-                &response.model,
-                response.usage.input_tokens,
-                response.usage.output_tokens,
-                response.usage.cache_creation_tokens,
-                response.usage.cache_read_tokens,
-            );
+        let cost = self.provider_for_session(session_id).calculate_cost_with_cache(
+            &response.model,
+            response.usage.input_tokens,
+            response.usage.output_tokens,
+            response.usage.cache_creation_tokens,
+            response.usage.cache_read_tokens,
+        );
 
         // Update message with usage info, stashing the server-reported
         // prompt token count so session reload reads it directly.
@@ -107,12 +100,9 @@ impl AgentService {
         // Add streaming flag to request
         let request = request.with_streaming();
 
-        // Get streaming response from provider
-        let provider = self
-            .provider
-            .read()
-            .expect("provider lock poisoned")
-            .clone();
+        // Get streaming response from provider (session-scoped so a
+        // concurrent /models pick on a different pane can't hijack).
+        let provider = self.provider_for_session(session_id);
         let stream = provider
             .stream(request)
             .await

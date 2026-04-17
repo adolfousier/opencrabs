@@ -1103,8 +1103,14 @@ impl App {
         let actual_model = self.agent_service.provider_model();
         self.default_model_name = actual_model.clone();
 
-        // Persist provider + model to current session DB record
+        // Persist provider + model to current session DB record AND pin the
+        // newly built provider to THIS session's entry in the agent service.
+        // Without the per-session pin a second pane's turn using a different
+        // provider would fall through to the new global default on its next
+        // iteration (2026-04-17 17:01 logs — background qwen-plus turn
+        // silently rerouted to localhost:8891 when the other pane swapped).
         let agent_provider_name = self.agent_service.provider_name();
+        let provider_arc = self.agent_service.provider();
         if let Some(ref mut session) = self.current_session {
             session.provider_name = Some(agent_provider_name.clone());
             session.model = Some(actual_model.clone());
@@ -1112,9 +1118,10 @@ impl App {
             if let Err(e) = self.session_service.update_session(&session_copy).await {
                 tracing::warn!("Failed to persist provider to session: {}", e);
             }
+            self.agent_service
+                .swap_provider_for_session(session.id, provider_arc.clone());
         }
         // Cache the provider instance for fast session switching
-        let provider_arc = self.agent_service.provider();
         self.provider_cache
             .insert(agent_provider_name, provider_arc);
 
@@ -1852,26 +1859,34 @@ impl App {
         // Start at the session's working directory
         self.file_picker_current_dir = self.working_directory.clone();
         self.file_picker_search.clear();
+        self.file_picker_recursive = false;
         self.refresh_file_picker().await
     }
 
     /// Reload file list for the current directory and apply search filter.
     pub(crate) async fn refresh_file_picker(&mut self) -> Result<()> {
+        self.load_flat_picker_files();
+        self.file_picker_recursive = false;
+        self.apply_file_picker_filter();
+        self.switch_mode(AppMode::FilePicker).await?;
+        Ok(())
+    }
+
+    /// Populate `file_picker_files` with a flat listing of
+    /// `file_picker_current_dir` (plus a `..` entry when applicable).
+    fn load_flat_picker_files(&mut self) {
         let mut files = Vec::new();
 
-        // Add parent directory option if not at root
         if self.file_picker_current_dir.parent().is_some() {
             files.push(self.file_picker_current_dir.join(".."));
         }
 
-        // Read directory entries
         if let Ok(entries) = std::fs::read_dir(&self.file_picker_current_dir) {
             for entry in entries.flatten() {
                 files.push(entry.path());
             }
         }
 
-        // Sort: directories first, then files, alphabetically
         files.sort_by(|a, b| {
             let a_is_dir = a.is_dir();
             let b_is_dir = b.is_dir();
@@ -1883,10 +1898,53 @@ impl App {
         });
 
         self.file_picker_files = files;
-        self.apply_file_picker_filter();
-        self.switch_mode(AppMode::FilePicker).await?;
+    }
 
-        Ok(())
+    /// Recursively walk the session working directory using ripgrep's
+    /// `ignore` walker (respects `.gitignore`, `.ignore`, hidden file rules).
+    /// Caps the result at `MAX_RECURSIVE_RESULTS` to keep huge repos snappy.
+    fn load_recursive_picker_files(&mut self) {
+        const MAX_RECURSIVE_RESULTS: usize = 5000;
+
+        let mut files = Vec::with_capacity(256);
+        let walker = ignore::WalkBuilder::new(&self.working_directory)
+            .standard_filters(true)
+            .hidden(false)
+            .git_ignore(true)
+            .git_exclude(true)
+            .max_depth(Some(20))
+            .build();
+
+        for entry in walker.flatten() {
+            if entry.depth() == 0 {
+                continue;
+            }
+            if entry.file_type().is_some_and(|ft| ft.is_dir()) {
+                continue;
+            }
+            files.push(entry.into_path());
+            if files.len() >= MAX_RECURSIVE_RESULTS {
+                break;
+            }
+        }
+
+        files.sort();
+        self.file_picker_files = files;
+    }
+
+    /// Switch the underlying file source based on the current search length:
+    /// flat dir listing for `< 2` chars, recursive walk for `>= 2`. Only
+    /// rebuilds when the source actually needs to change so per-keystroke
+    /// filtering stays cheap.
+    fn sync_file_picker_source(&mut self) {
+        let wants_recursive = self.file_picker_search.chars().count() >= 2;
+        if wants_recursive && !self.file_picker_recursive {
+            self.load_recursive_picker_files();
+            self.file_picker_recursive = true;
+        } else if !wants_recursive && self.file_picker_recursive {
+            self.load_flat_picker_files();
+            self.file_picker_recursive = false;
+        }
     }
 
     /// Filter the file list based on the current search query.
@@ -1895,8 +1953,14 @@ impl App {
     /// user starts typing — otherwise `file_picker_selected = 0` lands on
     /// `..` instead of the first real match, and hitting Enter navigates
     /// up instead of picking the file the user was filtering for.
+    ///
+    /// In recursive mode the query is matched against the path **relative to
+    /// the working directory** so users can filter by directory segments
+    /// (e.g. `tui/render` matches `src/tui/render/dialogs.rs`).
     fn apply_file_picker_filter(&mut self) {
         let query = self.file_picker_search.to_lowercase();
+        let recursive = self.file_picker_recursive;
+        let working_dir = self.working_directory.clone();
         self.file_picker_filtered = if query.is_empty() {
             (0..self.file_picker_files.len()).collect()
         } else {
@@ -1907,9 +1971,18 @@ impl App {
                     if path.ends_with("..") {
                         return false;
                     }
-                    path.file_name()
-                        .and_then(|n| n.to_str())
-                        .is_some_and(|name| name.to_lowercase().contains(&query))
+                    let haystack = if recursive {
+                        path.strip_prefix(&working_dir)
+                            .unwrap_or(path)
+                            .to_string_lossy()
+                            .to_lowercase()
+                    } else {
+                        path.file_name()
+                            .and_then(|n| n.to_str())
+                            .map(|s| s.to_lowercase())
+                            .unwrap_or_default()
+                    };
+                    haystack.contains(&query)
                 })
                 .map(|(i, _)| i)
                 .collect()
@@ -1970,10 +2043,12 @@ impl App {
             }
         } else if event.code == KeyCode::Backspace {
             if self.file_picker_search.pop().is_some() {
+                self.sync_file_picker_source();
                 self.apply_file_picker_filter();
             }
         } else if let KeyCode::Char(c) = event.code {
             self.file_picker_search.push(c);
+            self.sync_file_picker_source();
             self.apply_file_picker_filter();
         }
 

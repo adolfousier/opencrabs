@@ -185,29 +185,44 @@ impl App {
         // Persist as last active session so startup restores it
         Self::save_last_session_id(session_id);
 
-        // Swap agent provider to match the session's saved provider/model.
-        // Each session owns its provider choice — switching panes must restore it.
+        // Populate the session's provider entry in the agent service so
+        // future turns for this session use the right provider. Crucially
+        // we do NOT call `swap_provider` (the GLOBAL default) — another
+        // pane's session is allowed to sit on a different provider, and
+        // mutating global mid-turn is exactly the bug that routed a
+        // background qwen-plus turn at localhost:8891 when the other
+        // pane switched to qwenlocal (logs 2026-04-17 17:01).
         if let Some(ref saved_provider) = session.provider_name {
-            let active_prov = self.agent_service.provider_name();
-            if saved_provider != &active_prov {
-                // Try cached provider first, then create fresh
+            let current_prov = self.agent_service.provider_name_for_session(session.id);
+            if saved_provider != &current_prov {
                 if let Some(cached) = self.provider_cache.get(saved_provider).cloned() {
-                    tracing::info!("Restoring cached provider '{}' for session", saved_provider);
-                    self.agent_service.swap_provider(cached);
+                    tracing::info!(
+                        "Restoring cached provider '{}' for session {}",
+                        saved_provider,
+                        session.id
+                    );
+                    self.agent_service
+                        .swap_provider_for_session(session.id, cached);
                 } else if let Ok(config) = crate::config::Config::load() {
                     match crate::brain::provider::create_provider_by_name(&config, saved_provider)
                         .await
                     {
                         Ok(new_provider) => {
-                            tracing::info!("Created provider '{}' for session", saved_provider);
+                            tracing::info!(
+                                "Created provider '{}' for session {}",
+                                saved_provider,
+                                session.id
+                            );
                             self.provider_cache
                                 .insert(saved_provider.clone(), new_provider.clone());
-                            self.agent_service.swap_provider(new_provider);
+                            self.agent_service
+                                .swap_provider_for_session(session.id, new_provider);
                         }
                         Err(e) => {
                             tracing::warn!(
-                                "Failed to restore provider '{}': {e}, keeping current",
-                                saved_provider
+                                "Failed to restore provider '{}' for session {}: {e}, keeping current",
+                                saved_provider,
+                                session.id,
                             );
                         }
                     }
@@ -215,27 +230,27 @@ impl App {
                 // After swapping, the new provider may use a renamed canonical id
                 // (e.g. legacy "qwen-code" → "qwen-cli"). Refresh both provider
                 // AND model so they always stay paired.
-                let live_name = self.agent_service.provider_name();
+                let live_name = self.agent_service.provider_name_for_session(session.id);
                 if live_name != *saved_provider
                     && let Some(ref mut s) = self.current_session
                 {
                     s.provider_name = Some(live_name);
-                    s.model = Some(self.agent_service.provider_model());
+                    s.model = Some(self.agent_service.provider_model_for_session(session.id));
                 }
             }
         } else {
             // Legacy session with no saved provider — stamp current provider onto it
             if let Some(ref mut s) = self.current_session {
-                s.provider_name = Some(self.agent_service.provider_name());
-                s.model = Some(self.agent_service.provider_model());
+                s.provider_name = Some(self.agent_service.provider_name_for_session(session.id));
+                s.model = Some(self.agent_service.provider_model_for_session(session.id));
             }
         }
 
-        // Display model comes from the session record, falling back to the active provider
+        // Display model comes from the session record, falling back to the session's provider
         self.default_model_name = session
             .model
             .clone()
-            .unwrap_or_else(|| self.agent_service.provider_model());
+            .unwrap_or_else(|| self.agent_service.provider_model_for_session(session.id));
         self.context_max_tokens = self
             .agent_service
             .context_window_for_model(&self.default_model_name);

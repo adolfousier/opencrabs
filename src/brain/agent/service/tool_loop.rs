@@ -411,9 +411,7 @@ impl AgentService {
         // (pre-swap) provider's model. session.model is read from DB and is
         // always provider-correct.
         let model_name = model.or_else(|| session.model.clone()).unwrap_or_else(|| {
-            self.provider
-                .read()
-                .expect("provider lock poisoned")
+            self.provider_for_session(session_id)
                 .default_model()
                 .to_string()
         });
@@ -433,28 +431,25 @@ impl AgentService {
         // local llama.cpp/MLX models that answer in prose when they should
         // have called a tool get re-prompted, matching what Unsloth Studio
         // does out of the box.
-        let (is_cli_provider, cli_owns_context, is_dialagram, is_local_provider) = self
-            .provider
-            .read()
-            .map(|p| {
-                let base = p.base_url();
-                // Detect dialagram by base_url — users add it as a custom
-                // provider under any name they choose (typos included),
-                // but the proxy URL is always https://www.dialagram.me/...
-                let is_dialagram = base
-                    .map(|u| u.to_lowercase().contains("dialagram.me"))
-                    .unwrap_or(false);
-                let is_local = base
-                    .map(crate::brain::provider::factory::is_local_base_url)
-                    .unwrap_or(false);
-                (
-                    p.cli_handles_tools(),
-                    p.cli_manages_context(),
-                    is_dialagram,
-                    is_local,
-                )
-            })
-            .unwrap_or((false, false, false, false));
+        let (is_cli_provider, cli_owns_context, is_dialagram, is_local_provider) = {
+            let p = self.provider_for_session(session_id);
+            let base = p.base_url();
+            // Detect dialagram by base_url — users add it as a custom
+            // provider under any name they choose (typos included),
+            // but the proxy URL is always https://www.dialagram.me/...
+            let is_dialagram = base
+                .map(|u| u.to_lowercase().contains("dialagram.me"))
+                .unwrap_or(false);
+            let is_local = base
+                .map(crate::brain::provider::factory::is_local_base_url)
+                .unwrap_or(false);
+            (
+                p.cli_handles_tools(),
+                p.cli_manages_context(),
+                is_dialagram,
+                is_local,
+            )
+        };
 
         // For API providers ONLY: strip persisted `<!-- tools-v2: ... -->` and
         // `<!-- reasoning -->` markers from DB content before loading into the
@@ -1166,12 +1161,13 @@ impl AgentService {
                             fb_req = fb_req.with_tools(self.tool_registry.get_tool_definitions());
                         }
 
-                        let original_provider = {
-                            let mut guard = self.provider.write().expect("provider lock");
-                            let orig = guard.clone();
-                            *guard = (*fallback).clone();
-                            orig
-                        };
+                        // Swap only THIS session's provider for the fallback
+                        // attempt. Other sessions and the global default
+                        // stay on whatever they were — a background turn on
+                        // a different pane must not trip over our fallback
+                        // dance.
+                        let original_provider = self.provider_for_session(session_id);
+                        self.swap_provider_for_session(session_id, (*fallback).clone());
                         let fb_result = self
                             .stream_complete(
                                 session_id,
@@ -1183,10 +1179,7 @@ impl AgentService {
                                 false,
                             )
                             .await;
-                        {
-                            let mut guard = self.provider.write().expect("provider lock");
-                            *guard = original_provider;
-                        }
+                        self.swap_provider_for_session(session_id, original_provider);
                         match fb_result {
                             Ok(resp) => {
                                 succeeded = Some(resp);
@@ -1352,12 +1345,12 @@ impl AgentService {
                                     fb_req.with_tools(self.tool_registry.get_tool_definitions());
                             }
 
-                            let original_provider = {
-                                let mut guard = self.provider.write().expect("provider lock");
-                                let orig = guard.clone();
-                                *guard = (*fallback).clone();
-                                orig
-                            };
+                            // Swap only this session's provider for the
+                            // stream-fallback attempt; restore after so
+                            // any follow-up iteration goes back to the
+                            // session's primary.
+                            let original_provider = self.provider_for_session(session_id);
+                            self.swap_provider_for_session(session_id, (*fallback).clone());
                             let fb_result = self
                                 .stream_complete(
                                     session_id,
@@ -1369,10 +1362,7 @@ impl AgentService {
                                     false,
                                 )
                                 .await;
-                            {
-                                let mut guard = self.provider.write().expect("provider lock");
-                                *guard = original_provider;
-                            }
+                            self.swap_provider_for_session(session_id, original_provider);
                             match fb_result {
                                 Ok(resp) => {
                                     stream_succeeded = Some(resp);
@@ -1406,7 +1396,7 @@ impl AgentService {
             // Surface any sticky-fallback swap that the FallbackProvider
             // performed during this turn so the user sees which provider/model
             // is now active. Fires at most once per swap.
-            let rotated_this_iteration = self.provider().take_swap_event();
+            let rotated_this_iteration = self.provider_for_session(session_id).take_swap_event();
             if let Some(ref swap) = rotated_this_iteration
                 && let Some(ref cb) = progress_callback
             {
@@ -1555,11 +1545,7 @@ impl AgentService {
                             estimate,
                             cli_context,
                             cli_context / estimate.max(1),
-                            self.provider
-                                .read()
-                                .ok()
-                                .map(|p| p.name().to_string())
-                                .unwrap_or_default(),
+                            self.provider_for_session(session_id).name(),
                             model_name,
                         );
                     } else {
@@ -1800,14 +1786,17 @@ impl AgentService {
                             "retries={}, content_blocks={}, provider={}",
                             MAX_STREAM_RETRIES,
                             response.content.len(),
-                            self.provider().name(),
+                            self.provider_for_session(session_id).name(),
                         )),
                     );
 
                     // Try to fallback to next provider before giving up
                     let fallback_reason =
                         format!("stream dropped {} times with 0 content", MAX_STREAM_RETRIES,);
-                    if self.provider().force_next_fallback(&fallback_reason) {
+                    if self
+                        .provider_for_session(session_id)
+                        .force_next_fallback(&fallback_reason)
+                    {
                         tracing::info!(
                             "🔄 Fallback triggered after stream drops — retrying with next provider"
                         );
@@ -3191,17 +3180,13 @@ impl AgentService {
         // input_tokens = non-cached, cache_creation/read tracked separately.
         let billable_input = total_input_tokens + total_cache_creation + total_cache_read;
         let total_tokens = billable_input + total_output_tokens;
-        let cost = self
-            .provider
-            .read()
-            .expect("provider lock poisoned")
-            .calculate_cost_with_cache(
-                &response.model,
-                total_input_tokens,
-                total_output_tokens,
-                total_cache_creation,
-                total_cache_read,
-            );
+        let cost = self.provider_for_session(session_id).calculate_cost_with_cache(
+            &response.model,
+            total_input_tokens,
+            total_output_tokens,
+            total_cache_creation,
+            total_cache_read,
+        );
 
         // Update message with usage info. For the stashed prompt-token
         // count we prefer `billable_input` (non-cached + cache_create +

@@ -68,7 +68,24 @@ pub(super) fn render_file_picker(f: &mut Frame, app: &App, area: Rect) {
             "📄"
         };
 
-        let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+        // In recursive mode, show the path relative to the working dir so
+        // matches deep in the tree are disambiguated (e.g. `src/tui/render/dialogs.rs`
+        // vs just `dialogs.rs`).
+        let label = if app.file_picker_recursive {
+            path.strip_prefix(&app.working_directory)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| {
+                    path.file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("?")
+                        .to_string()
+                })
+        } else {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("?")
+                .to_string()
+        };
 
         let style = if is_selected {
             Style::default()
@@ -85,7 +102,7 @@ pub(super) fn render_file_picker(f: &mut Frame, app: &App, area: Rect) {
 
         lines.push(Line::from(vec![
             Span::styled(prefix, style),
-            Span::styled(format!("{} {}", icon, filename), style),
+            Span::styled(format!("{} {}", icon, label), style),
         ]));
     }
 

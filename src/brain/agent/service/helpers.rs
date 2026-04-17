@@ -51,11 +51,7 @@ impl AgentService {
         };
 
         let request_model = request.model.clone();
-        let provider = self
-            .provider
-            .read()
-            .expect("provider lock poisoned")
-            .clone();
+        let provider = self.provider_for_session(session_id);
         let mut stream = match provider.stream(request).await {
             Ok(s) => s,
             Err(e) => {
