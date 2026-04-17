@@ -206,27 +206,38 @@ fn strip_think_blocks(text: &str) -> String {
     result.trim().to_string()
 }
 
-/// Extract Qwen-style tool_call blocks emitted as text content.
+/// Extract tool_call blocks emitted as text content.
 ///
-/// Local GGUF/MLX backends serving Qwen3 will often put tool calls into
-/// `message.content` instead of the structured `tool_calls` field when the
-/// runtime isn't in the right template + reasoning mode. Unsloth's parser
-/// (`studio/backend/routes/inference.py`) solves this by scanning the raw
-/// text for two formats and emitting structured tool calls anyway:
+/// Local GGUF/MLX backends serving reasoning models will often put tool
+/// calls into `message.content` instead of the structured `tool_calls`
+/// field when the runtime isn't in the right template mode. Unsloth's
+/// parser (`studio/backend/routes/inference.py`) solves this by scanning
+/// the raw text for several formats and emitting structured tool calls
+/// anyway. We handle four:
 ///
-///   `<tool_call>{"name":"x","arguments":{...}}</tool_call>`
-///   `<function=x><parameter=k>v</parameter></function>`
+///   1. `<tool_call>{"name":"x","arguments":{...}}</tool_call>` — Qwen XML
+///   2. `<function=x><parameter=k>v</parameter></function>` — Qwen v2 XML
+///   3. `tool_call:{"id":"...","type":"function","function":{...}}` —
+///      bare OpenAI-envelope prefix (no tags) that Qwen3 leaks when the
+///      template isn't fully in reasoning mode but the model still knows
+///      it should be calling a tool
+///   4. `{"tool_calls":[{...}, ...]}` — OpenAI multi-call envelope
+///      hallucinated as content text
 ///
 /// Closing tags are treated as optional — models skip them constantly.
-/// JSON parsing uses balanced-brace counting with a string/escape guard so
-/// `{` or `}` inside argument strings doesn't confuse the extractor.
+/// JSON parsing uses balanced-brace counting with a string/escape guard
+/// so `{` or `}` inside argument strings doesn't confuse the extractor.
 ///
 /// Returns `(tool_calls, cleaned_text)` where `cleaned_text` is the input
 /// with every matched block removed. If nothing matches, the text is
 /// returned unchanged — safe to call on any content.
 pub(crate) fn extract_text_tool_calls(text: &str) -> (Vec<(String, serde_json::Value)>, String) {
-    // Cheap pre-check so non-Qwen content pays nothing.
-    if !text.contains("<tool_call>") && !text.contains("<function=") {
+    // Cheap pre-check so non-matching content pays nothing.
+    if !text.contains("<tool_call>")
+        && !text.contains("<function=")
+        && !text.contains("tool_call:")
+        && !text.contains("\"tool_calls\"")
+    {
         return (Vec::new(), text.to_string());
     }
 
@@ -239,13 +250,101 @@ pub(crate) fn extract_text_tool_calls(text: &str) -> (Vec<(String, serde_json::V
     while i < bytes.len() {
         let tc_at = text[i..].find("<tool_call>").map(|r| i + r);
         let fn_at = text[i..].find("<function=").map(|r| i + r);
-        let next = match (tc_at, fn_at) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        };
+        let bare_at = text[i..].find("tool_call:").map(|r| i + r);
+        let arr_at = text[i..].find("\"tool_calls\"").map(|r| i + r);
+        let next = [tc_at, fn_at, bare_at, arr_at].into_iter().flatten().min();
         let Some(start) = next else { break };
 
-        if tc_at == Some(start) {
+        if bare_at == Some(start) {
+            // Guard: "tool_call:" must be a bare marker, not a substring inside a
+            // larger identifier like "set_tool_call:true" or "my_tool_call:fn".
+            // Require the preceding byte (if any) to be a word boundary.
+            if start > 0 {
+                let prev = text.as_bytes()[start - 1];
+                let is_boundary = prev.is_ascii_whitespace()
+                    || matches!(
+                        prev,
+                        b',' | b';' | b':' | b'[' | b'(' | b'{' | b'\n' | b'\r'
+                    );
+                if !is_boundary {
+                    i = start + "tool_call:".len();
+                    continue;
+                }
+            }
+            let body_start = start + "tool_call:".len();
+            let brace_rel = text[body_start..]
+                .char_indices()
+                .find(|(_, c)| !c.is_whitespace())
+                .map(|(idx, _)| idx);
+            let brace_abs = match brace_rel {
+                Some(rel) if text.as_bytes().get(body_start + rel) == Some(&b'{') => {
+                    body_start + rel
+                }
+                _ => {
+                    // Not a JSON envelope — advance past the marker.
+                    i = body_start;
+                    continue;
+                }
+            };
+            match extract_balanced_json(&text[brace_abs..]) {
+                Some(consumed) => {
+                    let json_slice = &text[brace_abs..brace_abs + consumed];
+                    if let Some(call) = parse_qwen_tool_json(json_slice) {
+                        tool_calls.push(call);
+                        strip_ranges.push((start, brace_abs + consumed));
+                        i = brace_abs + consumed;
+                        continue;
+                    }
+                    // Unrecognized JSON shape — skip the bare marker but not
+                    // the JSON (it may still be prose with legitimate JSON).
+                    i = body_start;
+                }
+                None => {
+                    i = body_start;
+                }
+            }
+            continue;
+        } else if arr_at == Some(start) {
+            // `{"tool_calls":[...]}` envelope hallucinated as content text.
+            // Find the wrapping `{`; it should be within a short window of
+            // the `"tool_calls"` key (typically `{"tool_calls":` or
+            // `{ "tool_calls":`). If it's further away, this is probably
+            // prose like `the \"tool_calls\" field` — bail.
+            let wrapper = text[..start].rfind('{');
+            let wrapper_start = match wrapper {
+                Some(br) if start - br <= 4 => br,
+                _ => {
+                    i = start + "\"tool_calls\"".len();
+                    continue;
+                }
+            };
+            match extract_balanced_json(&text[wrapper_start..]) {
+                Some(consumed) => {
+                    let env_slice = &text[wrapper_start..wrapper_start + consumed];
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(env_slice)
+                        && let Some(arr) = v.get("tool_calls").and_then(|a| a.as_array())
+                    {
+                        let mut found_any = false;
+                        for item in arr {
+                            if let Some(call) = parse_tool_call_value(item) {
+                                tool_calls.push(call);
+                                found_any = true;
+                            }
+                        }
+                        if found_any {
+                            strip_ranges.push((wrapper_start, wrapper_start + consumed));
+                            i = wrapper_start + consumed;
+                            continue;
+                        }
+                    }
+                    i = start + "\"tool_calls\"".len();
+                }
+                None => {
+                    i = start + "\"tool_calls\"".len();
+                }
+            }
+            continue;
+        } else if tc_at == Some(start) {
             // <tool_call>{json}</tool_call>? — closing tag optional
             let body_start = start + "<tool_call>".len();
             // Skip whitespace to the opening brace.
@@ -313,10 +412,7 @@ pub(crate) fn extract_text_tool_calls(text: &str) -> (Vec<(String, serde_json::V
                 tail.find("<function=").map(|r| (r, 0usize)),
                 tail.find("</function>").map(|r| (r, "</function>".len())),
             ];
-            let pick = candidates
-                .iter()
-                .filter_map(|o| *o)
-                .min_by_key(|(r, _)| *r);
+            let pick = candidates.iter().filter_map(|o| *o).min_by_key(|(r, _)| *r);
             let (body_rel, close_len) = match pick {
                 Some(p) => p,
                 None => {
@@ -392,26 +488,49 @@ pub(crate) fn extract_balanced_json(s: &str) -> Option<usize> {
     None
 }
 
-/// Parse the JSON inside a `<tool_call>{...}</tool_call>` block. Accepts
-/// Qwen's canonical `{"name":"x","arguments":{...}}` and the variants
-/// other local models emit (`tool_name`, `args`, `input`, `parameters`,
-/// stringified arguments, etc.).
+/// Parse the JSON inside a `<tool_call>{...}</tool_call>` block or a bare
+/// `tool_call:{...}` envelope. Accepts every shape we've seen in the wild:
+/// Qwen's canonical `{"name":"x","arguments":{...}}`, MiniMax's
+/// `tool_name`/`args`, the OpenAI envelope
+/// `{"id":"...","type":"function","function":{"name":"...","arguments":{...}}}`,
+/// and stringified arguments (`"arguments": "{\"k\":1}"`).
 fn parse_qwen_tool_json(json: &str) -> Option<(String, serde_json::Value)> {
     let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    parse_tool_call_value(&v)
+}
+
+/// Value-level parser shared by the JSON-string path and the
+/// `{"tool_calls":[{...}, ...]}` multi-envelope path.
+fn parse_tool_call_value(v: &serde_json::Value) -> Option<(String, serde_json::Value)> {
+    // Name can live at the top level OR nested under `function` (OpenAI shape).
     let name = v
         .get("name")
-        .or_else(|| v.get("tool_name"))
-        .or_else(|| v.get("function"))
-        .and_then(|n| n.as_str())?
+        .and_then(|n| n.as_str())
+        .or_else(|| v.get("tool_name").and_then(|n| n.as_str()))
+        .or_else(|| {
+            v.get("function")
+                .and_then(|f| f.get("name"))
+                .and_then(|n| n.as_str())
+        })
+        // Fallback: `function` itself might be a string (legacy OpenAI
+        // function-call format: `{"function": "bash", ...}`).
+        .or_else(|| {
+            v.get("function")
+                .and_then(|f| if f.is_string() { f.as_str() } else { None })
+        })?
         .to_string();
     if name.is_empty() {
         return None;
     }
+    // Arguments follow the same pattern — may be nested under `function`
+    // for the OpenAI envelope shape.
     let args_val = v
         .get("arguments")
         .or_else(|| v.get("args"))
         .or_else(|| v.get("input"))
-        .or_else(|| v.get("parameters"));
+        .or_else(|| v.get("parameters"))
+        .or_else(|| v.get("function").and_then(|f| f.get("arguments")))
+        .or_else(|| v.get("function").and_then(|f| f.get("parameters")));
     let input = match args_val {
         Some(serde_json::Value::String(s)) => {
             serde_json::from_str(s).unwrap_or(serde_json::json!({}))
@@ -2616,7 +2735,9 @@ impl Provider for OpenAIProvider {
                                             // no cost beyond the substring check.
                                             if st.tool_calls.is_empty()
                                                 && (st.response_text_accum.contains("<tool_call>")
-                                                    || st.response_text_accum.contains("<function="))
+                                                    || st.response_text_accum.contains("<function=")
+                                                    || st.response_text_accum.contains("tool_call:")
+                                                    || st.response_text_accum.contains("\"tool_calls\""))
                                             {
                                                 let (recovered, _cleaned) =
                                                     extract_text_tool_calls(&st.response_text_accum);

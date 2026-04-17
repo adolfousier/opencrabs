@@ -12,7 +12,9 @@ use crate::brain::provider::factory::is_local_base_url;
 
 #[test]
 fn detects_loopback_hosts() {
-    assert!(is_local_base_url("http://localhost:1234/v1/chat/completions"));
+    assert!(is_local_base_url(
+        "http://localhost:1234/v1/chat/completions"
+    ));
     assert!(is_local_base_url("http://127.0.0.1:8080"));
     assert!(is_local_base_url("http://[::1]:1234/v1"));
     assert!(is_local_base_url("http://0.0.0.0:11434"));

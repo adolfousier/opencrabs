@@ -4,9 +4,12 @@
 
 use super::qwen::{qwen_body_transform, qwen_extra_headers};
 use super::{
-    Provider, anthropic::AnthropicProvider, claude_cli::ClaudeCliProvider,
+    Provider,
+    anthropic::AnthropicProvider,
+    claude_cli::ClaudeCliProvider,
     custom_openai_compatible::{BodyTransformFn, OpenAIProvider},
-    gemini::GeminiProvider, opencode_cli::OpenCodeCliProvider,
+    gemini::GeminiProvider,
+    opencode_cli::OpenCodeCliProvider,
 };
 use crate::config::{Config, ProviderConfig};
 use anyhow::Result;
@@ -369,7 +372,8 @@ fn try_create_custom_by_name(config: &Config, name: &str) -> Result<Option<Arc<d
     }
 
     tracing::info!("Creating custom provider '{}' at: {}", name, base_url);
-    let mut builder = OpenAIProvider::with_base_url(api_key.clone(), base_url.clone()).with_name(name);
+    let mut builder =
+        OpenAIProvider::with_base_url(api_key.clone(), base_url.clone()).with_name(name);
     if is_local_base_url(&base_url) {
         let enable = custom_config.enable_thinking.unwrap_or(true);
         builder = builder.with_body_transform(local_thinking_body_transform(enable));

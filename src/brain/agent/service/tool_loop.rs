@@ -2205,7 +2205,8 @@ impl AgentService {
                         "Phantom tool call detected (local={}, intent_match={}) — \
                          model described actions without executing tools. \
                          Injecting retry prompt.",
-                        phantom_matches_local, phantom_matches_narrow
+                        phantom_matches_local,
+                        phantom_matches_narrow
                     );
                     self.record_provider_feedback(
                         session_id,

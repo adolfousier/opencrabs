@@ -141,3 +141,78 @@ fn ignores_tool_call_without_name() {
     let (calls, _) = extract_text_tool_calls(text);
     assert_eq!(calls.len(), 0);
 }
+
+#[test]
+fn extract_bare_tool_call_openai_envelope() {
+    // The format Qwen3 leaks when the template isn't in reasoning mode —
+    // seen in logs 2026-04-17 02:41:12 after phantom retries failed.
+    let text = r#"tool_call:{"id":"call_001","type":"function","function":{"name":"bash","arguments":{"command":"ls -la"}}}"#;
+    let (calls, cleaned) = extract_text_tool_calls(text);
+    assert_eq!(calls.len(), 1, "must recover bare tool_call: prefix");
+    assert_eq!(calls[0].0, "bash");
+    assert_eq!(calls[0].1["command"], "ls -la");
+    assert!(
+        cleaned.trim().is_empty(),
+        "the whole envelope must be stripped, got: {cleaned:?}"
+    );
+}
+
+#[test]
+fn extract_bare_tool_call_with_preceding_text() {
+    let text = r#"I'll check that. tool_call:{"id":"c1","type":"function","function":{"name":"bash","arguments":{"command":"pwd"}}} done."#;
+    let (calls, cleaned) = extract_text_tool_calls(text);
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0, "bash");
+    assert!(cleaned.contains("I'll check that"));
+    assert!(cleaned.contains("done"));
+    assert!(!cleaned.contains("tool_call:"));
+}
+
+#[test]
+fn bare_marker_rejects_non_boundary_prefix() {
+    // `set_tool_call:{...}` is not a tool-call emission — the prefix is
+    // embedded in an identifier. Must not extract.
+    let text = r#"set_tool_call:{"x":1} and more"#;
+    let (calls, cleaned) = extract_text_tool_calls(text);
+    assert_eq!(calls.len(), 0);
+    assert_eq!(cleaned, text);
+}
+
+#[test]
+fn extract_tool_calls_array_envelope() {
+    let text = r#"{"tool_calls":[{"id":"c1","type":"function","function":{"name":"bash","arguments":{"command":"ls"}}},{"id":"c2","type":"function","function":{"name":"web_search","arguments":{"query":"rust"}}}]}"#;
+    let (calls, cleaned) = extract_text_tool_calls(text);
+    assert_eq!(calls.len(), 2, "both envelope entries must be recovered");
+    assert_eq!(calls[0].0, "bash");
+    assert_eq!(calls[0].1["command"], "ls");
+    assert_eq!(calls[1].0, "web_search");
+    assert_eq!(calls[1].1["query"], "rust");
+    assert!(cleaned.trim().is_empty());
+}
+
+#[test]
+fn openai_nested_function_name_without_wrapper() {
+    // Bare OpenAI object (no `tool_call:` prefix, no array wrapper).
+    // Currently we don't attempt to recover unprefixed bare JSON — users
+    // would want an extractor that checks every `{` prefix, which is far
+    // too aggressive for prose. This test locks in the "no false positive"
+    // expectation.
+    let text =
+        r#"{"id":"c1","type":"function","function":{"name":"bash","arguments":{"command":"ls"}}}"#;
+    let (calls, _) = extract_text_tool_calls(text);
+    assert_eq!(
+        calls.len(),
+        0,
+        "bare OpenAI JSON without a marker must NOT be auto-extracted"
+    );
+}
+
+#[test]
+fn tool_calls_inside_prose_is_ignored() {
+    // Prose like `the "tool_calls" field carries tool calls` must not
+    // match — the wrapping `{` is far away and belongs to something else.
+    let text = r#"The field called "tool_calls" is an array. Another sentence."#;
+    let (calls, cleaned) = extract_text_tool_calls(text);
+    assert_eq!(calls.len(), 0);
+    assert_eq!(cleaned, text);
+}
