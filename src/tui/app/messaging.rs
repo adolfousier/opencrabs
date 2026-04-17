@@ -47,6 +47,11 @@ impl App {
             .await?;
 
         self.current_session = Some(session.clone());
+        // Persist as last active so the next startup resumes this session.
+        // Without this, `last_session` kept pointing at whatever chat the
+        // user was on BEFORE creating the new one — restarts loaded the
+        // old session and the user saw their fresh work as "gone".
+        Self::save_last_session_id(session.id);
         self.set_plan_file_for_session(session.id);
         self.is_processing = false; // New session is never processing
         self.messages.clear();
