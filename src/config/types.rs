@@ -935,11 +935,23 @@ pub struct ProviderConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
 
-    /// Opt-in toggle for Qwen3 hybrid thinking mode.
-    /// Qwen3 is a single model with a runtime switch — set `enable_thinking =
-    /// true` in `[providers.qwen]` to ask the gateway to emit reasoning
-    /// tokens. Unset / false keeps the model in non-thinking (fast) mode.
-    /// Currently only honoured by the native Qwen provider.
+    /// Thinking-mode switch for reasoning-capable models.
+    ///
+    /// Two different pathways honour this flag:
+    /// - **DashScope Qwen** (`[providers.qwen]`) — inserted at the top
+    ///   level of the request body so the gateway enables Qwen3's hybrid
+    ///   reasoning mode. Unset / false keeps the model in fast mode.
+    /// - **Local providers** (custom providers whose `base_url` points at
+    ///   `localhost`, `*.local`, or an RFC1918 private IP — i.e. a
+    ///   self-hosted llama.cpp / MLX / LM Studio / Ollama server) —
+    ///   wrapped into `chat_template_kwargs: {"enable_thinking": X}`,
+    ///   matching what `llama-server --jinja --chat-template-kwargs`
+    ///   does. For local providers the default is `true` (Unsloth's
+    ///   default behaviour — letting Qwen/Kimi/DeepSeek templates render
+    ///   `<tool_call>` tags correctly); set `enable_thinking = false` in
+    ///   the custom provider config to force non-thinking fast mode.
+    ///
+    /// Cloud providers that aren't Qwen ignore this flag entirely.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable_thinking: Option<bool>,
 }

@@ -861,6 +861,16 @@ models = ["qwen2.5-coder-7b-instruct", "llama-3-8B", "mistral-7B-instruct"]
 
 > **Note:** `/chat/completions` is auto-appended to base URLs that don't include it.
 
+> **Local reasoning models (`enable_thinking`):** when a custom provider's `base_url` points at a local host (`localhost`, `127.0.0.1`, `*.local`, or an RFC1918 private IP like `192.168.x.x` / `10.x.x.x` / `172.16.x.x`–`172.31.x.x`), OpenCrabs injects `chat_template_kwargs: {"enable_thinking": true}` into every request. This mirrors `llama-server --jinja --chat-template-kwargs '{"enable_thinking":true}'` — what Unsloth Studio launches with by default — so Qwen3 / Kimi / DeepSeek-R1 templates render `<tool_call>` tags and reasoning blocks correctly, and tool calls actually execute instead of being hallucinated as text. Set `enable_thinking = false` in the provider block to disable (falls back to fast, non-thinking mode). Cloud providers are unaffected.
+>
+> ```toml
+> [providers.custom.lm_studio]
+> enabled = true
+> base_url = "http://localhost:1234/v1"
+> default_model = "qwen3-30b-a3b"
+> enable_thinking = false  # optional — default is true for local providers
+> ```
+
 **Multiple custom providers** coexist — define as many as you need with different names and switch between them via `/models`:
 
 ```toml

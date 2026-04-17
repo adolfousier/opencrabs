@@ -5,12 +5,90 @@
 use super::qwen::{qwen_body_transform, qwen_extra_headers};
 use super::{
     Provider, anthropic::AnthropicProvider, claude_cli::ClaudeCliProvider,
-    custom_openai_compatible::OpenAIProvider, gemini::GeminiProvider,
-    opencode_cli::OpenCodeCliProvider,
+    custom_openai_compatible::{BodyTransformFn, OpenAIProvider},
+    gemini::GeminiProvider, opencode_cli::OpenCodeCliProvider,
 };
 use crate::config::{Config, ProviderConfig};
 use anyhow::Result;
 use std::sync::Arc;
+
+/// Detect whether a base URL points to a local inference server
+/// (llama.cpp, MLX, LM Studio, Ollama, etc.). Used to gate behaviours
+/// that only make sense for self-hosted backends — specifically the
+/// `chat_template_kwargs` injection for local Qwen, which cloud Qwen
+/// (DashScope) rejects because it sets the reasoning flag server-side.
+///
+/// Matches loopback (`localhost`, `127.0.0.1`, `::1`, `0.0.0.0`),
+/// mDNS (`*.local`), and the three RFC1918 private-network ranges
+/// (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`). Public hosts
+/// always return false so production endpoints keep their existing
+/// request shape.
+pub(crate) fn is_local_base_url(url: &str) -> bool {
+    let after_scheme = url
+        .strip_prefix("http://")
+        .or_else(|| url.strip_prefix("https://"))
+        .unwrap_or(url);
+    let host_and_port = after_scheme.split(['/', '?']).next().unwrap_or("");
+    // IPv6 addresses are bracketed: `[::1]:1234`. Strip brackets first so
+    // the port-split logic doesn't mangle the address.
+    let bare = if let Some(rest) = host_and_port.strip_prefix('[') {
+        rest.split_once(']').map(|(h, _)| h).unwrap_or(rest)
+    } else {
+        host_and_port
+            .rsplit_once(':')
+            .map(|(h, _)| h)
+            .unwrap_or(host_and_port)
+    };
+    let bare = bare.to_ascii_lowercase();
+    if bare == "localhost"
+        || bare == "127.0.0.1"
+        || bare == "0.0.0.0"
+        || bare == "::1"
+        || bare.ends_with(".local")
+        || bare.starts_with("192.168.")
+        || bare.starts_with("10.")
+    {
+        return true;
+    }
+    // 172.16.0.0 – 172.31.255.255
+    let mut parts = bare.split('.');
+    if parts.next() == Some("172")
+        && let Some(second) = parts.next()
+        && let Ok(n) = second.parse::<u8>()
+        && (16..=31).contains(&n)
+    {
+        return true;
+    }
+    false
+}
+
+/// Build a body transform that injects
+/// `chat_template_kwargs: {"enable_thinking": X}` into every request sent
+/// to a local llama.cpp / MLX / LM Studio / Ollama server. Mirrors what
+/// `llama-server --jinja --chat-template-kwargs '{"enable_thinking":true}'`
+/// does — the flags Unsloth Studio launches with — so embedded GGUF/MLX
+/// chat templates render `<tool_call>` tags and reasoning blocks the way
+/// the model was trained on.
+///
+/// Generic across thinking-capable models (Qwen3, Kimi-K2, DeepSeek-R1
+/// variants, etc.) — we inject when opted in, regardless of the model
+/// name, because the mechanism is a llama.cpp jinja feature, not a
+/// model-specific one. Callers only install this transform when the
+/// user set `enable_thinking` in config (opt-in), so local models whose
+/// template doesn't accept the variable stay untouched by default.
+fn local_thinking_body_transform(enable: bool) -> BodyTransformFn {
+    Arc::new(move |mut body: serde_json::Value| {
+        if let Some(obj) = body.as_object_mut()
+            && !obj.contains_key("chat_template_kwargs")
+        {
+            obj.insert(
+                "chat_template_kwargs".to_string(),
+                serde_json::json!({ "enable_thinking": enable }),
+            );
+        }
+        body
+    })
+}
 
 /// Try a single provider by name. Qwen is async (OAuth refresh),
 /// everything else is sync but wrapped in the same async signature.
@@ -291,10 +369,12 @@ fn try_create_custom_by_name(config: &Config, name: &str) -> Result<Option<Arc<d
     }
 
     tracing::info!("Creating custom provider '{}' at: {}", name, base_url);
-    let provider = configure_openai_compatible(
-        OpenAIProvider::with_base_url(api_key.clone(), base_url).with_name(name),
-        &custom_config,
-    );
+    let mut builder = OpenAIProvider::with_base_url(api_key.clone(), base_url.clone()).with_name(name);
+    if is_local_base_url(&base_url) {
+        let enable = custom_config.enable_thinking.unwrap_or(true);
+        builder = builder.with_body_transform(local_thinking_body_transform(enable));
+    }
+    let provider = configure_openai_compatible(builder, &custom_config);
     Ok(Some(Arc::new(provider)))
 }
 
@@ -656,10 +736,12 @@ fn try_create_custom(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         base_url,
         !api_key.is_empty()
     );
-    let provider = configure_openai_compatible(
-        OpenAIProvider::with_base_url(api_key, base_url).with_name(&name),
-        &custom_config,
-    );
+    let mut builder = OpenAIProvider::with_base_url(api_key, base_url.clone()).with_name(&name);
+    if is_local_base_url(&base_url) {
+        let enable = custom_config.enable_thinking.unwrap_or(true);
+        builder = builder.with_body_transform(local_thinking_body_transform(enable));
+    }
+    let provider = configure_openai_compatible(builder, &custom_config);
     Ok(Some(Arc::new(provider)))
 }
 
@@ -699,10 +781,12 @@ fn try_create_openai(config: &Config) -> Result<Option<Arc<dyn Provider>>> {
         && openai_config.api_key.is_none()
     {
         tracing::info!("Using local LLM at: {}", base_url);
-        let provider = configure_openai_compatible(
-            OpenAIProvider::local(base_url.clone()).with_name("openai"),
-            openai_config,
-        );
+        let mut builder = OpenAIProvider::local(base_url.clone()).with_name("openai");
+        if is_local_base_url(base_url) {
+            let enable = openai_config.enable_thinking.unwrap_or(true);
+            builder = builder.with_body_transform(local_thinking_body_transform(enable));
+        }
+        let provider = configure_openai_compatible(builder, openai_config);
         return Ok(Some(Arc::new(provider)));
     }
 
