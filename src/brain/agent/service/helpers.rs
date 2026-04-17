@@ -138,25 +138,25 @@ impl AgentService {
         //   CLI: 1h. Subprocess runs tools internally (cargo build, gh, etc.).
         //
         //   Local HTTP server (llama.cpp / Unsloth / LM Studio / Ollama / MLX):
-        //   15min. A cold 35B gguf on Apple Silicon spends *real* time filling
-        //   its KV cache on a large prompt — 85%-window turns on
-        //   localhost:8891 ran past 90s with no chunk emitted yet. 15min
-        //   gives prefill enough runway while still detecting a truly dead
-        //   connection within the retry budget (3 × 15min = 45min worst case;
-        //   the handshake timeout above catches genuine wedges in 90s first).
+        //   1h. Hardware + model size varies too much to pick a smaller
+        //   number confidently — 4B on an M3 Ultra emits in seconds, but a
+        //   70B gguf on an older Mac or a LAN box running MoE 100B+ can
+        //   spend tens of minutes on prefill for a full-context prompt. The
+        //   handshake timeout (90s) above still catches genuinely dead
+        //   servers fast; once headers arrive the server is clearly alive
+        //   and just working — don't cut it off on a guess. The user can
+        //   always Esc if a turn truly runs away.
         //
         //   Remote HTTP: 90s. Cross-continent latency plus LLM warmup.
-        //   OpenAI/OpenRouter/etc. would emit stream events faster than a
-        //   local prefill, so 90s of silence there really does mean the
-        //   connection dropped.
+        //   OpenAI/OpenRouter/etc. emit stream events faster than a local
+        //   prefill, so 90s of silence really does mean the connection
+        //   dropped.
         let is_local = provider
             .base_url()
             .map(crate::brain::provider::factory::is_local_base_url)
             .unwrap_or(false);
-        let stream_idle_timeout = if is_cli {
+        let stream_idle_timeout = if is_cli || is_local {
             std::time::Duration::from_secs(3600)
-        } else if is_local {
-            std::time::Duration::from_secs(900)
         } else {
             std::time::Duration::from_secs(90)
         };
