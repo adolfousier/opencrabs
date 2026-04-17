@@ -71,13 +71,31 @@ const THINK_BLOCK_MAX_BYTES: usize = 200_000;
 /// carry up to `len(open_tag) - 1` bytes of it to bridge a split.
 const MAX_OPEN_TAG_CARRY: usize = 17;
 
+/// Returns `(display_text, reasoning_text)`.
+///
+/// `display_text` is the portion of the input that falls OUTSIDE every
+/// stripped block — what the user should see.
+///
+/// `reasoning_text` is the portion that fell inside a `<think>` or
+/// `<!-- reasoning -->` block. Generic HTML-comment blocks (the
+/// catch-all `<!--` entry at index 2 in STRIP_OPEN_TAGS, covering
+/// echoed `<!-- tools-v2: ... -->` markers etc.) are NOT treated as
+/// reasoning — they go to neither output and are discarded.
+///
+/// Capturing reasoning lets the caller emit it as
+/// `ContentDelta::ReasoningDelta` so models like Qwen that emit their
+/// thinking inline inside message content (rather than via the OpenAI
+/// `reasoning_content` field) still surface to the TUI as live
+/// "Thinking..." content and get persisted as `details` on the final
+/// assistant `DisplayMessage` — matching the UX of providers that emit
+/// reasoning via the structured field natively.
 fn filter_think_tags(
     text: &str,
     inside_think: &mut bool,
     active_close_tag: &mut usize,
     bytes_consumed: &mut usize,
     carry: &mut String,
-) -> String {
+) -> (String, String) {
     // Prepend any carry-over from the previous chunk so a split open
     // tag (e.g. prior chunk ended with `<!`, current chunk starts with
     // `-- tools-v2:`) can match as one unit.
@@ -90,7 +108,14 @@ fn filter_think_tags(
         owned.as_str()
     };
     let mut result = String::new();
+    let mut reasoning = String::new();
     let mut remaining = input_ref;
+
+    // STRIP_OPEN_TAGS indices 0 (`<think>`) and 1 (`<!-- reasoning -->`)
+    // carry real reasoning content. Index 2 (`<!--` generic) catches
+    // hallucinated tool markers and random HTML comments — those must
+    // stay discarded.
+    let is_reasoning_block = |idx: usize| idx < 2;
 
     loop {
         if *inside_think {
@@ -109,7 +134,11 @@ fn filter_think_tags(
                     *active_close_tag,
                 );
                 // Reset the counter so we don't re-log every chunk; stay in
-                // suppress mode until the actual close tag arrives.
+                // suppress mode until the actual close tag arrives. No
+                // reasoning routing for generic `<!--` comments.
+                if is_reasoning_block(*active_close_tag) {
+                    reasoning.push_str(remaining);
+                }
                 *bytes_consumed = 0;
                 break;
             }
@@ -122,10 +151,20 @@ fn filter_think_tags(
                 .min_by_key(|(pos, _)| *pos);
 
             if let Some((end, close)) = earliest_close {
+                if is_reasoning_block(*active_close_tag) {
+                    reasoning.push_str(&remaining[..end]);
+                }
                 remaining = &remaining[end + close.len()..];
                 *inside_think = false;
                 *bytes_consumed = 0;
             } else {
+                // No close in this chunk. Capture the whole remaining
+                // slice as reasoning (if this IS a reasoning block) so
+                // the caller can stream it live; the close tag will
+                // arrive in a future chunk.
+                if is_reasoning_block(*active_close_tag) {
+                    reasoning.push_str(remaining);
+                }
                 break;
             }
         } else {
@@ -163,7 +202,7 @@ fn filter_think_tags(
         }
     }
 
-    result
+    (result, reasoning)
 }
 
 /// Length of the longest suffix of `s` that's a strict prefix of any
@@ -2842,7 +2881,7 @@ impl Provider for OpenAIProvider {
                                                 let (mut inside, mut close_idx, mut consumed) =
                                                     (st.inside_think, st.active_close_tag, st.think_bytes_consumed);
                                                 let mut carry = std::mem::take(&mut st.think_carry);
-                                                let filtered = filter_think_tags(
+                                                let (filtered, reasoning_from_think) = filter_think_tags(
                                                     flushed,
                                                     &mut inside,
                                                     &mut close_idx,
@@ -2853,6 +2892,31 @@ impl Provider for OpenAIProvider {
                                                 st.active_close_tag = close_idx;
                                                 st.think_bytes_consumed = consumed;
                                                 st.think_carry = carry;
+
+                                                // Content inside `<think>…</think>` is promoted to a
+                                                // `ReasoningDelta` event so downstream treats it like
+                                                // the OpenAI `reasoning_content` field — helpers.rs
+                                                // accumulates it into `reasoning_buf`, emits a
+                                                // `ReasoningChunk` progress event the TUI renders as
+                                                // live "Thinking…" text, and lands it as `details` on
+                                                // the final `DisplayMessage`. Without this, models
+                                                // like Qwen that emit `<think>` inline would have
+                                                // their thinking silently discarded.
+                                                if !reasoning_from_think.is_empty() {
+                                                    if !st.emitted_content_start {
+                                                        st.emitted_content_start = true;
+                                                        events.push(Ok(StreamEvent::ContentBlockStart {
+                                                            index: 0,
+                                                            content_block: ContentBlock::Text { text: String::new() },
+                                                        }));
+                                                    }
+                                                    events.push(Ok(StreamEvent::ContentBlockDelta {
+                                                        index: 0,
+                                                        delta: ContentDelta::ReasoningDelta {
+                                                            text: reasoning_from_think,
+                                                        },
+                                                    }));
+                                                }
 
                                                 // For local providers (llama.cpp/MLX/etc.) the model often
                                                 // leaks tool calls as content text. Partition the filtered
@@ -3004,7 +3068,7 @@ impl Provider for OpenAIProvider {
                                                 let (mut inside, mut close_idx, mut consumed) =
                                                     (st.inside_think, st.active_close_tag, st.think_bytes_consumed);
                                                 let mut carry = std::mem::take(&mut st.think_carry);
-                                                let filtered = filter_think_tags(
+                                                let (filtered, reasoning_from_think) = filter_think_tags(
                                                     &flushed,
                                                     &mut inside,
                                                     &mut close_idx,
@@ -3015,6 +3079,21 @@ impl Provider for OpenAIProvider {
                                                 st.active_close_tag = close_idx;
                                                 st.think_bytes_consumed = consumed;
                                                 st.think_carry = carry;
+                                                if !reasoning_from_think.is_empty() {
+                                                    if !st.emitted_content_start {
+                                                        st.emitted_content_start = true;
+                                                        events.push(Ok(StreamEvent::ContentBlockStart {
+                                                            index: 0,
+                                                            content_block: ContentBlock::Text { text: String::new() },
+                                                        }));
+                                                    }
+                                                    events.push(Ok(StreamEvent::ContentBlockDelta {
+                                                        index: 0,
+                                                        delta: ContentDelta::ReasoningDelta {
+                                                            text: reasoning_from_think,
+                                                        },
+                                                    }));
+                                                }
                                                 if !filtered.is_empty() {
                                                     if !st.emitted_content_start {
                                                         st.emitted_content_start = true;

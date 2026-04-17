@@ -1398,7 +1398,10 @@ fn prose_lead_in(text: &str) -> &str {
             || trimmed_line.starts_with("- ")
             || trimmed_line.starts_with("* ")
             || trimmed_line.starts_with("• ")
-            || (trimmed_line.chars().next().is_some_and(|c| c.is_ascii_digit())
+            || (trimmed_line
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_digit())
                 && trimmed_line.contains(". "));
         if is_structural {
             return text[..byte_offset].trim_end();
