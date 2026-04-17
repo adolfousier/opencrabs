@@ -1181,19 +1181,15 @@ impl App {
                         }
                         self.is_processing = false;
                         self.processing_started_at = None;
-                        self.streaming_response = None;
-                        self.streaming_reasoning = None;
-                        self.cancel_token = None;
-                        self.escape_pending_at = None;
                         // Flush any in-flight tool group into the message list
-                        // BEFORE clearing. Per-tool DB persistence already wrote
-                        // them to the message row, but the TUI's DisplayMessage
-                        // for the group only exists as `active_tool_group` until
-                        // the next flush point. Without this, the user watches
-                        // tools execute, hits Escape-twice, and the whole group
-                        // vanishes from view — only reappearing on session
-                        // reload from DB. Commit it to `self.messages` so the
-                        // history stays stable across cancel.
+                        // BEFORE touching streaming state. Per-tool DB persistence
+                        // already wrote them to the message row, but the TUI's
+                        // DisplayMessage for the group only exists as
+                        // `active_tool_group` until the next flush point. Without
+                        // this, the user watches tools execute, hits Escape-twice,
+                        // and the whole group vanishes from view — only
+                        // reappearing on session reload from DB. Commit it to
+                        // `self.messages` so the history stays stable across cancel.
                         if let Some(group) = self.active_tool_group.take()
                             && !group.calls.is_empty()
                         {
@@ -1216,6 +1212,50 @@ impl App {
                                 tool_group: Some(group),
                             });
                         }
+                        // Promote any in-progress streaming text + reasoning to
+                        // a permanent assistant DisplayMessage BEFORE clearing
+                        // them. Without this the user sees streaming content
+                        // during the turn, hits Escape-twice, and the whole
+                        // response vanishes from the in-memory history — the
+                        // DB still has it (persist_streaming_state above wrote
+                        // it) but rendering pulls from `self.messages`, so the
+                        // chat appears to reset to just the user's message
+                        // until restart. Push now so the render matches what
+                        // the user actually saw on screen.
+                        let stash_text = self.streaming_response.take();
+                        let stash_reasoning = self.streaming_reasoning.take();
+                        let has_visible_text = stash_text
+                            .as_deref()
+                            .map(|s| !s.trim().is_empty())
+                            .unwrap_or(false);
+                        let has_visible_reasoning = stash_reasoning
+                            .as_deref()
+                            .map(|s| !s.trim().is_empty())
+                            .unwrap_or(false);
+                        if has_visible_text || has_visible_reasoning {
+                            let content = stash_text
+                                .as_deref()
+                                .map(|s| {
+                                    crate::utils::sanitize::strip_llm_artifacts(s)
+                                })
+                                .unwrap_or_default();
+                            self.messages.push(DisplayMessage {
+                                id: Uuid::new_v4(),
+                                role: "assistant".to_string(),
+                                content,
+                                timestamp: chrono::Utc::now(),
+                                token_count: None,
+                                cost: None,
+                                approval: None,
+                                approve_menu: None,
+                                details: stash_reasoning,
+                                expanded: false,
+                                tool_group: None,
+                            });
+                        }
+                        self.streaming_render_cache = None;
+                        self.cancel_token = None;
+                        self.escape_pending_at = None;
                         self.streaming_output_tokens = 0;
                         self.intermediate_text_received = false;
                         // Drop any queued user message — otherwise it would
