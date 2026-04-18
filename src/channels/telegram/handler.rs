@@ -1114,6 +1114,29 @@ pub(crate) async fn handle_message(
                                     let text =
                                         crate::utils::sanitize::strip_llm_artifacts(text);
                                     let text = redact_secrets(&text);
+
+                                    // Pre-send dedup: if this exact text was
+                                    // already delivered as an intermediate in
+                                    // this turn, skip. Downstream dedup only
+                                    // strips the final-placeholder edit — it
+                                    // cannot un-send intermediates already in
+                                    // the chat. Twin intermediates from a
+                                    // retry loop (e.g. truncation-retry
+                                    // firing on a URL-terminated response
+                                    // and producing the same text in
+                                    // iteration N+1) would otherwise land
+                                    // verbatim twice (2026-04-18 23:12/23:13).
+                                    {
+                                        let s = st.lock().unwrap_or_else(|e| e.into_inner());
+                                        if s.sent_intermediates.iter().any(|prev| prev == &text) {
+                                            tracing::info!(
+                                                "Telegram: suppressing duplicate intermediate (len={})",
+                                                text.len()
+                                            );
+                                            continue;
+                                        }
+                                    }
+
                                     let html = markdown_to_telegram_html(&text);
                                     if !html.is_empty() {
                                         // Chunk to 4096 and only record as delivered if every
@@ -1528,6 +1551,17 @@ pub(crate) async fn handle_message(
             DisplayItem::Intermediate(text) => {
                 let text = crate::utils::sanitize::strip_llm_artifacts(&text);
                 let text = redact_secrets(&text);
+                // Pre-send dedup — see matching block in edit-loop above.
+                {
+                    let s = streaming.lock().unwrap_or_else(|e| e.into_inner());
+                    if s.sent_intermediates.iter().any(|prev| prev == &text) {
+                        tracing::info!(
+                            "Telegram: suppressing duplicate intermediate (len={})",
+                            text.len()
+                        );
+                        continue;
+                    }
+                }
                 let html = markdown_to_telegram_html(&text);
                 if !html.is_empty() {
                     // Chunk to Telegram's 4096-char limit and send each chunk.
@@ -1844,6 +1878,17 @@ pub(crate) async fn resume_session(
                                 DisplayItem::Intermediate(text) => {
                                     let text = crate::utils::sanitize::strip_llm_artifacts(&text);
                                     let text = redact_secrets(&text);
+                                    // Pre-send dedup — see handle_message.
+                                    {
+                                        let s = st.lock().unwrap_or_else(|e| e.into_inner());
+                                        if s.sent_intermediates.iter().any(|prev| prev == &text) {
+                                            tracing::info!(
+                                                "Telegram resume: suppressing duplicate intermediate (len={})",
+                                                text.len()
+                                            );
+                                            continue;
+                                        }
+                                    }
                                     let html = markdown_to_telegram_html(&text);
                                     if !html.is_empty() {
                                         let chunks: Vec<String> = split_message(&html, 4096)
@@ -2085,6 +2130,17 @@ pub(crate) async fn resume_session(
             DisplayItem::Intermediate(text) => {
                 let text = crate::utils::sanitize::strip_llm_artifacts(&text);
                 let text = redact_secrets(&text);
+                // Pre-send dedup — see handle_message.
+                {
+                    let s = streaming.lock().unwrap_or_else(|e| e.into_inner());
+                    if s.sent_intermediates.iter().any(|prev| prev == &text) {
+                        tracing::info!(
+                            "Telegram resume: suppressing duplicate intermediate (len={})",
+                            text.len()
+                        );
+                        continue;
+                    }
+                }
                 let html = markdown_to_telegram_html(&text);
                 if !html.is_empty() {
                     // Same chunk-and-confirm pattern as the group handler —

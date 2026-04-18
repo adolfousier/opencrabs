@@ -1620,6 +1620,17 @@ pub fn looks_truncated_mid_sentence(text: &str) -> bool {
     if trimmed.ends_with('|') {
         return false;
     }
+    // URL-terminated response: a message ending with a URL is
+    // complete, even though the URL's last char is alphanumeric or
+    // a path separator. Previous heuristic treated "Done. Uploaded
+    // to Drive: https://…/view" as truncated and triggered a
+    // retry, which made the model restate the whole answer — the
+    // duplication visible on Telegram AND TUI (2026-04-18 23:12/23:13
+    // log: Block 0 "Done. Uploaded to Drive …" emitted in iteration
+    // N and again in iteration N+1).
+    if ends_with_url(trimmed) {
+        return false;
+    }
     let last = match trimmed.chars().next_back() {
         Some(c) => c,
         None => return false,
@@ -1633,6 +1644,20 @@ pub fn looks_truncated_mid_sentence(text: &str) -> bool {
         last,
         ',' | ';' | ':' | '-' | '(' | '[' | '{' | '<' | '/' | '\\' | '&' | '@' | '#'
     )
+}
+
+/// Detect whether `text` ends with a URL. Scans back from the end for
+/// whitespace or an open-paren/bracket boundary, then checks if the
+/// trailing token contains "://". Covers http(s), ftp, file, and any
+/// other scheme the model might emit.
+fn ends_with_url(text: &str) -> bool {
+    let trimmed = text.trim_end();
+    let boundary = trimmed
+        .rfind(|c: char| c.is_whitespace() || matches!(c, '(' | '[' | '{' | '<' | '"' | '\''))
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let tail = &trimmed[boundary..];
+    tail.contains("://")
 }
 
 pub fn has_phantom_tool_intent(text: &str) -> bool {
