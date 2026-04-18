@@ -16,6 +16,35 @@ fn strip_ansi_output(raw: &str) -> String {
     strip_ansi::strip_ansi(raw)
 }
 
+/// RAII guard that restores a session's provider on drop.
+///
+/// The fallback arms in `run_tool_loop_inner` swap the session's
+/// provider to a fallback, await the fallback's stream, then restore
+/// the original. That pattern was cancellation-unsafe: when the user
+/// sent a new message mid-fallback, the containing future was
+/// dropped, the line after `.await` never ran, and
+/// `session_providers[session_id]` stayed on the fallback. The next
+/// turn then built a request with the session's saved model (primary)
+/// but sent it to the fallback provider — producing the
+/// 2026-04-18 18:14 "400 Unknown Model, please check the model code"
+/// from zhipu after it received `model=qwen3.6-plus`.
+///
+/// Drop runs whether the future completes, errors, or is cancelled.
+struct FallbackProviderGuard<'a> {
+    service: &'a AgentService,
+    session_id: Uuid,
+    original: Option<Arc<dyn crate::brain::provider::Provider>>,
+}
+
+impl Drop for FallbackProviderGuard<'_> {
+    fn drop(&mut self) {
+        if let Some(original) = self.original.take() {
+            self.service
+                .swap_provider_for_session(self.session_id, original);
+        }
+    }
+}
+
 /// Detect whether a user message is a correction or negative feedback.
 ///
 /// Public for testing — used internally by the tool loop.
@@ -1204,12 +1233,21 @@ impl AgentService {
                         }
 
                         // Swap only THIS session's provider for the fallback
-                        // attempt. Other sessions and the global default
-                        // stay on whatever they were — a background turn on
-                        // a different pane must not trip over our fallback
-                        // dance.
+                        // attempt. The restore is wrapped in a Drop guard
+                        // so cancellation mid-await still flips the session
+                        // back to the original — without the guard, a user
+                        // sending a new message during a fallback stream
+                        // dropped the future before the restore line ran,
+                        // leaving session_providers stuck on the fallback
+                        // provider with the primary's model in session.model
+                        // (2026-04-18 18:14 "400 Unknown Model" on zhipu).
                         let original_provider = self.provider_for_session(session_id);
                         self.swap_provider_for_session(session_id, (*fallback).clone());
+                        let _restore_guard = FallbackProviderGuard {
+                            service: self,
+                            session_id,
+                            original: Some(original_provider),
+                        };
                         let fb_result = self
                             .stream_complete(
                                 session_id,
@@ -1221,7 +1259,7 @@ impl AgentService {
                                 false,
                             )
                             .await;
-                        self.swap_provider_for_session(session_id, original_provider);
+                        drop(_restore_guard);
                         match fb_result {
                             Ok(resp) => {
                                 succeeded = Some(resp);
@@ -1412,11 +1450,16 @@ impl AgentService {
                             }
 
                             // Swap only this session's provider for the
-                            // stream-fallback attempt; restore after so
-                            // any follow-up iteration goes back to the
-                            // session's primary.
+                            // stream-fallback attempt; guard ensures restore
+                            // runs even if the outer future is cancelled
+                            // mid-await (see FallbackProviderGuard doc).
                             let original_provider = self.provider_for_session(session_id);
                             self.swap_provider_for_session(session_id, (*fallback).clone());
+                            let _restore_guard = FallbackProviderGuard {
+                                service: self,
+                                session_id,
+                                original: Some(original_provider),
+                            };
                             let fb_result = self
                                 .stream_complete(
                                     session_id,
@@ -1428,7 +1471,7 @@ impl AgentService {
                                     false,
                                 )
                                 .await;
-                            self.swap_provider_for_session(session_id, original_provider);
+                            drop(_restore_guard);
                             match fb_result {
                                 Ok(resp) => {
                                     stream_succeeded = Some(resp);

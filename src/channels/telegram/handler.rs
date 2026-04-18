@@ -1560,55 +1560,20 @@ pub(crate) async fn handle_message(
             let text_only = crate::utils::sanitize::strip_llm_artifacts(&text_only);
             let text_only = redact_secrets(&text_only);
 
-            // Dedup: strip text that was already sent as intermediate messages
-            // to avoid duplicating content on Telegram.
-            let sent = {
-                let s = streaming.lock().unwrap_or_else(|e| e.into_inner());
-                s.sent_intermediates.clone()
-            };
+            // Dedup is no longer needed: we now delete every intermediate
+            // message below on successful completion, so the final
+            // response cannot visually duplicate anything. Always deliver
+            // the full response as the single remaining message. The old
+            // dedup used to strip the final to empty when intermediates
+            // covered it, which — combined with the new delete-all
+            // cleanup — left the chat with NOTHING delivered. Seen in
+            // "Applying the fix now. Changing substring match to exact
+            // match..." disappearing entirely on Telegram while the TUI
+            // showed it.
             tracing::info!(
-                "Telegram dedup: response.content len={}, sent_intermediates count={}, intermediates={:?}",
-                text_only.len(),
-                sent.len(),
-                sent.iter()
-                    .map(|s| format!("{}...", s.chars().take(60).collect::<String>()))
-                    .collect::<Vec<_>>()
+                "Telegram: delivering final response (len={})",
+                text_only.len()
             );
-            let text_only = if !sent.is_empty() {
-                let mut remaining = text_only.clone();
-                for intermediate in &sent {
-                    remaining = remaining.replace(intermediate.as_str(), "");
-                }
-                let result = remaining.trim().to_string();
-                if result != text_only {
-                    tracing::info!(
-                        "Telegram dedup: stripped {} chars, remaining len={}",
-                        text_only.len() - result.len(),
-                        result.len()
-                    );
-                } else {
-                    tracing::warn!(
-                        "Telegram dedup: NO MATCH — none of {} intermediates found in response",
-                        sent.len()
-                    );
-                }
-                // If dedup stripped everything, the intermediates already
-                // cover the full response — nothing new to send. Safe now
-                // that sent_intermediates only gets pushed on confirmed
-                // successful send (see the intermediate handler above).
-                if result.is_empty() {
-                    tracing::info!(
-                        "Telegram dedup: result empty after stripping — intermediates already delivered full response (len={})",
-                        text_only.len()
-                    );
-                    String::new()
-                } else {
-                    result
-                }
-            } else {
-                tracing::info!("Telegram dedup: no intermediates to strip");
-                text_only
-            };
 
             for img_path in img_paths {
                 match tokio::fs::read(&img_path).await {
@@ -1694,8 +1659,7 @@ pub(crate) async fn handle_message(
             // completion.
             let (tool_msg_ids, intermediate_ids): (Vec<MessageId>, Vec<MessageId>) = {
                 let mut s = streaming.lock().unwrap_or_else(|e| e.into_inner());
-                let tools: Vec<MessageId> =
-                    s.tool_msgs.iter().filter_map(|t| t.msg_id).collect();
+                let tools: Vec<MessageId> = s.tool_msgs.iter().filter_map(|t| t.msg_id).collect();
                 let inters = std::mem::take(&mut s.intermediate_msg_ids);
                 s.tool_msgs.clear();
                 (tools, inters)
@@ -2146,21 +2110,10 @@ pub(crate) async fn resume_session(
             let text_only = crate::utils::sanitize::strip_llm_artifacts(&text_only);
             let text_only = redact_secrets(&text_only);
 
-            // Dedup intermediates. Safe to strip to empty — the intermediate
-            // handler only pushes to sent_intermediates on confirmed delivery.
-            let sent = {
-                let s = streaming.lock().unwrap_or_else(|e| e.into_inner());
-                s.sent_intermediates.clone()
-            };
-            let text_only = if !sent.is_empty() {
-                let mut remaining = text_only.clone();
-                for intermediate in &sent {
-                    remaining = remaining.replace(intermediate.as_str(), "");
-                }
-                remaining.trim().to_string()
-            } else {
-                text_only
-            };
+            // Dedup removed — intermediates are deleted below on
+            // completion, so the final response can't duplicate them.
+            // See matching block in handle_message() for the incident
+            // that motivated this.
 
             for img_path in img_paths {
                 if let Ok(bytes) = tokio::fs::read(&img_path).await {
@@ -2204,8 +2157,7 @@ pub(crate) async fn resume_session(
             // tool-call messages so only the final response remains.
             let (tool_msg_ids, intermediate_ids): (Vec<MessageId>, Vec<MessageId>) = {
                 let mut s = streaming.lock().unwrap_or_else(|e| e.into_inner());
-                let tools: Vec<MessageId> =
-                    s.tool_msgs.iter().filter_map(|t| t.msg_id).collect();
+                let tools: Vec<MessageId> = s.tool_msgs.iter().filter_map(|t| t.msg_id).collect();
                 let inters = std::mem::take(&mut s.intermediate_msg_ids);
                 s.tool_msgs.clear();
                 (tools, inters)
