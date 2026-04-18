@@ -207,6 +207,19 @@ impl App {
         if let Some(ref saved_provider) = session.provider_name {
             let current_prov = self.agent_service.provider_name_for_session(session.id);
             if saved_provider != &current_prov {
+                // Track whether the swap actually succeeded. If it
+                // fails we MUST NOT fall through to the canonical-
+                // rename sync below — without this, any swap failure
+                // (stale base_url, transient config read error, etc.)
+                // caused the session to silently adopt the current
+                // global provider as its "live name" and overwrite
+                // session.provider_name in memory (and, on next save,
+                // in DB). 2026-04-18 incident: a session saved on
+                // "opencodeiolo" came back as "opencode" after restart
+                // because the global default at load time was
+                // "opencode" (first custom alphabetically) and this
+                // code stamped it over the user's saved choice.
+                let mut swap_ok = false;
                 if let Some(cached) = self.provider_cache.get(saved_provider).cloned() {
                     tracing::info!(
                         "Restoring cached provider '{}' for session {}",
@@ -215,6 +228,7 @@ impl App {
                     );
                     self.agent_service
                         .swap_provider_for_session(session.id, cached);
+                    swap_ok = true;
                 } else if let Ok(config) = crate::config::Config::load() {
                     match crate::brain::provider::create_provider_by_name(&config, saved_provider)
                         .await
@@ -229,25 +243,38 @@ impl App {
                                 .insert(saved_provider.clone(), new_provider.clone());
                             self.agent_service
                                 .swap_provider_for_session(session.id, new_provider);
+                            swap_ok = true;
                         }
                         Err(e) => {
                             tracing::warn!(
-                                "Failed to restore provider '{}' for session {}: {e}, keeping current",
+                                "Failed to restore provider '{}' for session {}: {e} — keeping saved name; user will see the real error on next turn",
                                 saved_provider,
                                 session.id,
                             );
                         }
                     }
                 }
-                // After swapping, the new provider may use a renamed canonical id
-                // (e.g. legacy "qwen-code" → "qwen-cli"). Refresh both provider
-                // AND model so they always stay paired.
-                let live_name = self.agent_service.provider_name_for_session(session.id);
-                if live_name != *saved_provider
-                    && let Some(ref mut s) = self.current_session
-                {
-                    s.provider_name = Some(live_name);
-                    s.model = Some(self.agent_service.provider_model_for_session(session.id));
+                // Canonical-rename sync: ONLY after a successful swap.
+                // Handles legacy renames like "qwen-code" → "qwen-cli"
+                // where the newly-created provider reports a different
+                // canonical id than what was stored. Never runs on
+                // failure, so a failed swap never mutates the session's
+                // saved provider/model to the global default.
+                if swap_ok {
+                    let live_name = self.agent_service.provider_name_for_session(session.id);
+                    if live_name != *saved_provider
+                        && let Some(ref mut s) = self.current_session
+                    {
+                        tracing::info!(
+                            "Canonical rename on load: '{}' → '{}' for session {}",
+                            saved_provider,
+                            live_name,
+                            session.id
+                        );
+                        s.provider_name = Some(live_name);
+                        s.model =
+                            Some(self.agent_service.provider_model_for_session(session.id));
+                    }
                 }
             }
         } else {
