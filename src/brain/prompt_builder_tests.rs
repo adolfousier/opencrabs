@@ -90,13 +90,17 @@ fn test_agents_md_not_injected_in_core_brain() {
 }
 
 #[test]
-fn test_tools_md_not_injected_in_core_brain() {
+fn test_tools_md_injected_in_core_brain() {
+    // TOOLS.md was moved to CORE_BRAIN_FILES on 2026-04-19 after
+    // duplicate gdrive uploads traced to the model guessing CLI
+    // syntax because TOOLS.md was only loaded on demand. The
+    // correct invocations must always be visible to the model.
     let dir = TempDir::new().unwrap();
     write(&dir, "TOOLS.md", "TOOL_NOTE: use cargo test");
     let brain = loader(&dir).build_core_brain(None, None);
     assert!(
-        !brain.contains("TOOL_NOTE"),
-        "TOOLS.md content must NOT be injected inline"
+        brain.contains("TOOL_NOTE"),
+        "TOOLS.md content must be injected inline (always-on CLI reference)"
     );
 }
 

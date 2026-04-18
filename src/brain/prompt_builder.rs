@@ -7,15 +7,26 @@ use crate::db::repository::feedback_ledger::FeedbackLedgerRepository;
 use std::path::PathBuf;
 
 /// Core brain files — always injected (personality + user context).
-const CORE_BRAIN_FILES: &[(&str, &str)] =
-    &[("SOUL.md", "personality"), ("USER.md", "user profile")];
+///
+/// TOOLS.md is here because it contains the exact CLI syntax for common
+/// external tools (gdrive, rclone, etc.) that the agent drives via bash.
+/// Gating it behind a tool call meant the agent guessed syntax (e.g.
+/// `gdrive upload` vs the correct `gdrive files upload`), which produced
+/// duplicate Drive uploads when the guess partially worked (2026-04-19
+/// 00:02 incident: same file uploaded twice in one turn because the model
+/// tried the wrong syntax, then retried with the right one). Small
+/// (~6 KB) so always-injecting is cheap.
+const CORE_BRAIN_FILES: &[(&str, &str)] = &[
+    ("SOUL.md", "personality"),
+    ("USER.md", "user profile"),
+    ("TOOLS.md", "tool notes"),
+];
 
 /// Contextual brain files — loaded on demand via the `load_brain_file` tool.
 /// IDENTITY.md lives here — only needed for cron jobs and social media replies.
 pub(crate) const CONTEXTUAL_BRAIN_FILES: &[(&str, &str)] = &[
     ("IDENTITY.md", "identity — social/cron replies only"),
     ("AGENTS.md", "workspace rules"),
-    ("TOOLS.md", "tool notes"),
     ("CODE.md", "coding standards"),
     ("SECURITY.md", "security policies"),
     ("MEMORY.md", "long-term memory"),
