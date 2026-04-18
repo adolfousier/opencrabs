@@ -353,9 +353,28 @@ pub fn redact_secrets(text: &str) -> String {
         }
     }
 
+    // Helper: a 28+ char alphanumeric blob preceded by `/` is almost always
+    // a URL path segment, not a secret. Google Drive `/file/d/<33-char-id>`,
+    // Docs `/document/d/<id>`, YouTube `/watch?v=<id>`, GitHub
+    // `/commit/<40-char-sha>`, etc. — all public identifiers that users
+    // need to click. 2026-04-18 22:29 screenshot: a Drive file ID got
+    // redacted to `[REDACTED_TOKEN]`, breaking the link. Real secrets
+    // appear after `=`, `:`, or whitespace, never after `/`.
+    let is_url_path_segment = |input: &str, match_start: usize| -> bool {
+        input[..match_start].ends_with('/')
+    };
+
     // 2. Redact long hex tokens (32+ chars — catches Azure keys, custom service tokens, etc.)
     result = HEX_TOKEN_RE
-        .replace_all(&result, "[REDACTED_TOKEN]")
+        .replace_all(&result, |caps: &regex::Captures| {
+            let m = caps.get(0).unwrap();
+            let token = m.as_str();
+            if is_url_path_segment(&result, m.start()) {
+                token.to_string()
+            } else {
+                "[REDACTED_TOKEN]".to_string()
+            }
+        })
         .into_owned();
 
     // 3. Redact mixed alphanumeric tokens (28+ chars with both letters AND digits).
@@ -364,10 +383,11 @@ pub fn redact_secrets(text: &str) -> String {
     //    false positives on long words like "acknowledgement" or pure numbers).
     result = MIXED_ALNUM_TOKEN_RE
         .replace_all(&result, |caps: &regex::Captures| {
-            let token = caps.get(0).unwrap().as_str();
+            let m = caps.get(0).unwrap();
+            let token = m.as_str();
             let has_digit = token.chars().any(|c| c.is_ascii_digit());
             let has_alpha = token.chars().any(|c| c.is_ascii_alphabetic());
-            if has_digit && has_alpha {
+            if has_digit && has_alpha && !is_url_path_segment(&result, m.start()) {
                 "[REDACTED_TOKEN]".to_string()
             } else {
                 token.to_string()
