@@ -272,6 +272,24 @@ pub async fn create_provider_with_warning(
 /// Used for per-session provider restoration without toggling disk config.
 /// Accepts names like "anthropic", "openai", "minimax", "openrouter", or "custom:<name>".
 pub async fn create_provider_by_name(config: &Config, name: &str) -> Result<Arc<dyn Provider>> {
+    // Custom entries take precedence over built-in names. If the user
+    // created a custom provider literally named "opencode" / "anthropic"
+    // / anything that collides with a built-in id, the custom entry wins.
+    // Without this, a session with provider_name="opencode" and a
+    // `providers.custom.opencode` entry pointing at opencode.ai HTTP
+    // would silently spawn an OpenCodeCliProvider subprocess instead
+    // (2026-04-18 bug). `custom:` prefix still routes below for
+    // sessions that stored the disambiguated form.
+    if !name.starts_with("custom:")
+        && config
+            .providers
+            .custom
+            .as_ref()
+            .is_some_and(|m| m.contains_key(name))
+        && let Some(p) = try_create_custom_by_name(config, name)?
+    {
+        return Ok(p);
+    }
     match name {
         "claude-cli" | "claude_cli" => {
             // Bypass enabled check — session explicitly requested this provider
@@ -290,8 +308,10 @@ pub async fn create_provider_by_name(config: &Config, name: &str) -> Result<Arc<
                 Err(e) => Err(anyhow::anyhow!("Claude CLI binary not found: {}", e)),
             }
         }
-        "opencode" | "opencode-cli" | "opencode_cli" => {
-            // Bypass enabled check — session explicitly requested this provider
+        "opencode-cli" | "opencode_cli" => {
+            // Bypass enabled check — session explicitly requested this provider.
+            // Bare "opencode" is NOT aliased here: it's a valid custom provider
+            // name (opencode.ai HTTP endpoint) and must never route to the CLI.
             let model = config
                 .providers
                 .opencode_cli

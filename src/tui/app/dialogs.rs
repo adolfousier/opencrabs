@@ -51,32 +51,30 @@ impl App {
             .as_ref()
             .and_then(|s| s.provider_name.as_deref());
 
-        // Resolve provider index + API key from session provider name
+        // Resolve provider index + API key from session provider name.
+        //
+        // CRITICAL: custom entries win over built-in aliases. A user who
+        // created a custom provider literally named "anthropic" or
+        // "opencode" means their custom entry, not the built-in — the
+        // config section `providers.custom.<name>` is the unambiguous
+        // source of truth. Built-in alias resolution only runs when no
+        // custom entry by that exact name exists. This prevents
+        // collisions like the 2026-04-18 "opencode" case where a custom
+        // provider silently displayed as opencode-cli in /models.
         let from_session: Option<(usize, Option<String>)> = session_provider.map(|name| {
             use crate::utils::providers;
-            // Try known provider first
-            if let Some(idx) = providers::tui_index_for_id(name) {
-                let api_key =
-                    providers::config_for(&config.providers, name).and_then(|p| p.api_key.clone());
-                (idx, api_key)
-            } else {
-                // Custom provider (e.g. "nvidia", "ollama")
-                let api_key = config
-                    .providers
-                    .custom_by_name(name)
-                    .and_then(|p| p.api_key.clone());
-                if let Some(c) = config.providers.custom_by_name(name) {
-                    self.ps.base_url = c.base_url.clone().unwrap_or_default();
-                    self.ps.custom_model = c.default_model.clone().unwrap_or_default();
-                    self.ps.context_window = c
-                        .context_window
-                        .map(|cw| cw.to_string())
-                        .unwrap_or_default();
-                    self.ps.custom_name = name.to_string();
-                    // Anchor: we're editing this entry. Save writes back
-                    // here even if the user renames the field.
-                    self.ps.editing_custom_key = Some(name.to_string());
-                }
+
+            // 1. Custom provider by exact name (takes precedence)
+            if let Some(c) = config.providers.custom_by_name(name) {
+                let api_key = c.api_key.clone();
+                self.ps.base_url = c.base_url.clone().unwrap_or_default();
+                self.ps.custom_model = c.default_model.clone().unwrap_or_default();
+                self.ps.context_window = c
+                    .context_window
+                    .map(|cw| cw.to_string())
+                    .unwrap_or_default();
+                self.ps.custom_name = name.to_string();
+                self.ps.editing_custom_key = Some(name.to_string());
                 let idx = self
                     .ps
                     .custom_names
@@ -84,8 +82,18 @@ impl App {
                     .position(|n| n == name)
                     .map(|pos| CUSTOM_INSTANCES_START + pos)
                     .unwrap_or(CUSTOM_PROVIDER_IDX);
-                (idx, api_key)
+                return (idx, api_key);
             }
+
+            // 2. Built-in provider id/alias
+            if let Some(idx) = providers::tui_index_for_id(name) {
+                let api_key =
+                    providers::config_for(&config.providers, name).and_then(|p| p.api_key.clone());
+                return (idx, api_key);
+            }
+
+            // 3. Unknown — default to new-custom flow
+            (CUSTOM_PROVIDER_IDX, None)
         });
 
         // Determine which provider is enabled — iterate PROVIDERS using shared utility
@@ -1046,8 +1054,7 @@ impl App {
             // below only fires when the user typed in the key field).
             if let Some(ref key_val) = api_key
                 && !key_val.is_empty()
-                && let Err(e) =
-                    crate::config::write_secret_key(section, "api_key", key_val)
+                && let Err(e) = crate::config::write_secret_key(section, "api_key", key_val)
             {
                 tracing::warn!("Failed to migrate api_key on rename: {}", e);
             }

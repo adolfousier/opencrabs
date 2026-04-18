@@ -92,7 +92,12 @@ pub fn find_provider_meta(name: &str) -> Option<&'static ProviderMeta> {
                 "gemini" => n == "google" || n == "google gemini",
                 "zhipu" => n == "z.ai glm",
                 "claude-cli" => n == "claude_cli",
-                "opencode-cli" => n == "opencode_cli" || n == "opencode",
+                // Only `opencode-cli` / `opencode_cli` — never bare "opencode".
+                // A custom provider named "opencode" (which users do create,
+                // pointing at opencode.ai HTTP) must never collide with this
+                // built-in CLI alias. Sessions that reference "opencode" are
+                // the custom entry, not the CLI.
+                "opencode-cli" => n == "opencode_cli",
                 _ => false,
             }
     })
