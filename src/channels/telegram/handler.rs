@@ -1492,26 +1492,16 @@ pub(crate) async fn handle_message(
             "Telegram: agent call for session {} finished after cancellation — suppressing stale delivery",
             session_id
         );
-        // Clean up streaming message and any tool messages already sent
+        // Only delete the streaming placeholder (the typing
+        // indicator). Keep the intermediate content and tool-call
+        // bubbles that were already posted — those are chat history
+        // the user wants to see. Previous behavior (dd9eedf Apr 17)
+        // deleted both to prevent duplicate intermediates on the
+        // replacement turn, but the pre-send dedup in the edit-loop
+        // now blocks duplicates in-turn and cross-turn restating is
+        // rare enough to tolerate. User explicitly asked 2026-04-18
+        // not to remove prior chat on follow-up messages.
         if let Some(mid) = streaming_msg_id {
-            let _ = bot.delete_message(msg.chat.id, mid).await;
-        }
-        let (tool_msg_ids, intermediate_ids): (
-            Vec<teloxide::types::MessageId>,
-            Vec<teloxide::types::MessageId>,
-        ) = {
-            let s = streaming.lock().unwrap_or_else(|e| e.into_inner());
-            (
-                s.tool_msgs.iter().filter_map(|t| t.msg_id).collect(),
-                s.intermediate_msg_ids.clone(),
-            )
-        };
-        for mid in tool_msg_ids {
-            let _ = bot.delete_message(msg.chat.id, mid).await;
-        }
-        // Intermediates too — otherwise they stay visible and the replacement
-        // call re-sends the same text, producing exact-match duplicates.
-        for mid in intermediate_ids {
             let _ = bot.delete_message(msg.chat.id, mid).await;
         }
         return Ok(());
@@ -2080,22 +2070,10 @@ pub(crate) async fn resume_session(
             "Telegram: resume for session {} cancelled by new message",
             session_id
         );
+        // Only delete the streaming placeholder — keep prior
+        // intermediate + tool-call history visible. See the matching
+        // block in handle_message() for rationale.
         if let Some(mid) = streaming_msg_id {
-            let _ = bot.delete_message(chat_id, mid).await;
-        }
-        // Delete tool messages and intermediates sent by this stale call so
-        // the replacement call doesn't race them into exact-match duplicates.
-        let (tool_msg_ids, intermediate_ids): (Vec<MessageId>, Vec<MessageId>) = {
-            let s = streaming.lock().unwrap_or_else(|e| e.into_inner());
-            (
-                s.tool_msgs.iter().filter_map(|t| t.msg_id).collect(),
-                s.intermediate_msg_ids.clone(),
-            )
-        };
-        for mid in tool_msg_ids {
-            let _ = bot.delete_message(chat_id, mid).await;
-        }
-        for mid in intermediate_ids {
             let _ = bot.delete_message(chat_id, mid).await;
         }
         return Ok(());

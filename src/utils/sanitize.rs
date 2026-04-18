@@ -360,9 +360,8 @@ pub fn redact_secrets(text: &str) -> String {
     // need to click. 2026-04-18 22:29 screenshot: a Drive file ID got
     // redacted to `[REDACTED_TOKEN]`, breaking the link. Real secrets
     // appear after `=`, `:`, or whitespace, never after `/`.
-    let is_url_path_segment = |input: &str, match_start: usize| -> bool {
-        input[..match_start].ends_with('/')
-    };
+    let is_url_path_segment =
+        |input: &str, match_start: usize| -> bool { input[..match_start].ends_with('/') };
 
     // 2. Redact long hex tokens (32+ chars — catches Azure keys, custom service tokens, etc.)
     result = HEX_TOKEN_RE
