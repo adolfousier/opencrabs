@@ -50,8 +50,32 @@ impl AgentService {
             override_cb.or(self.progress_callback.as_ref())
         };
 
-        let request_model = request.model.clone();
         let provider = self.provider_for_session(session_id);
+
+        // Invariant: never send a {provider, model} pair the user didn't
+        // configure. If the request's model isn't in this provider's
+        // supported list, remap to the provider's own default. This
+        // catches every path that might end up with a mismatched pair —
+        // cancelled fallback that bypassed its Drop guard, stale
+        // session_providers entry, upstream bug — so the HTTP call
+        // always goes out with a valid pair. 2026-04-18 18:14:
+        // zhipu was sent `model=qwen3.6-plus` (opencodeiolo's model)
+        // because the session's provider got stuck on a fallback
+        // after a cancelled turn. That exact case is now prevented
+        // at the stream site regardless of the cached state.
+        let mut request = request;
+        let supported = provider.supported_models();
+        if !supported.is_empty() && !supported.iter().any(|m| m == &request.model) {
+            let remapped = provider.default_model().to_string();
+            tracing::warn!(
+                "stream_complete: provider '{}' does not support model '{}' — remapping to '{}' (never send a pair the user never configured)",
+                provider.name(),
+                request.model,
+                remapped,
+            );
+            request.model = remapped;
+        }
+        let request_model = request.model.clone();
 
         // Bound the initial stream handshake (HTTP POST + response headers)
         // so a wedged local server — accepts TCP but never replies — can't

@@ -272,8 +272,7 @@ impl App {
                             session.id
                         );
                         s.provider_name = Some(live_name);
-                        s.model =
-                            Some(self.agent_service.provider_model_for_session(session.id));
+                        s.model = Some(self.agent_service.provider_model_for_session(session.id));
                     }
                 }
             }
