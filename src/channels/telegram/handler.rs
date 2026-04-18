@@ -1560,20 +1560,39 @@ pub(crate) async fn handle_message(
             let text_only = crate::utils::sanitize::strip_llm_artifacts(&text_only);
             let text_only = redact_secrets(&text_only);
 
-            // Dedup is no longer needed: we now delete every intermediate
-            // message below on successful completion, so the final
-            // response cannot visually duplicate anything. Always deliver
-            // the full response as the single remaining message. The old
-            // dedup used to strip the final to empty when intermediates
-            // covered it, which — combined with the new delete-all
-            // cleanup — left the chat with NOTHING delivered. Seen in
-            // "Applying the fix now. Changing substring match to exact
-            // match..." disappearing entirely on Telegram while the TUI
-            // showed it.
+            // Dedup: strip text that was already sent as intermediate messages
+            // to avoid duplicating content on Telegram. An intermediate chunk
+            // that already carries the final answer (e.g. "Done. Uploaded to
+            // Drive: https://…") will otherwise be repeated when the
+            // streaming placeholder is edited with the final response.
+            // Intermediates stay visible as-is; only the streaming
+            // placeholder's final text is pruned.
+            let sent = {
+                let s = streaming.lock().unwrap_or_else(|e| e.into_inner());
+                s.sent_intermediates.clone()
+            };
             tracing::info!(
-                "Telegram: delivering final response (len={})",
-                text_only.len()
+                "Telegram dedup: response.content len={}, sent_intermediates count={}",
+                text_only.len(),
+                sent.len(),
             );
+            let text_only = if !sent.is_empty() {
+                let mut remaining = text_only.clone();
+                for intermediate in &sent {
+                    remaining = remaining.replace(intermediate.as_str(), "");
+                }
+                let result = remaining.trim().to_string();
+                if result != text_only {
+                    tracing::info!(
+                        "Telegram dedup: stripped {} chars, remaining len={}",
+                        text_only.len() - result.len(),
+                        result.len()
+                    );
+                }
+                result
+            } else {
+                text_only
+            };
 
             for img_path in img_paths {
                 match tokio::fs::read(&img_path).await {
@@ -1645,29 +1664,6 @@ pub(crate) async fn handle_message(
                 }
             } else if let Some(mid) = streaming_msg_id {
                 // Empty final text — just clean up the streaming placeholder
-                let _ = bot.delete_message(msg.chat.id, mid).await;
-            }
-
-            // Collapse-on-completion: delete every intermediate text chunk
-            // and tool-call message posted during streaming so only the
-            // final response remains. Without this the chat accumulates
-            // 10+ separate messages per turn (each thinking chunk, each
-            // tool-call block) and the user sees what looks like
-            // duplication of the final content on top of all the
-            // work-in-progress narration. 2026-04-18 16:16 log: one turn
-            // produced 10 sent_intermediates that stayed visible after
-            // completion.
-            let (tool_msg_ids, intermediate_ids): (Vec<MessageId>, Vec<MessageId>) = {
-                let mut s = streaming.lock().unwrap_or_else(|e| e.into_inner());
-                let tools: Vec<MessageId> = s.tool_msgs.iter().filter_map(|t| t.msg_id).collect();
-                let inters = std::mem::take(&mut s.intermediate_msg_ids);
-                s.tool_msgs.clear();
-                (tools, inters)
-            };
-            for mid in tool_msg_ids {
-                let _ = bot.delete_message(msg.chat.id, mid).await;
-            }
-            for mid in intermediate_ids {
                 let _ = bot.delete_message(msg.chat.id, mid).await;
             }
 
@@ -2110,10 +2106,21 @@ pub(crate) async fn resume_session(
             let text_only = crate::utils::sanitize::strip_llm_artifacts(&text_only);
             let text_only = redact_secrets(&text_only);
 
-            // Dedup removed — intermediates are deleted below on
-            // completion, so the final response can't duplicate them.
-            // See matching block in handle_message() for the incident
-            // that motivated this.
+            // Dedup intermediates already delivered so we don't duplicate
+            // them when editing the streaming placeholder with the final.
+            let sent = {
+                let s = streaming.lock().unwrap_or_else(|e| e.into_inner());
+                s.sent_intermediates.clone()
+            };
+            let text_only = if !sent.is_empty() {
+                let mut remaining = text_only.clone();
+                for intermediate in &sent {
+                    remaining = remaining.replace(intermediate.as_str(), "");
+                }
+                remaining.trim().to_string()
+            } else {
+                text_only
+            };
 
             for img_path in img_paths {
                 if let Ok(bytes) = tokio::fs::read(&img_path).await {
@@ -2149,23 +2156,6 @@ pub(crate) async fn resume_session(
                     }
                 }
             } else if let Some(mid) = streaming_msg_id {
-                let _ = bot.delete_message(chat_id, mid).await;
-            }
-
-            // Collapse-on-completion — see the matching block in
-            // handle_message() for rationale. Delete intermediate +
-            // tool-call messages so only the final response remains.
-            let (tool_msg_ids, intermediate_ids): (Vec<MessageId>, Vec<MessageId>) = {
-                let mut s = streaming.lock().unwrap_or_else(|e| e.into_inner());
-                let tools: Vec<MessageId> = s.tool_msgs.iter().filter_map(|t| t.msg_id).collect();
-                let inters = std::mem::take(&mut s.intermediate_msg_ids);
-                s.tool_msgs.clear();
-                (tools, inters)
-            };
-            for mid in tool_msg_ids {
-                let _ = bot.delete_message(chat_id, mid).await;
-            }
-            for mid in intermediate_ids {
                 let _ = bot.delete_message(chat_id, mid).await;
             }
 
