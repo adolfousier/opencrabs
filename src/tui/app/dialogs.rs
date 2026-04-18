@@ -1159,6 +1159,19 @@ impl App {
             ));
         }
 
+        // Fast path for mid-navigation in /models: the user is still
+        // moving between fields (provider → api_key → model → ...), so
+        // we've written the enabled flag + base_url + default_model to
+        // disk but we don't need to rebuild the full provider chain yet
+        // — that call can take 5-10s because it re-creates every
+        // fallback (HTTP health checks, subprocess spawns). Defer
+        // rebuild until the final Enter (close_dialog=true). Navigation
+        // now returns ~immediately; the old flow made users think the
+        // dialog had hung and they'd mash Enter multiple times.
+        if !close_dialog {
+            return Ok(());
+        }
+
         // Rebuild agent service with new provider (now sees the correct model)
         if let Err(e) = self.rebuild_agent_service().await {
             if api_key.is_none() && provider_idx == CUSTOM_PROVIDER_IDX {

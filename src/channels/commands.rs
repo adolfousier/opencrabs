@@ -316,9 +316,11 @@ async fn format_usage(
     agent: &AgentService,
     session_svc: &SessionService,
 ) -> String {
-    let mut lines = vec!["📊 *Usage Stats*".to_string(), String::new()];
+    use crate::usage::data::{DashboardData, Period, fmt_cost, fmt_tokens};
 
-    // Current session
+    let mut lines = vec!["📊 *Usage Dashboard*".to_string(), String::new()];
+
+    // ── Current session (header) ─────────────────────────────────────
     let current_model = agent.provider_model();
     match session_svc.get_session(session_id).await {
         Ok(Some(session)) => {
@@ -336,48 +338,117 @@ async fn format_usage(
             } else {
                 0.0
             };
-            lines.push(format!("*Current Session:* {}", name));
-            lines.push(format!("  Model: `{}`", model));
-            lines.push(format!("  Tokens: {}", format_number(tokens as i64)));
-            lines.push(format!("  Cost: ${:.4}", cost));
-        }
-        _ => {
-            lines.push("*Current Session:* (not found)".to_string());
-        }
-    }
-
-    // All-time stats from usage ledger (survives session deletes)
-    lines.push(String::new());
-    {
-        use crate::db::repository::UsageLedgerRepository;
-        let ledger = UsageLedgerRepository::new(session_svc.pool());
-        let ledger_stats = ledger.stats_by_model().await.unwrap_or_default();
-
-        let all_tokens: i64 = ledger_stats.iter().map(|s| s.total_tokens).sum();
-        let all_cost: f64 = ledger_stats.iter().map(|s| s.total_cost).sum();
-
-        let total_sessions = session_svc
-            .list_sessions(SessionListOptions::default())
-            .await
-            .map(|s| s.len())
-            .unwrap_or(0);
-
-        lines.push(format!(
-            "*All-Time:* {} sessions, {} tokens, ${:.4}",
-            total_sessions,
-            format_number(all_tokens),
-            all_cost
-        ));
-
-        // Top models by cost (already sorted desc from ledger)
-        for stats in ledger_stats.iter().take(5) {
+            lines.push(format!("*Current:* {}", name));
             lines.push(format!(
-                "  `{}` — {} tokens, ${:.4}",
-                stats.model,
-                format_number(stats.total_tokens),
-                stats.total_cost
+                "  `{}` · {} tok · ${:.4}",
+                model,
+                format_number(tokens as i64),
+                cost
             ));
         }
+        _ => {
+            lines.push("*Current:* (session not found)".to_string());
+        }
+    }
+    lines.push(String::new());
+
+    // ── Period cards (Today + All-Time, both rendered inline) ────────
+    // TUI /usage lets the user cycle T/W/M/A — for the channel dump
+    // we show Today and All-Time since those are the two most useful
+    // snapshots. Each block is the full five-card breakdown
+    // (summary + by model + by tool + by project + by activity + daily
+    // strip). Keeps parity with the dashboard without blowing past
+    // Telegram's 4096-char limit for normal sessions.
+    for period in [Period::Today, Period::AllTime] {
+        let pool = session_svc.pool();
+        let data = match DashboardData::fetch(&pool, period).await {
+            Ok(d) => d,
+            Err(e) => {
+                lines.push(format!("*{}:* (failed to load: {})", period.label(), e));
+                lines.push(String::new());
+                continue;
+            }
+        };
+
+        lines.push(format!("━━ *{}* ━━", period.label()));
+        lines.push(format!(
+            "{} tok · {} · {} sessions · {} calls",
+            fmt_tokens(data.summary.total_tokens),
+            fmt_cost(data.summary.total_cost),
+            format_number(data.summary.session_count),
+            format_number(data.summary.call_count),
+        ));
+
+        if !data.daily.is_empty() && period != Period::Today {
+            lines.push(String::new());
+            lines.push("*Daily:*".to_string());
+            // Last 7 days of the window
+            let window: Vec<_> = data.daily.iter().rev().take(7).collect();
+            for d in window.iter().rev() {
+                lines.push(format!(
+                    "  {} · {} tok · {}",
+                    d.date,
+                    fmt_tokens(d.tokens),
+                    fmt_cost(d.cost)
+                ));
+            }
+        }
+
+        if !data.models.is_empty() {
+            lines.push(String::new());
+            lines.push("*By Model:*".to_string());
+            for m in data.models.iter().take(5) {
+                let est = if m.estimated { " ~" } else { "" };
+                lines.push(format!(
+                    "  `{}` · {} tok · {}{}",
+                    m.model,
+                    fmt_tokens(m.tokens),
+                    fmt_cost(m.cost),
+                    est
+                ));
+            }
+        }
+
+        if !data.tools.is_empty() {
+            lines.push(String::new());
+            lines.push("*Core Tools:*".to_string());
+            for t in data.tools.iter().take(5) {
+                lines.push(format!(
+                    "  `{}` · {} calls",
+                    t.tool_name,
+                    format_number(t.call_count)
+                ));
+            }
+        }
+
+        if !data.projects.is_empty() {
+            lines.push(String::new());
+            lines.push("*By Project:*".to_string());
+            for p in data.projects.iter().take(5) {
+                lines.push(format!(
+                    "  `{}` · {} · {} sessions",
+                    p.project,
+                    fmt_cost(p.cost),
+                    p.sessions
+                ));
+            }
+        }
+
+        if !data.activities.is_empty() {
+            lines.push(String::new());
+            lines.push("*By Activity:*".to_string());
+            for a in data.activities.iter().take(5) {
+                lines.push(format!(
+                    "  {} · {} · {} turns · {:.0}% one-shot",
+                    a.category,
+                    fmt_cost(a.cost),
+                    a.turns,
+                    a.one_shot_pct * 100.0,
+                ));
+            }
+        }
+
+        lines.push(String::new());
     }
 
     lines.join("\n")
