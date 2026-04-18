@@ -52,6 +52,13 @@ pub struct ProviderSelectorState {
     pub custom_model: String,
     /// Identifier name for custom provider (e.g. "nvidia", "ollama")
     pub custom_name: String,
+    /// Original name of the custom provider entry being edited, captured
+    /// when the dialog opened. `Some(name)` = editing an existing entry;
+    /// `None` = adding a new one. Save writes back to `editing_custom_key`
+    /// (renaming the TOML table key if `custom_name` differs) instead of
+    /// naively inserting at `custom_name` — prevents duplicate entries and
+    /// api_key loss on rename.
+    pub editing_custom_key: Option<String>,
     /// Context window size for custom providers (digits only)
     pub context_window: String,
     /// Which field is currently focused (numbering varies by provider type)

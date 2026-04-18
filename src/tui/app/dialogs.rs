@@ -73,6 +73,9 @@ impl App {
                         .map(|cw| cw.to_string())
                         .unwrap_or_default();
                     self.ps.custom_name = name.to_string();
+                    // Anchor: we're editing this entry. Save writes back
+                    // here even if the user renames the field.
+                    self.ps.editing_custom_key = Some(name.to_string());
                 }
                 let idx = self
                     .ps
@@ -137,6 +140,7 @@ impl App {
                     .map(|cw| cw.to_string())
                     .unwrap_or_default();
                 self.ps.custom_name = name.to_string();
+                self.ps.editing_custom_key = Some(name.to_string());
                 let idx = self
                     .ps
                     .custom_names
@@ -285,6 +289,7 @@ impl App {
                     self.ps.base_url.clear();
                     self.ps.context_window.clear();
                     self.ps.api_key_input.clear();
+                    self.ps.editing_custom_key = None;
                 } else if provider_idx >= CUSTOM_INSTANCES_START {
                     // Existing custom provider — populate fields from config
                     let custom_idx = provider_idx - CUSTOM_INSTANCES_START;
@@ -292,13 +297,14 @@ impl App {
                         && let Ok(c) = crate::config::Config::load()
                         && let Some(cfg) = c.providers.custom_by_name(&name)
                     {
-                        self.ps.custom_name = name;
+                        self.ps.custom_name = name.clone();
                         self.ps.base_url = cfg.base_url.clone().unwrap_or_default();
                         self.ps.custom_model = cfg.default_model.clone().unwrap_or_default();
                         self.ps.context_window = cfg
                             .context_window
                             .map(|cw| cw.to_string())
                             .unwrap_or_default();
+                        self.ps.editing_custom_key = Some(name);
                     }
                 } else {
                     // Static provider — clear custom fields
@@ -306,6 +312,7 @@ impl App {
                     self.ps.custom_model.clear();
                     self.ps.base_url.clear();
                     self.ps.context_window.clear();
+                    self.ps.editing_custom_key = None;
                 }
 
                 // Re-fetch models for the new provider — load API key from config
@@ -894,23 +901,48 @@ impl App {
                 });
             }
             10 if !self.ps.custom_name.is_empty() => {
+                // Edit-in-place semantics: if we're editing an existing
+                // entry (`editing_custom_key`), write back to that key —
+                // even when the user renamed the name field. Rename is a
+                // table-key move: take the old entry intact, remove the
+                // old key, insert under the new key with merged fields
+                // (api_key preserved unless the user typed a new one).
+                // Only when there's no anchor (pure "+ New Custom"
+                // flow) do we insert a fresh entry.
                 let custom_model = self.ps.custom_model.clone();
-                let custom_name = self.ps.custom_name.clone();
+                let new_name = self.ps.custom_name.clone();
+                let editing = self.ps.editing_custom_key.clone();
                 let mut customs = config.providers.custom.unwrap_or_default();
                 let context_window = self.ps.context_window.parse::<u32>().ok();
-                customs.insert(
-                    custom_name,
-                    ProviderConfig {
-                        enabled: true,
-                        api_key: api_key.clone(),
-                        base_url: Some(self.ps.base_url.clone()),
-                        default_model: Some(custom_model),
-                        models: vec![],
-                        vision_model: None,
-                        context_window,
-                        ..Default::default()
-                    },
-                );
+
+                // Base = existing entry we're editing (if any). Preserves
+                // fields the dialog doesn't surface (vision_model, custom
+                // headers, etc.) across saves.
+                let existing = editing
+                    .as_ref()
+                    .and_then(|k| customs.get(k).cloned())
+                    .unwrap_or_default();
+
+                let merged = ProviderConfig {
+                    enabled: true,
+                    api_key: api_key.clone().or(existing.api_key.clone()),
+                    base_url: Some(self.ps.base_url.clone()),
+                    default_model: Some(custom_model),
+                    models: existing.models.clone(),
+                    vision_model: existing.vision_model.clone(),
+                    context_window: context_window.or(existing.context_window),
+                    ..existing
+                };
+
+                // Rename: remove the old table key first, then insert
+                // the merged entry under the new name. If the name
+                // didn't change, this is a straight in-place update.
+                if let Some(old_key) = editing.as_ref()
+                    && old_key != &new_name
+                {
+                    customs.remove(old_key);
+                }
+                customs.insert(new_name, merged);
                 config.providers.custom = Some(customs);
             }
             _ => {}
@@ -978,6 +1010,46 @@ impl App {
                 if cs != section {
                     try_write(&cs, "enabled", "false");
                 }
+            }
+        }
+
+        // On custom-provider rename, delete the old `[providers.custom.<old>]`
+        // block and port its api_key to the new section in keys.toml.
+        // Without this, editing the name field in /models leaves a
+        // duplicate entry behind (old name still present with the key,
+        // new name empty and unusable) — the exact bug behind the
+        // 2026-04-18 13:52 401 where `opencodeiolo` had no key because
+        // it was a rename-duplicate. `api_key` here already comes from
+        // the merged config (Config::load merges keys.toml into
+        // api_key), so we just re-write it under the new section.
+        if provider_idx == CUSTOM_PROVIDER_IDX
+            && let Some(ref old_key) = self.ps.editing_custom_key
+            && old_key != &self.ps.custom_name
+            && !old_key.is_empty()
+        {
+            let old_section = format!("providers.custom.{}", old_key);
+            if let Err(e) = crate::config::Config::remove_section(&old_section) {
+                tracing::warn!(
+                    "Failed to remove old custom section '{}': {}",
+                    old_section,
+                    e
+                );
+            } else {
+                tracing::info!(
+                    "Renamed custom provider: '{}' -> '{}' (old section removed)",
+                    old_key,
+                    self.ps.custom_name
+                );
+            }
+            // Port the api_key to the new keys.toml section. This must
+            // happen unconditionally on rename (the key_changed gate
+            // below only fires when the user typed in the key field).
+            if let Some(ref key_val) = api_key
+                && !key_val.is_empty()
+                && let Err(e) =
+                    crate::config::write_secret_key(section, "api_key", key_val)
+            {
+                tracing::warn!("Failed to migrate api_key on rename: {}", e);
             }
         }
 
@@ -1123,7 +1195,36 @@ impl App {
         }
         // Cache the provider instance for fast session switching
         self.provider_cache
-            .insert(agent_provider_name, provider_arc);
+            .insert(agent_provider_name.clone(), provider_arc);
+
+        // Flush session_providers entries still bound to the old/new
+        // provider name so runtime picks up the fresh config immediately.
+        // Without this, sessions that cached an instance built before
+        // the save (e.g. Telegram session using a stale no-key
+        // opencodeiolo instance) keep failing until the user manually
+        // forces a new provider creation per session. The 2026-04-18
+        // 13:52 401 cascade was exactly this — config had the key,
+        // session_providers cache had the keyless instance.
+        let mut invalidate_names: Vec<String> = vec![agent_provider_name.clone()];
+        if let Some(ref old_key) = self.ps.editing_custom_key
+            && old_key != &self.ps.custom_name
+        {
+            invalidate_names.push(old_key.clone());
+        }
+        for (sid, p) in self.agent_service.session_provider_snapshot() {
+            let cached_name = p.name().to_string();
+            if invalidate_names.iter().any(|n| n == &cached_name) {
+                self.agent_service.remove_session_provider(sid);
+                tracing::info!(
+                    "[save_provider] flushed stale session_providers entry for session={} (was '{}')",
+                    sid,
+                    cached_name
+                );
+            }
+        }
+        // Anchor moves to the new key for the next save in this dialog
+        // session (if the user saves again without reopening).
+        self.ps.editing_custom_key = Some(self.ps.custom_name.clone());
 
         // Only close dialog if explicitly requested
         if close_dialog {
