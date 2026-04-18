@@ -1093,24 +1093,59 @@ impl AgentService {
                     ) || matches!(
                         &e,
                         crate::brain::provider::ProviderError::StreamError(s) if s.contains("rate limit") || s.contains("hit your limit")
-                    ) =>
+                    ) || matches!(
+                        &e,
+                        crate::brain::provider::ProviderError::ApiError { status, .. }
+                            if *status == 401 || *status == 403
+                    ) || matches!(&e, crate::brain::provider::ProviderError::InvalidApiKey) =>
                 {
-                    tracing::warn!("Rate/account limit hit — checking for fallback provider");
+                    // 401/403 auth failures and missing-key errors are
+                    // unrecoverable on the current provider (retry with
+                    // the same bad key is pointless) but perfectly
+                    // fallback-able: the next provider in the chain has
+                    // its own key and may work fine. The 2026-04-18
+                    // 13:52 log caught opencodeiolo returning 401
+                    // "Missing API key" and falling straight through
+                    // to the terminal AgentError — no retry, no
+                    // fallback, user saw a raw error string in
+                    // Telegram. Treat it like a rate-limit: skip
+                    // in-place retry, walk the fallback chain.
+                    let (is_auth, reason) =
+                        if matches!(
+                            &e,
+                            crate::brain::provider::ProviderError::ApiError { status, .. }
+                                if *status == 401 || *status == 403
+                        ) || matches!(&e, crate::brain::provider::ProviderError::InvalidApiKey)
+                        {
+                            (true, "auth_error")
+                        } else {
+                            (false, "rate_limit_exceeded")
+                        };
+                    tracing::warn!(
+                        "{} hit — checking for fallback provider",
+                        if is_auth {
+                            "Auth error"
+                        } else {
+                            "Rate/account limit"
+                        }
+                    );
                     self.record_provider_feedback(
                         session_id,
                         "provider_error",
                         &model_name,
-                        Some("rate_limit_exceeded"),
+                        Some(reason),
                     );
 
                     if let Some(ref cb) = progress_callback {
-                        let message = if self.fallback_providers.is_empty() {
-                            format!(
-                                "Rate limit on '{}' — no fallback providers configured.",
-                                model_name
-                            )
+                        let prefix = if is_auth {
+                            format!("Auth error on '{}'", model_name)
                         } else {
-                            format!("Rate limit on '{}' — walking fallback chain...", model_name)
+                            format!("Rate limit on '{}'", model_name)
+                        };
+                        let message = if self.fallback_providers.is_empty() {
+                            format!("{} — no fallback providers configured.", prefix)
+                        } else {
+                            format!("{} — walking fallback chain...", prefix)
                         };
                         cb(session_id, ProgressEvent::SelfHealingAlert { message });
                     }
