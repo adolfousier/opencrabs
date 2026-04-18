@@ -1683,6 +1683,30 @@ pub(crate) async fn handle_message(
                 let _ = bot.delete_message(msg.chat.id, mid).await;
             }
 
+            // Collapse-on-completion: delete every intermediate text chunk
+            // and tool-call message posted during streaming so only the
+            // final response remains. Without this the chat accumulates
+            // 10+ separate messages per turn (each thinking chunk, each
+            // tool-call block) and the user sees what looks like
+            // duplication of the final content on top of all the
+            // work-in-progress narration. 2026-04-18 16:16 log: one turn
+            // produced 10 sent_intermediates that stayed visible after
+            // completion.
+            let (tool_msg_ids, intermediate_ids): (Vec<MessageId>, Vec<MessageId>) = {
+                let mut s = streaming.lock().unwrap_or_else(|e| e.into_inner());
+                let tools: Vec<MessageId> =
+                    s.tool_msgs.iter().filter_map(|t| t.msg_id).collect();
+                let inters = std::mem::take(&mut s.intermediate_msg_ids);
+                s.tool_msgs.clear();
+                (tools, inters)
+            };
+            for mid in tool_msg_ids {
+                let _ = bot.delete_message(msg.chat.id, mid).await;
+            }
+            for mid in intermediate_ids {
+                let _ = bot.delete_message(msg.chat.id, mid).await;
+            }
+
             // If input was voice AND TTS is enabled, also send voice note after text
             if is_voice && voice_config.tts_enabled {
                 match crate::channels::voice::synthesize(&response.content, &voice_config).await {
@@ -2172,6 +2196,24 @@ pub(crate) async fn resume_session(
                     }
                 }
             } else if let Some(mid) = streaming_msg_id {
+                let _ = bot.delete_message(chat_id, mid).await;
+            }
+
+            // Collapse-on-completion — see the matching block in
+            // handle_message() for rationale. Delete intermediate +
+            // tool-call messages so only the final response remains.
+            let (tool_msg_ids, intermediate_ids): (Vec<MessageId>, Vec<MessageId>) = {
+                let mut s = streaming.lock().unwrap_or_else(|e| e.into_inner());
+                let tools: Vec<MessageId> =
+                    s.tool_msgs.iter().filter_map(|t| t.msg_id).collect();
+                let inters = std::mem::take(&mut s.intermediate_msg_ids);
+                s.tool_msgs.clear();
+                (tools, inters)
+            };
+            for mid in tool_msg_ids {
+                let _ = bot.delete_message(chat_id, mid).await;
+            }
+            for mid in intermediate_ids {
                 let _ = bot.delete_message(chat_id, mid).await;
             }
 
