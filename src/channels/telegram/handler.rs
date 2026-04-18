@@ -1098,7 +1098,22 @@ pub(crate) async fn handle_message(
                                     }
                                 }
                                 DisplayItem::Intermediate(text) => {
-                                    let text = crate::utils::sanitize::strip_llm_artifacts(text);
+                                    // Apply the same sanitization chain as the
+                                    // final response path: strip LLM artifacts
+                                    // AND redact secrets. Without the redact
+                                    // step here, an intermediate carrying a
+                                    // Drive URL `…/file/d/<id>/view` goes out
+                                    // with the raw id, while the final-response
+                                    // edit of the same text gets redacted to
+                                    // `[REDACTED_TOKEN]`. Two different strings
+                                    // → dedup's substring replace fails → both
+                                    // shown verbatim as back-to-back duplicate
+                                    // messages (2026-04-18 20:57 + 21:21 TG
+                                    // screenshots). Redact here so both sides
+                                    // match.
+                                    let text =
+                                        crate::utils::sanitize::strip_llm_artifacts(text);
+                                    let text = redact_secrets(&text);
                                     let html = markdown_to_telegram_html(&text);
                                     if !html.is_empty() {
                                         // Chunk to 4096 and only record as delivered if every
@@ -1512,6 +1527,7 @@ pub(crate) async fn handle_message(
             }
             DisplayItem::Intermediate(text) => {
                 let text = crate::utils::sanitize::strip_llm_artifacts(&text);
+                let text = redact_secrets(&text);
                 let html = markdown_to_telegram_html(&text);
                 if !html.is_empty() {
                     // Chunk to Telegram's 4096-char limit and send each chunk.
@@ -1827,6 +1843,7 @@ pub(crate) async fn resume_session(
                                 }
                                 DisplayItem::Intermediate(text) => {
                                     let text = crate::utils::sanitize::strip_llm_artifacts(&text);
+                                    let text = redact_secrets(&text);
                                     let html = markdown_to_telegram_html(&text);
                                     if !html.is_empty() {
                                         let chunks: Vec<String> = split_message(&html, 4096)
@@ -2067,6 +2084,7 @@ pub(crate) async fn resume_session(
             }
             DisplayItem::Intermediate(text) => {
                 let text = crate::utils::sanitize::strip_llm_artifacts(&text);
+                let text = redact_secrets(&text);
                 let html = markdown_to_telegram_html(&text);
                 if !html.is_empty() {
                     // Same chunk-and-confirm pattern as the group handler —
