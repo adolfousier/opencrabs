@@ -7,10 +7,10 @@
 //! - API-based TTS (OpenAI, OpenAI-compatible, Voicebox)
 //! - Local TTS (Piper)
 
-pub mod openai_tts;
 pub mod openai_stt;
-pub mod voicebox_tts;
+pub mod openai_tts;
 pub mod voicebox_stt;
+pub mod voicebox_tts;
 
 #[cfg(feature = "local-stt")]
 pub mod local_whisper;

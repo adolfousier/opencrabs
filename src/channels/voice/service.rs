@@ -29,31 +29,23 @@ pub async fn transcribe_audio(audio_bytes: Vec<u8>, groq_api_key: &str) -> Resul
 pub async fn transcribe(audio_bytes: Vec<u8>, voice_config: &VoiceConfig) -> Result<String> {
     // Voicebox STT takes priority if enabled
     if voice_config.voicebox_stt_enabled {
-        return super::voicebox_stt::transcribe(
-            audio_bytes,
-            &voice_config.voicebox_stt_base_url,
-        )
-        .await;
+        return super::voicebox_stt::transcribe(audio_bytes, &voice_config.voicebox_stt_base_url)
+            .await;
     }
 
     // OpenAI-compatible STT if base_url is configured
-    if let (Some(base_url), Some(model)) =
-        (&voice_config.stt_base_url, &voice_config.stt_model)
-        && let Some(api_key) = &voice_config.stt_api_key {
-            return super::openai_stt::transcribe_audio(
-                audio_bytes,
-                api_key,
-                model,
-                base_url,
-            )
-            .await;
-        }
+    if let (Some(base_url), Some(model)) = (&voice_config.stt_base_url, &voice_config.stt_model)
+        && let Some(api_key) = &voice_config.stt_api_key
+    {
+        return super::openai_stt::transcribe_audio(audio_bytes, api_key, model, base_url).await;
+    }
 
     // Groq API (legacy)
     if let Some(provider) = &voice_config.stt_provider
-        && let Some(api_key) = &provider.api_key {
-            return transcribe_audio(audio_bytes, api_key).await;
-        }
+        && let Some(api_key) = &provider.api_key
+    {
+        return transcribe_audio(audio_bytes, api_key).await;
+    }
 
     // Local whisper
     #[cfg(feature = "local-stt")]
@@ -162,8 +154,7 @@ pub async fn synthesize(text: &str, voice_config: &VoiceConfig) -> Result<Vec<u8
     }
 
     // OpenAI-compatible TTS if base_url is configured
-    if let (Some(base_url), Some(api_key)) =
-        (&voice_config.tts_base_url, &voice_config.tts_api_key)
+    if let (Some(base_url), Some(api_key)) = (&voice_config.tts_base_url, &voice_config.tts_api_key)
     {
         return super::openai_tts::synthesize_speech(
             text,
@@ -177,15 +168,16 @@ pub async fn synthesize(text: &str, voice_config: &VoiceConfig) -> Result<Vec<u8
 
     // OpenAI TTS API (legacy)
     if let Some(provider) = &voice_config.tts_provider
-        && let Some(api_key) = &provider.api_key {
-            return synthesize_speech(
-                text,
-                api_key,
-                &voice_config.tts_voice,
-                &voice_config.tts_model,
-            )
-            .await;
-        }
+        && let Some(api_key) = &provider.api_key
+    {
+        return synthesize_speech(
+            text,
+            api_key,
+            &voice_config.tts_voice,
+            &voice_config.tts_model,
+        )
+        .await;
+    }
 
     // Local Piper TTS
     #[cfg(feature = "local-tts")]
