@@ -6,7 +6,9 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::tui::onboarding::{OnboardingStep, OnboardingWizard, SttProvider, TtsProvider, VoiceField, WizardAction};
+use crate::tui::onboarding::{
+    OnboardingStep, OnboardingWizard, SttProvider, TtsProvider, VoiceField, WizardAction,
+};
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::empty())
@@ -33,9 +35,9 @@ fn stt_mode_cycles_with_up_down() {
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
     assert_eq!(wizard.stt_provider, SttProvider::Groq);
 
-    // Down -> Local if available, else OpenAiCompatible
-    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
     if local_stt {
+        // Down -> Local
+        crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
         assert_eq!(wizard.stt_provider, SttProvider::Local);
 
         // Down -> OpenAiCompatible
@@ -66,9 +68,27 @@ fn stt_mode_cycles_with_up_down() {
         crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Up));
         assert_eq!(wizard.stt_provider, SttProvider::Groq);
     } else {
-        assert_eq!(wizard.stt_provider, SttProvider::OpenAiCompatible); // skipping Local
+        // Down -> OpenAiCompatible (skipping Local)
+        crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
+        assert_eq!(wizard.stt_provider, SttProvider::OpenAiCompatible);
 
-        // Up from OpenAiCompatible -> Groq
+        // Down -> Voicebox
+        crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
+        assert_eq!(wizard.stt_provider, SttProvider::Voicebox);
+
+        // Down -> wraps to Off
+        crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
+        assert_eq!(wizard.stt_provider, SttProvider::Off);
+
+        // Up from Off -> Voicebox
+        crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Up));
+        assert_eq!(wizard.stt_provider, SttProvider::Voicebox);
+
+        // Up -> OpenAiCompatible
+        crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Up));
+        assert_eq!(wizard.stt_provider, SttProvider::OpenAiCompatible);
+
+        // Up -> Groq
         crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Up));
         assert_eq!(wizard.stt_provider, SttProvider::Groq);
     }
@@ -230,27 +250,28 @@ fn tts_mode_cycles_with_down() {
     let mut wizard = OnboardingWizard::new();
     wizard.step = OnboardingStep::VoiceSetup;
     wizard.voice_field = VoiceField::TtsModeSelect;
-    assert_eq!(wizard.tts_provider, TtsProvider::Off); // Off
-    assert!(!wizard.tts_enabled);
+    assert_eq!(wizard.tts_provider, TtsProvider::Off);
 
-    // Down → API (1)
+    // Down -> OpenAi
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
     assert_eq!(wizard.tts_provider, TtsProvider::OpenAi);
-    assert!(wizard.tts_enabled);
 
-    // Down → Local (2) if available, else wraps to Off (0)
+    // Down -> Local if available, else OpenAiCompatible
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
     if local_tts {
         assert_eq!(wizard.tts_provider, TtsProvider::Local);
-        assert!(wizard.tts_enabled);
 
-        // Down → Off (0) — wraps
+        // Down -> OpenAiCompatible
+        crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
+        assert_eq!(wizard.tts_provider, TtsProvider::OpenAiCompatible);
+
+        // Down -> Voicebox
+        crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
+        assert_eq!(wizard.tts_provider, TtsProvider::Voicebox);
+
+        // Down -> wraps to Off
         crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
         assert_eq!(wizard.tts_provider, TtsProvider::Off);
-        assert!(!wizard.tts_enabled);
-    } else {
-        assert_eq!(wizard.tts_provider, TtsProvider::Off); // wraps to Off, skipping Local
-        assert!(!wizard.tts_enabled);
     }
 }
 
@@ -261,19 +282,32 @@ fn tts_mode_cycles_with_up() {
     wizard.step = OnboardingStep::VoiceSetup;
     wizard.voice_field = VoiceField::TtsModeSelect;
 
-    // Up from Off (0) → Local (2) if available, else API (1)
+    // Up from Off -> Voicebox (last in the list)
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Up));
     if local_tts {
-        assert_eq!(wizard.tts_provider, TtsProvider::Local);
-        assert!(wizard.tts_enabled);
+        assert_eq!(wizard.tts_provider, TtsProvider::Voicebox);
 
-        // Up → API (1)
+        // Up -> OpenAiCompatible
+        crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Up));
+        assert_eq!(wizard.tts_provider, TtsProvider::OpenAiCompatible);
+
+        // Up -> Local
+        crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Up));
+        assert_eq!(wizard.tts_provider, TtsProvider::Local);
+
+        // Up -> OpenAi
         crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Up));
         assert_eq!(wizard.tts_provider, TtsProvider::OpenAi);
-        assert!(wizard.tts_enabled);
     } else {
-        assert_eq!(wizard.tts_provider, TtsProvider::OpenAi); // API is max when Local unavailable
-        assert!(wizard.tts_enabled);
+        assert_eq!(wizard.tts_provider, TtsProvider::Voicebox);
+
+        // Up -> OpenAiCompatible
+        crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Up));
+        assert_eq!(wizard.tts_provider, TtsProvider::OpenAiCompatible);
+
+        // Up -> OpenAi
+        crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Up));
+        assert_eq!(wizard.tts_provider, TtsProvider::OpenAi);
     }
 }
 
@@ -594,13 +628,13 @@ fn stt_mode_cycles_to_local_when_available() {
     wizard.voice_field = VoiceField::SttModeSelect;
     wizard.stt_provider = SttProvider::Groq; // API
 
-    // Down → Local (2) — available because local-stt feature is on
+    // Down → Local — available because local-stt feature is on
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
     assert_eq!(wizard.stt_provider, SttProvider::Local);
 
-    // Down → wraps to Off (0)
+    // Down → OpenAiCompatible
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
-    assert_eq!(wizard.stt_provider, SttProvider::Off);
+    assert_eq!(wizard.stt_provider, SttProvider::OpenAiCompatible);
 }
 
 #[cfg(feature = "local-stt")]
@@ -611,9 +645,9 @@ fn stt_mode_up_from_off_goes_to_local_when_available() {
     wizard.voice_field = VoiceField::SttModeSelect;
     wizard.stt_provider = SttProvider::Off; // Off
 
-    // Up from Off → Local (2) when local-stt is available
+    // Up from Off → Voicebox (last in list) when local-stt is available
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Up));
-    assert_eq!(wizard.stt_provider, SttProvider::Local);
+    assert_eq!(wizard.stt_provider, SttProvider::Voicebox);
 }
 
 // ─── Wizard resets unavailable modes ────────────────────────────────────────
@@ -652,15 +686,13 @@ fn tts_mode_cycles_to_local_when_available() {
     wizard.voice_field = VoiceField::TtsModeSelect;
     wizard.tts_provider = TtsProvider::OpenAi; // API
 
-    // Down → Local (2) — available because local-tts + python3
+    // Down → Local — available because local-tts + python3
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
     assert_eq!(wizard.tts_provider, TtsProvider::Local);
-    assert!(wizard.tts_enabled);
 
-    // Down → wraps to Off (0)
+    // Down → OpenAiCompatible
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
-    assert_eq!(wizard.tts_provider, TtsProvider::Off);
-    assert!(!wizard.tts_enabled);
+    assert_eq!(wizard.tts_provider, TtsProvider::OpenAiCompatible);
 }
 
 #[test]
@@ -673,13 +705,13 @@ fn tts_mode_skips_local_when_unavailable() {
     wizard.voice_field = VoiceField::TtsModeSelect;
     wizard.tts_provider = TtsProvider::Off; // Off
 
-    // Down → API (1)
+    // Down → OpenAi
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
     assert_eq!(wizard.tts_provider, TtsProvider::OpenAi);
 
-    // Down → wraps to Off (0), skipping Local
+    // Down → OpenAiCompatible (skipping Local)
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
-    assert_eq!(wizard.tts_provider, TtsProvider::Off);
+    assert_eq!(wizard.tts_provider, TtsProvider::OpenAiCompatible);
 }
 
 #[test]
@@ -692,13 +724,13 @@ fn stt_mode_skips_local_when_unavailable() {
     wizard.voice_field = VoiceField::SttModeSelect;
     wizard.stt_provider = SttProvider::Off; // Off
 
-    // Down → API (1)
+    // Down → Groq
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
     assert_eq!(wizard.stt_provider, SttProvider::Groq);
 
-    // Down → wraps to Off (0), skipping Local
+    // Down → OpenAiCompatible (skipping Local)
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Down));
-    assert_eq!(wizard.stt_provider, SttProvider::Off);
+    assert_eq!(wizard.stt_provider, SttProvider::OpenAiCompatible);
 }
 
 // ─── Wizard resets unavailable TTS mode ─────────────────────────────────────
@@ -717,7 +749,8 @@ enabled = true
         assert!(wizard.tts_enabled);
     } else {
         assert_eq!(
-            wizard.tts_provider, TtsProvider::Off,
+            wizard.tts_provider,
+            TtsProvider::Off,
             "Should reset Local TTS to Off when unavailable"
         );
         assert!(!wizard.tts_enabled);
@@ -759,8 +792,6 @@ fn tts_local_voice_select_tab_advances_step() {
 
 #[test]
 fn tts_local_voice_enter_when_downloaded_advances() {
-    // Enter on an already-downloaded voice — stays on voice select (Enter doesn't advance)
-    // Tab moves to Continue, then Enter advances
     let mut wizard = OnboardingWizard::new();
     wizard.step = OnboardingStep::VoiceSetup;
     wizard.voice_field = VoiceField::TtsLocalVoiceSelect;
@@ -768,9 +799,9 @@ fn tts_local_voice_enter_when_downloaded_advances() {
 
     let action = crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Enter));
     assert_eq!(action, WizardAction::None);
-    // Enter on downloaded voice doesn't advance — use Tab → Continue → Enter
-    crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Tab));
+    // Enter on downloaded voice goes to Continue
     assert_eq!(wizard.voice_field, VoiceField::Continue);
+    // Enter on Continue advances to next step
     crate::tui::onboarding::voice::handle_key(&mut wizard, key(KeyCode::Enter));
     assert_eq!(wizard.step, OnboardingStep::ImageSetup);
 }

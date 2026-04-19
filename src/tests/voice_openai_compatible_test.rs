@@ -5,32 +5,39 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::channels::voice::openai_tts;
     use crate::channels::voice::openai_stt;
+    use crate::channels::voice::openai_tts;
 
     // ─── URL building ───────────────────────────────────────────────────────
 
     #[test]
     fn build_endpoint_url_with_trailing_slash() {
-        let url = openai_tts::build_endpoint_url("http://localhost:11434/", "v1/audio/speech").unwrap();
+        let url =
+            openai_tts::build_endpoint_url("http://localhost:11434/", "v1/audio/speech").unwrap();
         assert_eq!(url, "http://localhost:11434/v1/audio/speech");
     }
 
     #[test]
     fn build_endpoint_url_without_trailing_slash() {
-        let url = openai_tts::build_endpoint_url("http://localhost:11434", "v1/audio/speech").unwrap();
+        let url =
+            openai_tts::build_endpoint_url("http://localhost:11434", "v1/audio/speech").unwrap();
         assert_eq!(url, "http://localhost:11434/v1/audio/speech");
     }
 
     #[test]
     fn build_endpoint_url_openai_style() {
-        let url = openai_tts::build_endpoint_url("https://api.openai.com", "v1/audio/speech").unwrap();
+        let url =
+            openai_tts::build_endpoint_url("https://api.openai.com", "v1/audio/speech").unwrap();
         assert_eq!(url, "https://api.openai.com/v1/audio/speech");
     }
 
     #[test]
     fn build_endpoint_url_groq_style() {
-        let url = openai_tts::build_endpoint_url("https://api.groq.com/openai", "v1/audio/transcriptions").unwrap();
+        let url = openai_tts::build_endpoint_url(
+            "https://api.groq.com/openai",
+            "v1/audio/transcriptions",
+        )
+        .unwrap();
         assert_eq!(url, "https://api.groq.com/openai/v1/audio/transcriptions");
     }
 
@@ -46,8 +53,13 @@ mod tests {
     #[tokio::test]
     async fn tts_empty_text_rejected() {
         let result = openai_tts::synthesize_speech(
-            "", "fake-key", "echo", "gpt-4o-mini-tts", "http://localhost:9999",
-        ).await;
+            "",
+            "fake-key",
+            "echo",
+            "gpt-4o-mini-tts",
+            "http://localhost:9999",
+        )
+        .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("empty text"));
     }
@@ -78,7 +90,8 @@ mod tests {
             "echo",
             "gpt-4o-mini-tts",
             &mock_url,
-        ).await;
+        )
+        .await;
 
         assert!(result.is_ok());
         let bytes = result.unwrap();
@@ -98,8 +111,13 @@ mod tests {
             .await;
 
         let result = openai_tts::synthesize_speech(
-            "hello", "wrong-key", "echo", "gpt-4o-mini-tts", &mock_url,
-        ).await;
+            "hello",
+            "wrong-key",
+            "echo",
+            "gpt-4o-mini-tts",
+            &mock_url,
+        )
+        .await;
 
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
@@ -109,15 +127,16 @@ mod tests {
 
     #[tokio::test]
     async fn tts_connection_refused_on_bad_url() {
-        let result = openai_tts::synthesize_speech(
-            "hello", "key", "echo", "model", "http://localhost:1",
-        ).await;
+        let result =
+            openai_tts::synthesize_speech("hello", "key", "echo", "model", "http://localhost:1")
+                .await;
         assert!(result.is_err());
         // Connection refused or timeout — either is acceptable
         let err = result.unwrap_err().to_string();
         assert!(
             err.contains("send") || err.contains("connect") || err.contains("Connection"),
-            "Should be a connection error: {}", err
+            "Should be a connection error: {}",
+            err
         );
     }
 
@@ -142,7 +161,8 @@ mod tests {
             "test-stt-key",
             "whisper-large-v3-turbo",
             &mock_url,
-        ).await;
+        )
+        .await;
 
         assert!(result.is_ok());
         let text = result.unwrap();
@@ -161,9 +181,8 @@ mod tests {
             .create_async()
             .await;
 
-        let result = openai_stt::transcribe_audio(
-            vec![0x00, 0x01], "key", "whisper", &mock_url,
-        ).await;
+        let result =
+            openai_stt::transcribe_audio(vec![0x00, 0x01], "key", "whisper", &mock_url).await;
 
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
@@ -185,9 +204,8 @@ mod tests {
             .create_async()
             .await;
 
-        let result = openai_stt::transcribe_audio(
-            vec![0x00, 0x01], "key", "whisper", &mock_url,
-        ).await;
+        let result =
+            openai_stt::transcribe_audio(vec![0x00, 0x01], "key", "whisper", &mock_url).await;
 
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();

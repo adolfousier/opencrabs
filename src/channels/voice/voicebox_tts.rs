@@ -68,10 +68,9 @@ impl VoiceboxTts {
             anyhow::bail!("Voicebox audio file not found: {}", result.audio_path);
         }
 
-        let audio_bytes =
-            tokio::fs::read(audio_path)
-                .await
-                .with_context(|| format!("Failed to read Voicebox audio file: {}", result.audio_path))?;
+        let audio_bytes = tokio::fs::read(audio_path).await.with_context(|| {
+            format!("Failed to read Voicebox audio file: {}", result.audio_path)
+        })?;
 
         tracing::info!(
             "Voicebox TTS: generated {} bytes of audio (profile={}, duration={:.2}s, path={})",

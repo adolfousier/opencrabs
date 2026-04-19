@@ -603,7 +603,8 @@ impl OnboardingWizard {
                 "enabled",
                 &(self.stt_provider == SttProvider::Voicebox).to_string()
             );
-            if self.stt_provider == SttProvider::Voicebox && !self.stt_voicebox_base_url.is_empty() {
+            if self.stt_provider == SttProvider::Voicebox && !self.stt_voicebox_base_url.is_empty()
+            {
                 try_write!(
                     write_errors,
                     "providers.stt.voicebox",

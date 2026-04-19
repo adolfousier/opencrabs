@@ -4,8 +4,8 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::channels::voice::voicebox_tts::VoiceboxTts;
     use crate::channels::voice::voicebox_stt;
+    use crate::channels::voice::voicebox_tts::VoiceboxTts;
 
     // ─── TTS ────────────────────────────────────────────────────────────────
 
@@ -43,16 +43,19 @@ mod tests {
             })))
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(serde_json::json!({
-                "id": "gen-123",
-                "profile_id": "profile-abc",
-                "text": "hello voicebox",
-                "language": "en",
-                "audio_path": audio_path.to_string_lossy(),
-                "duration": 1.5,
-                "seed": 42,
-                "created_at": "2026-04-18T00:00:00Z"
-            }).to_string())
+            .with_body(
+                serde_json::json!({
+                    "id": "gen-123",
+                    "profile_id": "profile-abc",
+                    "text": "hello voicebox",
+                    "language": "en",
+                    "audio_path": audio_path.to_string_lossy(),
+                    "duration": 1.5,
+                    "seed": 42,
+                    "created_at": "2026-04-18T00:00:00Z"
+                })
+                .to_string(),
+            )
             .create_async()
             .await;
 
@@ -74,16 +77,19 @@ mod tests {
             .mock("POST", "/generate")
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(serde_json::json!({
-                "id": "gen-123",
-                "profile_id": "profile-abc",
-                "text": "hello",
-                "language": "en",
-                "audio_path": "/nonexistent/path/audio.wav",
-                "duration": 1.0,
-                "seed": 42,
-                "created_at": "2026-04-18T00:00:00Z"
-            }).to_string())
+            .with_body(
+                serde_json::json!({
+                    "id": "gen-123",
+                    "profile_id": "profile-abc",
+                    "text": "hello",
+                    "language": "en",
+                    "audio_path": "/nonexistent/path/audio.wav",
+                    "duration": 1.0,
+                    "seed": 42,
+                    "created_at": "2026-04-18T00:00:00Z"
+                })
+                .to_string(),
+            )
             .create_async()
             .await;
 
@@ -138,10 +144,7 @@ mod tests {
             .create_async()
             .await;
 
-        let result = voicebox_stt::transcribe(
-            vec![0x00, 0x01, 0x02, 0x03],
-            &mock_url,
-        ).await;
+        let result = voicebox_stt::transcribe(vec![0x00, 0x01, 0x02, 0x03], &mock_url).await;
 
         assert!(result.is_ok());
         let text = result.unwrap();
@@ -160,10 +163,7 @@ mod tests {
             .create_async()
             .await;
 
-        let result = voicebox_stt::transcribe(
-            vec![0x00, 0x01],
-            &mock_url,
-        ).await;
+        let result = voicebox_stt::transcribe(vec![0x00, 0x01], &mock_url).await;
 
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
@@ -185,10 +185,7 @@ mod tests {
             .create_async()
             .await;
 
-        let result = voicebox_stt::transcribe(
-            vec![0x00, 0x01],
-            &mock_url,
-        ).await;
+        let result = voicebox_stt::transcribe(vec![0x00, 0x01], &mock_url).await;
 
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
@@ -197,10 +194,7 @@ mod tests {
 
     #[tokio::test]
     async fn stt_connection_refused_on_bad_url() {
-        let result = voicebox_stt::transcribe(
-            vec![0x00, 0x01],
-            "http://localhost:1",
-        ).await;
+        let result = voicebox_stt::transcribe(vec![0x00, 0x01], "http://localhost:1").await;
         assert!(result.is_err());
     }
 }

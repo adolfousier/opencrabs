@@ -29,7 +29,12 @@ impl SttProvider {
         if is_local_available {
             &Self::ALL
         } else {
-            &[Self::Off, Self::Groq, Self::OpenAiCompatible, Self::Voicebox]
+            &[
+                Self::Off,
+                Self::Groq,
+                Self::OpenAiCompatible,
+                Self::Voicebox,
+            ]
         }
     }
 
@@ -94,7 +99,12 @@ impl TtsProvider {
         if is_local_available {
             &Self::ALL
         } else {
-            &[Self::Off, TtsProvider::OpenAi, TtsProvider::OpenAiCompatible, TtsProvider::Voicebox]
+            &[
+                Self::Off,
+                TtsProvider::OpenAi,
+                TtsProvider::OpenAiCompatible,
+                TtsProvider::Voicebox,
+            ]
         }
     }
 

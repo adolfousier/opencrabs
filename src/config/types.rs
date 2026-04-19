@@ -1669,7 +1669,10 @@ impl Config {
             .and_then(|s| s.voicebox.as_ref())
             .is_some_and(|v| v.enabled);
 
-        let stt_enabled = groq_enabled || local_stt_enabled || openai_compatible_stt_enabled || voicebox_stt_enabled;
+        let stt_enabled = groq_enabled
+            || local_stt_enabled
+            || openai_compatible_stt_enabled
+            || voicebox_stt_enabled;
         let stt_mode = if local_stt_enabled {
             SttMode::Local
         } else {
@@ -1709,7 +1712,10 @@ impl Config {
             .and_then(|t| t.voicebox.as_ref())
             .is_some_and(|v| v.enabled);
 
-        let tts_enabled = openai_tts_enabled || local_tts_enabled || openai_compatible_tts_enabled || voicebox_tts_enabled;
+        let tts_enabled = openai_tts_enabled
+            || local_tts_enabled
+            || openai_compatible_tts_enabled
+            || voicebox_tts_enabled;
         let tts_mode = if local_tts_enabled {
             TtsMode::Local
         } else {

@@ -628,10 +628,14 @@ impl OnboardingWizard {
         };
 
         // If Local was saved but the capability isn't available, reset to Off
-        if wizard.stt_provider == SttProvider::Local && !crate::channels::voice::local_stt_available() {
+        if wizard.stt_provider == SttProvider::Local
+            && !crate::channels::voice::local_stt_available()
+        {
             wizard.stt_provider = SttProvider::Off;
         }
-        if wizard.tts_provider == TtsProvider::Local && !crate::channels::voice::local_tts_available() {
+        if wizard.tts_provider == TtsProvider::Local
+            && !crate::channels::voice::local_tts_available()
+        {
             wizard.tts_provider = TtsProvider::Off;
             wizard.tts_enabled = false;
         }

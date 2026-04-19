@@ -221,7 +221,14 @@ fn handle_tts_mode(wizard: &mut OnboardingWizard, key: KeyCode) -> WizardAction 
             advance_from_tts(wizard);
         }
         KeyCode::BackTab => {
-            advance_from_stt(wizard);
+            // Go to the last field of whatever STT provider is selected
+            match wizard.stt_provider {
+                SttProvider::Voicebox => wizard.voice_field = VoiceField::SttVoiceboxUrl,
+                SttProvider::OpenAiCompatible => wizard.voice_field = VoiceField::SttOpenaiCompatKey,
+                SttProvider::Local => wizard.voice_field = VoiceField::LocalModelSelect,
+                SttProvider::Groq => wizard.voice_field = VoiceField::GroqApiKey,
+                SttProvider::Off => wizard.voice_field = VoiceField::SttModeSelect,
+            }
         }
         _ => {}
     }
@@ -402,7 +409,9 @@ pub fn render(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
     if wizard.quick_jump {
         lines.push(Line::from(Span::styled(
             "  Voice Superpowers",
-            Style::default().fg(ACCENT_GOLD).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(ACCENT_GOLD)
+                .add_modifier(Modifier::BOLD),
         )));
         lines.push(Line::from(Span::styled(
             "  Talk to me, literally",
@@ -472,10 +481,17 @@ pub fn render(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
     let continue_focused = wizard.voice_field == VoiceField::Continue;
     if continue_focused {
         lines.push(Line::from(vec![
-            Span::styled("  > ", Style::default().fg(ACCENT_GOLD).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "  > ",
+                Style::default()
+                    .fg(ACCENT_GOLD)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(
                 "Continue",
-                Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
             ),
         ]));
     } else {
@@ -497,7 +513,12 @@ pub fn render(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
 fn render_stt_mode_selector(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
     let focused = wizard.voice_field == VoiceField::SttModeSelect;
     for provider in SttProvider::available(crate::channels::voice::local_stt_available()) {
-        render_radio(lines, focused, wizard.stt_provider == *provider, provider.label());
+        render_radio(
+            lines,
+            focused,
+            wizard.stt_provider == *provider,
+            provider.label(),
+        );
     }
 }
 
@@ -656,7 +677,12 @@ fn render_stt_voicebox_fields(lines: &mut Vec<Line<'static>>, wizard: &Onboardin
 fn render_tts_mode_selector(lines: &mut Vec<Line<'static>>, wizard: &OnboardingWizard) {
     let focused = wizard.voice_field == VoiceField::TtsModeSelect;
     for provider in TtsProvider::available(crate::channels::voice::local_tts_available()) {
-        render_radio(lines, focused, wizard.tts_provider == *provider, provider.label());
+        render_radio(
+            lines,
+            focused,
+            wizard.tts_provider == *provider,
+            provider.label(),
+        );
     }
 }
 
@@ -788,13 +814,25 @@ fn render_radio(lines: &mut Vec<Line<'static>>, focused: bool, selected: bool, l
         ),
         Span::styled(
             if selected { "(*)" } else { "( )" },
-            Style::default().fg(if selected { ACCENT_GOLD } else { Color::DarkGray }),
+            Style::default().fg(if selected {
+                ACCENT_GOLD
+            } else {
+                Color::DarkGray
+            }),
         ),
         Span::styled(
             format!(" {}", label),
             Style::default()
-                .fg(if focused && selected { Color::White } else { Color::DarkGray })
-                .add_modifier(if focused && selected { Modifier::BOLD } else { Modifier::empty() }),
+                .fg(if focused && selected {
+                    Color::White
+                } else {
+                    Color::DarkGray
+                })
+                .add_modifier(if focused && selected {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
         ),
     ]));
 }
