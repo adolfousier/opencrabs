@@ -768,9 +768,12 @@ async fn cmd_chat_inner(
             crate::brain::tools::browser::BrowserContentTool::new(browser_manager.clone()),
         ));
         shared_tool_registry.register(Arc::new(
-            crate::brain::tools::browser::BrowserWaitTool::new(browser_manager),
+            crate::brain::tools::browser::BrowserWaitTool::new(browser_manager.clone()),
         ));
-        tracing::info!("Browser automation tools registered (7 tools)");
+        shared_tool_registry.register(Arc::new(
+            crate::brain::tools::browser::BrowserFindTool::new(browser_manager),
+        ));
+        tracing::info!("Browser automation tools registered (8 tools)");
     }
 
     // Now that the registry is Arc'd, give it to the channel factory

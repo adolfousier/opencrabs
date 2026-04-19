@@ -4,6 +4,7 @@
 mod click;
 mod content;
 mod eval;
+mod find;
 mod manager;
 mod navigate;
 mod screenshot;
@@ -13,11 +14,17 @@ mod wait;
 pub use click::BrowserClickTool;
 pub use content::BrowserContentTool;
 pub use eval::BrowserEvalTool;
+pub use find::BrowserFindTool;
 
 // Eval output cap — re-exported only for test fixtures
 // (src/tests/browser_eval_cap_test.rs).
 #[cfg(test)]
 pub(crate) use eval::cap_eval_output;
+
+// Find-mode JS builder — re-exported only for test fixtures
+// (src/tests/browser_find_test.rs).
+#[cfg(test)]
+pub(crate) use find::build_find_js;
 pub use manager::BrowserManager;
 pub use navigate::BrowserNavigateTool;
 pub use screenshot::BrowserScreenshotTool;
