@@ -340,6 +340,24 @@ pub enum VoiceField {
     TtsModeSelect,
     TtsLocalVoiceSelect,
     Continue,
+    // OpenAI-compatible STT
+    SttOpenaiCompatToggle,
+    SttOpenaiCompatUrl,
+    SttOpenaiCompatModel,
+    SttOpenaiCompatKey,
+    // Voicebox STT
+    SttVoiceboxToggle,
+    SttVoiceboxUrl,
+    // OpenAI-compatible TTS
+    TtsOpenaiCompatToggle,
+    TtsOpenaiCompatUrl,
+    TtsOpenaiCompatModel,
+    TtsOpenaiCompatVoice,
+    TtsOpenaiCompatKey,
+    // Voicebox TTS
+    TtsVoiceboxToggle,
+    TtsVoiceboxUrl,
+    TtsVoiceboxProfileId,
 }
 
 /// Which field is focused in ImageSetup step

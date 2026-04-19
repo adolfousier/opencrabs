@@ -570,6 +570,46 @@ impl OnboardingWizard {
                 }
             }
 
+            // OpenAI-compatible STT
+            try_write!(
+                write_errors,
+                "providers.stt.openai_compatible",
+                "enabled",
+                &self.stt_openai_compat_enabled.to_string()
+            );
+            if !self.stt_openai_compat_base_url.is_empty() {
+                try_write!(
+                    write_errors,
+                    "providers.stt.openai_compatible",
+                    "base_url",
+                    &self.stt_openai_compat_base_url
+                );
+            }
+            if !self.stt_openai_compat_model.is_empty() {
+                try_write!(
+                    write_errors,
+                    "providers.stt.openai_compatible",
+                    "model",
+                    &self.stt_openai_compat_model
+                );
+            }
+
+            // Voicebox STT
+            try_write!(
+                write_errors,
+                "providers.stt.voicebox",
+                "enabled",
+                &self.stt_voicebox_enabled.to_string()
+            );
+            if !self.stt_voicebox_base_url.is_empty() {
+                try_write!(
+                    write_errors,
+                    "providers.stt.voicebox",
+                    "base_url",
+                    &self.stt_voicebox_base_url
+                );
+            }
+
             // TTS API provider (OpenAI)
             let is_api_tts = self.tts_enabled && self.tts_mode == 1;
             let is_local_tts = self.tts_enabled && self.tts_mode == 2;
@@ -608,6 +648,62 @@ impl OnboardingWizard {
                         );
                     }
                 }
+            }
+
+            // OpenAI-compatible TTS
+            try_write!(
+                write_errors,
+                "providers.tts.openai_compatible",
+                "enabled",
+                &self.tts_openai_compat_enabled.to_string()
+            );
+            if !self.tts_openai_compat_base_url.is_empty() {
+                try_write!(
+                    write_errors,
+                    "providers.tts.openai_compatible",
+                    "base_url",
+                    &self.tts_openai_compat_base_url
+                );
+            }
+            if !self.tts_openai_compat_model.is_empty() {
+                try_write!(
+                    write_errors,
+                    "providers.tts.openai_compatible",
+                    "model",
+                    &self.tts_openai_compat_model
+                );
+            }
+            if !self.tts_openai_compat_voice.is_empty() {
+                try_write!(
+                    write_errors,
+                    "providers.tts.openai_compatible",
+                    "voice",
+                    &self.tts_openai_compat_voice
+                );
+            }
+
+            // Voicebox TTS
+            try_write!(
+                write_errors,
+                "providers.tts.voicebox",
+                "enabled",
+                &self.tts_voicebox_enabled.to_string()
+            );
+            if !self.tts_voicebox_base_url.is_empty() {
+                try_write!(
+                    write_errors,
+                    "providers.tts.voicebox",
+                    "base_url",
+                    &self.tts_voicebox_base_url
+                );
+            }
+            if !self.tts_voicebox_profile_id.is_empty() {
+                try_write!(
+                    write_errors,
+                    "providers.tts.voicebox",
+                    "profile_id",
+                    &self.tts_voicebox_profile_id
+                );
             }
         } // end if write_voice
 
@@ -661,6 +757,26 @@ impl OnboardingWizard {
                     crate::config::write_secret_key("providers.tts.openai", "api_key", groq_key)
             {
                 tracing::warn!("Failed to save TTS key to keys.toml: {}", e);
+            }
+            // OpenAI-compatible STT key
+            if !self.stt_openai_compat_key_input.is_empty()
+                && let Err(e) = crate::config::write_secret_key(
+                    "providers.stt.openai_compatible",
+                    "api_key",
+                    &self.stt_openai_compat_key_input,
+                )
+            {
+                tracing::warn!("Failed to save OpenAI-compatible STT key: {}", e);
+            }
+            // OpenAI-compatible TTS key
+            if !self.tts_openai_compat_key_input.is_empty()
+                && let Err(e) = crate::config::write_secret_key(
+                    "providers.tts.openai_compatible",
+                    "api_key",
+                    &self.tts_openai_compat_key_input,
+                )
+            {
+                tracing::warn!("Failed to save OpenAI-compatible TTS key: {}", e);
             }
         } // end voice keys
 

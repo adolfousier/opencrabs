@@ -85,6 +85,25 @@ pub struct OnboardingWizard {
     /// Whether the selected Piper voice is downloaded and ready
     pub tts_voice_downloaded: bool,
 
+    // OpenAI-compatible STT
+    pub stt_openai_compat_enabled: bool,
+    pub stt_openai_compat_base_url: String,
+    pub stt_openai_compat_model: String,
+    pub stt_openai_compat_key_input: String,
+    // Voicebox STT
+    pub stt_voicebox_enabled: bool,
+    pub stt_voicebox_base_url: String,
+    // OpenAI-compatible TTS
+    pub tts_openai_compat_enabled: bool,
+    pub tts_openai_compat_base_url: String,
+    pub tts_openai_compat_model: String,
+    pub tts_openai_compat_voice: String,
+    pub tts_openai_compat_key_input: String,
+    // Voicebox TTS
+    pub tts_voicebox_enabled: bool,
+    pub tts_voicebox_base_url: String,
+    pub tts_voicebox_profile_id: String,
+
     /// Step 7: Image Setup
     pub image_field: ImageField,
     pub image_vision_enabled: bool,
@@ -373,6 +392,24 @@ impl OnboardingWizard {
             tts_voice_download_progress: None,
             tts_voice_download_error: None,
             tts_voice_downloaded: false,
+            // OpenAI-compatible STT
+            stt_openai_compat_enabled: false,
+            stt_openai_compat_base_url: String::new(),
+            stt_openai_compat_model: "whisper-1".to_string(),
+            stt_openai_compat_key_input: String::new(),
+            // Voicebox STT
+            stt_voicebox_enabled: false,
+            stt_voicebox_base_url: "http://localhost:8000".to_string(),
+            // OpenAI-compatible TTS
+            tts_openai_compat_enabled: false,
+            tts_openai_compat_base_url: String::new(),
+            tts_openai_compat_model: "tts-1".to_string(),
+            tts_openai_compat_voice: "alloy".to_string(),
+            tts_openai_compat_key_input: String::new(),
+            // Voicebox TTS
+            tts_voicebox_enabled: false,
+            tts_voicebox_base_url: String::new(),
+            tts_voicebox_profile_id: String::new(),
 
             image_field: ImageField::VisionToggle,
             image_vision_enabled: false,
@@ -607,6 +644,41 @@ impl OnboardingWizard {
         }
 
         wizard.detect_existing_groq_key();
+
+        // Load OpenAI-compatible STT config
+        if let Some(stt) = config.providers.stt.as_ref()
+            && let Some(ref oc) = stt.openai_compatible {
+            wizard.stt_openai_compat_enabled = oc.enabled;
+            wizard.stt_openai_compat_base_url = oc.base_url.clone().unwrap_or_default();
+            wizard.stt_openai_compat_model = oc.model.clone().unwrap_or_else(|| "whisper-1".to_string());
+            if oc.enabled {
+                wizard.stt_openai_compat_key_input = super::types::EXISTING_KEY_SENTINEL.to_string();
+            }
+        }
+        // Load Voicebox STT config
+        if let Some(stt) = config.providers.stt.as_ref()
+            && let Some(ref vb) = stt.voicebox {
+            wizard.stt_voicebox_enabled = vb.enabled;
+            wizard.stt_voicebox_base_url = vb.base_url.clone();
+        }
+        // Load OpenAI-compatible TTS config
+        if let Some(tts) = config.providers.tts.as_ref()
+            && let Some(ref oc) = tts.openai_compatible {
+            wizard.tts_openai_compat_enabled = oc.enabled;
+            wizard.tts_openai_compat_base_url = oc.base_url.clone().unwrap_or_default();
+            wizard.tts_openai_compat_model = oc.model.clone().unwrap_or_else(|| "tts-1".to_string());
+            wizard.tts_openai_compat_voice = oc.voice.clone().unwrap_or_else(|| "alloy".to_string());
+            if oc.enabled {
+                wizard.tts_openai_compat_key_input = super::types::EXISTING_KEY_SENTINEL.to_string();
+            }
+        }
+        // Load Voicebox TTS config
+        if let Some(tts) = config.providers.tts.as_ref()
+            && let Some(ref vb) = tts.voicebox {
+            wizard.tts_voicebox_enabled = vb.enabled;
+            wizard.tts_voicebox_base_url = vb.base_url.clone();
+            wizard.tts_voicebox_profile_id = vb.profile_id.clone();
+        }
 
         // Resolve selected Piper voice index from config
         #[cfg(feature = "local-tts")]
