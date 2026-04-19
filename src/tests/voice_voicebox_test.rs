@@ -46,13 +46,10 @@ mod tests {
             .with_body(
                 serde_json::json!({
                     "id": "gen-123",
-                    "profile_id": "profile-abc",
-                    "text": "hello voicebox",
-                    "language": "en",
+                    "status": "completed",
                     "audio_path": audio_path.to_string_lossy(),
                     "duration": 1.5,
-                    "seed": 42,
-                    "created_at": "2026-04-18T00:00:00Z"
+                    "error": null
                 })
                 .to_string(),
             )
@@ -80,13 +77,10 @@ mod tests {
             .with_body(
                 serde_json::json!({
                     "id": "gen-123",
-                    "profile_id": "profile-abc",
-                    "text": "hello",
-                    "language": "en",
+                    "status": "completed",
                     "audio_path": "/nonexistent/path/audio.wav",
                     "duration": 1.0,
-                    "seed": 42,
-                    "created_at": "2026-04-18T00:00:00Z"
+                    "error": null
                 })
                 .to_string(),
             )
