@@ -62,8 +62,8 @@ pub struct OnboardingWizard {
 
     /// Step 6: Voice Setup
     pub voice_field: VoiceField,
-    /// 0 = Off, 1 = API (Groq), 2 = Local (whisper.cpp)
-    pub stt_mode: usize,
+    /// Which STT provider is selected
+    pub stt_provider: SttProvider,
     pub groq_api_key_input: String,
     /// Index into LOCAL_MODEL_PRESETS (0=Tiny, 1=Base, 2=Small, 3=Medium)
     pub selected_local_stt_model: usize,
@@ -74,8 +74,8 @@ pub struct OnboardingWizard {
     /// Whether the selected model is downloaded and ready
     pub stt_model_downloaded: bool,
     pub tts_enabled: bool,
-    /// 0 = Off, 1 = API (OpenAI), 2 = Local (Piper)
-    pub tts_mode: usize,
+    /// Which TTS provider is selected
+    pub tts_provider: TtsProvider,
     /// Index into PIPER_VOICES (0=ryan, 1=amy, etc.)
     pub selected_tts_voice: usize,
     /// Download progress for Piper voice (0.0 - 1.0), None if not downloading
@@ -86,21 +86,17 @@ pub struct OnboardingWizard {
     pub tts_voice_downloaded: bool,
 
     // OpenAI-compatible STT
-    pub stt_openai_compat_enabled: bool,
     pub stt_openai_compat_base_url: String,
     pub stt_openai_compat_model: String,
     pub stt_openai_compat_key_input: String,
     // Voicebox STT
-    pub stt_voicebox_enabled: bool,
     pub stt_voicebox_base_url: String,
     // OpenAI-compatible TTS
-    pub tts_openai_compat_enabled: bool,
     pub tts_openai_compat_base_url: String,
     pub tts_openai_compat_model: String,
     pub tts_openai_compat_voice: String,
     pub tts_openai_compat_key_input: String,
     // Voicebox TTS
-    pub tts_voicebox_enabled: bool,
     pub tts_voicebox_base_url: String,
     pub tts_voicebox_profile_id: String,
 
@@ -380,34 +376,30 @@ impl OnboardingWizard {
             channel_test_status: ChannelTestStatus::Idle,
 
             voice_field: VoiceField::SttModeSelect,
-            stt_mode: 0,
+            stt_provider: SttProvider::Off,
             groq_api_key_input: String::new(),
             selected_local_stt_model: 0,
             stt_model_download_progress: None,
             stt_model_download_error: None,
             stt_model_downloaded: false,
             tts_enabled: false,
-            tts_mode: 0,
+            tts_provider: TtsProvider::Off,
             selected_tts_voice: 0,
             tts_voice_download_progress: None,
             tts_voice_download_error: None,
             tts_voice_downloaded: false,
             // OpenAI-compatible STT
-            stt_openai_compat_enabled: false,
             stt_openai_compat_base_url: String::new(),
             stt_openai_compat_model: "whisper-1".to_string(),
             stt_openai_compat_key_input: String::new(),
             // Voicebox STT
-            stt_voicebox_enabled: false,
             stt_voicebox_base_url: "http://localhost:8000".to_string(),
             // OpenAI-compatible TTS
-            tts_openai_compat_enabled: false,
             tts_openai_compat_base_url: String::new(),
             tts_openai_compat_model: "tts-1".to_string(),
             tts_openai_compat_voice: "alloy".to_string(),
             tts_openai_compat_key_input: String::new(),
             // Voicebox TTS
-            tts_voicebox_enabled: false,
             tts_voicebox_base_url: String::new(),
             tts_voicebox_profile_id: String::new(),
 
@@ -614,70 +606,89 @@ impl OnboardingWizard {
             RespondTo::Mention => 2,
         };
 
-        // Load voice settings (0=Off, 1=API, 2=Local for both STT and TTS)
+        // Load voice settings
         let vc = config.voice_config();
-        wizard.stt_mode = if !vc.stt_enabled {
-            0 // Off
+        // Initial mapping from legacy VoiceConfig (Groq/Local only)
+        wizard.stt_provider = if !vc.stt_enabled {
+            SttProvider::Off
         } else {
             match vc.stt_mode {
-                crate::config::SttMode::Api => 1,
-                crate::config::SttMode::Local => 2,
+                crate::config::SttMode::Api => SttProvider::Groq,
+                crate::config::SttMode::Local => SttProvider::Local,
             }
         };
         wizard.tts_enabled = vc.tts_enabled;
-        wizard.tts_mode = if !vc.tts_enabled {
-            0 // Off
+        wizard.tts_provider = if !vc.tts_enabled {
+            TtsProvider::Off
         } else {
             match vc.tts_mode {
-                crate::config::TtsMode::Api => 1,
-                crate::config::TtsMode::Local => 2,
+                crate::config::TtsMode::Api => TtsProvider::OpenAi,
+                crate::config::TtsMode::Local => TtsProvider::Local,
             }
         };
 
-        // If Local was saved but the capability isn't available on this machine, reset to Off
-        if wizard.stt_mode == 2 && !crate::channels::voice::local_stt_available() {
-            wizard.stt_mode = 0;
+        // If Local was saved but the capability isn't available, reset to Off
+        if wizard.stt_provider == SttProvider::Local && !crate::channels::voice::local_stt_available() {
+            wizard.stt_provider = SttProvider::Off;
         }
-        if wizard.tts_mode == 2 && !crate::channels::voice::local_tts_available() {
-            wizard.tts_mode = 0;
+        if wizard.tts_provider == TtsProvider::Local && !crate::channels::voice::local_tts_available() {
+            wizard.tts_provider = TtsProvider::Off;
             wizard.tts_enabled = false;
         }
 
         wizard.detect_existing_groq_key();
 
-        // Load OpenAI-compatible STT config
-        if let Some(stt) = config.providers.stt.as_ref()
-            && let Some(ref oc) = stt.openai_compatible {
-            wizard.stt_openai_compat_enabled = oc.enabled;
-            wizard.stt_openai_compat_base_url = oc.base_url.clone().unwrap_or_default();
-            wizard.stt_openai_compat_model = oc.model.clone().unwrap_or_else(|| "whisper-1".to_string());
-            if oc.enabled {
-                wizard.stt_openai_compat_key_input = super::types::EXISTING_KEY_SENTINEL.to_string();
+        // Load STT provider from config
+        if let Some(stt) = config.providers.stt.as_ref() {
+            if stt.voicebox.as_ref().is_some_and(|v| v.enabled) {
+                wizard.stt_provider = SttProvider::Voicebox;
+                wizard.stt_voicebox_base_url = stt.voicebox.as_ref().unwrap().base_url.clone();
+            } else if stt.openai_compatible.as_ref().is_some_and(|v| v.enabled) {
+                wizard.stt_provider = SttProvider::OpenAiCompatible;
+                let oc = stt.openai_compatible.as_ref().unwrap();
+                wizard.stt_openai_compat_base_url = oc.base_url.clone().unwrap_or_default();
+                wizard.stt_openai_compat_model =
+                    oc.model.clone().unwrap_or_else(|| "whisper-1".to_string());
+                wizard.stt_openai_compat_key_input =
+                    super::types::EXISTING_KEY_SENTINEL.to_string();
+            } else if stt.local.as_ref().is_some_and(|l| l.enabled) {
+                wizard.stt_provider = SttProvider::Local;
+            } else if stt.groq.as_ref().is_some_and(|g| g.enabled) {
+                wizard.stt_provider = SttProvider::Groq;
+            } else {
+                wizard.stt_provider = SttProvider::Off;
             }
         }
-        // Load Voicebox STT config
-        if let Some(stt) = config.providers.stt.as_ref()
-            && let Some(ref vb) = stt.voicebox {
-            wizard.stt_voicebox_enabled = vb.enabled;
-            wizard.stt_voicebox_base_url = vb.base_url.clone();
-        }
-        // Load OpenAI-compatible TTS config
-        if let Some(tts) = config.providers.tts.as_ref()
-            && let Some(ref oc) = tts.openai_compatible {
-            wizard.tts_openai_compat_enabled = oc.enabled;
-            wizard.tts_openai_compat_base_url = oc.base_url.clone().unwrap_or_default();
-            wizard.tts_openai_compat_model = oc.model.clone().unwrap_or_else(|| "tts-1".to_string());
-            wizard.tts_openai_compat_voice = oc.voice.clone().unwrap_or_else(|| "alloy".to_string());
-            if oc.enabled {
-                wizard.tts_openai_compat_key_input = super::types::EXISTING_KEY_SENTINEL.to_string();
+
+        // Load TTS provider from config
+        if let Some(tts) = config.providers.tts.as_ref() {
+            if tts.voicebox.as_ref().is_some_and(|v| v.enabled) {
+                wizard.tts_provider = TtsProvider::Voicebox;
+                wizard.tts_enabled = true;
+                let vb = tts.voicebox.as_ref().unwrap();
+                wizard.tts_voicebox_base_url = vb.base_url.clone();
+                wizard.tts_voicebox_profile_id = vb.profile_id.clone();
+            } else if tts.openai_compatible.as_ref().is_some_and(|v| v.enabled) {
+                wizard.tts_provider = TtsProvider::OpenAiCompatible;
+                wizard.tts_enabled = true;
+                let oc = tts.openai_compatible.as_ref().unwrap();
+                wizard.tts_openai_compat_base_url = oc.base_url.clone().unwrap_or_default();
+                wizard.tts_openai_compat_model =
+                    oc.model.clone().unwrap_or_else(|| "tts-1".to_string());
+                wizard.tts_openai_compat_voice =
+                    oc.voice.clone().unwrap_or_else(|| "alloy".to_string());
+                wizard.tts_openai_compat_key_input =
+                    super::types::EXISTING_KEY_SENTINEL.to_string();
+            } else if tts.local.as_ref().is_some_and(|l| l.enabled) {
+                wizard.tts_provider = TtsProvider::Local;
+                wizard.tts_enabled = true;
+            } else if tts.openai.as_ref().is_some_and(|o| o.enabled) {
+                wizard.tts_provider = TtsProvider::OpenAi;
+                wizard.tts_enabled = true;
+            } else {
+                wizard.tts_provider = TtsProvider::Off;
+                wizard.tts_enabled = false;
             }
-        }
-        // Load Voicebox TTS config
-        if let Some(tts) = config.providers.tts.as_ref()
-            && let Some(ref vb) = tts.voicebox {
-            wizard.tts_voicebox_enabled = vb.enabled;
-            wizard.tts_voicebox_base_url = vb.base_url.clone();
-            wizard.tts_voicebox_profile_id = vb.profile_id.clone();
         }
 
         // Resolve selected Piper voice index from config
