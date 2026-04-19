@@ -133,6 +133,8 @@ cargo test --all-features
 | Tests — Token Tracking | 8 | `src/tests/token_tracking_test.rs` |
 | Tests — wait_agent Resolver | 12 | `src/tests/wait_agent_resolver_test.rs` |
 | Tests — Browser Default (macOS LSHandlers parser) | 8 | `src/tests/browser_default_test.rs` |
+| Tests — Browser Default (Linux xdg-settings parser) | 4 | `src/tests/browser_default_linux_test.rs` (Linux-only) |
+| Tests — Browser Default (Windows reg-query parser) | 6 | `src/tests/browser_default_windows_test.rs` (Windows-only) |
 | Tests — Browser Profile Lock Sweeper | 5 | `src/tests/browser_locks_test.rs` |
 | Tests — Browser CDP Handler Health | 4 | `src/tests/browser_health_test.rs` |
 | Tests — Browser Stealth JS Regression Guards | 6 | `src/tests/browser_stealth_test.rs` |

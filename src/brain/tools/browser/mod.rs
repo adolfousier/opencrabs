@@ -25,6 +25,14 @@ pub use wait::BrowserWaitTool;
 #[cfg(all(target_os = "macos", test))]
 pub(crate) use manager::parse_ls_handlers;
 
+// Linux xdg-settings parser — re-exported for tests.
+#[cfg(all(target_os = "linux", test))]
+pub(crate) use manager::parse_xdg_default_browser;
+
+// Windows reg-query ProgId parser — re-exported for tests.
+#[cfg(all(target_os = "windows", test))]
+pub(crate) use manager::parse_windows_reg_prog_id;
+
 // Stale-lock sweeper — re-exported only for test fixtures
 // (src/tests/browser_locks_test.rs). See clean_stale_locks doc in
 // manager.rs for the failure mode it guards against.

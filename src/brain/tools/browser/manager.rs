@@ -788,10 +788,21 @@ fn detect_default_browser_id() -> Option<String> {
         .args(["get", "default-web-browser"])
         .output()
         .ok()?;
-    let text = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .to_lowercase();
-    if text.is_empty() { None } else { Some(text) }
+    let text = String::from_utf8_lossy(&output.stdout);
+    parse_xdg_default_browser(&text)
+}
+
+/// Pure parser for `xdg-settings get default-web-browser` output.
+/// Extracted so unit tests can feed fixtures without spawning the
+/// xdg-settings binary. Trims, lowercases, and rejects empty strings.
+#[cfg(target_os = "linux")]
+pub(crate) fn parse_xdg_default_browser(text: &str) -> Option<String> {
+    let trimmed = text.trim().to_lowercase();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
 }
 
 /// Detect the user's default browser (Windows).
@@ -806,12 +817,29 @@ fn detect_default_browser_id() -> Option<String> {
         .output()
         .ok()?;
     let text = String::from_utf8_lossy(&output.stdout);
-    // Output: "    ProgId    REG_SZ    ChromeHTML"
+    parse_windows_reg_prog_id(&text)
+}
+
+/// Pure parser for `reg query … /v ProgId` output. Example input line:
+/// `    ProgId    REG_SZ    ChromeHTML`. Returns the lowercased ProgId
+/// value, or None if no ProgId line was found.
+///
+/// Extracted so unit tests can feed fixtures without shelling out to
+/// `reg`. Matches the line containing "ProgId" and takes the last
+/// whitespace-delimited token as the value — this works for the
+/// standard `reg query` format on Windows 10/11.
+#[cfg(target_os = "windows")]
+pub(crate) fn parse_windows_reg_prog_id(text: &str) -> Option<String> {
     for line in text.lines() {
-        if line.contains("ProgId") {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if let Some(id) = parts.last() {
-                return Some(id.to_lowercase());
+        let trimmed = line.trim();
+        // Skip the "ProgId" header line that some reg versions emit
+        // without a value (shouldn't happen for REG_SZ queries, but
+        // guard anyway).
+        if trimmed.starts_with("ProgId") || trimmed.contains("    ProgId    ") {
+            let parts: Vec<&str> = trimmed.split_whitespace().collect();
+            // Expect at least: ["ProgId", "REG_SZ", "<value>"]
+            if parts.len() >= 3 {
+                return Some(parts.last().unwrap().to_lowercase());
             }
         }
     }
