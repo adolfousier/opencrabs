@@ -26,6 +26,36 @@ struct ManagerInner {
     headless: bool,
 }
 
+/// Best-effort cleanup when the last `BrowserManager` clone (and
+/// therefore the inner Arc) is dropped — typically app exit.
+///
+/// Previously, opencrabs shutdown left the CDP handler task running
+/// as a tokio zombie and the headed Chrome process alive (visible
+/// window, orphaned Arc<Browser>), since no signal handler or Drop
+/// impl closed either. Subsequent opencrabs restarts would then hit
+/// the SingletonLock path (fixed in P0) or fight over the user's
+/// profile.
+///
+/// Drop can't be async, so we do the synchronous subset: abort the
+/// handler task (JoinHandle::abort is sync and cancels the future at
+/// the next await point), and drop the Browser option — Browser's own
+/// Drop closes the CDP connection, which causes headless Chrome to
+/// exit. Headed Chrome typically remains running visually until the
+/// user closes it, which matches user expectations.
+impl Drop for ManagerInner {
+    fn drop(&mut self) {
+        if self.browser.is_none() && self.handler_handle.is_none() {
+            return; // never launched
+        }
+        self.pages.clear();
+        self.browser.take();
+        if let Some(h) = self.handler_handle.take() {
+            h.abort();
+        }
+        tracing::debug!("browser: ManagerInner dropped — handler aborted, CDP closed");
+    }
+}
+
 impl Default for BrowserManager {
     fn default() -> Self {
         Self::new()

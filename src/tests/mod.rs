@@ -1,6 +1,7 @@
 pub mod altgr_input_test;
 pub mod brain_templates_test;
 pub mod browser_default_test;
+pub mod browser_drop_test;
 pub mod browser_health_test;
 pub mod browser_locks_test;
 pub mod browser_stealth_test;
