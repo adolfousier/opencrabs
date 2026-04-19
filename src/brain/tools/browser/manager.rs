@@ -541,6 +541,28 @@ fn is_profile_locked(profile_dir: &std::path::Path) -> bool {
 }
 
 /// Detect the user's default browser (macOS).
+///
+/// Parses the `LSHandlers` array from LaunchServices. The plist output is
+/// an array of dicts — we want the one with `LSHandlerURLScheme = https`
+/// and read its `LSHandlerRoleAll` value.
+///
+/// The old parser walked the text line-by-line looking for a
+/// `LSHandlerURLScheme = https` token and then grabbing the next
+/// `LSHandlerRoleAll`. That was broken in two ways:
+///
+/// 1. Each entry starts with a nested `LSHandlerPreferredVersions` dict
+///    whose contents include `LSHandlerRoleAll = "-";` as a placeholder.
+///    The old parser grabbed that placeholder instead of the real role.
+/// 2. Within each entry the role line appears BEFORE the scheme line,
+///    so the `found_scheme` flag never fired on the correct role.
+///
+/// Result on this user's machine: the parser returned `"-"` as the
+/// identifier, no candidate matched, detect_browser() fell through to
+/// the first Chromium candidate (Google Chrome) — even when the user's
+/// actual default browser is Brave. The fix is block-aware parsing:
+/// track brace depth, accumulate fields at depth 2 only (skipping the
+/// nested PreferredVersions dict at depth 3), and emit the pair
+/// `(scheme, role)` when the block closes.
 #[cfg(target_os = "macos")]
 fn detect_default_browser_id() -> Option<String> {
     let output = std::process::Command::new("defaults")
@@ -552,38 +574,69 @@ fn detect_default_browser_id() -> Option<String> {
         .output()
         .ok()?;
     let text = String::from_utf8_lossy(&output.stdout);
-    // Parse the plist output looking for https handler
-    let mut found_https = false;
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if trimmed.contains("LSHandlerURLScheme") && trimmed.contains("https") {
-            found_https = true;
-        }
-        if found_https && trimmed.contains("LSHandlerRoleAll") {
-            // Extract the bundle ID value
-            if let Some(start) = trimmed.find('"')
-                && let Some(end) = trimmed.rfind('"')
-                && end > start
-            {
-                let id = &trimmed[start + 1..end];
-                if !id.is_empty() {
-                    return Some(id.to_lowercase());
-                }
-            }
-            // Try without quotes (older format): LSHandlerRoleAll = "com.brave.Browser";
-            if let Some(eq) = trimmed.find('=') {
-                let val = trimmed[eq + 1..]
-                    .trim()
-                    .trim_matches(';')
-                    .trim()
-                    .trim_matches('"');
-                if !val.is_empty() {
-                    return Some(val.to_lowercase());
-                }
-            }
-            found_https = false;
+
+    // Extract a quoted-or-unquoted value after `=` from a plist line.
+    // Handles both `key = "value";` and `key = value;` forms.
+    fn parse_value(line: &str) -> Option<String> {
+        let eq = line.find('=')?;
+        let rest = line[eq + 1..].trim().trim_end_matches(';').trim();
+        let unquoted = rest.trim_matches('"').trim();
+        if unquoted.is_empty() {
+            None
+        } else {
+            Some(unquoted.to_string())
         }
     }
+
+    // The `defaults` output wraps LSHandlers in `( … )` (plist array),
+    // not `{ … }`. So each LSHandler dict entry `{ … }` opens at brace
+    // depth 1, not 2. Fields at depth 1 are the entry's own keys; depth
+    // 2 is inside a nested dict like LSHandlerPreferredVersions which we
+    // skip. Entry closes when depth returns to 0.
+    //
+    // We also accept `LSHandlerContentType = "com.apple.default-app.web-browser"`
+    // as the "https" marker — that's how the default-web-browser choice
+    // is stored when set via System Settings → General → Default web
+    // browser rather than a URL-scheme association.
+    let mut depth: i32 = 0;
+    let mut block_scheme: Option<String> = None;
+    let mut block_content_type: Option<String> = None;
+    let mut block_role: Option<String> = None;
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+
+        if depth == 1 {
+            if trimmed.starts_with("LSHandlerURLScheme") {
+                block_scheme = parse_value(trimmed);
+            } else if trimmed.starts_with("LSHandlerContentType") {
+                block_content_type = parse_value(trimmed);
+            } else if trimmed.starts_with("LSHandlerRoleAll") {
+                block_role = parse_value(trimmed);
+            }
+        }
+
+        depth += trimmed.matches('{').count() as i32;
+        depth -= trimmed.matches('}').count() as i32;
+
+        // Block boundary: returning to depth 0 means the entry closed.
+        if depth == 0 {
+            let scheme = block_scheme.take();
+            let content_type = block_content_type.take();
+            let role = block_role.take();
+            let is_web_default = scheme.as_deref().map(|s| s.eq_ignore_ascii_case("https"))
+                == Some(true)
+                || content_type.as_deref()
+                    == Some("com.apple.default-app.web-browser");
+            if is_web_default
+                && let Some(r) = role
+                && r != "-"
+            {
+                return Some(r.to_lowercase());
+            }
+        }
+    }
+
     None
 }
 
