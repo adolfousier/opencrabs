@@ -1503,6 +1503,20 @@ pub(crate) async fn handle_message(
             "Telegram: agent call for session {} finished after cancellation — suppressing stale delivery",
             session_id
         );
+        // Voice-input + TTS case: the TTS block later in handle_message
+        // (line ~1727) only fires on the Ok arm of the agent result, so a
+        // cancelled voice-input turn silently drops the TTS reply. That
+        // looks to the user like "my voice reply disappeared" — log it
+        // specifically so the drop is traceable in logs instead of being
+        // indistinguishable from a send_voice failure.
+        if is_voice && voice_config.tts_enabled {
+            tracing::warn!(
+                "Telegram: voice-input turn cancelled before TTS synthesis for session {} \
+                 — user sent a new message while this turn was in-flight, so no voice reply \
+                 will be synthesized for this request (text intermediates already delivered are kept).",
+                session_id
+            );
+        }
         // Only delete the streaming placeholder (the typing
         // indicator). Keep the intermediate content and tool-call
         // bubbles that were already posted — those are chat history
