@@ -38,6 +38,8 @@ pub mod queued_message_test;
 pub mod qwen_tool_extractor_test;
 pub mod reasoning_lines_test;
 //pub mod plan_mode_integration_test;
+pub mod voice_openai_compatible_test;
+pub mod voice_voicebox_test;
 pub mod session_working_dir_test;
 pub mod slack_fmt_test;
 pub mod stream_loop_test;
