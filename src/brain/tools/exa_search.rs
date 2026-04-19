@@ -58,6 +58,17 @@ impl ExaSearchTool {
     /// server's status + body so a real breakage (auth, 500, etc.)
     /// stays diagnosable instead of getting silently swallowed.
     async fn init_mcp_session(&self, client: &reqwest::Client) -> Result<Option<String>> {
+        self.init_mcp_session_at(client, MCP_ENDPOINT).await
+    }
+
+    /// Inner initialize — endpoint parameterised so tests can point it
+    /// at a mockito server. Production callers go through the wrapper
+    /// above which pins `MCP_ENDPOINT`.
+    pub(crate) async fn init_mcp_session_at(
+        &self,
+        client: &reqwest::Client,
+        endpoint: &str,
+    ) -> Result<Option<String>> {
         let init_request = serde_json::json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -73,7 +84,7 @@ impl ExaSearchTool {
         });
 
         let response = client
-            .post(MCP_ENDPOINT)
+            .post(endpoint)
             .header("Content-Type", "application/json")
             .header("Accept", "application/json, text/event-stream")
             .json(&init_request)
@@ -107,7 +118,7 @@ impl ExaSearchTool {
                 "method": "notifications/initialized"
             });
             let _notif_resp = client
-                .post(MCP_ENDPOINT)
+                .post(endpoint)
                 .header("Content-Type", "application/json")
                 .header("Mcp-Session-Id", id)
                 .json(&notification)

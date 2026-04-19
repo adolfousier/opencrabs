@@ -13,6 +13,7 @@ pub mod cron_test;
 pub mod custom_provider_test;
 pub mod daemon_health_test;
 pub mod evolve_test;
+pub mod exa_search_test;
 pub mod gemini_fetch_test;
 pub mod github_provider_test;
 pub mod html_comment_strip_test;
