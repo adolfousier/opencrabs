@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Unified provider dispatch** in `voice::transcribe` and `voice::synthesize` — priority chain:
   Voicebox → OpenAI-compatible → (Groq for STT / OpenAI for TTS) → Local. First match wins. Every
   TTS output is normalised to OGG/Opus via `ensure_opus` before return.
+- **New `SttProvider` / `TtsProvider` named enums** replace the string mode discriminators —
+  `config.rs` and the onboarding wizard use typed variants (`Off` / `Groq` / `OpenAICompatible` /
+  `Voicebox` / `Local`), preventing mismatched-string-value bugs at compile time.
 
 #### Voice support expanded to all channels
 - **Slack TTS** — was missing entirely. Now transcribes incoming audio attachments and, when
@@ -33,6 +36,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Full STT/TTS parity across all four channels** — Telegram, WhatsApp, Discord, Slack all
   support both incoming voice/audio transcription and voice replies when input was audio. Single
   code path via `crate::channels::voice::{transcribe, synthesize}`.
+
+#### Onboarding wizard — voice screen rewrite
+- **Radio-selector layout with 5 providers each for STT and TTS** — Off / Groq / OpenAI-compatible /
+  Voicebox / Local for STT, and Off / OpenAI / OpenAI-compatible / Voicebox / Local for TTS. Fields
+  shown/hidden based on selected provider (e.g. `tts_base_url` + `tts_model` + `tts_voice` only
+  surface when OpenAI-compatible is picked).
+- **Voice API keys now land in `keys.toml`** — previously only `config.toml` received the field.
+  New entries: `providers.stt.openai_compatible.api_key` and `providers.tts.openai_compatible.api_key`.
+- **Paste now routes to the focused voice field** — previously the paste handler keyed on field
+  indices that shifted when new providers were added, so pasting into the TTS base URL could land
+  in the STT model name.
+- **TTS dispatch logs** — `tracing::info!` on which provider was selected and its params (base URL,
+  model, voice, profile_id) so failures point at the right config. Previously silent on the happy
+  path.
+
+#### CLI invocation reliability
+- **`TOOLS.md` always injected into the core brain** — was on-demand-loaded before, which meant the
+  model sometimes guessed CLI syntax from training data (caused duplicate `gdrive` uploads on the
+  2026-04-18 incident). Now baked in so the actual tool invocation syntax is always available.
 
 ### Fixed
 
@@ -44,6 +66,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Diagnosable voice drop on mid-stream cancellation** — when a new user message cancels a
   voice-input turn before the TTS block runs, emit a `tracing::warn` naming the session and the
   reason. Previously silent, which looked identical to `send_voice` failing.
+- **`send_voice` error no longer swallowed** — the Telegram `send_voice` error arm previously
+  logged a placeholder; now logs the real error and its Debug repr so the root cause is visible in
+  logs instead of being buried behind a generic "TTS failed" message.
 - **Voicebox audio fetch supports HTTP(S) + filesystem paths** — handles both remote URLs
   (`http://`/`https://`), server-relative paths (`/audio/{id}` → `GET {base_url}/audio/{id}`), and
   local filesystem paths (legacy sync mode). Fixes silent "audio never arrived" when the voicebox
@@ -56,13 +81,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ffmpeg output uses `-f ogg`** — previous behaviour emitted raw Opus without the Ogg container,
   which Telegram rejects. Now produces a proper Ogg/Opus file compatible with every channel.
 
+#### Telegram delivery / dedup
+- **Kill duplicate responses at the source** — `looks_truncated_mid_sentence` no longer flags a
+  URL-terminated response as truncated (added `ends_with_url` helper that scans back to
+  whitespace/open-bracket and checks for `://` in the trailing token). Previously "Done. Uploaded
+  to Drive: https://…/view" was marked truncated → model re-stated the whole answer → duplicate
+  intermediates on Telegram AND TUI. Also added pre-send dedup in `handle_message` and
+  `resume_session` so defensively we never send the exact same intermediate text twice in the
+  same turn.
+- **Keep prior intermediates + tool-call history on follow-up cancel** — the cancel path used to
+  delete every prior intermediate + tool message to prevent duplicates on the replacement turn.
+  With the pre-send dedup in place, cross-turn restating is rare enough to tolerate for the sake
+  of keeping history visible. Now only deletes the typing-indicator placeholder; all previously
+  posted bubbles stay.
+- **`redact_secrets` applied to intermediates** for dedup consistency — a redacted final response
+  otherwise wouldn't match an un-redacted intermediate, defeating the dedup.
+- **URL path segments no longer redacted as secrets** — paths like `/api/v1/users/123` were being
+  treated as tokens and stripped. Redaction now only fires on values that look like actual secrets
+  (long entropy, bearer prefixes, etc.).
+
+#### Provider / session
+- **Per-session provider construction by name on custom pick** — `/models` save no longer clones
+  `agent_service.provider()` (the stale global), it calls
+  `create_provider_by_name(&cfg, chosen)` so the Arc pinned into `session_providers[session_id]`
+  always matches the name written to `session.provider_name`. Fixes the
+  "session says opencode2 but routes to opencode" regression introduced by the per-session
+  isolation refactor (5c25fdc).
+- **Verify enabled=true actually lands on disk for the chosen provider** — after `/models` save,
+  reload the config and check the enabled flag for the saved section. On drift, retry via
+  `try_write` (which pushes to `write_errors` on failure so the user sees a visible warning
+  instead of silent divergence).
+- **Sticky fallback on rate-limit / auth** in the tool loop — when a 429 or 401/403 forces a
+  fallback, the session's provider is now swapped to the fallback and the success path disables
+  the `FallbackProviderGuard`'s Drop restore, so the swap sticks. `ProgressEvent::ProviderSwitched`
+  is emitted so the TUI persists `session.provider_name` + `session.model` to DB. Without this,
+  every subsequent turn would hit the same rate-limit, walk the chain, bounce back. Alerts now
+  read `'provider/model'` instead of `'model'` only — a user with opencode / opencode2 / opencode3
+  can tell which subscription got limited.
+- **Cancellation-safe fallback swap** — `FallbackProviderGuard` Drop restores the primary provider
+  on error OR future-drop (cancellation). Without the guard, a user sending a new message during a
+  fallback stream dropped the future before the restore line ran, leaving `session_providers`
+  stuck on the fallback provider with the primary's model in `session.model` (produced "400 Unknown
+  Model" on zhipu on 2026-04-18 18:14). On success the sticky-fallback path disables the guard so
+  the swap persists.
+- **Hard invariant against mismatched `{provider, model}` pair** — `stream_complete` now checks
+  `provider.supported_models()` before sending; if the request's model isn't in the list, remaps
+  to the provider's default and warns. Catches every path that could produce a mismatched pair
+  (stale session pin, upstream bug, cancelled fallback) before the HTTP call goes out.
+- **Custom provider always wins name collisions** against built-in ids — a user who names a custom
+  provider literally `opencode` or `anthropic` now gets the custom entry, not the built-in. Without
+  this, a session with `provider_name="opencode"` + a `providers.custom.opencode` HTTP entry
+  silently spawned an OpenCodeCliProvider subprocess instead.
+- **Custom provider edit = update in place, rename = table-key move** — on `/models` save, editing
+  an existing custom keeps the same TOML key if the name didn't change; renaming removes the old
+  key and inserts under the new name with merged fields, preserving api_key unless the user typed
+  a new one. Fixes the rename-duplicate that left `opencodeiolo` keyless on 2026-04-18.
+- **401 / 403 auth errors now trigger fallback chain** instead of a terminal `AgentError::Provider`.
+  Retry-in-place is pointless when the key is bad, but the next provider in the chain has its own
+  key and may work. Matches how rate-limit already behaved.
+- **`session.provider_name` no longer silently overwritten on swap failure** — if the configured
+  provider fails to instantiate during load, the old code overwrote `provider_name` to the
+  fallback's name in DB, so the next restart loaded the wrong provider and the original
+  configuration was silently lost.
+
 #### Reasoning renderer (TUI)
 - **Double-wrap + double-padding eliminated** in the reasoning/thinking block renderer — three
   sites in `chat.rs` (expanded message, streaming above response, standalone streaming) were
   wrapping each paragraph twice, producing inconsistent 2-vs-4 space continuation indents and
   awkward word breaks like `combined like.this.and.this`. The renderer now reserves the outer
-  indent in the wrap budget and skips the second wrap pass. Paragraph continuations now flush
-  with paragraph starts at a consistent 2-space column.
+  indent in the wrap budget and skips the second wrap pass.
+- **Flush-left reasoning wraps** — continuation lines inside a wrapped paragraph now align with
+  the paragraph's first line at a consistent 2-space column, instead of the extra-indented look
+  the previous 2-space continuation-padding produced.
+
+#### `/models` + channel commands
+- **Faster `/models` navigation** — mid-field navigation (provider → api_key → model → …) no
+  longer triggers a full `rebuild_agent_service` rebuild (5–10s freeze from HTTP health checks +
+  subprocess spawns). The enabled flag, base_url, and default_model still persist to disk on
+  every field move; the full rebuild runs exactly once on final Enter. Navigation now returns
+  in milliseconds.
+- **Full `/usage` dashboard on all channels** — was showing only current-session line + top 5
+  models. Channels now render five period-grouped cards (Daily, Projects, Models, Tools,
+  Activity) inline, one message per period (Today + All-Time), within the 4096-char Telegram cap.
 
 ## [0.3.11] - 2026-04-17
 
