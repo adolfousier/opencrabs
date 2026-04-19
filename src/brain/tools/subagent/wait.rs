@@ -57,7 +57,7 @@ impl Tool for WaitAgentTool {
     }
 
     async fn execute(&self, input: Value, _context: &ToolExecutionContext) -> Result<ToolResult> {
-        let agent_id = input
+        let raw_agent_id = input
             .get("agent_id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidInput("'agent_id' is required".into()))?;
@@ -67,12 +67,23 @@ impl Tool for WaitAgentTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(300);
 
-        if !self.manager.exists(agent_id) {
-            return Ok(ToolResult::error(format!(
-                "No sub-agent found with id: {}",
-                agent_id
-            )));
-        }
+        // Resolve the caller's id string to a real active agent. Every
+        // wait_agent failure on the 2026-04-17 logs (6/6 — 100% failure
+        // rate per the RSI feedback) was the model passing the wrong
+        // string: truncated UUID prefixes, role labels ("clippy")
+        // instead of IDs, or stale IDs from earlier turns. Rather than
+        // returning a terminal "No sub-agent found" error, try harder:
+        //   1. exact id match
+        //   2. unique UUID prefix (≥4 chars) match
+        //   3. label match (unique)
+        // If none work, return a helpful error that lists every active
+        // agent's id AND label so the model can self-correct instead of
+        // guessing again.
+        let agent_id = match self.resolve_agent_id(raw_agent_id) {
+            Some(id) => id,
+            None => return Ok(ToolResult::error(self.unknown_agent_message(raw_agent_id))),
+        };
+        let agent_id = agent_id.as_str();
 
         // Fast path — terminal or round-boundary states already visible
         // without awaiting the task handle (the task never terminates at a
@@ -127,6 +138,68 @@ impl Tool for WaitAgentTool {
 }
 
 impl WaitAgentTool {
+    /// Map a caller-provided id string to a real active agent id via:
+    ///   1. exact match (fast path — the common case)
+    ///   2. unique UUID prefix match (≥4 chars)
+    ///   3. unique label match
+    ///
+    /// Returns None if nothing matches or the match is ambiguous.
+    fn resolve_agent_id(&self, raw: &str) -> Option<String> {
+        if self.manager.exists(raw) {
+            return Some(raw.to_string());
+        }
+        let active = self.manager.list();
+
+        // Prefix match — only accept ≥4 chars to avoid accidental
+        // ambiguity on short strings.
+        if raw.len() >= 4 {
+            let prefix_hits: Vec<&(String, String, _)> = active
+                .iter()
+                .filter(|(id, _, _)| id.starts_with(raw))
+                .collect();
+            if prefix_hits.len() == 1 {
+                return Some(prefix_hits[0].0.clone());
+            }
+        }
+
+        // Label match (exact, case-insensitive).
+        let label_hits: Vec<&(String, String, _)> = active
+            .iter()
+            .filter(|(_, label, _)| label.eq_ignore_ascii_case(raw))
+            .collect();
+        if label_hits.len() == 1 {
+            return Some(label_hits[0].0.clone());
+        }
+
+        None
+    }
+
+    /// Format a helpful error when no agent matches. Lists every active
+    /// agent so the caller can self-correct on the next turn instead of
+    /// guessing another string into the void.
+    fn unknown_agent_message(&self, raw: &str) -> String {
+        let active = self.manager.list();
+        if active.is_empty() {
+            return format!(
+                "No sub-agent found with id or label '{}'. \
+                 There are no active sub-agents — spawn one first with spawn_agent.",
+                raw
+            );
+        }
+        let mut listing = String::new();
+        for (id, label, state) in &active {
+            listing.push_str(&format!("  - {} (label: {}, state: {:?})\n", id, label, state));
+        }
+        format!(
+            "No sub-agent matched '{}'. {} agent{} active:\n{}\n\
+             Call wait_agent with the full id from the list above, or the agent's label.",
+            raw,
+            active.len(),
+            if active.len() == 1 { "" } else { "s" },
+            listing.trim_end()
+        )
+    }
+
     /// Return a ToolResult if the agent has reached a state worth reporting
     /// immediately: terminal (Completed / Failed / Cancelled) or
     /// round-boundary (AwaitingInput). Returns None while still Running.
