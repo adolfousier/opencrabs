@@ -1732,6 +1732,37 @@ pub(crate) async fn handle_message(
                 let _ = bot.delete_message(msg.chat.id, mid).await;
             }
 
+            // Record the bot's text reply into channel_messages for group chats
+            // so the recent() query that builds conversation context on the NEXT
+            // turn sees both sides. Without this, `channel_msg_repo.recent()`
+            // returns user messages only — the bot loads a one-sided transcript
+            // on every group turn and effectively talks to itself in the dark.
+            // DMs skip this: they already use the session's messages table
+            // directly for context and don't touch channel_msg_repo.
+            if !is_dm && !text_only.trim().is_empty() {
+                let bot_display_name = telegram_state
+                    .bot_username()
+                    .await
+                    .map(|u| format!("@{}", u))
+                    .unwrap_or_else(|| "OpenCrabs".to_string());
+                let cm = DbChannelMessage::new(
+                    "telegram".to_string(),
+                    msg.chat.id.0.to_string(),
+                    Some(chat_title.to_string()),
+                    "bot:opencrabs".to_string(),
+                    bot_display_name,
+                    text_only.clone(),
+                    "text".to_string(),
+                    None,
+                );
+                if let Err(e) = channel_msg_repo.insert(&cm).await {
+                    tracing::warn!(
+                        "Telegram: failed to record bot reply in channel_messages: {}",
+                        e
+                    );
+                }
+            }
+
             // If input was voice AND TTS is enabled, also send voice note after text
             if is_voice && voice_config.tts_enabled {
                 tracing::info!(
