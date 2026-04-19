@@ -1,8 +1,16 @@
 //! Voice Processing Module
 //!
 //! Speech-to-text and text-to-speech services.
-//! Supports API-based STT (Groq Whisper) and local STT (whisper.cpp).
-//! Supports API-based TTS (OpenAI) and local TTS (Piper).
+//! Supports:
+//! - API-based STT (Groq Whisper, OpenAI-compatible, Voicebox)
+//! - Local STT (whisper.cpp / rwhisper)
+//! - API-based TTS (OpenAI, OpenAI-compatible, Voicebox)
+//! - Local TTS (Piper)
+
+pub mod openai_tts;
+pub mod openai_stt;
+pub mod voicebox_tts;
+pub mod voicebox_stt;
 
 #[cfg(feature = "local-stt")]
 pub mod local_whisper;
