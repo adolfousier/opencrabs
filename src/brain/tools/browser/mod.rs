@@ -37,7 +37,7 @@ pub(crate) use manager::parse_windows_reg_prog_id;
 // (src/tests/browser_locks_test.rs). See clean_stale_locks doc in
 // manager.rs for the failure mode it guards against.
 #[cfg(test)]
-pub(crate) use manager::{clean_stale_locks, LOCK_FILES};
+pub(crate) use manager::{clean_stale_locks, wait_for_profile_unlock, LOCK_FILES};
 
 // CDP-handler-alive check — re-exported only for test fixtures
 // (src/tests/browser_health_test.rs). See handler_is_dead doc in

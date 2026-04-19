@@ -174,17 +174,27 @@ impl BrowserManager {
         // Use the browser's own profile so the user's logins/cookies are available.
         // Falls back to our own profile dir if we can't find the browser's profile
         // or if it's locked by a running instance.
-        let profile_dir = detected
-            .as_ref()
-            .and_then(|b| b.user_data_dir.clone())
-            .filter(|p| p.exists() && !is_profile_locked(p))
-            .unwrap_or_else(|| {
+        //
+        // Retry the lock check with exponential backoff before falling
+        // through to the fallback. When the user's main browser is
+        // *starting up*, Chrome briefly holds the profile lock before
+        // releasing it for additional instances — falling straight
+        // through on the first locked check drops the user into the
+        // empty opencrabs fallback profile and silently loses all
+        // their logins/cookies. Cap at ~10s total wait
+        // (250ms → 500 → 1000 → 2000 → 4000 ≈ 7.75s; next retry
+        // would exceed the cap so we stop).
+        let native_profile = detected.as_ref().and_then(|b| b.user_data_dir.clone());
+        let profile_dir = match native_profile {
+            Some(p) if p.exists() && wait_for_profile_unlock(&p, 10_000).await => p,
+            _ => {
                 let fallback = crate::config::opencrabs_home().join("chrome-profile");
                 if !fallback.exists() {
                     let _ = std::fs::create_dir_all(&fallback);
                 }
                 fallback
-            });
+            }
+        };
 
         // Sweep stale lock files in our OWN fallback profile before launch.
         // The 2026-04-11 / 17 logs all had the same failure: a previous
@@ -703,6 +713,48 @@ pub(crate) const STEALTH_JS: &str = r#"
 /// proceeding with an un-polled event stream).
 pub(crate) fn handler_is_dead(handle: Option<&tokio::task::JoinHandle<()>>) -> bool {
     handle.map(|h| h.is_finished()).unwrap_or(true)
+}
+
+/// Poll `is_profile_locked` on `profile_dir` with exponential backoff
+/// up to `cap_ms` total wait. Returns true once the profile becomes
+/// unlocked, false if the cap elapses first.
+///
+/// When the user's main browser is starting up, Chrome briefly holds
+/// the profile lock before releasing it for additional instances.
+/// Checking once and falling straight through drops the user into the
+/// empty fallback profile and silently loses all their
+/// logins/cookies. Waiting a few seconds gets the native profile
+/// back almost every time, at the cost of a small first-launch delay.
+///
+/// Delays: 250ms, 500, 1000, 2000, 4000 (capped at 4000ms per step).
+pub(crate) async fn wait_for_profile_unlock(
+    profile_dir: &std::path::Path,
+    cap_ms: u64,
+) -> bool {
+    let mut waited_ms: u64 = 0;
+    let mut delay_ms: u64 = 250;
+    loop {
+        if !is_profile_locked(profile_dir) {
+            return true;
+        }
+        if waited_ms >= cap_ms {
+            tracing::debug!(
+                "browser: profile {} still locked after {}ms — caller falls back",
+                profile_dir.display(),
+                waited_ms
+            );
+            return false;
+        }
+        let step = delay_ms.min(cap_ms.saturating_sub(waited_ms));
+        tracing::debug!(
+            "browser: profile {} locked, retrying in {}ms",
+            profile_dir.display(),
+            step
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(step)).await;
+        waited_ms += step;
+        delay_ms = (delay_ms * 2).min(4000);
+    }
 }
 
 pub(crate) fn clean_stale_locks(profile_dir: &std::path::Path) {
