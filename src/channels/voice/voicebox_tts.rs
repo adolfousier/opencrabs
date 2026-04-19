@@ -36,7 +36,9 @@ struct GenerateResponse {
 
 #[derive(Deserialize)]
 struct StatusResponse {
-    id: String,
+    // `id` is echoed back by the server but we already hold the generation_id
+    // from the POST response, so we don't deserialize it here. serde will
+    // ignore unknown fields by default.
     status: String,
     audio_path: String,
     duration: f64,
@@ -92,7 +94,9 @@ impl VoiceboxTts {
 
         // If already completed (sync mode), use the result directly
         if result.status == "completed" && !result.audio_path.is_empty() {
-            return self.read_audio_file(&result.audio_path, result.duration).await;
+            return self
+                .read_audio_file(&result.audio_path, result.duration)
+                .await;
         }
 
         // Async mode: poll until completed
@@ -108,7 +112,7 @@ impl VoiceboxTts {
             &format!("generate/{}/status", generation_id),
         )?;
 
-        let deadline = tokio::time:: Instant::now() + POLL_TIMEOUT;
+        let deadline = tokio::time::Instant::now() + POLL_TIMEOUT;
 
         loop {
             if tokio::time::Instant::now() > deadline {
@@ -143,7 +147,10 @@ impl VoiceboxTts {
                 }
                 "generating" | "queued" | "pending" => continue,
                 other => {
-                    tracing::warn!("Voicebox TTS: unexpected status '{}', continuing to poll", other);
+                    tracing::warn!(
+                        "Voicebox TTS: unexpected status '{}', continuing to poll",
+                        other
+                    );
                     continue;
                 }
             }
