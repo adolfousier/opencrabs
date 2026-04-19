@@ -353,13 +353,23 @@ pub struct VoiceConfig {
     pub stt_enabled: bool,
     pub stt_mode: SttMode,
     pub local_stt_model: String,
+    pub stt_base_url: Option<String>,
+    pub stt_model: Option<String>,
+    pub stt_api_key: Option<String>,
     pub tts_enabled: bool,
     pub tts_mode: TtsMode,
     pub tts_voice: String,
     pub tts_model: String,
+    pub tts_base_url: Option<String>,
+    pub tts_api_key: Option<String>,
     pub local_tts_voice: String,
     pub stt_provider: Option<ProviderConfig>,
     pub tts_provider: Option<ProviderConfig>,
+    pub voicebox_stt_enabled: bool,
+    pub voicebox_stt_base_url: String,
+    pub voicebox_tts_enabled: bool,
+    pub voicebox_tts_base_url: String,
+    pub voicebox_tts_profile_id: String,
 }
 
 fn default_local_stt_model() -> String {
@@ -381,13 +391,23 @@ impl Default for VoiceConfig {
             stt_enabled: false,
             stt_mode: SttMode::default(),
             local_stt_model: default_local_stt_model(),
+            stt_base_url: None,
+            stt_model: None,
+            stt_api_key: None,
             tts_enabled: false,
             tts_mode: TtsMode::default(),
             tts_voice: default_tts_voice(),
             tts_model: default_tts_model(),
+            tts_base_url: None,
+            tts_api_key: None,
             local_tts_voice: default_local_tts_voice(),
             stt_provider: None,
             tts_provider: None,
+            voicebox_stt_enabled: false,
+            voicebox_stt_base_url: default_voicebox_url(),
+            voicebox_tts_enabled: false,
+            voicebox_tts_base_url: default_voicebox_url(),
+            voicebox_tts_profile_id: String::new(),
         }
     }
 }
@@ -812,6 +832,64 @@ pub struct SttProviders {
     /// Local whisper.cpp STT configuration ([providers.stt.local])
     #[serde(default)]
     pub local: Option<LocalSttConfig>,
+
+    /// OpenAI-compatible STT configuration ([providers.stt.openai_compatible])
+    #[serde(default)]
+    pub openai_compatible: Option<OpenaiCompatibleSttConfig>,
+
+    /// Voicebox STT configuration ([providers.stt.voicebox])
+    #[serde(default)]
+    pub voicebox: Option<VoiceboxSttConfig>,
+}
+
+/// OpenAI-compatible STT configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenaiCompatibleSttConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Base URL (e.g. "http://localhost:11434" or "https://api.groq.com/openai")
+    #[serde(default)]
+    pub base_url: Option<String>,
+    /// Model name (e.g. "whisper-large-v3-turbo")
+    #[serde(default)]
+    pub model: Option<String>,
+    /// API key
+    #[serde(default)]
+    pub api_key: Option<String>,
+}
+
+impl Default for OpenaiCompatibleSttConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            base_url: None,
+            model: None,
+            api_key: None,
+        }
+    }
+}
+
+/// Voicebox STT configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VoiceboxSttConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Base URL (e.g. "http://localhost:8000")
+    #[serde(default = "default_voicebox_url")]
+    pub base_url: String,
+}
+
+impl Default for VoiceboxSttConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            base_url: default_voicebox_url(),
+        }
+    }
+}
+
+fn default_voicebox_url() -> String {
+    "http://localhost:8000".to_string()
 }
 
 /// Local STT (whisper.cpp) configuration
@@ -845,6 +923,68 @@ pub struct TtsProviders {
     /// Local Piper TTS configuration ([providers.tts.local])
     #[serde(default)]
     pub local: Option<LocalTtsConfig>,
+
+    /// OpenAI-compatible TTS configuration ([providers.tts.openai_compatible])
+    #[serde(default)]
+    pub openai_compatible: Option<OpenaiCompatibleTtsConfig>,
+
+    /// Voicebox TTS configuration ([providers.tts.voicebox])
+    #[serde(default)]
+    pub voicebox: Option<VoiceboxTtsConfig>,
+}
+
+/// OpenAI-compatible TTS configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenaiCompatibleTtsConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Base URL (e.g. "http://localhost:11434")
+    #[serde(default)]
+    pub base_url: Option<String>,
+    /// Model name (e.g. "gpt-4o-mini-tts")
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Voice name (e.g. "echo")
+    #[serde(default)]
+    pub voice: Option<String>,
+    /// API key
+    #[serde(default)]
+    pub api_key: Option<String>,
+}
+
+impl Default for OpenaiCompatibleTtsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            base_url: None,
+            model: None,
+            voice: None,
+            api_key: None,
+        }
+    }
+}
+
+/// Voicebox TTS configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VoiceboxTtsConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Base URL (e.g. "http://localhost:8000")
+    #[serde(default = "default_voicebox_url")]
+    pub base_url: String,
+    /// Voice profile ID for synthesis
+    #[serde(default)]
+    pub profile_id: String,
+}
+
+impl Default for VoiceboxTtsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            base_url: default_voicebox_url(),
+            profile_id: String::new(),
+        }
+    }
 }
 
 /// Local TTS (Piper) configuration
