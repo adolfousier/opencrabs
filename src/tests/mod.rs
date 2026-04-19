@@ -52,6 +52,7 @@ pub mod rsi_test;
 pub mod self_healing_test;
 pub mod split_pane_test;
 pub mod subagent_test;
+pub mod wait_agent_resolver_test;
 pub mod telegram_resume_test;
 pub mod token_tracking_test;
 pub mod tui_error_test;

@@ -144,7 +144,11 @@ impl WaitAgentTool {
     ///   3. unique label match
     ///
     /// Returns None if nothing matches or the match is ambiguous.
-    fn resolve_agent_id(&self, raw: &str) -> Option<String> {
+    ///
+    /// `pub(crate)` so `src/tests/wait_agent_resolver_test.rs` can
+    /// exercise the resolver directly without spinning up a full
+    /// agent runtime.
+    pub(crate) fn resolve_agent_id(&self, raw: &str) -> Option<String> {
         if self.manager.exists(raw) {
             return Some(raw.to_string());
         }
@@ -177,7 +181,9 @@ impl WaitAgentTool {
     /// Format a helpful error when no agent matches. Lists every active
     /// agent so the caller can self-correct on the next turn instead of
     /// guessing another string into the void.
-    fn unknown_agent_message(&self, raw: &str) -> String {
+    ///
+    /// `pub(crate)` for the same testability reason as resolve_agent_id.
+    pub(crate) fn unknown_agent_message(&self, raw: &str) -> String {
         let active = self.manager.list();
         if active.is_empty() {
             return format!(
