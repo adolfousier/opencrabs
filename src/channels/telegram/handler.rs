@@ -102,6 +102,16 @@ struct StreamingState {
     /// cancelled old call leaves its intermediate visible and the new call
     /// re-sends the same text — the exact-match duplicate the user reported.
     intermediate_msg_ids: Vec<MessageId>,
+    /// Message IDs of every voice note delivered to Telegram via `send_voice`
+    /// (TTS responses to voice-input turns). This field exists purely as a
+    /// load-bearing invariant: voice-reply IDs live here and MUST NEVER be
+    /// iterated for deletion by any cleanup/cancellation/rebuild path. If a
+    /// future contributor adds a bulk cleanup over message IDs they have to
+    /// consciously skip this field. The user's TTS voice note is the most
+    /// expensive artefact to reproduce — it's a real synthesis call, not a
+    /// cheap text render — so losing it to a sweep that "looked reasonable
+    /// at the time" is a regression we've deliberately made hard to introduce.
+    voice_msg_ids: Vec<MessageId>,
     /// True from start until first response text arrives — enables rolling messages for CLI providers
     /// where tools complete instantly (ToolStarted+ToolCompleted back-to-back)
     processing: bool,
@@ -960,6 +970,7 @@ pub(crate) async fn handle_message(
         status_shown_at: None,
         sent_intermediates: Vec::new(),
         intermediate_msg_ids: Vec::new(),
+        voice_msg_ids: Vec::new(),
         processing: true,
     }));
 
@@ -1729,6 +1740,13 @@ pub(crate) async fn handle_message(
                                     "Telegram: voice message delivered (msg_id={})",
                                     m.id
                                 );
+                                // Record the delivered voice message ID in
+                                // the isolated voice_msg_ids list. Cleanup
+                                // paths do not touch this list. See the
+                                // field doc on StreamingState.
+                                let mut s =
+                                    streaming.lock().unwrap_or_else(|e| e.into_inner());
+                                s.voice_msg_ids.push(m.id);
                             }
                             Err(e) => {
                                 tracing::error!("Telegram: send_voice failed — {}: {:?}", e, e);
@@ -1814,6 +1832,7 @@ pub(crate) async fn resume_session(
         status_shown_at: None,
         sent_intermediates: Vec::new(),
         intermediate_msg_ids: Vec::new(),
+        voice_msg_ids: Vec::new(),
         processing: true,
     }));
 
