@@ -72,8 +72,16 @@ impl Tool for BrowserClickTool {
             return Ok(ToolResult::error(format!("Click failed: {e}")));
         }
 
-        // Brief wait for page to settle after click (navigation, AJAX, animations)
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        // Wait for the page to settle after click — navigation, AJAX,
+        // hydration. `wait_for_network_almost_idle_with_timeout` resolves
+        // once ≤2 requests have been in flight for 500ms, or the timeout
+        // elapses (silently). This beats the old fixed 500ms sleep:
+        //  - fast SPA updates proceed immediately without wasting 500ms
+        //  - slow multi-request hydration gets the time it actually needs
+        //  - a stuck page still falls through at the timeout cap
+        let _ = page
+            .wait_for_network_almost_idle_with_timeout(std::time::Duration::from_secs(3))
+            .await;
 
         let mut result = ToolResult::success(format!("Clicked element: {selector}"));
 
