@@ -241,7 +241,16 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                 && let Some(ref details) = app.messages[msg_idx].details
             {
                 lines.push(Line::from(""));
-                let reasoning_lines = reasoning_to_lines(details, content_width);
+                // Reserve the outer 2-space indent in the wrap budget so
+                // reasoning_to_lines produces lines that already fit
+                // `content_width - 2`. Then we prepend the outer "  "
+                // prefix and push as-is — no second wrap pass. Previously
+                // the caller added the prefix, exceeded content_width,
+                // triggered a re-wrap, and broke at wrong word boundaries
+                // (e.g. `like.this.and.this` artifacts, inconsistent
+                // 2-vs-4-space continuation indent).
+                let inner_width = content_width.saturating_sub(2);
+                let reasoning_lines = reasoning_to_lines(details, inner_width);
                 let reasoning_style = Style::default()
                     .fg(Color::DarkGray)
                     .add_modifier(Modifier::ITALIC);
@@ -250,10 +259,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                     for span in line.spans {
                         padded_spans.push(Span::styled(span.content.to_string(), reasoning_style));
                     }
-                    let padded_line = Line::from(padded_spans);
-                    for wrapped in wrap_line_with_padding(padded_line, content_width, "  ") {
-                        lines.push(wrapped);
-                    }
+                    lines.push(Line::from(padded_spans));
                 }
             }
         }
@@ -284,7 +290,9 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                         .add_modifier(Modifier::ITALIC | Modifier::BOLD),
                 ),
             ]));
-            let reasoning_lines = reasoning_to_lines(reasoning, content_width);
+            // See comment at the expanded-message reasoning site above.
+            let inner_width = content_width.saturating_sub(2);
+            let reasoning_lines = reasoning_to_lines(reasoning, inner_width);
             let reasoning_style = Style::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::ITALIC);
@@ -293,10 +301,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                 for span in line.spans {
                     padded_spans.push(Span::styled(span.content.to_string(), reasoning_style));
                 }
-                let padded_line = Line::from(padded_spans);
-                for wrapped in wrap_line_with_padding(padded_line, content_width, "  ") {
-                    lines.push(wrapped);
-                }
+                lines.push(Line::from(padded_spans));
             }
             lines.push(Line::from("")); // separator between reasoning and response
         }
@@ -392,7 +397,9 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                     .add_modifier(Modifier::ITALIC | Modifier::BOLD),
             ),
         ]));
-        let reasoning_lines = reasoning_to_lines(reasoning, content_width);
+        // See comment at the expanded-message reasoning site above.
+        let inner_width = content_width.saturating_sub(2);
+        let reasoning_lines = reasoning_to_lines(reasoning, inner_width);
         let reasoning_style = Style::default()
             .fg(Color::DarkGray)
             .add_modifier(Modifier::ITALIC);
@@ -401,10 +408,7 @@ pub(super) fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             for span in rline.spans {
                 padded_spans.push(Span::styled(span.content.to_string(), reasoning_style));
             }
-            let padded_line = Line::from(padded_spans);
-            for wrapped in wrap_line_with_padding(padded_line, content_width, "  ") {
-                lines.push(wrapped);
-            }
+            lines.push(Line::from(padded_spans));
         }
 
         // Blank line to separate reasoning from status spinner
