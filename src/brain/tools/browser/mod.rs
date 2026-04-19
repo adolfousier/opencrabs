@@ -13,6 +13,11 @@ mod wait;
 pub use click::BrowserClickTool;
 pub use content::BrowserContentTool;
 pub use eval::BrowserEvalTool;
+
+// Eval output cap — re-exported only for test fixtures
+// (src/tests/browser_eval_cap_test.rs).
+#[cfg(test)]
+pub(crate) use eval::cap_eval_output;
 pub use manager::BrowserManager;
 pub use navigate::BrowserNavigateTool;
 pub use screenshot::BrowserScreenshotTool;

@@ -68,9 +68,39 @@ impl Tool for BrowserEvalTool {
                     Value::Null => "(undefined)".to_string(),
                     other => serde_json::to_string_pretty(other).unwrap_or_default(),
                 };
-                Ok(ToolResult::success(output))
+                Ok(ToolResult::success(cap_eval_output(output)))
             }
             Err(e) => Ok(ToolResult::error(format!("JS execution failed: {e}"))),
         }
     }
+}
+
+/// Maximum number of bytes from a single `browser_eval` result that
+/// reach the LLM. The agent has called eval scripts that return the
+/// entire `document.body.outerHTML` of JS-heavy sites (multi-megabyte)
+/// which burns the whole context window on one tool result — the
+/// result is truncated with a trailing note so the model knows more
+/// data exists.
+const EVAL_OUTPUT_MAX_BYTES: usize = 50_000;
+
+/// Truncate an eval result to `EVAL_OUTPUT_MAX_BYTES`, appending a
+/// byte-count note so the model knows the truncation happened. UTF-8
+/// safe: always splits at a char boundary.
+///
+/// `pub(crate)` so `src/tests/browser_eval_cap_test.rs` can exercise
+/// the boundary conditions directly.
+pub(crate) fn cap_eval_output(output: String) -> String {
+    if output.len() <= EVAL_OUTPUT_MAX_BYTES {
+        return output;
+    }
+    let mut end = EVAL_OUTPUT_MAX_BYTES;
+    while end > 0 && !output.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!(
+        "{}\n\n[truncated — result was {} bytes total, showing first {}]",
+        &output[..end],
+        output.len(),
+        end
+    )
 }

@@ -4,6 +4,7 @@ pub mod browser_default_test;
 pub mod browser_default_linux_test;
 pub mod browser_default_windows_test;
 pub mod browser_drop_test;
+pub mod browser_eval_cap_test;
 pub mod browser_health_test;
 pub mod browser_locks_test;
 pub mod browser_profile_wait_test;
