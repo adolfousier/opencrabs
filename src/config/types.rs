@@ -843,7 +843,7 @@ pub struct SttProviders {
 }
 
 /// OpenAI-compatible STT configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct OpenaiCompatibleSttConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -856,17 +856,6 @@ pub struct OpenaiCompatibleSttConfig {
     /// API key
     #[serde(default)]
     pub api_key: Option<String>,
-}
-
-impl Default for OpenaiCompatibleSttConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            base_url: None,
-            model: None,
-            api_key: None,
-        }
-    }
 }
 
 /// Voicebox STT configuration
@@ -934,7 +923,7 @@ pub struct TtsProviders {
 }
 
 /// OpenAI-compatible TTS configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct OpenaiCompatibleTtsConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -950,18 +939,6 @@ pub struct OpenaiCompatibleTtsConfig {
     /// API key
     #[serde(default)]
     pub api_key: Option<String>,
-}
-
-impl Default for OpenaiCompatibleTtsConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            base_url: None,
-            model: None,
-            voice: None,
-            api_key: None,
-        }
-    }
 }
 
 /// Voicebox TTS configuration
@@ -1680,12 +1657,19 @@ impl Config {
         let stt = self.providers.stt.as_ref();
         let tts = self.providers.tts.as_ref();
 
-        // STT: enabled if groq or local is enabled
+        // STT: detect all modes
         let groq_enabled = stt.and_then(|s| s.groq.as_ref()).is_some_and(|g| g.enabled);
         let local_stt_enabled = stt
             .and_then(|s| s.local.as_ref())
             .is_some_and(|l| l.enabled);
-        let stt_enabled = groq_enabled || local_stt_enabled;
+        let openai_compatible_stt_enabled = stt
+            .and_then(|s| s.openai_compatible.as_ref())
+            .is_some_and(|c| c.enabled);
+        let voicebox_stt_enabled = stt
+            .and_then(|s| s.voicebox.as_ref())
+            .is_some_and(|v| v.enabled);
+
+        let stt_enabled = groq_enabled || local_stt_enabled || openai_compatible_stt_enabled || voicebox_stt_enabled;
         let stt_mode = if local_stt_enabled {
             SttMode::Local
         } else {
@@ -1695,15 +1679,37 @@ impl Config {
             .and_then(|s| s.local.as_ref())
             .map(|l| l.model.clone())
             .unwrap_or_else(default_local_stt_model);
+        let stt_base_url = stt
+            .and_then(|s| s.openai_compatible.as_ref())
+            .and_then(|c| c.base_url.clone())
+            .or_else(|| groq_enabled.then(|| "https://api.groq.com/openai/v1".to_string()));
+        let stt_model = stt
+            .and_then(|s| s.openai_compatible.as_ref())
+            .and_then(|c| c.model.clone())
+            .or_else(|| Some("whisper-large-v3-turbo".to_string()));
+        let stt_api_key = stt
+            .and_then(|s| s.openai_compatible.as_ref())
+            .and_then(|c| c.api_key.clone())
+            .or_else(|| {
+                stt.and_then(|s| s.groq.as_ref())
+                    .and_then(|g| g.api_key.clone())
+            });
 
-        // TTS: enabled if openai or local is enabled
+        // TTS: detect all modes
         let openai_tts_enabled = tts
             .and_then(|t| t.openai.as_ref())
             .is_some_and(|o| o.enabled);
         let local_tts_enabled = tts
             .and_then(|t| t.local.as_ref())
             .is_some_and(|l| l.enabled);
-        let tts_enabled = openai_tts_enabled || local_tts_enabled;
+        let openai_compatible_tts_enabled = tts
+            .and_then(|t| t.openai_compatible.as_ref())
+            .is_some_and(|c| c.enabled);
+        let voicebox_tts_enabled = tts
+            .and_then(|t| t.voicebox.as_ref())
+            .is_some_and(|v| v.enabled);
+
+        let tts_enabled = openai_tts_enabled || local_tts_enabled || openai_compatible_tts_enabled || voicebox_tts_enabled;
         let tts_mode = if local_tts_enabled {
             TtsMode::Local
         } else {
@@ -1712,15 +1718,48 @@ impl Config {
         let tts_voice = tts
             .and_then(|t| t.openai.as_ref())
             .and_then(|o| o.voice.clone())
+            .or_else(|| {
+                tts.and_then(|t| t.openai_compatible.as_ref())
+                    .and_then(|c| c.voice.clone())
+            })
             .unwrap_or_else(default_tts_voice);
         let tts_model = tts
             .and_then(|t| t.openai.as_ref())
             .and_then(|o| o.model.clone().or_else(|| o.default_model.clone()))
+            .or_else(|| {
+                tts.and_then(|t| t.openai_compatible.as_ref())
+                    .and_then(|c| c.model.clone())
+            })
             .unwrap_or_else(default_tts_model);
+        let tts_base_url = tts
+            .and_then(|t| t.openai_compatible.as_ref())
+            .and_then(|c| c.base_url.clone())
+            .or_else(|| openai_tts_enabled.then(|| "https://api.openai.com".to_string()));
+        let tts_api_key = tts
+            .and_then(|t| t.openai_compatible.as_ref())
+            .and_then(|c| c.api_key.clone())
+            .or_else(|| {
+                tts.and_then(|t| t.openai.as_ref())
+                    .and_then(|o| o.api_key.clone())
+            });
         let local_tts_voice = tts
             .and_then(|t| t.local.as_ref())
             .map(|l| l.voice.clone())
             .unwrap_or_else(default_local_tts_voice);
+
+        // Voicebox config
+        let voicebox_stt_base_url = stt
+            .and_then(|s| s.voicebox.as_ref())
+            .map(|v| v.base_url.clone())
+            .unwrap_or_else(default_voicebox_url);
+        let voicebox_tts_base_url = tts
+            .and_then(|t| t.voicebox.as_ref())
+            .map(|v| v.base_url.clone())
+            .unwrap_or_else(default_voicebox_url);
+        let voicebox_tts_profile_id = tts
+            .and_then(|t| t.voicebox.as_ref())
+            .map(|v| v.profile_id.clone())
+            .unwrap_or_default();
 
         let stt_provider = stt.and_then(|s| s.groq.clone());
         let tts_provider = tts.and_then(|t| t.openai.clone());
@@ -1729,13 +1768,23 @@ impl Config {
             stt_enabled,
             stt_mode,
             local_stt_model,
+            stt_base_url,
+            stt_model,
+            stt_api_key,
             tts_enabled,
             tts_mode,
             tts_voice,
             tts_model,
+            tts_base_url,
+            tts_api_key,
             local_tts_voice,
             stt_provider,
             tts_provider,
+            voicebox_stt_enabled,
+            voicebox_stt_base_url,
+            voicebox_tts_enabled,
+            voicebox_tts_base_url,
+            voicebox_tts_profile_id,
         }
     }
 

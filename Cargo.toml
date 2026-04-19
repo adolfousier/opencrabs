@@ -152,6 +152,7 @@ tar = "0.4"
 qmd = "0.3"
 llama-cpp-2 = "0.1.137"
 emojis = "0.8.0"
+url = "2.5.8"
 
 [dev-dependencies]
 rstest = "0.25"

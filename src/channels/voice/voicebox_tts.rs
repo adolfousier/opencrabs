@@ -7,7 +7,6 @@ use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use url::Url;
 
 use super::openai_tts::build_endpoint_url;
 

@@ -9,7 +9,6 @@
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::Deserialize;
-use url::Url;
 
 use super::openai_tts::build_endpoint_url;
 
@@ -33,13 +32,15 @@ pub async fn transcribe_audio(
 
     let client = Client::new();
 
+    let model_owned = model.to_string();
+
     let file_part = reqwest::multipart::Part::bytes(audio_bytes)
         .file_name("voice.ogg")
         .mime_str("audio/ogg")?;
 
     let form = reqwest::multipart::Form::new()
         .part("file", file_part)
-        .text("model", model)
+        .text("model", model_owned)
         .text("response_format", "json");
 
     let response = client

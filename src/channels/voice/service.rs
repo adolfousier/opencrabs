@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::Deserialize;
 
-use crate::config::{SttMode, VoiceConfig};
+use crate::config::VoiceConfig;
 
 const GROQ_TRANSCRIPTION_URL: &str = "https://api.groq.com/openai/v1/audio/transcriptions";
 const OPENAI_SPEECH_URL: &str = "https://api.openai.com/v1/audio/speech";
@@ -20,70 +20,84 @@ pub async fn transcribe_audio(audio_bytes: Vec<u8>, groq_api_key: &str) -> Resul
     transcribe_audio_with_url(audio_bytes, groq_api_key, GROQ_TRANSCRIPTION_URL).await
 }
 
-/// Dispatch STT transcription based on config mode (API or Local).
+/// Dispatch STT transcription based on config.
 ///
-/// - `SttMode::Api` → Groq Whisper API (requires `groq_api_key`)
-/// - `SttMode::Local` → whisper.cpp on-device (requires downloaded model)
+/// - Groq Whisper API (stt_provider)
+/// - OpenAI-compatible STT (stt_base_url + stt_model)
+/// - Voicebox STT (voicebox_stt_enabled)
+/// - Local whisper (local-stt feature)
 pub async fn transcribe(audio_bytes: Vec<u8>, voice_config: &VoiceConfig) -> Result<String> {
-    match voice_config.stt_mode {
-        SttMode::Api => {
-            let api_key = voice_config
-                .stt_provider
-                .as_ref()
-                .and_then(|p| p.api_key.as_deref())
-                .ok_or_else(|| anyhow::anyhow!("STT API key not configured"))?;
-            transcribe_audio(audio_bytes, api_key).await
-        }
-        SttMode::Local => {
-            #[cfg(feature = "local-stt")]
-            {
-                if !super::local_stt_available() {
-                    anyhow::bail!(
-                        "Local STT is not supported on this CPU — AVX2 is required. \
-                         Please switch to API STT in settings."
-                    );
-                }
-                let model_id = &voice_config.local_stt_model;
-                let preset = super::local_whisper::find_local_model(model_id)
-                    .ok_or_else(|| anyhow::anyhow!("Unknown local STT model: {}", model_id))?;
-                if !super::local_whisper::is_model_downloaded(preset) {
-                    // Auto-download model transparently (migration from ggml → candle format)
-                    tracing::info!(
-                        "Local STT model '{}' not in candle format — downloading automatically",
-                        model_id
-                    );
-                    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-                    let preset_id = model_id.to_string();
-                    let download_preset = super::local_whisper::find_local_model(&preset_id)
-                        .ok_or_else(|| anyhow::anyhow!("Unknown model: {}", preset_id))?;
-                    let download_handle = tokio::spawn(async move {
-                        super::local_whisper::download_model(download_preset, tx).await
-                    });
-                    // Drain progress channel
-                    while let Some(progress) = rx.recv().await {
-                        if progress.done {
-                            break;
-                        }
-                        if let Some(err) = progress.error {
-                            anyhow::bail!("Model download failed: {}", err);
-                        }
-                    }
-                    download_handle
-                        .await
-                        .map_err(|e| anyhow::anyhow!("Download task failed: {}", e))??;
-                    tracing::info!("Local STT model '{}' downloaded successfully", model_id);
-                }
-                tracing::info!("Local STT: transcribing with model {}", model_id);
-                transcribe_audio_local(audio_bytes, model_id.clone()).await
-            }
-            #[cfg(not(feature = "local-stt"))]
-            {
-                anyhow::bail!(
-                    "Local STT not available — binary was built without the `local-stt` feature"
-                )
-            }
-        }
+    // Voicebox STT takes priority if enabled
+    if voice_config.voicebox_stt_enabled {
+        return super::voicebox_stt::transcribe(
+            audio_bytes,
+            &voice_config.voicebox_stt_base_url,
+        )
+        .await;
     }
+
+    // OpenAI-compatible STT if base_url is configured
+    if let (Some(base_url), Some(model)) =
+        (&voice_config.stt_base_url, &voice_config.stt_model)
+        && let Some(api_key) = &voice_config.stt_api_key {
+            return super::openai_stt::transcribe_audio(
+                audio_bytes,
+                api_key,
+                model,
+                base_url,
+            )
+            .await;
+        }
+
+    // Groq API (legacy)
+    if let Some(provider) = &voice_config.stt_provider
+        && let Some(api_key) = &provider.api_key {
+            return transcribe_audio(audio_bytes, api_key).await;
+        }
+
+    // Local whisper
+    #[cfg(feature = "local-stt")]
+    {
+        if !super::local_stt_available() {
+            anyhow::bail!(
+                "Local STT is not supported on this CPU — AVX2 is required. \
+                 Please switch to API STT in settings."
+            );
+        }
+        let model_id = &voice_config.local_stt_model;
+        let preset = super::local_whisper::find_local_model(model_id)
+            .ok_or_else(|| anyhow::anyhow!("Unknown local STT model: {}", model_id))?;
+        if !super::local_whisper::is_model_downloaded(preset) {
+            tracing::info!(
+                "Local STT model '{}' not in candle format — downloading automatically",
+                model_id
+            );
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            let preset_id = model_id.to_string();
+            let download_preset = super::local_whisper::find_local_model(&preset_id)
+                .ok_or_else(|| anyhow::anyhow!("Unknown model: {}", preset_id))?;
+            let download_handle = tokio::spawn(async move {
+                super::local_whisper::download_model(download_preset, tx).await
+            });
+            while let Some(progress) = rx.recv().await {
+                if progress.done {
+                    break;
+                }
+                if let Some(err) = progress.error {
+                    anyhow::bail!("Model download failed: {}", err);
+                }
+            }
+            download_handle
+                .await
+                .map_err(|e| anyhow::anyhow!("Download task failed: {}", e))??;
+            tracing::info!("Local STT model '{}' downloaded successfully", model_id);
+        }
+        tracing::info!("Local STT: transcribing with model {}", model_id);
+        transcribe_audio_local(audio_bytes, model_id.clone()).await
+    }
+
+    #[cfg(not(feature = "local-stt"))]
+    anyhow::bail!("No STT provider configured")
 }
 
 /// Internal: transcribe with configurable URL (for testing).
@@ -127,47 +141,62 @@ async fn transcribe_audio_with_url(
     Ok(result.text)
 }
 
-/// Dispatch TTS synthesis based on config mode (API or Local).
+/// Dispatch TTS synthesis based on config.
 ///
-/// - `TtsMode::Api` → OpenAI TTS API (requires `openai_api_key`)
-/// - `TtsMode::Local` → Piper on-device TTS (requires downloaded voice model)
+/// - Voicebox TTS (voicebox_tts_enabled)
+/// - OpenAI-compatible TTS (tts_base_url + tts_model)
+/// - OpenAI TTS API (tts_provider)
+/// - Local Piper TTS (local-tts feature)
 pub async fn synthesize(text: &str, voice_config: &VoiceConfig) -> Result<Vec<u8>> {
-    use crate::config::TtsMode;
-
     if text.is_empty() {
         anyhow::bail!("Cannot synthesize empty text");
     }
 
-    match voice_config.tts_mode {
-        TtsMode::Api => {
-            let api_key = voice_config
-                .tts_provider
-                .as_ref()
-                .and_then(|p| p.api_key.as_deref())
-                .ok_or_else(|| anyhow::anyhow!("TTS API key not configured"))?;
-            synthesize_speech(
+    // Voicebox TTS takes priority if enabled
+    if voice_config.voicebox_tts_enabled {
+        let client = super::voicebox_tts::VoiceboxTts::new(
+            &voice_config.voicebox_tts_base_url,
+            &voice_config.voicebox_tts_profile_id,
+        );
+        return client.synthesize(text).await;
+    }
+
+    // OpenAI-compatible TTS if base_url is configured
+    if let (Some(base_url), Some(api_key)) =
+        (&voice_config.tts_base_url, &voice_config.tts_api_key)
+    {
+        return super::openai_tts::synthesize_speech(
+            text,
+            api_key,
+            &voice_config.tts_voice,
+            &voice_config.tts_model,
+            base_url,
+        )
+        .await;
+    }
+
+    // OpenAI TTS API (legacy)
+    if let Some(provider) = &voice_config.tts_provider
+        && let Some(api_key) = &provider.api_key {
+            return synthesize_speech(
                 text,
                 api_key,
                 &voice_config.tts_voice,
                 &voice_config.tts_model,
             )
-            .await
+            .await;
         }
-        TtsMode::Local => {
-            #[cfg(feature = "local-tts")]
-            {
-                let voice_id = voice_config.local_tts_voice.clone();
-                tracing::info!("Local TTS: synthesizing with Piper voice {}", voice_id);
-                synthesize_speech_local(text, &voice_id).await
-            }
-            #[cfg(not(feature = "local-tts"))]
-            {
-                anyhow::bail!(
-                    "Local TTS not available — binary was built without the `local-tts` feature"
-                )
-            }
-        }
+
+    // Local Piper TTS
+    #[cfg(feature = "local-tts")]
+    {
+        let voice_id = voice_config.local_tts_voice.clone();
+        tracing::info!("Local TTS: synthesizing with Piper voice {}", voice_id);
+        return synthesize_speech_local(text, &voice_id).await;
     }
+
+    #[cfg(not(feature = "local-tts"))]
+    anyhow::bail!("No TTS provider configured")
 }
 
 /// Synthesize speech using local Piper TTS. Runs in a blocking thread.
