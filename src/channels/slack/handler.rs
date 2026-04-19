@@ -824,6 +824,9 @@ async fn handle_message(
 
     // Process attached files — images as <<IMG:tmp_path>>, text files extracted inline
     let mut content = text.clone();
+    // Set to true if an incoming audio attachment is successfully transcribed.
+    // Used to decide whether to mirror the text response as a TTS voice note.
+    let mut is_voice = false;
     if !files.is_empty() {
         use crate::utils::{inject_file_content, process_file_with_vision};
         let cfg = match crate::config::Config::load() {
@@ -883,6 +886,7 @@ async fn handle_message(
                             } else {
                                 content.push_str(&format!("\n\n[Transcription]: {transcript}"));
                             }
+                            is_voice = true;
                         }
                         Err(e) => tracing::error!("Slack: STT error: {e}"),
                     }
@@ -1444,6 +1448,46 @@ async fn handle_message(
                 }
                 if let Err(e) = session.chat_post_message(&request).await {
                     tracing::error!("Slack: failed to send reply: {}", e);
+                }
+            }
+
+            // If input was audio AND TTS is enabled, also upload a voice note
+            // (OGG/Opus) alongside the text reply. Slack doesn't have a
+            // dedicated "voice note" primitive like Telegram's send_voice —
+            // audio files uploaded via files.upload play inline with a
+            // waveform UI, which is the closest analogue.
+            if is_voice && voice_config.tts_enabled {
+                tracing::info!(
+                    "Slack: TTS requested — synthesizing response text (len={})",
+                    response.content.len()
+                );
+                match crate::channels::voice::synthesize(&response.content, &voice_config).await {
+                    Ok(audio_bytes) => {
+                        tracing::info!(
+                            "Slack: TTS succeeded — {} bytes of audio, uploading to channel {}",
+                            audio_bytes.len(),
+                            channel_id
+                        );
+                        #[allow(deprecated)]
+                        let req = SlackApiFilesUploadRequest {
+                            channels: Some(vec![SlackChannelId::new(channel_id.clone())]),
+                            binary_content: Some(audio_bytes),
+                            filename: Some("response.ogg".to_string()),
+                            filetype: Some(SlackFileType("ogg".to_string())),
+                            content: None,
+                            initial_comment: None,
+                            thread_ts: thread_ts.clone(),
+                            title: None,
+                            file_content_type: Some("audio/ogg".to_string()),
+                        };
+                        #[allow(deprecated)]
+                        if let Err(e) = session.files_upload(&req).await {
+                            tracing::error!("Slack: failed to upload TTS voice note: {}", e);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("Slack: TTS synthesis failed: {:#}", e);
+                    }
                 }
             }
         }
