@@ -5,6 +5,65 @@ All notable changes to OpenCrabs will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+#### Voice stack — new STT/TTS providers
+- **OpenAI-compatible STT provider** — any Whisper-compatible `/v1/audio/transcriptions` endpoint works
+  via `stt_base_url` + `stt_model` + `providers.stt.openai_compatible.api_key`. Covers self-hosted
+  Whisper, Deepgram-compatible proxies, etc.
+- **OpenAI-compatible TTS provider** — any `/v1/audio/speech` endpoint works via `tts_base_url` +
+  `tts_model` + `tts_voice` + `providers.tts.openai_compatible.api_key`. Covers self-hosted Coqui/Bark,
+  ElevenLabs-compatible proxies, etc.
+- **Voicebox STT provider** — self-hosted open-source voice stack, no API key. Enable with
+  `voicebox_stt_enabled=true` + `voicebox_stt_base_url`.
+- **Voicebox TTS provider** — async `POST /generate` → poll `/generate/{id}/status` → fetch audio
+  from the returned path (supports HTTP(S) URLs, server-relative paths, and local filesystem paths).
+  Enable with `voicebox_tts_enabled=true` + `voicebox_tts_base_url` + `voicebox_tts_profile_id`.
+- **Unified provider dispatch** in `voice::transcribe` and `voice::synthesize` — priority chain:
+  Voicebox → OpenAI-compatible → (Groq for STT / OpenAI for TTS) → Local. First match wins. Every
+  TTS output is normalised to OGG/Opus via `ensure_opus` before return.
+
+#### Voice support expanded to all channels
+- **Slack TTS** — was missing entirely. Now transcribes incoming audio attachments and, when
+  `is_voice && tts_enabled`, uploads an OGG/Opus audio file via `files.upload` (renders inline with
+  waveform UI) alongside the text reply. Matches the pattern already used by Telegram, WhatsApp,
+  and Discord.
+- **Full STT/TTS parity across all four channels** — Telegram, WhatsApp, Discord, Slack all
+  support both incoming voice/audio transcription and voice replies when input was audio. Single
+  code path via `crate::channels::voice::{transcribe, synthesize}`.
+
+### Fixed
+
+#### Voice protection
+- **Telegram TTS voice messages tracked in isolated list** — added
+  `voice_msg_ids: Vec<MessageId>` to `StreamingState` with a load-bearing doc comment forbidding any
+  cleanup path from iterating it. TTS voice notes are the most expensive artefact the bot produces
+  (real synthesis call) and must survive every cancel/restart/rebuild path.
+- **Diagnosable voice drop on mid-stream cancellation** — when a new user message cancels a
+  voice-input turn before the TTS block runs, emit a `tracing::warn` naming the session and the
+  reason. Previously silent, which looked identical to `send_voice` failing.
+- **Voicebox audio fetch supports HTTP(S) + filesystem paths** — handles both remote URLs
+  (`http://`/`https://`), server-relative paths (`/audio/{id}` → `GET {base_url}/audio/{id}`), and
+  local filesystem paths (legacy sync mode). Fixes silent "audio never arrived" when the voicebox
+  server returns a URL instead of a local path.
+- **Voicebox async polling** — `POST /generate` returns immediately with `status=generating`;
+  client now polls `/generate/{id}/status` every 500ms up to 120s until the generation completes or
+  errors. Fixes hang-or-fail on servers that don't synthesise synchronously.
+- **ffmpeg conversion uses `pipe:0`/`pipe:1`** instead of `/dev/stdin`/`/dev/stdout` — the named
+  device path doesn't exist on macOS; the pipe syntax works on both Linux and macOS.
+- **ffmpeg output uses `-f ogg`** — previous behaviour emitted raw Opus without the Ogg container,
+  which Telegram rejects. Now produces a proper Ogg/Opus file compatible with every channel.
+
+#### Reasoning renderer (TUI)
+- **Double-wrap + double-padding eliminated** in the reasoning/thinking block renderer — three
+  sites in `chat.rs` (expanded message, streaming above response, standalone streaming) were
+  wrapping each paragraph twice, producing inconsistent 2-vs-4 space continuation indents and
+  awkward word breaks like `combined like.this.and.this`. The renderer now reserves the outer
+  indent in the wrap budget and skips the second wrap pass. Paragraph continuations now flush
+  with paragraph starts at a consistent 2-space column.
+
 ## [0.3.11] - 2026-04-17
 
 Major refactor: Qwen OAuth rotation replaced with DashScope API-key provider,

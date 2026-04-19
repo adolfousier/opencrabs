@@ -457,32 +457,32 @@ https://github.com/user-attachments/assets/7f45c5f8-acdf-48d5-b6a4-0e4811a9ee23
 | **Image Attachments** | Paste image paths or URLs into the input — auto-detected and attached as vision content blocks for multimodal models |
 | **PDF Support** | Attach PDF files by path — native Anthropic PDF support; for other providers, text is extracted locally via `pdf-extract` |
 | **Document Parsing** | Built-in `parse_document` tool extracts text from PDF, DOCX, HTML, TXT, MD, JSON, XML |
-| **Voice (STT)** | Voice notes transcribed via **API** (Groq Whisper `whisper-large-v3-turbo`) or **Local** (whisper.cpp via `whisper-rs`, runs on-device). Choose mode in `/onboard:voice`. Local mode: select model size (Tiny 75 MB / Base 142 MB / Small 466 MB / Medium 1.5 GB), download from HuggingFace, zero API cost. Included by default |
-| **Voice (TTS)** | Agent replies to voice notes with audio via **API** (OpenAI TTS `gpt-4o-mini-tts`) or **Local** (Piper TTS, runs on-device via Python venv). Choose mode in `/onboard:voice`. Local mode: select voice (Ryan / Amy / Lessac / Kristin / Joe / Cori), auto-downloads from HuggingFace, zero API cost. Falls back to text if disabled |
+| **Voice (STT)** | Voice notes transcribed via **Groq Whisper API** (`whisper-large-v3-turbo`), any **OpenAI-compatible STT endpoint** (set `stt_base_url` + `stt_model` — works with self-hosted Whisper, Deepgram-compatible proxies, etc.), **Voicebox STT** (self-hosted open-source voice stack — point `voicebox_stt_base_url` at your instance), or **Local** whisper.cpp via `whisper-rs` (runs on-device, Tiny 75 MB / Base 142 MB / Small 466 MB / Medium 1.5 GB, zero API cost). All dispatched through a single entry point so every channel gets the same provider priority chain. Choose mode in `/onboard:voice`. Included by default |
+| **Voice (TTS)** | Agent replies to voice notes with audio via **OpenAI TTS API** (`gpt-4o-mini-tts`), any **OpenAI-compatible TTS endpoint** (set `tts_base_url` + `tts_model` + `tts_voice` — works with self-hosted Coqui/Bark, ElevenLabs-compatible proxies, etc.), **Voicebox TTS** (async `/generate` → poll `/generate/{id}/status` → fetch audio; set `voicebox_tts_base_url` + `voicebox_tts_profile_id`), or **Local** Piper TTS (runs on-device via Python venv, Ryan / Amy / Lessac / Kristin / Joe / Cori, zero API cost). All outputs normalised to OGG/Opus via `ensure_opus` before delivery — consistent format across every channel regardless of backend. Falls back to text if disabled |
 | **Attachment Indicator** | Attached images show as `[IMG1:filename.png]` in the input title bar |
 | **Image Generation** | Agent generates images via Google Gemini (`gemini-3.1-flash-image-preview` "Nano Banana") using the `generate_image` tool — enabled via `/onboard:image`. Returned as native images/attachments in all channels |
 
 ### Messaging Integrations
 | Feature | Description |
 |---------|-------------|
-| **Telegram Bot** | Full-featured Telegram bot — owner DMs share TUI session, groups get isolated per-group sessions (keyed by chat ID). Photo/voice support, allowed user IDs, allowed chat/group IDs, `respond_to` filter (`all`/`dm_only`/`mention`). Passive group message capture — all messages stored for context even when bot isn't mentioned |
-| **WhatsApp** | Connect via QR code pairing at runtime or from onboarding wizard. Text + image, shared session with TUI, phone allowlist (`allowed_phones`), session persists across restarts |
+| **Telegram Bot** | Full-featured Telegram bot — owner DMs share TUI session, groups get isolated per-group sessions (keyed by chat ID). Photo/voice support (STT transcribes incoming voice notes; TTS replies as OGG/Opus voice notes via `send_voice` when input was audio). Allowed user IDs, allowed chat/group IDs, `respond_to` filter (`all`/`dm_only`/`mention`). Passive group message capture — all messages stored for context even when bot isn't mentioned |
+| **WhatsApp** | Connect via QR code pairing at runtime or from onboarding wizard. Text + image + voice (STT transcribes incoming voice notes; TTS replies as voice notes when input was audio and `tts_enabled=true`). Shared session with TUI, phone allowlist (`allowed_phones`), session persists across restarts |
 | **Discord** | Full Discord bot — text + image + voice. Owner DMs share TUI session, guild channels get isolated per-channel sessions. Allowed user IDs, allowed channel IDs, `respond_to` filter. Full proactive control via `discord_send` (17 actions): `send`, `reply`, `react`, `unreact`, `edit`, `delete`, `pin`, `unpin`, `create_thread`, `send_embed`, `get_messages`, `list_channels`, `add_role`, `remove_role`, `kick`, `ban`, `send_file`. Generated images sent as native Discord file attachments |
-| **Slack** | Full Slack bot via Socket Mode — owner DMs share TUI session, channels get isolated per-channel sessions. Allowed user IDs, allowed channel IDs, `respond_to` filter. Full proactive control via `slack_send` (17 actions): `send`, `reply`, `react`, `unreact`, `edit`, `delete`, `pin`, `unpin`, `get_messages`, `get_channel`, `list_channels`, `get_user`, `list_members`, `kick_user`, `set_topic`, `send_blocks`, `send_file`. Generated images sent as native Slack file uploads. Bot token + app token from `api.slack.com/apps` (Socket Mode required). **Required Bot Token Scopes:** `chat:write`, `channels:history`, `groups:history`, `im:history`, `mpim:history`, `users:read`, `files:read`, `files:write`, `reactions:write`, `app_mentions:read` |
+| **Slack** | Full Slack bot via Socket Mode — owner DMs share TUI session, channels get isolated per-channel sessions. Text + image + voice (STT transcribes incoming audio attachments; TTS replies upload an OGG/Opus audio file via `files.upload` — renders inline with waveform UI — when input was audio and `tts_enabled=true`). Allowed user IDs, allowed channel IDs, `respond_to` filter. Full proactive control via `slack_send` (17 actions): `send`, `reply`, `react`, `unreact`, `edit`, `delete`, `pin`, `unpin`, `get_messages`, `get_channel`, `list_channels`, `get_user`, `list_members`, `kick_user`, `set_topic`, `send_blocks`, `send_file`. Generated images sent as native Slack file uploads. Bot token + app token from `api.slack.com/apps` (Socket Mode required). **Required Bot Token Scopes:** `chat:write`, `channels:history`, `groups:history`, `im:history`, `mpim:history`, `users:read`, `files:read`, `files:write`, `reactions:write`, `app_mentions:read` |
 | **Trello** | Tool-only by default — the AI acts on Trello only when explicitly asked via `trello_send`. Opt-in polling via `poll_interval_secs` in config; when enabled, only `@bot_username` mentions from allowed users trigger a response. Full card management via `trello_send` (22 actions): `add_comment`, `create_card`, `move_card`, `find_cards`, `list_boards`, `get_card`, `get_card_comments`, `update_card`, `archive_card`, `add_member_to_card`, `remove_member_from_card`, `add_label_to_card`, `remove_label_from_card`, `add_checklist`, `add_checklist_item`, `complete_checklist_item`, `list_lists`, `get_board_members`, `search`, `get_notifications`, `mark_notifications_read`, `add_attachment`. API Key + Token from `trello.com/power-ups/admin`, board IDs and member-ID allowlist configurable |
 
 #### File & Media Input Support
 
 When users send files, images, or documents across any channel, the agent receives the content automatically — no manual forwarding needed. Example: a user uploads a dashboard screenshot to a Trello card with the comment _"I'm seeing this error"_ — the agent fetches the attachment, passes it through the vision pipeline, and responds with full context.
 
-| Channel | Images (in) | Text files (in) | Documents (in) | Audio (in) | Image gen (out) |
-|---------|-------------|-----------------|----------------|------------|-----------------|
-| **Telegram** | ✅ vision pipeline | ✅ extracted inline | ✅ / PDF note | ✅ STT | ✅ native photo |
-| **WhatsApp** | ✅ vision pipeline | ✅ extracted inline | ✅ / PDF note | ✅ STT | ✅ native image |
-| **Discord** | ✅ vision pipeline | ✅ extracted inline | ✅ / PDF note | ✅ STT | ✅ file attachment |
-| **Slack** | ✅ vision pipeline | ✅ extracted inline | ✅ / PDF note | ✅ STT | ✅ file upload |
-| **Trello** | ✅ card attachments → vision | ✅ extracted inline | — | — | ✅ card attachment + embed |
-| **TUI** | ✅ paste path → vision | ✅ paste path → inline | — | ✅ STT | ✅ `[IMG: name]` display |
+| Channel | Images (in) | Text files (in) | Documents (in) | Audio (in) | Audio reply (out) | Image gen (out) |
+|---------|-------------|-----------------|----------------|------------|-------------------|-----------------|
+| **Telegram** | ✅ vision pipeline | ✅ extracted inline | ✅ / PDF note | ✅ STT | ✅ TTS via `send_voice` (OGG/Opus) | ✅ native photo |
+| **WhatsApp** | ✅ vision pipeline | ✅ extracted inline | ✅ / PDF note | ✅ STT | ✅ TTS via upload + `audio_message` (OGG/Opus, `ptt=true`) | ✅ native image |
+| **Discord** | ✅ vision pipeline | ✅ extracted inline | ✅ / PDF note | ✅ STT | ✅ TTS as `response.ogg` attachment | ✅ file attachment |
+| **Slack** | ✅ vision pipeline | ✅ extracted inline | ✅ / PDF note | ✅ STT | ✅ TTS via `files.upload` (OGG/Opus, inline waveform) | ✅ file upload |
+| **Trello** | ✅ card attachments → vision | ✅ extracted inline | — | — | — | ✅ card attachment + embed |
+| **TUI** | ✅ paste path → vision | ✅ paste path → inline | — | ✅ STT | — (terminal has no native audio) | ✅ `[IMG: name]` display |
 
 Images are passed to the active model's vision pipeline if it supports multimodal input, or routed to the `analyze_image` tool (Google Gemini vision) otherwise. Text files (`.txt`, `.md`, `.json`, `.csv`, source code, etc.) are extracted as UTF-8 and included inline up to 8 000 characters — in the TUI simply paste or type the file path.
 
@@ -1321,7 +1321,7 @@ First-time users are guided through a 9-step setup wizard that appears automatic
 | 3 | **Workspace** | Set brain workspace path (default `~/.opencrabs/`) → seed template files (SOUL.md, IDENTITY.md, etc.) |
 | 4 | **Gateway** | Configure HTTP API gateway: port, bind address, auth mode |
 | 5 | **Channels** | Toggle messaging integrations (Telegram, Discord, WhatsApp, Slack, Trello) |
-| 6 | **Voice** | Choose STT mode: **Off** / **API** (Groq Whisper) / **Local** (whisper.cpp). Choose TTS mode: **Off** / **API** (OpenAI TTS) / **Local** (Piper TTS). Local modes show model/voice picker with download progress |
+| 6 | **Voice** | Choose STT provider: **Off** / **Groq Whisper (API)** / **OpenAI-compatible (API)** / **Voicebox (self-hosted)** / **Local whisper.cpp**. Choose TTS provider: **Off** / **OpenAI TTS (API)** / **OpenAI-compatible (API)** / **Voicebox (self-hosted)** / **Local Piper**. Local modes show model/voice picker with download progress. OpenAI-compatible modes take base URL + model + key. Voicebox modes take base URL + profile_id (TTS) / base URL (STT) |
 | 7 | **Image Handling** | Enable Gemini image generation and/or vision analysis — uses a separate Google AI key |
 | 8 | **Daemon** | Install background service (systemd on Linux, LaunchAgent on macOS) |
 | 9 | **Health Check** | Verify API key, config, workspace — shows pass/fail summary |
@@ -1349,13 +1349,39 @@ In `/onboard:voice`, select **Local** mode, pick a model size, and press Enter t
 Config (`config.toml`):
 ```toml
 [voice]
+# Core toggles
 stt_enabled = true
+tts_enabled = true
+
+# --- Local mode (whisper.cpp + Piper) ---
 stt_mode = "local"              # "api" (default) or "local"
 local_stt_model = "local-base"  # local-tiny, local-base, local-small, local-medium
-tts_enabled = true
 tts_mode = "local"              # "api" (default) or "local"
 local_tts_voice = "ryan"        # ryan, amy, lessac, kristin, joe, cori
+
+# --- OpenAI-compatible API mode (any Whisper/Coqui-compatible endpoint) ---
+# STT
+stt_base_url = "https://your-stt-host/v1/audio/transcriptions"
+stt_model    = "whisper-large-v3"
+# TTS
+tts_base_url = "https://your-tts-host/v1/audio/speech"
+tts_model    = "tts-1"
+tts_voice    = "alloy"
+
+# --- Voicebox (self-hosted open-source voice stack) ---
+voicebox_stt_enabled   = false
+voicebox_stt_base_url  = "http://localhost:8000"
+voicebox_tts_enabled   = false
+voicebox_tts_base_url  = "http://localhost:8000"
+voicebox_tts_profile_id = "your-voice-profile-uuid"
 ```
+
+**Provider priority** (first match wins, enforced in `voice::transcribe` and `voice::synthesize`):
+
+- **STT:** Voicebox → OpenAI-compatible → Groq API → Local whisper.cpp
+- **TTS:** Voicebox → OpenAI-compatible → OpenAI TTS API → Local Piper
+
+All TTS outputs are normalised to OGG/Opus via `ensure_opus` before reaching a channel — channels can send the bytes directly to `send_voice` (Telegram), `audio_message` with `ptt=true` (WhatsApp), file attachment (Discord), or `files.upload` (Slack) without format checks of their own.
 
 #### Brain Personalization (Step 10)
 
@@ -1437,17 +1463,33 @@ api_key = "your-exa-key"
 [providers.web_search.brave]
 api_key = "your-brave-key"
 
-# Voice (STT/TTS)
-# STT API mode (default): uses Groq Whisper
+# Voice (STT/TTS) — dispatched in priority order: Voicebox → OpenAI-compatible → Groq → Local
+# STT Groq API (legacy default): uses Groq Whisper
 [providers.stt.groq]
 api_key = "your-groq-key"
+
+# STT OpenAI-compatible endpoint (any Whisper-compatible server: self-hosted, Deepgram proxy, etc.)
+# Also set stt_base_url = "https://…/v1/audio/transcriptions" and stt_model in [voice] of config.toml
+[providers.stt.openai_compatible]
+api_key = "your-stt-key"
+
+# STT Voicebox (self-hosted open-source voice stack) — no API key required
+# Set voicebox_stt_enabled = true and voicebox_stt_base_url in [voice] of config.toml
 
 # STT Local mode: no API key needed — runs whisper.cpp on device
 # Set stt_mode = "local" and local_stt_model in config.toml
 
-# TTS API mode (default): uses OpenAI TTS
+# TTS OpenAI API (legacy default): uses OpenAI TTS
 [providers.tts.openai]
 api_key = "your-openai-key"
+
+# TTS OpenAI-compatible endpoint (self-hosted Coqui / Bark / ElevenLabs-compatible proxy)
+# Also set tts_base_url = "https://…/v1/audio/speech" + tts_model + tts_voice in [voice]
+[providers.tts.openai_compatible]
+api_key = "your-tts-key"
+
+# TTS Voicebox (self-hosted) — no API key required
+# Set voicebox_tts_enabled = true, voicebox_tts_base_url, voicebox_tts_profile_id in [voice]
 
 # TTS Local mode: no API key needed — runs Piper TTS on device
 # Set tts_mode = "local" and local_tts_voice in config.toml
