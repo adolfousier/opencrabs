@@ -226,52 +226,28 @@ impl BrowserManager {
             .await
             .map_err(|e| anyhow::anyhow!("Failed to create page: {e}"))?;
 
-        // Inject stealth patches before any navigation
-        Self::inject_stealth(&page).await;
+        // Register stealth patches via CDP's addScriptToEvaluateOnNewDocument
+        // so they re-apply automatically on every navigation — including
+        // cross-origin hops. Previously this was a one-shot `page.evaluate`
+        // on page creation, so the patches survived same-document updates
+        // but got reset on any full navigation (the JS context is
+        // destroyed + rebuilt). Anti-bot scanners detect the half-patched
+        // state; the new-document registration fixes this.
+        Self::install_stealth_on_new_document(&page).await;
 
         inner.pages.insert(session_name, page.clone());
         Ok(page)
     }
 
-    /// Inject stealth JS to reduce bot detection fingerprinting.
-    async fn inject_stealth(page: &Page) {
-        let stealth_js = r#"
-            // Hide navigator.webdriver
-            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-
-            // Fake chrome.runtime (present in real Chrome, missing in automation)
-            if (!window.chrome) { window.chrome = {}; }
-            if (!window.chrome.runtime) {
-                window.chrome.runtime = {
-                    connect: function() {},
-                    sendMessage: function() {},
-                    id: undefined
-                };
-            }
-
-            // Fake plugins array (headless has 0 plugins)
-            Object.defineProperty(navigator, 'plugins', {
-                get: () => [
-                    { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
-                    { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
-                    { name: 'Native Client', filename: 'internal-nacl-plugin' }
-                ]
-            });
-
-            // Fake languages
-            Object.defineProperty(navigator, 'languages', {
-                get: () => ['en-US', 'en']
-            });
-
-            // Remove automation-related properties from navigator
-            const originalQuery = window.navigator.permissions.query;
-            window.navigator.permissions.query = (parameters) =>
-                parameters.name === 'notifications'
-                    ? Promise.resolve({ state: Notification.permission })
-                    : originalQuery(parameters);
-        "#;
-
-        if let Err(e) = page.evaluate(stealth_js).await {
+    /// Register stealth JS via `Page.addScriptToEvaluateOnNewDocument`
+    /// so Chrome runs it on every document creation — including full
+    /// cross-origin navigations — without the caller needing to
+    /// re-inject after each `goto`.
+    async fn install_stealth_on_new_document(page: &Page) {
+        if let Err(e) = page
+            .add_script_to_evaluate_on_new_document(Some(STEALTH_JS.to_string()))
+            .await
+        {
             tracing::warn!("Stealth JS injection failed: {e}");
         }
     }
@@ -576,6 +552,51 @@ fn is_profile_locked(profile_dir: &std::path::Path) -> bool {
 /// Kept as a module-level constant so the test module can exercise the
 /// exact same list.
 pub(crate) const LOCK_FILES: &[&str] = &["SingletonLock", "SingletonSocket", "Lock"];
+
+/// Stealth JavaScript registered via CDP's
+/// `Page.addScriptToEvaluateOnNewDocument` so Chrome runs it on every
+/// document creation — including full cross-origin navigations. Hides
+/// the most common automation fingerprints: `navigator.webdriver`,
+/// missing `chrome.runtime`, empty `navigator.plugins`, and the
+/// notifications-permission probe used by bot detection libraries.
+///
+/// Exported `pub(crate)` for `src/tests/browser_stealth_test.rs` which
+/// pins the presence of each patch as a regression guard.
+pub(crate) const STEALTH_JS: &str = r#"
+    // Hide navigator.webdriver
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+
+    // Fake chrome.runtime (present in real Chrome, missing in automation)
+    if (!window.chrome) { window.chrome = {}; }
+    if (!window.chrome.runtime) {
+        window.chrome.runtime = {
+            connect: function() {},
+            sendMessage: function() {},
+            id: undefined
+        };
+    }
+
+    // Fake plugins array (headless has 0 plugins)
+    Object.defineProperty(navigator, 'plugins', {
+        get: () => [
+            { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
+            { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
+            { name: 'Native Client', filename: 'internal-nacl-plugin' }
+        ]
+    });
+
+    // Fake languages
+    Object.defineProperty(navigator, 'languages', {
+        get: () => ['en-US', 'en']
+    });
+
+    // Remove automation-related properties from navigator
+    const originalQuery = window.navigator.permissions.query;
+    window.navigator.permissions.query = (parameters) =>
+        parameters.name === 'notifications'
+            ? Promise.resolve({ state: Notification.permission })
+            : originalQuery(parameters);
+"#;
 
 /// Remove stale Chrome singleton lock files from the OPENCRABS-OWNED
 /// profile directory. A previous opencrabs Chrome process that crashed

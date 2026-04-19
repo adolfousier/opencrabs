@@ -36,3 +36,9 @@ pub(crate) use manager::{clean_stale_locks, LOCK_FILES};
 // manager.rs.
 #[cfg(test)]
 pub(crate) use manager::handler_is_dead;
+
+// Stealth JS source — re-exported only for test fixtures
+// (src/tests/browser_stealth_test.rs) that pin the presence of each
+// patch as a regression guard.
+#[cfg(test)]
+pub(crate) use manager::STEALTH_JS;

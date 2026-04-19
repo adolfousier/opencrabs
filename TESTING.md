@@ -135,12 +135,13 @@ cargo test --all-features
 | Tests — Browser Default (macOS LSHandlers parser) | 8 | `src/tests/browser_default_test.rs` |
 | Tests — Browser Profile Lock Sweeper | 5 | `src/tests/browser_locks_test.rs` |
 | Tests — Browser CDP Handler Health | 4 | `src/tests/browser_health_test.rs` |
+| Tests — Browser Stealth JS Regression Guards | 6 | `src/tests/browser_stealth_test.rs` |
 | Tests — exa_search MCP Handshake | 4 | `src/tests/exa_search_test.rs` |
 | Tests — http_request User-Agent | 3 | `src/tests/http_request_test.rs` |
 | **Usage — Categorizer** | 4 | `src/usage/categorizer.rs` |
 | **Usage — Dashboard** | 6 | `src/usage/dashboard.rs` |
 | **Usage — Data** | 7 | `src/usage/data.rs` |
-| **Total** | **2,087** | |
+| **Total** | **2,093** | |
 
 ---
 
