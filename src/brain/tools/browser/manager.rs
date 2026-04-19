@@ -22,7 +22,7 @@ pub struct BrowserManager {
 struct ManagerInner {
     browser: Option<Browser>,
     pages: HashMap<String, Page>,
-    _handler_handle: Option<tokio::task::JoinHandle<()>>,
+    handler_handle: Option<tokio::task::JoinHandle<()>>,
     headless: bool,
 }
 
@@ -48,7 +48,7 @@ impl BrowserManager {
             inner: Arc::new(Mutex::new(ManagerInner {
                 browser: None,
                 pages: HashMap::new(),
-                _handler_handle: None,
+                handler_handle: None,
                 headless,
             })),
         }
@@ -81,7 +81,7 @@ impl BrowserManager {
         // Tear down existing browser so it relaunches in the new mode
         inner.pages.clear();
         inner.browser.take();
-        if let Some(handle) = inner._handler_handle.take() {
+        if let Some(handle) = inner.handler_handle.take() {
             handle.abort();
         }
         tracing::info!(
@@ -96,11 +96,29 @@ impl BrowserManager {
         self.inner.lock().await.headless
     }
 
-    /// Ensure the browser is launched. No-op if already running.
+    /// Ensure the browser is launched. No-op if already running and the
+    /// handler task is still alive.
+    ///
+    /// When the underlying Chrome process dies (OS kill, CDP socket
+    /// break, OOM, user closed the window) the handler task completes
+    /// and `handler_handle.is_finished()` becomes true. The Browser
+    /// object is still in the map but its CDP channel is dead — the
+    /// next `page.goto()` returns `Navigation failed: channel closed`
+    /// (2026-04-19 09:49 log). We detect that here and relaunch.
     async fn ensure_browser(&self) -> anyhow::Result<()> {
         let mut inner = self.inner.lock().await;
-        if inner.browser.is_some() {
+        if inner.browser.is_some() && !handler_is_dead(inner.handler_handle.as_ref()) {
             return Ok(());
+        }
+        if inner.browser.is_some() {
+            tracing::warn!(
+                "browser: CDP handler task is dead — tearing down stale Browser handle and relaunching"
+            );
+            inner.pages.clear();
+            inner.browser.take();
+            if let Some(h) = inner.handler_handle.take() {
+                h.abort();
+            }
         }
 
         let mode = if inner.headless { "headless" } else { "headed" };
@@ -183,7 +201,7 @@ impl BrowserManager {
         });
 
         inner.browser = Some(browser);
-        inner._handler_handle = Some(handle);
+        inner.handler_handle = Some(handle);
         tracing::info!("{mode} {browser_name} launched successfully");
         Ok(())
     }
@@ -294,7 +312,7 @@ impl BrowserManager {
         let mut inner = self.inner.lock().await;
         inner.pages.clear();
         inner.browser.take();
-        if let Some(handle) = inner._handler_handle.take() {
+        if let Some(handle) = inner.handler_handle.take() {
             handle.abort();
         }
         tracing::info!("Browser shut down");
@@ -571,6 +589,25 @@ pub(crate) const LOCK_FILES: &[&str] = &["SingletonLock", "SingletonSocket", "Lo
 /// re-create will still be atomic. Restrict callers to paths that are
 /// NEVER the user's native browser profile (doing this on a live
 /// Chrome's profile would crash their main browser).
+/// Decide whether the CDP handler task is dead and the cached Browser
+/// handle should be discarded. Pure function over the handler's state
+/// so `src/tests/browser_health_test.rs` can exercise both branches
+/// without spawning a real Chrome.
+///
+/// Returns `true` when:
+///   - the handler handle is `None` (never launched, or already torn down), or
+///   - the handle exists but `is_finished()` — the task exited, usually
+///     because the underlying Chrome process died (OS kill / OOM / user
+///     closed the window / CDP socket break).
+///
+/// The production path calls this after the Browser Option is confirmed
+/// Some, so `None` handle while browser is Some means "we forgot to
+/// store the handle" — treat it as dead and relaunch (safer than
+/// proceeding with an un-polled event stream).
+pub(crate) fn handler_is_dead(handle: Option<&tokio::task::JoinHandle<()>>) -> bool {
+    handle.map(|h| h.is_finished()).unwrap_or(true)
+}
+
 pub(crate) fn clean_stale_locks(profile_dir: &std::path::Path) {
     for name in LOCK_FILES {
         let path = profile_dir.join(name);

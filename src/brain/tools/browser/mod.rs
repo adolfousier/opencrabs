@@ -30,3 +30,9 @@ pub(crate) use manager::parse_ls_handlers;
 // manager.rs for the failure mode it guards against.
 #[cfg(test)]
 pub(crate) use manager::{clean_stale_locks, LOCK_FILES};
+
+// CDP-handler-alive check — re-exported only for test fixtures
+// (src/tests/browser_health_test.rs). See handler_is_dead doc in
+// manager.rs.
+#[cfg(test)]
+pub(crate) use manager::handler_is_dead;
