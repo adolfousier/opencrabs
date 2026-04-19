@@ -1201,8 +1201,58 @@ impl App {
         // provider would fall through to the new global default on its next
         // iteration (2026-04-17 17:01 logs — background qwen-plus turn
         // silently rerouted to localhost:8891 when the other pane swapped).
-        let agent_provider_name = self.agent_service.provider_name();
-        let provider_arc = self.agent_service.provider();
+        //
+        // CRITICAL: for custom providers, construct the session's instance
+        // BY NAME via create_provider_by_name(&config, chosen). Using
+        // `self.agent_service.provider()` was the root cause of the
+        // 2026-04-19 "session says opencode2 but routes to opencode" bug —
+        // agent_service.provider() returns the global default, which lags
+        // /models save by one rebuild cycle on a busy TUI. When the user
+        // switched from opencode to opencode2 the session would record
+        // "opencode2" as the name but pin the global's opencode-arc
+        // underneath, routing every request to the rate-limited account.
+        // Building from config by name is pure and always hits the
+        // correct section.
+        let (agent_provider_name, provider_arc) = if provider_idx == CUSTOM_PROVIDER_IDX
+            && !self.ps.custom_name.is_empty()
+        {
+            let chosen = self.ps.custom_name.clone();
+            match crate::config::Config::load() {
+                Ok(cfg) => match crate::brain::provider::factory::create_provider_by_name(
+                    &cfg, &chosen,
+                )
+                .await
+                {
+                    Ok(p) => (chosen, p),
+                    Err(e) => {
+                        tracing::warn!(
+                            "[save_provider] create_provider_by_name('{}') failed: {} — falling back to agent_service global",
+                            chosen,
+                            e
+                        );
+                        (
+                            self.agent_service.provider_name(),
+                            self.agent_service.provider(),
+                        )
+                    }
+                },
+                Err(e) => {
+                    tracing::warn!(
+                        "[save_provider] Config::load() failed while resolving session provider: {}",
+                        e
+                    );
+                    (
+                        self.agent_service.provider_name(),
+                        self.agent_service.provider(),
+                    )
+                }
+            }
+        } else {
+            (
+                self.agent_service.provider_name(),
+                self.agent_service.provider(),
+            )
+        };
         if let Some(ref mut session) = self.current_session {
             session.provider_name = Some(agent_provider_name.clone());
             session.model = Some(actual_model.clone());
