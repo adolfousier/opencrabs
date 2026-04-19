@@ -43,8 +43,7 @@ struct StatusResponse {
     #[serde(default)]
     status: String,
     #[serde(default)]
-    audio_path: String,
-    #[serde(default)]
+    #[allow(dead_code)]
     duration: f64,
     #[serde(default)]
     error: Option<String>,
@@ -102,10 +101,9 @@ impl VoiceboxTts {
             return self.fetch_audio(&result.audio_path, result.duration).await;
         }
 
-        // Async mode: poll until completed
-        let final_result = self.poll_until_completed(&generation_id).await?;
-        self.fetch_audio(&final_result.audio_path, final_result.duration)
-            .await
+        // Async mode: poll until completed, then fetch audio by generation ID
+        self.poll_until_completed(&generation_id).await?;
+        self.fetch_audio_by_id(&generation_id).await
     }
 
     /// Poll `/generate/{id}/status` until the generation completes.
@@ -184,6 +182,59 @@ impl VoiceboxTts {
                 }
             }
         }
+    }
+
+    /// Fetch audio bytes from Voicebox by generation ID.
+    async fn fetch_audio_by_id(&self, generation_id: &str) -> Result<Vec<u8>> {
+        let audio_url = build_endpoint_url(&self.base_url, &format!("audio/{}", generation_id))?;
+
+        let resp = self
+            .client
+            .get(&audio_url)
+            .send()
+            .await
+            .with_context(|| format!("Failed to fetch audio from {}", audio_url))?;
+
+        let content_type = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .map(|v| v.to_str().unwrap_or("unknown"))
+            .unwrap_or("unknown")
+            .to_string();
+
+        let resp = resp
+            .error_for_status()
+            .with_context(|| format!("Voicebox audio fetch returned error for {}", audio_url))?;
+
+        let audio_bytes = resp
+            .bytes()
+            .await
+            .with_context(|| "Failed to read audio bytes from response")?
+            .to_vec();
+
+        // Detect format from magic bytes
+        let detected_format = if audio_bytes.starts_with(b"RIFF") {
+            "WAV"
+        } else if audio_bytes.starts_with(b"ID3") || audio_bytes.starts_with(b"\xff\xfb") {
+            "MP3"
+        } else if audio_bytes.starts_with(b"OggS") {
+            "OGG"
+        } else if audio_bytes.starts_with(&[0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70]) {
+            "M4A"
+        } else {
+            "unknown"
+        };
+
+        tracing::info!(
+            "Voicebox TTS: fetched {} bytes (content_type={}, detected={}, profile={}, generation={})",
+            audio_bytes.len(),
+            content_type,
+            detected_format,
+            self.profile_id,
+            generation_id,
+        );
+
+        Ok(audio_bytes)
     }
 
     /// Fetch audio bytes from Voicebox via HTTP GET.
