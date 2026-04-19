@@ -83,9 +83,9 @@ impl Tool for BrowserNavigateTool {
         let mut result = ToolResult::success(format!("Navigated to: {final_url}\nTitle: {title}"));
 
         // Auto-screenshot: give the model vision of the page after navigation
-        if let Some(img) = self.manager.take_screenshot_for_session(context.session_id).await {
-            result.images.push(img);
-        }
+        self.manager
+            .attach_screenshot(context.session_id, &mut result)
+            .await;
 
         Ok(result)
     }

@@ -82,9 +82,9 @@ impl Tool for BrowserTypeTool {
             let mut result = ToolResult::success(format!("Typed '{}' into {}", text, sel));
 
             // Auto-screenshot: give the model vision after typing
-            if let Some(img) = self.manager.take_screenshot_for_session(context.session_id).await {
-                result.images.push(img);
-            }
+            self.manager
+                .attach_screenshot(context.session_id, &mut result)
+                .await;
 
             Ok(result)
         } else {
@@ -103,9 +103,9 @@ impl Tool for BrowserTypeTool {
                     if ok {
                         let mut result =
                             ToolResult::success(format!("Typed '{}' into focused element", text));
-                        if let Some(img) = self.manager.take_screenshot_for_session(context.session_id).await {
-                            result.images.push(img);
-                        }
+                        self.manager
+                            .attach_screenshot(context.session_id, &mut result)
+                            .await;
                         Ok(result)
                     } else {
                         Ok(ToolResult::error(

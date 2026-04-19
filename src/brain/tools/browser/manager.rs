@@ -312,6 +312,35 @@ impl BrowserManager {
         }
     }
 
+    /// Attach a screenshot to `result` for the given session's page.
+    /// On success pushes the image and records `screenshot=ok` in the
+    /// metadata. On failure appends a short explanatory note to the
+    /// tool output and records `screenshot=failed` — the model used to
+    /// see the primary text reply but had no way to know the visual
+    /// it expected was missing.
+    pub async fn attach_screenshot(
+        &self,
+        session_id: uuid::Uuid,
+        result: &mut crate::brain::tools::ToolResult,
+    ) {
+        match self.take_screenshot_for_session(session_id).await {
+            Some(img) => {
+                result.images.push(img);
+                result
+                    .metadata
+                    .insert("screenshot".to_string(), "ok".to_string());
+            }
+            None => {
+                result
+                    .output
+                    .push_str("\n\n[screenshot unavailable — the page may not be rendered yet]");
+                result
+                    .metadata
+                    .insert("screenshot".to_string(), "failed".to_string());
+            }
+        }
+    }
+
     /// Take a screenshot of the session's page and return
     /// (media_type, base64_data). Never errors out — returns None if
     /// no page exists for the session or the capture fails.

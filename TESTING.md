@@ -142,12 +142,13 @@ cargo test --all-features
 | Tests — Browser Session-Scoped Tabs | 4 | `src/tests/browser_session_test.rs` |
 | Tests — Browser Profile Unlock Backoff | 4 | `src/tests/browser_profile_wait_test.rs` |
 | Tests — Browser Eval Output Cap | 5 | `src/tests/browser_eval_cap_test.rs` |
+| Tests — Browser Screenshot-Failure Surface | 2 | `src/tests/browser_screenshot_surface_test.rs` |
 | Tests — exa_search MCP Handshake | 4 | `src/tests/exa_search_test.rs` |
 | Tests — http_request User-Agent | 3 | `src/tests/http_request_test.rs` |
 | **Usage — Categorizer** | 4 | `src/usage/categorizer.rs` |
 | **Usage — Dashboard** | 6 | `src/usage/dashboard.rs` |
 | **Usage — Data** | 7 | `src/usage/data.rs` |
-| **Total** | **2,108** | |
+| **Total** | **2,110** | |
 
 ---
 
