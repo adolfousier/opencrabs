@@ -17,11 +17,18 @@ use unicode_width::UnicodeWidthStr;
 
 /// Render reasoning/thinking text as plain lines, preserving literal newlines.
 /// Unlike `parse_markdown`, single `\n` is honoured instead of being collapsed.
+///
+/// Wrapped continuations use an empty padding so they align flush-left with
+/// the paragraph's first line after the caller prepends its own outer indent.
+/// Previously the continuation padding was "  " which, combined with the
+/// caller's outer "  " prefix, produced an ugly 4-space indent on wrapped
+/// continuations while paragraph starts sat at 2 — inconsistent and distracting
+/// in long thinking blocks (screenshot 2026-04-19 08:15).
 pub(crate) fn reasoning_to_lines(text: &str, max_width: usize) -> Vec<Line<'static>> {
     let mut result = Vec::new();
     for l in text.split('\n') {
         let line = Line::from(Span::raw(l.to_string()));
-        for wrapped in wrap_line_with_padding(line, max_width, "  ") {
+        for wrapped in wrap_line_with_padding(line, max_width, "") {
             result.push(wrapped);
         }
     }
