@@ -1060,7 +1060,64 @@ impl App {
             }
         }
 
+        // Enable the chosen provider on disk. User reported 2026-04-19
+        // that after picking opencode2 in /models, config.toml still had
+        // `providers.custom.opencode2.enabled = false`. Add loud tracing
+        // around this single write + a reload-and-verify guard so any
+        // future drift (section mismatch, toml_edit corruption,
+        // concurrent writer) is caught in the log and re-written instead
+        // of being swallowed silently by try_write's warn-and-continue.
+        tracing::info!(
+            "[save_provider] writing enabled=true to section '{}' (provider_idx={}, custom_name='{}')",
+            section,
+            provider_idx,
+            self.ps.custom_name,
+        );
         try_write(section, "enabled", "true");
+
+        // Verify the write actually landed. Re-read config and confirm.
+        // On mismatch, try again via the raw write_key (bypasses try_write's
+        // borrow on write_errors so we can act on the true/false outcome).
+        let verified_enabled = crate::config::Config::load()
+            .ok()
+            .and_then(|cfg| match section {
+                "providers.anthropic" => cfg.providers.anthropic.map(|p| p.enabled),
+                "providers.openai" => cfg.providers.openai.map(|p| p.enabled),
+                "providers.github" => cfg.providers.github.map(|p| p.enabled),
+                "providers.gemini" => cfg.providers.gemini.map(|p| p.enabled),
+                "providers.openrouter" => cfg.providers.openrouter.map(|p| p.enabled),
+                "providers.minimax" => cfg.providers.minimax.map(|p| p.enabled),
+                "providers.zhipu" => cfg.providers.zhipu.map(|p| p.enabled),
+                "providers.claude_cli" => cfg.providers.claude_cli.map(|p| p.enabled),
+                "providers.opencode_cli" => cfg.providers.opencode_cli.map(|p| p.enabled),
+                "providers.qwen" => cfg.providers.qwen.map(|p| p.enabled),
+                s if s.starts_with("providers.custom.") => {
+                    let name = s.trim_start_matches("providers.custom.");
+                    cfg.providers
+                        .custom
+                        .as_ref()
+                        .and_then(|m| m.get(name))
+                        .map(|p| p.enabled)
+                }
+                _ => None,
+            })
+            .unwrap_or(false);
+        if !verified_enabled {
+            tracing::warn!(
+                "[save_provider] enabled=true did NOT land on disk for '{}' — retrying",
+                section
+            );
+            if let Err(e) = crate::config::Config::write_key(section, "enabled", "true") {
+                tracing::error!(
+                    "[save_provider] retry write_key(enabled=true) for '{}' failed: {}",
+                    section,
+                    e
+                );
+                write_errors.push(format!("{}.enabled", section));
+            }
+        } else {
+            tracing::info!("[save_provider] verified enabled=true on disk for '{}'", section);
+        }
 
         // Write base_url if applicable (indices match PROVIDERS)
         match provider_idx {
