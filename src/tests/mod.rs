@@ -1,6 +1,7 @@
 pub mod altgr_input_test;
 pub mod brain_templates_test;
 pub mod browser_default_test;
+pub mod browser_locks_test;
 pub mod candle_whisper_test;
 pub mod channel_search_test;
 pub mod cli_arg_too_long_test;

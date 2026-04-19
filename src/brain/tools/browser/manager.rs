@@ -137,6 +137,20 @@ impl BrowserManager {
                 }
                 fallback
             });
+
+        // Sweep stale lock files in our OWN fallback profile before launch.
+        // The 2026-04-11 / 17 logs all had the same failure: a previous
+        // opencrabs Chrome process crashed, leaving `SingletonLock` behind
+        // in `~/.opencrabs/chrome-profile`, and the next launch refused to
+        // start with "Failed to create SingletonLock: File exists (17)".
+        // Restricted to the opencrabs-owned fallback path — never touch
+        // the user's native Chrome/Brave profile locks (that's their
+        // running browser).
+        let fallback_root = crate::config::opencrabs_home().join("chrome-profile");
+        if profile_dir == fallback_root {
+            clean_stale_locks(&profile_dir);
+        }
+
         tracing::debug!("Browser profile: {}", profile_dir.display());
         builder = builder.user_data_dir(profile_dir);
 
@@ -538,6 +552,38 @@ fn is_profile_locked(profile_dir: &std::path::Path) -> bool {
     }
     // macOS: check for SingletonSocket too
     profile_dir.join("SingletonSocket").exists()
+}
+
+/// Names of the lock artefacts Chrome writes under `--user-data-dir`.
+/// Kept as a module-level constant so the test module can exercise the
+/// exact same list.
+pub(crate) const LOCK_FILES: &[&str] = &["SingletonLock", "SingletonSocket", "Lock"];
+
+/// Remove stale Chrome singleton lock files from the OPENCRABS-OWNED
+/// profile directory. A previous opencrabs Chrome process that crashed
+/// leaves these files behind — the next launch then refuses to start
+/// with "Failed to create SingletonLock: File exists (17)" (see
+/// 2026-04-11 16:57 / 2026-04-17 15:00 logs).
+///
+/// This is safe to call unconditionally on our own profile: if a live
+/// process genuinely holds the lock, the caller has already checked
+/// `is_profile_locked` and is about to launch anyway — the OS-level
+/// re-create will still be atomic. Restrict callers to paths that are
+/// NEVER the user's native browser profile (doing this on a live
+/// Chrome's profile would crash their main browser).
+pub(crate) fn clean_stale_locks(profile_dir: &std::path::Path) {
+    for name in LOCK_FILES {
+        let path = profile_dir.join(name);
+        if path.exists()
+            && let Err(e) = std::fs::remove_file(&path)
+        {
+            tracing::warn!(
+                "browser: failed to clean stale lock {}: {}",
+                path.display(),
+                e
+            );
+        }
+    }
 }
 
 /// Detect the user's default browser (macOS).

@@ -24,3 +24,9 @@ pub use wait::BrowserWaitTool;
 // doesn't complain about it being unused in production builds.
 #[cfg(all(target_os = "macos", test))]
 pub(crate) use manager::parse_ls_handlers;
+
+// Stale-lock sweeper — re-exported only for test fixtures
+// (src/tests/browser_locks_test.rs). See clean_stale_locks doc in
+// manager.rs for the failure mode it guards against.
+#[cfg(test)]
+pub(crate) use manager::{clean_stale_locks, LOCK_FILES};
