@@ -439,7 +439,11 @@ impl AgentService {
         // restore, reading provider.default_model() can capture the wrong
         // (pre-swap) provider's model. session.model is read from DB and is
         // always provider-correct.
-        let model_name = model.or_else(|| session.model.clone()).unwrap_or_else(|| {
+        // Mutable so the sticky-fallback path can rebind this to the
+        // successful fallback's model — otherwise subsequent tool-loop
+        // iterations in the same turn rebuild requests with the primary
+        // model name pointed at the fallback provider → 400 unknown model.
+        let mut model_name = model.or_else(|| session.model.clone()).unwrap_or_else(|| {
             self.provider_for_session(session_id)
                 .default_model()
                 .to_string()
@@ -1165,11 +1169,29 @@ impl AgentService {
                         Some(reason),
                     );
 
+                    // Resolve the session's CURRENT primary provider name
+                    // for the alert — never just the model. A user can
+                    // have opencode, opencode2, opencode3 … all routing to
+                    // the same underlying model name. "Rate limit on
+                    // 'claude-sonnet-4-6'" hides WHICH subscription got
+                    // rate-limited. The session's provider is the truth
+                    // source (global `self.provider` may differ after
+                    // per-session swaps).
+                    let primary_from_name =
+                        self.provider_name_for_session(session_id);
+                    let primary_from_model = model_name.clone();
+
                     if let Some(ref cb) = progress_callback {
                         let prefix = if is_auth {
-                            format!("Auth error on '{}'", model_name)
+                            format!(
+                                "Auth error on '{}/{}'",
+                                primary_from_name, model_name
+                            )
                         } else {
-                            format!("Rate limit on '{}'", model_name)
+                            format!(
+                                "Rate limit on '{}/{}'",
+                                primary_from_name, model_name
+                            )
                         };
                         let message = if self.fallback_providers.is_empty() {
                             format!("{} — no fallback providers configured.", prefix)
@@ -1179,14 +1201,11 @@ impl AgentService {
                         cb(session_id, ProgressEvent::SelfHealingAlert { message });
                     }
 
-                    // Walk the entire fallback chain, skipping the active provider.
-                    // Each provider gets one attempt; on failure we try the next.
-                    let active_name = self
-                        .provider
-                        .read()
-                        .ok()
-                        .map(|p| p.name().to_string())
-                        .unwrap_or_default();
+                    // Walk the entire fallback chain, skipping the SESSION's
+                    // active provider (not the global default — a per-session
+                    // swap may already have this session on opencode2 while
+                    // `self.provider` still holds opencode).
+                    let active_name = self.provider_name_for_session(session_id);
                     let candidates: Vec<_> = self
                         .fallback_providers
                         .iter()
@@ -1198,7 +1217,11 @@ impl AgentService {
                     }
 
                     let mut last_err = e;
-                    let mut succeeded = None;
+                    let mut succeeded: Option<(
+                        crate::brain::provider::LLMResponse,
+                        String,
+                        String,
+                    )> = None;
                     for fallback in &candidates {
                         let fb_name = fallback.name().to_string();
                         let fb_model = fallback.default_model().to_string();
@@ -1232,18 +1255,27 @@ impl AgentService {
                             fb_req = fb_req.with_tools(self.tool_registry.get_tool_definitions());
                         }
 
-                        // Swap only THIS session's provider for the fallback
-                        // attempt. The restore is wrapped in a Drop guard
-                        // so cancellation mid-await still flips the session
-                        // back to the original — without the guard, a user
-                        // sending a new message during a fallback stream
-                        // dropped the future before the restore line ran,
-                        // leaving session_providers stuck on the fallback
-                        // provider with the primary's model in session.model
-                        // (2026-04-18 18:14 "400 Unknown Model" on zhipu).
+                        // STICKY FALLBACK (rate-limit / auth path): swap
+                        // session provider to the fallback, and on success
+                        // DON'T restore. Rate limits from subscription
+                        // quotas can last hours; without stickiness every
+                        // subsequent turn hits the same 429, walks the
+                        // chain again, and bounces back — the user sees a
+                        // warning every turn and never settles on the
+                        // working provider.
+                        //
+                        // Guard pattern: if the await errors OR is
+                        // cancelled (future dropped mid-stream), Drop fires
+                        // and restores the original. Avoids the nightmare
+                        // where session_providers points at fallback but
+                        // session.model in DB is still primary → 400
+                        // "unknown model" on next turn. On success we
+                        // disable the guard (set original=None) so the
+                        // swap STICKS, then emit ProviderSwitched to
+                        // persist the pairing to DB via state.rs:2205.
                         let original_provider = self.provider_for_session(session_id);
                         self.swap_provider_for_session(session_id, (*fallback).clone());
-                        let _restore_guard = FallbackProviderGuard {
+                        let mut restore_guard = FallbackProviderGuard {
                             service: self,
                             session_id,
                             original: Some(original_provider),
@@ -1259,16 +1291,22 @@ impl AgentService {
                                 false,
                             )
                             .await;
-                        drop(_restore_guard);
                         match fb_result {
                             Ok(resp) => {
-                                succeeded = Some(resp);
+                                // Disable restore — the swap must stick.
+                                restore_guard.original = None;
+                                drop(restore_guard);
+                                succeeded = Some((resp, fb_name, fb_model));
                                 break;
                             }
                             Err(fb_err) => {
+                                // Guard's Drop restores the original so
+                                // the next candidate iteration starts
+                                // clean.
+                                drop(restore_guard);
                                 tracing::warn!(
                                     "Fallback '{}' failed: {} — trying next",
-                                    fb_name,
+                                    fallback.name(),
                                     fb_err
                                 );
                                 last_err = fb_err;
@@ -1276,7 +1314,53 @@ impl AgentService {
                         }
                     }
                     match succeeded {
-                        Some(resp) => resp,
+                        Some((resp, fb_name, fb_model)) => {
+                            // Emit ProviderSwitched so the TUI persists the
+                            // swap to the session DB (session.provider_name
+                            // and session.model). state.rs:2205 picks this
+                            // up and calls session_service.update_session
+                            // so the NEXT turn resolves model_name from
+                            // the fallback, not the rate-limited primary.
+                            if let Some(ref cb) = progress_callback {
+                                let reason = if is_auth {
+                                    "auth_error".to_string()
+                                } else {
+                                    "rate_limit".to_string()
+                                };
+                                cb(
+                                    session_id,
+                                    ProgressEvent::SelfHealingAlert {
+                                        message: format!(
+                                            "Sticky fallback → '{}/{}' (was '{}/{}', {}). \
+                                             Pinned until you change via /models.",
+                                            fb_name,
+                                            fb_model,
+                                            primary_from_name,
+                                            primary_from_model,
+                                            reason
+                                        ),
+                                    },
+                                );
+                                cb(
+                                    session_id,
+                                    ProgressEvent::ProviderSwitched {
+                                        from_name: primary_from_name.clone(),
+                                        from_model: primary_from_model.clone(),
+                                        to_name: fb_name.clone(),
+                                        to_model: fb_model.clone(),
+                                        reason,
+                                    },
+                                );
+                            }
+                            // Update the local model_name binding so any
+                            // further iterations in THIS turn build
+                            // requests with the fallback's model
+                            // (otherwise the next tool-loop iteration
+                            // would send the primary's model name to the
+                            // fallback provider → 400).
+                            model_name = fb_model;
+                            resp
+                        }
                         None => {
                             tracing::error!(
                                 "All {} fallback providers exhausted",
@@ -1376,11 +1460,13 @@ impl AgentService {
                         );
 
                         if let Some(ref cb) = progress_callback {
+                            let active_name = self.provider_name_for_session(session_id);
                             cb(
                                 session_id,
                                 ProgressEvent::SelfHealingAlert {
                                     message: format!(
-                                        "Stream error on '{}' after 3 retries. {}",
+                                        "Stream error on '{}/{}' after 3 retries. {}",
+                                        active_name,
                                         model_name,
                                         if self.has_fallback_provider() {
                                             "Switching to fallback provider..."
