@@ -1709,13 +1709,25 @@ pub(crate) async fn handle_message(
 
             // If input was voice AND TTS is enabled, also send voice note after text
             if is_voice && voice_config.tts_enabled {
+                tracing::info!("Telegram: TTS requested — synthesizing response text (len={})", response.content.len());
                 match crate::channels::voice::synthesize(&response.content, &voice_config).await {
                     Ok(audio_bytes) => {
-                        bot.send_voice(msg.chat.id, InputFile::memory(audio_bytes))
-                            .await?;
+                        tracing::info!(
+                            "Telegram: TTS succeeded — {} bytes of audio, sending to chat {}",
+                            audio_bytes.len(),
+                            msg.chat.id
+                        );
+                        match bot.send_voice(msg.chat.id, InputFile::memory(audio_bytes)).await {
+                            Ok(m) => {
+                                tracing::info!("Telegram: voice message delivered (msg_id={})", m.id);
+                            }
+                            Err(e) => {
+                                tracing::error!("Telegram: send_voice failed — {}: {:?}", e, e);
+                            }
+                        }
                     }
                     Err(e) => {
-                        tracing::error!("Telegram: TTS error: {}", e);
+                        tracing::error!("Telegram: TTS synthesis failed: {:#}", e);
                     }
                 }
             }

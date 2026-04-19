@@ -224,7 +224,9 @@ fn handle_tts_mode(wizard: &mut OnboardingWizard, key: KeyCode) -> WizardAction 
             // Go to the last field of whatever STT provider is selected
             match wizard.stt_provider {
                 SttProvider::Voicebox => wizard.voice_field = VoiceField::SttVoiceboxUrl,
-                SttProvider::OpenAiCompatible => wizard.voice_field = VoiceField::SttOpenaiCompatKey,
+                SttProvider::OpenAiCompatible => {
+                    wizard.voice_field = VoiceField::SttOpenaiCompatKey
+                }
                 SttProvider::Local => wizard.voice_field = VoiceField::LocalModelSelect,
                 SttProvider::Groq => wizard.voice_field = VoiceField::GroqApiKey,
                 SttProvider::Off => wizard.voice_field = VoiceField::SttModeSelect,

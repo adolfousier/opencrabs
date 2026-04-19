@@ -279,57 +279,55 @@ impl OnboardingWizard {
                     Some(|c: char| c.is_ascii_digit() || c == '+' || c == '-'),
                 );
             }
-            OnboardingStep::VoiceSetup => {
-                match self.voice_field {
-                    VoiceField::GroqApiKey => {
-                        tracing::debug!("[paste] Groq API key pasted ({} chars)", clean.len());
-                        if self.has_existing_groq_key() {
-                            self.groq_api_key_input.clear();
-                        }
-                        self.groq_api_key_input.push_str(clean);
+            OnboardingStep::VoiceSetup => match self.voice_field {
+                VoiceField::GroqApiKey => {
+                    tracing::debug!("[paste] Groq API key pasted ({} chars)", clean.len());
+                    if self.has_existing_groq_key() {
+                        self.groq_api_key_input.clear();
                     }
-                    VoiceField::SttOpenaiCompatUrl => {
-                        self.stt_openai_compat_base_url.push_str(clean);
-                    }
-                    VoiceField::SttOpenaiCompatModel => {
-                        self.stt_openai_compat_model.clear();
-                        self.stt_openai_compat_model.push_str(clean);
-                    }
-                    VoiceField::SttOpenaiCompatKey => {
-                        self.stt_openai_compat_key_input.push_str(clean);
-                    }
-                    VoiceField::SttVoiceboxUrl => {
-                        self.stt_voicebox_base_url.push_str(clean);
-                    }
-                    VoiceField::TtsOpenaiCompatUrl => {
-                        self.tts_openai_compat_base_url.push_str(clean);
-                    }
-                    VoiceField::TtsOpenaiCompatModel => {
-                        self.tts_openai_compat_model.clear();
-                        self.tts_openai_compat_model.push_str(clean);
-                    }
-                    VoiceField::TtsOpenaiCompatVoice => {
-                        self.tts_openai_compat_voice.clear();
-                        self.tts_openai_compat_voice.push_str(clean);
-                    }
-                    VoiceField::TtsOpenaiCompatKey => {
-                        self.tts_openai_compat_key_input.push_str(clean);
-                    }
-                    VoiceField::TtsVoiceboxUrl => {
-                        self.tts_voicebox_base_url.push_str(clean);
-                    }
-                    VoiceField::TtsVoiceboxProfileId => {
-                        self.tts_voicebox_profile_id.clear();
-                        self.tts_voicebox_profile_id.push_str(clean);
-                    }
-                    _ => {
-                        tracing::debug!(
-                            "[paste] Voice field {:?} does not accept text input, ignoring paste",
-                            self.voice_field
-                        );
-                    }
+                    self.groq_api_key_input.push_str(clean);
                 }
-            }
+                VoiceField::SttOpenaiCompatUrl => {
+                    self.stt_openai_compat_base_url.push_str(clean);
+                }
+                VoiceField::SttOpenaiCompatModel => {
+                    self.stt_openai_compat_model.clear();
+                    self.stt_openai_compat_model.push_str(clean);
+                }
+                VoiceField::SttOpenaiCompatKey => {
+                    self.stt_openai_compat_key_input.push_str(clean);
+                }
+                VoiceField::SttVoiceboxUrl => {
+                    self.stt_voicebox_base_url.push_str(clean);
+                }
+                VoiceField::TtsOpenaiCompatUrl => {
+                    self.tts_openai_compat_base_url.push_str(clean);
+                }
+                VoiceField::TtsOpenaiCompatModel => {
+                    self.tts_openai_compat_model.clear();
+                    self.tts_openai_compat_model.push_str(clean);
+                }
+                VoiceField::TtsOpenaiCompatVoice => {
+                    self.tts_openai_compat_voice.clear();
+                    self.tts_openai_compat_voice.push_str(clean);
+                }
+                VoiceField::TtsOpenaiCompatKey => {
+                    self.tts_openai_compat_key_input.push_str(clean);
+                }
+                VoiceField::TtsVoiceboxUrl => {
+                    self.tts_voicebox_base_url.push_str(clean);
+                }
+                VoiceField::TtsVoiceboxProfileId => {
+                    self.tts_voicebox_profile_id.clear();
+                    self.tts_voicebox_profile_id.push_str(clean);
+                }
+                _ => {
+                    tracing::debug!(
+                        "[paste] Voice field {:?} does not accept text input, ignoring paste",
+                        self.voice_field
+                    );
+                }
+            },
             OnboardingStep::ImageSetup if self.image_field == ImageField::ApiKey => {
                 tracing::debug!("[paste] Google API key pasted ({} chars)", clean.len());
                 if self.has_existing_image_key() {

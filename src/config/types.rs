@@ -2418,10 +2418,7 @@ impl Config {
             DocumentMut::new()
         };
 
-        let parts: Vec<String> = section
-            .split('.')
-            .map(|p| p.to_string())
-            .collect();
+        let parts: Vec<String> = section.split('.').map(|p| p.to_string()).collect();
 
         let mut current = doc.as_table_mut();
         for part in &parts {

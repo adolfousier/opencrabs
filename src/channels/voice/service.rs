@@ -146,6 +146,11 @@ pub async fn synthesize(text: &str, voice_config: &VoiceConfig) -> Result<Vec<u8
 
     // Voicebox TTS takes priority if enabled
     if voice_config.voicebox_tts_enabled {
+        tracing::info!(
+            "TTS dispatch → Voicebox (base_url={}, profile_id={})",
+            voice_config.voicebox_tts_base_url,
+            voice_config.voicebox_tts_profile_id
+        );
         let client = super::voicebox_tts::VoiceboxTts::new(
             &voice_config.voicebox_tts_base_url,
             &voice_config.voicebox_tts_profile_id,
@@ -156,6 +161,10 @@ pub async fn synthesize(text: &str, voice_config: &VoiceConfig) -> Result<Vec<u8
     // OpenAI-compatible TTS if base_url is configured
     if let (Some(base_url), Some(api_key)) = (&voice_config.tts_base_url, &voice_config.tts_api_key)
     {
+        tracing::info!(
+            "TTS dispatch → OpenAI-compatible (base_url={}, model={}, voice={})",
+            base_url, voice_config.tts_model, voice_config.tts_voice
+        );
         return super::openai_tts::synthesize_speech(
             text,
             api_key,
@@ -170,6 +179,10 @@ pub async fn synthesize(text: &str, voice_config: &VoiceConfig) -> Result<Vec<u8
     if let Some(provider) = &voice_config.tts_provider
         && let Some(api_key) = &provider.api_key
     {
+        tracing::info!(
+            "TTS dispatch → OpenAI (model={}, voice={})",
+            voice_config.tts_model, voice_config.tts_voice
+        );
         return synthesize_speech(
             text,
             api_key,
@@ -183,7 +196,7 @@ pub async fn synthesize(text: &str, voice_config: &VoiceConfig) -> Result<Vec<u8
     #[cfg(feature = "local-tts")]
     {
         let voice_id = voice_config.local_tts_voice.clone();
-        tracing::info!("Local TTS: synthesizing with Piper voice {}", voice_id);
+        tracing::info!("TTS dispatch → Local Piper (voice={})", voice_id);
         return synthesize_speech_local(text, &voice_id).await;
     }
 

@@ -29,13 +29,10 @@ mod tests {
         let mut server = mockito::Server::new_async().await;
         let mock_url = server.url();
 
-        // Create a temp audio file that the mock will reference
-        let temp_dir = tempfile::TempDir::new().unwrap();
-        let audio_path = temp_dir.path().join("audio.wav");
         let fake_audio = vec![0x52, 0x49, 0x46, 0x46, 0x00, 0x01, 0x02, 0x03];
-        std::fs::write(&audio_path, &fake_audio).unwrap();
 
-        let _mock = server
+        // Mock POST /generate → returns completed with audio path
+        let _generate = server
             .mock("POST", "/generate")
             .match_body(mockito::Matcher::Json(serde_json::json!({
                 "profile_id": "profile-abc",
@@ -47,12 +44,20 @@ mod tests {
                 serde_json::json!({
                     "id": "gen-123",
                     "status": "completed",
-                    "audio_path": audio_path.to_string_lossy(),
+                    "audio_path": "/audio/gen-123.wav",
                     "duration": 1.5,
                     "error": null
                 })
                 .to_string(),
             )
+            .create_async()
+            .await;
+
+        // Mock GET /audio/gen-123.wav → returns audio bytes
+        let _audio = server
+            .mock("GET", "/audio/gen-123.wav")
+            .with_status(200)
+            .with_body(fake_audio.clone())
             .create_async()
             .await;
 
@@ -65,12 +70,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tts_audio_file_not_found() {
+    async fn tts_audio_fetch_fails_on_404() {
         let mut server = mockito::Server::new_async().await;
         let mock_url = server.url();
 
-        // Return a path to a non-existent file
-        let _mock = server
+        let _generate = server
             .mock("POST", "/generate")
             .with_status(200)
             .with_header("content-type", "application/json")
@@ -78,7 +82,7 @@ mod tests {
                 serde_json::json!({
                     "id": "gen-123",
                     "status": "completed",
-                    "audio_path": "/nonexistent/path/audio.wav",
+                    "audio_path": "/audio/missing.wav",
                     "duration": 1.0,
                     "error": null
                 })
@@ -87,12 +91,20 @@ mod tests {
             .create_async()
             .await;
 
+        // Audio endpoint returns 404
+        let _audio = server
+            .mock("GET", "/audio/missing.wav")
+            .with_status(404)
+            .with_body("not found")
+            .create_async()
+            .await;
+
         let tts = VoiceboxTts::new(&mock_url, "profile-abc");
         let result = tts.synthesize("hello").await;
 
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("not found") || err.contains("No such file"));
+        assert!(err.contains("404") || err.contains("error"));
     }
 
     #[tokio::test]

@@ -25,23 +25,29 @@ pub struct VoiceboxTts {
 
 #[derive(Deserialize)]
 struct GenerateResponse {
+    #[serde(default)]
     id: String,
+    #[serde(default)]
     status: String,
+    #[serde(default)]
     audio_path: String,
+    #[serde(default)]
     #[allow(dead_code)]
     duration: f64,
+    #[serde(default)]
     #[allow(dead_code)]
     error: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct StatusResponse {
-    // `id` is echoed back by the server but we already hold the generation_id
-    // from the POST response, so we don't deserialize it here. serde will
-    // ignore unknown fields by default.
+    #[serde(default)]
     status: String,
+    #[serde(default)]
     audio_path: String,
+    #[serde(default)]
     duration: f64,
+    #[serde(default)]
     error: Option<String>,
 }
 
@@ -157,16 +163,43 @@ impl VoiceboxTts {
         }
     }
 
-    /// Read audio bytes from the file path returned by Voicebox.
+    /// Fetch audio bytes from Voicebox.
+    ///
+    /// If `audio_path` is an HTTP(S) URL or absolute path starting with `/`,
+    /// fetch via HTTP GET. Otherwise treat as local filesystem path.
     async fn read_audio_file(&self, audio_path: &str, duration: f64) -> Result<Vec<u8>> {
-        let path = Path::new(audio_path);
-        if !path.exists() {
-            anyhow::bail!("Voicebox audio file not found: {}", audio_path);
-        }
+        // If it looks like an HTTP path or URL, fetch via GET
+        let audio_bytes = if audio_path.starts_with("http://")
+            || audio_path.starts_with("https://")
+            || audio_path.starts_with('/')
+        {
+            let audio_url =
+                if audio_path.starts_with("http://") || audio_path.starts_with("https://") {
+                    audio_path.to_string()
+                } else {
+                    build_endpoint_url(&self.base_url, audio_path.trim_start_matches('/'))?
+                };
 
-        let audio_bytes = tokio::fs::read(path)
-            .await
-            .with_context(|| format!("Failed to read Voicebox audio file: {}", audio_path))?;
+            self.client
+                .get(&audio_url)
+                .send()
+                .await
+                .with_context(|| format!("Failed to fetch audio from {}", audio_url))?
+                .error_for_status()
+                .with_context(|| format!("Voicebox audio fetch returned error for {}", audio_url))?
+                .bytes()
+                .await
+                .with_context(|| "Failed to read audio bytes from response")?
+                .to_vec()
+        } else {
+            let path = Path::new(audio_path);
+            if !path.exists() {
+                anyhow::bail!("Voicebox audio file not found: {}", audio_path);
+            }
+            tokio::fs::read(path)
+                .await
+                .with_context(|| format!("Failed to read Voicebox audio file: {}", audio_path))?
+        };
 
         tracing::info!(
             "Voicebox TTS: generated {} bytes of audio (profile={}, duration={:.2}s, path={})",
