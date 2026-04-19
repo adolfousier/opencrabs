@@ -173,9 +173,18 @@ impl Tool for HttpClientTool {
 
         let method = parse_method(&input.method)?;
 
-        // Build client with timeout
+        // Build client with timeout. Always set a default User-Agent —
+        // GitHub's API (and a long tail of other services that follow the
+        // same convention) returns 403 Forbidden when the UA header is
+        // missing, and reqwest ships with no UA by default. The error
+        // body literally says "Request forbidden by administrative
+        // rules. Please make sure your request has a User-Agent header."
+        // The caller's `headers` map can still override this: reqwest's
+        // per-request header setters win over client-level defaults, so
+        // explicit `User-Agent` in the tool input replaces ours.
         let client = Client::builder()
             .timeout(StdDuration::from_secs(input.timeout_secs))
+            .user_agent(concat!("opencrabs/", env!("CARGO_PKG_VERSION")))
             .redirect(if input.follow_redirects {
                 reqwest::redirect::Policy::limited(10)
             } else {
