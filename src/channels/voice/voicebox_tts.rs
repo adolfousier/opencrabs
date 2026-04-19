@@ -135,10 +135,36 @@ impl VoiceboxTts {
                 .await
                 .context("Failed to poll Voicebox generation status")?;
 
-            let result: StatusResponse = response
-                .json()
-                .await
-                .context("Failed to parse Voicebox status response")?;
+            if response.status() == reqwest::StatusCode::NO_CONTENT {
+                // Still generating, not ready yet
+                continue;
+            }
+
+            if !response.status().is_success() {
+                // Not ready yet or not found — keep polling
+                continue;
+            }
+
+            let text = response.text().await.unwrap_or_default();
+
+            if text.is_empty() || text.trim().is_empty() {
+                // Empty body = not ready yet
+                continue;
+            }
+
+            // SSE responses have "data: " prefix — strip it before JSON parsing
+            let json_text = text
+                .lines()
+                .find(|l| l.starts_with("data: "))
+                .map(|l| l.trim_start_matches("data: ").trim())
+                .unwrap_or(text.trim());
+
+            let result: StatusResponse = serde_json::from_str(json_text).with_context(|| {
+                format!(
+                    "Failed to parse Voicebox status response: '{}'",
+                    json_text.chars().take(200).collect::<String>()
+                )
+            })?;
 
             match result.status.as_str() {
                 "completed" => return Ok(result),

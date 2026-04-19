@@ -224,7 +224,7 @@ fn ensure_opus(audio_bytes: Vec<u8>) -> Vec<u8> {
     let mut cmd = std::process::Command::new(&ffmpeg_path);
     cmd.args([
         "-i",
-        "/dev/stdin",
+        "pipe:0",
         "-f",
         "ogg",
         "-c:a",
@@ -234,7 +234,7 @@ fn ensure_opus(audio_bytes: Vec<u8>) -> Vec<u8> {
         "-application",
         "voip",
         "-y",
-        "/dev/stdout",
+        "pipe:1",
     ])
     .stdin(std::process::Stdio::piped())
     .stdout(std::process::Stdio::piped())
