@@ -1177,21 +1177,14 @@ impl AgentService {
                     // rate-limited. The session's provider is the truth
                     // source (global `self.provider` may differ after
                     // per-session swaps).
-                    let primary_from_name =
-                        self.provider_name_for_session(session_id);
+                    let primary_from_name = self.provider_name_for_session(session_id);
                     let primary_from_model = model_name.clone();
 
                     if let Some(ref cb) = progress_callback {
                         let prefix = if is_auth {
-                            format!(
-                                "Auth error on '{}/{}'",
-                                primary_from_name, model_name
-                            )
+                            format!("Auth error on '{}/{}'", primary_from_name, model_name)
                         } else {
-                            format!(
-                                "Rate limit on '{}/{}'",
-                                primary_from_name, model_name
-                            )
+                            format!("Rate limit on '{}/{}'", primary_from_name, model_name)
                         };
                         let message = if self.fallback_providers.is_empty() {
                             format!("{} — no fallback providers configured.", prefix)
@@ -1217,8 +1210,11 @@ impl AgentService {
                     }
 
                     let mut last_err = e;
+                    // stream_complete returns (LLMResponse, Option<String>);
+                    // we also need fb_name / fb_model alongside for the
+                    // ProviderSwitched event emitted once on success.
                     let mut succeeded: Option<(
-                        crate::brain::provider::LLMResponse,
+                        (crate::brain::provider::LLMResponse, Option<String>),
                         String,
                         String,
                     )> = None;

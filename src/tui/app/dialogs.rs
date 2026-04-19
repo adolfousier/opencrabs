@@ -1104,19 +1104,18 @@ impl App {
             .unwrap_or(false);
         if !verified_enabled {
             tracing::warn!(
-                "[save_provider] enabled=true did NOT land on disk for '{}' — retrying",
+                "[save_provider] enabled=true did NOT land on disk for '{}' — retrying via try_write",
                 section
             );
-            if let Err(e) = crate::config::Config::write_key(section, "enabled", "true") {
-                tracing::error!(
-                    "[save_provider] retry write_key(enabled=true) for '{}' failed: {}",
-                    section,
-                    e
-                );
-                write_errors.push(format!("{}.enabled", section));
-            }
+            // try_write logs + pushes to write_errors itself on failure,
+            // so we don't touch write_errors directly (which would conflict
+            // with the closure's active &mut borrow).
+            try_write(section, "enabled", "true");
         } else {
-            tracing::info!("[save_provider] verified enabled=true on disk for '{}'", section);
+            tracing::info!(
+                "[save_provider] verified enabled=true on disk for '{}'",
+                section
+            );
         }
 
         // Write base_url if applicable (indices match PROVIDERS)
@@ -1275,24 +1274,24 @@ impl App {
         {
             let chosen = self.ps.custom_name.clone();
             match crate::config::Config::load() {
-                Ok(cfg) => match crate::brain::provider::factory::create_provider_by_name(
-                    &cfg, &chosen,
-                )
-                .await
-                {
-                    Ok(p) => (chosen, p),
-                    Err(e) => {
-                        tracing::warn!(
-                            "[save_provider] create_provider_by_name('{}') failed: {} — falling back to agent_service global",
-                            chosen,
-                            e
-                        );
-                        (
-                            self.agent_service.provider_name(),
-                            self.agent_service.provider(),
-                        )
+                Ok(cfg) => {
+                    match crate::brain::provider::factory::create_provider_by_name(&cfg, &chosen)
+                        .await
+                    {
+                        Ok(p) => (chosen, p),
+                        Err(e) => {
+                            tracing::warn!(
+                                "[save_provider] create_provider_by_name('{}') failed: {} — falling back to agent_service global",
+                                chosen,
+                                e
+                            );
+                            (
+                                self.agent_service.provider_name(),
+                                self.agent_service.provider(),
+                            )
+                        }
                     }
-                },
+                }
                 Err(e) => {
                     tracing::warn!(
                         "[save_provider] Config::load() failed while resolving session provider: {}",
