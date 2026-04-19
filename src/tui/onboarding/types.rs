@@ -2,6 +2,137 @@
 /// The actual key is never held in memory — this just signals "key exists".
 pub use crate::tui::provider_selector::EXISTING_KEY_SENTINEL;
 
+/// STT provider selection in onboarding voice screen.
+/// Replaces magic numbers with named variants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SttProvider {
+    #[default]
+    Off,
+    Groq,
+    Local,
+    OpenAiCompatible,
+    Voicebox,
+}
+
+impl SttProvider {
+    /// All variants in radio-button order
+    pub const ALL: [SttProvider; 5] = [
+        SttProvider::Off,
+        SttProvider::Groq,
+        SttProvider::Local,
+        SttProvider::OpenAiCompatible,
+        SttProvider::Voicebox,
+    ];
+
+    /// Variants available when local STT is compiled in
+    pub fn available(is_local_available: bool) -> &'static [SttProvider] {
+        if is_local_available {
+            &Self::ALL
+        } else {
+            &[Self::Off, Self::Groq, Self::OpenAiCompatible, Self::Voicebox]
+        }
+    }
+
+    /// Radio button label shown in the TUI
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Groq => "API (Groq Whisper)",
+            Self::Local => "Local (Whisper — runs on device)",
+            Self::OpenAiCompatible => "OpenAI-compatible (custom endpoint)",
+            Self::Voicebox => "Voicebox",
+        }
+    }
+
+    /// Cycle to the next variant (wraps around)
+    pub fn next(self, available: &[SttProvider]) -> Self {
+        available
+            .iter()
+            .cycle()
+            .skip_while(|&&v| v != self)
+            .nth(1)
+            .copied()
+            .unwrap_or(Self::Off)
+    }
+
+    /// Cycle to the previous variant (wraps around)
+    pub fn prev(self, available: &[SttProvider]) -> Self {
+        available
+            .iter()
+            .rev()
+            .cycle()
+            .skip_while(|&&v| v != self)
+            .nth(1)
+            .copied()
+            .unwrap_or(Self::Off)
+    }
+}
+
+/// TTS provider selection in onboarding voice screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TtsProvider {
+    #[default]
+    Off,
+    OpenAi,
+    Local,
+    OpenAiCompatible,
+    Voicebox,
+}
+
+impl TtsProvider {
+    /// All variants in radio-button order
+    pub const ALL: [TtsProvider; 5] = [
+        TtsProvider::Off,
+        TtsProvider::OpenAi,
+        TtsProvider::Local,
+        TtsProvider::OpenAiCompatible,
+        TtsProvider::Voicebox,
+    ];
+
+    /// Variants available when local TTS is compiled in
+    pub fn available(is_local_available: bool) -> &'static [TtsProvider] {
+        if is_local_available {
+            &Self::ALL
+        } else {
+            &[Self::Off, TtsProvider::OpenAi, TtsProvider::OpenAiCompatible, TtsProvider::Voicebox]
+        }
+    }
+
+    /// Radio button label shown in the TUI
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::OpenAi => "API (OpenAI TTS — uses OpenAI key)",
+            Self::Local => "Local (Piper — runs on device, free)",
+            Self::OpenAiCompatible => "OpenAI-compatible (custom endpoint)",
+            Self::Voicebox => "Voicebox",
+        }
+    }
+
+    /// Cycle to the next variant (wraps around)
+    pub fn next(self, available: &[TtsProvider]) -> Self {
+        available
+            .iter()
+            .cycle()
+            .skip_while(|&&v| v != self)
+            .nth(1)
+            .copied()
+            .unwrap_or(Self::Off)
+    }
+
+    /// Cycle to the previous variant (wraps around)
+    pub fn prev(self, available: &[TtsProvider]) -> Self {
+        available
+            .iter()
+            .rev()
+            .cycle()
+            .skip_while(|&&v| v != self)
+            .nth(1)
+            .copied()
+            .unwrap_or(Self::Off)
+    }
+}
+
 /// Provider definitions
 pub const PROVIDERS: &[ProviderInfo] = &[
     ProviderInfo {
@@ -337,27 +468,29 @@ pub enum VoiceField {
     SttModeSelect,
     GroqApiKey,
     LocalModelSelect,
-    TtsModeSelect,
-    TtsLocalVoiceSelect,
-    Continue,
     // OpenAI-compatible STT
-    SttOpenaiCompatToggle,
+    SttOpenaiCompatSelect,
     SttOpenaiCompatUrl,
     SttOpenaiCompatModel,
     SttOpenaiCompatKey,
     // Voicebox STT
-    SttVoiceboxToggle,
+    SttVoiceboxSelect,
     SttVoiceboxUrl,
+    // TTS mode
+    TtsModeSelect,
+    TtsLocalVoiceSelect,
     // OpenAI-compatible TTS
-    TtsOpenaiCompatToggle,
+    TtsOpenaiCompatSelect,
     TtsOpenaiCompatUrl,
     TtsOpenaiCompatModel,
     TtsOpenaiCompatVoice,
     TtsOpenaiCompatKey,
     // Voicebox TTS
-    TtsVoiceboxToggle,
+    TtsVoiceboxSelect,
     TtsVoiceboxUrl,
     TtsVoiceboxProfileId,
+    // Navigation
+    Continue,
 }
 
 /// Which field is focused in ImageSetup step
