@@ -1789,8 +1789,7 @@ pub(crate) async fn handle_message(
                                 // the isolated voice_msg_ids list. Cleanup
                                 // paths do not touch this list. See the
                                 // field doc on StreamingState.
-                                let mut s =
-                                    streaming.lock().unwrap_or_else(|e| e.into_inner());
+                                let mut s = streaming.lock().unwrap_or_else(|e| e.into_inner());
                                 s.voice_msg_ids.push(m.id);
                             }
                             Err(e) => {

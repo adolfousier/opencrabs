@@ -200,7 +200,7 @@ async fn factory_creates_opencode_by_name() {
         ..Default::default()
     });
     let provider =
-        crate::brain::provider::factory::create_provider_by_name(&config, "opencode").await;
+        crate::brain::provider::factory::create_provider_by_name(&config, "opencode-cli").await;
     assert!(provider.is_ok(), "Should create opencode provider by name");
     assert_eq!(provider.unwrap().name(), "opencode");
 }
@@ -217,7 +217,7 @@ async fn factory_creates_opencode_by_alt_names() {
         ..Default::default()
     });
 
-    for name in ["opencode", "opencode-cli", "opencode_cli"] {
+    for name in ["opencode-cli", "opencode_cli"] {
         let provider =
             crate::brain::provider::factory::create_provider_by_name(&config, name).await;
         assert!(

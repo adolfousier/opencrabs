@@ -5,7 +5,7 @@ All notable changes to OpenCrabs will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.12] - 2026-04-18
 
 ### Voice — new STT/TTS providers
 
@@ -279,6 +279,7 @@ provider and context budget.
 - **Raise think-tag safety valve** — long Qwen reasoning blocks no longer
   get partially stripped by the tag filter.
 
+[0.3.12]: https://github.com/adolfousier/opencrabs/compare/v0.3.11...v0.3.12
 [0.3.11]: https://github.com/adolfousier/opencrabs/compare/v0.3.10...v0.3.11
 
 ## [0.3.10] - 2026-04-15

@@ -83,7 +83,10 @@ cargo test --all-features
 | **Utils — Install** | 6 | `src/utils/install.rs` |
 | **Utils — Config Watcher** | 2 | `src/utils/config_watcher.rs` |
 | **Logging** | 4 | `src/logging/logger.rs` |
+| Tests — Voice STT Dispatch | 21 | `src/tests/voice_stt_dispatch_test.rs` |
 | Tests — Voice Onboarding | 65 | `src/tests/voice_onboarding_test.rs` |
+| Tests — Voice OpenAI Compatible | 12 | `src/tests/voice_openai_compatible_test.rs` |
+| Tests — Voice Voicebox | 10 | `src/tests/voice_voicebox_test.rs` |
 | Tests — Cron Jobs & Scheduling | 49 | `src/tests/cron_test.rs` |
 | Tests — Onboarding Field Nav | 46 | `src/tests/onboarding_field_nav_test.rs` |
 | Tests — GitHub Copilot Provider | 38 | `src/tests/github_provider_test.rs` |
@@ -98,7 +101,6 @@ cargo test --all-features
 | Tests — Slack Formatting | 21 | `src/tests/slack_fmt_test.rs` |
 | Tests — Split Pane | 21 | `src/tests/split_pane_test.rs` |
 | Tests — OpenCode CLI Provider | 21 | `src/tests/opencode_provider_test.rs` |
-| Tests — Voice STT Dispatch | 21 | `src/tests/voice_stt_dispatch_test.rs` |
 | Tests — Onboarding Brain | 21 | `src/tests/onboarding_brain_test.rs` |
 | Tests — Onboarding Types | 16 | `src/tests/onboarding_types_test.rs` |
 | Tests — OpenAI Provider | 16 | `src/tests/openai_provider_test.rs` |
@@ -132,7 +134,7 @@ cargo test --all-features
 | **Usage — Categorizer** | 4 | `src/usage/categorizer.rs` |
 | **Usage — Dashboard** | 6 | `src/usage/dashboard.rs` |
 | **Usage — Data** | 7 | `src/usage/data.rs` |
-| **Total** | **1,995** | |
+| **Total** | **2,056** | |
 
 ---
 
