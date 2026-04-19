@@ -717,6 +717,38 @@ pub(crate) async fn handle_message(
                 }
             }
 
+            // Record the bot's reply in channel_messages so the recent() query
+            // used for group context on the next guild turn sees both sides of
+            // the conversation. Without this, the bot loads only user messages
+            // and responds blind to its own prior replies. Skip for DMs — the
+            // session's messages table already carries full history there.
+            if !is_dm && !text_only.trim().is_empty() {
+                let bot_id = discord_state.bot_user_id().await;
+                let bot_sender_id = bot_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_else(|| "bot:opencrabs".to_string());
+                let guild_name = msg
+                    .guild_id
+                    .map(|g| g.get().to_string())
+                    .unwrap_or_else(|| "DM".to_string());
+                let cm = DbChannelMessage::new(
+                    "discord".into(),
+                    msg.channel_id.get().to_string(),
+                    Some(guild_name),
+                    bot_sender_id,
+                    "OpenCrabs".into(),
+                    text_only.clone(),
+                    "text".into(),
+                    None,
+                );
+                if let Err(e) = channel_msg_repo.insert(&cm).await {
+                    tracing::warn!(
+                        "Discord: failed to record bot reply in channel_messages: {}",
+                        e
+                    );
+                }
+            }
+
             // TTS: send voice reply if input was audio and TTS is enabled
             if is_voice && voice_config.tts_enabled {
                 match crate::channels::voice::synthesize(&response.content, &voice_config).await {

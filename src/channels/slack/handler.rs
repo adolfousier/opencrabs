@@ -1451,6 +1451,30 @@ async fn handle_message(
                 }
             }
 
+            // Record the bot's reply in channel_messages so recent() context
+            // queries on the next turn see both sides of the conversation,
+            // not only user messages. Matches the Telegram/Discord/WhatsApp
+            // pattern. Applies to all Slack chats (channels + DMs) since
+            // store_channel_msg above also stores for both.
+            if !text_only.trim().is_empty() {
+                let cm = DbChannelMessage::new(
+                    "slack".into(),
+                    channel_id.clone(),
+                    Some(channel_name.clone()),
+                    "bot:opencrabs".to_string(),
+                    "OpenCrabs".to_string(),
+                    text_only.clone(),
+                    "text".into(),
+                    None,
+                );
+                if let Err(e) = state.channel_msg_repo.insert(&cm).await {
+                    tracing::warn!(
+                        "Slack: failed to record bot reply in channel_messages: {}",
+                        e
+                    );
+                }
+            }
+
             // If input was audio AND TTS is enabled, also upload a voice note
             // (OGG/Opus) alongside the text reply. Slack doesn't have a
             // dedicated "voice note" primitive like Telegram's send_voice —

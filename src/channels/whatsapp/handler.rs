@@ -1015,6 +1015,36 @@ pub(crate) async fn handle_message(
                 }
             }
 
+            // Record the bot's reply in channel_messages so recent() context
+            // queries on the next turn see both sides of the conversation,
+            // not only user messages. Matches the pattern added for Telegram
+            // and Discord. Applies to both group and DM threads — WhatsApp
+            // stores user messages for both, so we stay symmetric.
+            if !text_content.trim().is_empty() {
+                let chat_id = format!("{}", info.source.chat);
+                let is_group = info.source.is_group;
+                let cm = DbChannelMessage::new(
+                    "whatsapp".into(),
+                    chat_id,
+                    if is_group {
+                        Some(format!("{}", info.source.chat))
+                    } else {
+                        None
+                    },
+                    "bot:opencrabs".to_string(),
+                    "OpenCrabs".to_string(),
+                    text_content.clone(),
+                    "text".into(),
+                    None,
+                );
+                if let Err(e) = channel_msg_repo.insert(&cm).await {
+                    tracing::warn!(
+                        "WhatsApp: failed to record bot reply in channel_messages: {}",
+                        e
+                    );
+                }
+            }
+
             // If input was voice AND TTS is enabled, also send voice note after text
             if has_aud && voice_config.tts_enabled {
                 match crate::channels::voice::synthesize(&response.content, &voice_config).await {
