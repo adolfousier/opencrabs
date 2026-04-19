@@ -526,20 +526,20 @@ impl OnboardingWizard {
         } // end if write_channels
 
         if write_voice {
-            // Voice config (0=Off, 1=API, 2=Local for both STT and TTS)
-            let is_local_stt = self.stt_mode == 2;
-            let is_api_stt = self.stt_mode == 1;
+            // Voice config — uses named SttProvider/TtsProvider variants
+
+            // ── STT providers ──
             let groq_key_exists =
                 !self.groq_api_key_input.is_empty() || self.has_existing_groq_key();
 
-            // STT API provider (Groq)
+            // STT: Groq
             try_write!(
                 write_errors,
                 "providers.stt.groq",
                 "enabled",
-                &(is_api_stt && groq_key_exists).to_string()
+                &(self.stt_provider == SttProvider::Groq && groq_key_exists).to_string()
             );
-            if is_api_stt && groq_key_exists {
+            if self.stt_provider == SttProvider::Groq && groq_key_exists {
                 try_write!(
                     write_errors,
                     "providers.stt.groq",
@@ -548,14 +548,14 @@ impl OnboardingWizard {
                 );
             }
 
-            // STT local provider
+            // STT: Local
             try_write!(
                 write_errors,
                 "providers.stt.local",
                 "enabled",
-                &is_local_stt.to_string()
+                &(self.stt_provider == SttProvider::Local).to_string()
             );
-            if is_local_stt {
+            if self.stt_provider == SttProvider::Local {
                 #[cfg(feature = "local-stt")]
                 {
                     use crate::channels::voice::local_whisper::LOCAL_MODEL_PRESETS;
@@ -570,38 +570,40 @@ impl OnboardingWizard {
                 }
             }
 
-            // OpenAI-compatible STT
+            // STT: OpenAI-compatible
             try_write!(
                 write_errors,
                 "providers.stt.openai_compatible",
                 "enabled",
-                &self.stt_openai_compat_enabled.to_string()
+                &(self.stt_provider == SttProvider::OpenAiCompatible).to_string()
             );
-            if !self.stt_openai_compat_base_url.is_empty() {
-                try_write!(
-                    write_errors,
-                    "providers.stt.openai_compatible",
-                    "base_url",
-                    &self.stt_openai_compat_base_url
-                );
-            }
-            if !self.stt_openai_compat_model.is_empty() {
-                try_write!(
-                    write_errors,
-                    "providers.stt.openai_compatible",
-                    "model",
-                    &self.stt_openai_compat_model
-                );
+            if self.stt_provider == SttProvider::OpenAiCompatible {
+                if !self.stt_openai_compat_base_url.is_empty() {
+                    try_write!(
+                        write_errors,
+                        "providers.stt.openai_compatible",
+                        "base_url",
+                        &self.stt_openai_compat_base_url
+                    );
+                }
+                if !self.stt_openai_compat_model.is_empty() {
+                    try_write!(
+                        write_errors,
+                        "providers.stt.openai_compatible",
+                        "model",
+                        &self.stt_openai_compat_model
+                    );
+                }
             }
 
-            // Voicebox STT
+            // STT: Voicebox
             try_write!(
                 write_errors,
                 "providers.stt.voicebox",
                 "enabled",
-                &self.stt_voicebox_enabled.to_string()
+                &(self.stt_provider == SttProvider::Voicebox).to_string()
             );
-            if !self.stt_voicebox_base_url.is_empty() {
+            if self.stt_provider == SttProvider::Voicebox && !self.stt_voicebox_base_url.is_empty() {
                 try_write!(
                     write_errors,
                     "providers.stt.voicebox",
@@ -610,16 +612,16 @@ impl OnboardingWizard {
                 );
             }
 
-            // TTS API provider (OpenAI)
-            let is_api_tts = self.tts_enabled && self.tts_mode == 1;
-            let is_local_tts = self.tts_enabled && self.tts_mode == 2;
+            // ── TTS providers ──
+
+            // TTS: OpenAI
             try_write!(
                 write_errors,
                 "providers.tts.openai",
                 "enabled",
-                &is_api_tts.to_string()
+                &(self.tts_provider == TtsProvider::OpenAi).to_string()
             );
-            if is_api_tts {
+            if self.tts_provider == TtsProvider::OpenAi {
                 try_write!(
                     write_errors,
                     "providers.tts.openai",
@@ -628,14 +630,14 @@ impl OnboardingWizard {
                 );
             }
 
-            // TTS local provider (Piper)
+            // TTS: Local Piper
             try_write!(
                 write_errors,
                 "providers.tts.local",
                 "enabled",
-                &is_local_tts.to_string()
+                &(self.tts_provider == TtsProvider::Local).to_string()
             );
-            if is_local_tts {
+            if self.tts_provider == TtsProvider::Local {
                 #[cfg(feature = "local-tts")]
                 {
                     use crate::channels::voice::local_tts::PIPER_VOICES;
@@ -650,60 +652,64 @@ impl OnboardingWizard {
                 }
             }
 
-            // OpenAI-compatible TTS
+            // TTS: OpenAI-compatible
             try_write!(
                 write_errors,
                 "providers.tts.openai_compatible",
                 "enabled",
-                &self.tts_openai_compat_enabled.to_string()
+                &(self.tts_provider == TtsProvider::OpenAiCompatible).to_string()
             );
-            if !self.tts_openai_compat_base_url.is_empty() {
-                try_write!(
-                    write_errors,
-                    "providers.tts.openai_compatible",
-                    "base_url",
-                    &self.tts_openai_compat_base_url
-                );
-            }
-            if !self.tts_openai_compat_model.is_empty() {
-                try_write!(
-                    write_errors,
-                    "providers.tts.openai_compatible",
-                    "model",
-                    &self.tts_openai_compat_model
-                );
-            }
-            if !self.tts_openai_compat_voice.is_empty() {
-                try_write!(
-                    write_errors,
-                    "providers.tts.openai_compatible",
-                    "voice",
-                    &self.tts_openai_compat_voice
-                );
+            if self.tts_provider == TtsProvider::OpenAiCompatible {
+                if !self.tts_openai_compat_base_url.is_empty() {
+                    try_write!(
+                        write_errors,
+                        "providers.tts.openai_compatible",
+                        "base_url",
+                        &self.tts_openai_compat_base_url
+                    );
+                }
+                if !self.tts_openai_compat_model.is_empty() {
+                    try_write!(
+                        write_errors,
+                        "providers.tts.openai_compatible",
+                        "model",
+                        &self.tts_openai_compat_model
+                    );
+                }
+                if !self.tts_openai_compat_voice.is_empty() {
+                    try_write!(
+                        write_errors,
+                        "providers.tts.openai_compatible",
+                        "voice",
+                        &self.tts_openai_compat_voice
+                    );
+                }
             }
 
-            // Voicebox TTS
+            // TTS: Voicebox
             try_write!(
                 write_errors,
                 "providers.tts.voicebox",
                 "enabled",
-                &self.tts_voicebox_enabled.to_string()
+                &(self.tts_provider == TtsProvider::Voicebox).to_string()
             );
-            if !self.tts_voicebox_base_url.is_empty() {
-                try_write!(
-                    write_errors,
-                    "providers.tts.voicebox",
-                    "base_url",
-                    &self.tts_voicebox_base_url
-                );
-            }
-            if !self.tts_voicebox_profile_id.is_empty() {
-                try_write!(
-                    write_errors,
-                    "providers.tts.voicebox",
-                    "profile_id",
-                    &self.tts_voicebox_profile_id
-                );
+            if self.tts_provider == TtsProvider::Voicebox {
+                if !self.tts_voicebox_base_url.is_empty() {
+                    try_write!(
+                        write_errors,
+                        "providers.tts.voicebox",
+                        "base_url",
+                        &self.tts_voicebox_base_url
+                    );
+                }
+                if !self.tts_voicebox_profile_id.is_empty() {
+                    try_write!(
+                        write_errors,
+                        "providers.tts.voicebox",
+                        "profile_id",
+                        &self.tts_voicebox_profile_id
+                    );
+                }
             }
         } // end if write_voice
 
