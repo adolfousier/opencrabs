@@ -54,7 +54,7 @@ impl Tool for BrowserNavigateTool {
         true
     }
 
-    async fn execute(&self, input: Value, _context: &ToolExecutionContext) -> Result<ToolResult> {
+    async fn execute(&self, input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
         let url = match input["url"].as_str() {
             Some(u) if !u.is_empty() => u,
             _ => return Ok(ToolResult::error("'url' is required".into())),
@@ -65,7 +65,7 @@ impl Tool for BrowserNavigateTool {
             self.manager.set_headless(headless).await;
         }
 
-        let page = match self.manager.get_or_create_page(None).await {
+        let page = match self.manager.get_or_create_session_page(context.session_id).await {
             Ok(p) => p,
             Err(e) => return Ok(ToolResult::error(format!("Browser error: {e}"))),
         };
@@ -83,7 +83,7 @@ impl Tool for BrowserNavigateTool {
         let mut result = ToolResult::success(format!("Navigated to: {final_url}\nTitle: {title}"));
 
         // Auto-screenshot: give the model vision of the page after navigation
-        if let Some(img) = self.manager.take_screenshot().await {
+        if let Some(img) = self.manager.take_screenshot_for_session(context.session_id).await {
             result.images.push(img);
         }
 

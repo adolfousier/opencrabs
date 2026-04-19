@@ -52,14 +52,14 @@ impl Tool for BrowserTypeTool {
         true
     }
 
-    async fn execute(&self, input: Value, _context: &ToolExecutionContext) -> Result<ToolResult> {
+    async fn execute(&self, input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
         let text = match input["text"].as_str() {
             Some(t) if !t.is_empty() => t,
             _ => return Ok(ToolResult::error("'text' is required".into())),
         };
         let selector = input["selector"].as_str();
 
-        let page = match self.manager.get_or_create_page(None).await {
+        let page = match self.manager.get_or_create_session_page(context.session_id).await {
             Ok(p) => p,
             Err(e) => return Ok(ToolResult::error(format!("Browser error: {e}"))),
         };
@@ -82,7 +82,7 @@ impl Tool for BrowserTypeTool {
             let mut result = ToolResult::success(format!("Typed '{}' into {}", text, sel));
 
             // Auto-screenshot: give the model vision after typing
-            if let Some(img) = self.manager.take_screenshot().await {
+            if let Some(img) = self.manager.take_screenshot_for_session(context.session_id).await {
                 result.images.push(img);
             }
 
@@ -103,7 +103,7 @@ impl Tool for BrowserTypeTool {
                     if ok {
                         let mut result =
                             ToolResult::success(format!("Typed '{}' into focused element", text));
-                        if let Some(img) = self.manager.take_screenshot().await {
+                        if let Some(img) = self.manager.take_screenshot_for_session(context.session_id).await {
                             result.images.push(img);
                         }
                         Ok(result)

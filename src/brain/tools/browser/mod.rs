@@ -50,3 +50,4 @@ pub(crate) use manager::handler_is_dead;
 // patch as a regression guard.
 #[cfg(test)]
 pub(crate) use manager::STEALTH_JS;
+

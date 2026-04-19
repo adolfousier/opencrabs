@@ -48,13 +48,13 @@ impl Tool for BrowserClickTool {
         true
     }
 
-    async fn execute(&self, input: Value, _context: &ToolExecutionContext) -> Result<ToolResult> {
+    async fn execute(&self, input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
         let selector = match input["selector"].as_str() {
             Some(s) if !s.is_empty() => s,
             _ => return Ok(ToolResult::error("'selector' is required".into())),
         };
 
-        let page = match self.manager.get_or_create_page(None).await {
+        let page = match self.manager.get_or_create_session_page(context.session_id).await {
             Ok(p) => p,
             Err(e) => return Ok(ToolResult::error(format!("Browser error: {e}"))),
         };
@@ -78,7 +78,7 @@ impl Tool for BrowserClickTool {
         let mut result = ToolResult::success(format!("Clicked element: {selector}"));
 
         // Auto-screenshot: give the model vision of the page after clicking
-        if let Some(img) = self.manager.take_screenshot().await {
+        if let Some(img) = self.manager.take_screenshot_for_session(context.session_id).await {
             result.images.push(img);
         }
 

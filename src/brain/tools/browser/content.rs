@@ -52,11 +52,11 @@ impl Tool for BrowserContentTool {
         true
     }
 
-    async fn execute(&self, input: Value, _context: &ToolExecutionContext) -> Result<ToolResult> {
+    async fn execute(&self, input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
         let selector = input["selector"].as_str();
         let text_only = input["text_only"].as_bool().unwrap_or(false);
 
-        let page = match self.manager.get_or_create_page(None).await {
+        let page = match self.manager.get_or_create_session_page(context.session_id).await {
             Ok(p) => p,
             Err(e) => return Ok(ToolResult::error(format!("Browser error: {e}"))),
         };

@@ -6,6 +6,7 @@ pub mod browser_default_windows_test;
 pub mod browser_drop_test;
 pub mod browser_health_test;
 pub mod browser_locks_test;
+pub mod browser_session_test;
 pub mod browser_stealth_test;
 pub mod candle_whisper_test;
 pub mod channel_search_test;

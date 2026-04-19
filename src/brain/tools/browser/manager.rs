@@ -236,6 +236,26 @@ impl BrowserManager {
         Ok(())
     }
 
+    /// Get or create a page keyed on an agent session id. Each agent
+    /// session gets its own tab so concurrent turns on different
+    /// sessions can't stomp on each other's DOM state (fixes P5 from
+    /// the 2026-04-19 browser audit).
+    pub async fn get_or_create_session_page(
+        &self,
+        session_id: uuid::Uuid,
+    ) -> anyhow::Result<Page> {
+        self.get_or_create_page(Some(&Self::page_name_for_session(session_id)))
+            .await
+    }
+
+    /// Format a session id as the tab-name key the manager stores. The
+    /// `session-` prefix is load-bearing — it keeps session tabs out
+    /// of the old "default" namespace so a pre-P5 caller and a
+    /// session-aware caller never collide on the same key.
+    pub(crate) fn page_name_for_session(session_id: uuid::Uuid) -> String {
+        format!("session-{}", session_id)
+    }
+
     /// Get or create a named page (tab). Default name is "default".
     pub async fn get_or_create_page(&self, name: Option<&str>) -> anyhow::Result<Page> {
         self.ensure_browser().await?;
@@ -282,8 +302,34 @@ impl BrowserManager {
         }
     }
 
-    /// Take a screenshot of the current page and return (media_type, base64_data).
-    /// Returns None if no page exists or screenshot fails — never errors out.
+    /// Take a screenshot of the session's page and return
+    /// (media_type, base64_data). Never errors out — returns None if
+    /// no page exists for the session or the capture fails.
+    pub async fn take_screenshot_for_session(
+        &self,
+        session_id: uuid::Uuid,
+    ) -> Option<(String, String)> {
+        let key = Self::page_name_for_session(session_id);
+        let inner = self.inner.lock().await;
+        let page = inner.pages.get(&key)?;
+        let bytes = page
+            .screenshot(
+                chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotParams::builder()
+                    .format(
+                        chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png,
+                    )
+                    .build(),
+            )
+            .await
+            .ok()?;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        Some(("image/png".to_string(), b64))
+    }
+
+    /// Legacy: take a screenshot of the hardcoded "default" page.
+    /// Kept for any non-session-aware caller; session-aware tools
+    /// should use `take_screenshot_for_session`.
+    #[allow(dead_code)]
     pub async fn take_screenshot(&self) -> Option<(String, String)> {
         let inner = self.inner.lock().await;
         let page = inner.pages.get("default")?;
