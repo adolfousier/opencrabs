@@ -2402,6 +2402,54 @@ impl Config {
         Ok(())
     }
 
+    /// Write a key-value pair into the system keys.toml using TOML merge.
+    /// Same as write_key but targets keys.toml instead of config.toml.
+    pub fn write_keys_key(section: &str, key: &str, value: &str) -> Result<()> {
+        use toml_edit::DocumentMut;
+
+        let value = value.trim();
+        let _guard = CONFIG_FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let path = opencrabs_home().join("keys.toml");
+
+        let mut doc: DocumentMut = if path.exists() {
+            fs::read_to_string(&path)?.parse()?
+        } else {
+            DocumentMut::new()
+        };
+
+        let parts: Vec<String> = section
+            .split('.')
+            .map(|p| p.to_string())
+            .collect();
+
+        let mut current = doc.as_table_mut();
+        for part in &parts {
+            if current.get(part.as_str()).is_none() {
+                current.insert(part, toml_edit::Item::Table(toml_edit::Table::new()));
+            }
+            current = current
+                .get_mut(part.as_str())
+                .context("section not found after insert")?
+                .as_table_mut()
+                .with_context(|| format!("'{}' is not a table", part))?;
+        }
+
+        let parsed: toml_edit::Item = toml_edit::value(value);
+
+        current.insert(key, parsed);
+
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        Self::backup_config(&path, 7);
+
+        fs::write(&path, doc.to_string())?;
+        tracing::info!("Wrote keys.toml key [{section}].{key}");
+        Ok(())
+    }
+
     /// Remove a dotted section from config.toml.
     /// e.g. `remove_section("providers.custom.default")` removes `[providers.custom.default]`.
     pub fn remove_section(section: &str) -> Result<()> {

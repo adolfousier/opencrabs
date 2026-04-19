@@ -160,6 +160,17 @@ providers = ["openrouter", "anthropic"]  # Tried in order on failure
 enabled = false
 default_model = "whisper-large-v3-turbo"
 
+# OpenAI-compatible STT (self-hosted Whisper, Together AI, etc.)
+[providers.stt.openai_compatible]
+enabled = false
+base_url = "http://localhost:11434"        # Ollama, LM Studio, or any OpenAI-compatible STT
+model = "whisper-large-v3-turbo"
+
+# Voicebox STT (local voice-to-text service)
+[providers.stt.voicebox]
+enabled = false
+base_url = "http://localhost:8000"
+
 # ========================================
 # TTS (Text-to-Speech) Providers
 # ========================================
@@ -169,6 +180,19 @@ enabled = false
 default_model = "gpt-4o-mini-tts"
 voice = "ash"             # TTS voice name
 model = "gpt-4o-mini-tts" # TTS model
+
+# OpenAI-compatible TTS (self-hosted, Together AI, etc.)
+[providers.tts.openai_compatible]
+enabled = false
+base_url = "http://localhost:11434"
+model = "tts-1"
+voice = "alloy"
+
+# Voicebox TTS (local voice-to-text service)
+[providers.tts.voicebox]
+enabled = false
+base_url = "http://localhost:8000"
+profile_id = ""
 
 # ========================================
 # Image Generation & Vision (Google Gemini)

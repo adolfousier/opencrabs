@@ -62,12 +62,22 @@ api_key = ""
 # Get from: console.groq.com
 api_key = ""
 
+# OpenAI-compatible STT (self-hosted Whisper, Together AI, etc.)
+[providers.stt.openai_compatible]
+# API key for the STT endpoint (optional if no auth required)
+api_key = ""
+
 # ========================================
 # TTS (Text-to-Speech) API Keys
 # ========================================
 
 [providers.tts.openai]
 # Uses OpenAI key - can be same as providers.openai
+api_key = ""
+
+# OpenAI-compatible TTS (self-hosted, Together AI, etc.)
+[providers.tts.openai_compatible]
+# API key for the TTS endpoint (optional if no auth required)
 api_key = ""
 
 # ========================================

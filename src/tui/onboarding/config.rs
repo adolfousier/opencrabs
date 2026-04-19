@@ -16,6 +16,16 @@ macro_rules! try_write {
     };
 }
 
+/// Try to write a keys.toml key, collecting errors into a Vec for later reporting.
+macro_rules! try_write_keys {
+    ($errors:expr, $section:expr, $key:expr, $val:expr) => {
+        if let Err(e) = Config::write_keys_key($section, $key, $val) {
+            tracing::warn!("Failed to write keys.toml {}.{}: {}", $section, $key, e);
+            $errors.push(format!("{}.{}", $section, $key));
+        }
+    };
+}
+
 /// Try to write a config array, collecting errors into a Vec for later reporting.
 macro_rules! try_write_array {
     ($errors:expr, $section:expr, $key:expr, $val:expr) => {
@@ -546,6 +556,15 @@ impl OnboardingWizard {
                     "default_model",
                     "whisper-large-v3-turbo"
                 );
+                // Write Groq API key to keys.toml (only if newly entered)
+                if !self.groq_api_key_input.is_empty() && !self.has_existing_groq_key() {
+                    try_write_keys!(
+                        write_errors,
+                        "providers.stt.groq",
+                        "api_key",
+                        &self.groq_api_key_input
+                    );
+                }
             }
 
             // STT: Local
@@ -592,6 +611,15 @@ impl OnboardingWizard {
                         "providers.stt.openai_compatible",
                         "model",
                         &self.stt_openai_compat_model
+                    );
+                }
+                // Write API key to keys.toml (only if newly entered)
+                if !self.stt_openai_compat_key_input.is_empty() {
+                    try_write_keys!(
+                        write_errors,
+                        "providers.stt.openai_compatible",
+                        "api_key",
+                        &self.stt_openai_compat_key_input
                     );
                 }
             }
@@ -683,6 +711,15 @@ impl OnboardingWizard {
                         "providers.tts.openai_compatible",
                         "voice",
                         &self.tts_openai_compat_voice
+                    );
+                }
+                // Write API key to keys.toml (only if newly entered)
+                if !self.tts_openai_compat_key_input.is_empty() {
+                    try_write_keys!(
+                        write_errors,
+                        "providers.tts.openai_compatible",
+                        "api_key",
+                        &self.tts_openai_compat_key_input
                     );
                 }
             }
