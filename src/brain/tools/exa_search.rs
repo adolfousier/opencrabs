@@ -35,8 +35,29 @@ impl ExaSearchTool {
         self.api_key.as_ref().is_none_or(|k| k.is_empty())
     }
 
-    /// Initialize an MCP session and return the session ID.
-    async fn init_mcp_session(&self, client: &reqwest::Client) -> Result<String> {
+    /// Initialize an MCP session and return the session ID if the server
+    /// issued one. Returns `None` for stateless servers.
+    ///
+    /// Every exa_search failure in the 2026-04-16/17 logs (5/5 = 100%)
+    /// was `"MCP server did not return session ID"`. The original code
+    /// treated a missing `Mcp-Session-Id` response header as a terminal
+    /// error. MCP Streamable HTTP transport (protocol rev 2025-03-26+)
+    /// lets servers operate in **stateless** mode — they process each
+    /// JSON-RPC request standalone without tracking sessions, and skip
+    /// setting the header. EXA's hosted endpoint apparently migrated to
+    /// that mode.
+    ///
+    /// Behaviour now:
+    ///   - header present → store it, send the `initialized` notification
+    ///     against the session, return `Some(id)`
+    ///   - header absent  → log a debug note, skip the notification
+    ///     (there's nothing to target), return `None`. Subsequent
+    ///     tool calls omit the `Mcp-Session-Id` header entirely.
+    ///
+    /// On any non-2xx init response we still fail loudly with the
+    /// server's status + body so a real breakage (auth, 500, etc.)
+    /// stays diagnosable instead of getting silently swallowed.
+    async fn init_mcp_session(&self, client: &reqwest::Client) -> Result<Option<String>> {
         let init_request = serde_json::json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -60,47 +81,57 @@ impl ExaSearchTool {
             .await
             .map_err(|e| ToolError::Execution(format!("MCP initialize failed: {}", e)))?;
 
-        // Capture session ID from response header
+        let status = response.status();
         let session_id = response
             .headers()
             .get("mcp-session-id")
             .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string())
-            .ok_or_else(|| {
-                ToolError::Execution("MCP server did not return session ID".to_string())
-            })?;
+            .map(|s| s.to_string());
+        let body = response.text().await.unwrap_or_default();
 
-        // Consume the response body (we don't need the init result)
-        let _body = response.text().await.unwrap_or_default();
+        if !status.is_success() {
+            return Err(ToolError::Execution(format!(
+                "MCP initialize returned {}: {}",
+                status,
+                body.chars().take(500).collect::<String>()
+            )));
+        }
 
-        // Send initialized notification (required by MCP protocol)
-        let notification = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "notifications/initialized"
-        });
-
-        let _notif_resp = client
-            .post(MCP_ENDPOINT)
-            .header("Content-Type", "application/json")
-            .header("Mcp-Session-Id", &session_id)
-            .json(&notification)
-            .send()
-            .await
-            .map_err(|e| {
-                ToolError::Execution(format!("MCP initialized notification failed: {}", e))
-            })?;
-
-        // Store session ID
-        *self.mcp_session_id.write().await = Some(session_id.clone());
+        if let Some(ref id) = session_id {
+            tracing::debug!("MCP: using session {}", id);
+            // Send initialized notification — required by spec for
+            // session-ful transports, skipped entirely in stateless
+            // mode below.
+            let notification = serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized"
+            });
+            let _notif_resp = client
+                .post(MCP_ENDPOINT)
+                .header("Content-Type", "application/json")
+                .header("Mcp-Session-Id", id)
+                .json(&notification)
+                .send()
+                .await
+                .map_err(|e| {
+                    ToolError::Execution(format!("MCP initialized notification failed: {}", e))
+                })?;
+            *self.mcp_session_id.write().await = Some(id.clone());
+        } else {
+            tracing::debug!(
+                "MCP: server did not set Mcp-Session-Id header — using stateless mode"
+            );
+            *self.mcp_session_id.write().await = None;
+        }
 
         Ok(session_id)
     }
 
-    /// Get or create an MCP session.
-    async fn ensure_mcp_session(&self, client: &reqwest::Client) -> Result<String> {
-        // Check existing session
+    /// Get or create an MCP session. Returns `None` in stateless mode
+    /// (the server didn't issue a session on initialize).
+    async fn ensure_mcp_session(&self, client: &reqwest::Client) -> Result<Option<String>> {
         if let Some(ref id) = *self.mcp_session_id.read().await {
-            return Ok(id.clone());
+            return Ok(Some(id.clone()));
         }
         self.init_mcp_session(client).await
     }
@@ -159,12 +190,17 @@ impl ExaSearchTool {
             }
         });
 
-        let response = client
+        // In stateless mode we omit the Mcp-Session-Id header entirely
+        // — sending a bogus/empty value would break some servers.
+        let mut req = client
             .post(MCP_ENDPOINT)
             .header("Content-Type", "application/json")
             .header("Accept", "application/json, text/event-stream")
-            .header("Mcp-Session-Id", &session_id)
-            .json(&tool_call)
+            .json(&tool_call);
+        if let Some(ref id) = session_id {
+            req = req.header("Mcp-Session-Id", id);
+        }
+        let response = req
             .send()
             .await
             .map_err(|e| ToolError::Execution(format!("MCP tool call failed: {}", e)))?;
