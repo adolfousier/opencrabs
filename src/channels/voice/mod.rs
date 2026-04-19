@@ -45,7 +45,6 @@ pub fn local_stt_available() -> bool {
 }
 
 /// Returns true if local TTS (Piper) can run on this machine.
-/// Requires `python3` with the `venv` module available on the system PATH.
 /// Result is cached so the probe runs at most once per process.
 pub fn local_tts_available() -> bool {
     #[cfg(feature = "local-tts")]

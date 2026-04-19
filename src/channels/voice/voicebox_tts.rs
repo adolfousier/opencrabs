@@ -1,12 +1,11 @@
 //! Voicebox TTS provider.
 //!
 //! POST to `/generate` endpoint, poll `/generate/{id}/status` until completed,
-//! then read the audio file from the returned path.
+//! then fetch the audio file via HTTP GET.
 
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::Deserialize;
-use std::path::Path;
 use tokio::time::{Duration, sleep};
 
 use super::openai_tts::build_endpoint_url;
@@ -63,7 +62,7 @@ impl VoiceboxTts {
 
     /// Synthesize speech using Voicebox.
     ///
-    /// Flow: POST /generate → poll /generate/{id}/status → read audio file.
+    /// Flow: POST /generate → poll /generate/{id}/status → fetch audio via HTTP.
     pub async fn synthesize(&self, text: &str) -> Result<Vec<u8>> {
         if text.is_empty() {
             anyhow::bail!("Cannot synthesize empty text");
@@ -100,14 +99,12 @@ impl VoiceboxTts {
 
         // If already completed (sync mode), use the result directly
         if result.status == "completed" && !result.audio_path.is_empty() {
-            return self
-                .read_audio_file(&result.audio_path, result.duration)
-                .await;
+            return self.fetch_audio(&result.audio_path, result.duration).await;
         }
 
         // Async mode: poll until completed
         let final_result = self.poll_until_completed(&generation_id).await?;
-        self.read_audio_file(&final_result.audio_path, final_result.duration)
+        self.fetch_audio(&final_result.audio_path, final_result.duration)
             .await
     }
 
@@ -163,49 +160,57 @@ impl VoiceboxTts {
         }
     }
 
-    /// Fetch audio bytes from Voicebox.
-    ///
-    /// If `audio_path` is an HTTP(S) URL or absolute path starting with `/`,
-    /// fetch via HTTP GET. Otherwise treat as local filesystem path.
-    async fn read_audio_file(&self, audio_path: &str, duration: f64) -> Result<Vec<u8>> {
-        // If it looks like an HTTP path or URL, fetch via GET
-        let audio_bytes = if audio_path.starts_with("http://")
-            || audio_path.starts_with("https://")
-            || audio_path.starts_with('/')
-        {
-            let audio_url =
-                if audio_path.starts_with("http://") || audio_path.starts_with("https://") {
-                    audio_path.to_string()
-                } else {
-                    build_endpoint_url(&self.base_url, audio_path.trim_start_matches('/'))?
-                };
-
-            self.client
-                .get(&audio_url)
-                .send()
-                .await
-                .with_context(|| format!("Failed to fetch audio from {}", audio_url))?
-                .error_for_status()
-                .with_context(|| format!("Voicebox audio fetch returned error for {}", audio_url))?
-                .bytes()
-                .await
-                .with_context(|| "Failed to read audio bytes from response")?
-                .to_vec()
+    /// Fetch audio bytes from Voicebox via HTTP GET.
+    async fn fetch_audio(&self, audio_path: &str, _duration: f64) -> Result<Vec<u8>> {
+        let audio_url = if audio_path.starts_with("http://") || audio_path.starts_with("https://") {
+            audio_path.to_string()
         } else {
-            let path = Path::new(audio_path);
-            if !path.exists() {
-                anyhow::bail!("Voicebox audio file not found: {}", audio_path);
-            }
-            tokio::fs::read(path)
-                .await
-                .with_context(|| format!("Failed to read Voicebox audio file: {}", audio_path))?
+            build_endpoint_url(&self.base_url, audio_path.trim_start_matches('/'))?
+        };
+
+        let resp = self
+            .client
+            .get(&audio_url)
+            .send()
+            .await
+            .with_context(|| format!("Failed to fetch audio from {}", audio_url))?;
+
+        let content_type = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .map(|v| v.to_str().unwrap_or("unknown"))
+            .unwrap_or("unknown")
+            .to_string();
+
+        let resp = resp
+            .error_for_status()
+            .with_context(|| format!("Voicebox audio fetch returned error for {}", audio_url))?;
+
+        let audio_bytes = resp
+            .bytes()
+            .await
+            .with_context(|| "Failed to read audio bytes from response")?
+            .to_vec();
+
+        // Detect format from magic bytes
+        let detected_format = if audio_bytes.starts_with(b"RIFF") {
+            "WAV"
+        } else if audio_bytes.starts_with(b"ID3") || audio_bytes.starts_with(b"\xff\xfb") {
+            "MP3"
+        } else if audio_bytes.starts_with(b"OggS") {
+            "OGG"
+        } else if audio_bytes.starts_with(&[0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70]) {
+            "M4A"
+        } else {
+            "unknown"
         };
 
         tracing::info!(
-            "Voicebox TTS: generated {} bytes of audio (profile={}, duration={:.2}s, path={})",
+            "Voicebox TTS: fetched {} bytes (content_type={}, detected={}, profile={}, path={})",
             audio_bytes.len(),
+            content_type,
+            detected_format,
             self.profile_id,
-            duration,
             audio_path,
         );
 

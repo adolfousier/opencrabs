@@ -139,13 +139,15 @@ async fn transcribe_audio_with_url(
 /// - OpenAI-compatible TTS (tts_base_url + tts_model)
 /// - OpenAI TTS API (tts_provider)
 /// - Local Piper TTS (local-tts feature)
+///
+/// All audio is converted to OGG/Opus before returning, since Telegram's
+/// `send_voice` only accepts Opus format.
 pub async fn synthesize(text: &str, voice_config: &VoiceConfig) -> Result<Vec<u8>> {
     if text.is_empty() {
         anyhow::bail!("Cannot synthesize empty text");
     }
 
-    // Voicebox TTS takes priority if enabled
-    if voice_config.voicebox_tts_enabled {
+    let audio = if voice_config.voicebox_tts_enabled {
         tracing::info!(
             "TTS dispatch → Voicebox (base_url={}, profile_id={})",
             voice_config.voicebox_tts_base_url,
@@ -155,53 +157,131 @@ pub async fn synthesize(text: &str, voice_config: &VoiceConfig) -> Result<Vec<u8
             &voice_config.voicebox_tts_base_url,
             &voice_config.voicebox_tts_profile_id,
         );
-        return client.synthesize(text).await;
-    }
-
-    // OpenAI-compatible TTS if base_url is configured
-    if let (Some(base_url), Some(api_key)) = (&voice_config.tts_base_url, &voice_config.tts_api_key)
+        client.synthesize(text).await?
+    } else if let (Some(base_url), Some(api_key)) =
+        (&voice_config.tts_base_url, &voice_config.tts_api_key)
     {
         tracing::info!(
             "TTS dispatch → OpenAI-compatible (base_url={}, model={}, voice={})",
-            base_url, voice_config.tts_model, voice_config.tts_voice
+            base_url,
+            voice_config.tts_model,
+            voice_config.tts_voice
         );
-        return super::openai_tts::synthesize_speech(
+        super::openai_tts::synthesize_speech(
             text,
             api_key,
             &voice_config.tts_voice,
             &voice_config.tts_model,
             base_url,
         )
-        .await;
-    }
-
-    // OpenAI TTS API (legacy)
-    if let Some(provider) = &voice_config.tts_provider
+        .await?
+    } else if let Some(provider) = &voice_config.tts_provider
         && let Some(api_key) = &provider.api_key
     {
         tracing::info!(
             "TTS dispatch → OpenAI (model={}, voice={})",
-            voice_config.tts_model, voice_config.tts_voice
+            voice_config.tts_model,
+            voice_config.tts_voice
         );
-        return synthesize_speech(
+        synthesize_speech(
             text,
             api_key,
             &voice_config.tts_voice,
             &voice_config.tts_model,
         )
-        .await;
+        .await?
+    } else {
+        #[cfg(feature = "local-tts")]
+        {
+            let voice_id = voice_config.local_tts_voice.clone();
+            tracing::info!("TTS dispatch → Local Piper (voice={})", voice_id);
+            synthesize_speech_local(text, &voice_id).await?
+        }
+        #[cfg(not(feature = "local-tts"))]
+        anyhow::bail!("No TTS provider configured")
+    };
+
+    // Ensure Opus format for Telegram — converts WAV/MP3 if needed
+    Ok(ensure_opus(audio))
+}
+
+/// Detect if audio bytes are already in OGG/Opus format.
+fn is_opus(audio: &[u8]) -> bool {
+    audio.starts_with(b"OggS")
+}
+
+/// Convert audio bytes to OGG/Opus format if needed.
+///
+/// Checks magic bytes to detect format. If already OGG/Opus, returns as-is.
+/// Otherwise uses ffmpeg to convert. Falls back to original bytes if ffmpeg fails.
+fn ensure_opus(audio_bytes: Vec<u8>) -> Vec<u8> {
+    if is_opus(&audio_bytes) {
+        return audio_bytes;
     }
 
-    // Local Piper TTS
-    #[cfg(feature = "local-tts")]
-    {
-        let voice_id = voice_config.local_tts_voice.clone();
-        tracing::info!("TTS dispatch → Local Piper (voice={})", voice_id);
-        return synthesize_speech_local(text, &voice_id).await;
-    }
+    // Try ffmpeg conversion
+    let ffmpeg_path = std::env::var("FFMPEG_PATH").unwrap_or_else(|_| "ffmpeg".to_string());
+    let mut cmd = std::process::Command::new(&ffmpeg_path);
+    cmd.args([
+        "-i",
+        "/dev/stdin",
+        "-f",
+        "ogg",
+        "-c:a",
+        "libopus",
+        "-b:a",
+        "48k",
+        "-application",
+        "voip",
+        "-y",
+        "/dev/stdout",
+    ])
+    .stdin(std::process::Stdio::piped())
+    .stdout(std::process::Stdio::piped())
+    .stderr(std::process::Stdio::piped());
 
-    #[cfg(not(feature = "local-tts"))]
-    anyhow::bail!("No TTS provider configured")
+    match cmd.spawn() {
+        Ok(mut child) => {
+            use std::io::Write;
+            if let Some(mut stdin) = child.stdin.take()
+                && stdin.write_all(&audio_bytes).is_err()
+            {
+                tracing::warn!("TTS: failed to write audio to ffmpeg");
+                return audio_bytes;
+            }
+            match child.wait_with_output() {
+                Ok(output) if output.status.success() => {
+                    tracing::info!(
+                        "TTS: converted audio to Opus ({} → {} bytes)",
+                        audio_bytes.len(),
+                        output.stdout.len()
+                    );
+                    output.stdout
+                }
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    tracing::warn!(
+                        "TTS: ffmpeg conversion failed ({}), using original audio: {}",
+                        output.status,
+                        stderr.lines().next().unwrap_or("")
+                    );
+                    audio_bytes
+                }
+                Err(e) => {
+                    tracing::warn!("TTS: ffmpeg process failed: {}", e);
+                    audio_bytes
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                "TTS: ffmpeg not found at '{}', sending audio as-is: {}",
+                ffmpeg_path,
+                e
+            );
+            audio_bytes
+        }
+    }
 }
 
 /// Synthesize speech using local Piper TTS. Runs in a blocking thread.
