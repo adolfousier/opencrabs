@@ -574,7 +574,25 @@ fn detect_default_browser_id() -> Option<String> {
         .output()
         .ok()?;
     let text = String::from_utf8_lossy(&output.stdout);
+    parse_ls_handlers(&text)
+}
 
+/// Pure parser for the `defaults read … LSHandlers` plist output.
+/// Extracted so unit tests can feed fixtures without spawning `defaults`.
+///
+/// The `defaults` output wraps LSHandlers in `( … )` (plist array),
+/// not `{ … }`. So each LSHandler dict entry `{ … }` opens at brace
+/// depth 1, not 2. Fields at depth 1 are the entry's own keys; depth
+/// 2 is inside a nested dict like LSHandlerPreferredVersions which we
+/// skip. Entry closes when depth returns to 0.
+///
+/// We accept either `LSHandlerURLScheme = https` or
+/// `LSHandlerContentType = "com.apple.default-app.web-browser"` as
+/// the "default web browser" marker — System Settings → General →
+/// Default web browser writes the content-type form; per-scheme
+/// associations write the URL-scheme form.
+#[cfg(target_os = "macos")]
+pub(crate) fn parse_ls_handlers(text: &str) -> Option<String> {
     // Extract a quoted-or-unquoted value after `=` from a plist line.
     // Handles both `key = "value";` and `key = value;` forms.
     fn parse_value(line: &str) -> Option<String> {
@@ -588,16 +606,6 @@ fn detect_default_browser_id() -> Option<String> {
         }
     }
 
-    // The `defaults` output wraps LSHandlers in `( … )` (plist array),
-    // not `{ … }`. So each LSHandler dict entry `{ … }` opens at brace
-    // depth 1, not 2. Fields at depth 1 are the entry's own keys; depth
-    // 2 is inside a nested dict like LSHandlerPreferredVersions which we
-    // skip. Entry closes when depth returns to 0.
-    //
-    // We also accept `LSHandlerContentType = "com.apple.default-app.web-browser"`
-    // as the "https" marker — that's how the default-web-browser choice
-    // is stored when set via System Settings → General → Default web
-    // browser rather than a URL-scheme association.
     let mut depth: i32 = 0;
     let mut block_scheme: Option<String> = None;
     let mut block_content_type: Option<String> = None;
@@ -626,8 +634,7 @@ fn detect_default_browser_id() -> Option<String> {
             let role = block_role.take();
             let is_web_default = scheme.as_deref().map(|s| s.eq_ignore_ascii_case("https"))
                 == Some(true)
-                || content_type.as_deref()
-                    == Some("com.apple.default-app.web-browser");
+                || content_type.as_deref() == Some("com.apple.default-app.web-browser");
             if is_web_default
                 && let Some(r) = role
                 && r != "-"

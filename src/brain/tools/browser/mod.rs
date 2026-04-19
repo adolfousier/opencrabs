@@ -18,3 +18,9 @@ pub use navigate::BrowserNavigateTool;
 pub use screenshot::BrowserScreenshotTool;
 pub use type_text::BrowserTypeTool;
 pub use wait::BrowserWaitTool;
+
+// macOS LSHandlers plist parser — re-exported only for test fixtures
+// (src/tests/browser_default_test.rs). Gated with `test` so clippy
+// doesn't complain about it being unused in production builds.
+#[cfg(all(target_os = "macos", test))]
+pub(crate) use manager::parse_ls_handlers;
