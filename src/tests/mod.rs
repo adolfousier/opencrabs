@@ -15,6 +15,7 @@ pub mod evolve_test;
 pub mod gemini_fetch_test;
 pub mod github_provider_test;
 pub mod html_comment_strip_test;
+pub mod http_request_test;
 pub mod openai_provider_test;
 pub mod opencode_provider_test;
 pub mod rate_limiter_test;
