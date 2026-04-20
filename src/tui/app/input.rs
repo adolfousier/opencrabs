@@ -1399,9 +1399,7 @@ impl App {
             // Ctrl+O — toggle expand/collapse on ALL tool groups and reasoning details
             let target = if let Some(ref group) = self.active_tool_group {
                 !group.expanded
-            } else if let Some(msg) =
-                self.messages.iter().rev().find(|m| m.tool_group.is_some())
-            {
+            } else if let Some(msg) = self.messages.iter().rev().find(|m| m.tool_group.is_some()) {
                 !msg.tool_group
                     .as_ref()
                     .expect("tool_group checked is_some above")
