@@ -12,8 +12,7 @@ use crate::brain::tools::browser::STEALTH_JS;
 #[test]
 fn hides_navigator_webdriver() {
     assert!(
-        STEALTH_JS.contains("navigator.webdriver")
-            && STEALTH_JS.contains("get: () => undefined"),
+        STEALTH_JS.contains("navigator.webdriver") && STEALTH_JS.contains("get: () => undefined"),
         "STEALTH_JS must hide navigator.webdriver"
     );
 }

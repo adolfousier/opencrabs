@@ -250,10 +250,7 @@ impl BrowserManager {
     /// session gets its own tab so concurrent turns on different
     /// sessions can't stomp on each other's DOM state (fixes P5 from
     /// the 2026-04-19 browser audit).
-    pub async fn get_or_create_session_page(
-        &self,
-        session_id: uuid::Uuid,
-    ) -> anyhow::Result<Page> {
+    pub async fn get_or_create_session_page(&self, session_id: uuid::Uuid) -> anyhow::Result<Page> {
         self.get_or_create_page(Some(&Self::page_name_for_session(session_id)))
             .await
     }
@@ -756,10 +753,7 @@ pub(crate) fn handler_is_dead(handle: Option<&tokio::task::JoinHandle<()>>) -> b
 /// back almost every time, at the cost of a small first-launch delay.
 ///
 /// Delays: 250ms, 500, 1000, 2000, 4000 (capped at 4000ms per step).
-pub(crate) async fn wait_for_profile_unlock(
-    profile_dir: &std::path::Path,
-    cap_ms: u64,
-) -> bool {
+pub(crate) async fn wait_for_profile_unlock(profile_dir: &std::path::Path, cap_ms: u64) -> bool {
     let mut waited_ms: u64 = 0;
     let mut delay_ms: u64 = 250;
     loop {

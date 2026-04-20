@@ -65,7 +65,11 @@ impl Tool for BrowserNavigateTool {
             self.manager.set_headless(headless).await;
         }
 
-        let page = match self.manager.get_or_create_session_page(context.session_id).await {
+        let page = match self
+            .manager
+            .get_or_create_session_page(context.session_id)
+            .await
+        {
             Ok(p) => p,
             Err(e) => return Ok(ToolResult::error(format!("Browser error: {e}"))),
         };

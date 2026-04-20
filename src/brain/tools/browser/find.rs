@@ -14,7 +14,7 @@ use super::manager::BrowserManager;
 use crate::brain::tools::error::Result;
 use crate::brain::tools::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 
 pub struct BrowserFindTool {
@@ -85,7 +85,11 @@ impl Tool for BrowserFindTool {
             .map(|l| l.clamp(1, 200) as usize)
             .unwrap_or(20);
 
-        let page = match self.manager.get_or_create_session_page(context.session_id).await {
+        let page = match self
+            .manager
+            .get_or_create_session_page(context.session_id)
+            .await
+        {
             Ok(p) => p,
             Err(e) => return Ok(ToolResult::error(format!("Browser error: {e}"))),
         };

@@ -56,7 +56,11 @@ impl Tool for BrowserContentTool {
         let selector = input["selector"].as_str();
         let text_only = input["text_only"].as_bool().unwrap_or(false);
 
-        let page = match self.manager.get_or_create_session_page(context.session_id).await {
+        let page = match self
+            .manager
+            .get_or_create_session_page(context.session_id)
+            .await
+        {
             Ok(p) => p,
             Err(e) => return Ok(ToolResult::error(format!("Browser error: {e}"))),
         };

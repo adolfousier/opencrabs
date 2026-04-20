@@ -129,9 +129,7 @@ impl ExaSearchTool {
                 })?;
             *self.mcp_session_id.write().await = Some(id.clone());
         } else {
-            tracing::debug!(
-                "MCP: server did not set Mcp-Session-Id header — using stateless mode"
-            );
+            tracing::debug!("MCP: server did not set Mcp-Session-Id header — using stateless mode");
             *self.mcp_session_id.write().await = None;
         }
 

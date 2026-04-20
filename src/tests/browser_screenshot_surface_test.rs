@@ -8,8 +8,8 @@
 //! `take_screenshot_for_session` call returns None (no page exists
 //! for the session) and we verify the failure surface.
 
-use crate::brain::tools::browser::BrowserManager;
 use crate::brain::tools::ToolResult;
+use crate::brain::tools::browser::BrowserManager;
 use uuid::Uuid;
 
 #[tokio::test]
@@ -41,6 +41,10 @@ async fn attach_screenshot_preserves_existing_output_text() {
     let mgr = BrowserManager::new();
     let mut result = ToolResult::success("Navigated to https://example.com".to_string());
     mgr.attach_screenshot(Uuid::new_v4(), &mut result).await;
-    assert!(result.output.starts_with("Navigated to https://example.com"));
+    assert!(
+        result
+            .output
+            .starts_with("Navigated to https://example.com")
+    );
     assert!(result.output.contains("[screenshot unavailable"));
 }

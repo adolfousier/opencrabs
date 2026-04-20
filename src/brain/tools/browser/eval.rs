@@ -55,7 +55,11 @@ impl Tool for BrowserEvalTool {
             _ => return Ok(ToolResult::error("'script' is required".into())),
         };
 
-        let page = match self.manager.get_or_create_session_page(context.session_id).await {
+        let page = match self
+            .manager
+            .get_or_create_session_page(context.session_id)
+            .await
+        {
             Ok(p) => p,
             Err(e) => return Ok(ToolResult::error(format!("Browser error: {e}"))),
         };

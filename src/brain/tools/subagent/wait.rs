@@ -194,7 +194,10 @@ impl WaitAgentTool {
         }
         let mut listing = String::new();
         for (id, label, state) in &active {
-            listing.push_str(&format!("  - {} (label: {}, state: {:?})\n", id, label, state));
+            listing.push_str(&format!(
+                "  - {} (label: {}, state: {:?})\n",
+                id, label, state
+            ));
         }
         format!(
             "No sub-agent matched '{}'. {} agent{} active:\n{}\n\
