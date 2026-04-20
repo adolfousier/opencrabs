@@ -1277,3 +1277,61 @@ fn strip_streamed_content_progress_event_carries_reason() {
         _ => panic!("Expected StripStreamedContent variant"),
     }
 }
+
+// ── Investigative Intent Phrases (Phantom No-Tools) ───────────────
+
+#[test]
+fn has_investigative_intent_detects_original_phrases() {
+    use crate::brain::agent::service::has_investigative_intent;
+
+    assert!(has_investigative_intent("Let me dig into the issue"));
+    assert!(has_investigative_intent("I'll investigate this"));
+    assert!(has_investigative_intent("let me check the logs"));
+    assert!(has_investigative_intent("i'll search for"));
+    assert!(has_investigative_intent("let me look"));
+}
+
+#[test]
+fn has_investigative_intent_detects_new_phrases() {
+    use crate::brain::agent::service::has_investigative_intent;
+
+    assert!(has_investigative_intent("Let me hunt down where LLM response text gets parsed"));
+    assert!(has_investigative_intent("I'll trace the rendering path"));
+    assert!(has_investigative_intent("i'll track that down"));
+    assert!(has_investigative_intent("Let me look into the response parsing"));
+    assert!(has_investigative_intent("I'll check into the tool output"));
+    assert!(has_investigative_intent("let me find out why"));
+    assert!(has_investigative_intent("I'll dig into the source"));
+}
+
+#[test]
+fn has_investigative_intent_no_false_positives() {
+    use crate::brain::agent::service::has_investigative_intent;
+
+    assert!(!has_investigative_intent("That looks good"));
+    assert!(!has_investigative_intent("All done"));
+    assert!(!has_investigative_intent("The build succeeded"));
+    assert!(!has_investigative_intent("I think the issue is X"));
+    assert!(!has_investigative_intent("Great, thanks"));
+    // Partial matches should not trigger
+    assert!(!has_investigative_intent("I checked my email"));
+    assert!(!has_investigative_intent("The search button"));
+    assert!(!has_investigative_intent("A new look"));
+}
+
+#[test]
+fn has_investigative_intent_mixed_case() {
+    use crate::brain::agent::service::has_investigative_intent;
+
+    assert!(has_investigative_intent("LET ME CHECK"));
+    assert!(has_investigative_intent("I'll Hunt For That"));
+    assert!(has_investigative_intent("Let Me Look Into"));
+}
+
+#[test]
+fn has_investigative_intent_with_emoji() {
+    use crate::brain::agent::service::has_investigative_intent;
+
+    assert!(has_investigative_intent("Let me check 👍"));
+    assert!(has_investigative_intent("I'll find out what's going on 💪"));
+}

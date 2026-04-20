@@ -146,10 +146,11 @@ cargo test --all-features
 | Tests — Browser Find JS Builder | 9 | `src/tests/browser_find_test.rs` |
 | Tests — exa_search MCP Handshake | 4 | `src/tests/exa_search_test.rs` |
 | Tests — http_request User-Agent | 3 | `src/tests/http_request_test.rs` |
+| Tests — Phantom Detection (Self-Healing) | 5 | `src/tests/self_healing_test.rs` |
 | **Usage — Categorizer** | 4 | `src/usage/categorizer.rs` |
 | **Usage — Dashboard** | 6 | `src/usage/dashboard.rs` |
 | **Usage — Data** | 7 | `src/usage/data.rs` |
-| **Total** | **2,119** | |
+| **Total** | **2,129** | 5 new phantom detection tests added for investigative intent phrases |
 
 ---
 
@@ -223,3 +224,33 @@ These modules exist but are commented out in `src/tests/mod.rs` (require network
 | `integration_test` | End-to-end with LLM provider |
 | `plan_mode_integration_test` | End-to-end plan workflow |
 | `streaming_test` | Requires streaming API endpoint |
+
+---
+
+## Phantom Detection Tests
+
+The self-healing phantom detector prevents the agent from dropping requests mid-stream when it says it will investigate something but never calls tools.
+
+### Coverage
+
+Tests in `src/tests/self_healing_test.rs` verify detection of investigative intent phrases:
+
+| Phrase Pattern | Examples |
+|---------------|----------|
+| `let me hunt/trace/track` | "let me hunt down the bug", "let me trace the request" |
+| `let me look into/check into` | "let me look into that", "let me check into the logs" |
+| `let me find out/dig into` | "let me find out why", "let me dig into the code" |
+| `i'll hunt/trace/track` | "i'll hunt that down", "i'll trace the flow" |
+| `i'll look into/check into` | "i'll look into it", "i'll check into the error" |
+| `i'll find out/dig into` | "i'll find out what's wrong", "i'll dig into the issue" |
+
+### Behavior
+
+When the agent outputs one of these phrases with zero tool calls, the phantom detector:
+1. Catches the mismatch between intent and action
+2. Injects a correction forcing tool invocation
+3. Prevents the response from ending with unexecuted promises
+
+### Test Count
+
+5 tests covering phrase detection, edge cases, and integration with the tool loop.

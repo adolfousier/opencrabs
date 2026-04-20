@@ -1512,6 +1512,13 @@ const INTENT_PHRASES: &[&str] = &[
     "let me fetch",
     "let me query",
     "let me scan",
+    "let me hunt",
+    "let me trace",
+    "let me track",
+    "let me look into",
+    "let me check into",
+    "let me find out",
+    "let me dig into",
     "i'll dig",
     "i'll investigate",
     "i'll explore",
@@ -1524,6 +1531,13 @@ const INTENT_PHRASES: &[&str] = &[
     "i'll fetch",
     "i'll query",
     "i'll scan",
+    "i'll hunt",
+    "i'll trace",
+    "i'll track",
+    "i'll look into",
+    "i'll check into",
+    "i'll find out",
+    "i'll dig into",
 ];
 
 /// Relaxed phantom detection used when the caller already knows the
@@ -1558,6 +1572,14 @@ pub fn has_phantom_tool_intent_no_tools(text: &str) -> bool {
         return false;
     }
     let lower = lead.to_lowercase();
+    INTENT_PHRASES.iter().any(|p| lower.contains(p))
+}
+
+/// Does the text contain any investigative/intent phrases from `INTENT_PHRASES`?
+/// Used by the phantom tool-call detector to identify when the model is
+/// narrating an action it should be executing via tools.
+pub fn has_investigative_intent(text: &str) -> bool {
+    let lower = text.to_lowercase();
     INTENT_PHRASES.iter().any(|p| lower.contains(p))
 }
 
@@ -1794,3 +1816,4 @@ pub fn has_phantom_tool_intent(text: &str) -> bool {
 
     false
 }
+
