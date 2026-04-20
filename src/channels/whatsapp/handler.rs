@@ -14,7 +14,8 @@ use crate::utils::sanitize::redact_secrets;
 use crate::utils::truncate_str;
 use std::collections::HashSet;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
+use tokio::sync::Mutex as TokioMutex;
 use uuid::Uuid;
 
 use tokio_util::sync::CancellationToken;
@@ -256,7 +257,7 @@ pub(crate) async fn handle_message(
     client: Arc<Client>,
     agent: Arc<AgentService>,
     session_svc: SessionService,
-    shared_session: Arc<Mutex<Option<Uuid>>>,
+    shared_session: Arc<TokioMutex<Option<Uuid>>>,
     wa_state: Arc<WhatsAppState>,
     config_rx: tokio::sync::watch::Receiver<Config>,
     channel_msg_repo: ChannelMessageRepository,
@@ -769,6 +770,7 @@ pub(crate) async fn handle_message(
     // send each chunk as a new message. Images (<<IMG:...>>) are stripped here —
     // the main handler delivers them as actual WhatsApp image messages.
     let was_streamed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let sent_intermediates: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let progress_cb: ProgressCallback = {
         let client_cb = client.clone();
         let jid_cb = info.source.chat.clone();
@@ -777,8 +779,17 @@ pub(crate) async fn handle_message(
             ProgressEvent::IntermediateText { text, .. } => {
                 let (clean, _) = crate::utils::extract_img_markers(&text);
                 let clean = redact_secrets(&clean);
+                let clean = crate::utils::sanitize::strip_llm_artifacts(&clean);
                 let clean = crate::utils::slack_fmt::markdown_to_mrkdwn(&clean);
                 if !clean.trim().is_empty() {
+                    // Pre-send dedup: skip if this exact text was already sent
+                    let mut prev = sent_intermediates.lock().unwrap();
+                    if prev.iter().any(|s| s == &clean) {
+                        drop(prev);
+                        return;
+                    }
+                    prev.push(clean.clone());
+                    drop(prev);
                     was_streamed_cb.store(true, std::sync::atomic::Ordering::Relaxed);
                     let client = client_cb.clone();
                     let jid = jid_cb.clone();

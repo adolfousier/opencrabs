@@ -1816,4 +1816,3 @@ pub fn has_phantom_tool_intent(text: &str) -> bool {
 
     false
 }
-

@@ -1295,10 +1295,14 @@ fn has_investigative_intent_detects_original_phrases() {
 fn has_investigative_intent_detects_new_phrases() {
     use crate::brain::agent::service::has_investigative_intent;
 
-    assert!(has_investigative_intent("Let me hunt down where LLM response text gets parsed"));
+    assert!(has_investigative_intent(
+        "Let me hunt down where LLM response text gets parsed"
+    ));
     assert!(has_investigative_intent("I'll trace the rendering path"));
     assert!(has_investigative_intent("i'll track that down"));
-    assert!(has_investigative_intent("Let me look into the response parsing"));
+    assert!(has_investigative_intent(
+        "Let me look into the response parsing"
+    ));
     assert!(has_investigative_intent("I'll check into the tool output"));
     assert!(has_investigative_intent("let me find out why"));
     assert!(has_investigative_intent("I'll dig into the source"));
