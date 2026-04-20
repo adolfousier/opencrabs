@@ -841,33 +841,65 @@ async fn handle_message(
             let mime = file.mimetype.as_ref().map(|m| m.0.as_str()).unwrap_or("");
             let fname = file.name.as_deref().unwrap_or("file");
 
-            // Download file using bot token (Slack private URLs require auth)
-            let dl_url = match file
+            // Download file using bot token (Slack private URLs require auth).
+            // Try url_private_download first, fall back to url_private if it
+            // returns HTML instead of raw file bytes.
+            let download_urls: Vec<&str> = file
                 .url_private_download
                 .as_ref()
-                .or(file.url_private.as_ref())
-            {
-                Some(u) => u.to_string(),
-                None => continue,
-            };
-            let dl_bytes = match http
-                .get(&dl_url)
-                .header(
-                    "Authorization",
-                    format!("Bearer {}", state.current_bot_token()),
-                )
-                .send()
-                .await
-            {
-                Ok(resp) => match resp.bytes().await {
-                    Ok(b) => b.to_vec(),
+                .map(|u| u.as_str())
+                .into_iter()
+                .chain(file.url_private.as_ref().map(|u| u.as_str()))
+                .collect();
+
+            let mut dl_bytes: Option<Vec<u8>> = None;
+            for url in &download_urls {
+                match http
+                    .get(*url)
+                    .header(
+                        "Authorization",
+                        format!("Bearer {}", state.current_bot_token()),
+                    )
+                    .send()
+                    .await
+                {
+                    Ok(resp) => {
+                        let content_type = resp
+                            .headers()
+                            .get(reqwest::header::CONTENT_TYPE)
+                            .and_then(|v| v.to_str().ok())
+                            .unwrap_or("")
+                            .to_string();
+
+                        if content_type.starts_with("text/html") {
+                            tracing::warn!(
+                                "Slack: download returned HTML (Content-Type: {content_type}) for {fname}, trying fallback URL"
+                            );
+                            continue;
+                        }
+
+                        match resp.bytes().await {
+                            Ok(b) => {
+                                dl_bytes = Some(b.to_vec());
+                                break;
+                            }
+                            Err(e) => {
+                                tracing::error!("Slack: failed to read file bytes: {e}");
+                                continue;
+                            }
+                        }
+                    }
                     Err(e) => {
-                        tracing::error!("Slack: failed to read file bytes: {e}");
+                        tracing::warn!("Slack: failed to download file {fname} from {url}: {e}");
                         continue;
                     }
-                },
-                Err(e) => {
-                    tracing::error!("Slack: failed to download file {}: {e}", fname);
+                }
+            }
+
+            let dl_bytes = match dl_bytes {
+                Some(b) => b,
+                None => {
+                    tracing::warn!("Slack: all download URLs failed for {fname}");
                     continue;
                 }
             };
