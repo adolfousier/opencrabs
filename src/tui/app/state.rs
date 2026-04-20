@@ -1161,6 +1161,10 @@ impl App {
                         // Scrolling up — disable auto-scroll
                         self.scroll_offset = self.scroll_offset.saturating_add(3);
                         self.auto_scroll = false;
+                        // Load more history when scrolling up if hidden messages exist
+                        if self.hidden_older_messages > 0 && self.display_token_count < 300_000 {
+                            let _ = self.load_more_history().await;
+                        }
                     } else {
                         self.scroll_offset = self.scroll_offset.saturating_sub(3);
                         // Re-enable auto-scroll when back at bottom

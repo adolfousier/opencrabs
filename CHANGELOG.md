@@ -5,6 +5,66 @@ All notable changes to OpenCrabs will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.13] - 2026-04-20
+
+### Self-healing — phantom detector expansion
+
+| Type | Area | Change | Why / Impact |
+|------|------|--------|--------------|
+| add | self-healing | **14 investigative intent phrases** (`let me hunt/trace/track/look into/check into/find out/dig into` + `i'll` variants) | Catches "Let me hunt down where..." drops where agent announces investigation but never calls tools |
+| add | self-healing | **14 "Now + gerund" patterns** (`now cherry-picking/updating/fixing/committing/pushing/merging/rebasing/deploying/building/testing/checking/applying/restarting`) | Catches status-report-then-action drops like "Now cherry-picking to main..." followed by silence |
+| add | self-healing | **Regex-based gerund detection** with sentence boundary requirement | Prevents false positives like "Are you now checking the logs?" |
+| refactor | self-healing | **Extracted `has_investigative_intent()`** as public helper + re-exported in service mod | Enables test coverage for phantom detection logic |
+
+### Channel — duplicate response elimination
+
+| Type | Area | Change | Why / Impact |
+|------|------|--------|--------------|
+| fix | slack | **Pre-send intermediate dedup** — checks `sent_intermediates` before sending | Same intermediate emitted twice during streaming no longer sends twice |
+| fix | slack | **Sanitized intermediate storage** — `strip_llm_artifacts` + `redact_secrets` applied before storing | Final response `.replace()` dedup now matches correctly (raw vs sanitized mismatch) |
+| fix | slack | **Image download fallback** — tries `url_private` when `url_private_download` returns HTML | Slack sometimes returns HTML preview page instead of raw bytes; now falls back instead of saving HTML as `.png` |
+| fix | whatsapp | **Pre-send intermediate dedup** with `sent_intermediates` tracking + sanitized storage | Same pattern as Slack/Telegram — prevents duplicate intermediates during streaming |
+
+### Browser tools — new tool + 10 reliability fixes
+
+| Type | Area | Change | Why / Impact |
+|------|------|--------|--------------|
+| add | browser | **`browser_find` tool** — enumerate page elements with stable selectors (CSS/XPath/text/aria modes) | Returns selectors passable directly to `browser_click` / `browser_type` without ambiguity |
+| fix | browser | **`browser_click` waits for network-idle** instead of fixed 500ms sleep | Pages with async loads stabilize before screenshot |
+| fix | browser | **Screenshot failure surfaced** in tool result instead of swallowed | Users see actual error instead of silent failure |
+| fix | browser | **`browser_eval` caps output at 50 KB** | Prevents massive DOM dumps from blowing up context |
+| fix | browser | **Waits up to 10s for user's Chrome profile** to unlock before fallback | Reduces SingletonLock failures when user's Chrome is running |
+| fix | browser | **Per-session tab isolation** — no more cross-session DOM stomping | Multiple concurrent sessions no longer interfere |
+| fix | browser | **Drop impl aborts CDP handler** + releases Browser properly | Prevents zombie Chrome processes on session end |
+| fix | browser | **Stealth JS registered** via `addScriptToEvaluateOnNewDocument` | Anti-bot detection runs before any page script |
+| fix | browser | **Detects dead CDP handler** and relaunches instead of zombie | Recovers from crashed Chrome automatically |
+| fix | browser | **Sweeps stale SingletonLock** before launch | Fixes launch failures from crashed Chrome leaving lock files |
+| fix | browser | **Detects user's default browser** correctly on macOS | Uses `LSHandlers` from `com.apple.LaunchServices` plist |
+
+### Other tool fixes
+
+| Type | Area | Change | Why / Impact |
+|------|------|--------|--------------|
+| fix | tools | **`wait_agent` resolves by prefix or label**, lists actives on miss | No more "No sub-agent found" when using short IDs or labels |
+| fix | tools | **`exa_search` supports stateless MCP servers** (missing session header) | Fixes "MCP server did not return session ID" errors |
+| fix | tools | **`http_request` sets default User-Agent** | Stops GitHub API 403 Forbidden errors |
+
+### Build / test
+
+| Type | Area | Change | Why / Impact |
+|------|------|--------|--------------|
+| test | self-healing | **5 investigative intent tests** in `src/tests/self_healing_test.rs` | Coverage for 14 new phrases + false positive prevention |
+| test | self-healing | **2 gerund pattern tests** with 17 assertions | Coverage for "Now + gerund" detection + false positive prevention |
+| test | tools | **12 tests** for `wait_agent` id resolver and miss-message | |
+| test | browser | **8 tests** for macOS LSHandlers default-browser parser | |
+| test | tools | **3 tests** for `http_request` User-Agent default fix | |
+| test | tools | **4 tests** for `exa_search` stateless-MCP fallback | |
+| test | browser | **Linux xdg + Windows reg** default-browser tests | |
+
+**2,131 tests passing** (+75 since v0.3.12).
+
+[0.3.13]: https://github.com/adolfousier/opencrabs/compare/v0.3.12...v0.3.13
+
 ## [0.3.12] - 2026-04-18
 
 ### Voice — new STT/TTS providers

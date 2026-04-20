@@ -1396,40 +1396,38 @@ impl App {
                 self.error_message_shown_at = Some(std::time::Instant::now());
             }
         } else if event.code == KeyCode::Char('o') && event.modifiers == KeyModifiers::CONTROL {
-            if self.hidden_older_messages > 0 && self.display_token_count < 300_000 {
-                // Load more history from DB
-                self.load_more_history().await?;
+            // Ctrl+O — toggle expand/collapse on ALL tool groups and reasoning details
+            let target = if let Some(ref group) = self.active_tool_group {
+                !group.expanded
+            } else if let Some(msg) =
+                self.messages.iter().rev().find(|m| m.tool_group.is_some())
+            {
+                !msg.tool_group
+                    .as_ref()
+                    .expect("tool_group checked is_some above")
+                    .expanded
             } else {
-                // Ctrl+O — toggle expand/collapse on ALL tool groups in the session
-                // Determine target state from the active group or most recent group
-                let target = if let Some(ref group) = self.active_tool_group {
-                    !group.expanded
-                } else if let Some(msg) =
-                    self.messages.iter().rev().find(|m| m.tool_group.is_some())
-                {
-                    !msg.tool_group
-                        .as_ref()
-                        .expect("tool_group checked is_some above")
-                        .expanded
-                } else {
-                    true
-                };
-                if let Some(ref mut group) = self.active_tool_group {
+                true
+            };
+            if let Some(ref mut group) = self.active_tool_group {
+                group.expanded = target;
+            }
+            for msg in self.messages.iter_mut() {
+                if let Some(ref mut group) = msg.tool_group {
                     group.expanded = target;
                 }
-                for msg in self.messages.iter_mut() {
-                    if let Some(ref mut group) = msg.tool_group {
-                        group.expanded = target;
-                    }
-                    // Also toggle expanded on messages with reasoning details
-                    if msg.details.is_some() {
-                        msg.expanded = target;
-                    }
+                // Also toggle expanded on messages with reasoning details
+                if msg.details.is_some() {
+                    msg.expanded = target;
                 }
             }
         } else if keys::is_page_up(&event) {
             self.scroll_offset = self.scroll_offset.saturating_add(10);
             self.auto_scroll = false;
+            // Load more history when paging up if hidden messages exist
+            if self.hidden_older_messages > 0 && self.display_token_count < 300_000 {
+                let _ = self.load_more_history().await;
+            }
         } else if keys::is_page_down(&event) {
             self.scroll_offset = self.scroll_offset.saturating_sub(10);
             if self.scroll_offset == 0 {
