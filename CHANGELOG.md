@@ -7,61 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.13] - 2026-04-20
 
-### Self-healing — phantom detector expansion
+Phantom self-healing detector expanded with 28 new intent patterns, duplicate
+response elimination extended to Slack and WhatsApp, browser tools received 10
+reliability fixes plus a new `browser_find` tool, and Ctrl+O expand now works
+on first press with history loading moved to scroll.
 
-| Type | Area | Change | Why / Impact |
-|------|------|--------|--------------|
-| add | self-healing | **14 investigative intent phrases** (`let me hunt/trace/track/look into/check into/find out/dig into` + `i'll` variants) | Catches "Let me hunt down where..." drops where agent announces investigation but never calls tools |
-| add | self-healing | **14 "Now + gerund" patterns** (`now cherry-picking/updating/fixing/committing/pushing/merging/rebasing/deploying/building/testing/checking/applying/restarting`) | Catches status-report-then-action drops like "Now cherry-picking to main..." followed by silence |
-| add | self-healing | **Regex-based gerund detection** with sentence boundary requirement | Prevents false positives like "Are you now checking the logs?" |
-| refactor | self-healing | **Extracted `has_investigative_intent()`** as public helper + re-exported in service mod | Enables test coverage for phantom detection logic |
+### Added
 
-### Channel — duplicate response elimination
+#### Self-healing
+- **14 investigative intent phrases** — `let me hunt/trace/track/look into/check
+  into/find out/dig into` plus `i'll` variants. Catches "Let me hunt down
+  where..." drops where the agent announces investigation but never calls tools.
+- **14 "Now + gerund" patterns** — `now cherry-picking/updating/fixing/committing/
+  pushing/merging/rebasing/deploying/building/testing/checking/applying/restarting`.
+  Catches status-report-then-action drops like "Now cherry-picking to main..."
+  followed by silence.
+- **Regex-based gerund detection** with sentence boundary requirement to prevent
+  false positives like "Are you now checking the logs?"
+- **Extracted `has_investigative_intent()`** as public helper + re-exported in
+  service mod for testability.
 
-| Type | Area | Change | Why / Impact |
-|------|------|--------|--------------|
-| fix | slack | **Pre-send intermediate dedup** — checks `sent_intermediates` before sending | Same intermediate emitted twice during streaming no longer sends twice |
-| fix | slack | **Sanitized intermediate storage** — `strip_llm_artifacts` + `redact_secrets` applied before storing | Final response `.replace()` dedup now matches correctly (raw vs sanitized mismatch) |
-| fix | slack | **Image download fallback** — tries `url_private` when `url_private_download` returns HTML | Slack sometimes returns HTML preview page instead of raw bytes; now falls back instead of saving HTML as `.png` |
-| fix | whatsapp | **Pre-send intermediate dedup** with `sent_intermediates` tracking + sanitized storage | Same pattern as Slack/Telegram — prevents duplicate intermediates during streaming |
+#### Browser
+- **`browser_find` tool** — enumerate page elements with stable selectors
+  (CSS/XPath/text/aria modes). Returns selectors passable directly to
+  `browser_click` / `browser_type` without ambiguity.
 
-### Browser tools — new tool + 10 reliability fixes
+#### TUI
+- **Ctrl+O exclusively for expand/collapse** — no longer hijacked by history
+  loading. Works on first press.
+- **History loading moved to scroll** — triggers on mouse scroll-up and PageUp
+  instead of stealing Ctrl+O presses.
 
-| Type | Area | Change | Why / Impact |
-|------|------|--------|--------------|
-| add | browser | **`browser_find` tool** — enumerate page elements with stable selectors (CSS/XPath/text/aria modes) | Returns selectors passable directly to `browser_click` / `browser_type` without ambiguity |
-| fix | browser | **`browser_click` waits for network-idle** instead of fixed 500ms sleep | Pages with async loads stabilize before screenshot |
-| fix | browser | **Screenshot failure surfaced** in tool result instead of swallowed | Users see actual error instead of silent failure |
-| fix | browser | **`browser_eval` caps output at 50 KB** | Prevents massive DOM dumps from blowing up context |
-| fix | browser | **Waits up to 10s for user's Chrome profile** to unlock before fallback | Reduces SingletonLock failures when user's Chrome is running |
-| fix | browser | **Per-session tab isolation** — no more cross-session DOM stomping | Multiple concurrent sessions no longer interfere |
-| fix | browser | **Drop impl aborts CDP handler** + releases Browser properly | Prevents zombie Chrome processes on session end |
-| fix | browser | **Stealth JS registered** via `addScriptToEvaluateOnNewDocument` | Anti-bot detection runs before any page script |
-| fix | browser | **Detects dead CDP handler** and relaunches instead of zombie | Recovers from crashed Chrome automatically |
-| fix | browser | **Sweeps stale SingletonLock** before launch | Fixes launch failures from crashed Chrome leaving lock files |
-| fix | browser | **Detects user's default browser** correctly on macOS | Uses `LSHandlers` from `com.apple.LaunchServices` plist |
+### Fixed
 
-### Other tool fixes
+#### Channel — duplicate response elimination
+- **Slack: pre-send intermediate dedup** — checks `sent_intermediates` before
+  sending so the same intermediate emitted twice during streaming no longer
+  sends twice.
+- **Slack: sanitized intermediate storage** — `strip_llm_artifacts` +
+  `redact_secrets` applied before storing so final response `.replace()` dedup
+  matches correctly (was raw vs sanitized mismatch).
+- **Slack: image download fallback** — tries `url_private` when
+  `url_private_download` returns HTML. Slack sometimes returns an HTML preview
+  page instead of raw bytes; now falls back instead of saving HTML as `.png`.
+- **WhatsApp: pre-send intermediate dedup** with `sent_intermediates` tracking
+  + sanitized storage, matching the Slack/Telegram pattern.
 
-| Type | Area | Change | Why / Impact |
-|------|------|--------|--------------|
-| fix | tools | **`wait_agent` resolves by prefix or label**, lists actives on miss | No more "No sub-agent found" when using short IDs or labels |
-| fix | tools | **`exa_search` supports stateless MCP servers** (missing session header) | Fixes "MCP server did not return session ID" errors |
-| fix | tools | **`http_request` sets default User-Agent** | Stops GitHub API 403 Forbidden errors |
+#### Browser tools
+- **`browser_click` waits for network-idle** instead of fixed 500ms sleep.
+- **Screenshot failure surfaced** in tool result instead of swallowed.
+- **`browser_eval` caps output at 50 KB** to prevent massive DOM dumps.
+- **Waits up to 10s for user's Chrome profile** to unlock before fallback.
+- **Per-session tab isolation** — no more cross-session DOM stomping.
+- **Drop impl aborts CDP handler** + releases Browser properly.
+- **Stealth JS registered** via `addScriptToEvaluateOnNewDocument`.
+- **Detects dead CDP handler** and relaunches instead of zombie.
+- **Sweeps stale SingletonLock** before launch.
+- **Detects user's default browser** correctly on macOS via LSHandlers plist.
 
-### Build / test
+#### Other tools
+- **`wait_agent` resolves by prefix or label**, lists actives on miss.
+- **`exa_search` supports stateless MCP servers** (missing session header).
+- **`http_request` sets default User-Agent** to stop GitHub API 403s.
 
-| Type | Area | Change | Why / Impact |
-|------|------|--------|--------------|
-| test | self-healing | **5 investigative intent tests** in `src/tests/self_healing_test.rs` | Coverage for 14 new phrases + false positive prevention |
-| test | self-healing | **2 gerund pattern tests** with 17 assertions | Coverage for "Now + gerund" detection + false positive prevention |
-| test | tools | **12 tests** for `wait_agent` id resolver and miss-message | |
-| test | browser | **8 tests** for macOS LSHandlers default-browser parser | |
-| test | tools | **3 tests** for `http_request` User-Agent default fix | |
-| test | tools | **4 tests** for `exa_search` stateless-MCP fallback | |
-| test | browser | **Linux xdg + Windows reg** default-browser tests | |
-
-**2,131 tests passing** (+75 since v0.3.12).
+#### Voice onboarding
+- **Local STT/TTS availability reset moved after config provider loading** —
+  the reset was running before `config.providers.stt/tts` loaded, so
+  `stt.local.enabled = true` would overwrite the reset back to Local.
 
 [0.3.13]: https://github.com/adolfousier/opencrabs/compare/v0.3.12...v0.3.13
 
