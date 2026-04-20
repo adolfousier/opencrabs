@@ -150,7 +150,7 @@ cargo test --all-features
 | **Usage — Categorizer** | 4 | `src/usage/categorizer.rs` |
 | **Usage — Dashboard** | 6 | `src/usage/dashboard.rs` |
 | **Usage — Data** | 7 | `src/usage/data.rs` |
-| **Total** | **2,129** | 5 new phantom detection tests added for investigative intent phrases |
+| **Total** | **2,131** | 7 new phantom detection tests (5 investigative intent + 2 gerund patterns) |
 
 ---
 
