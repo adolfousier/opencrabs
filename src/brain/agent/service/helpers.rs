@@ -1791,6 +1791,20 @@ pub fn has_phantom_tool_intent(text: &str) -> bool {
         return true;
     }
 
+    // ── Now + gerund status-then-action drops (standalone) ─────────────
+    // Model reports status then announces a gerund action and drops:
+    // "Fix committed. Now cherry-picking to main and prod." — inherently
+    // phantom because the status report proves work was done but the
+    // announced next action never executes. No corroboration needed.
+    // Must appear at a sentence boundary (start of text or after .!?)
+    // to avoid false positives like "Are you now checking the logs?"
+    let now_gerund_re = Regex::new(
+        r"(?im)(?:^|[.!?]\s+)\s*now\s+(?:updating|fixing|committing|amending|pushing|cherry-picking|merging|rebasing|deploying|building|testing|checking|applying|restarting)\b"
+    ).unwrap();
+    if now_gerund_re.is_match(trimmed) {
+        return true;
+    }
+
     // ── Weak signals (need corroboration) ─────────────────────────────
     // A single "let me check" or "I'll look" is normal conversation.
     // Only flag as phantom if ALSO accompanied by file-path-like patterns,

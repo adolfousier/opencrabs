@@ -1157,6 +1157,75 @@ fn phantom_no_tools_scope_is_prose_lead_in() {
     );
 }
 
+// ── Now + Gerund Status-Then-Action Drops ───────────────────────────────
+
+#[test]
+fn phantom_now_gerund_status_then_action_drops() {
+    use crate::brain::agent::service::has_phantom_tool_intent;
+
+    // Real incident: model reports status, announces gerund action, drops
+    assert!(has_phantom_tool_intent(
+        "dev is at ce21b098. The LandingPage fix is committed. Now cherry-picking to main and prod."
+    ));
+    assert!(has_phantom_tool_intent(
+        "Slack dedup fix applied. Now updating the TESTING.md docs with the new coverage."
+    ));
+    assert!(has_phantom_tool_intent(
+        "Build passed. Now committing the WhatsApp dedup changes to the branch."
+    ));
+    assert!(has_phantom_tool_intent(
+        "Tests all green. Now pushing to origin main for the release."
+    ));
+    assert!(has_phantom_tool_intent(
+        "CI is clean. Now merging the feature branch into main."
+    ));
+    assert!(has_phantom_tool_intent(
+        "Config updated. Now deploying to the staging server."
+    ));
+    assert!(has_phantom_tool_intent(
+        "Dependencies resolved. Now building the release binary."
+    ));
+    assert!(has_phantom_tool_intent(
+        "Changes ready. Now testing the full suite before commit."
+    ));
+    assert!(has_phantom_tool_intent(
+        "Patch applied. Now restarting the service to pick up changes."
+    ));
+    assert!(has_phantom_tool_intent(
+        "Fix verified. Now amending the commit with the correct message."
+    ));
+    assert!(has_phantom_tool_intent(
+        "Branch diverged. Now rebasing onto latest main."
+    ));
+}
+
+#[test]
+fn phantom_now_gerund_false_positives() {
+    use crate::brain::agent::service::has_phantom_tool_intent;
+
+    // "Now checking" in a question — not a status report
+    assert!(!has_phantom_tool_intent(
+        "Are you now checking the logs for errors?"
+    ));
+
+    // Gerund without "now" prefix — normal narration
+    assert!(!has_phantom_tool_intent(
+        "I'm updating the docs later today when I have time."
+    ));
+
+    // "Now" used temporally, not as action announcement
+    assert!(!has_phantom_tool_intent(
+        "The build is now complete and all tests passed successfully."
+    ));
+    assert!(!has_phantom_tool_intent(
+        "We are now testing the new feature in staging."
+    ));
+
+    // Short text — never phantom
+    assert!(!has_phantom_tool_intent("Now updating."));
+    assert!(!has_phantom_tool_intent("Now fixing."));
+}
+
 #[test]
 fn phantom_tool_intent_numbered_step_narration() {
     use crate::brain::agent::service::has_phantom_tool_intent;
