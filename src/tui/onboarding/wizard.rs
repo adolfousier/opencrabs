@@ -695,6 +695,19 @@ impl OnboardingWizard {
             }
         }
 
+        // Reset Local STT/TTS to Off if capability isn't available (after config loading)
+        if wizard.stt_provider == SttProvider::Local
+            && !crate::channels::voice::local_stt_available()
+        {
+            wizard.stt_provider = SttProvider::Off;
+        }
+        if wizard.tts_provider == TtsProvider::Local
+            && !crate::channels::voice::local_tts_available()
+        {
+            wizard.tts_provider = TtsProvider::Off;
+            wizard.tts_enabled = false;
+        }
+
         // Resolve selected Piper voice index from config
         #[cfg(feature = "local-tts")]
         {
