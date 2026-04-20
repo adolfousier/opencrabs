@@ -1332,9 +1332,27 @@ async fn handle_message(
                 ProgressEvent::IntermediateText { text, .. } => {
                     let thread_ts_resp = thread_ts_inner.clone();
                     let sent_ref = sent.clone();
+                    let text_clone = text.clone();
                     tokio::spawn(async move {
+                        // Pre-send dedup: skip if this exact text was already sent
+                        // to avoid twin intermediates from retry loops
+                        // Sanitize before storing so final response dedup can match
+                        // (final response is sanitized via strip_llm_artifacts + redact_secrets)
+                        let sanitized = crate::utils::sanitize::strip_llm_artifacts(&text_clone);
+                        let sanitized = redact_secrets(&sanitized);
+                        {
+                            let s = sent_ref.lock().await;
+                            if s.iter().any(|prev| prev == &sanitized) {
+                                tracing::info!(
+                                    "Slack: suppressing duplicate intermediate (len={})",
+                                    sanitized.len()
+                                );
+                                return;
+                            }
+                        }
+
                         let session = client.open_session(&token);
-                        let text_fmt = crate::utils::slack_fmt::markdown_to_mrkdwn(&text);
+                        let text_fmt = crate::utils::slack_fmt::markdown_to_mrkdwn(&text_clone);
                         let mut req = SlackApiChatPostMessageRequest::new(
                             channel,
                             SlackMessageContent::new().with_text(text_fmt),
@@ -1345,7 +1363,7 @@ async fn handle_message(
                         if let Err(e) = session.chat_post_message(&req).await {
                             tracing::debug!("Slack: failed to send intermediate text: {}", e);
                         } else {
-                            sent_ref.lock().await.push(text);
+                            sent_ref.lock().await.push(sanitized);
                         }
                     });
                 }
