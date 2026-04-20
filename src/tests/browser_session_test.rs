@@ -6,6 +6,8 @@
 //! reconnecting to the same session id returns the same tab, and
 //! prefixed so it can never collide with the legacy "default" key.
 
+#![cfg(feature = "browser")]
+
 use crate::brain::tools::browser::BrowserManager;
 use uuid::Uuid;
 

@@ -2,6 +2,8 @@
 //! behaviour so large `document.body.outerHTML` dumps don't burn the
 //! LLM's entire context window on one tool result.
 
+#![cfg(feature = "browser")]
+
 use crate::brain::tools::browser::cap_eval_output;
 
 #[test]

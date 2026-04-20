@@ -7,6 +7,8 @@
 //! `Navigation failed: channel closed` on the next goto call
 //! (2026-04-19 09:49 log).
 
+#![cfg(feature = "browser")]
+
 use crate::brain::tools::browser::handler_is_dead;
 
 /// `None` handle means "never launched or already torn down" — the

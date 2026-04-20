@@ -4,7 +4,7 @@
 //! Gated to Linux — the parser itself is cfg'd to target_os = "linux"
 //! since only the Linux detection path uses it.
 
-#![cfg(target_os = "linux")]
+#![cfg(all(feature = "browser", target_os = "linux"))]
 
 use crate::brain::tools::browser::parse_xdg_default_browser;
 

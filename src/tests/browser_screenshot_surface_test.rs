@@ -8,6 +8,8 @@
 //! `take_screenshot_for_session` call returns None (no page exists
 //! for the session) and we verify the failure surface.
 
+#![cfg(feature = "browser")]
+
 use crate::brain::tools::ToolResult;
 use crate::brain::tools::browser::BrowserManager;
 use uuid::Uuid;

@@ -7,6 +7,8 @@
 //! `detect_browser()` fell through to the first installed Chromium
 //! candidate (Google Chrome) even when the user's default was Brave.
 //!
+#![cfg(feature = "browser")]
+
 //! Fixtures are modelled on the actual `defaults` plist output observed
 //! on the developer's machine (2026-04-19).
 

@@ -8,6 +8,8 @@
 //! sees the lock, falls through to the empty fallback profile —
 //! user's cookies and logins gone.
 
+#![cfg(feature = "browser")]
+
 use crate::brain::tools::browser::wait_for_profile_unlock;
 use std::fs;
 

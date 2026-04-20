@@ -8,6 +8,8 @@
 //! matters most for process shutdown hygiene: a manager Arc with no
 //! handler task and no Browser handle must drop cleanly without panic.
 
+#![cfg(feature = "browser")]
+
 use crate::brain::tools::browser::BrowserManager;
 
 #[test]

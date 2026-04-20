@@ -8,6 +8,8 @@
 //! tests verify we emit the right script shape for each mode and
 //! that user-supplied patterns are correctly escaped.
 
+#![cfg(feature = "browser")]
+
 use crate::brain::tools::browser::build_find_js;
 
 #[test]

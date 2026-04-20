@@ -4,7 +4,7 @@
 //! Gated to Windows — the parser is cfg'd to target_os = "windows"
 //! since only the Windows detection path uses it.
 
-#![cfg(target_os = "windows")]
+#![cfg(all(feature = "browser", target_os = "windows"))]
 
 use crate::brain::tools::browser::parse_windows_reg_prog_id;
 

@@ -7,6 +7,8 @@
 //! `"Failed to create SingletonLock: File exists (17)"` (see the 2026-04-11
 //! 16:57 and 2026-04-17 15:00 log incidents).
 
+#![cfg(feature = "browser")]
+
 use crate::brain::tools::browser::{LOCK_FILES, clean_stale_locks};
 use std::fs;
 use std::path::PathBuf;

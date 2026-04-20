@@ -7,6 +7,8 @@
 //! permissions shim) fails CI instead of silently becoming easier to
 //! fingerprint.
 
+#![cfg(feature = "browser")]
+
 use crate::brain::tools::browser::STEALTH_JS;
 
 #[test]
