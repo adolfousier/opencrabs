@@ -155,7 +155,7 @@ impl DashboardData {
         let since = period.since_epoch();
 
         // Run all queries concurrently
-        let (summary, daily, projects, models, tools, activities) = tokio::try_join!(
+        let (mut summary, daily, projects, models, tools, activities) = tokio::try_join!(
             fetch_summary(pool, since),
             fetch_daily(pool, since),
             fetch_projects(pool, since),
@@ -163,6 +163,11 @@ impl DashboardData {
             fetch_tools(pool, since),
             fetch_activities(pool, since),
         )?;
+
+        // Override total_cost with sum of recalculated model costs.
+        // The DB cost column is stale (old pricing or $0.00 for unknown models).
+        // fetch_models recalculates using current TOML pricing, so we trust that.
+        summary.total_cost = models.iter().map(|m| m.cost).sum();
 
         Ok(Self {
             summary,

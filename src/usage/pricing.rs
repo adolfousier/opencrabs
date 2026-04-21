@@ -87,7 +87,17 @@ impl PricingConfig {
 
         // If no match, try prepending common provider prefixes
         // (normalized names like "opus-4-6" need "claude-" to match TOML entries)
-        let prefixes = ["claude-", "gpt-", "gemini-", "deepseek-", "llama-", "qwen", "kimi-", "zhipu-", "glm-"];
+        let prefixes = [
+            "claude-",
+            "gpt-",
+            "gemini-",
+            "deepseek-",
+            "llama-",
+            "qwen",
+            "kimi-",
+            "zhipu-",
+            "glm-",
+        ];
         for p in &prefixes {
             let prefixed = format!("{}{}", p, m);
             if let Some(cost) = self.try_match(&prefixed, token_count) {
