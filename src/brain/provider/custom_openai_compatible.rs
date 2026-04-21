@@ -3629,9 +3629,9 @@ impl Provider for OpenAIProvider {
     }
 
     fn calculate_cost(&self, model: &str, input_tokens: u32, output_tokens: u32) -> f64 {
-        // Always load fresh from disk — avoids stale OnceLock cache
-        // that may have been initialized before usage_pricing.toml existed
-        crate::pricing::PricingConfig::load().calculate_cost(model, input_tokens, output_tokens)
+        crate::usage::pricing::PricingConfig::load()
+            .map(|cfg| cfg.calculate_cost(model, input_tokens, output_tokens))
+            .unwrap_or(0.0)
     }
 }
 

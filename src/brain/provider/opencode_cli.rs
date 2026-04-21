@@ -745,7 +745,9 @@ impl Provider for OpenCodeCliProvider {
     }
 
     fn calculate_cost(&self, model: &str, input_tokens: u32, output_tokens: u32) -> f64 {
-        crate::pricing::PricingConfig::load().calculate_cost(model, input_tokens, output_tokens)
+        crate::usage::pricing::PricingConfig::load()
+            .map(|cfg| cfg.calculate_cost(model, input_tokens, output_tokens))
+            .unwrap_or(0.0)
     }
 
     fn supports_tools(&self) -> bool {

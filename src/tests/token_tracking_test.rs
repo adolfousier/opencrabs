@@ -4,7 +4,7 @@
 //! across all provider types (API, Claude CLI, OpenCode CLI).
 
 use crate::brain::provider::types::TokenUsage;
-use crate::pricing::{PricingConfig, PricingEntry, ProviderBlock};
+use crate::usage::pricing::{PricingConfig, PricingEntry, ProviderBlock};
 use std::collections::HashMap;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -243,8 +243,8 @@ fn cache_pricing_unknown_model_returns_zero() {
 
 #[test]
 fn cache_pricing_defaults_load_and_compute() {
-    // Use built-in defaults from usage_pricing.toml
-    let cfg = PricingConfig::defaults();
+    // Load from the embedded example file (same as runtime)
+    let cfg = PricingConfig::load().expect("usage_pricing.toml should load");
 
     // Opus with cache — real scenario
     let cost = cfg.calculate_cost_with_cache("opus-4-6", 3, 501, 83_129, 13_981);
@@ -369,7 +369,7 @@ fn billable_input_api_provider_no_cache() {
 #[test]
 fn cost_not_zero_for_cli_with_cache_tokens() {
     // THE BUG: was returning $0.00 because cache tokens were excluded
-    let cfg = PricingConfig::defaults();
+    let cfg = PricingConfig::load().expect("usage_pricing.toml should load");
     let cost = cfg.calculate_cost_with_cache(
         "opus-4-6", 3,      // non-cached input
         501,    // output
@@ -407,7 +407,7 @@ fn cost_cache_read_cheaper_than_regular() {
 
 #[test]
 fn cost_old_vs_new_calculation_difference() {
-    let cfg = PricingConfig::defaults();
+    let cfg = PricingConfig::load().expect("usage_pricing.toml should load");
 
     // OLD (broken): treated 3 input + 501 output only → ~$0.00
     let old_cost = cfg.calculate_cost("opus-4-6", 3, 501);

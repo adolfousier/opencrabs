@@ -961,18 +961,11 @@ impl App {
         }
 
         // Extract <antThinking> blocks (case-insensitive, handles <anTthinking> typo)
-        remaining = Self::extract_tag_case_insensitive(
-            &remaining,
-            "antthinking",
-            &mut reasoning_parts,
-        );
+        remaining =
+            Self::extract_tag_case_insensitive(&remaining, "antthinking", &mut reasoning_parts);
 
         // Extract <think> blocks (DeepSeek)
-        remaining = Self::extract_tag_case_insensitive(
-            &remaining,
-            "think",
-            &mut reasoning_parts,
-        );
+        remaining = Self::extract_tag_case_insensitive(&remaining, "think", &mut reasoning_parts);
 
         let remaining = remaining.trim().to_string();
         if reasoning_parts.is_empty() {

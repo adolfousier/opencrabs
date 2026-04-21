@@ -148,13 +148,19 @@ pub trait Provider: Send + Sync {
         cache_creation_tokens: u32,
         cache_read_tokens: u32,
     ) -> f64 {
-        let cost = crate::pricing::PricingConfig::load().calculate_cost_with_cache(
-            model,
-            input_tokens,
-            output_tokens,
-            cache_creation_tokens,
-            cache_read_tokens,
-        );
+        let cost = match crate::usage::pricing::PricingConfig::load() {
+            Ok(cfg) => cfg.calculate_cost_with_cache(
+                model,
+                input_tokens,
+                output_tokens,
+                cache_creation_tokens,
+                cache_read_tokens,
+            ),
+            Err(e) => {
+                tracing::warn!("Pricing config load failed: {}", e);
+                0.0
+            }
+        };
         if cost > 0.0 {
             cost
         } else {

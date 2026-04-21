@@ -455,7 +455,9 @@ async fn format_usage(
 }
 
 fn estimate_cost(model: &str, token_count: i64) -> Option<f64> {
-    crate::pricing::PricingConfig::load().estimate_cost(model, token_count)
+    crate::usage::pricing::PricingConfig::load()
+        .ok()
+        .and_then(|cfg| cfg.estimate_cost(model, token_count))
 }
 
 fn format_number(n: i64) -> String {

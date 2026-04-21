@@ -44,6 +44,7 @@ pub(crate) fn normalize_model_name(model: &str) -> String {
         "sonnet" | "sonnet-4-6" => "sonnet-4-6".to_string(),
         "haiku" | "haiku-4-5" | "haiku-4-5-20251001" => "haiku-4-5".to_string(),
         // Qwen
+        "qwen-3.6-max-preview" | "qwen3.6-max-preview" | "qwen-3-6-max-preview" | "qwen3-6-max-preview" | "qwen-max-preview" => "qwen3.6-max-preview".to_string(),
         "coder-model" | "qwen-3.6-plus" | "qwen3.6-plus" => "qwen3.6-plus".to_string(),
         "qwen3.5-plus" | "qwen-3.5-plus" => "qwen3.5-plus".to_string(),
         // MiniMax
@@ -158,6 +159,7 @@ impl UsageLedgerRepository {
                          WHEN m3 IN ('opus', 'opus-4-6') THEN 'opus-4-6' \
                          WHEN m3 IN ('sonnet', 'sonnet-4-6') THEN 'sonnet-4-6' \
                          WHEN m3 IN ('haiku', 'haiku-4-5', 'haiku-4-5-20251001') THEN 'haiku-4-5' \
+                         WHEN m3 IN ('qwen-3.6-max-preview', 'qwen3.6-max-preview', 'qwen-3-6-max-preview', 'qwen3-6-max-preview', 'qwen-max-preview') THEN 'qwen3.6-max-preview' \
                          WHEN m3 IN ('coder-model', 'qwen3.6-plus', 'qwen-3.6-plus') THEN 'qwen3.6-plus' \
                          WHEN m3 IN ('qwen3.5-plus', 'qwen-3.5-plus') THEN 'qwen3.5-plus' \
                          WHEN m3 IN ('minimax-m2.5') THEN 'minimax-m2.5' \
