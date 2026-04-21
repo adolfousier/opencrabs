@@ -248,7 +248,7 @@ pub fn inject_file_content(content: &FileContent) -> (String, bool) {
             let path_str = path.to_string_lossy();
             (
                 format!(
-                    "[User attached an image. Use analyze_image to view it.]\n<<IMG:{path_str}>>"
+                    "[User attached an image. Call analyze_image with this path to view it.]\n<<IMG:{path_str}>>"
                 ),
                 true,
             )
@@ -260,7 +260,7 @@ pub fn inject_file_content(content: &FileContent) -> (String, bool) {
                 .collect();
             (
                 format!(
-                    "[User attached a {label}. analyze_image each page and combine the results.]\n{markers}"
+                    "[User attached a {label}. Call analyze_image for EACH page path below, then combine the results.]\n{markers}"
                 ),
                 true,
             )

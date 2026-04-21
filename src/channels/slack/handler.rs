@@ -897,7 +897,13 @@ async fn handle_message(
             }
 
             let dl_bytes = match dl_bytes {
-                Some(b) => b,
+                Some(b) => {
+                    tracing::info!(
+                        "Slack: downloaded file {fname} ({} bytes, mime={mime})",
+                        b.len()
+                    );
+                    b
+                }
                 None => {
                     tracing::warn!("Slack: all download URLs failed for {fname}");
                     continue;
@@ -927,13 +933,19 @@ async fn handle_message(
             }
 
             let fc = process_file_with_vision(&dl_bytes, mime, fname, &cfg);
-            let injected = inject_file_content(&fc).0;
+            let (injected, needs_vision) = inject_file_content(&fc);
             if !injected.is_empty() {
+                tracing::info!(
+                    "Slack: injected file {fname} (needs_vision={needs_vision}, len={})",
+                    injected.len()
+                );
                 if content.is_empty() {
                     content = injected;
                 } else {
                     content.push_str(&format!("\n\n{injected}"));
                 }
+            } else {
+                tracing::warn!("Slack: file {fname} produced empty injection");
             }
         }
     }
@@ -1143,6 +1155,17 @@ async fn handle_message(
         .as_ref()
         .map(|ts| format!("[Replying in thread (thread_ts: {ts})]"));
 
+    // Tell the LLM its text response is automatically delivered to the chat,
+    // so it should NOT use slack_send for simple text replies.
+    // If images are attached, instruct the agent to analyze ALL of them.
+    // Check before `content` is moved into agent_input below.
+    let has_images = content.contains("<<IMG:");
+    let image_hint = if has_images {
+        " IMPORTANT: Multiple images may be attached. Call analyze_image for EACH <<IMG:path>> marker separately. Do not skip any image."
+    } else {
+        ""
+    };
+
     // For non-owner users, prepend sender identity so the agent knows who
     // it's talking to and doesn't assume it's the owner.
     let agent_input = if !is_owner {
@@ -1196,7 +1219,7 @@ async fn handle_message(
     let agent_input = format!(
         "[Channel: Slack — your text response is automatically sent to this channel. \
          Do NOT call slack_send to deliver your answer. Only use slack_send for: \
-         sending to a different channel, threads, blocks, reactions, files, or moderation.]\n{agent_input}"
+         sending to a different channel, threads, blocks, reactions, files, or moderation.]\n{image_hint}{agent_input}"
     );
 
     // Register channel for approval routing, then send with approval callback
@@ -1229,11 +1252,13 @@ async fn handle_message(
         }
     }
 
-    // Track sent intermediate messages for dedup against final response
-    let sent_intermediates: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-    let sent_intermediates_final = sent_intermediates.clone();
+    // Track sent intermediate message timestamps so we can delete them before
+    // sending the final response (prevents duplicate content on Slack).
+    let sent_intermediate_ts: Arc<Mutex<Vec<SlackTs>>> = Arc::new(Mutex::new(Vec::new()));
+    let sent_intermediate_ts_final = sent_intermediate_ts.clone();
 
     // Build progress callback — sends tool call status as Slack messages
+    #[allow(clippy::type_complexity)]
     let progress_cb: crate::brain::agent::ProgressCallback = {
         use crate::brain::agent::ProgressEvent;
 
@@ -1252,7 +1277,7 @@ async fn handle_message(
 
         Arc::new(move |_session_id, event| {
             let tools = tools.clone();
-            let sent = sent_intermediates.clone();
+            let _ts_ref = sent_intermediate_ts.clone();
             let token = SlackApiToken::new(SlackApiTokenValue::from(bot_token_cb.clone()));
             let channel = channel_cb.clone();
             let client = client_cb.clone();
@@ -1331,26 +1356,9 @@ async fn handle_message(
                 }
                 ProgressEvent::IntermediateText { text, .. } => {
                     let thread_ts_resp = thread_ts_inner.clone();
-                    let sent_ref = sent.clone();
+                    let ts_ref = sent_intermediate_ts.clone();
                     let text_clone = text.clone();
                     tokio::spawn(async move {
-                        // Pre-send dedup: skip if this exact text was already sent
-                        // to avoid twin intermediates from retry loops
-                        // Sanitize before storing so final response dedup can match
-                        // (final response is sanitized via strip_llm_artifacts + redact_secrets)
-                        let sanitized = crate::utils::sanitize::strip_llm_artifacts(&text_clone);
-                        let sanitized = redact_secrets(&sanitized);
-                        {
-                            let s = sent_ref.lock().await;
-                            if s.iter().any(|prev| prev == &sanitized) {
-                                tracing::info!(
-                                    "Slack: suppressing duplicate intermediate (len={})",
-                                    sanitized.len()
-                                );
-                                return;
-                            }
-                        }
-
                         let session = client.open_session(&token);
                         let text_fmt = crate::utils::slack_fmt::markdown_to_mrkdwn(&text_clone);
                         let mut req = SlackApiChatPostMessageRequest::new(
@@ -1360,10 +1368,13 @@ async fn handle_message(
                         if let Some(ref ts) = thread_ts_resp {
                             req = req.with_thread_ts(ts.clone());
                         }
-                        if let Err(e) = session.chat_post_message(&req).await {
-                            tracing::debug!("Slack: failed to send intermediate text: {}", e);
-                        } else {
-                            sent_ref.lock().await.push(sanitized);
+                        match session.chat_post_message(&req).await {
+                            Ok(resp) => {
+                                ts_ref.lock().await.push(resp.ts);
+                            }
+                            Err(e) => {
+                                tracing::debug!("Slack: failed to send intermediate text: {}", e);
+                            }
                         }
                     });
                 }
@@ -1398,56 +1409,30 @@ async fn handle_message(
         }
     }
 
+    // Delete all intermediate messages before sending the final response
+    // to prevent duplicate content on Slack.
+    {
+        let token = SlackApiToken::new(SlackApiTokenValue::from(state.current_bot_token()));
+        let session = client.open_session(&token);
+        let intermediates = sent_intermediate_ts_final.lock().await.clone();
+        if !intermediates.is_empty() {
+            tracing::info!(
+                "Slack: deleting {} intermediate messages before final response",
+                intermediates.len()
+            );
+            for ts in &intermediates {
+                let del = SlackApiChatDeleteRequest::new(SlackChannelId::new(channel_id.clone()), ts.clone());
+                let _ = session.chat_delete(&del).await;
+            }
+        }
+    }
+
     match result {
         Ok(response) => {
             // Extract <<IMG:path>> markers — upload each as a Slack file.
             let (text_only, img_paths) = crate::utils::extract_img_markers(&response.content);
             let text_only = crate::utils::sanitize::strip_llm_artifacts(&text_only);
             let text_only = redact_secrets(&text_only);
-
-            // Dedup: strip text that was already sent as intermediate messages
-            // to avoid duplicating content on Slack.
-            let sent = sent_intermediates_final.lock().await.clone();
-            tracing::info!(
-                "Slack dedup: response.content len={}, sent_intermediates count={}",
-                text_only.len(),
-                sent.len()
-            );
-            let text_only = if !sent.is_empty() {
-                let mut remaining = text_only.clone();
-                for intermediate in &sent {
-                    remaining = remaining.replace(intermediate.as_str(), "");
-                }
-                let result = remaining.trim().to_string();
-                if result != text_only {
-                    tracing::info!(
-                        "Slack dedup: stripped {} chars, remaining len={}",
-                        text_only.len() - result.len(),
-                        result.len()
-                    );
-                } else {
-                    tracing::warn!(
-                        "Slack dedup: NO MATCH — none of {} intermediates found in response",
-                        sent.len()
-                    );
-                }
-                // If dedup stripped everything, the intermediates already
-                // cover the full response — nothing new to send. Safe here
-                // because Slack's intermediate handler only pushes to
-                // sent_intermediates on confirmed successful post.
-                if result.is_empty() {
-                    tracing::info!(
-                        "Slack dedup: result empty after stripping — intermediates already delivered full response (len={})",
-                        text_only.len()
-                    );
-                    String::new()
-                } else {
-                    result
-                }
-            } else {
-                tracing::info!("Slack dedup: no intermediates to strip");
-                text_only
-            };
 
             let text_only = crate::utils::slack_fmt::markdown_to_mrkdwn(&text_only);
 
