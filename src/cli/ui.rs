@@ -62,6 +62,9 @@ async fn cmd_chat_inner(
         tracing::warn!("Session auto-categorization failed: {}", e);
     }
 
+    // Ensure usage_pricing.toml exists (first-run only, copies from example)
+    crate::usage::pricing::PricingConfig::seed_from_example();
+
     // Select provider based on configuration using factory
     // Returns placeholder provider if none configured, so app can start and show onboarding
     let provider = match crate::brain::provider::create_provider(config).await {

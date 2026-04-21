@@ -79,6 +79,11 @@ entries = [
 
 [providers.moonshot]
 entries = [
+  # Kimi K2.6 — Moonshot AI (≤262k context)
+  # Cache hit: $0.16/1M, Cache miss: $0.95/1M
+  { prefix = "kimi-k2.6",            input_per_m = 0.95,  output_per_m = 4.0,   cache_write_per_m = 0.95, cache_read_per_m = 0.16 },
+  { prefix = "kimi-k2-6",            input_per_m = 0.95,  output_per_m = 4.0,   cache_write_per_m = 0.95, cache_read_per_m = 0.16 },
+  { prefix = "kimik2.6",             input_per_m = 0.95,  output_per_m = 4.0,   cache_write_per_m = 0.95, cache_read_per_m = 0.16 },
   { prefix = "kimi-k2.5",          input_per_m = 0.60,  output_per_m = 3.0   },
   { prefix = "kimi-k2-turbo",      input_per_m = 1.15,  output_per_m = 8.0   },
   { prefix = "kimi-k2",            input_per_m = 0.60,  output_per_m = 2.50  },

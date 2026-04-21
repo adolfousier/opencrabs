@@ -66,7 +66,8 @@ impl OnboardingWizard {
             tracing::info!("Created keys.toml at {:?}", keys_path);
         }
 
-        // Create usage_pricing.toml if it doesn't exist
+        // Ensure usage_pricing.toml exists and is up to date
+        // (also called on startup, but onboarding may run before that path)
         crate::usage::pricing::PricingConfig::seed_from_example();
 
         // Reload models for the selected provider from the newly created config

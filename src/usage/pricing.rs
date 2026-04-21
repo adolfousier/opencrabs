@@ -189,17 +189,20 @@ impl PricingConfig {
         out
     }
 
-    /// Write the pricing file from the embedded example if it doesn't exist.
-    /// Called during onboarding/first-run.
+    /// Copy `usage_pricing.toml.example` to brain directory on first run only.
+    /// Existing users: see release notes for instructions to diff and update their file.
     pub fn seed_from_example() {
         let path = crate::config::opencrabs_home().join("usage_pricing.toml");
-        if !path.exists() {
-            let example = include_str!("../../usage_pricing.toml.example");
-            if let Err(e) = std::fs::write(&path, example) {
-                tracing::error!("Failed to seed usage_pricing.toml from example: {}", e);
-            } else {
-                tracing::info!("Seeded usage_pricing.toml from example");
-            }
+
+        if path.exists() {
+            return; // User owns this file. Never overwrite.
+        }
+
+        let example_content = include_str!("../../usage_pricing.toml.example");
+        if let Err(e) = std::fs::write(&path, example_content) {
+            tracing::error!("Failed to seed usage_pricing.toml from example: {}", e);
+        } else {
+            tracing::info!("Seeded usage_pricing.toml from example");
         }
     }
 }
