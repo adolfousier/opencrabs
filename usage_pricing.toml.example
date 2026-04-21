@@ -114,6 +114,16 @@ entries = [
   { prefix = "qwen-plus",          input_per_m = 0.50,  output_per_m = 3.00,  cache_write_per_m = 0.625, cache_read_per_m = 0.05 },
 ]
 
+[providers.zhipu]
+entries = [
+  # GLM-5.1 — Zhipu AI (≤200k context)
+  { prefix = "glm-5.1",            input_per_m = 0.95,  output_per_m = 3.15  },
+  # GLM-5 Turbo — Zhipu AI
+  { prefix = "glm-5-turbo",        input_per_m = 0.95,  output_per_m = 3.15  },
+  { prefix = "glm-5",              input_per_m = 0.95,  output_per_m = 3.15  },
+  { prefix = "zhipu",              input_per_m = 0.95,  output_per_m = 3.15  },
+]
+
 [providers.opencode]
 entries = [
   { prefix = "mimo-v2-pro",         input_per_m = 1.0,   output_per_m = 3.0   },

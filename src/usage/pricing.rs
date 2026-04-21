@@ -79,9 +79,30 @@ impl PricingConfig {
     /// Returns None if model is unknown.
     pub fn estimate_cost(&self, model: &str, token_count: i64) -> Option<f64> {
         let m = model.to_lowercase();
+
+        // Try direct match first
+        if let Some(cost) = self.try_match(&m, token_count) {
+            return Some(cost);
+        }
+
+        // If no match, try prepending common provider prefixes
+        // (normalized names like "opus-4-6" need "claude-" to match TOML entries)
+        let prefixes = ["claude-", "gpt-", "gemini-", "deepseek-", "llama-", "qwen", "kimi-", "zhipu-", "glm-"];
+        for p in &prefixes {
+            let prefixed = format!("{}{}", p, m);
+            if let Some(cost) = self.try_match(&prefixed, token_count) {
+                return Some(cost);
+            }
+        }
+
+        None
+    }
+
+    /// Internal helper: try to match a model string against all pricing entries.
+    fn try_match(&self, model_lower: &str, token_count: i64) -> Option<f64> {
         for block in self.providers.values() {
             for entry in &block.entries {
-                if m.contains(&entry.prefix.to_lowercase()) {
+                if model_lower.contains(&entry.prefix.to_lowercase()) {
                     let input = (token_count as f64 * 0.80 / 1_000_000.0) * entry.input_per_m;
                     let output = (token_count as f64 * 0.20 / 1_000_000.0) * entry.output_per_m;
                     return Some(input + output);

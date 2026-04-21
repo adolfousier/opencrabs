@@ -375,7 +375,7 @@ async fn fetch_models(pool: &Pool, since: Option<i64>) -> Result<Vec<ModelStats>
                  WHEN m3 IN ('mimo-v2-omni', 'mimo-v2-omni-free') THEN 'mimo-v2-omni' \
                  WHEN m3 IN ('mimo-v2-pro', 'mimo-v2-pro-free') THEN 'mimo-v2-pro' \
                  WHEN m3 IN ('kimi-k2.5', 'kimi-k2-5', 'kimi-k2.6', 'kimi-k2-6', 'kimik2.6') THEN 'kimi-k2.6' \
-                 WHEN m3 IN ('glm-5-turbo', 'zhipu') THEN 'glm-5-turbo' \
+                 WHEN m3 IN ('glm-5.1', 'glm-5-1', 'glm-5-turbo', 'glm-5', 'zhipu') THEN 'glm-5.1' \
                  ELSE m3 \
                END AS normalized_model, \
                COALESCE(SUM(token_count), 0), \

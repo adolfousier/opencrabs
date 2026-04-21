@@ -61,7 +61,7 @@ pub(crate) fn normalize_model_name(model: &str) -> String {
         "kimi-k2.6" | "kimi-k2-6" | "kimik2.6" => "kimi-k2.6".to_string(),
         "kimi-k2.5" | "kimi-k2-5" => "kimi-k2.5".to_string(),
         // GLM / ZhiPu
-        "glm-5-turbo" | "zhipu" => "glm-5-turbo".to_string(),
+        "glm-5.1" | "glm-5-1" | "glm-5-turbo" | "glm-5" | "zhipu" => "glm-5.1".to_string(),
         // No match — return lowercased as-is
         _ => lower.to_string(),
     }
@@ -173,7 +173,7 @@ impl UsageLedgerRepository {
                          WHEN m3 IN ('mimo-v2-pro', 'mimo-v2-pro-free') THEN 'mimo-v2-pro' \
                          WHEN m3 IN ('kimi-k2.6', 'kimi-k2-6', 'kimik2.6') THEN 'kimi-k2.6' \
                          WHEN m3 IN ('kimi-k2.5', 'kimi-k2-5') THEN 'kimi-k2.5' \
-                         WHEN m3 IN ('glm-5-turbo', 'zhipu') THEN 'glm-5-turbo' \
+                         WHEN m3 IN ('glm-5.1', 'glm-5-1', 'glm-5-turbo', 'glm-5', 'zhipu') THEN 'glm-5.1' \
                          ELSE m3 \
                        END AS normalized_model, \
                        COALESCE(SUM(token_count), 0), \
