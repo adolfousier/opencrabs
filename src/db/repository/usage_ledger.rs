@@ -58,6 +58,7 @@ pub(crate) fn normalize_model_name(model: &str) -> String {
         "mimo-v2-omni" | "mimo-v2-omni-free" => "mimo-v2-omni".to_string(),
         "mimo-v2-pro" | "mimo-v2-pro-free" => "mimo-v2-pro".to_string(),
         // Kimi
+        "kimi-k2.6" | "kimi-k2-6" | "kimik2.6" => "kimi-k2.6".to_string(),
         "kimi-k2.5" | "kimi-k2-5" => "kimi-k2.5".to_string(),
         // GLM / ZhiPu
         "glm-5-turbo" | "zhipu" => "glm-5-turbo".to_string(),
@@ -170,6 +171,7 @@ impl UsageLedgerRepository {
                          WHEN m3 IN ('minimax-m2.7') THEN 'minimax-m2.7' \
                          WHEN m3 IN ('mimo-v2-omni', 'mimo-v2-omni-free') THEN 'mimo-v2-omni' \
                          WHEN m3 IN ('mimo-v2-pro', 'mimo-v2-pro-free') THEN 'mimo-v2-pro' \
+                         WHEN m3 IN ('kimi-k2.6', 'kimi-k2-6', 'kimik2.6') THEN 'kimi-k2.6' \
                          WHEN m3 IN ('kimi-k2.5', 'kimi-k2-5') THEN 'kimi-k2.5' \
                          WHEN m3 IN ('glm-5-turbo', 'zhipu') THEN 'glm-5-turbo' \
                          ELSE m3 \

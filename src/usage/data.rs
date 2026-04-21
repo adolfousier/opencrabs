@@ -326,8 +326,12 @@ async fn fetch_projects(pool: &Pool, since: Option<i64>) -> Result<Vec<ProjectSt
 }
 
 async fn fetch_models(pool: &Pool, since: Option<i64>) -> Result<Vec<ModelStats>> {
+    // Load current pricing to recalculate costs at display time.
+    // Stored costs may be stale (old pricing or $0.00 for unknown models at record time).
+    let pricing = crate::usage::pricing::PricingConfig::load().ok();
+
     let conn = pool.get().await.context("pool")?;
-    conn.interact(move |conn| {
+    let models = conn.interact(move |conn| {
         // Reuse the same SQL normalization as usage_ledger.rs stats_by_model
         let base_where = if since.is_some() {
             "WHERE model != '' AND created_at >= ?1"
@@ -363,46 +367,61 @@ async fn fetch_models(pool: &Pool, since: Option<i64>) -> Result<Vec<ModelStats>
                  WHEN m3 IN ('opus', 'opus-4-6') THEN 'opus-4-6' \
                  WHEN m3 IN ('sonnet', 'sonnet-4-6') THEN 'sonnet-4-6' \
                  WHEN m3 IN ('haiku', 'haiku-4-5', 'haiku-4-5-20251001') THEN 'haiku-4-5' \
+                 WHEN m3 IN ('qwen-3.6-max-preview', 'qwen3.6-max-preview', 'qwen-3-6-max-preview', 'qwen3-6-max-preview', 'qwen-max-preview') THEN 'qwen3.6-max-preview' \
                  WHEN m3 IN ('coder-model', 'qwen3.6-plus', 'qwen-3.6-plus') THEN 'qwen3.6-plus' \
                  WHEN m3 IN ('qwen3.5-plus', 'qwen-3.5-plus') THEN 'qwen3.5-plus' \
                  WHEN m3 IN ('minimax-m2.5') THEN 'minimax-m2.5' \
                  WHEN m3 IN ('minimax-m2.7') THEN 'minimax-m2.7' \
                  WHEN m3 IN ('mimo-v2-omni', 'mimo-v2-omni-free') THEN 'mimo-v2-omni' \
                  WHEN m3 IN ('mimo-v2-pro', 'mimo-v2-pro-free') THEN 'mimo-v2-pro' \
-                 WHEN m3 IN ('kimi-k2.5', 'kimi-k2-5') THEN 'kimi-k2.5' \
+                 WHEN m3 IN ('kimi-k2.5', 'kimi-k2-5', 'kimi-k2.6', 'kimi-k2-6', 'kimik2.6') THEN 'kimi-k2.6' \
                  WHEN m3 IN ('glm-5-turbo', 'zhipu') THEN 'glm-5-turbo' \
                  ELSE m3 \
                END AS normalized_model, \
                COALESCE(SUM(token_count), 0), \
-               COALESCE(SUM(cost), 0.0), \
                COUNT(*) \
              FROM prefixed \
              GROUP BY normalized_model \
-             ORDER BY SUM(cost) DESC"
+             ORDER BY SUM(token_count) DESC"
         );
         let mut stmt = conn.prepare(&query)?;
         let map_row = |row: &rusqlite::Row| {
-            let tokens: i64 = row.get(1)?;
-            let cost: f64 = row.get(2)?;
-            Ok(ModelStats {
-                model: row.get(0)?,
-                tokens,
-                cost,
-                calls: row.get(3)?,
-                estimated: cost == 0.0 && tokens > 0,
-            })
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
         };
-        if let Some(s) = since {
+        let rows: Vec<(String, i64, i64)> = if let Some(s) = since {
             stmt.query_map(params![s], map_row)?
-                .collect::<std::result::Result<Vec<_>, _>>()
+                .collect::<std::result::Result<Vec<_>, _>>()?
         } else {
             stmt.query_map([], map_row)?
-                .collect::<std::result::Result<Vec<_>, _>>()
-        }
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        Ok::<_, rusqlite::Error>(rows)
     })
     .await
     .map_err(interact_err)?
-    .context("Failed to fetch model stats")
+    .context("Failed to fetch model stats")?;
+
+    // Recalculate costs using current TOML pricing (80/20 input/output split)
+    Ok(models
+        .into_iter()
+        .map(|(model, tokens, calls)| {
+            let cost = pricing
+                .as_ref()
+                .and_then(|p| p.estimate_cost(&model, tokens))
+                .unwrap_or(0.0);
+            ModelStats {
+                model,
+                tokens,
+                cost,
+                calls,
+                estimated: cost == 0.0 && tokens > 0,
+            }
+        })
+        .collect())
 }
 
 async fn fetch_tools(pool: &Pool, since: Option<i64>) -> Result<Vec<ToolStats>> {
