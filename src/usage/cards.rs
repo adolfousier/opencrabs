@@ -276,10 +276,7 @@ pub fn render_models(f: &mut Frame, models: &[ModelStats], area: Rect, focused: 
                 DIM,
             ),
             Span::raw("  "),
-            Span::styled(
-                format!("{:>width$} req", m.calls, width = calls_width),
-                DIM,
-            ),
+            Span::styled(format!("{:>width$} req", m.calls, width = calls_width), DIM),
         ]));
     }
 

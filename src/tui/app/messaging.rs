@@ -928,38 +928,51 @@ impl App {
     /// Expand a DB message into one or more DisplayMessages.
     /// Assistant messages may contain tool markers that get reconstructed into ToolCallGroup display messages.
     /// Supports both v1 (`<!-- tools: desc1 | desc2 -->`) and v2 (`<!-- tools-v2: [JSON] -->`) formats.
-    /// Extract `<!-- reasoning -->...<!-- /reasoning -->` blocks from text.
+    /// Extract reasoning blocks from text. Handles:
+    /// - `<!-- reasoning -->...<!-- /reasoning -->`
+    /// - `<antThinking>...</antThinking>` (Qwen, case-insensitive)
+    /// - `<think>...</think>` (DeepSeek)
+    ///
     /// Returns (reasoning_text, remaining_text_without_markers).
     fn extract_reasoning(text: &str) -> (Option<String>, String) {
+        let mut reasoning_parts = Vec::new();
+        let mut remaining = text.to_string();
+
+        // Extract <!-- reasoning --> blocks
         let open_tag = "<!-- reasoning -->";
         let close_tag = "<!-- /reasoning -->";
-        let mut reasoning_parts = Vec::new();
-        let mut remaining = String::new();
-        let mut rest = text;
-
-        loop {
-            if let Some(start) = rest.find(open_tag) {
-                remaining.push_str(&rest[..start]);
-                let after_tag = &rest[start + open_tag.len()..];
-                if let Some(end) = after_tag.find(close_tag) {
-                    let part = after_tag[..end].trim();
-                    if !part.is_empty() {
-                        reasoning_parts.push(part.to_string());
-                    }
-                    rest = &after_tag[end + close_tag.len()..];
-                } else {
-                    // Unclosed tag — treat rest as reasoning
-                    let part = after_tag.trim();
-                    if !part.is_empty() {
-                        reasoning_parts.push(part.to_string());
-                    }
-                    break;
+        while let Some(start) = remaining.find(open_tag) {
+            let before = remaining[..start].to_string();
+            let after_tag = &remaining[start + open_tag.len()..];
+            if let Some(end) = after_tag.find(close_tag) {
+                let part = after_tag[..end].trim();
+                if !part.is_empty() {
+                    reasoning_parts.push(part.to_string());
                 }
+                remaining = format!("{}{}", before, &after_tag[end + close_tag.len()..]);
             } else {
-                remaining.push_str(rest);
+                let part = after_tag.trim();
+                if !part.is_empty() {
+                    reasoning_parts.push(part.to_string());
+                }
+                remaining = before;
                 break;
             }
         }
+
+        // Extract <antThinking> blocks (case-insensitive, handles <anTthinking> typo)
+        remaining = Self::extract_tag_case_insensitive(
+            &remaining,
+            "antthinking",
+            &mut reasoning_parts,
+        );
+
+        // Extract <think> blocks (DeepSeek)
+        remaining = Self::extract_tag_case_insensitive(
+            &remaining,
+            "think",
+            &mut reasoning_parts,
+        );
 
         let remaining = remaining.trim().to_string();
         if reasoning_parts.is_empty() {
@@ -967,6 +980,43 @@ impl App {
         } else {
             (Some(reasoning_parts.join("\n\n")), remaining)
         }
+    }
+
+    /// Extract content between <tag>...</tag> pairs, case-insensitive.
+    fn extract_tag_case_insensitive(
+        text: &str,
+        tag_name: &str,
+        reasoning_parts: &mut Vec<String>,
+    ) -> String {
+        let mut result = text.to_string();
+        loop {
+            let lower = result.to_lowercase();
+            let open = format!("<{}>", tag_name);
+            let close = format!("</{}>", tag_name);
+            let start_opt = lower.find(&open);
+            if let Some(start) = start_opt {
+                let before = result[..start].to_string();
+                let after_open = &result[start + open.len()..];
+                let after_open_lower = &lower[start + open.len()..];
+                if let Some(end) = after_open_lower.find(&close) {
+                    let part = after_open[..end].trim();
+                    if !part.is_empty() {
+                        reasoning_parts.push(part.to_string());
+                    }
+                    result = format!("{}{}", before, &after_open[end + close.len()..]);
+                } else {
+                    let part = after_open.trim();
+                    if !part.is_empty() {
+                        reasoning_parts.push(part.to_string());
+                    }
+                    result = before;
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        result
     }
 
     fn expand_message(msg: crate::db::models::Message) -> Vec<DisplayMessage> {
@@ -977,8 +1027,12 @@ impl App {
             return vec![];
         }
 
+        let content_lower = msg.content.to_lowercase();
         if msg.role != "assistant"
-            || (!msg.content.contains("<!-- tools") && !msg.content.contains("<!-- reasoning -->"))
+            || (!msg.content.contains("<!-- tools")
+                && !msg.content.contains("<!-- reasoning -->")
+                && !content_lower.contains("<antthinking")
+                && !content_lower.contains("<think"))
         {
             return vec![DisplayMessage::from(msg)];
         }
