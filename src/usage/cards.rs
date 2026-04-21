@@ -227,13 +227,20 @@ pub fn render_models(f: &mut Frame, models: &[ModelStats], area: Rect, focused: 
         .map(|m| fmt_tokens(m.tokens).len())
         .max()
         .unwrap_or(6);
+    let max_calls_len = models
+        .iter()
+        .take(visible)
+        .map(|m| m.calls.to_string().len())
+        .max()
+        .unwrap_or(1);
 
     // Data columns get guaranteed space; name column fills whatever is left
     let spacing = 2;
     let cost_width = max_cost_len;
     let tok_width = max_tok_len;
+    let calls_width = max_calls_len;
     // +1 for leading space on name
-    let fixed = cost_width + tok_width + spacing * 2 + 1;
+    let fixed = cost_width + tok_width + calls_width + spacing * 3 + 1;
     let name_width = (inner.width as usize).saturating_sub(fixed).max(4);
 
     let mut lines: Vec<Line> = Vec::new();
@@ -266,6 +273,11 @@ pub fn render_models(f: &mut Frame, models: &[ModelStats], area: Rect, focused: 
             Span::raw("  "),
             Span::styled(
                 format!("{:>width$}", fmt_tokens(m.tokens), width = tok_width),
+                DIM,
+            ),
+            Span::raw("  "),
+            Span::styled(
+                format!("{:>width$} req", m.calls, width = calls_width),
                 DIM,
             ),
         ]));
