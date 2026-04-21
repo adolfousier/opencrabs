@@ -1300,7 +1300,27 @@ impl App {
         out
     }
 
-    /// Expand tab characters to spaces (4 spaces per tab stop).
+    /// Normalize invisible/zero-width Unicode characters that web pages use
+    /// for table formatting. These paste as invisible bytes in terminals,
+    /// gluing columns together.
+    pub(crate) fn normalize_unicode_whitespace(text: &str) -> String {
+        text.chars()
+            .map(|ch| match ch {
+                // Non-breaking spaces (common in HTML tables)
+                '\u{00A0}' | '\u{202F}' | '\u{2007}' => ' ',
+                // Zero-width spaces / joiners — remove entirely
+                '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}' => '\0',
+                // Various width spaces — normalize to regular space
+                '\u{2000}'..='\u{200A}' | '\u{205F}' | '\u{3000}' => ' ',
+                // Soft hyphen — remove
+                '\u{00AD}' => '\0',
+                _ => ch,
+            })
+            .filter(|&ch| ch != '\0')
+            .collect()
+    }
+
+    /// Expand tab characters to spaces (8 spaces per tab stop — standard terminal width).
     /// Terminal TUIs can't render tab stops, so pasted table data with `\t`
     /// collapses to zero-width, gluing columns together. This preserves visual
     /// alignment from web pages and spreadsheets.
@@ -1309,8 +1329,8 @@ impl App {
         let mut col = 0usize;
         for ch in text.chars() {
             if ch == '\t' {
-                // Advance to next tab stop (every 4 columns)
-                let spaces = 4 - (col % 4);
+                // Advance to next tab stop (every 8 columns — standard terminal)
+                let spaces = 8 - (col % 8);
                 for _ in 0..spaces {
                     result.push(' ');
                 }

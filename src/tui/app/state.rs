@@ -1229,6 +1229,11 @@ impl App {
                     // appear in user-typed text.
                     let mut filtered = Self::strip_terminal_escapes(&text);
 
+                    // Normalize Unicode whitespace (non-breaking spaces, zero-width chars)
+                    // that web pages use for table formatting. These paste as invisible
+                    // bytes in terminals, gluing columns together.
+                    filtered = Self::normalize_unicode_whitespace(&filtered);
+
                     // Convert tabs to spaces so pasted table data doesn't collapse.
                     // Terminal TUI can't render tab stops, so \t chars show as
                     // zero-width, gluing columns together.  Replacing with spaces
