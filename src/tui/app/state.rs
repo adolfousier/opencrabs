@@ -1227,7 +1227,15 @@ impl App {
                     // focus switch (mouse tracking, SGR mode, etc.).  These look
                     // like \x1b[<35;118;37M or CSI sequences and should never
                     // appear in user-typed text.
-                    let filtered = Self::strip_terminal_escapes(&text);
+                    let mut filtered = Self::strip_terminal_escapes(&text);
+
+                    // Convert tabs to spaces so pasted table data doesn't collapse.
+                    // Terminal TUI can't render tab stops, so \t chars show as
+                    // zero-width, gluing columns together.  Replacing with spaces
+                    // preserves visual column alignment from web pages.
+                    if filtered.contains('\t') {
+                        filtered = Self::expand_tabs(&filtered);
+                    }
                     if filtered.trim().is_empty() {
                         tracing::debug!(
                             "Paste event contained only escape sequences ({} bytes) — dropped",

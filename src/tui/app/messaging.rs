@@ -1300,6 +1300,33 @@ impl App {
         out
     }
 
+    /// Expand tab characters to spaces (4 spaces per tab stop).
+    /// Terminal TUIs can't render tab stops, so pasted table data with `\t`
+    /// collapses to zero-width, gluing columns together. This preserves visual
+    /// alignment from web pages and spreadsheets.
+    pub(crate) fn expand_tabs(text: &str) -> String {
+        let mut result = String::with_capacity(text.len());
+        let mut col = 0usize;
+        for ch in text.chars() {
+            if ch == '\t' {
+                // Advance to next tab stop (every 4 columns)
+                let spaces = 4 - (col % 4);
+                for _ in 0..spaces {
+                    result.push(' ');
+                }
+                col += spaces;
+            } else {
+                result.push(ch);
+                if ch == '\n' {
+                    col = 0;
+                } else {
+                    col += 1;
+                }
+            }
+        }
+        result
+    }
+
     /// Text file paths (`.txt`, `.md`, `.json`, source code, etc.) are read from
     /// disk and inlined into the returned text — no attachment needed.
     pub(crate) fn extract_image_paths(text: &str) -> (String, Vec<ImageAttachment>) {

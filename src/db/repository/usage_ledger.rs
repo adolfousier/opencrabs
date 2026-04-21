@@ -44,7 +44,11 @@ pub(crate) fn normalize_model_name(model: &str) -> String {
         "sonnet" | "sonnet-4-6" => "sonnet-4-6".to_string(),
         "haiku" | "haiku-4-5" | "haiku-4-5-20251001" => "haiku-4-5".to_string(),
         // Qwen
-        "qwen-3.6-max-preview" | "qwen3.6-max-preview" | "qwen-3-6-max-preview" | "qwen3-6-max-preview" | "qwen-max-preview" => "qwen3.6-max-preview".to_string(),
+        "qwen-3.6-max-preview"
+        | "qwen3.6-max-preview"
+        | "qwen-3-6-max-preview"
+        | "qwen3-6-max-preview"
+        | "qwen-max-preview" => "qwen3.6-max-preview".to_string(),
         "coder-model" | "qwen-3.6-plus" | "qwen3.6-plus" => "qwen3.6-plus".to_string(),
         "qwen3.5-plus" | "qwen-3.5-plus" => "qwen3.5-plus".to_string(),
         // MiniMax
