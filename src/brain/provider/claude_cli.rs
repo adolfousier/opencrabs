@@ -10,9 +10,16 @@ use super::types::*;
 use async_trait::async_trait;
 use futures::stream::StreamExt;
 use serde::Deserialize;
+use std::collections::HashSet;
 use std::process::Stdio;
+use std::sync::{LazyLock, Mutex};
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncWriteExt;
+
+/// Deduper for `warn_if_model_drifted` — a given observed model is
+/// logged at WARN once per process, subsequent matches are silent.
+static CLI_MODEL_DRIFT_SEEN: LazyLock<Mutex<HashSet<String>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
 
 /// Claude CLI provider — talks directly to the `claude` binary.
 #[derive(Clone)]
@@ -27,12 +34,12 @@ impl ClaudeCliProvider {
         let path = resolve_claude_path()?;
         Ok(Self {
             claude_path: path,
-            default_model: "sonnet-4-6".to_string(),
+            default_model: Self::default_for_alias("sonnet"),
         })
     }
 
     /// Override the default model (e.g. "opus", "haiku", "sonnet").
-    /// Normalizes to display form (e.g. "opus" → "opus-4-6").
+    /// Normalizes to display form (e.g. "opus" → "opus-4-7").
     pub fn with_default_model(mut self, model: String) -> Self {
         self.default_model = Self::normalize_model(&model);
         self
@@ -50,16 +57,61 @@ impl ClaudeCliProvider {
     }
 
     /// Normalize a model name for pricing/usage tracking.
-    /// CLI shorthands like "opus" → "opus-4-6". Strips "claude-" prefix.
-    fn normalize_model(model: &str) -> String {
-        // Strip "claude-" prefix first (API returns "claude-opus-4-6")
+    /// CLI shorthands like "opus" → "opus-4-7". Strips "claude-" prefix
+    /// and any trailing date suffix (e.g. "claude-opus-4-7-20260115"
+    /// → "opus-4-7"). Unknown variants are returned as-is so a future
+    /// shorthand like "opus-4-8" flows through unchanged.
+    pub(crate) fn normalize_model(model: &str) -> String {
         let stripped = model.strip_prefix("claude-").unwrap_or(model);
-        match stripped {
-            "opus" => "opus-4-6".to_string(),
+        let without_date = strip_claude_date_suffix(stripped);
+        match without_date {
+            "opus" | "sonnet" | "haiku" => Self::default_for_alias(without_date),
+            other => other.to_string(),
+        }
+    }
+
+    /// Latest known normalized model for a bare CLI shorthand. Updating
+    /// this constant is one place to teach the provider about a new
+    /// Claude release (e.g. bumping sonnet to 4-7 when Anthropic ships
+    /// it). The CLI itself still does the actual resolution; if the
+    /// constant here drifts behind reality, `warn_if_model_drifted`
+    /// logs a warning on the first assistant response so the gap is
+    /// visible instead of silent.
+    fn default_for_alias(alias: &str) -> String {
+        match alias {
+            "opus" => "opus-4-7".to_string(),
             "sonnet" => "sonnet-4-6".to_string(),
             "haiku" => "haiku-4-5".to_string(),
             other => other.to_string(),
         }
+    }
+
+    /// Compare the model reported by the CLI with what our hardcoded
+    /// table advertises. When they diverge, log a single WARN with a
+    /// clear instruction — this is the signal that `default_for_alias`
+    /// needs updating in code (or that the user should pin a specific
+    /// version in `config.toml [providers.claude_cli] default_model`).
+    fn warn_if_model_drifted(&self, cli_full_model: &str) {
+        let observed = Self::normalize_model(cli_full_model);
+        if observed == self.default_model {
+            return;
+        }
+        let alias_seen_before = CLI_MODEL_DRIFT_SEEN
+            .lock()
+            .ok()
+            .map(|mut s| !s.insert(observed.clone()))
+            .unwrap_or(false);
+        if alias_seen_before {
+            return;
+        }
+        tracing::warn!(
+            "claude-cli model drift: CLI resolved to '{}' (normalized '{}') but provider advertises '{}'. \
+             Pin the exact model in config.toml [providers.claude_cli].default_model, or update \
+             ClaudeCliProvider::default_for_alias in claude_cli.rs to catch up with Anthropic's release.",
+            cli_full_model,
+            observed,
+            self.default_model,
+        );
     }
 
     /// Build a plain-text prompt from LLMRequest messages.
@@ -405,6 +457,7 @@ impl Provider for ClaudeCliProvider {
         // Channel-based stream: parse NDJSON lines → StreamEvent
         let (tx, rx) = tokio::sync::mpsc::channel::<Result<StreamEvent>>(64);
 
+        let self_clone = self.clone();
         tokio::spawn(async move {
             let reader = tokio::io::BufReader::new(stdout);
             let mut lines = reader.lines();
@@ -498,6 +551,16 @@ impl Provider for ClaudeCliProvider {
                                             serde_json::from_value::<CliUsage>(u.clone())
                                     {
                                         input_tokens = cli_u.total_input();
+                                    }
+                                    // Compare the CLI's actual model against our
+                                    // hardcoded alias mapping. Logs WARN once per
+                                    // observed model if they drift.
+                                    if let Some(observed) = event
+                                        .get("message")
+                                        .and_then(|m| m.get("model"))
+                                        .and_then(|m| m.as_str())
+                                    {
+                                        self_clone.warn_if_model_drifted(observed);
                                     }
                                     match serde_json::from_value::<StreamEvent>(event) {
                                         Ok(mut se) => {
@@ -672,6 +735,9 @@ impl Provider for ClaudeCliProvider {
                             let msg_id = message.id.unwrap_or_else(|| {
                                 format!("msg_{}", uuid::Uuid::new_v4().simple())
                             });
+                            if let Some(ref raw) = message.model {
+                                self_clone.warn_if_model_drifted(raw);
+                            }
                             let msg_model = message
                                 .model
                                 .map(|m| Self::normalize_model(&m))
@@ -1079,6 +1145,7 @@ impl Provider for ClaudeCliProvider {
             "sonnet".to_string(),
             "opus".to_string(),
             "haiku".to_string(),
+            "opus-4-7".to_string(),
             "sonnet-4-6".to_string(),
             "opus-4-6".to_string(),
             "haiku-4-5".to_string(),
@@ -1262,4 +1329,18 @@ fn normalize_stream_event(event: StreamEvent) -> StreamEvent {
         },
         other => other,
     }
+}
+
+/// Strip the trailing release-date suffix from a Claude model string.
+/// Anthropic stamps model ids as `claude-opus-4-7-20260115`; for display
+/// and pricing we want `opus-4-7`. Only strips an 8-digit date at the
+/// very end preceded by a hyphen.
+pub(crate) fn strip_claude_date_suffix(s: &str) -> &str {
+    if let Some(idx) = s.rfind('-') {
+        let suffix = &s[idx + 1..];
+        if suffix.len() == 8 && suffix.chars().all(|c| c.is_ascii_digit()) {
+            return &s[..idx];
+        }
+    }
+    s
 }

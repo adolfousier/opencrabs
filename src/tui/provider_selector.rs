@@ -448,11 +448,52 @@ pub fn model_display_label(model_id: &str) -> &str {
         "kimi-k2.5" | "kimi-k2-5" => "Kimi K2.5",
         "glm-5.1" => "GLM 5.1",
         "glm-5-turbo" => "GLM 5 Turbo",
+        "opus-4-7" => "Opus 4.7",
         "opus-4-6" => "Opus 4.6",
         "sonnet-4-6" => "Sonnet 4.6",
         "haiku-4-5" => "Haiku 4.5",
-        other => other,
+        other => prettify_claude_cli_model(other).unwrap_or(other),
     }
+}
+
+/// Fallback prettifier for Claude CLI shorthand models we haven't
+/// hardcoded yet. Matches `opus-X-Y` / `sonnet-X-Y` / `haiku-X-Y` and
+/// returns "Opus X.Y", "Sonnet X.Y", "Haiku X.Y". The `&'static str`
+/// return matches the main match arm; per-id strings are leaked into
+/// a process-wide cache (one slot per distinct model id ever observed)
+/// so the same id never re-leaks.
+fn prettify_claude_cli_model(model: &str) -> Option<&'static str> {
+    use std::collections::HashMap;
+    use std::sync::{LazyLock, Mutex};
+    static PRETTIFIED: LazyLock<Mutex<HashMap<String, &'static str>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
+
+    let (family, rest) = if let Some(r) = model.strip_prefix("opus-") {
+        ("Opus", r)
+    } else if let Some(r) = model.strip_prefix("sonnet-") {
+        ("Sonnet", r)
+    } else if let Some(r) = model.strip_prefix("haiku-") {
+        ("Haiku", r)
+    } else {
+        return None;
+    };
+    let (major, minor) = rest.split_once('-')?;
+    if major.is_empty()
+        || minor.is_empty()
+        || !major.chars().all(|c| c.is_ascii_digit())
+        || !minor.chars().all(|c| c.is_ascii_digit())
+    {
+        return None;
+    }
+
+    let mut cache = PRETTIFIED.lock().ok()?;
+    if let Some(existing) = cache.get(model) {
+        return Some(existing);
+    }
+    let pretty: &'static str =
+        Box::leak(format!("{} {}.{}", family, major, minor).into_boxed_str());
+    cache.insert(model.to_string(), pretty);
+    Some(pretty)
 }
 
 /// Load default models from embedded config.toml.example for a provider.

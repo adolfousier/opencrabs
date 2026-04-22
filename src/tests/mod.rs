@@ -14,6 +14,7 @@ pub mod browser_session_test;
 pub mod browser_stealth_test;
 pub mod candle_whisper_test;
 pub mod channel_search_test;
+pub mod claude_cli_model_test;
 pub mod cli_arg_too_long_test;
 pub mod cli_test;
 pub mod collapse_build_output_test;
