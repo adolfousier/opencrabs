@@ -977,7 +977,9 @@ pub(crate) async fn handle_message(
     let edit_cancel = CancellationToken::new();
 
     // Edit loop: sends individual tool messages + streams response at bottom
-    tokio::spawn({
+    // Store JoinHandle so we can await it after cancellation to prevent race
+    // where edit loop sends a NEW message after we grab streaming_msg_id.
+    let edit_loop_handle = tokio::spawn({
         let bot = bot.clone();
         let chat = msg.chat.id;
         let st = streaming.clone();
@@ -1364,7 +1366,7 @@ pub(crate) async fn handle_message(
                         }
                     }
                 }
-                ProgressEvent::IntermediateText { text, reasoning } => {
+                ProgressEvent::IntermediateText { text, reasoning: _ } => {
                     if let Ok(mut s) = st.lock() {
                         s.thinking.clear();
                         // Clear accumulated streaming response — it's now captured
@@ -1375,15 +1377,14 @@ pub(crate) async fn handle_message(
                         if s.msg_id.is_some() {
                             s.recreate = true;
                         }
-                        // Use reasoning as fallback when model produces no text
-                        // blocks between tool rounds (only thinking + tool_use).
-                        let content = if text.is_empty() {
-                            reasoning.unwrap_or_default()
-                        } else {
-                            text
-                        };
-                        if !content.is_empty() {
-                            s.display_queue.push(DisplayItem::Intermediate(content));
+                        // Never push reasoning as a standalone intermediate — it
+                        // belongs in the streaming response's 💭 thinking block.
+                        // Using reasoning as a fallback here causes duplicate
+                        // messages on Telegram (reasoning intermediate + final
+                        // response that doesn't contain the reasoning text, so
+                        // dedup can't strip it).
+                        if !text.is_empty() {
+                            s.display_queue.push(DisplayItem::Intermediate(text));
                         }
                     }
                 }
@@ -1481,6 +1482,9 @@ pub(crate) async fn handle_message(
 
     // Stop edit loop — final content will be written below
     edit_cancel.cancel();
+    // Await edit loop termination to prevent race where it sends a NEW
+    // message after we grab streaming_msg_id (causes duplicate completion).
+    let _ = edit_loop_handle.await;
     // _typing_guard drop cancels typing loop
 
     // Grab streaming message id and clean up status message
@@ -1883,7 +1887,8 @@ pub(crate) async fn resume_session(
     let edit_cancel = CancellationToken::new();
 
     // Edit loop — same as handle_message
-    tokio::spawn({
+    // Store JoinHandle to await after cancellation (prevents duplicate race).
+    let edit_loop_handle = tokio::spawn({
         let bot = bot.clone();
         let st = streaming.clone();
         let cancel = edit_cancel.clone();
@@ -2095,20 +2100,21 @@ pub(crate) async fn resume_session(
                     }
                 }
             }
-            ProgressEvent::IntermediateText { text, reasoning } => {
+            ProgressEvent::IntermediateText { text, reasoning: _ } => {
                 if let Ok(mut s) = st.lock() {
                     s.thinking.clear();
                     s.response.clear();
                     if s.msg_id.is_some() {
                         s.recreate = true;
                     }
-                    let content = if text.is_empty() {
-                        reasoning.unwrap_or_default()
-                    } else {
-                        text
-                    };
-                    if !content.is_empty() {
-                        s.display_queue.push(DisplayItem::Intermediate(content));
+                    // Never push reasoning as a standalone intermediate — it
+                    // belongs in the streaming response's 💭 thinking block.
+                    // Using reasoning as a fallback here causes duplicate
+                    // messages on Telegram (reasoning intermediate + final
+                    // response that doesn't contain the reasoning text, so
+                    // dedup can't strip it).
+                    if !text.is_empty() {
+                        s.display_queue.push(DisplayItem::Intermediate(text));
                     }
                 }
             }
@@ -2138,6 +2144,9 @@ pub(crate) async fn resume_session(
 
     telegram_state.remove_cancel_token(session_id).await;
     edit_cancel.cancel();
+    // Await edit loop to prevent race where it sends a NEW message after
+    // we grab streaming_msg_id (causes duplicate completion).
+    let _ = edit_loop_handle.await;
 
     // ── Final delivery ─────────────────────────────────────────────────────
     let (streaming_msg_id, status_msg_id, remaining_display) = {
