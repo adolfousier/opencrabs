@@ -606,56 +606,18 @@ pub(crate) async fn handle_message(
         telegram_state.set_owner_chat_id(msg.chat.id.0).await;
     }
 
-    let session_id = if is_owner && is_dm {
-        // Owner DM shares the TUI's current session (or daemon's persisted session)
-        let shared = shared_session.lock().await;
-        match *shared {
-            Some(id) => id,
-            None => {
-                drop(shared); // release lock before async calls
-                // Try to resume the most recent active session from DB (survives daemon restarts)
-                let restored = match session_svc.get_most_recent_session().await {
-                    Ok(Some(session)) => {
-                        tracing::info!(
-                            "Telegram: restored most recent session {} for owner",
-                            session.id
-                        );
-                        Some(session.id)
-                    }
-                    _ => None,
-                };
-                let id = match restored {
-                    Some(id) => id,
-                    None => {
-                        tracing::info!("Telegram: no existing session, creating one for owner");
-                        match crate::channels::session_init::create_channel_session(
-                            &session_svc,
-                            Some("Chat".to_string()),
-                        )
-                        .await
-                        {
-                            Ok(session) => session.id,
-                            Err(e) => {
-                                tracing::error!("Telegram: failed to create session: {}", e);
-                                bot.send_message(msg.chat.id, "Internal error creating session.")
-                                    .await?;
-                                return Ok(());
-                            }
-                        }
-                    }
-                };
-                *shared_session.lock().await = Some(id);
-                id
-            }
-        }
+    // Sessions are ALWAYS isolated per chat — owner DMs no longer share the
+    // TUI session. DM title includes user_id so two users with the same
+    // first_name don't collide and so a DM never reuses a group's session
+    // accidentally. Group title kept as "Telegram: {chat_title}" to preserve
+    // existing DB session rows (changing the format would orphan history).
+    let session_title = if is_dm {
+        format!("Telegram: DM {} ({})", user.first_name, user_id)
     } else {
-        // Non-DM-owner sessions: persisted in DB by title — survives restarts.
-        let session_title = if is_dm {
-            format!("Telegram: {}", user.first_name)
-        } else {
-            format!("Telegram: {}", chat_title)
-        };
+        format!("Telegram: {}", chat_title)
+    };
 
+    let session_id = {
         let existing = session_svc
             .find_session_by_title(&session_title)
             .await
@@ -672,11 +634,18 @@ pub(crate) async fn handle_message(
                 }
                 match crate::channels::session_init::create_channel_session(
                     &session_svc,
-                    Some(session_title),
+                    Some(session_title.clone()),
                 )
                 .await
                 {
-                    Ok(new_session) => new_session.id,
+                    Ok(new_session) => {
+                        tracing::info!(
+                            "Telegram: idle-timeout reset — new session {} for \"{}\"",
+                            new_session.id,
+                            session_title,
+                        );
+                        new_session.id
+                    }
                     Err(e) => {
                         tracing::error!("Telegram: failed to create session: {}", e);
                         bot.send_message(msg.chat.id, "Internal error creating session.")
@@ -685,20 +654,25 @@ pub(crate) async fn handle_message(
                     }
                 }
             } else {
+                tracing::debug!(
+                    "Telegram: reusing existing session {} for \"{}\"",
+                    session.id,
+                    session_title,
+                );
                 session.id
             }
         } else {
             match crate::channels::session_init::create_channel_session(
                 &session_svc,
-                Some(session_title),
+                Some(session_title.clone()),
             )
             .await
             {
                 Ok(session) => {
                     tracing::info!(
-                        "Telegram: created new channel session {} for {}",
+                        "Telegram: created new session {} for \"{}\"",
                         session.id,
-                        chat_title
+                        session_title,
                     );
                     session.id
                 }
@@ -730,6 +704,7 @@ pub(crate) async fn handle_message(
     let session_meta = session_svc.get_session(session_id).await.ok().flatten();
     crate::channels::commands::sync_provider_for_session(
         &agent,
+        session_id,
         session_meta
             .as_ref()
             .and_then(|s| s.provider_name.as_deref()),

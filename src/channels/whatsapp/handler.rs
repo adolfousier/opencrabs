@@ -469,7 +469,8 @@ pub(crate) async fn handle_message(
         return;
     }
 
-    // Resolve session: owner (first in allowed list) shares TUI session, others get their own
+    // is_owner still used below for /new / owner-only flows, but session
+    // resolution no longer depends on it — every phone gets its own session.
     let is_owner = allowed.is_empty()
         || allowed
             .iter()
@@ -477,44 +478,9 @@ pub(crate) async fn handle_message(
             .map(|a| a.trim_start_matches('+') == phone)
             .unwrap_or(false);
 
-    let session_id = if is_owner {
-        let shared = shared_session.lock().await;
-        match *shared {
-            Some(id) => id,
-            None => {
-                drop(shared);
-                // Resume most recent session from DB (survives daemon restarts)
-                let restored = match session_svc.get_most_recent_session().await {
-                    Ok(Some(s)) => {
-                        tracing::info!("WhatsApp: restored most recent session {}", s.id);
-                        Some(s.id)
-                    }
-                    _ => None,
-                };
-                let id = match restored {
-                    Some(id) => id,
-                    None => {
-                        tracing::info!("WhatsApp: no existing session, creating one for owner");
-                        match crate::channels::session_init::create_channel_session(
-                            &session_svc,
-                            Some("Chat".to_string()),
-                        )
-                        .await
-                        {
-                            Ok(session) => session.id,
-                            Err(e) => {
-                                tracing::error!("WhatsApp: failed to create session: {}", e);
-                                return;
-                            }
-                        }
-                    }
-                };
-                *shared_session.lock().await = Some(id);
-                id
-            }
-        }
-    } else {
-        // Non-owner sessions: persisted in DB by title — survives restarts.
+    // Sessions are ALWAYS isolated per phone — owner no longer shares the
+    // TUI session. Each phone gets its own session in the DB.
+    let session_id = {
         let session_title = format!("WhatsApp: {}", phone);
 
         let existing = session_svc
@@ -569,6 +535,7 @@ pub(crate) async fn handle_message(
     let session_meta = session_svc.get_session(session_id).await.ok().flatten();
     crate::channels::commands::sync_provider_for_session(
         &agent,
+        session_id,
         session_meta
             .as_ref()
             .and_then(|s| s.provider_name.as_deref()),

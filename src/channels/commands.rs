@@ -17,58 +17,86 @@ use crate::services::SessionService;
 /// Only falls back to the global config if the session has no provider set.
 pub async fn sync_provider_for_session(
     agent: &AgentService,
+    session_id: Uuid,
     session_provider: Option<&str>,
     session_model: Option<&str>,
 ) {
     let config = match Config::load() {
         Ok(c) => c,
-        Err(_) => return,
+        Err(e) => {
+            tracing::warn!(
+                "sync_provider_for_session[{}]: Config::load failed: {} — skipping sync",
+                session_id,
+                e
+            );
+            return;
+        }
     };
 
     // If the session has an explicit provider, restore it (ignoring global config)
     if let Some(sess_prov) = session_provider {
-        let agent_provider = agent.provider_name();
-        let agent_model = agent.provider_model();
+        let agent_provider = agent.provider_name_for_session(session_id);
+        let agent_model = agent.provider_model_for_session(session_id);
         let sess_prov_norm = normalize_provider_name(sess_prov);
         let agent_prov_norm = normalize_provider_name(&agent_provider);
         let same_provider = provider_names_match(&sess_prov_norm, &agent_prov_norm);
         let same_model = session_model.is_none_or(|m| m == agent_model);
 
-        if !same_provider || !same_model {
-            match crate::brain::provider::factory::create_provider_by_name(&config, sess_prov).await
-            {
-                Ok(new_provider) => {
-                    tracing::info!(
-                        "Channel: restored session provider {}/{} (was {}/{})",
-                        sess_prov,
-                        session_model.unwrap_or("default"),
-                        agent_provider,
-                        agent_model,
-                    );
-                    agent.swap_provider(new_provider);
-                    return;
-                }
-                Err(e) => {
-                    // Session's stored provider is gone (e.g. user removed a
-                    // custom provider, or the config was reset). Don't leave
-                    // the channel agent on a stale provider pointing at an
-                    // unreachable URL — fall through to the global config.
-                    tracing::warn!(
-                        "Failed to restore session provider '{}': {} — falling back to active config provider",
-                        sess_prov,
-                        e
-                    );
-                }
-            }
-        } else {
+        if same_provider && same_model {
+            tracing::debug!(
+                "sync_provider_for_session[{}]: already on {}/{} — no swap needed",
+                session_id,
+                agent_provider,
+                agent_model
+            );
             return;
         }
+
+        tracing::info!(
+            "sync_provider_for_session[{}]: session wants {}/{}, agent currently on {}/{} — attempting restore",
+            session_id,
+            sess_prov,
+            session_model.unwrap_or("<default>"),
+            agent_provider,
+            agent_model,
+        );
+        match crate::brain::provider::factory::create_provider_by_name(&config, sess_prov).await {
+            Ok(new_provider) => {
+                tracing::info!(
+                    "sync_provider_for_session[{}]: restored {}/{} (was {}/{})",
+                    session_id,
+                    sess_prov,
+                    session_model.unwrap_or("<default>"),
+                    agent_provider,
+                    agent_model,
+                );
+                agent.swap_provider_for_session(session_id, new_provider);
+                return;
+            }
+            Err(e) => {
+                // Session's stored provider is gone (e.g. user removed a
+                // custom provider, or the config was reset). Don't leave
+                // the channel agent on a stale provider pointing at an
+                // unreachable URL — fall through to the global config.
+                tracing::warn!(
+                    "sync_provider_for_session[{}]: create_provider_by_name('{}') failed: {} — falling back to active config provider",
+                    session_id,
+                    sess_prov,
+                    e
+                );
+            }
+        }
+    } else {
+        tracing::debug!(
+            "sync_provider_for_session[{}]: session has no stored provider — using global config",
+            session_id
+        );
     }
 
-    // No session provider — fall back to global config (first message in a new session)
+    // No session provider (or restore failed) — fall back to global config
     let (cfg_provider, cfg_model) = config.providers.active_provider_and_model();
-    let agent_provider = agent.provider_name();
-    let agent_model = agent.provider_model();
+    let agent_provider = agent.provider_name_for_session(session_id);
+    let agent_model = agent.provider_model_for_session(session_id);
 
     let cfg_provider_norm = normalize_provider_name(&cfg_provider);
     let agent_provider_norm = normalize_provider_name(&agent_provider);
@@ -78,14 +106,19 @@ pub async fn sync_provider_for_session(
         match crate::brain::provider::create_provider(&config).await {
             Ok(new_provider) => {
                 tracing::info!(
-                    "Channel agent synced to config: {} → {}",
-                    agent_provider,
+                    "sync_provider_for_session[{}]: synced to config provider {} (was {})",
+                    session_id,
                     cfg_provider,
+                    agent_provider,
                 );
-                agent.swap_provider(new_provider);
+                agent.swap_provider_for_session(session_id, new_provider);
             }
             Err(e) => {
-                tracing::warn!("Failed to sync channel agent provider: {}", e);
+                tracing::warn!(
+                    "sync_provider_for_session[{}]: create_provider(active config) failed: {}",
+                    session_id,
+                    e
+                );
             }
         }
     }

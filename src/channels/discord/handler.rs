@@ -254,47 +254,11 @@ pub(crate) async fn handle_message(
         discord_state.set_guild_id(guild_id.get()).await;
     }
 
-    // Resolve session: owner DM shares TUI session; guild channels get per-channel sessions
-    let session_id = if is_owner && is_dm {
-        let shared = shared_session.lock().await;
-        match *shared {
-            Some(id) => id,
-            None => {
-                drop(shared);
-                // Resume most recent session from DB (survives daemon restarts)
-                let restored = match session_svc.get_most_recent_session().await {
-                    Ok(Some(s)) => {
-                        tracing::info!("Discord: restored most recent session {}", s.id);
-                        Some(s.id)
-                    }
-                    _ => None,
-                };
-                let id = match restored {
-                    Some(id) => id,
-                    None => {
-                        tracing::info!("Discord: no existing session, creating one for owner");
-                        match crate::channels::session_init::create_channel_session(
-                            &session_svc,
-                            Some("Chat".to_string()),
-                        )
-                        .await
-                        {
-                            Ok(session) => session.id,
-                            Err(e) => {
-                                tracing::error!("Discord: failed to create session: {}", e);
-                                return;
-                            }
-                        }
-                    }
-                };
-                *shared_session.lock().await = Some(id);
-                id
-            }
-        }
-    } else {
-        // Non-DM-owner sessions: persisted in DB by title — survives restarts.
+    // Sessions are ALWAYS isolated per chat — owner DMs no longer share the
+    // TUI session. DMs keyed by author user_id; guild channels by channel_id.
+    let session_id = {
         let session_title = if is_dm {
-            format!("Discord: {}", msg.author.name)
+            format!("Discord: DM {} ({})", msg.author.name, msg.author.id.get())
         } else {
             format!("Discord: #{}", msg.channel_id.get())
         };
@@ -355,6 +319,7 @@ pub(crate) async fn handle_message(
     let session_meta = session_svc.get_session(session_id).await.ok().flatten();
     crate::channels::commands::sync_provider_for_session(
         &agent,
+        session_id,
         session_meta
             .as_ref()
             .and_then(|s| s.provider_name.as_deref()),

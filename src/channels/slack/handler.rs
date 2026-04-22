@@ -720,49 +720,11 @@ async fn handle_message(
             .await;
     }
 
-    // Resolve session: owner DM shares TUI session; channels/groups get per-channel sessions
-    let session_id = if is_owner && is_dm {
-        let shared = state.shared_session.lock().await;
-        match *shared {
-            Some(id) => id,
-            None => {
-                drop(shared);
-                // Resume most recent session from DB (survives daemon restarts)
-                let restored = match state.session_svc.get_most_recent_session().await {
-                    Ok(Some(s)) => {
-                        tracing::info!("Slack: restored most recent session {}", s.id);
-                        Some(s.id)
-                    }
-                    _ => None,
-                };
-                let id = match restored {
-                    Some(id) => id,
-                    None => {
-                        tracing::info!("Slack: no existing session, creating one for owner");
-                        match crate::channels::session_init::create_channel_session(
-                            &state.session_svc,
-                            Some("Chat".to_string()),
-                        )
-                        .await
-                        {
-                            Ok(session) => session.id,
-                            Err(e) => {
-                                tracing::error!("Slack: failed to create session: {}", e);
-                                return;
-                            }
-                        }
-                    }
-                };
-                *state.shared_session.lock().await = Some(id);
-                id
-            }
-        }
-    } else {
-        // Non-DM-owner sessions: keyed by channel_id for channels (shared per channel),
-        // by user_id for DMs (separate per user).
-        // Persisted in DB by title — survives restarts.
+    // Sessions are ALWAYS isolated per chat — owner DMs no longer share the
+    // TUI session. DMs keyed by user_id; channels keyed by channel_id.
+    let session_id = {
         let session_title = if is_dm {
-            format!("Slack: {}", user_id)
+            format!("Slack: DM {}", user_id)
         } else {
             format!("Slack: #{}", channel_id)
         };
@@ -964,6 +926,7 @@ async fn handle_message(
         .flatten();
     crate::channels::commands::sync_provider_for_session(
         &state.agent,
+        session_id,
         session_meta
             .as_ref()
             .and_then(|s| s.provider_name.as_deref()),
