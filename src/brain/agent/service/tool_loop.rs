@@ -1581,8 +1581,7 @@ impl AgentService {
                         }
                     }
                 }
-                Err(e)
-                    if matches!(&e, crate::brain::provider::ProviderError::ApiError { status, .. } if *status >= 500 && *status < 600) =>
+                Err(e) if matches!(&e, crate::brain::provider::ProviderError::ApiError { status, .. } if *status >= 500 && *status < 600) =>
                 {
                     // 5xx upstream errors (500/502/503/504) are transient — retry
                     // up to 3 times with backoff before falling back, same as
@@ -1657,9 +1656,7 @@ impl AgentService {
                     if let Some(resp) = succeeded {
                         resp
                     } else {
-                        tracing::warn!(
-                            "All 3 5xx retries failed — checking for fallback provider"
-                        );
+                        tracing::warn!("All 3 5xx retries failed — checking for fallback provider");
 
                         if let Some(ref cb) = progress_callback {
                             let active_name = self.provider_name_for_session(session_id);
@@ -1700,11 +1697,7 @@ impl AgentService {
                         for fallback in &stream_candidates {
                             let fb_name = fallback.name().to_string();
                             let fb_model = fallback.default_model().to_string();
-                            tracing::info!(
-                                "5xx fallback trying '{}/{}'",
-                                fb_name,
-                                fb_model
-                            );
+                            tracing::info!("5xx fallback trying '{}/{}'", fb_name, fb_model);
                             if let Some(ref cb) = progress_callback {
                                 cb(
                                     session_id,
@@ -1759,8 +1752,7 @@ impl AgentService {
                                     );
                                     stream_succeeded = Some(resp);
                                     // Sticky swap so subsequent iterations use this provider
-                                    self.provider_for_session(session_id)
-                                        .sticky_swap(&fb_name, &fb_model, "5xx error");
+                                    self.swap_provider_for_session(session_id, (*fallback).clone());
                                     break;
                                 }
                                 Err(fb_err) => {
