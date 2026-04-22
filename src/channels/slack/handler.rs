@@ -1421,7 +1421,10 @@ async fn handle_message(
                 intermediates.len()
             );
             for ts in &intermediates {
-                let del = SlackApiChatDeleteRequest::new(SlackChannelId::new(channel_id.clone()), ts.clone());
+                let del = SlackApiChatDeleteRequest::new(
+                    SlackChannelId::new(channel_id.clone()),
+                    ts.clone(),
+                );
                 let _ = session.chat_delete(&del).await;
             }
         }
