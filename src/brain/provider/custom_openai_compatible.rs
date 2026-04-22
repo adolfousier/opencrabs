@@ -2730,12 +2730,11 @@ impl Provider for OpenAIProvider {
             marker_carry: String,
         }
 
-        // Detect whether this stream is talking to a local inference server
-        // (llama.cpp / MLX / LM Studio / Ollama). Local Qwen / Kimi / DeepSeek
-        // models leak tool calls as content text — we want to suppress those
-        // markers from the display stream so the TUI renders only structured
-        // `ContentBlock::ToolUse` events, matching the cloud-provider UX.
-        let is_local_stream = crate::brain::provider::factory::is_local_base_url(&self.base_url);
+        // Tool-call marker filtering runs for ALL OpenAI-compatible providers.
+        // Some cloud/custom providers also leak tool calls as text content
+        // (e.g. `<tool_call>{...}`) instead of using the structured `tool_calls` field.
+        // The filter suppresses raw markers from the TUI and captures them
+        // for proper extraction at finish_reason.
 
         let state = std::sync::Arc::new(std::sync::Mutex::new(StreamState {
             emitted_message_start: false,
@@ -3161,63 +3160,60 @@ impl Provider for OpenAIProvider {
                                                 // After scanning, hold back any suffix that still looks
                                                 // like the start of a marker so the next chunk can close
                                                 // the match.
+                                                // Only match actual tool-call invocation formats.
+                                                // JSON field names like "tool_calls" are NOT markers
+                                                // — they appear in source code and cause false positives
+                                                // that bleed raw content into the TUI.
                                                 const TOOL_MARKERS: &[&str] = &[
                                                     "<tool_call>",
                                                     "<function=",
-                                                    "tool_call:",
-                                                    "\"tool_calls\"",
-                                                    "\"tool_call\"",
                                                 ];
                                                 let mut display_text: String = String::new();
-                                                if is_local_stream {
-                                                    if st.tool_block_active {
-                                                        // Already capturing — all further content is tool body.
-                                                        st.tool_capture_buffer.push_str(&filtered);
+                                                if st.tool_block_active {
+                                                    // Already capturing — all further content is tool body.
+                                                    st.tool_capture_buffer.push_str(&filtered);
+                                                } else {
+                                                    // Prepend carry so tokens split across chunk
+                                                    // boundaries still match as one unit.
+                                                    let mut working = std::mem::take(&mut st.marker_carry);
+                                                    working.push_str(&filtered);
+
+                                                    let first = TOOL_MARKERS
+                                                        .iter()
+                                                        .filter_map(|m| working.find(m).map(|p| (p, *m)))
+                                                        .min_by_key(|(p, _)| *p);
+
+                                                    if let Some((pos, marker)) = first {
+                                                        let before: String = working[..pos].to_string();
+                                                        let after = &working[pos..];
+                                                        st.tool_capture_buffer.push_str(after);
+                                                        st.tool_block_active = true;
+                                                        display_text = before;
+                                                        tracing::info!(
+                                                            "[STREAM_FILTER] Tool-call marker {:?} detected — routing {} bytes to capture buffer",
+                                                            marker, after.len()
+                                                        );
                                                     } else {
-                                                        // Prepend carry so tokens split across chunk
-                                                        // boundaries still match as one unit.
-                                                        let mut working = std::mem::take(&mut st.marker_carry);
-                                                        working.push_str(&filtered);
-
-                                                        let first = TOOL_MARKERS
-                                                            .iter()
-                                                            .filter_map(|m| working.find(m).map(|p| (p, *m)))
-                                                            .min_by_key(|(p, _)| *p);
-
-                                                        if let Some((pos, marker)) = first {
-                                                            let before: String = working[..pos].to_string();
-                                                            let after = &working[pos..];
-                                                            st.tool_capture_buffer.push_str(after);
-                                                            st.tool_block_active = true;
-                                                            display_text = before;
-                                                            tracing::info!(
-                                                                "[STREAM_FILTER] Tool-call marker {:?} detected — routing {} bytes to capture buffer",
-                                                                marker, after.len()
-                                                            );
+                                                        // No full marker match. Hold back any trailing
+                                                        // suffix that's a viable prefix of some marker
+                                                        // so the next chunk can finish the match.
+                                                        let tail_keep = tool_marker_prefix_len(
+                                                            &working,
+                                                            TOOL_MARKERS,
+                                                        );
+                                                        if tail_keep >= working.len() {
+                                                            // Entire working string is a viable prefix
+                                                            // — hold it all, emit nothing this tick.
+                                                            st.marker_carry = working;
+                                                        } else if tail_keep > 0 {
+                                                            let split = working.len() - tail_keep;
+                                                            display_text = working[..split].to_string();
+                                                            st.marker_carry =
+                                                                working[split..].to_string();
                                                         } else {
-                                                            // No full marker match. Hold back any trailing
-                                                            // suffix that's a viable prefix of some marker
-                                                            // so the next chunk can finish the match.
-                                                            let tail_keep = tool_marker_prefix_len(
-                                                                &working,
-                                                                TOOL_MARKERS,
-                                                            );
-                                                            if tail_keep >= working.len() {
-                                                                // Entire working string is a viable prefix
-                                                                // — hold it all, emit nothing this tick.
-                                                                st.marker_carry = working;
-                                                            } else if tail_keep > 0 {
-                                                                let split = working.len() - tail_keep;
-                                                                display_text = working[..split].to_string();
-                                                                st.marker_carry =
-                                                                    working[split..].to_string();
-                                                            } else {
-                                                                display_text = working;
-                                                            }
+                                                            display_text = working;
                                                         }
                                                     }
-                                                } else {
-                                                    display_text = filtered.clone();
                                                 }
 
                                                 if !display_text.is_empty() {

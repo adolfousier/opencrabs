@@ -1116,12 +1116,15 @@ impl App {
 
         let content_lower = msg.content.to_lowercase();
         let has_db_thinking = msg.thinking.as_ref().is_some_and(|t| !t.trim().is_empty());
+        let has_tool_call_tag =
+            msg.content.contains("\u{fe0f}\u{20e3}") || msg.content.contains("<tool_call>");
         if msg.role != "assistant"
             || (!msg.content.contains("<!-- tools")
                 && !msg.content.contains("<!-- reasoning -->")
                 && !content_lower.contains("<antthinking")
                 && !content_lower.contains("<think")
-                && !has_db_thinking)
+                && !has_db_thinking
+                && !has_tool_call_tag)
         {
             return vec![DisplayMessage::from(msg)];
         }
