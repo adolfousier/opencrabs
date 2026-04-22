@@ -99,6 +99,7 @@ pub struct OnboardingWizard {
     // Voicebox TTS
     pub tts_voicebox_base_url: String,
     pub tts_voicebox_profile_id: String,
+    pub tts_voicebox_engine: String,
 
     /// Step 7: Image Setup
     pub image_field: ImageField,
@@ -402,6 +403,7 @@ impl OnboardingWizard {
             // Voicebox TTS
             tts_voicebox_base_url: String::new(),
             tts_voicebox_profile_id: String::new(),
+            tts_voicebox_engine: String::new(),
 
             image_field: ImageField::VisionToggle,
             image_vision_enabled: false,
@@ -672,6 +674,8 @@ impl OnboardingWizard {
                 let vb = tts.voicebox.as_ref().unwrap();
                 wizard.tts_voicebox_base_url = vb.base_url.clone();
                 wizard.tts_voicebox_profile_id = vb.profile_id.clone();
+                wizard.tts_voicebox_engine = vb.engine.clone();
+                wizard.tts_voicebox_engine = vb.engine.clone();
             } else if tts.openai_compatible.as_ref().is_some_and(|v| v.enabled) {
                 wizard.tts_provider = TtsProvider::OpenAiCompatible;
                 wizard.tts_enabled = true;

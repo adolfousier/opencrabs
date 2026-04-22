@@ -743,6 +743,14 @@ impl OnboardingWizard {
                         &self.tts_voicebox_profile_id
                     );
                 }
+                if !self.tts_voicebox_engine.is_empty() {
+                    try_write!(
+                        write_errors,
+                        "providers.tts.voicebox",
+                        "engine",
+                        &self.tts_voicebox_engine
+                    );
+                }
             }
         } // end if write_voice
 

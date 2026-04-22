@@ -1423,6 +1423,85 @@ impl App {
                                     };
                                     format!("[Model changed to {} (provider: {})]", mname, pname)
                                 }
+                                OnboardingStep::VoiceSetup => {
+                                    let stt_name = match wizard.stt_provider {
+                                        super::onboarding::SttProvider::Off => "Off",
+                                        super::onboarding::SttProvider::Groq => "Groq",
+                                        super::onboarding::SttProvider::Local => "Local Whisper",
+                                        super::onboarding::SttProvider::OpenAiCompatible => {
+                                            "OpenAI-compatible"
+                                        }
+                                        super::onboarding::SttProvider::Voicebox => "Voicebox",
+                                    };
+                                    let tts_name = match wizard.tts_provider {
+                                        super::onboarding::TtsProvider::Off => "Off",
+                                        super::onboarding::TtsProvider::OpenAi => "OpenAI",
+                                        super::onboarding::TtsProvider::Local => "Local Piper",
+                                        super::onboarding::TtsProvider::OpenAiCompatible => {
+                                            "OpenAI-compatible"
+                                        }
+                                        super::onboarding::TtsProvider::Voicebox => "Voicebox",
+                                    };
+                                    let mut parts = vec![
+                                        format!("STT: {}", stt_name),
+                                        format!("TTS: {}", tts_name),
+                                    ];
+                                    if wizard.tts_provider
+                                        == super::onboarding::TtsProvider::Voicebox
+                                        && !wizard.tts_voicebox_profile_id.is_empty()
+                                    {
+                                        parts.push(format!(
+                                            "Profile: {}",
+                                            &wizard.tts_voicebox_profile_id
+                                                [..8.min(wizard.tts_voicebox_profile_id.len())]
+                                        ));
+                                    }
+                                    if wizard.tts_provider
+                                        == super::onboarding::TtsProvider::Voicebox
+                                        && !wizard.tts_voicebox_engine.is_empty()
+                                    {
+                                        parts.push(format!(
+                                            "Engine: {}",
+                                            wizard.tts_voicebox_engine
+                                        ));
+                                    }
+                                    format!("Voice settings saved — {}", parts.join(" | "))
+                                }
+                                OnboardingStep::ImageSetup => {
+                                    let mut parts = vec![];
+                                    if wizard.image_vision_enabled {
+                                        parts.push("Vision: ON".to_string());
+                                    }
+                                    if wizard.image_generation_enabled {
+                                        parts.push("Generation: ON".to_string());
+                                    }
+                                    if parts.is_empty() {
+                                        parts.push("Image: OFF".to_string());
+                                    }
+                                    format!("Image settings saved — {}", parts.join(" | "))
+                                }
+                                OnboardingStep::Channels => {
+                                    let mut parts = vec![];
+                                    if wizard.is_telegram_enabled() {
+                                        parts.push("Telegram".to_string());
+                                    }
+                                    if wizard.is_discord_enabled() {
+                                        parts.push("Discord".to_string());
+                                    }
+                                    if wizard.channel_toggles.get(2).is_some_and(|t| t.1) {
+                                        parts.push("WhatsApp".to_string());
+                                    }
+                                    if wizard.is_slack_enabled() {
+                                        parts.push("Slack".to_string());
+                                    }
+                                    if wizard.is_trello_enabled() {
+                                        parts.push("Trello".to_string());
+                                    }
+                                    if parts.is_empty() {
+                                        parts.push("All channels OFF".to_string());
+                                    }
+                                    format!("Channels saved — {}", parts.join(", "))
+                                }
                                 _ => "Settings saved.".to_string(),
                             };
                             self.push_system_message(msg);

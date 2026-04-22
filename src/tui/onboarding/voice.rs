@@ -94,8 +94,15 @@ pub fn handle_key(wizard: &mut OnboardingWizard, event: KeyEvent) -> WizardActio
             wizard,
             event.code,
             |w| &mut w.tts_voicebox_profile_id,
-            VoiceField::Continue,
+            VoiceField::TtsVoiceboxEngine,
             VoiceField::TtsVoiceboxUrl,
+        ),
+        VoiceField::TtsVoiceboxEngine => handle_text_field(
+            wizard,
+            event.code,
+            |w| &mut w.tts_voicebox_engine,
+            VoiceField::Continue,
+            VoiceField::TtsVoiceboxProfileId,
         ),
         VoiceField::Continue => handle_continue(wizard, event.code),
     }
@@ -312,7 +319,7 @@ fn handle_continue(wizard: &mut OnboardingWizard, key: KeyCode) -> WizardAction 
         KeyCode::BackTab => {
             // Go back to the last field of whatever TTS provider is selected
             wizard.voice_field = match wizard.tts_provider {
-                TtsProvider::Voicebox => VoiceField::TtsVoiceboxProfileId,
+                TtsProvider::Voicebox => VoiceField::TtsVoiceboxEngine,
                 TtsProvider::OpenAiCompatible => VoiceField::TtsOpenaiCompatKey,
                 TtsProvider::Local => VoiceField::TtsLocalVoiceSelect,
                 TtsProvider::OpenAi | TtsProvider::Off => VoiceField::TtsModeSelect,
@@ -803,6 +810,15 @@ fn render_tts_voicebox_fields(lines: &mut Vec<Line<'static>>, wizard: &Onboardin
         &wizard.tts_voicebox_profile_id,
         "",
         profile_focused,
+    );
+
+    let engine_focused = wizard.voice_field == VoiceField::TtsVoiceboxEngine;
+    render_text_field(
+        lines,
+        "  Engine: ",
+        &wizard.tts_voicebox_engine,
+        "kokoro, qwen, qwen_custom_voice",
+        engine_focused,
     );
 }
 

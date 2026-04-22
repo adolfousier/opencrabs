@@ -87,27 +87,27 @@ impl OnboardingWizard {
     }
 
     /// Check if Telegram channel is enabled (index 0 in channel_toggles)
-    pub(super) fn is_telegram_enabled(&self) -> bool {
+    pub fn is_telegram_enabled(&self) -> bool {
         self.channel_toggles.first().is_some_and(|t| t.1)
     }
 
     /// Check if Discord channel is enabled (index 1 in channel_toggles)
-    pub(super) fn is_discord_enabled(&self) -> bool {
+    pub fn is_discord_enabled(&self) -> bool {
         self.channel_toggles.get(1).is_some_and(|t| t.1)
     }
 
     /// Check if WhatsApp channel is enabled (index 2 in channel_toggles)
-    pub(super) fn is_whatsapp_enabled(&self) -> bool {
+    pub fn is_whatsapp_enabled(&self) -> bool {
         self.channel_toggles.get(2).is_some_and(|t| t.1)
     }
 
     /// Check if Slack channel is enabled (index 3 in channel_toggles)
-    pub(super) fn is_slack_enabled(&self) -> bool {
+    pub fn is_slack_enabled(&self) -> bool {
         self.channel_toggles.get(3).is_some_and(|t| t.1)
     }
 
     /// Check if Trello channel is enabled (index 4 in channel_toggles)
-    pub(super) fn is_trello_enabled(&self) -> bool {
+    pub fn is_trello_enabled(&self) -> bool {
         self.channel_toggles.get(4).is_some_and(|t| t.1)
     }
 

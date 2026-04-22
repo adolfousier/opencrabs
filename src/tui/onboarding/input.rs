@@ -321,6 +321,10 @@ impl OnboardingWizard {
                     self.tts_voicebox_profile_id.clear();
                     self.tts_voicebox_profile_id.push_str(clean);
                 }
+                VoiceField::TtsVoiceboxEngine => {
+                    self.tts_voicebox_engine.clear();
+                    self.tts_voicebox_engine.push_str(clean);
+                }
                 _ => {
                     tracing::debug!(
                         "[paste] Voice field {:?} does not accept text input, ignoring paste",
