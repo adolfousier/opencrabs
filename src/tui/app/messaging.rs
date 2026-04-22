@@ -927,6 +927,47 @@ impl App {
 
     /// Expand a DB message into one or more DisplayMessages.
     /// Assistant messages may contain tool markers that get reconstructed into ToolCallGroup display messages.
+    /// Find the byte length of a balanced JSON array starting at `s[0] == '['`.
+    /// Tracks string and escape state so `-->` or `]` tokens inside string
+    /// values don't terminate the scan prematurely (e.g. cargo/rustc
+    /// diagnostics like `--> src/main.rs:42` embedded in a tool-call output).
+    /// Returns `None` if the input doesn't start with `[` or is unbalanced.
+    fn find_balanced_json_end(s: &str) -> Option<usize> {
+        let bytes = s.as_bytes();
+        if bytes.first() != Some(&b'[') {
+            return None;
+        }
+        let mut depth: i32 = 0;
+        let mut in_string = false;
+        let mut escape = false;
+        for (idx, &b) in bytes.iter().enumerate() {
+            if escape {
+                escape = false;
+                continue;
+            }
+            if in_string {
+                match b {
+                    b'\\' => escape = true,
+                    b'"' => in_string = false,
+                    _ => {}
+                }
+                continue;
+            }
+            match b {
+                b'"' => in_string = true,
+                b'[' | b'{' => depth += 1,
+                b']' | b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(idx + 1);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
     /// Supports both v1 (`<!-- tools: desc1 | desc2 -->`) and v2 (`<!-- tools-v2: [JSON] -->`) formats.
     /// Extract reasoning blocks from text. Handles:
     /// - `<!-- reasoning -->...<!-- /reasoning -->`
@@ -1161,74 +1202,96 @@ impl App {
                 "<!-- tools:".len()
             };
             let after_marker = &remaining[marker_start + marker_len..];
-            if let Some(end) = after_marker.find("-->") {
-                let tools_str = after_marker[..end].trim();
 
-                let calls: Vec<ToolCallEntry> = if is_v2 {
-                    // v2: parse JSON array with descriptions, success, output, and tool input
-                    serde_json::from_str::<Vec<serde_json::Value>>(tools_str)
-                        .unwrap_or_default()
-                        .into_iter()
-                        .map(|entry| {
-                            let desc = entry["d"].as_str().unwrap_or("?").to_string();
-                            let success = entry["s"].as_bool().unwrap_or(true);
-                            let output = entry["o"]
-                                .as_str()
-                                .map(|s| s.to_string())
-                                .filter(|s| !s.is_empty());
-                            let tool_input =
-                                entry.get("i").cloned().unwrap_or(serde_json::Value::Null);
-                            ToolCallEntry {
-                                description: desc,
-                                success,
-                                details: output,
-                                completed: true,
-                                tool_input,
-                            }
-                        })
-                        .collect()
+            // v2 markers contain a JSON array that may include `-->` inside
+            // string values (e.g. cargo/rustc diagnostics like
+            // `--> src/main.rs:42`). A naive find("-->") terminates at the
+            // first inner arrow, truncates the JSON, and fails to parse.
+            // Use balanced JSON scanning to find the true closing `]`, then
+            // look for `-->` after it.
+            let (tools_str, close_end) = if is_v2 {
+                let trimmed = after_marker.trim_start();
+                let lead = after_marker.len() - trimmed.len();
+                if let Some(array_end) = Self::find_balanced_json_end(trimmed) {
+                    let tail = &trimmed[array_end..];
+                    let tail_lead = tail.len() - tail.trim_start().len();
+                    let post = &tail[tail_lead..];
+                    if post.starts_with("-->") {
+                        let end = lead + array_end + tail_lead + 3;
+                        (after_marker[..end - 3].trim(), end)
+                    } else {
+                        // No closing `-->` after balanced array — malformed
+                        remaining = after_marker;
+                        break;
+                    }
                 } else {
-                    // v1: plain descriptions, no output
-                    tools_str
-                        .split(" | ")
-                        .map(|desc| ToolCallEntry {
-                            description: desc.to_string(),
-                            success: true,
-                            details: None,
-                            completed: true,
-                            tool_input: serde_json::Value::Null,
-                        })
-                        .collect()
-                };
-
-                if !calls.is_empty() {
-                    let count = calls.len();
-                    result.push(DisplayMessage {
-                        id: Uuid::new_v4(),
-                        role: "tool_group".to_string(),
-                        content: format!(
-                            "{} tool call{}",
-                            count,
-                            if count == 1 { "" } else { "s" }
-                        ),
-                        timestamp,
-                        token_count: None,
-                        cost: None,
-                        approval: None,
-                        approve_menu: None,
-                        details: None,
-                        expanded: false,
-                        tool_group: Some(ToolCallGroup {
-                            calls,
-                            expanded: false,
-                        }),
-                    });
+                    // No balanced JSON array found — malformed
+                    remaining = after_marker;
+                    break;
                 }
-                remaining = &after_marker[end + 3..];
+            } else if let Some(end) = after_marker.find("-->") {
+                (after_marker[..end].trim(), end + 3)
             } else {
                 remaining = after_marker;
                 break;
+            };
+
+            let calls: Vec<ToolCallEntry> = if is_v2 {
+                // v2: parse JSON array with descriptions, success, output, and tool input
+                serde_json::from_str::<Vec<serde_json::Value>>(tools_str)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|entry| {
+                        let desc = entry["d"].as_str().unwrap_or("?").to_string();
+                        let success = entry["s"].as_bool().unwrap_or(true);
+                        let output = entry["o"]
+                            .as_str()
+                            .map(|s| s.to_string())
+                            .filter(|s| !s.is_empty());
+                        let tool_input = entry.get("i").cloned().unwrap_or(serde_json::Value::Null);
+                        ToolCallEntry {
+                            description: desc,
+                            success,
+                            details: output,
+                            completed: true,
+                            tool_input,
+                        }
+                    })
+                    .collect()
+            } else {
+                // v1: plain descriptions, no output
+                tools_str
+                    .split(" | ")
+                    .map(|desc| ToolCallEntry {
+                        description: desc.to_string(),
+                        success: true,
+                        details: None,
+                        completed: true,
+                        tool_input: serde_json::Value::Null,
+                    })
+                    .collect()
+            };
+
+            if !calls.is_empty() {
+                let count = calls.len();
+                result.push(DisplayMessage {
+                    id: Uuid::new_v4(),
+                    role: "tool_group".to_string(),
+                    content: format!("{} tool call{}", count, if count == 1 { "" } else { "s" }),
+                    timestamp,
+                    token_count: None,
+                    cost: None,
+                    approval: None,
+                    approve_menu: None,
+                    details: None,
+                    expanded: false,
+                    tool_group: Some(ToolCallGroup {
+                        calls,
+                        expanded: false,
+                    }),
+                });
             }
+            remaining = &after_marker[close_end..];
         }
 
         // Any remaining text after the last marker
