@@ -42,6 +42,7 @@ impl MessageService {
             token_count: None,
             cost: None,
             input_tokens: None,
+            thinking: None,
         };
 
         repo.create(&message)
@@ -140,6 +141,24 @@ impl MessageService {
         repo.append_content(id, content_to_append)
             .await
             .context("Failed to append to message")?;
+        Ok(())
+    }
+
+    /// Set thinking/reasoning content on a message (non-CLI providers).
+    pub async fn set_thinking(&self, id: Uuid, thinking: &str) -> Result<()> {
+        let repo = MessageRepository::new(self.context.pool());
+        repo.set_thinking(id, thinking)
+            .await
+            .context("Failed to set thinking")?;
+        Ok(())
+    }
+
+    /// Append thinking to a message (non-CLI providers, multi-iteration).
+    pub async fn append_thinking(&self, id: Uuid, thinking: &str) -> Result<()> {
+        let repo = MessageRepository::new(self.context.pool());
+        repo.append_thinking(id, thinking)
+            .await
+            .context("Failed to append thinking")?;
         Ok(())
     }
 

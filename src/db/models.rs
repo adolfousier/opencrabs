@@ -138,6 +138,12 @@ pub struct Message {
     /// Used as the authoritative "last known context size" on session load
     /// — no more tokenizing raw message content to estimate.
     pub input_tokens: Option<i32>,
+    /// Reasoning/thinking content for non-CLI providers (dialagram, custom
+    /// OpenAI-compatible). Persisted separately from `content` so it
+    /// survives restart and can be reconstructed as Ctrl+O expandable
+    /// thinking blocks in the TUI. CLI providers store reasoning inline
+    /// inside `content` as `<!-- reasoning -->` markers instead.
+    pub thinking: Option<String>,
 }
 
 impl Message {
@@ -152,6 +158,7 @@ impl Message {
             token_count: row.get("token_count")?,
             cost: row.get("cost")?,
             input_tokens: row.get("input_tokens").ok(),
+            thinking: row.get("thinking").ok().flatten(),
         })
     }
 
@@ -167,6 +174,7 @@ impl Message {
             token_count: None,
             cost: None,
             input_tokens: None,
+            thinking: None,
         }
     }
 }

@@ -198,6 +198,9 @@ impl Database {
             M::up(include_str!(
                 "../migrations/20260416000001_add_message_input_tokens.sql"
             )),
+            M::up(include_str!(
+                "../migrations/20260421000001_add_message_thinking.sql"
+            )),
         ]);
 
         self.pool

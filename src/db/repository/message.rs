@@ -67,8 +67,8 @@ impl MessageRepository {
             .interact(move |conn| {
                 conn.execute(
                     "INSERT INTO messages (id, session_id, role, content, sequence,
-                                         created_at, token_count, cost)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                                         created_at, token_count, cost, thinking)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                     params![
                         m.id.to_string(),
                         m.session_id.to_string(),
@@ -78,6 +78,7 @@ impl MessageRepository {
                         m.created_at.timestamp(),
                         m.token_count,
                         m.cost,
+                        m.thinking,
                     ],
                 )
             })
@@ -103,13 +104,14 @@ impl MessageRepository {
             .interact(move |conn| {
                 conn.execute(
                     "UPDATE messages
-                     SET content = ?1, token_count = ?2, cost = ?3, input_tokens = ?4
-                     WHERE id = ?5",
+                     SET content = ?1, token_count = ?2, cost = ?3, input_tokens = ?4, thinking = ?5
+                     WHERE id = ?6",
                     params![
                         m.content,
                         m.token_count,
                         m.cost,
                         m.input_tokens,
+                        m.thinking,
                         m.id.to_string()
                     ],
                 )
@@ -171,6 +173,62 @@ impl MessageRepository {
             .context("Failed to append to message")?;
 
         tracing::debug!("Appended content to message: {}", id);
+        Ok(())
+    }
+
+    /// Set the thinking/reasoning content on an existing message.
+    /// Called once per iteration for non-CLI providers to persist reasoning
+    /// that was collected during streaming into the `thinking` column.
+    pub async fn set_thinking(&self, id: Uuid, thinking: &str) -> Result<()> {
+        let id_str = id.to_string();
+        let thinking_val = thinking.to_string();
+        self.pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.execute(
+                    "UPDATE messages SET thinking = ?1 WHERE id = ?2",
+                    params![thinking_val, id_str],
+                )
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to set thinking on message")?;
+
+        tracing::debug!("Set thinking ({} chars) on message: {}", thinking.len(), id);
+        Ok(())
+    }
+
+    /// Append to existing thinking content (accumulates reasoning across
+    /// multiple tool-loop iterations for non-CLI providers).
+    pub async fn append_thinking(&self, id: Uuid, thinking_to_append: &str) -> Result<()> {
+        let id_str = id.to_string();
+        let thinking = thinking_to_append.to_string();
+        self.pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                // If thinking is NULL, just set it; otherwise concatenate with separator
+                conn.execute(
+                    "UPDATE messages SET thinking = CASE \
+                     WHEN thinking IS NULL THEN ?1 \
+                     ELSE thinking || char(10) || char(10) || ?1 \
+                     END \
+                     WHERE id = ?2",
+                    params![thinking, id_str],
+                )
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to append thinking to message")?;
+
+        tracing::debug!(
+            "Appended thinking ({} chars) to message: {}",
+            thinking_to_append.len(),
+            id
+        );
         Ok(())
     }
 
