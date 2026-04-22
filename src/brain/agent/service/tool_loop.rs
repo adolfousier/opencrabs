@@ -1581,6 +1581,210 @@ impl AgentService {
                         }
                     }
                 }
+                Err(e)
+                    if matches!(&e, crate::brain::provider::ProviderError::ApiError { status, .. } if *status >= 500 && *status < 600) =>
+                {
+                    // 5xx upstream errors (500/502/503/504) are transient — retry
+                    // up to 3 times with backoff before falling back, same as
+                    // StreamError/Timeout. Without this the user sees a hard
+                    // failure on every blip from the provider.
+                    let err_msg = e.to_string();
+                    tracing::warn!("Upstream 5xx error: {} — retrying up to 3 times", err_msg);
+                    self.record_provider_feedback(
+                        session_id,
+                        "provider_error",
+                        &model_name,
+                        Some(&err_msg),
+                    );
+
+                    let mut last_err = e;
+                    let mut succeeded = None;
+
+                    for attempt in 1..=3 {
+                        tracing::info!("5xx retry attempt {}/3 after: {}", attempt, last_err);
+
+                        tokio::time::sleep(tokio::time::Duration::from_millis(
+                            500 * (1 << (attempt - 1)),
+                        ))
+                        .await;
+
+                        let mut retry_req =
+                            LLMRequest::new(model_name.clone(), context.messages.clone())
+                                .with_max_tokens(self.max_tokens);
+                        retry_req.working_directory =
+                            Some(self.get_working_directory().to_string_lossy().to_string());
+                        retry_req.session_id = Some(session_id);
+                        if let Some(system) = &context.system_brain {
+                            retry_req = retry_req.with_system(system.clone());
+                        }
+                        if self.tool_registry.count() > 0 {
+                            retry_req =
+                                retry_req.with_tools(self.tool_registry.get_tool_definitions());
+                        }
+
+                        match self
+                            .stream_complete(
+                                session_id,
+                                retry_req,
+                                cancel_token.as_ref(),
+                                progress_callback.as_ref(),
+                                if is_cli_provider {
+                                    self.message_queue_callback.as_ref()
+                                } else {
+                                    None
+                                },
+                                if is_cli_provider {
+                                    Some(&queued_buf)
+                                } else {
+                                    None
+                                },
+                                false,
+                            )
+                            .await
+                        {
+                            Ok(resp) => {
+                                tracing::info!("5xx retry {}/3 succeeded", attempt);
+                                succeeded = Some(resp);
+                                break;
+                            }
+                            Err(retry_err) => {
+                                tracing::warn!("5xx retry {}/3 failed: {}", attempt, retry_err);
+                                last_err = retry_err;
+                            }
+                        }
+                    }
+
+                    if let Some(resp) = succeeded {
+                        resp
+                    } else {
+                        tracing::warn!(
+                            "All 3 5xx retries failed — checking for fallback provider"
+                        );
+
+                        if let Some(ref cb) = progress_callback {
+                            let active_name = self.provider_name_for_session(session_id);
+                            cb(
+                                session_id,
+                                ProgressEvent::SelfHealingAlert {
+                                    message: format!(
+                                        "5xx error on '{}/{}' after 3 retries. {}",
+                                        active_name,
+                                        model_name,
+                                        if self.has_fallback_provider() {
+                                            "Switching to fallback provider..."
+                                        } else {
+                                            "No fallback provider configured."
+                                        }
+                                    ),
+                                },
+                            );
+                        }
+
+                        let stream_active_name = self
+                            .provider
+                            .read()
+                            .ok()
+                            .map(|p| p.name().to_string())
+                            .unwrap_or_default();
+                        let stream_candidates: Vec<_> = self
+                            .fallback_providers
+                            .iter()
+                            .filter(|p| p.name() != stream_active_name)
+                            .collect();
+
+                        if stream_candidates.is_empty() {
+                            return Err(AgentError::Provider(last_err));
+                        }
+
+                        let mut stream_succeeded = None;
+                        for fallback in &stream_candidates {
+                            let fb_name = fallback.name().to_string();
+                            let fb_model = fallback.default_model().to_string();
+                            tracing::info!(
+                                "5xx fallback trying '{}/{}'",
+                                fb_name,
+                                fb_model
+                            );
+                            if let Some(ref cb) = progress_callback {
+                                cb(
+                                    session_id,
+                                    ProgressEvent::SelfHealingAlert {
+                                        message: format!(
+                                            "Trying fallback '{}/{}'...",
+                                            fb_name, fb_model
+                                        ),
+                                    },
+                                );
+                            }
+
+                            let mut fb_req =
+                                LLMRequest::new(fb_model.clone(), context.messages.clone())
+                                    .with_max_tokens(self.max_tokens);
+                            fb_req.working_directory =
+                                Some(self.get_working_directory().to_string_lossy().to_string());
+                            fb_req.session_id = Some(session_id);
+                            if let Some(system) = &context.system_brain {
+                                fb_req = fb_req.with_system(system.clone());
+                            }
+                            if self.tool_registry.count() > 0 {
+                                fb_req =
+                                    fb_req.with_tools(self.tool_registry.get_tool_definitions());
+                            }
+
+                            match self
+                                .stream_complete(
+                                    session_id,
+                                    fb_req,
+                                    cancel_token.as_ref(),
+                                    progress_callback.as_ref(),
+                                    if is_cli_provider {
+                                        self.message_queue_callback.as_ref()
+                                    } else {
+                                        None
+                                    },
+                                    if is_cli_provider {
+                                        Some(&queued_buf)
+                                    } else {
+                                        None
+                                    },
+                                    false,
+                                )
+                                .await
+                            {
+                                Ok(resp) => {
+                                    tracing::info!(
+                                        "5xx fallback succeeded with '{}/{}'",
+                                        fb_name,
+                                        fb_model
+                                    );
+                                    stream_succeeded = Some(resp);
+                                    // Sticky swap so subsequent iterations use this provider
+                                    self.provider_for_session(session_id)
+                                        .sticky_swap(&fb_name, &fb_model, "5xx error");
+                                    break;
+                                }
+                                Err(fb_err) => {
+                                    tracing::warn!(
+                                        "5xx fallback '{}/{}' failed: {}",
+                                        fb_name,
+                                        fb_model,
+                                        fb_err
+                                    );
+                                }
+                            }
+                        }
+
+                        if let Some(resp) = stream_succeeded {
+                            resp
+                        } else {
+                            tracing::error!(
+                                "All {} 5xx fallback providers exhausted",
+                                stream_candidates.len()
+                            );
+                            return Err(AgentError::Provider(last_err));
+                        }
+                    }
+                }
                 Err(e) => return Err(AgentError::Provider(e)),
             };
 
@@ -2262,10 +2466,20 @@ impl AgentService {
                 }
             } else {
                 // Non-CLI: separate writes (tool execution happens between iterations)
-                // NOTE: reasoning_text is intentionally NOT persisted to DB content.
+                // NOTE: reasoning_text is intentionally NOT persisted to DB *content*.
                 // Writing <!-- reasoning --> markers teaches models (esp. qwen3.6-plus)
                 // to echo them back in the content field, causing reasoning leaks.
-                // Reasoning is already captured separately via reasoning_buf.
+                // Instead, reasoning is persisted to the separate `thinking` column
+                // so it survives restart without polluting the content sent back to
+                // the model or leaking to Telegram/Slack channels.
+
+                if let Some(ref reasoning) = reasoning_text
+                    && !reasoning.trim().is_empty()
+                {
+                    let _ = message_service
+                        .set_thinking(assistant_db_msg.id, reasoning)
+                        .await;
+                }
 
                 if !iteration_text.is_empty() {
                     if !accumulated_text.is_empty() {
