@@ -159,6 +159,13 @@ impl Tool for AnalyzeImageTool {
             .build()
             .map_err(|e| super::error::ToolError::Execution(e.to_string()))?;
 
+        tracing::info!(
+            "analyze_image: calling Gemini model={} url={} key_prefix={}",
+            self.model,
+            url,
+            &self.api_key.chars().take(10).collect::<String>()
+        );
+
         let response = client
             .post(&url)
             .header("Content-Type", "application/json")
@@ -168,19 +175,33 @@ impl Tool for AnalyzeImageTool {
             .await
             .map_err(|e| super::error::ToolError::Execution(e.to_string()))?;
 
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let err_body = response.text().await.unwrap_or_default();
+        let status = response.status().as_u16();
+        tracing::info!("analyze_image: Gemini HTTP status={}", status);
+
+        // Read body as text first so we can log it on failure
+        let body_text = response.text().await.map_err(|e| {
+            super::error::ToolError::Execution(format!("Failed to read response body: {}", e))
+        })?;
+
+        tracing::info!(
+            "analyze_image: Gemini response body (first 300 chars)={}",
+            &body_text.chars().take(300).collect::<String>()
+        );
+
+        if !(200..300).contains(&status) {
             return Ok(ToolResult::error(format!(
                 "Gemini API error {}: {}",
-                status, err_body
+                status, body_text
             )));
         }
 
-        let json: Value = response
-            .json()
-            .await
-            .map_err(|e| super::error::ToolError::Execution(e.to_string()))?;
+        let json: Value = serde_json::from_str(&body_text).map_err(|e| {
+            super::error::ToolError::Execution(format!(
+                "Failed to parse Gemini JSON response: {}. Body (first 500 chars): {}",
+                e,
+                &body_text.chars().take(500).collect::<String>()
+            ))
+        })?;
 
         // Extract text response
         let empty_vec = vec![];
