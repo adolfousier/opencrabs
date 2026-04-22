@@ -370,6 +370,7 @@ pub struct VoiceConfig {
     pub voicebox_tts_enabled: bool,
     pub voicebox_tts_base_url: String,
     pub voicebox_tts_profile_id: String,
+    pub voicebox_tts_engine: String,
 }
 
 fn default_local_stt_model() -> String {
@@ -408,6 +409,7 @@ impl Default for VoiceConfig {
             voicebox_tts_enabled: false,
             voicebox_tts_base_url: default_voicebox_url(),
             voicebox_tts_profile_id: String::new(),
+            voicebox_tts_engine: String::new(),
         }
     }
 }
@@ -952,6 +954,9 @@ pub struct VoiceboxTtsConfig {
     /// Voice profile ID for synthesis
     #[serde(default)]
     pub profile_id: String,
+    /// TTS engine (e.g. "kokoro", "qwen", "qwen_custom_voice")
+    #[serde(default)]
+    pub engine: String,
 }
 
 impl Default for VoiceboxTtsConfig {
@@ -960,6 +965,7 @@ impl Default for VoiceboxTtsConfig {
             enabled: false,
             base_url: default_voicebox_url(),
             profile_id: String::new(),
+            engine: String::new(),
         }
     }
 }
@@ -1766,6 +1772,10 @@ impl Config {
             .and_then(|t| t.voicebox.as_ref())
             .map(|v| v.profile_id.clone())
             .unwrap_or_default();
+        let voicebox_tts_engine = tts
+            .and_then(|t| t.voicebox.as_ref())
+            .map(|v| v.engine.clone())
+            .unwrap_or_default();
 
         let stt_provider = stt.and_then(|s| s.groq.clone());
         let tts_provider = tts.and_then(|t| t.openai.clone());
@@ -1791,6 +1801,7 @@ impl Config {
             voicebox_tts_enabled,
             voicebox_tts_base_url,
             voicebox_tts_profile_id,
+            voicebox_tts_engine,
         }
     }
 

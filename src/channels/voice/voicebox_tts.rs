@@ -20,6 +20,7 @@ pub struct VoiceboxTts {
     client: Client,
     base_url: String,
     profile_id: String,
+    engine: String,
 }
 
 #[derive(Deserialize)]
@@ -51,11 +52,12 @@ struct StatusResponse {
 
 impl VoiceboxTts {
     /// Create a new Voicebox TTS client.
-    pub fn new(base_url: &str, profile_id: &str) -> Self {
+    pub fn new(base_url: &str, profile_id: &str, engine: &str) -> Self {
         Self {
             client: Client::new(),
             base_url: base_url.to_string(),
             profile_id: profile_id.to_string(),
+            engine: engine.to_string(),
         }
     }
 
@@ -72,6 +74,7 @@ impl VoiceboxTts {
         let body = serde_json::json!({
             "profile_id": self.profile_id,
             "text": text,
+            "engine": self.engine,
         });
 
         let response = self

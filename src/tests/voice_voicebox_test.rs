@@ -11,14 +11,14 @@ mod tests {
 
     #[tokio::test]
     async fn tts_new_creates_client() {
-        let _tts = VoiceboxTts::new("http://localhost:8000", "profile-abc");
+        let _tts = VoiceboxTts::new("http://localhost:8000", "profile-abc", "xtts");
         // Just verify it doesn't panic and stores the values
         // (fields are private, so we test via synthesize behavior)
     }
 
     #[tokio::test]
     async fn tts_empty_text_rejected() {
-        let tts = VoiceboxTts::new("http://localhost:8000", "profile-abc");
+        let tts = VoiceboxTts::new("http://localhost:8000", "profile-abc", "xtts");
         let result = tts.synthesize("").await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("empty text"));
@@ -36,7 +36,8 @@ mod tests {
             .mock("POST", "/generate")
             .match_body(mockito::Matcher::Json(serde_json::json!({
                 "profile_id": "profile-abc",
-                "text": "hello voicebox"
+                "text": "hello voicebox",
+                "engine": "xtts"
             })))
             .with_status(200)
             .with_header("content-type", "application/json")
@@ -61,7 +62,7 @@ mod tests {
             .create_async()
             .await;
 
-        let tts = VoiceboxTts::new(&mock_url, "profile-abc");
+        let tts = VoiceboxTts::new(&mock_url, "profile-abc", "xtts");
         let result = tts.synthesize("hello voicebox").await;
 
         assert!(result.is_ok());
@@ -99,7 +100,7 @@ mod tests {
             .create_async()
             .await;
 
-        let tts = VoiceboxTts::new(&mock_url, "profile-abc");
+        let tts = VoiceboxTts::new(&mock_url, "profile-abc", "xtts");
         let result = tts.synthesize("hello").await;
 
         assert!(result.is_err());
@@ -119,7 +120,7 @@ mod tests {
             .create_async()
             .await;
 
-        let tts = VoiceboxTts::new(&mock_url, "profile-abc");
+        let tts = VoiceboxTts::new(&mock_url, "profile-abc", "xtts");
         let result = tts.synthesize("hello").await;
 
         assert!(result.is_err());
@@ -130,7 +131,7 @@ mod tests {
 
     #[tokio::test]
     async fn tts_connection_refused_on_bad_url() {
-        let tts = VoiceboxTts::new("http://localhost:1", "profile");
+        let tts = VoiceboxTts::new("http://localhost:1", "profile", "xtts");
         let result = tts.synthesize("hello").await;
         assert!(result.is_err());
     }

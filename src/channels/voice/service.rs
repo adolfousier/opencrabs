@@ -149,13 +149,15 @@ pub async fn synthesize(text: &str, voice_config: &VoiceConfig) -> Result<Vec<u8
 
     let audio = if voice_config.voicebox_tts_enabled {
         tracing::info!(
-            "TTS dispatch → Voicebox (base_url={}, profile_id={})",
+            "TTS dispatch → Voicebox (base_url={}, profile_id={}, engine={})",
             voice_config.voicebox_tts_base_url,
-            voice_config.voicebox_tts_profile_id
+            voice_config.voicebox_tts_profile_id,
+            voice_config.voicebox_tts_engine
         );
         let client = super::voicebox_tts::VoiceboxTts::new(
             &voice_config.voicebox_tts_base_url,
             &voice_config.voicebox_tts_profile_id,
+            &voice_config.voicebox_tts_engine,
         );
         client.synthesize(text).await?
     } else if let (Some(base_url), Some(api_key)) =
