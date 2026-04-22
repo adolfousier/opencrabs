@@ -228,7 +228,7 @@ impl From<Message> for DisplayMessage {
             cost: msg.cost,
             approval: None,
             approve_menu: None,
-            details: None,
+            details: msg.thinking,
             expanded: false,
             tool_group: None,
         }
@@ -2957,10 +2957,36 @@ mod tests {
             token_count: Some(10),
             cost: Some(0.001),
             input_tokens: None,
+            thinking: None,
         };
 
         let display_msg: DisplayMessage = msg.into();
         assert_eq!(display_msg.role, "user");
         assert_eq!(display_msg.content, "Hello");
+        assert!(display_msg.details.is_none());
+    }
+
+    #[test]
+    fn test_display_message_thinking_from_db() {
+        let msg = Message {
+            id: Uuid::new_v4(),
+            session_id: Uuid::new_v4(),
+            role: "assistant".to_string(),
+            content: "Here is the answer.".to_string(),
+            sequence: 2,
+            created_at: chrono::Utc::now(),
+            token_count: Some(50),
+            cost: Some(0.005),
+            input_tokens: Some(200),
+            thinking: Some("I need to analyze this carefully...".to_string()),
+        };
+
+        let display_msg: DisplayMessage = msg.into();
+        assert_eq!(display_msg.role, "assistant");
+        assert_eq!(display_msg.content, "Here is the answer.");
+        assert_eq!(
+            display_msg.details,
+            Some("I need to analyze this carefully...".to_string())
+        );
     }
 }
