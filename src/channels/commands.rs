@@ -515,14 +515,11 @@ async fn format_sessions(
 // ── /models ─────────────────────────────────────────────────────────────────
 
 fn format_providers(agent: &AgentService) -> ProvidersResponse {
-    // Read current provider/model from config (not the channel agent, which may be stale)
-    let (current_provider, current_model) = match crate::config::Config::load() {
-        Ok(cfg) => {
-            let (prov, model) = cfg.providers.active_provider_and_model();
-            (prov, model)
-        }
-        Err(_) => (agent.provider_name(), agent.provider_model()),
-    };
+    // Use the agent's ACTUAL current provider/model, not config.toml.
+    // Channel model switches call agent.swap_provider() without touching config,
+    // so reading from Config::load() shows stale data after a channel switch.
+    let current_provider = agent.provider_name();
+    let current_model = agent.provider_model();
 
     let providers = configured_providers();
 
@@ -541,8 +538,8 @@ fn format_providers(agent: &AgentService) -> ProvidersResponse {
     }
 
     ProvidersResponse {
-        current_provider,
-        current_model,
+        current_provider: current_provider.clone(),
+        current_model: current_model.clone(),
         providers,
         text: text_lines.join("\n"),
     }
