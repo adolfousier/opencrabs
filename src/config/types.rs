@@ -1499,18 +1499,39 @@ fn merge_provider_keys(mut base: ProviderConfigs, keys: ProviderConfigs) -> Prov
             entry.base_url = k.base_url;
         }
     }
-    if let Some(custom_keys) = keys.custom
-        && let Some(ref mut base_customs) = base.custom
-    {
-        // Only merge keys for custom providers that already exist in config.toml
-        // Never create new config entries from keys.toml alone
+    // Merge custom provider keys. Both config.toml and keys.toml go through
+    // deserialize_custom_providers which normalizes keys via normalize_toml_key,
+    // so names should match exactly (e.g. "opencodeiolo-qwen").
+    if let Some(custom_keys) = keys.custom {
+        let base_customs = base.custom.get_or_insert_with(BTreeMap::default);
         for (name, key_cfg) in custom_keys {
             if let Some(key) = key_cfg.api_key
                 && is_real_key(&key)
-                && base_customs.contains_key(&name)
             {
-                let entry = base_customs.entry(name).or_default();
-                entry.api_key = Some(key);
+                use std::collections::btree_map::Entry;
+                match base_customs.entry(name.clone()) {
+                    Entry::Occupied(mut occupied) => {
+                        tracing::info!(
+                            "merge_provider_keys: merging api_key for custom '{}'",
+                            name
+                        );
+                        occupied.get_mut().api_key = Some(key);
+                    }
+                    Entry::Vacant(vacant) => {
+                        // Key exists in keys.toml but not in config.toml.
+                        // Create a minimal entry so the provider can be constructed.
+                        tracing::info!(
+                            "merge_provider_keys: custom '{}' has key in keys.toml but no config.toml entry — creating minimal entry",
+                            name
+                        );
+                        vacant.insert(ProviderConfig {
+                            api_key: Some(key),
+                            base_url: key_cfg.base_url,
+                            default_model: key_cfg.default_model,
+                            ..Default::default()
+                        });
+                    }
+                }
             }
         }
     }

@@ -60,6 +60,22 @@ pub async fn sync_provider_for_session(
             agent_provider,
             agent_model,
         );
+        // Log whether the config actually has an api_key for this provider
+        // to diagnose "Auth error on restart" issues.
+        let has_key = config
+            .providers
+            .custom
+            .as_ref()
+            .and_then(|c| c.get(sess_prov))
+            .and_then(|p| p.api_key.as_ref())
+            .is_some_and(|k| !k.is_empty() && k != "__EXISTING_KEY__");
+        tracing::info!(
+            "sync_provider_for_session[{}]: create_provider_by_name('{}') — config has api_key: {}",
+            session_id,
+            sess_prov,
+            has_key
+        );
+
         match crate::brain::provider::factory::create_provider_by_name(&config, sess_prov).await {
             Ok(new_provider) => {
                 tracing::info!(
@@ -71,15 +87,14 @@ pub async fn sync_provider_for_session(
                     agent_model,
                 );
                 agent.swap_provider_for_session(session_id, new_provider);
-                return;
             }
             Err(e) => {
-                // Session's stored provider is gone (e.g. user removed a
-                // custom provider, or the config was reset). Don't leave
-                // the channel agent on a stale provider pointing at an
-                // unreachable URL — fall through to the global config.
+                // Session has a stored provider but we couldn't create it.
+                // NEVER fall back to global/TUI provider — sessions are isolated.
+                // Leave the agent on whatever provider it currently has.
+                // The self-healing fallback chain in tool_loop will handle auth errors.
                 tracing::warn!(
-                    "sync_provider_for_session[{}]: create_provider_by_name('{}') failed: {} — falling back to active config provider",
+                    "sync_provider_for_session[{}]: create_provider_by_name('{}') failed: {} — keeping current provider (session isolation)",
                     session_id,
                     sess_prov,
                     e
@@ -87,38 +102,37 @@ pub async fn sync_provider_for_session(
             }
         }
     } else {
+        // Session has no stored provider — this is the ONLY case where global config applies
         tracing::debug!(
             "sync_provider_for_session[{}]: session has no stored provider — using global config",
             session_id
         );
-    }
+        let (cfg_provider, cfg_model) = config.providers.active_provider_and_model();
+        let agent_provider = agent.provider_name_for_session(session_id);
+        let agent_model = agent.provider_model_for_session(session_id);
 
-    // No session provider (or restore failed) — fall back to global config
-    let (cfg_provider, cfg_model) = config.providers.active_provider_and_model();
-    let agent_provider = agent.provider_name_for_session(session_id);
-    let agent_model = agent.provider_model_for_session(session_id);
+        let cfg_provider_norm = normalize_provider_name(&cfg_provider);
+        let agent_provider_norm = normalize_provider_name(&agent_provider);
+        let same_provider = provider_names_match(&cfg_provider_norm, &agent_provider_norm);
 
-    let cfg_provider_norm = normalize_provider_name(&cfg_provider);
-    let agent_provider_norm = normalize_provider_name(&agent_provider);
-    let same_provider = provider_names_match(&cfg_provider_norm, &agent_provider_norm);
-
-    if !same_provider || cfg_model != agent_model {
-        match crate::brain::provider::create_provider(&config).await {
-            Ok(new_provider) => {
-                tracing::info!(
-                    "sync_provider_for_session[{}]: synced to config provider {} (was {})",
-                    session_id,
-                    cfg_provider,
-                    agent_provider,
-                );
-                agent.swap_provider_for_session(session_id, new_provider);
-            }
-            Err(e) => {
-                tracing::warn!(
-                    "sync_provider_for_session[{}]: create_provider(active config) failed: {}",
-                    session_id,
-                    e
-                );
+        if !same_provider || cfg_model != agent_model {
+            match crate::brain::provider::create_provider(&config).await {
+                Ok(new_provider) => {
+                    tracing::info!(
+                        "sync_provider_for_session[{}]: synced to config provider {} (was {})",
+                        session_id,
+                        cfg_provider,
+                        agent_provider,
+                    );
+                    agent.swap_provider_for_session(session_id, new_provider);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "sync_provider_for_session[{}]: create_provider(active config) failed: {}",
+                        session_id,
+                        e
+                    );
+                }
             }
         }
     }
