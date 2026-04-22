@@ -1162,16 +1162,10 @@ impl AgentService {
                             "Rate/account limit"
                         }
                     );
-                    self.record_provider_feedback(
-                        session_id,
-                        "provider_error",
-                        &model_name,
-                        Some(reason),
-                    );
 
                     // Resolve the session's CURRENT primary provider name
-                    // for the alert — never just the model. A user can
-                    // have opencode, opencode2, opencode3 … all routing to
+                    // for the alert AND feedback dimension — never just the model.
+                    // A user can have opencode, opencode2, opencode3 … all routing to
                     // the same underlying model name. "Rate limit on
                     // 'claude-sonnet-4-6'" hides WHICH subscription got
                     // rate-limited. The session's provider is the truth
@@ -1179,6 +1173,14 @@ impl AgentService {
                     // per-session swaps).
                     let primary_from_name = self.provider_name_for_session(session_id);
                     let primary_from_model = model_name.clone();
+                    let provider_model_dim = format!("{}/{}", primary_from_name, model_name);
+
+                    self.record_provider_feedback(
+                        session_id,
+                        "provider_error",
+                        &provider_model_dim,
+                        Some(reason),
+                    );
 
                     if let Some(ref cb) = progress_callback {
                         let prefix = if is_auth {
@@ -1381,10 +1383,12 @@ impl AgentService {
                     // activity instead of a dead turn.
                     let err_msg = e.to_string();
                     tracing::warn!("Mid-stream error: {} — retrying up to 3 times", err_msg);
+                    let primary_from_name = self.provider_name_for_session(session_id);
+                    let provider_model_dim = format!("{}/{}", primary_from_name, model_name);
                     self.record_provider_feedback(
                         session_id,
                         "provider_error",
-                        &model_name,
+                        &provider_model_dim,
                         Some(&err_msg),
                     );
 
@@ -1589,10 +1593,12 @@ impl AgentService {
                     // failure on every blip from the provider.
                     let err_msg = e.to_string();
                     tracing::warn!("Upstream 5xx error: {} — retrying up to 3 times", err_msg);
+                    let primary_from_name = self.provider_name_for_session(session_id);
+                    let provider_model_dim = format!("{}/{}", primary_from_name, model_name);
                     self.record_provider_feedback(
                         session_id,
                         "provider_error",
-                        &model_name,
+                        &provider_model_dim,
                         Some(&err_msg),
                     );
 
