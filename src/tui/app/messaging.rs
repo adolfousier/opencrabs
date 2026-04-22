@@ -967,6 +967,59 @@ impl App {
         // Extract <think> blocks (DeepSeek)
         remaining = Self::extract_tag_case_insensitive(&remaining, "think", &mut reasoning_parts);
 
+        // Extract self-closing tags: <think/>, <antThinking/>, etc.
+        // These appear when the model emits thinking with no content or as a flush marker.
+        for tag_name in ["think", "antthinking"] {
+            let mut cleaned = String::new();
+            let mut rest = remaining.as_str();
+            let open_self = format!("<{}", tag_name);
+            loop {
+                let rest_lower = rest.to_lowercase();
+                if let Some(start) = rest_lower.find(&open_self) {
+                    cleaned.push_str(&rest[..start]);
+                    let after = &rest[start + open_self.len()..];
+                    // Find the closing />
+                    if let Some(end) = after.find("/>") {
+                        let inner = after[..end].trim();
+                        // If the self-closing tag has content attributes, capture them
+                        if !inner.is_empty() && !inner.starts_with('/') {
+                            reasoning_parts.push(inner.to_string());
+                        }
+                        rest = &after[end + 2..];
+                    } else {
+                        // Malformed — keep the rest as-is
+                        cleaned.push_str(&rest[start..]);
+                        rest = "";
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+            cleaned.push_str(rest);
+            remaining = cleaned;
+        }
+
+        // Strip orphan closing tags (</think>, </antThinking>) that leaked
+        // when a stream error dropped mid-thinking-block. These have no
+        // matching open tag so extract_tag_case_insensitive never catches them.
+        for tag_name in ["think", "antthinking"] {
+            let close = format!("</{}>", tag_name);
+            let mut cleaned = String::new();
+            let mut rest = remaining.as_str();
+            loop {
+                let rest_lower = rest.to_lowercase();
+                if let Some(start) = rest_lower.find(&close) {
+                    cleaned.push_str(&rest[..start]);
+                    rest = &rest[start + close.len()..];
+                } else {
+                    break;
+                }
+            }
+            cleaned.push_str(rest);
+            remaining = cleaned;
+        }
+
         let remaining = remaining.trim().to_string();
         if reasoning_parts.is_empty() {
             (None, remaining)
@@ -1021,11 +1074,13 @@ impl App {
         }
 
         let content_lower = msg.content.to_lowercase();
+        let has_db_thinking = msg.thinking.as_ref().is_some_and(|t| !t.trim().is_empty());
         if msg.role != "assistant"
             || (!msg.content.contains("<!-- tools")
                 && !msg.content.contains("<!-- reasoning -->")
                 && !content_lower.contains("<antthinking")
-                && !content_lower.contains("<think"))
+                && !content_lower.contains("<think")
+                && !has_db_thinking)
         {
             return vec![DisplayMessage::from(msg)];
         }
@@ -1036,6 +1091,7 @@ impl App {
         let token_count = msg.token_count;
         let cost = msg.cost;
         let content = msg.content;
+        let db_thinking = msg.thinking;
 
         let mut result = Vec::new();
 
@@ -1225,6 +1281,27 @@ impl App {
                 expanded: false,
                 tool_group: None,
             });
+        }
+
+        // Apply thinking from DB `thinking` column (non-CLI providers).
+        // If no DisplayMessage has `details` set yet but we have persisted
+        // thinking, attach it to the first text-based assistant message.
+        if let Some(ref thinking) = db_thinking
+            && !thinking.trim().is_empty()
+        {
+            let has_details = result.iter().any(|dm| dm.details.is_some());
+            if !has_details {
+                // Find the first assistant text message to attach thinking to
+                if let Some(first_text) = result
+                    .iter_mut()
+                    .find(|dm| dm.role == "assistant" && !dm.content.is_empty())
+                {
+                    first_text.details = Some(thinking.clone());
+                } else if let Some(first) = result.first_mut() {
+                    // Even if it's a tool-only message, attach thinking
+                    first.details = Some(thinking.clone());
+                }
+            }
         }
 
         result
