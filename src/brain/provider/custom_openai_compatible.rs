@@ -1821,22 +1821,33 @@ impl OpenAIProvider {
         // etc.) without losing the actual validation details.
         let body_text = response.text().await.unwrap_or_default();
 
+        // Always log the raw body on any error response. Without this,
+        // generic passthrough messages like opencode.ai's
+        // "Provider returned error" left the operator with nothing to
+        // diagnose — the real error from the upstream backend was
+        // hidden inside the OpenAI-shaped envelope, but all we logged
+        // was the envelope's outer message.
+        tracing::warn!(
+            "[HANDLE_ERROR] {} → {}: raw body (first 1500 chars): {}",
+            self.name,
+            status,
+            body_text.chars().take(1500).collect::<String>(),
+        );
+
         // Try to parse OpenAI's `{error: {message, type}}` shape.
         if let Ok(error_body) = serde_json::from_str::<OpenAIErrorResponse>(&body_text) {
+            // Unwrap proxy passthrough envelopes (opencode.ai, OpenRouter,
+            // etc.) so the real upstream error surfaces instead of a
+            // generic "Provider returned error".
+            let (inner_message, inner_type) = unwrap_proxy_error(&error_body.error);
             let message = if status == 429 {
                 if let Some(secs) = retry_after {
-                    format!(
-                        "{} (retry after {} seconds)",
-                        error_body.error.message, secs
-                    )
+                    format!("{} (retry after {} seconds)", inner_message, secs)
                 } else {
-                    format!(
-                        "{} (rate limited, please retry later)",
-                        error_body.error.message
-                    )
+                    format!("{} (rate limited, please retry later)", inner_message)
                 }
             } else {
-                error_body.error.message
+                inner_message
             };
 
             return if status == 429 {
@@ -1846,7 +1857,7 @@ impl OpenAIProvider {
                 ProviderError::ApiError {
                     status,
                     message,
-                    error_type: Some(error_body.error.error_type.unwrap_or_default()),
+                    error_type: inner_type.or(Some(String::new())),
                 }
             };
         }
@@ -1854,16 +1865,8 @@ impl OpenAIProvider {
         // 422 bodies from FastAPI/pydantic servers (notably Unsloth Studio)
         // come back as `{detail: [{loc, msg, type}, ...]}`. The generic
         // "Unknown error" fallback lost the per-field details, so operators
-        // had no way to see WHICH field the server rejected. Log the raw
-        // body and synthesize a readable summary.
-        if !body_text.is_empty() {
-            tracing::warn!(
-                "[HANDLE_ERROR] {} → {}: non-OpenAI error body (first 1000 chars): {}",
-                self.name,
-                status,
-                body_text.chars().take(1000).collect::<String>(),
-            );
-        }
+        // had no way to see WHICH field the server rejected. The body is
+        // already logged above; we just translate it here.
 
         if status == 422
             && let Ok(pydantic) = serde_json::from_str::<PydanticValidationError>(&body_text)
@@ -3940,6 +3943,61 @@ struct OpenAIError {
     message: String,
     #[serde(rename = "type")]
     error_type: Option<String>,
+    /// Proxy-wrapped upstream errors. opencode.ai in particular hides the
+    /// real backend error inside `error.metadata.raw` as a stringified
+    /// JSON blob (`"{\"error\":{\"message\":\"...\",\"type\":\"...\"}}"`).
+    /// Leaving it wrapped meant users only saw "Provider returned error".
+    #[serde(default)]
+    metadata: Option<OpenAIErrorMetadata>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct OpenAIErrorMetadata {
+    #[serde(default)]
+    raw: Option<String>,
+    #[serde(default)]
+    provider_name: Option<String>,
+}
+
+/// Walk a proxy's nested error envelope to find the real upstream error.
+/// Returns (message, error_type) after stripping the passthrough wrapper.
+/// The `provider_name` (if present) is prepended so operators can tell
+/// which backend — Moonshot AI, Alibaba, z.ai — actually failed.
+fn unwrap_proxy_error(outer: &OpenAIError) -> (String, Option<String>) {
+    let Some(ref metadata) = outer.metadata else {
+        return (outer.message.clone(), outer.error_type.clone());
+    };
+    let Some(ref raw) = metadata.raw else {
+        return (outer.message.clone(), outer.error_type.clone());
+    };
+    // opencode.ai stuffs a stringified JSON of the upstream error in `raw`.
+    // Parse that to get the real message / type.
+    let Ok(inner) = serde_json::from_str::<OpenAIErrorResponse>(raw) else {
+        // Not JSON — just append the raw text so it's visible.
+        let prefix = metadata
+            .provider_name
+            .as_deref()
+            .map(|p| format!("[{}] ", p))
+            .unwrap_or_default();
+        return (
+            format!("{}{}: {}", prefix, outer.message, raw),
+            outer.error_type.clone(),
+        );
+    };
+    let prefix = metadata
+        .provider_name
+        .as_deref()
+        .map(|p| format!("[{}] ", p))
+        .unwrap_or_default();
+    // Prefer the inner (upstream) error — it has the actionable detail.
+    (
+        format!("{}{}", prefix, inner.error.message),
+        inner
+            .error
+            .error_type
+            .clone()
+            .or_else(|| outer.error_type.clone()),
+    )
 }
 
 /// Pydantic / FastAPI default 422 body shape. Used by Unsloth Studio and
