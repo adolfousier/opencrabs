@@ -38,9 +38,12 @@ impl App {
 
     /// Create a new session
     pub(crate) async fn create_new_session(&mut self) -> Result<()> {
-        // Inherit provider and model from the current agent service
+        // Inherit provider and model from the global agent service default.
+        // Do NOT use self.default_model_name — that field gets overwritten
+        // when loading a session to the session's saved model, so it may
+        // be stale (e.g. last session was on a different provider).
         let provider_name = Some(self.agent_service.provider_name());
-        let model = Some(self.default_model_name.clone());
+        let model = Some(self.agent_service.provider_model());
         let session = self
             .session_service
             .create_session_with_provider(Some("New Chat".to_string()), provider_name, model)
