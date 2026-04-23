@@ -77,8 +77,16 @@ impl AgentContext {
         let mut context = Self::new(session_id, max_tokens);
 
         for db_msg in db_messages {
-            // Skip messages with empty content — Anthropic rejects empty text blocks
-            if db_msg.content.is_empty() {
+            // Skip messages with empty content AND no captured reasoning —
+            // Anthropic rejects empty text blocks. A non-empty thinking
+            // column alone still justifies keeping the row so downstream
+            // providers (e.g. Moonshot kimi) see the reasoning context.
+            let has_content = !db_msg.content.is_empty();
+            let has_thinking = db_msg
+                .thinking
+                .as_deref()
+                .is_some_and(|t| !t.trim().is_empty());
+            if !has_content && !has_thinking {
                 continue;
             }
 
@@ -89,12 +97,28 @@ impl AgentContext {
                 _ => Role::User, // Default fallback
             };
 
-            let message = Message {
-                role,
-                content: vec![ContentBlock::Text {
+            // Rehydrate reasoning as a leading ContentBlock::Thinking so
+            // the OpenAI-compatible encoder can emit it as
+            // `reasoning_content` on assistant tool_call messages.
+            // Without this, Moonshot kimi 400s on any resumed turn because
+            // the required `reasoning_content` field is missing.
+            let mut content: Vec<ContentBlock> = Vec::new();
+            if role == Role::Assistant
+                && has_thinking
+                && let Some(thinking) = db_msg.thinking.as_deref()
+            {
+                content.push(ContentBlock::Thinking {
+                    thinking: thinking.to_string(),
+                    signature: None,
+                });
+            }
+            if has_content {
+                content.push(ContentBlock::Text {
                     text: db_msg.content,
-                }],
-            };
+                });
+            }
+
+            let message = Message { role, content };
 
             context.add_message(message);
         }

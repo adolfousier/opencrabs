@@ -2877,7 +2877,11 @@ impl AgentService {
                     session_id,
                     ProgressEvent::IntermediateText {
                         text: iteration_text,
-                        reasoning: reasoning_text,
+                        // Clone: reasoning_text is still needed downstream to
+                        // seed the assistant message's ContentBlock::Thinking
+                        // so follow-up turns (notably kimi/Moonshot) have the
+                        // required `reasoning_content` to echo back.
+                        reasoning: reasoning_text.clone(),
                     },
                 );
             }
@@ -3442,13 +3446,34 @@ impl AgentService {
                 tool_outputs.clear();
             }
 
-            // Add assistant message with tool use to context (filter empty text blocks)
-            let clean_content: Vec<ContentBlock> = response
+            // Add assistant message with tool use to context (filter empty text blocks).
+            // Preserve the live reasoning text as a ContentBlock::Thinking so
+            // downstream providers that require it — notably Moonshot kimi
+            // via opencode.ai/zen/go, which rejects any follow-up turn whose
+            // assistant tool_call messages omit `reasoning_content` — can
+            // echo the real reasoning instead of a placeholder. Other
+            // providers either use it natively (Anthropic) or ignore
+            // unknown blocks (OpenAI, Zhipu, Minimax).
+            let mut clean_content: Vec<ContentBlock> = response
                 .content
                 .iter()
                 .filter(|b| !matches!(b, ContentBlock::Text { text } if text.is_empty()))
                 .cloned()
                 .collect();
+            if let Some(ref reasoning) = reasoning_text
+                && !reasoning.trim().is_empty()
+                && !clean_content
+                    .iter()
+                    .any(|b| matches!(b, ContentBlock::Thinking { .. }))
+            {
+                clean_content.insert(
+                    0,
+                    ContentBlock::Thinking {
+                        thinking: reasoning.clone(),
+                        signature: None,
+                    },
+                );
+            }
             let assistant_msg = Message {
                 role: crate::brain::provider::Role::Assistant,
                 content: clean_content,

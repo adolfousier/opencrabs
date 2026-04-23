@@ -1349,7 +1349,7 @@ impl OpenAIProvider {
     }
 
     /// Convert our generic request to OpenAI-specific format
-    fn to_openai_request(&self, request: LLMRequest) -> OpenAIRequest {
+    pub(crate) fn to_openai_request(&self, request: LLMRequest) -> OpenAIRequest {
         let mut messages = Vec::new();
 
         // Debug: log system brain
@@ -1469,14 +1469,17 @@ impl OpenAIProvider {
                     .collect();
 
                 let content_val = make_content(&text_parts, &image_parts);
+                // Real reasoning flows in via ContentBlock::Thinking blocks
+                // from tool_loop (live turns) and from_db_messages (resumed
+                // turns via the DB `thinking` column). `needs_reasoning_content`
+                // is a last-resort safety for historic DB rows that predate
+                // the thinking column — Moonshot validates non-empty, so a
+                // single space satisfies the shape check when we truly have
+                // nothing to echo. Non-Moonshot providers see None.
                 let reasoning_content = if !thinking_parts.is_empty() {
                     Some(thinking_parts.join("\n"))
                 } else if needs_reasoning_content {
-                    // Moonshot requires the field present; empty string
-                    // satisfies validation when we have no captured
-                    // thinking text (e.g. turn resumed from DB before
-                    // reasoning persistence).
-                    Some(String::new())
+                    Some(" ".to_string())
                 } else {
                     None
                 };
@@ -3771,9 +3774,9 @@ struct AnthropicORCacheControl {
 // ============================================================================
 
 #[derive(Debug, Clone, Serialize)]
-struct OpenAIRequest {
-    model: String,
-    messages: Vec<OpenAIMessage>,
+pub(crate) struct OpenAIRequest {
+    pub(crate) model: String,
+    pub(crate) messages: Vec<OpenAIMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
     /// Legacy token limit field — used by older OpenAI models (gpt-4o, gpt-3.5, etc.)
@@ -3818,15 +3821,15 @@ struct StreamOptions {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct OpenAIMessage {
-    role: String,
+pub(crate) struct OpenAIMessage {
+    pub(crate) role: String,
     /// Either a plain string or an array of content parts (text + image_url).
     #[serde(skip_serializing_if = "Option::is_none")]
-    content: Option<serde_json::Value>,
+    pub(crate) content: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    tool_calls: Option<Vec<OpenAIToolCall>>,
+    pub(crate) tool_calls: Option<Vec<OpenAIToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    tool_call_id: Option<String>,
+    pub(crate) tool_call_id: Option<String>,
     /// Thinking / reasoning text associated with an assistant message.
     /// Moonshot kimi (direct and via opencode.ai/zen/go) 400s on tool-call
     /// messages that omit this when thinking mode is on upstream —
@@ -3835,20 +3838,20 @@ struct OpenAIMessage {
     /// Zhipu ignore unknown fields, so echoing our stored Thinking blocks
     /// here is safe cross-provider.
     #[serde(skip_serializing_if = "Option::is_none")]
-    reasoning_content: Option<String>,
+    pub(crate) reasoning_content: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct OpenAIToolCall {
-    id: String,
-    r#type: String,
-    function: OpenAIFunctionCall,
+pub(crate) struct OpenAIToolCall {
+    pub(crate) id: String,
+    pub(crate) r#type: String,
+    pub(crate) function: OpenAIFunctionCall,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct OpenAIFunctionCall {
-    name: String,
-    arguments: String,
+pub(crate) struct OpenAIFunctionCall {
+    pub(crate) name: String,
+    pub(crate) arguments: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
