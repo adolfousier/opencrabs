@@ -77,6 +77,20 @@ impl ProviderError {
             | ProviderError::RateLimitExceeded(_)
             | ProviderError::Timeout(_) => true,
             ProviderError::ApiError { status, .. } if *status >= 500 => true,
+            // HTTP 400 with a generic proxy-style body (empty error_type
+            // AND a message that doesn't describe an actionable client
+            // problem) is almost always a transient upstream failure
+            // forwarded by the proxy. opencode.ai's "Provider returned
+            // error" is the canonical case — the user's payload is fine,
+            // their upstream is having a moment. Retry before falling
+            // back. Real client-side 400s (invalid_model, validation
+            // errors, bad JSON) carry specific error_type or message
+            // strings and stay non-retryable.
+            ProviderError::ApiError {
+                status: 400,
+                message,
+                error_type,
+            } => is_transient_proxy_400(message, error_type.as_deref()),
             _ => false,
         }
     }
@@ -122,6 +136,35 @@ impl ProviderError {
             _ => false,
         }
     }
+}
+
+/// True when an HTTP 400 response body looks like a proxy passthrough of
+/// an upstream hiccup rather than a real client-side error. Used by
+/// `is_retryable` so opencode.ai-style "Provider returned error" 400s
+/// go through the 3-retry backoff instead of bailing to fallback on
+/// the first try.
+fn is_transient_proxy_400(message: &str, error_type: Option<&str>) -> bool {
+    // Real client errors always carry an error_type (OpenAI: "invalid_request_error",
+    // "model_not_found", "validation_error", etc.). Treat any non-empty type as
+    // non-transient so we don't retry bad payloads.
+    if error_type.is_some_and(|t| !t.is_empty()) {
+        return false;
+    }
+    let m = message.trim().to_ascii_lowercase();
+    if m.is_empty() {
+        return true;
+    }
+    // Known proxy-passthrough phrases. Add new strings here when a proxy
+    // invents a different one.
+    const TRANSIENT_HINTS: &[&str] = &[
+        "provider returned error",
+        "upstream error",
+        "internal error",
+        "temporary",
+        "try again",
+        "bad gateway",
+    ];
+    TRANSIENT_HINTS.iter().any(|h| m.contains(h))
 }
 
 /// Result type for provider operations
