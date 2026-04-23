@@ -717,15 +717,24 @@ pub async fn switch_model(
     model_name: &str,
     session_id: Option<uuid::Uuid>,
 ) -> Result<String, String> {
-    let provider_name = agent.provider_name();
+    // Provider name MUST come from the same session we're about to store
+    // the pair for. Reading `agent.provider_name()` (global) meant that
+    // when another session had just nudged the global away, the pair
+    // saved here would be `(wrong_provider, this_session_model)` — the
+    // exact "opencodeiolo-qwen + glm-5.1" mix the user hit on Telegram.
+    let provider_name = match session_id {
+        Some(sid) => agent.provider_name_for_session(sid),
+        None => agent.provider_name(),
+    };
 
     let config =
         crate::config::Config::load().map_err(|e| format!("Failed to load config: {}", e))?;
 
     tracing::info!(
-        "Channel: switched model to {} (provider: {})",
+        "Channel: switched model to {} (provider: {}, session: {:?})",
         model_name,
-        provider_name
+        provider_name,
+        session_id
     );
 
     // Create provider by name (doesn't modify global config enabled flags)
@@ -737,7 +746,12 @@ pub async fn switch_model(
                 format!("Model saved but failed to reload provider: {}", e)
             })?;
     let display_name = provider_display_name(&provider_name);
-    agent.swap_provider(new_provider);
+    // Pin per-session when possible; only touch the global slot for
+    // callers without a session (kept for the bootstrap path).
+    match session_id {
+        Some(sid) => agent.swap_provider_for_session(sid, new_provider),
+        None => agent.swap_provider(new_provider),
+    }
 
     let change_msg = format!(
         "[Model changed to {} (provider: {})]",

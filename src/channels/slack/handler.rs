@@ -62,7 +62,12 @@ pub async fn on_interaction(
                                     )
                                     .await
                             {
-                                state.agent.swap_provider(new_provider);
+                                match session_id {
+                                    Some(sid) => {
+                                        state.agent.swap_provider_for_session(sid, new_provider)
+                                    }
+                                    None => state.agent.swap_provider(new_provider),
+                                }
                             }
                             if !resp.current_model.is_empty() {
                                 let _ = crate::channels::commands::switch_model(
@@ -165,6 +170,9 @@ pub async fn on_interaction(
                     } else {
                         (None, rest)
                     };
+                    // Resolve the session first so the provider swap lands on
+                    // the right per-session slot.
+                    let session_id = *state.shared_session.lock().await;
                     let mut provider_err: Option<String> = None;
                     if let Some(pname) = provider_name {
                         match crate::config::Config::load() {
@@ -174,7 +182,12 @@ pub async fn on_interaction(
                                 )
                                 .await
                                 {
-                                    Ok(new_provider) => state.agent.swap_provider(new_provider),
+                                    Ok(new_provider) => match session_id {
+                                        Some(sid) => {
+                                            state.agent.swap_provider_for_session(sid, new_provider)
+                                        }
+                                        None => state.agent.swap_provider(new_provider),
+                                    },
                                     Err(e) => {
                                         provider_err = Some(format!(
                                             "Failed to create provider '{}': {}",
@@ -190,7 +203,6 @@ pub async fn on_interaction(
                         tracing::warn!("Slack: provider switch failed: {}", err);
                         format!("⚠️ {}", err)
                     } else {
-                        let session_id = *state.shared_session.lock().await;
                         match crate::channels::commands::switch_model(
                             &state.agent,
                             model_name,

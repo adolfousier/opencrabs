@@ -203,11 +203,17 @@ impl TelegramAgent {
                                     // not from shared_session (which is the TUI session).
                                     let session_id = resolve_callback_session(&query, &state, &shared_session).await;
                                     let display = crate::channels::commands::provider_display_name(provider_name);
-                                    // Switch to this provider with its default model
+                                    // Switch to this provider with its default model. Pin the
+                                    // provider to THIS session so another channel/session
+                                    // doesn't get yanked onto it — the model callback's
+                                    // switch_model then reads from the same per-session slot.
                                     if let Ok(config) = crate::config::Config::load()
                                         && let Ok(new_provider) = crate::brain::provider::factory::create_provider_by_name(&config, provider_name).await
                                     {
-                                        agent.swap_provider(new_provider);
+                                        match session_id {
+                                            Some(sid) => agent.swap_provider_for_session(sid, new_provider),
+                                            None => agent.swap_provider(new_provider),
+                                        }
                                     }
                                     if !resp.current_model.is_empty() {
                                         let _ = crate::channels::commands::switch_model(&agent, &resp.current_model, session_id).await;
@@ -299,12 +305,21 @@ impl TelegramAgent {
                                 } else {
                                     (None, rest)
                                 };
+                                // Resolve session BEFORE the provider swap so the swap
+                                // lands on the right per-session slot. Leaving the
+                                // resolve below the swap (as it was) made the provider
+                                // change visible to other sessions via the global slot
+                                // until the per-session pin from switch_model landed.
+                                let session_id = resolve_callback_session(&query, &state, &shared_session).await;
                                 // Switch provider if specified and different
                                 let mut provider_err: Option<String> = None;
                                 if let Some(pname) = provider_name {
                                     match crate::config::Config::load() {
                                         Ok(config) => match crate::brain::provider::factory::create_provider_by_name(&config, pname).await {
-                                            Ok(new_provider) => agent.swap_provider(new_provider),
+                                            Ok(new_provider) => match session_id {
+                                                Some(sid) => agent.swap_provider_for_session(sid, new_provider),
+                                                None => agent.swap_provider(new_provider),
+                                            },
                                             Err(e) => provider_err = Some(format!("Failed to create provider '{}': {}", pname, e)),
                                         },
                                         Err(e) => provider_err = Some(format!("Failed to load config: {}", e)),
@@ -313,9 +328,6 @@ impl TelegramAgent {
                                 let (switch_ok, display_text) = if let Some(err) = provider_err {
                                     (false, format!("⚠️ {}", err))
                                 } else {
-                                    // Resolve session from the chat where the button was pressed,
-                                    // not from shared_session (which is the TUI session).
-                                    let session_id = resolve_callback_session(&query, &state, &shared_session).await;
                                     match crate::channels::commands::switch_model(&agent, model_name, session_id).await {
                                         Ok(_) => (true, format!("✅ Model switched to <code>{}</code>", model_name)),
                                         Err(e) => (false, format!("⚠️ {}", e)),

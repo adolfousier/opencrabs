@@ -192,7 +192,10 @@ impl EventHandler for Handler {
                             )
                             .await
                     {
-                        self.agent.swap_provider(new_provider);
+                        match session_id {
+                            Some(sid) => self.agent.swap_provider_for_session(sid, new_provider),
+                            None => self.agent.swap_provider(new_provider),
+                        }
                     }
                     if !resp.current_model.is_empty() {
                         let _ = crate::channels::commands::switch_model(
@@ -317,6 +320,9 @@ impl EventHandler for Handler {
                 } else {
                     (None, rest)
                 };
+                // Resolve session first so the provider swap pins to the
+                // right per-session slot instead of leaking via the global.
+                let session_id = *self.shared_session.lock().await;
                 let mut provider_err: Option<String> = None;
                 if let Some(pname) = provider_name {
                     match crate::config::Config::load() {
@@ -326,7 +332,12 @@ impl EventHandler for Handler {
                             )
                             .await
                             {
-                                Ok(new_provider) => self.agent.swap_provider(new_provider),
+                                Ok(new_provider) => match session_id {
+                                    Some(sid) => {
+                                        self.agent.swap_provider_for_session(sid, new_provider)
+                                    }
+                                    None => self.agent.swap_provider(new_provider),
+                                },
                                 Err(e) => {
                                     provider_err = Some(format!(
                                         "Failed to create provider '{}': {}",
@@ -341,7 +352,6 @@ impl EventHandler for Handler {
                 let reply = if let Some(err) = provider_err {
                     format!("⚠️ {}", err)
                 } else {
-                    let session_id = *self.shared_session.lock().await;
                     match crate::channels::commands::switch_model(
                         &self.agent,
                         model_name,
