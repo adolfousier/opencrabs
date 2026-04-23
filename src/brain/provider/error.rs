@@ -143,7 +143,7 @@ impl ProviderError {
 /// `is_retryable` so opencode.ai-style "Provider returned error" 400s
 /// go through the 3-retry backoff instead of bailing to fallback on
 /// the first try.
-fn is_transient_proxy_400(message: &str, error_type: Option<&str>) -> bool {
+pub(crate) fn is_transient_proxy_400(message: &str, error_type: Option<&str>) -> bool {
     // Real client errors always carry an error_type (OpenAI: "invalid_request_error",
     // "model_not_found", "validation_error", etc.). Treat any non-empty type as
     // non-transient so we don't retry bad payloads.

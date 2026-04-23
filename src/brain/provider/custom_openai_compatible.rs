@@ -1366,8 +1366,19 @@ impl OpenAIProvider {
                 content: Some(serde_json::Value::String(system)),
                 tool_calls: None,
                 tool_call_id: None,
+                reasoning_content: None,
             });
         }
+
+        // Moonshot kimi (direct and via opencode.ai/zen/go) requires a
+        // `reasoning_content` field on every assistant tool_call message
+        // when thinking mode is on upstream. Detect kimi-via-opencode-or-
+        // moonshot base URLs and inject an empty string when we don't have
+        // a real Thinking block to ship — otherwise Moonshot 400s with
+        // "thinking is enabled but reasoning_content is missing in
+        // assistant tool call message at index N". Other providers ignore
+        // unknown fields.
+        let needs_reasoning_content = needs_reasoning_content_for(&self.base_url, &request.model);
 
         // Add conversation messages
         for msg in request.messages {
@@ -1382,6 +1393,7 @@ impl OpenAIProvider {
             let mut image_parts: Vec<serde_json::Value> = Vec::new();
             let mut tool_uses = Vec::new();
             let mut tool_results = Vec::new();
+            let mut thinking_parts: Vec<String> = Vec::new();
 
             for block in msg.content {
                 match block {
@@ -1398,8 +1410,14 @@ impl OpenAIProvider {
                     } => {
                         tool_results.push((tool_use_id, content));
                     }
-                    ContentBlock::Thinking { .. } => {
-                        // OpenAI-compatible providers don't support thinking blocks; skip.
+                    ContentBlock::Thinking { thinking, .. } => {
+                        // Capture for providers that serialize it as
+                        // `reasoning_content` on assistant tool_call
+                        // messages (Moonshot / opencode.ai kimi). Others
+                        // ignore the field entirely.
+                        if !thinking.is_empty() {
+                            thinking_parts.push(thinking);
+                        }
                     }
                     ContentBlock::Image { source } => {
                         let url = match source {
@@ -1451,12 +1469,24 @@ impl OpenAIProvider {
                     .collect();
 
                 let content_val = make_content(&text_parts, &image_parts);
+                let reasoning_content = if !thinking_parts.is_empty() {
+                    Some(thinking_parts.join("\n"))
+                } else if needs_reasoning_content {
+                    // Moonshot requires the field present; empty string
+                    // satisfies validation when we have no captured
+                    // thinking text (e.g. turn resumed from DB before
+                    // reasoning persistence).
+                    Some(String::new())
+                } else {
+                    None
+                };
 
                 messages.push(OpenAIMessage {
                     role: role.to_string(),
                     content: content_val,
                     tool_calls: Some(openai_tool_calls),
                     tool_call_id: None,
+                    reasoning_content,
                 });
             }
             // Handle tool result messages
@@ -1467,6 +1497,7 @@ impl OpenAIProvider {
                         content: Some(serde_json::Value::String(content)),
                         tool_calls: None,
                         tool_call_id: Some(tool_use_id),
+                        reasoning_content: None,
                     });
                 }
             }
@@ -1475,11 +1506,21 @@ impl OpenAIProvider {
                 let content_val = make_content(&text_parts, &image_parts)
                     .unwrap_or(serde_json::Value::String(String::new()));
 
+                // Assistant-only: if we captured thinking from a
+                // previously-streamed assistant turn without tool_calls,
+                // echo it under reasoning_content for kimi/Moonshot.
+                let reasoning_content = if role == "assistant" && !thinking_parts.is_empty() {
+                    Some(thinking_parts.join("\n"))
+                } else {
+                    None
+                };
+
                 messages.push(OpenAIMessage {
                     role: role.to_string(),
                     content: Some(content_val),
                     tool_calls: None,
                     tool_call_id: None,
+                    reasoning_content,
                 });
             }
         }
@@ -1644,6 +1685,7 @@ impl OpenAIProvider {
                     content: Some(serde_json::Value::String(String::new())),
                     tool_calls: None,
                     tool_call_id: None,
+                    reasoning_content: None,
                 },
                 finish_reason: Some("error".to_string()),
             });
@@ -3785,6 +3827,15 @@ struct OpenAIMessage {
     tool_calls: Option<Vec<OpenAIToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_call_id: Option<String>,
+    /// Thinking / reasoning text associated with an assistant message.
+    /// Moonshot kimi (direct and via opencode.ai/zen/go) 400s on tool-call
+    /// messages that omit this when thinking mode is on upstream —
+    /// `"thinking is enabled but reasoning_content is missing in assistant
+    /// tool call message at index N"`. OpenAI-native, Anthropic, and
+    /// Zhipu ignore unknown fields, so echoing our stored Thinking blocks
+    /// here is safe cross-provider.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_content: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3934,36 +3985,46 @@ struct OpenAIMessageDelta {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct OpenAIErrorResponse {
-    error: OpenAIError,
+pub(crate) struct OpenAIErrorResponse {
+    pub(crate) error: OpenAIError,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct OpenAIError {
-    message: String,
+pub(crate) struct OpenAIError {
+    pub(crate) message: String,
     #[serde(rename = "type")]
-    error_type: Option<String>,
+    pub(crate) error_type: Option<String>,
     /// Proxy-wrapped upstream errors. opencode.ai in particular hides the
     /// real backend error inside `error.metadata.raw` as a stringified
     /// JSON blob (`"{\"error\":{\"message\":\"...\",\"type\":\"...\"}}"`).
     /// Leaving it wrapped meant users only saw "Provider returned error".
     #[serde(default)]
-    metadata: Option<OpenAIErrorMetadata>,
+    pub(crate) metadata: Option<OpenAIErrorMetadata>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct OpenAIErrorMetadata {
+pub(crate) struct OpenAIErrorMetadata {
     #[serde(default)]
-    raw: Option<String>,
+    pub(crate) raw: Option<String>,
     #[serde(default)]
-    provider_name: Option<String>,
+    pub(crate) provider_name: Option<String>,
+}
+
+/// True when an OpenAI-compatible endpoint routes to Moonshot kimi
+/// and therefore requires `reasoning_content` on assistant tool-call
+/// messages. Matches both the direct Moonshot URL and opencode.ai's
+/// zen/go proxy when the model name contains "kimi".
+pub(crate) fn needs_reasoning_content_for(base_url: &str, model: &str) -> bool {
+    let url = base_url.to_ascii_lowercase();
+    let model = model.to_ascii_lowercase();
+    url.contains("moonshot") || (url.contains("opencode.ai") && model.contains("kimi"))
 }
 
 /// Walk a proxy's nested error envelope to find the real upstream error.
 /// Returns (message, error_type) after stripping the passthrough wrapper.
 /// The `provider_name` (if present) is prepended so operators can tell
 /// which backend — Moonshot AI, Alibaba, z.ai — actually failed.
-fn unwrap_proxy_error(outer: &OpenAIError) -> (String, Option<String>) {
+pub(crate) fn unwrap_proxy_error(outer: &OpenAIError) -> (String, Option<String>) {
     let Some(ref metadata) = outer.metadata else {
         return (outer.message.clone(), outer.error_type.clone());
     };
