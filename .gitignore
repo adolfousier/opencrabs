@@ -50,6 +50,9 @@ Desktop.ini
 *.backup
 ~*
 
+
+# GitHub workflows (temporarily ignored)
+.github/workflows/opencrabs-review.yml
 # Lock files (keep for libraries, ignore for binaries)
 # Cargo.lock
 

@@ -5,6 +5,106 @@ All notable changes to OpenCrabs will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.14] - 2026-04-24
+
+### Provider & API Resilience
+
+| Type | Area | Change | Why / Impact |
+|------|------|--------|-------------|
+| fix | provider | **Kimi/Moonshot reasoning_content support** — assistant messages with tool calls now include `reasoning_content` field when thinking mode is enabled | Kimi rejected requests with 400 when thinking was enabled but reasoning_content was missing from assistant tool-call messages |
+| fix | provider | **Proxy error envelope unwrapping** with automatic retry | Proxies sometimes wrap errors in nested JSON envelopes; now unwrapped and retried instead of failing immediately |
+| fix | provider | **HTTP 401 distinction** — model-unsupported vs actual auth failure | 401 responses from "model not supported" no longer trigger auth-error fallback chains |
+| fix | provider | **5xx retry** with exponential backoff and automatic fallback chain | Transient server errors now retry in-place before walking the fallback chain |
+| fix | provider | **Claude CLI opus alias** bumped to 4-7 | Keeps the Claude CLI provider pointing at the latest Opus model |
+| fix | provider | **Gemini analyze_image error logging** for debugging vision failures | Vision errors now log the actual response body instead of generic connection errors |
+| fix | provider | **Custom provider api_key status** displayed in startup logs | Startup logs now show whether custom providers have real API keys loaded |
+
+### Channel & Session Isolation
+
+| Type | Area | Change | Why / Impact |
+|------|------|--------|-------------|
+| fix | telegram | **Session isolation from TUI** — Telegram sessions never inherit TUI's provider on restart | Removed fallback to global provider when `create_provider_by_name` fails; sessions keep their stored provider |
+| fix | telegram | **Custom provider key merging** — keys.toml entries merged even when config.toml lacks `[providers.custom]` section | `merge_provider_keys` now creates minimal custom provider entries from keys.toml data instead of silently dropping them |
+| fix | channels | **Per-session provider swap** with per-chat isolation | Each session carries its own provider instance; switching models in one session never affects others |
+| fix | channels | **Pin provider per-session** on /models command | Provider selection persists to the session, not global config |
+| fix | channels | **/models shows actual current provider** instead of stale global | Model switch dialog now reads from the session's own provider |
+| fix | channels | **Restore missing sticky_swap** functionality | Provider swaps now persist across session reloads |
+| fix | telegram | **Duplicate message elimination** | Pre-send dedup prevents the same intermediate from being sent twice during streaming |
+| fix | slack | **Duplicate response fix + multi-image support** | Slack no longer sends duplicate responses; multiple images handled correctly |
+
+### TUI & Display
+
+| Type | Area | Change | Why / Impact |
+|------|------|--------|-------------|
+| fix | tui | **New sessions use global provider/model pair** — never crossed | `create_new_session` now reads from `agent_service.provider_model()` instead of stale `default_model_name` |
+| fix | tui | **Tool-call tag bleed prevention** in TUI rendering | Removed false-positive markers and `is_local_stream` gate so filtering runs for all providers |
+| fix | tui | **Stop persisting literal "default"** string as default_model | Empty model names no longer get written as the string "default" |
+| fix | tui | **Balanced JSON scanning** for Claude CLI tool-call markers | JSON scanning now handles balanced braces correctly without false positives |
+| fix | tui | **DisplayMessage loads thinking** from dedicated DB column | Thinking content now loads from the `thinking` column instead of being reconstructed from markers |
+| fix | tui | **Strip orphan thinking tags** on session reload | Orphan `<think>` tags from previous sessions are stripped on load |
+
+### Self-Healing Engine
+
+| Type | Area | Change | Why / Impact |
+|------|------|--------|-------------|
+| fix | self-heal | **49 "let's" contraction variants** added to phantom detection | Models frequently write "let's check the logs" instead of "let me check" — these were slipping through |
+
+### RSI Feedback
+
+| Type | Area | Change | Why / Impact |
+|------|------|--------|-------------|
+| fix | rsi | **Provider name in feedback records** — dimension now includes provider/model pair | RSI logs previously showed only model name (e.g. `qwen-3.6-plus`), making it impossible to identify which provider failed |
+
+### Voice
+
+| Type | Area | Change | Why / Impact |
+|------|------|--------|-------------|
+| add | voice | **Voicebox TTS engine selection** support | Voicebox can now be selected as the TTS engine alongside OpenAI and Local |
+| add | voice | **Voicebox engine field** added to onboarding flow | Onboarding wizard now includes Voicebox as a TTS option |
+
+### Database
+
+| Type | Area | Change | Why / Impact |
+|------|------|--------|-------------|
+| add | db | **Thinking column** for non-CLI provider reasoning content storage | New `thinking` column in messages table stores reasoning content separately |
+| fix | db | **Migration idempotency** for thinking column | Migration now handles the case where the column already exists |
+
+### Usage Dashboard & Pricing
+
+| Type | Area | Change | Why / Impact |
+|------|------|--------|-------------|
+| refactor | usage | **Removed hardcoded pricing**, moved to usage/pricing.rs | Pricing is now centralized in a single module instead of scattered across files |
+| add | usage | **Kimi K2.6 pricing** added | Kimi model costs now tracked correctly |
+| fix | usage | **Normalized model names** and recalculated all costs | Model name variants now merge correctly for accurate cost tracking |
+| add | usage | **GLM pricing and display labels** | z.ai GLM models now have correct pricing and human-readable labels |
+| fix | usage | **Total cost sums** now use recalculated per-model costs | Dashboard totals are accurate after per-model cost recalculation |
+| fix | usage | **GLM 5.1 and GLM 5 Turbo** tracked separately | Two GLM variants no longer merge into one cost entry |
+| add | usage | **Request count** shown in By Model card | Usage dashboard now displays request count per model |
+
+### Input Handling
+
+| Type | Area | Change | Why / Impact |
+|------|------|--------|-------------|
+| fix | input | **Unicode whitespace normalization** on paste | Non-breaking spaces and other Unicode whitespace now normalize to regular spaces |
+| fix | input | **Tab expansion** on paste for consistent input | Tabs in pasted content are expanded to spaces |
+
+### Tools
+
+| Type | Area | Change | Why / Impact |
+|------|------|--------|-------------|
+| fix | tools | **Detach subprocess stdin** from TUI's TTY to prevent hangs | Subprocesses no longer inherit the TUI's terminal stdin |
+
+### Tests
+
+| Type | Area | Change | Why / Impact |
+|------|------|--------|-------------|
+| fix | tests | **Migration count** bumped to 19 | Thinking column migration added but count wasn't updated |
+| fix | tests | **Token test model names** corrected to match pricing file | `opus-4-6` changed to `claude-opus-4` to match pricing entries |
+
+**2,145 tests passing** (+14 since v0.3.13).
+
+[0.3.14]: https://github.com/adolfousier/opencrabs/compare/v0.3.13...v0.3.14
+
 ## [0.3.13] - 2026-04-20
 
 ### Self-healing — phantom detector expansion

@@ -125,27 +125,33 @@ impl PricingConfig {
     /// Load from ~/.opencrabs/usage_pricing.toml.
     /// Supports both the current schema (`[providers.X] entries = [...]`) and the
     /// legacy on-disk schema (`[[usage.pricing.X]]` array-of-tables).
-    /// Returns an error if the file is missing, unreadable, or unparseable.
+    /// Falls back to the embedded example file if the user file doesn't exist
+    /// (useful for tests and CI environments).
+    /// Returns an error only if both the user file and embedded example fail to parse.
     pub fn load() -> Result<Self, String> {
         let path = crate::config::opencrabs_home().join("usage_pricing.toml");
-        let content = std::fs::read_to_string(&path).map_err(|e| {
-            format!(
-                "usage_pricing.toml not found at {:?}.\n\
-                 Copy it from the repo: cp usage_pricing.toml.example {:?}\n\
-                 Error: {}",
-                path, path, e
-            )
-        })?;
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => {
+                // Fall back to embedded example (tests, CI, fresh installs)
+                let example = include_str!("../../usage_pricing.toml.example");
+                return Self::parse_content(example, "embedded example");
+            }
+        };
+        Self::parse_content(&content, &format!("{:?}", path))
+    }
 
+    /// Parse TOML content with both schema variants.
+    fn parse_content(content: &str, source: &str) -> Result<Self, String> {
         // Try current schema first.
-        if let Ok(cfg) = toml::from_str::<PricingConfig>(&content)
+        if let Ok(cfg) = toml::from_str::<PricingConfig>(content)
             && !cfg.providers.is_empty()
         {
             return Ok(cfg);
         }
 
         // Try legacy schema: [[usage.pricing.<provider>]] entries
-        if let Ok(cfg) = Self::load_legacy(&content)
+        if let Ok(cfg) = Self::load_legacy(content)
             && !cfg.providers.is_empty()
         {
             tracing::warn!(
@@ -153,14 +159,18 @@ impl PricingConfig {
                  See usage_pricing.toml.example in the repo"
             );
             let new_content = Self::serialize_to_toml(&cfg);
-            let _ = std::fs::write(&path, new_content);
+            // Only write back if source is a real file path (not embedded example)
+            if source != "embedded example" {
+                let path = crate::config::opencrabs_home().join("usage_pricing.toml");
+                let _ = std::fs::write(&path, new_content);
+            }
             return Ok(cfg);
         }
 
         Err(format!(
-            "usage_pricing.toml at {:?} failed to parse with both schemas.\n\
+            "usage_pricing.toml from {} failed to parse with both schemas.\n\
              Check the file syntax or re-copy from usage_pricing.toml.example",
-            path
+            source
         ))
     }
 
