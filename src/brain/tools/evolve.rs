@@ -126,6 +126,7 @@ async fn health_check_binary(path: &std::path::Path) -> std::result::Result<(), 
         std::time::Duration::from_secs(10),
         tokio::process::Command::new(path)
             .arg("--version")
+            .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .output(),
@@ -346,6 +347,7 @@ impl EvolveTool {
 
         let output = tokio::process::Command::new("cargo")
             .args(["install", "opencrabs", "--force"])
+            .stdin(std::process::Stdio::null())
             .output()
             .await
             .map_err(|e| {

@@ -193,10 +193,13 @@ impl DynamicTool {
                 ));
             }
         };
+        // Detach stdin from the parent TTY so mouse-capture bytes don't
+        // leak into captured stdout (same TUI-bleed issue as bash.rs).
         let output = tokio::process::Command::new("sh")
             .arg("-c")
             .arg(&cmd)
             .current_dir(&context.working_directory)
+            .stdin(std::process::Stdio::null())
             .output()
             .await;
         match output {

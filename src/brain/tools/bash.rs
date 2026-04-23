@@ -180,11 +180,18 @@ impl Tool for BashTool {
                 }
             }
         } else {
-            // Normal execution (no sudo password needed)
+            // Normal execution (no sudo password needed).
+            // stdin is set to /dev/null to detach from the parent TTY — when
+            // the TUI is running with mouse capture enabled, leaving stdin
+            // inherited lets subshells (pipes, `read`, `cat`) swallow
+            // mouse-report escape sequences off the terminal and emit them
+            // on stdout, where they land in the tool-output buffer and
+            // leak into the rendered TUI message.
             let command_future = Command::new(shell)
                 .arg(shell_arg)
                 .arg(&input.command)
                 .current_dir(&working_dir)
+                .stdin(std::process::Stdio::null())
                 .output();
 
             match timeout(Duration::from_secs(effective_timeout), command_future).await {
