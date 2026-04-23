@@ -1582,6 +1582,36 @@ fn merge_provider_keys(mut base: ProviderConfigs, keys: ProviderConfigs) -> Prov
             entry.api_key = Some(key);
         }
     }
+    // Summarise custom-provider key merge at INFO so "auth errors on
+    // startup" always have a ground-truth log to correlate with: how
+    // many customs exist, which have real keys, which don't.
+    if let Some(ref customs) = base.custom {
+        let total = customs.len();
+        let with_key = customs
+            .values()
+            .filter(|c| {
+                c.api_key
+                    .as_ref()
+                    .is_some_and(|k| !k.is_empty() && k != "__EXISTING_KEY__")
+            })
+            .count();
+        let missing: Vec<&str> = customs
+            .iter()
+            .filter(|(_, c)| {
+                !c.api_key
+                    .as_ref()
+                    .is_some_and(|k| !k.is_empty() && k != "__EXISTING_KEY__")
+            })
+            .map(|(n, _)| n.as_str())
+            .collect();
+        tracing::info!(
+            "merge_provider_keys: custom providers loaded = {} ({} with real api_key); \
+             providers missing a real key: {:?}",
+            total,
+            with_key,
+            missing,
+        );
+    }
     base
 }
 

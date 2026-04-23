@@ -391,7 +391,34 @@ fn try_create_custom_by_name(config: &Config, name: &str) -> Result<Option<Arc<d
         base_url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     }
 
-    tracing::info!("Creating custom provider '{}' at: {}", name, base_url);
+    // Redact the key for logs but confirm merger ran. An empty key here
+    // means keys.toml wasn't merged into this custom entry — the request
+    // will then go out with `Bearer ` (empty) and always 401/403. Surface
+    // that loudly instead of silently constructing a provider that can't
+    // authenticate.
+    let key_status = if api_key.is_empty() {
+        "MISSING".to_string()
+    } else if api_key == "__EXISTING_KEY__" {
+        "SENTINEL(__EXISTING_KEY__ never merged)".to_string()
+    } else {
+        format!("present (len={})", api_key.len())
+    };
+    if api_key.is_empty() || api_key == "__EXISTING_KEY__" {
+        tracing::warn!(
+            "Custom provider '{}' being constructed without a real api_key ({}). \
+             Requests will fail auth. Check keys.toml has [providers.custom.{}] api_key = \"...\" \
+             and that the key isn't the literal sentinel string.",
+            name,
+            key_status,
+            name,
+        );
+    }
+    tracing::info!(
+        "Creating custom provider '{}' at: {} (api_key: {})",
+        name,
+        base_url,
+        key_status,
+    );
     let mut builder =
         OpenAIProvider::with_base_url(api_key.clone(), base_url.clone()).with_name(name);
     if is_local_base_url(&base_url) {
