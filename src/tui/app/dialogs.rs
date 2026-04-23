@@ -736,6 +736,10 @@ impl App {
         // Resolve default_model:
         // - On final confirm (close_dialog=true): use the user's selected model
         // - On provider switch (close_dialog=false): preserve existing config model
+        // Empty string = "no real model yet" → skip the config.toml write below.
+        // Writing the literal "default" (2026-04-22 bug) produced
+        // `default_model = "default"` entries that then failed every
+        // request with "Model default not supported".
         let default_model = if !close_dialog {
             // Preserve whatever is already saved in config for this provider
             let provider_id = self.ps.provider_id();
@@ -750,7 +754,7 @@ impl App {
                         .models
                         .first()
                         .map(|s| s.to_string())
-                        .unwrap_or_else(|| "default".to_string())
+                        .unwrap_or_default()
                 })
         } else if provider_idx >= CUSTOM_PROVIDER_IDX {
             self.ps.custom_model.clone()
@@ -770,11 +774,14 @@ impl App {
         } else if let Some(model) = provider.models.get(self.ps.selected_model) {
             model.to_string()
         } else {
+            // Empty string → write below is skipped. Do NOT write "default"
+            // as a placeholder — it gets persisted to config.toml and then
+            // every request fails with "Model default not supported".
             provider
                 .models
                 .first()
                 .map(|s| s.to_string())
-                .unwrap_or_else(|| "default".to_string())
+                .unwrap_or_default()
         };
         // Indices: 0=Anthropic, 1=OpenAI, 2=GitHub, 3=Gemini, 4=OpenRouter,
         // 5=Minimax, 6=z.ai GLM, 7=Claude CLI, 8=OpenCode CLI, 9=Qwen (native),
@@ -1201,8 +1208,19 @@ impl App {
             }
         }
 
-        // Write default_model to config BEFORE rebuild so the provider picks it up
-        if let Err(e) = crate::config::Config::write_key(section, "default_model", &default_model) {
+        // Write default_model to config BEFORE rebuild so the provider picks it up.
+        // Skip when we don't have a real model id — writing the literal "default"
+        // or an empty string pollutes config.toml and every subsequent request
+        // fails with "Model <garbage> not supported".
+        if default_model.is_empty() || default_model == "default" {
+            tracing::info!(
+                "Not writing default_model for section '{}' — no valid model selected yet (value was {:?})",
+                section,
+                default_model,
+            );
+        } else if let Err(e) =
+            crate::config::Config::write_key(section, "default_model", &default_model)
+        {
             tracing::warn!("Failed to persist model to config: {}", e);
             write_errors.push(format!("{}.default_model", section));
         }
