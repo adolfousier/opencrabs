@@ -81,6 +81,40 @@ impl ProviderError {
             _ => None,
         }
     }
+
+    /// True when the server rejected the REQUEST's model id (not the
+    /// credential). Some OpenAI-compatible proxies — notably
+    /// `opencode.ai/zen` — return HTTP 401 with
+    /// `{"error":{"type":"ModelError","message":"Model X not supported"}}`
+    /// for "this key can't use that model", which collides with real
+    /// auth failures. Downstream code uses this to keep the actual
+    /// "invalid key" classification meaningful and route model-mismatch
+    /// errors to a different UX path.
+    pub fn is_model_unsupported(&self) -> bool {
+        match self {
+            ProviderError::ModelNotFound(_) => true,
+            ProviderError::ApiError {
+                error_type,
+                message,
+                ..
+            } => {
+                let type_hit = error_type.as_ref().is_some_and(|t| {
+                    let t = t.to_ascii_lowercase();
+                    t == "modelerror"
+                        || t == "model_error"
+                        || t == "model_not_found"
+                        || t == "invalid_model"
+                });
+                let msg = message.to_ascii_lowercase();
+                let msg_hit = msg.contains("model")
+                    && (msg.contains("not supported")
+                        || msg.contains("not found")
+                        || msg.contains("unsupported"));
+                type_hit || msg_hit
+            }
+            _ => false,
+        }
+    }
 }
 
 /// Result type for provider operations

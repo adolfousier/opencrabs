@@ -1143,24 +1143,42 @@ impl AgentService {
                     // fallback, user saw a raw error string in
                     // Telegram. Treat it like a rate-limit: skip
                     // in-place retry, walk the fallback chain.
-                    let (is_auth, reason) =
-                        if matches!(
-                            &e,
-                            crate::brain::provider::ProviderError::ApiError { status, .. }
-                                if *status == 401 || *status == 403
-                        ) || matches!(&e, crate::brain::provider::ProviderError::InvalidApiKey)
-                        {
-                            (true, "auth_error")
-                        } else {
-                            (false, "rate_limit_exceeded")
-                        };
+                    // Distinguish three failure flavours that all arrive here:
+                    //   • genuine auth: 401/403 with an auth-ish error_type or
+                    //     InvalidApiKey. Key is bad — walk fallback.
+                    //   • model rejection disguised as 401: some proxies
+                    //     (opencode.ai/zen) return 401 with
+                    //     `error_type: "ModelError"` when the key is valid
+                    //     but the requested model isn't in their allowlist.
+                    //     Reporting "Auth error" here misled the user into
+                    //     thinking keys were wrong.
+                    //   • rate/account limits: 429 / RateLimitExceeded.
+                    let is_model_mismatch = e.is_model_unsupported();
+                    let (is_auth, reason) = if is_model_mismatch {
+                        (false, "model_unsupported")
+                    } else if matches!(
+                        &e,
+                        crate::brain::provider::ProviderError::ApiError { status, .. }
+                            if *status == 401 || *status == 403
+                    ) || matches!(
+                        &e,
+                        crate::brain::provider::ProviderError::InvalidApiKey
+                    ) {
+                        (true, "auth_error")
+                    } else {
+                        (false, "rate_limit_exceeded")
+                    };
+                    let flavour_label = if is_model_mismatch {
+                        "Model not supported by provider"
+                    } else if is_auth {
+                        "Auth error"
+                    } else {
+                        "Rate/account limit"
+                    };
                     tracing::warn!(
-                        "{} hit — checking for fallback provider",
-                        if is_auth {
-                            "Auth error"
-                        } else {
-                            "Rate/account limit"
-                        }
+                        "{} hit ({}) — checking for fallback provider",
+                        flavour_label,
+                        e
                     );
 
                     // Resolve the session's CURRENT primary provider name
@@ -1183,7 +1201,12 @@ impl AgentService {
                     );
 
                     if let Some(ref cb) = progress_callback {
-                        let prefix = if is_auth {
+                        let prefix = if is_model_mismatch {
+                            format!(
+                                "Model '{}' not supported by '{}'",
+                                model_name, primary_from_name
+                            )
+                        } else if is_auth {
                             format!("Auth error on '{}/{}'", primary_from_name, model_name)
                         } else {
                             format!("Rate limit on '{}/{}'", primary_from_name, model_name)
@@ -1320,7 +1343,9 @@ impl AgentService {
                             // so the NEXT turn resolves model_name from
                             // the fallback, not the rate-limited primary.
                             if let Some(ref cb) = progress_callback {
-                                let reason = if is_auth {
+                                let reason = if is_model_mismatch {
+                                    "model_unsupported".to_string()
+                                } else if is_auth {
                                     "auth_error".to_string()
                                 } else {
                                     "rate_limit".to_string()
