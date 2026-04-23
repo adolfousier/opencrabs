@@ -162,7 +162,7 @@ fn cache_pricing_opus_default_rates() {
     let cfg = test_pricing_config();
     // opus-4: input=$15, output=$75, cache_write=$18.75, cache_read=$1.50
     let cost = cfg.calculate_cost_with_cache(
-        "opus-4-6", 1_000_000, // 1M non-cached input
+        "claude-opus-4", 1_000_000, // 1M non-cached input
         1_000_000, // 1M output
         0,         // no cache write
         0,         // no cache read
@@ -174,7 +174,7 @@ fn cache_pricing_opus_default_rates() {
 fn cache_pricing_opus_with_cache_write() {
     let cfg = test_pricing_config();
     let cost = cfg.calculate_cost_with_cache(
-        "opus-4-6", 3,      // 3 non-cached input tokens
+        "claude-opus-4", 3,      // 3 non-cached input tokens
         500,    // 500 output tokens
         83_000, // 83K cache write tokens
         0,      // no cache read
@@ -190,7 +190,7 @@ fn cache_pricing_opus_with_cache_write() {
 fn cache_pricing_opus_with_cache_read() {
     let cfg = test_pricing_config();
     let cost = cfg.calculate_cost_with_cache(
-        "opus-4-6", 3,      // 3 non-cached input
+        "claude-opus-4", 3,      // 3 non-cached input
         500,    // 500 output
         0,      // no cache write
         14_000, // 14K cache read
@@ -204,7 +204,7 @@ fn cache_pricing_opus_with_cache_read() {
 fn cache_pricing_opus_full_breakdown() {
     let cfg = test_pricing_config();
     // Realistic CLI session: 3 input, 501 output, 83K cache write, 14K cache read
-    let cost = cfg.calculate_cost_with_cache("opus-4-6", 3, 501, 83_129, 13_981);
+    let cost = cfg.calculate_cost_with_cache("claude-opus-4", 3, 501, 83_129, 13_981);
     let expected = (3.0 / 1e6 * 15.0)
         + (501.0 / 1e6 * 75.0)
         + (83_129.0 / 1e6 * 18.75)
@@ -229,8 +229,8 @@ fn cache_pricing_sonnet_explicit_rates() {
 #[test]
 fn cache_pricing_no_cache_matches_regular() {
     let cfg = test_pricing_config();
-    let regular = cfg.calculate_cost("opus-4-6", 1_000_000, 1_000_000);
-    let with_cache = cfg.calculate_cost_with_cache("opus-4-6", 1_000_000, 1_000_000, 0, 0);
+    let regular = cfg.calculate_cost("claude-opus-4", 1_000_000, 1_000_000);
+    let with_cache = cfg.calculate_cost_with_cache("claude-opus-4", 1_000_000, 1_000_000, 0, 0);
     assert_eq!(regular, with_cache);
 }
 
@@ -247,12 +247,12 @@ fn cache_pricing_defaults_load_and_compute() {
     let cfg = PricingConfig::load().expect("usage_pricing.toml should load");
 
     // Opus with cache — real scenario
-    let cost = cfg.calculate_cost_with_cache("opus-4-6", 3, 501, 83_129, 13_981);
+    let cost = cfg.calculate_cost_with_cache("claude-opus-4", 3, 501, 83_129, 13_981);
     assert!(cost > 0.0, "Cost should be > 0 for opus with cache tokens");
 
     // No cache — should match regular calculate_cost
-    let regular = cfg.calculate_cost("opus-4-6", 1000, 500);
-    let with_cache = cfg.calculate_cost_with_cache("opus-4-6", 1000, 500, 0, 0);
+    let regular = cfg.calculate_cost("claude-opus-4", 1000, 500);
+    let with_cache = cfg.calculate_cost_with_cache("claude-opus-4", 1000, 500, 0, 0);
     assert_eq!(regular, with_cache);
 }
 
@@ -371,7 +371,7 @@ fn cost_not_zero_for_cli_with_cache_tokens() {
     // THE BUG: was returning $0.00 because cache tokens were excluded
     let cfg = PricingConfig::load().expect("usage_pricing.toml should load");
     let cost = cfg.calculate_cost_with_cache(
-        "opus-4-6", 3,      // non-cached input
+        "claude-opus-4", 3,      // non-cached input
         501,    // output
         83_129, // cache write
         13_981, // cache read
@@ -387,9 +387,9 @@ fn cost_not_zero_for_cli_with_cache_tokens() {
 fn cost_cache_write_more_expensive_than_regular() {
     let cfg = test_pricing_config();
     // 1M tokens as regular input
-    let regular_cost = cfg.calculate_cost_with_cache("opus-4-6", 1_000_000, 0, 0, 0);
+    let regular_cost = cfg.calculate_cost_with_cache("claude-opus-4", 1_000_000, 0, 0, 0);
     // 1M tokens as cache write
-    let cache_write_cost = cfg.calculate_cost_with_cache("opus-4-6", 0, 0, 1_000_000, 0);
+    let cache_write_cost = cfg.calculate_cost_with_cache("claude-opus-4", 0, 0, 1_000_000, 0);
     // Cache write (1.25x) should be more expensive than regular input
     assert!(cache_write_cost > regular_cost);
 }
@@ -398,9 +398,9 @@ fn cost_cache_write_more_expensive_than_regular() {
 fn cost_cache_read_cheaper_than_regular() {
     let cfg = test_pricing_config();
     // 1M tokens as regular input
-    let regular_cost = cfg.calculate_cost_with_cache("opus-4-6", 1_000_000, 0, 0, 0);
+    let regular_cost = cfg.calculate_cost_with_cache("claude-opus-4", 1_000_000, 0, 0, 0);
     // 1M tokens as cache read
-    let cache_read_cost = cfg.calculate_cost_with_cache("opus-4-6", 0, 0, 0, 1_000_000);
+    let cache_read_cost = cfg.calculate_cost_with_cache("claude-opus-4", 0, 0, 0, 1_000_000);
     // Cache read (0.1x) should be cheaper than regular input
     assert!(cache_read_cost < regular_cost);
 }
@@ -410,10 +410,10 @@ fn cost_old_vs_new_calculation_difference() {
     let cfg = PricingConfig::load().expect("usage_pricing.toml should load");
 
     // OLD (broken): treated 3 input + 501 output only → ~$0.00
-    let old_cost = cfg.calculate_cost("opus-4-6", 3, 501);
+    let old_cost = cfg.calculate_cost("claude-opus-4", 3, 501);
 
     // NEW (correct): includes cache breakdown
-    let new_cost = cfg.calculate_cost_with_cache("opus-4-6", 3, 501, 83_129, 13_981);
+    let new_cost = cfg.calculate_cost_with_cache("claude-opus-4", 3, 501, 83_129, 13_981);
 
     // New cost should be orders of magnitude higher
     assert!(new_cost > old_cost * 10.0);

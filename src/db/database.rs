@@ -141,7 +141,7 @@ impl Database {
     }
 
     /// Total number of migrations defined below — keep in sync when adding new ones.
-    const MIGRATION_COUNT: usize = 18;
+    const MIGRATION_COUNT: usize = 19;
 
     /// Run database migrations
     pub async fn run_migrations(&self) -> Result<()> {
