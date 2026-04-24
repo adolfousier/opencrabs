@@ -204,7 +204,7 @@ pub async fn synthesize(text: &str, voice_config: &VoiceConfig) -> Result<Vec<u8
     };
 
     // Ensure Opus format for Telegram — converts WAV/MP3 if needed
-    Ok(ensure_opus(audio))
+    Ok(ensure_opus(audio).await)
 }
 
 /// Detect if audio bytes are already in OGG/Opus format.
@@ -215,73 +215,105 @@ fn is_opus(audio: &[u8]) -> bool {
 /// Convert audio bytes to OGG/Opus format if needed.
 ///
 /// Checks magic bytes to detect format. If already OGG/Opus, returns as-is.
-/// Otherwise uses ffmpeg to convert. Falls back to original bytes if ffmpeg fails.
-fn ensure_opus(audio_bytes: Vec<u8>) -> Vec<u8> {
+/// Otherwise uses ffmpeg to convert with a 5-minute timeout.
+/// Two-stage fallback: voip-tuned → basic opus → original bytes.
+async fn ensure_opus(audio_bytes: Vec<u8>) -> Vec<u8> {
     if is_opus(&audio_bytes) {
         return audio_bytes;
     }
 
-    // Try ffmpeg conversion
-    let ffmpeg_path = std::env::var("FFMPEG_PATH").unwrap_or_else(|_| "ffmpeg".to_string());
-    let mut cmd = std::process::Command::new(&ffmpeg_path);
-    cmd.args([
-        "-i",
-        "pipe:0",
-        "-f",
-        "ogg",
-        "-c:a",
-        "libopus",
-        "-b:a",
-        "48k",
-        "-application",
-        "voip",
-        "-y",
-        "pipe:1",
-    ])
-    .stdin(std::process::Stdio::piped())
-    .stdout(std::process::Stdio::piped())
-    .stderr(std::process::Stdio::piped());
+    let audio_len = audio_bytes.len();
+    let audio_fallback = audio_bytes.clone();
+    let handle = tokio::task::spawn_blocking(move || {
+        let ffmpeg_path = std::env::var("FFMPEG_PATH").unwrap_or_else(|_| "ffmpeg".to_string());
 
-    match cmd.spawn() {
-        Ok(mut child) => {
+        // Stage 1: voip-tuned opus (optimized for voice notes)
+        let mut cmd = std::process::Command::new(&ffmpeg_path);
+        cmd.args([
+            "-i", "pipe:0",
+            "-f", "ogg",
+            "-c:a", "libopus",
+            "-b:a", "48k",
+            "-application", "voip",
+            "-y", "pipe:1",
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+        if let Ok(mut child) = cmd.spawn() {
             use std::io::Write;
-            if let Some(mut stdin) = child.stdin.take()
-                && stdin.write_all(&audio_bytes).is_err()
-            {
-                tracing::warn!("TTS: failed to write audio to ffmpeg");
-                return audio_bytes;
-            }
-            match child.wait_with_output() {
-                Ok(output) if output.status.success() => {
-                    tracing::info!(
-                        "TTS: converted audio to Opus ({} → {} bytes)",
-                        audio_bytes.len(),
-                        output.stdout.len()
-                    );
-                    output.stdout
-                }
-                Ok(output) => {
+            let write_ok = child.stdin.take()
+                .map(|mut stdin| stdin.write_all(&audio_bytes).is_ok())
+                .unwrap_or(false);
+
+            if write_ok {
+                if let Ok(output) = child.wait_with_output() {
+                    if output.status.success() && !output.stdout.is_empty() {
+                        tracing::info!(
+                            "TTS: voip opus conversion ok ({} → {} bytes)",
+                            audio_bytes.len(),
+                            output.stdout.len()
+                        );
+                        return output.stdout;
+                    }
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    tracing::warn!(
-                        "TTS: ffmpeg conversion failed ({}), using original audio: {}",
-                        output.status,
-                        stderr.lines().next().unwrap_or("")
-                    );
-                    audio_bytes
+                    tracing::warn!("TTS: voip opus failed ({}): {}", output.status, stderr.lines().next().unwrap_or(""));
                 }
-                Err(e) => {
-                    tracing::warn!("TTS: ffmpeg process failed: {}", e);
-                    audio_bytes
-                }
+            } else {
+                tracing::warn!("TTS: failed to write audio to ffmpeg stage 1");
             }
         }
-        Err(e) => {
-            tracing::warn!(
-                "TTS: ffmpeg not found at '{}', sending audio as-is: {}",
-                ffmpeg_path,
-                e
-            );
-            audio_bytes
+
+        // Stage 2: basic opus fallback (no voip tuning, higher bitrate)
+        tracing::info!("TTS: trying basic opus fallback");
+        let mut cmd2 = std::process::Command::new(&ffmpeg_path);
+        cmd2.args([
+            "-i", "pipe:0",
+            "-f", "ogg",
+            "-c:a", "libopus",
+            "-b:a", "64k",
+            "-y", "pipe:1",
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+        if let Ok(mut child) = cmd2.spawn() {
+            use std::io::Write;
+            let write_ok = child.stdin.take()
+                .map(|mut stdin| stdin.write_all(&audio_bytes).is_ok())
+                .unwrap_or(false);
+
+            if write_ok {
+                if let Ok(output) = child.wait_with_output() {
+                    if output.status.success() && !output.stdout.is_empty() {
+                        tracing::info!(
+                            "TTS: basic opus fallback ok ({} → {} bytes)",
+                            audio_bytes.len(),
+                            output.stdout.len()
+                        );
+                        return output.stdout;
+                    }
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    tracing::warn!("TTS: basic opus fallback failed ({}): {}", output.status, stderr.lines().next().unwrap_or(""));
+                }
+            } else {
+                tracing::warn!("TTS: failed to write audio to ffmpeg stage 2");
+            }
+        } else {
+            tracing::warn!("TTS: ffmpeg not found at '{}'", ffmpeg_path);
+        }
+
+        // Both stages failed — return original
+        audio_bytes
+    });
+
+    match tokio::time::timeout(std::time::Duration::from_secs(300), handle).await {
+        Ok(result) => result.unwrap_or(audio_fallback),
+        Err(_) => {
+            tracing::warn!("TTS: ffmpeg conversion timed out after 5m ({} bytes), sending original audio", audio_len);
+            audio_fallback
         }
     }
 }
