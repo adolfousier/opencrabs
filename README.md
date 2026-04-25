@@ -428,7 +428,11 @@ flowchart LR
 
 ---
 
-## 📸 Screenshots
+## 🎬 Full onboard
+
+https://github.com/user-attachments/assets/f05a1132-5d00-4532-bc89-30fb80e45e22
+
+## 🎬 Demo
 
 https://github.com/user-attachments/assets/7f45c5f8-acdf-48d5-b6a4-0e4811a9ee23
 
