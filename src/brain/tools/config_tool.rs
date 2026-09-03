@@ -18,7 +18,10 @@ impl Tool for ConfigTool {
     fn description(&self) -> &str {
         "Read or write OpenCrabs configuration (config.toml) and user commands (commands.toml). \
          Use this to change settings like approval policy, view current config, \
-         add/remove user slash commands, change working directory, or trigger a config reload."
+         add/remove user slash commands, change working directory, or trigger a config reload. \
+         write_config is validated against the compiled config schema: a section that exists in \
+         config.toml (like [memory]) is accepted, while a path the schema would silently drop \
+         on load is hard-denied."
     }
 
     fn input_schema(&self) -> Value {
@@ -40,7 +43,7 @@ impl Tool for ConfigTool {
                 },
                 "section": {
                     "type": "string",
-                    "description": "Config section for read_config/write_config (e.g. 'agent', 'voice', 'logging'). Omit to read the full config."
+                    "description": "Config section for read_config/write_config (e.g. 'agent', 'voice', 'logging'). Omit to read the full config. write_config accepts any section the compiled Config struct knows — e.g. 'memory', even though read_config only renders the first level; unknown paths are hard-denied."
                 },
                 "key": {
                     "type": "string",
@@ -109,7 +112,7 @@ impl Tool for ConfigTool {
 }
 
 /// Top-level sections `read_config` can render.
-pub(crate) use crate::config::sections::{CONFIG_SECTIONS, resolve_section};
+pub(crate) use crate::config::sections::{known_sections, resolve_section};
 
 impl ConfigTool {
     fn read_config(&self, input: &Value) -> Result<ToolResult> {
@@ -123,9 +126,13 @@ impl ConfigTool {
         // below names what was actually asked for.
         let requested = input.get("section").and_then(|v| v.as_str());
         let resolved = requested.and_then(resolve_section);
-        let section = resolved.or(requested);
+        // Unresolved requests keep the original string so the error below
+        // names what was actually asked for — and legacy section names that
+        // predate the struct registry (e.g. `voice`, migrated into
+        // `providers`) still render their dedicated read views.
+        let section = resolved.or_else(|| requested.map(str::to_string));
 
-        let output = match section {
+        let output = match section.as_deref() {
             Some("agent") => format_toml(&config.agent),
             Some("voice") => {
                 let vc = config.voice_config();
@@ -164,7 +171,7 @@ impl ConfigTool {
                      resolve to their parent (e.g. 'providers.stt' or 'stt' -> providers, \
                      'telegram' -> channels).",
                     other,
-                    CONFIG_SECTIONS.join(", ")
+                    known_sections().join(", ")
                 )));
             }
             None => {

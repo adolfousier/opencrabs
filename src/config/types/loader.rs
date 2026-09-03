@@ -439,31 +439,6 @@ impl Config {
         Ok(config)
     }
 
-    /// Known top-level sections in config.toml.
-    ///
-    /// Pinned to the compiled schema by the drift-guard test in
-    /// `src/tests/rsi_stale_scan_test.rs` — extend that test's array when a
-    /// section is added here (or vice versa).
-    pub(crate) const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
-        "provider_registry",
-        "database",
-        "logging",
-        "debug",
-        "providers",
-        "channels",
-        "agent",
-        "daemon",
-        "a2a",
-        "gateway",
-        "image",
-        "cron",
-        "memory",
-        "brain",
-        "browser",
-        "doctor",
-        "tui",
-    ];
-
     /// Check for unknown top-level keys and log warnings.
     /// Only collects warnings once — subsequent calls are no-ops.
     fn warn_unknown_keys(path: &Path) {
@@ -473,18 +448,17 @@ impl Config {
             return;
         }
 
+        // #83: the same serde_ignored pass the write guard uses — the
+        // compiled `Config` struct is the registry, so this warning can
+        // never drift (its predecessor, the hand-maintained
+        // `KNOWN_TOP_LEVEL_KEYS` list, was missing `doctor`, so a live
+        // [doctor] section warned as a possible typo).
         let Ok(raw) = std::fs::read_to_string(path) else {
             return;
         };
-        let Ok(table) = raw.parse::<toml::Table>() else {
+        let Ok(unknown) = crate::config::sections::unknown_top_level_sections(&raw) else {
             return;
         };
-        let mut unknown: Vec<String> = Vec::new();
-        for key in table.keys() {
-            if !Self::KNOWN_TOP_LEVEL_KEYS.contains(&key.as_str()) {
-                unknown.push(key.clone());
-            }
-        }
         if !unknown.is_empty() {
             tracing::warn!(
                 "Unknown top-level keys in config.toml (possible typos): {}",
@@ -1080,14 +1054,6 @@ impl Config {
     fn write_item(section: &str, key: &str, parsed: toml_edit::Item) -> Result<()> {
         use toml_edit::DocumentMut;
 
-        // Reject a section that is not a real config path BEFORE touching the
-        // file (#1199). The navigation below creates any table it is asked
-        // for, so an unknown section wrote successfully into an orphan table
-        // that serde discards on load: tooling reported success, the setting
-        // never applied, and reads kept honestly returning the old value.
-        crate::config::sections::validate_write_path(section)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
-
         // Hold lock for entire read-modify-write to prevent races between
         // concurrent write_key calls (e.g. fallback provider switching fires
         // multiple writes in rapid succession).
@@ -1171,6 +1137,28 @@ impl Config {
                 "config write denied: setting [{section}].{key} would make config.toml invalid \
                  ({e}). The file was NOT changed."
             );
+        }
+
+        // Schema guard (#83): deserialize the candidate through `Config`
+        // with serde_ignored and refuse iff the struct would ignore a key at
+        // the target path. The compiled struct is the registry — a section
+        // the struct knows ([memory], [daemon], ...) writes without ceremony;
+        // anything the struct would discard on load is an orphan by
+        // construction and is refused (the #1199 rule, now struct-derived so
+        // no hand-maintained section list can drift). The parse guard above
+        // runs first, so a type error keeps surfacing with the #714 message.
+        let doc_path_owned = parts.join(".");
+        let doc_path = if doc_path_owned.is_empty() {
+            section
+        } else {
+            doc_path_owned.as_str()
+        };
+        if let Err(e) = crate::config::sections::write_guard(doc_path, key, &serialized) {
+            tracing::error!(
+                target: "config_guard",
+                "Denied config.toml write [{section}].{key}: {e}"
+            );
+            anyhow::bail!("config write denied: {e}");
         }
 
         // Back up before overwriting
