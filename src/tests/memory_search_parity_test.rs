@@ -11,6 +11,8 @@
 
 #![cfg(feature = "code-graph")]
 
+use crate::brain::tools::memory_search::MemorySearchTool;
+use crate::brain::tools::r#trait::Tool;
 use crate::memory::COLLECTION_EXTERNAL;
 use crate::memory::db::Store;
 use crate::memory::search::{MIN_STRUCTURAL_RESULTS, detect_structural_query, search_symbol_graph};
