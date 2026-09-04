@@ -17,6 +17,18 @@ use super::{
 #[cfg(feature = "code-graph")]
 pub(crate) const MIN_STRUCTURAL_RESULTS: usize = 25;
 
+/// Impact chains walk at most this many hops (#89): depth 1 = direct
+/// callers, depth 2 adds callers-of-callers. Deeper than that the noise
+/// outweighs the signal for a one-screen answer.
+#[cfg(feature = "code-graph")]
+pub(crate) const IMPACT_MAX_DEPTH: usize = 2;
+
+/// Impact chains cap total rows across all depths (#89): a hub symbol in a
+/// 96k-edge graph can have hundreds of transitive callers; beyond this many
+/// indented lines the model stops reading them anyway.
+#[cfg(feature = "code-graph")]
+pub(crate) const MAX_IMPACT_ROWS: usize = 50;
+
 /// Detect if a query is asking for structural code relationships.
 ///
 /// Returns `Some((query_type, symbol))` where query_type is one of:
@@ -29,6 +41,28 @@ pub(crate) const MIN_STRUCTURAL_RESULTS: usize = 25;
 #[cfg(feature = "code-graph")]
 pub(crate) fn detect_structural_query(query: &str) -> Option<(String, String)> {
     let query_lower = query.to_lowercase();
+
+    // "who calls X transitively" / "transitive callers of X" → impact chain (#89).
+    // MUST precede the plain "who calls X" pattern, which would otherwise
+    // swallow the same query and answer depth-0 only.
+    if let Some(caps) = regex::Regex::new(
+        r"(?i)(?:who\s+calls|transitive\s+callers\s+of)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+transitively",
+    )
+    .ok()
+    .and_then(|re| re.captures(&query_lower))
+    {
+        return Some(("impact".to_string(), caps[1].to_string()));
+    }
+
+    // "impact of X" / "what breaks if I change X" → impact chain (#89)
+    if let Some(caps) = regex::Regex::new(
+        r"(?i)(?:impact\s+(?:of|for)|what\s+breaks\s+if\s+(?:i|we)\s+(?:change|touch|modify))\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+    )
+    .ok()
+    .and_then(|re| re.captures(&query_lower))
+    {
+        return Some(("impact".to_string(), caps[1].to_string()));
+    }
 
     // "who calls X" / "what calls X" → find callers of X
     if let Some(caps) = regex::Regex::new(r"(?i)(who|what)\s+calls\s+([a-zA-Z_][a-zA-Z0-9_]*)")
@@ -77,7 +111,7 @@ pub(crate) fn detect_structural_query(query: &str) -> Option<(String, String)> {
 /// [`MIN_STRUCTURAL_RESULTS`] here — and ONLY here. Ranked FTS/vector paths
 /// keep the caller's requested `n` by design (Issue-Ref: leshchenko1979/opencrabs#89).
 #[cfg(feature = "code-graph")]
-fn search_symbol_graph(
+pub(crate) fn search_symbol_graph(
     store: &Store,
     query_type: &str,
     symbol: &str,
@@ -108,6 +142,23 @@ fn search_symbol_graph(
                 .map(|(callee, file_path, line)| MemoryResult {
                     path: file_path,
                     snippet: format!("{} calls {} at line {}", symbol, callee, line),
+                    rank: 1.0,
+                    corpus: COLLECTION_EXTERNAL,
+                })
+                .collect())
+        }
+        "impact" => {
+            // Transitive callers, indented by depth, breadth-capped (#89).
+            let rows = store.query_transitive_callers(symbol, IMPACT_MAX_DEPTH)?;
+            Ok(rows
+                .into_iter()
+                .take(MAX_IMPACT_ROWS)
+                .map(|(caller, file_path, line, depth)| MemoryResult {
+                    path: file_path,
+                    snippet: format!(
+                        "{indent}{caller} calls {symbol} at line {line} (depth {depth})",
+                        indent = "  ".repeat(depth.saturating_sub(1))
+                    ),
                     rank: 1.0,
                     corpus: COLLECTION_EXTERNAL,
                 })

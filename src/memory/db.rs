@@ -726,6 +726,60 @@ impl Store {
             .map_err(|e| format!("query_callees_of collect: {e}"))
     }
 
+    /// Transitive callers of a symbol up to `max_depth` hops, via a recursive
+    /// walk of `call_edges` (#89). Returns (caller, file, call_line, depth)
+    /// with depth 1 = direct caller; each caller appears once at its SHALLOWEST
+    /// depth, deterministically ordered by (depth, caller, file, line).
+    ///
+    /// Cycle guard: the recursive member increments `depth` and is bounded by
+    /// `imp.depth < ?2`, so an A→B→A cycle in corrupt data terminates at the
+    /// depth cap instead of walking forever; UNION (not UNION ALL) keeps the
+    /// intermediate row set from fanning out on repeated identical edges.
+    #[cfg(feature = "code-graph")]
+    pub fn query_transitive_callers(
+        &self,
+        callee: &str,
+        max_depth: usize,
+    ) -> Result<Vec<(String, String, usize, usize)>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                r"
+                SELECT caller_symbol, file_path, call_line, MIN(depth) AS depth
+                FROM (
+                    WITH RECURSIVE impact(caller_symbol, file_path, call_line, depth) AS (
+                        SELECT caller_symbol, file_path, call_line, 1
+                        FROM call_edges
+                        WHERE callee_symbol = ?1
+                        UNION
+                        SELECT ce.caller_symbol, ce.file_path, ce.call_line, imp.depth + 1
+                        FROM call_edges ce
+                        JOIN impact imp ON ce.callee_symbol = imp.caller_symbol
+                        WHERE imp.depth < ?2
+                    )
+                    SELECT caller_symbol, file_path, call_line, depth FROM impact
+                )
+                GROUP BY caller_symbol
+                ORDER BY depth, caller_symbol, file_path, call_line
+                ",
+            )
+            .map_err(|e| format!("query_transitive_callers prepare: {e}"))?;
+
+        let rows = stmt
+            .query_map(params![callee, max_depth as i64], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)? as usize,
+                    row.get::<_, i64>(3)? as usize,
+                ))
+            })
+            .map_err(|e| format!("query_transitive_callers: {e}"))?;
+
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("query_transitive_callers collect: {e}"))
+    }
+
     /// Insert (or replace) an embedding for one chunk of a content hash.
     /// `hash_seq` is `{hash}_{seq}` — the key format `vector_search.rs`
     /// reads, so it must not change.

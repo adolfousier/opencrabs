@@ -13,7 +13,7 @@
 
 use crate::memory::COLLECTION_EXTERNAL;
 use crate::memory::db::Store;
-use crate::memory::search::{MIN_STRUCTURAL_RESULTS, search_symbol_graph};
+use crate::memory::search::{MIN_STRUCTURAL_RESULTS, detect_structural_query, search_symbol_graph};
 use tempfile::TempDir;
 
 /// 8 distinct callers of one symbol, inserted in scrambled order.
@@ -159,4 +159,98 @@ fn corpus_tags_are_symmetric_across_corpora() {
     // Collection-wide search() stamps an empty corpus.
     assert_eq!(tag("", true), "");
     assert_eq!(tag("", false), "");
+}
+
+/// "impact of X" routes to the impact chain; plain "who calls X" must NOT.
+#[test]
+fn impact_queries_route_to_the_impact_chain() {
+    assert_eq!(
+        detect_structural_query("impact of validate_input"),
+        Some(("impact".into(), "validate_input".into()))
+    );
+    assert_eq!(
+        detect_structural_query("what breaks if I change process_message"),
+        Some(("impact".into(), "process_message".into()))
+    );
+    assert_eq!(
+        detect_structural_query("who calls validate_input transitively"),
+        Some(("impact".into(), "validate_input".into()))
+    );
+    // Plain depth-0 queries stay where they were.
+    assert_eq!(
+        detect_structural_query("who calls validate_input"),
+        Some(("calls".into(), "validate_input".into()))
+    );
+}
+
+/// Chain A→B→C: impact of C reaches A at depth 2, each caller reported once
+/// at its shallowest depth, output ordered by (depth, caller).
+#[test]
+fn impact_chain_walks_two_hops() {
+    let temp = TempDir::new().unwrap();
+    let store = Store::open(temp.path().join("impact.db")).unwrap();
+    store.ensure_symbol_tables().unwrap();
+    // a.rs line numbers scrambled to prove ordering, not insertion order.
+    store.insert_call_edge("mid", "leaf", "a.rs", 42).unwrap();
+    store.insert_call_edge("top", "mid", "a.rs", 7).unwrap();
+    store.insert_call_edge("mid2", "leaf", "b.rs", 2).unwrap();
+
+    let rows = store.query_transitive_callers("leaf", 2).unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            ("mid".into(), "a.rs".into(), 42, 1),
+            ("mid2".into(), "b.rs".into(), 2, 1),
+            ("top".into(), "a.rs".into(), 7, 2),
+        ],
+        "depth-1 callers first, then depth-2, each ordered by (file, line)"
+    );
+
+    // Depth 1 answers direct callers only.
+    let direct = store.query_transitive_callers("leaf", 1).unwrap();
+    assert_eq!(direct.len(), 2, "depth cap must exclude depth-2 callers");
+}
+
+/// CYCLE GUARD: corrupt data with A→B→A must terminate at the depth cap,
+/// not walk forever or fan out — the query returns bounded, deduplicated
+/// rows (the guard exists precisely for this case) (#89).
+#[test]
+fn impact_chain_survives_a_call_cycle() {
+    let temp = TempDir::new().unwrap();
+    let store = Store::open(temp.path().join("cycle.db")).unwrap();
+    store.ensure_symbol_tables().unwrap();
+    store.insert_call_edge("b_fn", "a_fn", "a.rs", 1).unwrap();
+    store.insert_call_edge("a_fn", "b_fn", "a.rs", 2).unwrap();
+
+    let rows = store.query_transitive_callers("a_fn", 2).unwrap();
+    // b_fn (depth 1) then a_fn itself (depth 2, via the cycle). Bounded rows,
+    // no duplication blowup, no hang.
+    assert!(
+        rows.len() <= 2,
+        "cycle must not fan out beyond one row per symbol per depth: {rows:?}"
+    );
+    assert!(
+        rows.iter().any(|(c, _, _, d)| c == "b_fn" && *d == 1),
+        "direct caller b_fn must be present"
+    );
+}
+
+/// The rendered impact chain indents by depth.
+#[test]
+fn impact_snippets_indent_by_depth() {
+    let temp = TempDir::new().unwrap();
+    let store = Store::open(temp.path().join("indent.db")).unwrap();
+    store.ensure_symbol_tables().unwrap();
+    store.insert_call_edge("mid", "leaf", "a.rs", 42).unwrap();
+    store.insert_call_edge("top", "mid", "a.rs", 7).unwrap();
+
+    let results = search_symbol_graph(&store, "impact", "leaf", 5).unwrap();
+    let snippets: Vec<&str> = results.iter().map(|r| r.snippet.as_str()).collect();
+    assert_eq!(
+        snippets,
+        vec![
+            "mid calls leaf at line 42 (depth 1)",
+            "  top calls leaf at line 7 (depth 2)",
+        ]
+    );
 }
