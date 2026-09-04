@@ -11,7 +11,6 @@
 
 #![cfg(feature = "code-graph")]
 
-use crate::brain::tools::memory_search::MemorySearchTool;
 use crate::brain::tools::r#trait::Tool;
 use crate::memory::COLLECTION_EXTERNAL;
 use crate::memory::db::Store;
@@ -342,7 +341,7 @@ fn mega_caller_sets_roll_up_per_file() {
 /// their signature (search_core) has no offset parameter to pass.
 #[test]
 fn offset_is_documented_as_structural_only() {
-    let schema = crate::brain::tools::memory_search::MemorySearchTool.input_schema();
+    let schema = MemorySearchTool.input_schema();
     let offset = &schema["properties"]["offset"];
     assert_eq!(offset["default"], 0, "offset defaults to 0");
     let desc = offset["description"].as_str().unwrap().to_lowercase();
