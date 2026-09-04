@@ -7,7 +7,8 @@
 //! that root; paths outside every configured root pass through unchanged.
 
 use crate::config::profile::with_home_override;
-use crate::memory::{COLLECTION_EXTERNAL, resolve_path};
+use crate::memory::COLLECTION_EXTERNAL;
+use crate::memory::search::resolve_path;
 use std::path::Path;
 
 const CONFIG_WITH_EXTRA_PATHS: &str = r#"
@@ -81,10 +82,10 @@ fn external_path_outside_roots_passes_through() {
 #[test]
 fn brain_path_still_home_anchored() {
     let (_temp, home) = temp_home_with(CONFIG_WITH_EXTRA_PATHS);
+    let anchor = home.clone();
     with_home_override(home, || {
-        let home_path = home.clone();
-        let got = resolve_path(&home_path, "brain", "SOUL.md");
-        assert_eq!(got, home_path.join("SOUL.md").to_string_lossy());
+        let got = resolve_path(&anchor, "brain", "SOUL.md");
+        assert_eq!(got, anchor.join("SOUL.md").to_string_lossy());
     });
 }
 

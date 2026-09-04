@@ -116,14 +116,23 @@ pub(crate) fn search_symbol_graph(
     query_type: &str,
     symbol: &str,
     n: usize,
+    offset: usize,
 ) -> Result<Vec<MemoryResult>, String> {
     let n = n.max(MIN_STRUCTURAL_RESULTS);
     match query_type {
         "calls" => {
-            // Find who calls this symbol
+            // Who calls this symbol. Real caller sets are unbounded —
+            // measured in a live index: to_string=5404 callers — so the
+            // listing reports its own truncation, paginates via offset, and
+            // switches to a per-file rollup on mega-sets (#89).
             let callers = store.query_callers_of(symbol)?;
-            Ok(callers
+            let total = callers.len();
+            if total > MAX_CALLER_LINE_ROWS {
+                return Ok(caller_rollup(callers, symbol));
+            }
+            let mut results: Vec<MemoryResult> = callers
                 .into_iter()
+                .skip(offset)
                 .take(n)
                 .map(|(caller, file_path, line)| MemoryResult {
                     path: file_path,
@@ -131,13 +140,20 @@ pub(crate) fn search_symbol_graph(
                     rank: 1.0,
                     corpus: COLLECTION_EXTERNAL,
                 })
-                .collect())
+                .collect();
+            if offset + results.len() < total {
+                let remaining = total - offset - results.len();
+                results.push(truncation_marker("callers", symbol, remaining));
+            }
+            Ok(results)
         }
         "called_by" => {
             // Find what this symbol calls
             let callees = store.query_callees_of(symbol)?;
-            Ok(callees
+            let total = callees.len();
+            let mut results: Vec<MemoryResult> = callees
                 .into_iter()
+                .skip(offset)
                 .take(n)
                 .map(|(callee, file_path, line)| MemoryResult {
                     path: file_path,
@@ -145,14 +161,21 @@ pub(crate) fn search_symbol_graph(
                     rank: 1.0,
                     corpus: COLLECTION_EXTERNAL,
                 })
-                .collect())
+                .collect();
+            if offset + results.len() < total {
+                let remaining = total - offset - results.len();
+                results.push(truncation_marker("callees", symbol, remaining));
+            }
+            Ok(results)
         }
         "impact" => {
             // Transitive callers, indented by depth, breadth-capped (#89).
             let rows = store.query_transitive_callers(symbol, IMPACT_MAX_DEPTH)?;
-            Ok(rows
+            let total = rows.len();
+            let mut results: Vec<MemoryResult> = rows
                 .into_iter()
-                .take(MAX_IMPACT_ROWS)
+                .skip(offset)
+                .take(MAX_IMPACT_ROWS.min(n))
                 .map(|(caller, file_path, line, depth)| MemoryResult {
                     path: file_path,
                     snippet: format!(
@@ -162,13 +185,20 @@ pub(crate) fn search_symbol_graph(
                     rank: 1.0,
                     corpus: COLLECTION_EXTERNAL,
                 })
-                .collect())
+                .collect();
+            if offset + results.len() < total {
+                let remaining = total - offset - results.len();
+                results.push(truncation_marker("transitive callers", symbol, remaining));
+            }
+            Ok(results)
         }
         "implements" | "defined_in" => {
             // Find symbol definitions
             let symbols = store.query_symbols_by_name(symbol)?;
-            Ok(symbols
+            let total = symbols.len();
+            let mut results: Vec<MemoryResult> = symbols
                 .into_iter()
+                .skip(offset)
                 .take(n)
                 .map(|(kind, file_path, start_line, end_line)| MemoryResult {
                     path: file_path,
@@ -179,10 +209,72 @@ pub(crate) fn search_symbol_graph(
                     rank: 1.0,
                     corpus: COLLECTION_EXTERNAL,
                 })
-                .collect())
+                .collect();
+            if offset + results.len() < total {
+                let remaining = total - offset - results.len();
+                results.push(truncation_marker("definitions", symbol, remaining));
+            }
+            Ok(results)
         }
         _ => Ok(vec![]),
     }
+}
+
+/// Mega-set threshold for caller listings (#89): above this many callers the
+/// one-line-per-caller listing would blow the response budget (measured live:
+/// `to_string` has 5404 callers), so the listing collapses to a per-file
+/// rollup the model can target.
+#[cfg(feature = "code-graph")]
+pub(crate) const MAX_CALLER_LINE_ROWS: usize = 500;
+
+/// The trailing truncation line for a structural listing (#89): silent
+/// truncation on mega-symbols hid most of the answer; when anything is cut,
+/// the listing says how much remains and how to page to it. Rendered as a
+/// result with an empty path — the formatter prints it bare.
+#[cfg(feature = "code-graph")]
+pub(crate) fn truncation_marker(kind: &str, symbol: &str, remaining: usize) -> MemoryResult {
+    MemoryResult {
+        path: String::new(),
+        snippet: format!(
+            "… and {remaining} more {kind} of {symbol} (re-query with higher n or offset)"
+        ),
+        rank: 1.0,
+        corpus: COLLECTION_EXTERNAL,
+    }
+}
+
+/// Per-file rollup of a mega caller set (#89): one line per file with its
+/// call-site count, sorted by file, plus the total line. Keeps a 5k-caller
+/// answer at ~tens of lines and gives the model a file to target.
+#[cfg(feature = "code-graph")]
+fn caller_rollup(callers: Vec<(String, String, usize)>, symbol: &str) -> Vec<MemoryResult> {
+    use std::collections::BTreeMap;
+
+    let total = callers.len();
+    let mut by_file: BTreeMap<String, usize> = BTreeMap::new();
+    for (_, file, _) in callers {
+        *by_file.entry(file).or_default() += 1;
+    }
+    let mut results: Vec<MemoryResult> = by_file
+        .into_iter()
+        .map(|(file, count)| MemoryResult {
+            path: file,
+            snippet: format!("{count} call sites of {symbol}"),
+            rank: 1.0,
+            corpus: COLLECTION_EXTERNAL,
+        })
+        .collect();
+    // Rollup totals read differently from a paged remainder: nothing was
+    // shown per-line, so the line states the full count (HQ amendment #89).
+    results.push(MemoryResult {
+        path: String::new(),
+        snippet: format!(
+            "… {total} total callers of {symbol} (per-file rollup; target a file for detail)"
+        ),
+        rank: 1.0,
+        corpus: COLLECTION_EXTERNAL,
+    });
+    results
 }
 
 /// Hybrid search across ALL collections in the store: FTS5 (BM25) + vector
@@ -229,16 +321,18 @@ pub(crate) async fn search_external(
     store: &'static Mutex<Store>,
     query: &str,
     n: usize,
+    offset: usize,
 ) -> Result<Vec<MemoryResult>, String> {
-    // Check for structural query (code-graph feature)
+    // Check for structural query (code-graph feature). Offset applies ONLY
+    // here — ranked FTS/vector pagination is by rank, not by window (#89).
     #[cfg(feature = "code-graph")]
     if let Some((query_type, symbol)) = detect_structural_query(query) {
         let store_lock = store
             .lock()
             .map_err(|e| format!("Store lock poisoned: {e}"))?;
-        return search_symbol_graph(&store_lock, &query_type, &symbol, n);
+        return search_symbol_graph(&store_lock, &query_type, &symbol, n, offset);
     }
-
+    let _ = offset; // ranked path: offset deliberately unused
     let results = search_core(store, query, n, Some(COLLECTION_EXTERNAL)).await?;
     let paths: Vec<String> = results.iter().map(|r| r.path.clone()).collect();
     if super::freshness::refresh_stale_external(&paths).await > 0 {
