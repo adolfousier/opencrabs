@@ -648,7 +648,7 @@ impl Store {
                 SELECT kind, file_path, start_line, end_line
                 FROM symbols
                 WHERE symbol_name = ?1
-                ORDER BY (file_path LIKE '%/tests/%'), kind
+                ORDER BY (file_path LIKE '%/tests/%'), kind, file_path, start_line
                 ",
             )
             .map_err(|e| format!("query_symbols_by_name prepare: {e}"))?;
@@ -678,6 +678,7 @@ impl Store {
                 SELECT caller_symbol, file_path, call_line
                 FROM call_edges
                 WHERE callee_symbol = ?1
+                ORDER BY caller_symbol, file_path, call_line
                 ",
             )
             .map_err(|e| format!("query_callers_of prepare: {e}"))?;
@@ -706,6 +707,7 @@ impl Store {
                 SELECT callee_symbol, file_path, call_line
                 FROM call_edges
                 WHERE caller_symbol = ?1
+                ORDER BY callee_symbol, file_path, call_line
                 ",
             )
             .map_err(|e| format!("query_callees_of prepare: {e}"))?;

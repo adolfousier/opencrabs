@@ -10,6 +10,13 @@ use super::{
     embedding_api_configured,
 };
 
+/// Minimum effective cap for structural graph listings (#89): callers/callees/
+/// definitions are rank-1 one-liners where the full set is the answer, so a
+/// search-default n=5 would truncate arbitrarily. Applies to structural
+/// listings only — never to ranked FTS/vector search paths.
+#[cfg(feature = "code-graph")]
+pub(crate) const MIN_STRUCTURAL_RESULTS: usize = 25;
+
 /// Detect if a query is asking for structural code relationships.
 ///
 /// Returns `Some((query_type, symbol))` where query_type is one of:
@@ -63,6 +70,12 @@ pub(crate) fn detect_structural_query(query: &str) -> Option<(String, String)> {
 }
 
 /// Execute a structural query against the symbol graph.
+///
+/// Structural listings ("who calls X") are RANK-1 result sets, not a ranked
+/// search: every hit matters, so the search-default n=5 cap would truncate
+/// the answer arbitrarily. The effective cap is floored at
+/// [`MIN_STRUCTURAL_RESULTS`] here — and ONLY here. Ranked FTS/vector paths
+/// keep the caller's requested `n` by design (Issue-Ref: leshchenko1979/opencrabs#89).
 #[cfg(feature = "code-graph")]
 fn search_symbol_graph(
     store: &Store,
@@ -70,6 +83,7 @@ fn search_symbol_graph(
     symbol: &str,
     n: usize,
 ) -> Result<Vec<MemoryResult>, String> {
+    let n = n.max(MIN_STRUCTURAL_RESULTS);
     match query_type {
         "calls" => {
             // Find who calls this symbol
