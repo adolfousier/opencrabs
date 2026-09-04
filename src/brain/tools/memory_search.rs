@@ -166,8 +166,23 @@ impl Tool for MemorySearchTool {
             ))),
             Ok(results) => {
                 let mut output = String::new();
+                // scope=all merges brain/memory/external blocks in order, so
+                // the model can tell provenance: tag EVERY hit symmetrically
+                // (#89) — the formatter stays corpus-generic.
+                let tag_results = scope == "all";
                 for (i, r) in results.iter().enumerate() {
-                    output.push_str(&format!("{}. **{}**\n   {}\n\n", i + 1, r.path, r.snippet));
+                    let tag = if tag_results && !r.corpus.is_empty() {
+                        format!("[{}] ", r.corpus)
+                    } else {
+                        String::new()
+                    };
+                    output.push_str(&format!(
+                        "{}. {}**{}**\n   {}\n\n",
+                        i + 1,
+                        tag,
+                        r.path,
+                        r.snippet
+                    ));
                 }
                 Ok(ToolResult::success(output))
             }

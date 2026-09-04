@@ -95,6 +95,7 @@ fn search_symbol_graph(
                     path: file_path,
                     snippet: format!("{} calls {} at line {}", caller, symbol, line),
                     rank: 1.0,
+                    corpus: COLLECTION_EXTERNAL,
                 })
                 .collect())
         }
@@ -108,6 +109,7 @@ fn search_symbol_graph(
                     path: file_path,
                     snippet: format!("{} calls {} at line {}", symbol, callee, line),
                     rank: 1.0,
+                    corpus: COLLECTION_EXTERNAL,
                 })
                 .collect())
         }
@@ -124,6 +126,7 @@ fn search_symbol_graph(
                         kind, symbol, start_line, end_line
                     ),
                     rank: 1.0,
+                    corpus: COLLECTION_EXTERNAL,
                 })
                 .collect())
         }
@@ -265,6 +268,7 @@ async fn search_core(
                         path: r.file,
                         snippet: extract_snippet(&r.body, &fts_query, 200),
                         rank: r.score,
+                        corpus: collection.unwrap_or(""),
                     })
                     .collect());
             }
@@ -285,6 +289,7 @@ async fn search_core(
                     path: resolve_path(&home, &r.doc.collection_name, &r.doc.path),
                     snippet,
                     rank: r.score,
+                    corpus: collection.unwrap_or(""),
                 }
             })
             .collect())
@@ -339,6 +344,7 @@ pub async fn search_brain(
                     path: resolve_path(&home, &r.doc.collection_name, &r.doc.path),
                     snippet,
                     rank: r.score,
+                    corpus: COLLECTION_BRAIN,
                 }
             })
             .collect())
