@@ -129,7 +129,7 @@ fn symbol_definitions_are_deterministically_ordered() {
     let files: Vec<&str> = defs.iter().map(|(_, f, _, _)| f.as_str()).collect();
     assert_eq!(
         files,
-        vec!["src/lib.rs", "src/main.rs", "src/lib.rs", "tests/it.rs"],
+        vec!["src/lib.rs", "src/lib.rs", "src/main.rs", "tests/it.rs"],
         "expected non-test files first sorted by path/line, tests last — got {files:?}"
     );
 }
