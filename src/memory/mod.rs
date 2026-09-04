@@ -52,7 +52,7 @@ pub(crate) use embedding_config::{
 };
 pub use index::{BRAIN_FILES, index_file, index_file_fts_only, reindex};
 pub use search::{RrfResult, hybrid_search_rrf, search, search_brain};
-pub(crate) use search::{search_external, search_memory};
+pub(crate) use search::{resolve_path, search_external, search_memory};
 pub(crate) use settings::{
     external_allowed_in_shared, external_excludes, extra_paths_config, read_memory_config,
     sweep_interval_secs, vector_enabled,

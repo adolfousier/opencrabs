@@ -7,7 +7,7 @@ use std::sync::Mutex;
 use super::embedding::{embed_query_api, engine_if_ready};
 use super::{
     COLLECTION_BRAIN, COLLECTION_EXTERNAL, COLLECTION_MEMORY, MemoryResult,
-    embedding_api_configured,
+    embedding_api_configured, extra_paths_config,
 };
 
 /// Minimum effective cap for structural graph listings (#89): callers/callees/
@@ -418,12 +418,26 @@ fn results_to_tuples_for(
 }
 
 /// Resolve filesystem path for a search result based on its collection.
-fn resolve_path(home: &Path, collection: &str, doc_path: &str) -> String {
+pub(crate) fn resolve_path(home: &Path, collection: &str, doc_path: &str) -> String {
     if collection == COLLECTION_EXTERNAL {
         // External documents are keyed by ABSOLUTE path (#1051): the stored
         // path IS the filesystem path. Rebuilding it as home/memory/<key>
         // would point every external hit at a nonexistent file, so pass it
         // through unchanged (mine map #3).
+        //
+        // (#89) When the absolute path sits under a configured [memory]
+        // extra_paths root, emit it relative to that root instead — the
+        // shared prefix is the same on every hit and drowns the informative
+        // part. Paths outside every configured root pass through unchanged.
+        for ep in extra_paths_config() {
+            let root = ep.path().trim_end_matches('/');
+            if let Some(rest) = doc_path
+                .strip_prefix(root)
+                .filter(|rest| rest.starts_with('/'))
+            {
+                return rest[1..].to_string();
+            }
+        }
         return doc_path.to_string();
     }
     let p = if collection == COLLECTION_BRAIN {

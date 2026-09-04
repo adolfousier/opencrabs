@@ -289,6 +289,7 @@ pub mod memory_local_engine_test;
 pub mod memory_recall_eval_test;
 pub mod memory_recall_multilingual_test;
 pub mod memory_recall_test;
+pub mod memory_search_resolve_path_test;
 pub mod memory_search_rrf_test;
 pub mod memory_search_scope_test;
 pub mod memory_search_test;
