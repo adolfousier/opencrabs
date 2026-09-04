@@ -171,15 +171,10 @@ impl Tool for MemorySearchTool {
                 // (#89) — the formatter stays corpus-generic.
                 let tag_results = scope == "all";
                 for (i, r) in results.iter().enumerate() {
-                    let tag = if tag_results && !r.corpus.is_empty() {
-                        format!("[{}] ", r.corpus)
-                    } else {
-                        String::new()
-                    };
                     output.push_str(&format!(
                         "{}. {}**{}**\n   {}\n\n",
                         i + 1,
-                        tag,
+                        corpus_tag(r.corpus, tag_results),
                         r.path,
                         r.snippet
                     ));
@@ -188,5 +183,17 @@ impl Tool for MemorySearchTool {
             }
             Err(e) => Ok(ToolResult::error(format!("Memory search failed: {e}"))),
         }
+    }
+}
+
+/// The one-token corpus marker for a hit block (#89): `[brain] `, `[memory] `,
+/// `[external] ` — symmetric across ALL corpora when scope=all merges them.
+/// Empty when the scope names one corpus (no provenance ambiguity) or the
+/// result carries no corpus (collection-wide search()).
+pub(crate) fn corpus_tag(corpus: &str, scope_all: bool) -> String {
+    if scope_all && !corpus.is_empty() {
+        format!("[{corpus}] ")
+    } else {
+        String::new()
     }
 }
