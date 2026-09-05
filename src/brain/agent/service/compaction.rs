@@ -615,7 +615,7 @@ impl AgentService {
         let token_count = context.token_count;
         let max_tokens = context.max_tokens;
         let model = model_name.to_string();
-        let max_output = self.max_tokens;
+        let max_output = self.request_max_tokens_for_session(session_id);
         let working_dir = self.get_working_directory_for_session(session_id);
         let auto_approve = self.auto_approve_tools;
         let subagents = self.subagent_manager.clone();

@@ -1888,7 +1888,7 @@ impl AgentService {
 
             // Build LLM request with tools if available
             let mut request = LLMRequest::new(model_name.clone(), context.messages.clone())
-                .with_max_tokens(self.max_tokens);
+                .with_max_tokens(self.request_max_tokens_for_session(session_id));
             request.working_directory = Some(
                 self.get_working_directory_for_session(session_id)
                     .to_string_lossy()
@@ -2061,7 +2061,7 @@ impl AgentService {
                     }
                     let mut retry_req =
                         LLMRequest::new(model_name.clone(), context.messages.clone())
-                            .with_max_tokens(self.max_tokens);
+                            .with_max_tokens(self.request_max_tokens_for_session(session_id));
                     retry_req.working_directory = Some(
                         self.get_working_directory_for_session(session_id)
                             .to_string_lossy()
@@ -2261,7 +2261,7 @@ impl AgentService {
                     // Rebuild request with compacted context
                     let mut retry_req =
                         LLMRequest::new(model_name.clone(), context.messages.clone())
-                            .with_max_tokens(self.max_tokens);
+                            .with_max_tokens(self.request_max_tokens_for_session(session_id));
                     retry_req.working_directory = Some(
                         self.get_working_directory_for_session(session_id)
                             .to_string_lossy()
@@ -2536,7 +2536,7 @@ impl AgentService {
 
                         let mut fb_req =
                             LLMRequest::new(fb_model.clone(), context.messages.clone())
-                                .with_max_tokens(self.max_tokens);
+                                .with_max_tokens(self.request_max_tokens_for_session(session_id));
                         fb_req.working_directory = Some(
                             self.get_working_directory_for_session(session_id)
                                 .to_string_lossy()
@@ -2783,7 +2783,7 @@ impl AgentService {
                         // Rebuild request
                         let mut retry_req =
                             LLMRequest::new(model_name.clone(), context.messages.clone())
-                                .with_max_tokens(self.max_tokens);
+                                .with_max_tokens(self.request_max_tokens_for_session(session_id));
                         retry_req.working_directory = Some(
                             self.get_working_directory_for_session(session_id)
                                 .to_string_lossy()
@@ -2971,7 +2971,9 @@ impl AgentService {
 
                             let mut fb_req =
                                 LLMRequest::new(fb_model.clone(), context.messages.clone())
-                                    .with_max_tokens(self.max_tokens);
+                                    .with_max_tokens(
+                                        self.request_max_tokens_for_session(session_id),
+                                    );
                             fb_req.working_directory = Some(
                                 self.get_working_directory_for_session(session_id)
                                     .to_string_lossy()
@@ -3201,7 +3203,7 @@ impl AgentService {
 
                         let mut retry_req =
                             LLMRequest::new(model_name.clone(), context.messages.clone())
-                                .with_max_tokens(self.max_tokens);
+                                .with_max_tokens(self.request_max_tokens_for_session(session_id));
                         retry_req.working_directory = Some(
                             self.get_working_directory_for_session(session_id)
                                 .to_string_lossy()
@@ -3333,7 +3335,9 @@ impl AgentService {
 
                             let mut fb_req =
                                 LLMRequest::new(fb_model.clone(), context.messages.clone())
-                                    .with_max_tokens(self.max_tokens);
+                                    .with_max_tokens(
+                                        self.request_max_tokens_for_session(session_id),
+                                    );
                             fb_req.working_directory = Some(
                                 self.get_working_directory_for_session(session_id)
                                     .to_string_lossy()
@@ -3554,7 +3558,7 @@ impl AgentService {
 
                         let mut fb_req =
                             LLMRequest::new(fb_model.clone(), context.messages.clone())
-                                .with_max_tokens(self.max_tokens);
+                                .with_max_tokens(self.request_max_tokens_for_session(session_id));
                         fb_req.working_directory = Some(
                             self.get_working_directory_for_session(session_id)
                                 .to_string_lossy()
@@ -5500,7 +5504,9 @@ impl AgentService {
                                 fb_attempt += 1;
                                 let mut fb_req =
                                     LLMRequest::new(fb_model.clone(), fb_messages.clone())
-                                        .with_max_tokens(self.max_tokens);
+                                        .with_max_tokens(
+                                            self.request_max_tokens_for_session(session_id),
+                                        );
                                 fb_req.working_directory = Some(
                                     self.get_working_directory_for_session(session_id)
                                         .to_string_lossy()

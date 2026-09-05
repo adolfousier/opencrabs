@@ -648,6 +648,21 @@ impl AgentService {
         self.max_tokens
     }
 
+    /// Output budget for a request in `session_id`.
+    ///
+    /// Context capacity is shared by input, hidden reasoning, and output. On a
+    /// bounded route (notably 200K), blindly reserving the global 65,536-token
+    /// cap leaves only ~134K for input and turns the 65% compaction boundary
+    /// into a near-permanent state. Keep one provider-agnostic policy: reserve
+    /// at most 20% of the active window, while preserving the configured cap on
+    /// larger windows.
+    pub(super) fn request_max_tokens_for_session(&self, session_id: Uuid) -> u32 {
+        super::request_budget::bounded_output_tokens(
+            self.max_tokens,
+            self.context_limit_for_session(session_id),
+        )
+    }
+
     /// Get the tool registry
     pub fn tool_registry(&self) -> &Arc<ToolRegistry> {
         &self.tool_registry

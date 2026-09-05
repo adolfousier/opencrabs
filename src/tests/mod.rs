@@ -594,6 +594,7 @@ pub mod react_marker_test;
 pub mod reasoning_lines_test;
 pub mod reasoning_run_test;
 pub mod rename_session_test;
+pub mod request_budget_test;
 pub mod respond_to_group_persist_test;
 #[cfg(feature = "rtk")]
 pub mod rtk_autodownload_test;

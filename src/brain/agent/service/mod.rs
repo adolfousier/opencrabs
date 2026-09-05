@@ -32,6 +32,7 @@ pub(crate) mod plan_mode_provider;
 pub(crate) mod quiet_delivery;
 pub(crate) mod reasoning_run;
 pub(crate) mod repetition;
+pub(crate) mod request_budget;
 pub(crate) mod restart_recovery;
 pub(crate) mod session_cwd;
 pub(crate) mod session_routes;
