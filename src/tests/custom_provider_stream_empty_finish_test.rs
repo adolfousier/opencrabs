@@ -139,10 +139,10 @@ async fn empty_finish_reason_does_not_flush_partial_tool_calls() {
     let text: String = events
         .iter()
         .filter_map(|e| match e {
-            StreamEvent::ContentBlockDelta { delta, .. } => match &delta {
-                ContentDelta::TextDelta { text } => Some(text.clone()),
-                _ => None,
-            },
+            StreamEvent::ContentBlockDelta {
+                delta: ContentDelta::TextDelta { text },
+                ..
+            } => Some(text.clone()),
             _ => None,
         })
         .collect();
