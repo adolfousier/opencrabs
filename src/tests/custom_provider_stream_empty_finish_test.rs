@@ -66,7 +66,7 @@ async fn serve_sse(listener: TcpListener, body: String) {
     sock.flush().await.ok();
 }
 
-async fn collect_events(provider: &OpenAIProvider, port: u16) -> Vec<StreamEvent> {
+async fn collect_events(provider: &OpenAIProvider) -> Vec<StreamEvent> {
     let req = LLMRequest::new("test-model", vec![Message::user("weather?")]);
     let mut stream = provider.stream(req).await.expect("stream opens");
     let mut events = Vec::new();
@@ -100,7 +100,7 @@ async fn empty_finish_reason_does_not_flush_partial_tool_calls() {
     tokio::spawn(serve_sse(listener, sse));
 
     let provider = OpenAIProvider::local(format!("http://127.0.0.1:{port}/chat/completions"));
-    let events = timeout(Duration::from_secs(10), collect_events(&provider, port))
+    let events = timeout(Duration::from_secs(10), collect_events(&provider))
         .await
         .expect("stream completes in time");
 
