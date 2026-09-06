@@ -1,0 +1,17 @@
+pub mod brain;
+pub mod channels;
+pub mod chat;
+pub mod config_cmd;
+pub mod cron;
+pub mod diagnostics;
+pub mod files;
+pub mod mcp;
+pub mod onboarding;
+pub mod panes;
+pub mod session;
+pub mod skills;
+pub mod tools;
+pub mod update;
+pub mod usage;
+pub mod validation;
+pub mod voice;

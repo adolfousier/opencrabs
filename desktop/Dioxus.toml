@@ -1,0 +1,22 @@
+[application]
+name = "opencrabs-desktop-ui"
+default_platform = "web"
+out_dir = "dist"
+asset_dir = "public"
+
+[web.app]
+title = "OpenCrabs"
+
+[web.wasm_opt]
+# Don't keep DWARF debug symbols in the output (and the input is stripped at the
+# cargo profile level) — binaryen's DWARF reader aborts on DWARF v5.
+debug = false
+# Preserve the wasm name section so console_error_panic_hook backtraces stay
+# human-readable without any DWARF (which crashes wasm-opt).
+keep_names = true
+# Aggressive size optimization for a shippable release.
+level = "z"
+
+[web.watcher]
+watch_path = ["src", "public", "Cargo.toml"]
+reload_html = true
