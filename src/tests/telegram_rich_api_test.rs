@@ -91,6 +91,53 @@ async fn edit_rich_html_uses_custom_api_url() {
 }
 
 #[tokio::test]
+async fn edit_rich_markdown_media_url_entry_uses_custom_api_url() {
+    let mut server = mockito::Server::new_async().await;
+    let mock = server
+        .mock("POST", "/botTESTTOKEN/editMessageText")
+        .match_body(mockito::Matcher::PartialJson(serde_json::json!({
+            "chat_id": 12345,
+            "message_id": 7,
+            "rich_message": {
+                "markdown": "![diagram](tg://photo?id=diag0)",
+                "media": [
+                    {"id": "diag0", "media": {"type": "photo", "media": "https://mermaid.ink/img/abc"}}
+                ]
+            }
+        })))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"ok":true,"result":true}"#)
+        .create_async()
+        .await;
+
+    let kb = serde_json::json!({"inline_keyboard": [[{"text": "b", "callback_data": "cb0"}]]});
+    let result = api::edit_rich_markdown_media(
+        &server.url(),
+        "TESTTOKEN",
+        12345,
+        7,
+        "![diagram](tg://photo?id=diag0)",
+        &[crate::channels::telegram::rich::mermaid::MediaEntry {
+            id: "diag0".to_string(),
+            url: Some("https://mermaid.ink/img/abc".to_string()),
+            bytes: None,
+        }],
+        Some(&kb),
+        "test",
+        "-",
+    )
+    .await;
+
+    assert!(
+        result.is_ok(),
+        "media edit should succeed: {:?}",
+        result.err()
+    );
+    mock.assert_async().await;
+}
+
+#[tokio::test]
 async fn send_rich_markdown_media_target_id_uses_custom_api_url() {
     let mut server = mockito::Server::new_async().await;
     let mock = server

@@ -24,17 +24,19 @@ const STALE_HOST_CAP: usize = 32;
 #[derive(Clone)]
 pub(crate) struct MergedHost {
     pub message_id: MessageId,
-    /// HTML last rendered in that bubble (final response text, plus the
-    /// folded option list when present).
+    /// Body last rendered in that bubble (final response text, plus the
+    /// folded option list when present). HTML for html-plane hosts; the
+    /// merged markdown payload for markdown-plane hosts.
     pub html: String,
     /// Host lives on the native rich API: tap-record edits must ride
-    /// `super::rich::api::edit_rich_html`, not teloxide's edit_message_text.
+    /// `super::rich::api::edit_rich_html` (or `edit_rich_markdown` for
+    /// markdown-plane hosts), not teloxide's edit_message_text.
     pub rich: bool,
-    /// #55: the keyboard was GLUED onto this bubble (glue tier — the body
-    /// was not merge-safe, e.g. a table-bearing rich answer). The body is
-    /// unknown/unsafe to rewrite, so a tap strips the keyboard markup-only
-    /// and echoes the pick record as its own note instead of editing text.
-    pub glued: bool,
+    /// Markdown-plane host (#79 piece 4): the merged markdown payload.
+    /// When set, pick redraws and strips ride `edit_rich_markdown` —
+    /// the server-side render keeps tables intact (#679). `None` = the
+    /// html plane.
+    pub markdown: Option<String>,
 }
 
 /// Merge candidate captured by deliver_final_response (#tg-suggest-merge):
@@ -42,11 +44,12 @@ pub(crate) struct MergedHost {
 #[derive(Clone)]
 pub(crate) struct MergeBubble {
     pub message_id: MessageId,
-    /// `Some` = merge-safe body (classic HTML or table-free rich markdown).
-    /// `None` = rich answer carries a table (#55): merging would flatten it,
-    /// but the id is still a valid GLUE target — `edit_message_reply_markup`
-    /// attaches the keyboard without ever touching the body.
-    pub body: Option<BubbleBody>,
+    /// Body last delivered in that bubble: classic HTML for classic
+    /// bubbles, the captured markdown for rich ones. Markdown-plane
+    /// hosts (#79 piece 4) keep the raw markdown — the merge edit rides
+    /// `edit_rich_markdown`, whose server-side render keeps tables
+    /// intact (#679).
+    pub body: BubbleBody,
 }
 
 /// How a captured [`MergeBubble`] was sent — decides which edit call merges
@@ -1134,9 +1137,10 @@ impl TelegramState {
                         message_id: MessageId(h.message_id as i32),
                         html: h.html,
                         rich: h.rich,
-                        // Port note (#55): persisted rows predate the glue
-                        // tier; restore as non-glued (pre-glue tap path).
-                        glued: false,
+                        // Port note (#79 p4): the markdown column is NULL
+                        // for rows persisted before this change, so hydrate
+                        // reads the plane straight from the row.
+                        markdown: h.markdown,
                     });
                     let token = row.token;
                     let entry = PendingFollowupEntry {
@@ -1174,6 +1178,7 @@ impl TelegramState {
                     message_id: i64::from(h.message_id.0),
                     html: h.html.clone(),
                     rich: h.rich,
+                    markdown: h.markdown.clone(),
                 }),
         };
         let guard = self.followup_store.lock().await;

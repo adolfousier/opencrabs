@@ -8,7 +8,9 @@
 //! point `should_render_mermaid` is not unit-tested because it reads the live
 //! `Config`, whose values in tests depend on the embedded example config.
 
-use crate::channels::telegram::rich::api::build_body_markdown_media_target;
+use crate::channels::telegram::rich::api::{
+    build_body_markdown_media_edit, build_body_markdown_media_target, multipart_scalar_fields,
+};
 use crate::channels::telegram::rich::ast::{Block, Inline, MermaidResult};
 use crate::channels::telegram::rich::markdown_to_html_mermaid;
 use crate::channels::telegram::rich::mermaid::{
@@ -435,6 +437,45 @@ fn build_body_markdown_media_target_bytes_entry_uses_attach_reference() {
 }
 
 // ---------------------------------------------------------------------------
+// build_body_markdown_media_edit (#98 — same media convention on the edit path)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn build_body_markdown_media_edit_carries_message_id_and_media() {
+    let media = vec![MediaEntry {
+        id: "diag0".into(),
+        url: Some("https://mermaid.ink/img/abc".into()),
+        bytes: None,
+    }];
+    let body = build_body_markdown_media_edit(-100, 40827, "text", &media);
+    assert_eq!(body["chat_id"], -100);
+    assert_eq!(body["message_id"], 40827);
+    assert_eq!(body["rich_message"]["markdown"], "text");
+    let arr = body["rich_message"]["media"]
+        .as_array()
+        .expect("media array");
+    assert_eq!(arr[0]["id"], "diag0");
+    assert_eq!(arr[0]["media"]["type"], "photo");
+    assert_eq!(arr[0]["media"]["media"], "https://mermaid.ink/img/abc");
+    // No keyboard passed — the key must be absent, not null.
+    assert!(body.get("reply_markup").is_none());
+}
+
+#[test]
+fn build_body_markdown_media_edit_bytes_entry_uses_attach_reference() {
+    let media = vec![MediaEntry {
+        id: "diag1".into(),
+        url: None,
+        bytes: Some(vec![0x89, b'P']),
+    }];
+    let body = build_body_markdown_media_edit(-100, 5, "text", &media);
+    let arr = body["rich_message"]["media"]
+        .as_array()
+        .expect("media array");
+    assert_eq!(arr[0]["media"]["media"], "attach://diag1");
+}
+
+// ---------------------------------------------------------------------------
 // resolve_markdown_media (no mermaid fence — no network)
 // ---------------------------------------------------------------------------
 
@@ -660,4 +701,24 @@ fn png_dims_rejects_non_png_and_short_buffers() {
     hdr.extend_from_slice(b"IDAT"); // wrong chunk type
     hdr.extend_from_slice(&[0u8; 16]);
     assert_eq!(png_dims(&hdr), None);
+}
+
+#[test]
+fn multipart_scalar_fields_carries_message_id_for_edits_only() {
+    let edit_body = serde_json::json!({
+        "chat_id": -100,
+        "message_id": 40827,
+        "rich_message": { "markdown": "text", "media": [] },
+    });
+    let edit_parts = multipart_scalar_fields(&edit_body);
+    assert!(edit_parts.contains(&("message_id".to_string(), "40827".to_string())));
+    assert!(edit_parts.contains(&("chat_id".to_string(), "-100".to_string())));
+    assert!(edit_parts.iter().any(|(name, _)| name == "rich_message"));
+
+    let send_body = serde_json::json!({
+        "chat_id": -100,
+        "rich_message": { "markdown": "text", "media": [] },
+    });
+    let send_parts = multipart_scalar_fields(&send_body);
+    assert!(!send_parts.iter().any(|(name, _)| name == "message_id"));
 }
