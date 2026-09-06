@@ -8,6 +8,7 @@
 
 use super::mermaid;
 use super::render_html::markdown_to_html_mermaid;
+use crate::channels::telegram::suggest_options::enforce_button_fit;
 use teloxide::types::ThreadId;
 
 /// Send `html` as a native rich message and return the new message id
@@ -59,7 +60,7 @@ pub(crate) async fn edit_rich_markdown(
     let mut body = serde_json::json!({
         "chat_id": chat_id,
         "message_id": message_id,
-        "rich_message": { "markdown": markdown },
+        "rich_message": { "markdown": enforce_button_fit(markdown) },
     });
     if let Some(kb) = reply_markup {
         body["reply_markup"] = kb.clone();
@@ -84,12 +85,78 @@ pub(crate) async fn edit_rich_html(
     let mut body = serde_json::json!({
         "chat_id": chat_id,
         "message_id": message_id,
-        "rich_message": { "html": html },
+        "rich_message": { "html": enforce_button_fit(html) },
     });
     if let Some(kb) = reply_markup {
         body["reply_markup"] = kb.clone();
     }
     post_and_check(&url, &body, origin, origin_detail).await
+}
+
+/// Edit an existing rich message with markdown input + a `media` array (#98).
+/// Same body convention as the send path (`rich_message: {markdown, media}`,
+/// Bot API 10.2+, #1044): local PNG bytes upload via multipart `attach://`,
+/// URL entries ride as server-side references. `reply_markup` is optional —
+/// pass `None` to leave the keyboard unchanged.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn edit_rich_markdown_media(
+    api_url: &str,
+    token: &str,
+    chat_id: i64,
+    message_id: i32,
+    markdown: &str,
+    media: &[super::mermaid::MediaEntry],
+    reply_markup: Option<&serde_json::Value>,
+    origin: &str,
+    origin_detail: &str,
+) -> anyhow::Result<()> {
+    let url = format!("{}/bot{token}/editMessageText", api_base(api_url));
+    let body = build_body_markdown_media_edit(chat_id, message_id, markdown, media);
+    let body = if let Some(kb) = reply_markup {
+        let mut b = body;
+        b["reply_markup"] = kb.clone();
+        b
+    } else {
+        body
+    };
+    if media.iter().any(|m| m.bytes.is_some()) {
+        post_rich_multipart(&url, media, &body, origin, origin_detail).await?;
+    } else {
+        post_and_check(&url, &body, origin, origin_detail).await?;
+    }
+    Ok(())
+}
+
+/// Build the `editMessageText` body with markdown input + a `media` array
+/// (#98). Split out so the request shape is unit-testable without a live
+/// bot, mirroring the send-path body shape (`build_body_markdown_media_target`).
+pub(crate) fn build_body_markdown_media_edit(
+    chat_id: i64,
+    message_id: i32,
+    markdown: &str,
+    media: &[super::mermaid::MediaEntry],
+) -> serde_json::Value {
+    let media_arr: Vec<serde_json::Value> = media
+        .iter()
+        .map(|m| {
+            // Local PNG bytes upload via multipart as `attach://<id>`; URL
+            // entries keep the legacy server-side fetch reference.
+            let source = match (&m.bytes, &m.url) {
+                (Some(_), _) => format!("attach://{}", m.id),
+                (None, Some(url)) => url.clone(),
+                (None, None) => String::new(),
+            };
+            serde_json::json!({
+                "id": m.id,
+                "media": { "type": "photo", "media": source },
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "rich_message": { "markdown": enforce_button_fit(markdown), "media": media_arr },
+    })
 }
 
 /// Lib-pass dead-code exempt: production callers went through the media
@@ -342,7 +409,7 @@ pub(crate) fn build_body_target(
 ) -> serde_json::Value {
     let mut body = serde_json::json!({
         "chat_id": chat_id,
-        "rich_message": { "markdown": markdown },
+        "rich_message": { "markdown": enforce_button_fit(markdown) },
     });
     if let Some(t) = thread_id {
         // ThreadId wraps a MessageId(i32).
@@ -364,7 +431,7 @@ pub(crate) fn build_body_html(
 ) -> serde_json::Value {
     let mut body = serde_json::json!({
         "chat_id": chat_id,
-        "rich_message": { "html": html },
+        "rich_message": { "html": enforce_button_fit(html) },
     });
     if let Some(t) = thread_id {
         body["message_thread_id"] = serde_json::json!(t.0.0);
@@ -419,21 +486,19 @@ pub(crate) async fn send_rich_markdown_media_target_id(
         .ok_or_else(|| anyhow::anyhow!("sendRichMessage ok but response carried no message_id"))
 }
 
-/// Build the multipart/form-data request for a `sendRichMessage` whose media
-/// array references uploaded PNG bytes via `attach://<id>`. Every top-level
-/// scalar field of the JSON body (`chat_id`, `message_thread_id`,
-/// `reply_parameters`, `rich_message`) becomes a string form part; each byte
-/// entry becomes a file part named exactly `<id>` so Telegram's
-/// `attach://<id>` reference resolves (§ Bot API multipart media convention).
-/// The JSON body is still passed in for correlation telemetry
-/// ([`rich_send_fields`] reads its `rich_message` pointer).
-fn build_multipart_form(
-    media: &[super::mermaid::MediaEntry],
-    body: &serde_json::Value,
-) -> reqwest::multipart::Form {
+/// Scalar string form parts for a rich multipart request: the JSON body's
+/// top-level fields Telegram needs as form parts. Split out so the part
+/// shape is unit-testable without a live bot. `message_id` is edit-only:
+/// `editMessageText` multipart rejects with `message to edit not found`
+/// when the part is missing; `sendRichMessage` bodies carry no
+/// `message_id`, so sends are unchanged.
+pub(crate) fn multipart_scalar_fields(body: &serde_json::Value) -> Vec<(String, String)> {
     let mut fields: Vec<(String, String)> = Vec::new();
     if let Some(v) = body.get("chat_id") {
         fields.push(("chat_id".to_string(), v.to_string()));
+    }
+    if let Some(v) = body.get("message_id") {
+        fields.push(("message_id".to_string(), v.to_string()));
     }
     if let Some(v) = body.get("message_thread_id") {
         fields.push(("message_thread_id".to_string(), v.to_string()));
@@ -444,9 +509,22 @@ fn build_multipart_form(
     if let Some(v) = body.get("rich_message") {
         fields.push(("rich_message".to_string(), v.to_string()));
     }
+    fields
+}
 
+/// Build the multipart/form-data request for a `sendRichMessage` whose media
+/// array references uploaded PNG bytes via `attach://<id>`. Scalar parts come
+/// from [`multipart_scalar_fields`]; each byte entry becomes a file part
+/// named exactly `<id>` so Telegram's `attach://<id>` reference resolves
+/// (§ Bot API multipart media convention). The JSON body is still passed in
+/// for correlation telemetry ([`rich_send_fields`] reads its `rich_message`
+/// pointer).
+fn build_multipart_form(
+    media: &[super::mermaid::MediaEntry],
+    body: &serde_json::Value,
+) -> reqwest::multipart::Form {
     let mut form = reqwest::multipart::Form::new();
-    for (name, value) in fields {
+    for (name, value) in multipart_scalar_fields(body) {
         form = form.text(name, value);
     }
     for m in media {
@@ -592,7 +670,7 @@ pub(crate) fn build_body_markdown_media_target(
         .collect();
     let mut body = serde_json::json!({
         "chat_id": chat_id,
-        "rich_message": { "markdown": markdown, "media": media_arr },
+        "rich_message": { "markdown": enforce_button_fit(markdown), "media": media_arr },
     });
     if let Some(t) = thread_id {
         body["message_thread_id"] = serde_json::json!(t.0.0);

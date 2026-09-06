@@ -85,7 +85,7 @@ fn truncate_label_reproduces_the_historic_fold_shape() {
 #[test]
 fn channel_budgets_stay_sane() {
     use crate::channels::question_common::{DISCORD_LABEL_BUDGET, SLACK_LABEL_BUDGET};
-    use crate::channels::telegram::suggest_options::MAX_BUTTON_CHARS;
+    use crate::channels::telegram::suggest_options::BUTTON_LABEL_MAX_UNITS;
     // Evaluated at compile time: these are consts, so a runtime assert both
     // trips `assertions_on_constants` and defers to run-time a contradiction
     // the compiler can already see.
@@ -93,7 +93,7 @@ fn channel_budgets_stay_sane() {
         assert!(DISCORD_LABEL_BUDGET > 0 && SLACK_LABEL_BUDGET > 0);
         // Telegram's ladder replaced its budget: past this width a label
         // cannot ride a button at all and becomes a numbered entry, so no
-        // Telegram label is ever silently cut (#1204).
-        assert!(MAX_BUTTON_CHARS > 0);
+        // Telegram label is never silently cut (#1204, recalibrated #79).
+        assert!(BUTTON_LABEL_MAX_UNITS > 0);
     }
 }
