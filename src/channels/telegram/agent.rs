@@ -317,11 +317,11 @@ impl TelegramAgent {
                                             // so the bubble stops silently eating taps.
                                             // #59: the strip is HOST-AWARE — the #597
                                             // clear rescues the merged-host record, so the
-                                            // shape is known: rich (non-glued) hosts carry
-                                            // the buttons INSIDE the body (a markup strip
-                                            // is a guaranteed "message is not modified"
-                                            // no-op — the zombie), glued/classic hosts
-                                            // carry a reply-markup.
+                                            // shape is known: rich hosts carry the buttons
+                                            // INSIDE the body (a markup strip there is a
+                                            // guaranteed "message is not modified" no-op —
+                                            // the zombie); classic/unknown hosts carry a
+                                            // reply-markup.
                                             if let Some(msg) = query
                                                 .message
                                                 .as_ref()
@@ -330,27 +330,47 @@ impl TelegramAgent {
                                                 let stale_host =
                                                     state.peek_stale_host(&cb_token).await;
                                                 let strip = match &stale_host {
-                                                    Some(h) if h.rich && !h.glued => {
+                                                    Some(h) if h.rich => {
                                                         // Rich host: rewrite the body without
                                                         // the button rows; no reply-markup
                                                         // ever existed on this bubble.
-                                                        let body =
-                                                            super::suggest_options::strip_button_rows(&h.html);
-                                                        super::rich::api::edit_rich_html(
-                                                            bot.api_url().as_str(),
-                                                            bot.token(),
-                                                            msg.chat.id.0,
-                                                            msg.id.0,
-                                                            &body,
-                                                            None,
-                                                            "stale-strip",
-                                                            "#59 stale rich strip",
-                                                        )
-                                                        .await
-                                                        .map_err(|e| e.to_string())
+                                                        // Markdown-plane hosts (#79 piece 4)
+                                                        // ride the markdown strip source so
+                                                        // tables survive the strip (#679).
+                                                        if let Some(md) = &h.markdown {
+                                                            let body =
+                                                                super::suggest_options::strip_button_rows(md);
+                                                            super::rich::api::edit_rich_markdown(
+                                                                bot.api_url().as_str(),
+                                                                bot.token(),
+                                                                msg.chat.id.0,
+                                                                msg.id.0,
+                                                                &body,
+                                                                None,
+                                                                "stale-strip",
+                                                                "#59 stale rich strip",
+                                                            )
+                                                            .await
+                                                            .map_err(|e| e.to_string())
+                                                        } else {
+                                                            let body = super::suggest_options::
+                                                                strip_button_rows(&h.html);
+                                                            super::rich::api::edit_rich_html(
+                                                                bot.api_url().as_str(),
+                                                                bot.token(),
+                                                                msg.chat.id.0,
+                                                                msg.id.0,
+                                                                &body,
+                                                                None,
+                                                                "stale-strip",
+                                                                "#59 stale rich strip",
+                                                            )
+                                                            .await
+                                                            .map_err(|e| e.to_string())
+                                                        }
                                                     }
                                                     _ => {
-                                                        // Glued/classic/unknown: markup strip.
+                                                        // Classic/unknown: markup strip.
                                                         // Unknown = pre-#59 record (or none):
                                                         // keep the #1226 blind strip as the
                                                         // last resort — it is the correct
@@ -469,9 +489,6 @@ impl TelegramAgent {
                                                 &crate::channels::telegram::suggest_options::
                                                     picked_block(&text, chooser.as_deref()),
                                             );
-                                        // #68: true when the echo fallback is owned by the
-                                        // deferred retry task (do NOT echo into the same
-                                        // 429 window — the old immediate echo died there).
                                         let mut echo_deferred = false;
                                         let recorded = match prompt_msg_id {
                                             Some(mid) => {
@@ -485,80 +502,47 @@ impl TelegramAgent {
                                                 // hosts ride teloxide's edit_message_text.
                                                 let host_info =
                                                     merged_host.as_ref().and_then(|h| {
-                                                        (h.message_id == mid)
-                                                            .then(|| (h.html.clone(), h.rich, h.glued))
+                                                        (h.message_id == mid).then(|| {
+                                                            (
+                                                                h.html.clone(),
+                                                                h.rich,
+                                                                h.markdown.clone(),
+                                                            )
+                                                        })
                                                     });
-                                                let empty_kb =
-                                                    super::suggest_options::empty_keyboard();
+                                                let empty_kb = teloxide::types::
+                                                    InlineKeyboardMarkup::new(
+                                                        Vec::<Vec<teloxide::types::InlineKeyboardButton>>::new(),
+                                                    );
                                                 // #39: the pick record is baked into the body
                                                 // BEFORE any transport arm runs — one format
                                                 // site, so no arm can drop the choice again
-                                                // #68: capture the rewrite payload so a
-                                                // Retry-After deferral can re-fire a
-                                                // byte-identical edit outside the 429 window.
-                                                // Initialized here (outside the if/else) so it's
-                                                // accessible in the error handling below.
-                                                let mut tap_retry = None;
-
                                                 // (the classic merged host used to edit the
                                                 // answer HTML alone and lose the record).
-                                                let outcome: Result<(), String> =
-                                                    if host_info
-                                                        .as_ref()
-                                                        .is_some_and(|(_, _, glued)| *glued)
-                                                        {
-                                                        // #55 glue tier: the host body is not
-                                                        // merge-safe (table-bearing rich answer) —
-                                                        // a text edit would flatten it. Strip the
-                                                        // dead keyboard markup-only, then echo the
-                                                        // pick record as its own note bubble.
-                                                        // Sequential, not and_then/map: the note
-                                                        // future must be awaited, which no
-                                                        // Result-combinator closure can do.
-                                                        let stripped = bot_clone
-                                                            .edit_message_reply_markup(chat_id, mid)
-                                                            .reply_markup(empty_kb)
-                                                            .await
-                                                            .map(|_| ())
-                                                            .map_err(|e| e.to_string());
-                                                        if stripped.is_ok() {
-                                                            crate::channels::telegram::send::
-                                                                best_effort_note(
-                                                                    &bot_clone,
-                                                                    chat_id,
-                                                                    thread_id,
-                                                                    &picked,
-                                                                    Some(teloxide::types::ParseMode::Html),
-                                                                    "tap-glue",
-                                                                    "pick record after glued tap",
-                                                                    "the glued host body must not be rewritten",
-                                                                )
-                                                                .await;
-                                                        }
-                                                        stripped
-                                                    } else {
-                                                        // #39: the pick record is baked into the body
-                                                        // BEFORE any transport arm runs — one format
-                                                        // site, so no arm can drop the choice again.
-                                                        let rewrite =
-                                                            super::suggest_options::pick_rewrite(
-                                                                host_info.as_ref().map(
-                                                                    |(full, rich, _glued)| {
-                                                                        (full.as_str(), *rich)
-                                                                    },
-                                                                ),
-                                                                picked,
-                                                                picked_idx,
-                                                            );
-                                                        // #68: capture the rewrite payload so a
-                                                        // Retry-After deferral can re-fire a
-                                                        // byte-identical edit outside the 429 window.
-                                                        tap_retry = Some(match &rewrite {
-                                                            super::suggest_options::PickRewrite::RichHost(body) => TapRetry::Rich(chat_id, mid, body.clone(), empty_kb.clone()),
-                                                            super::suggest_options::PickRewrite::ClassicHost(body) => TapRetry::Classic(chat_id, mid, body.clone(), empty_kb.clone()),
-                                                            super::suggest_options::PickRewrite::Standalone(body) => TapRetry::Standalone(chat_id, mid, body.clone()),
-                                                        });
-                                                        match rewrite {
+                                                let rewrite =
+                                                    super::suggest_options::pick_rewrite(
+                                                        host_info.as_ref().map(|(full, rich, md)| {
+                                                            (full.as_str(), *rich, md.as_deref())
+                                                        }),
+                                                        picked,
+                                                        picked_idx,
+                                                    );
+                                                let outcome: Result<(), String> = match rewrite.clone() {
+                                                    super::suggest_options::PickRewrite::RichMarkdownHost(
+                                                        body,
+                                                    ) => super::rich::api::edit_rich_markdown(
+                                                        bot_clone.api_url().as_str(),
+                                                        bot_clone.token(),
+                                                        chat_id.0,
+                                                        mid.0,
+                                                        &body,
+                                                        Some(&serde_json::json!(empty_kb)),
+                                                        "turn",
+                                                        "-",
+                                                    )
+                                                    .await
+                                                    .map(|_| ())
+                                                    .map_err(|e| e.to_string()),
                                                     super::suggest_options::PickRewrite::RichHost(
                                                         body,
                                                     ) => super::rich::api::edit_rich_html(
@@ -579,20 +563,19 @@ impl TelegramAgent {
                                                     ) => bot_clone
                                                         .edit_message_text(chat_id, mid, &body)
                                                         .parse_mode(teloxide::types::ParseMode::Html)
-                                                        .reply_markup(empty_kb)
+                                                        .reply_markup(empty_kb.clone())
                                                         .await
                                                         .map(|_| ())
                                                         .map_err(|e| e.to_string()),
-                                                            super::suggest_options::PickRewrite::Standalone(
-                                                                body,
-                                                            ) => bot_clone
-                                                                .edit_message_text(chat_id, mid, &body)
-                                                                .parse_mode(teloxide::types::ParseMode::Html)
-                                                                .await
-                                                                .map(|_| ())
-                                                                .map_err(|e| e.to_string()),
-                                                        }
-                                                    };
+                                                    super::suggest_options::PickRewrite::Standalone(
+                                                        body,
+                                                    ) => bot_clone
+                                                        .edit_message_text(chat_id, mid, &body)
+                                                        .parse_mode(teloxide::types::ParseMode::Html)
+                                                        .await
+                                                        .map(|_| ())
+                                                        .map_err(|e| e.to_string()),
+                                                };
                                                 if let Err(e) = outcome {
                                                     match super::edit_retry::classify_str(&e) {
                                                         super::edit_retry::EditErr::RetryAfter(wait) => {
@@ -601,41 +584,64 @@ impl TelegramAgent {
                                                                  429 (retry after {wait:?}) — deferring one \
                                                                  identical retry"
                                                             );
-                                                            if let Some(retry) = tap_retry.take() {
-                                                                let bot_r = bot_clone.clone();
-                                                                let bot_e = bot_clone.clone();
-                                                                let echo_text = text.clone();
-                                                                let echo_chooser = chooser.clone();
-                                                                super::edit_retry::spawn_deferred(
-                                                                    wait,
-                                                                    move || async move {
-                                                                        refire_pick_edit(&bot_r, retry)
-                                                                            .await
-                                                                    },
-                                                                    move || async move {
-                                                                        // The legacy quoted echo — now
-                                                                        // safely outside the 429 window
-                                                                        // that killed attempt 1 (#68).
-                                                                        let echo = crate::channels::telegram::handler::md_to_html(
-                                                                            &crate::channels::telegram::suggest_options::
-                                                                                echo_fallback(&echo_text, echo_chooser.as_deref()),
+                                                            let bot_r = bot_clone.clone();
+                                                            let bot_e = bot_clone.clone();
+                                                            let retry = (
+                                                                chat_id,
+                                                                mid,
+                                                                rewrite.clone(),
+                                                                empty_kb.clone(),
+                                                            );
+                                                            let echo_text = text.clone();
+                                                            let echo_chooser = chooser.clone();
+                                                            super::edit_retry::spawn_deferred(
+                                                                wait,
+                                                                move || async move {
+                                                                    refire_pick_edit(&bot_r, retry)
+                                                                        .await
+                                                                },
+                                                                move || async move {
+                                                                    // Contract point 2 (#76): the
+                                                                    // pick-record edit failed TWICE —
+                                                                    // the bubble never showed the pick
+                                                                    // (#71 lesson: telemetry ≠ visual).
+                                                                    // The echo below is the only record.
+                                                                    tracing::warn!(
+                                                                        "Telegram followup tap: pick \
+                                                                         REDRAW_FAILED on msg {} in chat \
+                                                                         {} — second 429; choice registered \
+                                                                         via echo fallback only",
+                                                                        mid, chat_id
+                                                                    );
+                                                                    // The legacy quoted echo — now
+                                                                    // safely outside the 429 window
+                                                                    // that killed attempt 1 (#68).
+                                                                    let echo = crate::channels::telegram::
+                                                                        handler::md_to_html(
+                                                                            &crate::channels::telegram::
+                                                                                suggest_options::echo_fallback(
+                                                                                    &echo_text,
+                                                                                    echo_chooser.as_deref(),
+                                                                                ),
                                                                         );
-                                                                        if let Err(e) =
-                                                                            crate::channels::telegram::send::message_in_thread(
-                                                                                &bot_e, chat_id, thread_id, echo,
+                                                                    if let Err(e) =
+                                                                        crate::channels::telegram::send::
+                                                                            message_in_thread(
+                                                                                &bot_e, chat_id, thread_id,
+                                                                                echo,
                                                                             )
-                                                                            .parse_mode(teloxide::types::ParseMode::Html)
+                                                                            .parse_mode(teloxide::types::
+                                                                                ParseMode::Html)
                                                                             .await
-                                                                        {
-                                                                            tracing::warn!(
-                                                                                "Telegram followup tap: echo fallback \
-                                                                                 also failed: {e}"
-                                                                            );
-                                                                        }
-                                                                    },
-                                                                );
-                                                                echo_deferred = true;
-                                                            }
+                                                                    {
+                                                                        tracing::warn!(
+                                                                            "Telegram followup tap: echo \
+                                                                             fallback also failed: {e}"
+                                                                        );
+                                                                    }
+                                                                },
+                                                            );
+                                                            echo_deferred = true;
                                                         }
                                                         super::edit_retry::EditErr::Fatal(_) => {
                                                             tracing::warn!(
@@ -1761,7 +1767,8 @@ impl TelegramAgent {
                                     session_id,
                                     crate::tui::plan::ApprovalSource::User,
                                 )
-                                .await {
+                                .await
+                                {
                                     crate::utils::plan_mode::ApproveOutcome::Refused(msg) => {
                                         let _ =
                                             bot.answer_callback_query(query.id.clone()).await;
@@ -2143,47 +2150,37 @@ type PendingEdits = Arc<Mutex<HashMap<(ChatId, MessageId), (u64, Message)>>>;
 /// Cloneable bundle of everything `handle_message` needs, so the message,
 /// edited-message, and settle paths can dispatch without threading nine
 /// arguments through each.
-#[derive(Clone)]
-struct DispatchDeps {
-    agent: Arc<AgentService>,
-    session_svc: SessionService,
-    bot_token: Arc<String>,
-    shared_session: Arc<Mutex<Option<Uuid>>>,
-    telegram_state: Arc<TelegramState>,
-    config_rx: tokio::sync::watch::Receiver<Config>,
-    channel_msg_repo: ChannelMessageRepository,
-    session_binding_repo: SessionBindingRepository,
-}
-
-/// Prebuilt retry payload for the tap pick-record edit (#68). Built BEFORE
-/// the first attempt fires, so the deferred retry is byte-identical to
-/// attempt 1 — same body, same empty keyboard, same transport arm.
-#[derive(Clone)]
-enum TapRetry {
-    /// Rich merged host: body rides `edit_rich_html`.
-    Rich(
-        ChatId,
-        MessageId,
-        String,
-        teloxide::types::InlineKeyboardMarkup,
-    ),
-    /// Classic merged host: body + empty keyboard strip the dead buttons.
-    Classic(
-        ChatId,
-        MessageId,
-        String,
-        teloxide::types::InlineKeyboardMarkup,
-    ),
-    /// Standalone suggestion block becomes the pick record.
-    Standalone(ChatId, MessageId, String),
-}
-
 /// Re-fire a tap pick-record edit exactly as attempt 1 fired it (#68).
-async fn refire_pick_edit(bot: &Bot, retry: TapRetry) -> Result<(), String> {
+/// HEAD adaptation of fork's `TapRetry` plumbing: the `PickRewrite` payload is
+/// already in scope at the failure site and is `Clone`, so the deferred retry
+/// is byte-identical by construction — no parallel enum needed.
+async fn refire_pick_edit(
+    bot: &teloxide::Bot,
+    (chat_id, mid, rewrite, kb): (
+        teloxide::types::ChatId,
+        teloxide::types::MessageId,
+        super::suggest_options::PickRewrite,
+        teloxide::types::InlineKeyboardMarkup,
+    ),
+) -> Result<(), String> {
     use teloxide::payloads::EditMessageTextSetters;
     use teloxide::prelude::Requester;
-    match retry {
-        TapRetry::Rich(chat_id, mid, body, kb) => super::rich::api::edit_rich_html(
+    match rewrite {
+        super::suggest_options::PickRewrite::RichMarkdownHost(body) => {
+            super::rich::api::edit_rich_markdown(
+                bot.api_url().as_str(),
+                bot.token(),
+                chat_id.0,
+                mid.0,
+                &body,
+                Some(&serde_json::json!(kb)),
+                "turn",
+                "-",
+            )
+            .await
+            .map_err(|e| e.to_string())
+        }
+        super::suggest_options::PickRewrite::RichHost(body) => super::rich::api::edit_rich_html(
             bot.api_url().as_str(),
             bot.token(),
             chat_id.0,
@@ -2195,20 +2192,32 @@ async fn refire_pick_edit(bot: &Bot, retry: TapRetry) -> Result<(), String> {
         )
         .await
         .map_err(|e| e.to_string()),
-        TapRetry::Classic(chat_id, mid, body, kb) => bot
+        super::suggest_options::PickRewrite::ClassicHost(body) => bot
             .edit_message_text(chat_id, mid, &body)
             .parse_mode(teloxide::types::ParseMode::Html)
             .reply_markup(kb)
             .await
             .map(|_| ())
             .map_err(|e| e.to_string()),
-        TapRetry::Standalone(chat_id, mid, body) => bot
+        super::suggest_options::PickRewrite::Standalone(body) => bot
             .edit_message_text(chat_id, mid, &body)
             .parse_mode(teloxide::types::ParseMode::Html)
             .await
             .map(|_| ())
             .map_err(|e| e.to_string()),
     }
+}
+
+#[derive(Clone)]
+struct DispatchDeps {
+    agent: Arc<AgentService>,
+    session_svc: SessionService,
+    bot_token: Arc<String>,
+    shared_session: Arc<Mutex<Option<Uuid>>>,
+    telegram_state: Arc<TelegramState>,
+    config_rx: tokio::sync::watch::Receiver<Config>,
+    channel_msg_repo: ChannelMessageRepository,
+    session_binding_repo: SessionBindingRepository,
 }
 
 /// Should this message be held until its edit stream settles? True only for

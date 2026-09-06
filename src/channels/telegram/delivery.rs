@@ -533,17 +533,15 @@ pub(crate) async fn deliver_final_response(
                             rich_md.len(),
                             intermediate_ids.len()
                         );
-                        // Merge candidate (#tg-suggest-merge): the id is
-                        // captured ALWAYS. Table-free rich bubbles capture the
-                        // body too; table-bearing ones capture body=None — #55
-                        // glue tier (keyboard attaches via
-                        // edit_message_reply_markup, body never re-sent), not
-                        // the old skip-to-standalone.
+                        // Merge candidate (#tg-suggest-merge): every rich
+                        // bubble can carry the suggestion controls now —
+                        // table-bearing answers ride the markdown plane,
+                        // whose server-side render keeps tables intact
+                        // (#79 piece 4; the html plane flattened them,
+                        // #679, which is why they used to be excluded).
                         final_bubble = Some(super::state::MergeBubble {
                             message_id: teloxide::types::MessageId(rich_msg_id),
-                            body: (!super::rich::contains_table(&pre_dedup_text)).then(|| {
-                                super::state::BubbleBody::Markdown(pre_dedup_text.clone())
-                            }),
+                            body: super::state::BubbleBody::Markdown(pre_dedup_text.clone()),
                         });
                         // Store bot reply in channel_messages even though
                         // text_only is empty (dedup stripped it). The rich
@@ -804,17 +802,16 @@ pub(crate) async fn deliver_final_response(
                                     rich_md.len()
                                 );
                                 sent_reply_id = Some(id);
-                                // Merge candidate (#tg-suggest-merge): the id
-                                // is captured ALWAYS. Table-free bubbles carry
-                                // the controls in-body; table-bearing ones
-                                // capture body=None — merging re-sends as rich
-                                // HTML input, which flattens tables (#679), so
-                                // #55 glues the keyboard markup-only instead.
+                                // Merge candidate (#tg-suggest-merge): the
+                                // controls can ride this bubble — table-bearing
+                                // answers included: the merge edit goes back out
+                                // on the markdown plane, whose server-side
+                                // render keeps tables intact (#79 piece 4; the
+                                // old html-plane merge flattened them, #679,
+                                // which is why tables used to be excluded).
                                 final_bubble = Some(super::state::MergeBubble {
                                     message_id: teloxide::types::MessageId(id),
-                                    body: (!super::rich::contains_table(&rich_md)).then(|| {
-                                        super::state::BubbleBody::Markdown(rich_md.clone())
-                                    }),
+                                    body: super::state::BubbleBody::Markdown(rich_md.clone()),
                                 });
                                 true
                             }
@@ -904,7 +901,7 @@ pub(crate) async fn deliver_final_response(
                                 // answer bubble suggest_options can ride on.
                                 final_bubble = Some(super::state::MergeBubble {
                                     message_id: mid,
-                                    body: Some(super::state::BubbleBody::Html(chunks[0].clone())),
+                                    body: super::state::BubbleBody::Html(chunks[0].clone()),
                                 });
                             }
                             Err(teloxide::RequestError::RetryAfter(secs)) => {
@@ -918,9 +915,9 @@ pub(crate) async fn deliver_final_response(
                                         sent_reply_id = Some(mid.0);
                                         final_bubble = Some(super::state::MergeBubble {
                                             message_id: mid,
-                                            body: Some(super::state::BubbleBody::Html(
+                                            body: super::state::BubbleBody::Html(
                                                 chunks[0].clone(),
-                                            )),
+                                            ),
                                         });
                                     }
                                     Err(e) => {
@@ -946,9 +943,9 @@ pub(crate) async fn deliver_final_response(
                                             sent_reply_id = Some(sent.0);
                                             final_bubble = Some(super::state::MergeBubble {
                                                 message_id: sent,
-                                                body: Some(super::state::BubbleBody::Html(
+                                                body: super::state::BubbleBody::Html(
                                                     chunks[0].clone(),
-                                                )),
+                                                ),
                                             });
                                         } else {
                                             tracing::error!(
@@ -972,9 +969,9 @@ pub(crate) async fn deliver_final_response(
                                     sent_reply_id = Some(sent.0);
                                     final_bubble = Some(super::state::MergeBubble {
                                         message_id: sent,
-                                        body: Some(super::state::BubbleBody::Html(
+                                        body: super::state::BubbleBody::Html(
                                             chunks[0].clone(),
-                                        )),
+                                        ),
                                     });
                                 }
                             }
@@ -993,7 +990,7 @@ pub(crate) async fn deliver_final_response(
                                 sent_reply_id = Some(sent.0);
                                 final_bubble = Some(super::state::MergeBubble {
                                     message_id: sent,
-                                    body: Some(super::state::BubbleBody::Html(chunk.clone())),
+                                    body: super::state::BubbleBody::Html(chunk.clone()),
                                 });
                             }
                         }

@@ -12,9 +12,14 @@
 //!
 //! Fixtures are synthetic and carry no user identifiers.
 
+use std::sync::Arc;
+
+use teloxide::types::MessageId;
+
+use crate::channels::telegram::state::{MergedHost, TelegramState};
 use crate::channels::telegram::suggest_options::{
-    PickRewrite, echo_fallback, mark_picked_button, pick_rewrite, picked_block,
-    suggestion_rows_rich_html,
+    PickRewrite, echo_fallback, folded_list_markdown, mark_picked_button, pick_rewrite,
+    picked_block, suggestion_rows_rich_html,
 };
 
 const CHOICE: &str = "Update the SKILL.md with the new callback routing";
@@ -113,7 +118,7 @@ fn classic_host_body_keeps_answer_and_pick() {
     // classic merged host edited the answer HTML alone and the pick
     // record vanished. The body must carry BOTH, answer first.
     let rewrite = pick_rewrite(
-        Some(("<b>the answer</b>", false)),
+        Some(("<b>the answer</b>", false, None)),
         picked_block(CHOICE, None),
         0,
     );
@@ -131,7 +136,7 @@ fn classic_host_body_keeps_answer_and_pick() {
 #[test]
 fn rich_host_body_keeps_answer_and_pick() {
     let rewrite = pick_rewrite(
-        Some(("<b>the answer</b>", true)),
+        Some(("<b>the answer</b>", true, None)),
         picked_block(CHOICE, None),
         0,
     );
@@ -159,18 +164,117 @@ fn the_rich_flag_decides_the_transport_not_the_body() {
     // Same host html, same pick — only the rich flag flips, so the two
     // bodies must match byte for byte; only the variant differs.
     let picked = picked_block(CHOICE, None);
-    let classic = pick_rewrite(Some(("host", false)), picked.clone(), 0);
-    let rich = pick_rewrite(Some(("host", true)), picked, 0);
+    let classic = pick_rewrite(Some(("host", false, None)), picked.clone(), 0);
+    let rich = pick_rewrite(Some(("host", true, None)), picked, 0);
     fn body_of(r: &PickRewrite) -> &str {
         match r {
-            PickRewrite::RichHost(b) | PickRewrite::ClassicHost(b) | PickRewrite::Standalone(b) => {
-                b.as_str()
-            }
+            PickRewrite::RichHost(b)
+            | PickRewrite::RichMarkdownHost(b)
+            | PickRewrite::ClassicHost(b)
+            | PickRewrite::Standalone(b) => b.as_str(),
         }
     }
     assert_eq!(body_of(&classic), body_of(&rich));
     assert_ne!(classic, rich, "the variant must flip with the flag");
 }
+
+// ---- #59: stale-shell taps must know the host shape after a #597 clear ----
+//
+// The #597 clear wipes the stash when the user sends their own message, but
+// RICH-merged buttons keep rendering inside the bubble body. The clear now
+// rescues the merged-host record into a bounded stale map, so the stale-shell
+// tap can strip by host shape instead of firing a blind markup strip (a
+// guaranteed no-op on rich bubbles — the zombie).
+//
+// (Adapted to the upstream MergedHost shape: no `glued` field — that is the
+// fork's #55 glue tier, disposition ASK, not ported.)
+
+fn host(mid: i32, rich: bool) -> MergedHost {
+    MergedHost {
+        message_id: MessageId(mid),
+        html: "<p>answer</p><tg-button-row><tg-button>Go</tg-button></tg-button-row>".into(),
+        rich,
+        markdown: None,
+    }
+}
+
+async fn register_one(state: &TelegramState, sid: uuid::Uuid, token_tag: u8) -> String {
+    let token = state
+        .register_pending_followups(sid, vec![format!("Option {token_tag}")])
+        .await;
+    state
+        .attach_followup_host(&token, host(100 + i32::from(token_tag), true))
+        .await;
+    token
+}
+
+#[tokio::test]
+async fn clear_rescues_host_records_for_stale_taps() {
+    let state = Arc::new(TelegramState::new());
+    let sid = uuid::Uuid::new_v4();
+    let token = register_one(&state, sid, 1).await;
+
+    // No stale record before the clear.
+    assert!(state.peek_stale_host(&token).await.is_none());
+
+    state.clear_pending_followups(sid).await;
+
+    // After the clear the stash is gone, but the rescued record survives.
+    let h = state
+        .peek_stale_host(&token)
+        .await
+        .expect("clear must rescue the merged-host record (#59)");
+    assert!(h.rich);
+    assert_eq!(h.message_id.0, 101);
+}
+
+#[tokio::test]
+async fn forget_removes_only_the_stripped_record() {
+    let state = Arc::new(TelegramState::new());
+    let sid = uuid::Uuid::new_v4();
+    let a = register_one(&state, sid, 1).await;
+    let b = register_one(&state, sid, 2).await;
+    state.clear_pending_followups(sid).await;
+
+    state.forget_stale_host(&a).await;
+    assert!(state.peek_stale_host(&a).await.is_none());
+    assert!(
+        state.peek_stale_host(&b).await.is_some(),
+        "unrelated records must survive a forget"
+    );
+    // Idempotent: forgetting again is a no-op, not a panic.
+    state.forget_stale_host(&a).await;
+}
+
+#[tokio::test]
+async fn unmerged_entries_leave_no_stale_record() {
+    let state = Arc::new(TelegramState::new());
+    let sid = uuid::Uuid::new_v4();
+    // Registered but the merge never landed: no host to attach, nothing to
+    // strip later — the clear must NOT mint a stale record for it.
+    let _ = state
+        .register_pending_followups(sid, vec!["Bare option".to_string()])
+        .await;
+    state.clear_pending_followups(sid).await;
+    assert_eq!(state.stale_host_count().await, 0);
+}
+
+#[tokio::test]
+async fn stale_map_is_bounded_at_the_cap() {
+    let state = Arc::new(TelegramState::new());
+    let sid = uuid::Uuid::new_v4();
+    // CAP + 5 registrations, all cleared in one sweep: the deque must shed
+    // the oldest records down to the cap.
+    for i in 0..37 {
+        let _ = register_one(&state, sid, (i % 250 + 1) as u8).await;
+    }
+    state.clear_pending_followups(sid).await;
+    assert!(
+        state.stale_host_count().await <= 32,
+        "stale-host map must be bounded (FIFO eviction)"
+    );
+}
+
 // ── #67 tap-redraw: mark_picked_button ──────────────────────────────────────
 
 fn shared_row_html() -> String {
@@ -229,7 +333,7 @@ fn tap_redraw_rich_host_body_has_marked_rows_and_record() {
     // End-to-end through pick_rewrite: rows rewritten to the picked state,
     // record appended, #39 order preserved (answer/rows first, record last).
     let host = format!("<b>the answer</b>\n{}", shared_row_html());
-    let rewrite = pick_rewrite(Some((&host, true)), picked_block(CHOICE, None), 1);
+    let rewrite = pick_rewrite(Some((&host, true, None)), picked_block(CHOICE, None), 1);
     let PickRewrite::RichHost(body) = rewrite else {
         panic!("rich host stays rich")
     };
@@ -246,102 +350,47 @@ fn tap_redraw_rich_host_body_has_marked_rows_and_record() {
     );
 }
 
-// ---- #59: stale-shell taps must know the host shape after a #597 clear ----
-//
-// The #597 clear wipes the stash when the user sends their own message, but
-// RICH-merged buttons keep rendering inside the bubble body. The clear now
-// rescues the merged-host record into a bounded stale map, so the stale-shell
-// tap can strip by host shape instead of firing a blind markup strip (a
-// guaranteed no-op on rich bubbles — the zombie).
+#[test]
+fn markdown_host_routes_to_the_markdown_plane() {
+    // #79 piece 4: a markdown-plane host (markdown: Some) must produce the
+    // RichMarkdownHost variant even though its body bytes rewrite exactly
+    // like an html-plane host — the plane decides the transport, not the
+    // content.
+    let host = "<b>answer</b>\n| a | b |\n|---|---|\n| 1 | 2 |".to_string();
+    let rewrite = pick_rewrite(
+        Some((host.as_str(), true, Some(host.as_str()))),
+        picked_block(CHOICE, None),
+        0,
+    );
+    let PickRewrite::RichMarkdownHost(body) = rewrite else {
+        panic!("markdown host must ride the markdown plane: {rewrite:?}")
+    };
+    assert!(body.starts_with("<b>answer</b>"), "answer first: {body}");
+    assert!(
+        body.contains("| a | b |"),
+        "markdown table survives: {body}"
+    );
+    assert!(body.contains(CHOICE), "pick record survives: {body}");
+}
 
-use std::sync::Arc;
-
-use teloxide::types::MessageId;
-
-use crate::channels::telegram::state::{MergedHost, TelegramState};
-
-fn host(mid: i32, rich: bool, glued: bool) -> MergedHost {
-    MergedHost {
-        message_id: MessageId(mid),
-        html: "<p>answer</p><tg-button-row><tg-button>Go</tg-button></tg-button-row>".into(),
-        rich,
-        glued,
+#[test]
+fn markdown_and_html_hosts_rewrite_identically() {
+    // Same body bytes, different plane: the rewritten bodies must match
+    // byte for byte — only the variant (transport) differs.
+    let host = "<b>the answer</b>";
+    let picked = picked_block(CHOICE, None);
+    let html_plane = pick_rewrite(Some((host, true, None)), picked.clone(), 0);
+    let md_plane = pick_rewrite(Some((host, true, Some(host))), picked, 0);
+    match (html_plane, md_plane) {
+        (PickRewrite::RichHost(a), PickRewrite::RichMarkdownHost(b)) => {
+            assert_eq!(a, b, "rewrite is plane-agnostic")
+        }
+        other => panic!("unexpected variants: {other:?}"),
     }
 }
 
-async fn register_one(state: &TelegramState, sid: uuid::Uuid, token_tag: u8) -> String {
-    let token = state
-        .register_pending_followups(sid, vec![format!("Option {token_tag}")])
-        .await;
-    state
-        .attach_followup_host(&token, host(100 + i32::from(token_tag), true, false))
-        .await;
-    token
-}
-
-#[tokio::test]
-async fn clear_rescues_host_records_for_stale_taps() {
-    let state = Arc::new(TelegramState::new());
-    let sid = uuid::Uuid::new_v4();
-    let token = register_one(&state, sid, 1).await;
-
-    // No stale record before the clear.
-    assert!(state.peek_stale_host(&token).await.is_none());
-
-    state.clear_pending_followups(sid).await;
-
-    // After the clear the stash is gone, but the rescued record survives.
-    let h = state
-        .peek_stale_host(&token)
-        .await
-        .expect("clear must rescue the merged-host record (#59)");
-    assert!(h.rich && !h.glued);
-    assert_eq!(h.message_id.0, 101);
-}
-
-#[tokio::test]
-async fn forget_removes_only_the_stripped_record() {
-    let state = Arc::new(TelegramState::new());
-    let sid = uuid::Uuid::new_v4();
-    let a = register_one(&state, sid, 1).await;
-    let b = register_one(&state, sid, 2).await;
-    state.clear_pending_followups(sid).await;
-
-    state.forget_stale_host(&a).await;
-    assert!(state.peek_stale_host(&a).await.is_none());
-    assert!(
-        state.peek_stale_host(&b).await.is_some(),
-        "unrelated records must survive a forget"
-    );
-    // Idempotent: forgetting again is a no-op, not a panic.
-    state.forget_stale_host(&a).await;
-}
-
-#[tokio::test]
-async fn unmerged_entries_leave_no_stale_record() {
-    let state = Arc::new(TelegramState::new());
-    let sid = uuid::Uuid::new_v4();
-    // Registered but the merge never landed: no host to attach, nothing to
-    // strip later — the clear must NOT mint a stale record for it.
-    let _ = state
-        .register_pending_followups(sid, vec!["Bare option".to_string()])
-        .await;
-    state.clear_pending_followups(sid).await;
-    assert_eq!(state.stale_host_count().await, 0);
-}
-
-#[tokio::test]
-async fn stale_map_is_bounded_at_the_cap() {
-    let state = Arc::new(TelegramState::new());
-    let sid = uuid::Uuid::new_v4();
-    // CAP + 5 registrations, all cleared in one sweep: the deque must shed
-    // the oldest records down to the cap.
-    for i in 0..37 {
-        let _ = register_one(&state, sid, (i % 250 + 1) as u8).await;
-    }
-    state.clear_pending_followups(sid).await;
-    assert!(
-        state.stale_host_count().await <= 32,
-        "stale-host map must be bounded (FIFO eviction)"
-    );
+#[test]
+fn folded_list_markdown_numbers_each_option() {
+    let list = folded_list_markdown(&["первый".to_string(), "второй|с таблицей".to_string()]);
+    assert_eq!(list, "1. первый\n2. второй|с таблицей");
 }

@@ -25,6 +25,11 @@ pub struct FollowupHost {
     pub message_id: i64,
     pub html: String,
     pub rich: bool,
+    /// Merged markdown payload for markdown-plane hosts (#79 piece 4):
+    /// when set, every edit of this bubble rides `edit_rich_markdown`
+    /// (server-side render keeps tables intact); the `html` copy is then
+    /// a fallback/strip source only. `None` = html-plane host.
+    pub markdown: Option<String>,
 }
 
 /// One armed suggestion keyboard, as stored.
@@ -55,7 +60,7 @@ impl PendingFollowupRepository {
             .interact(move |conn| -> Result<Vec<PendingFollowup>> {
                 let mut stmt = conn.prepare(
                     "SELECT token, session_id, options_json, host_message_id, host_html, \
-                     host_rich FROM pending_followups",
+                     host_rich, host_markdown FROM pending_followups",
                 )?;
                 let rows = stmt
                     .query_map([], |row| {
@@ -67,24 +72,28 @@ impl PendingFollowupRepository {
                             row.get::<_, Option<i64>>(3)?,
                             row.get::<_, Option<String>>(4)?,
                             row.get::<_, i64>(5)? != 0,
+                            row.get::<_, Option<String>>(6)?,
                         ))
                     })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
                 rows.into_iter()
-                    .map(|(token, session_id, options_json, mid, html, rich)| {
-                        let options = serde_json::from_str(&options_json)
-                            .with_context(|| format!("decode options for token {token}"))?;
-                        Ok(PendingFollowup {
-                            token,
-                            session_id,
-                            options,
-                            host: mid.map(|message_id| FollowupHost {
-                                message_id,
-                                html: html.unwrap_or_default(),
-                                rich,
-                            }),
-                        })
-                    })
+                    .map(
+                        |(token, session_id, options_json, mid, html, rich, markdown)| {
+                            let options = serde_json::from_str(&options_json)
+                                .with_context(|| format!("decode options for token {token}"))?;
+                            Ok(PendingFollowup {
+                                token,
+                                session_id,
+                                options,
+                                host: mid.map(|message_id| FollowupHost {
+                                    message_id,
+                                    html: html.unwrap_or_default(),
+                                    rich,
+                                    markdown,
+                                }),
+                            })
+                        },
+                    )
                     .collect()
             })
             .await
@@ -97,9 +106,14 @@ impl PendingFollowupRepository {
     pub async fn save(&self, entry: &PendingFollowup) -> Result<()> {
         let options_json =
             serde_json::to_string(&entry.options).context("encode followup options")?;
-        let (mid, html, rich) = match &entry.host {
-            Some(h) => (Some(h.message_id), Some(h.html.clone()), h.rich),
-            None => (None, None, false),
+        let (mid, html, rich, markdown) = match &entry.host {
+            Some(h) => (
+                Some(h.message_id),
+                Some(h.html.clone()),
+                h.rich,
+                h.markdown.clone(),
+            ),
+            None => (None, None, false, None),
         };
         let token = entry.token.clone();
         let session_id = entry.session_id.clone();
@@ -111,16 +125,17 @@ impl PendingFollowupRepository {
                 conn.execute(
                     "INSERT INTO pending_followups \
                        (token, session_id, options_json, host_message_id, host_html, \
-                        host_rich, updated_at) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, strftime('%s','now')) \
+                        host_rich, host_markdown, updated_at) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, strftime('%s','now')) \
                      ON CONFLICT(token) DO UPDATE SET \
                        session_id = excluded.session_id, \
                        options_json = excluded.options_json, \
                        host_message_id = excluded.host_message_id, \
                        host_html = excluded.host_html, \
                        host_rich = excluded.host_rich, \
+                       host_markdown = excluded.host_markdown, \
                        updated_at = excluded.updated_at",
-                    params![token, session_id, options_json, mid, html, rich],
+                    params![token, session_id, options_json, mid, html, rich, markdown],
                 )
             })
             .await
