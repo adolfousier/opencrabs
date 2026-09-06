@@ -8,7 +8,9 @@
 //! point `should_render_mermaid` is not unit-tested because it reads the live
 //! `Config`, whose values in tests depend on the embedded example config.
 
-use crate::channels::telegram::rich::api::build_body_markdown_media_target;
+use crate::channels::telegram::rich::api::{
+    build_body_markdown_media_target, multipart_scalar_fields,
+};
 use crate::channels::telegram::rich::ast::{Block, Inline, MermaidResult};
 use crate::channels::telegram::rich::markdown_to_html_mermaid;
 use crate::channels::telegram::rich::mermaid::{
@@ -660,4 +662,24 @@ fn png_dims_rejects_non_png_and_short_buffers() {
     hdr.extend_from_slice(b"IDAT"); // wrong chunk type
     hdr.extend_from_slice(&[0u8; 16]);
     assert_eq!(png_dims(&hdr), None);
+}
+
+#[test]
+fn multipart_scalar_fields_carries_message_id_for_edits_only() {
+    let edit_body = serde_json::json!({
+        "chat_id": -100,
+        "message_id": 40827,
+        "rich_message": { "markdown": "text", "media": [] },
+    });
+    let edit_parts = multipart_scalar_fields(&edit_body);
+    assert!(edit_parts.contains(&("message_id".to_string(), "40827".to_string())));
+    assert!(edit_parts.contains(&("chat_id".to_string(), "-100".to_string())));
+    assert!(edit_parts.iter().any(|(name, _)| name == "rich_message"));
+
+    let send_body = serde_json::json!({
+        "chat_id": -100,
+        "rich_message": { "markdown": "text", "media": [] },
+    });
+    let send_parts = multipart_scalar_fields(&send_body);
+    assert!(!send_parts.iter().any(|(name, _)| name == "message_id"));
 }

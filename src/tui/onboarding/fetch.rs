@@ -381,6 +381,12 @@ pub async fn fetch_provider_models(
             .and_then(|c| c.providers.xiaomi.clone())
             .map(|p| p.models)
             .unwrap_or_default();
+        if api_models.is_empty() {
+            // Live fetch failed (401 / offline) — fall back to the binary
+            // baseline so the picker is never empty (#1419). Mirrors the
+            // MiniMax fallback above.
+            return merge_minimax_baseline(xiaomi_baseline_models(), user_models);
+        }
         return merge_minimax_baseline(api_models, user_models);
     }
 
@@ -759,6 +765,22 @@ fn minimax_baseline_models() -> Vec<String> {
         "MiniMax-M2.1".to_string(),
         "MiniMax-M2.1-highspeed".to_string(),
         "MiniMax-M2".to_string(),
+    ]
+}
+
+/// Binary's known Xiaomi MiMo models, used as fallback when the live
+/// /models fetch fails — the endpoint is keyless but geo/credential
+/// sensitive (401 on some CI runners, #1419). Newest first so the
+/// picker highlights the current model. Live fetch is the primary
+/// source — this only covers offline / unreachable-API scenarios.
+fn xiaomi_baseline_models() -> Vec<String> {
+    vec![
+        "mimo-v2.5-pro".to_string(),
+        "mimo-v2-pro".to_string(),
+        "mimo-v2-omni".to_string(),
+        "mimo-v2-flash".to_string(),
+        "mimo-v2-pro-free".to_string(),
+        "mimo-v2-omni-free".to_string(),
     ]
 }
 

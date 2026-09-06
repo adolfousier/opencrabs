@@ -419,21 +419,19 @@ pub(crate) async fn send_rich_markdown_media_target_id(
         .ok_or_else(|| anyhow::anyhow!("sendRichMessage ok but response carried no message_id"))
 }
 
-/// Build the multipart/form-data request for a `sendRichMessage` whose media
-/// array references uploaded PNG bytes via `attach://<id>`. Every top-level
-/// scalar field of the JSON body (`chat_id`, `message_thread_id`,
-/// `reply_parameters`, `rich_message`) becomes a string form part; each byte
-/// entry becomes a file part named exactly `<id>` so Telegram's
-/// `attach://<id>` reference resolves (§ Bot API multipart media convention).
-/// The JSON body is still passed in for correlation telemetry
-/// ([`rich_send_fields`] reads its `rich_message` pointer).
-fn build_multipart_form(
-    media: &[super::mermaid::MediaEntry],
-    body: &serde_json::Value,
-) -> reqwest::multipart::Form {
+/// Scalar string form parts for a rich multipart request: the JSON body's
+/// top-level fields Telegram needs as form parts. Split out so the part
+/// shape is unit-testable without a live bot. `message_id` is edit-only:
+/// `editMessageText` multipart rejects with `message to edit not found`
+/// when the part is missing; `sendRichMessage` bodies carry no
+/// `message_id`, so sends are unchanged.
+pub(crate) fn multipart_scalar_fields(body: &serde_json::Value) -> Vec<(String, String)> {
     let mut fields: Vec<(String, String)> = Vec::new();
     if let Some(v) = body.get("chat_id") {
         fields.push(("chat_id".to_string(), v.to_string()));
+    }
+    if let Some(v) = body.get("message_id") {
+        fields.push(("message_id".to_string(), v.to_string()));
     }
     if let Some(v) = body.get("message_thread_id") {
         fields.push(("message_thread_id".to_string(), v.to_string()));
@@ -444,9 +442,22 @@ fn build_multipart_form(
     if let Some(v) = body.get("rich_message") {
         fields.push(("rich_message".to_string(), v.to_string()));
     }
+    fields
+}
 
+/// Build the multipart/form-data request for a `sendRichMessage` whose media
+/// array references uploaded PNG bytes via `attach://<id>`. Scalar parts come
+/// from [`multipart_scalar_fields`]; each byte entry becomes a file part
+/// named exactly `<id>` so Telegram's `attach://<id>` reference resolves
+/// (§ Bot API multipart media convention). The JSON body is still passed in
+/// for correlation telemetry ([`rich_send_fields`] reads its `rich_message`
+/// pointer).
+fn build_multipart_form(
+    media: &[super::mermaid::MediaEntry],
+    body: &serde_json::Value,
+) -> reqwest::multipart::Form {
     let mut form = reqwest::multipart::Form::new();
-    for (name, value) in fields {
+    for (name, value) in multipart_scalar_fields(body) {
         form = form.text(name, value);
     }
     for m in media {
