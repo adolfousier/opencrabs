@@ -107,10 +107,16 @@ async fn empty_finish_reason_does_not_flush_partial_tool_calls() {
     // (1) Exactly ONE ToolUse block start — the COMPLETE call, flushed only at
     // the terminal chunk. Pre-fix, the empty-finish partial chunk emitted a
     // second (partial) ToolUse first.
+    // Count ONLY ToolUse block starts: plain text content also OPENS a
+    // ContentBlockStart (Text { text: "" }) before its deltas — that is the
+    // normal streaming protocol, not a partial tool flush (#105).
     let tool_starts: Vec<&ContentBlock> = events
         .iter()
         .filter_map(|e| match e {
-            StreamEvent::ContentBlockStart { content_block, .. } => Some(content_block),
+            StreamEvent::ContentBlockStart { content_block, .. } => match content_block {
+                block @ ContentBlock::ToolUse { .. } => Some(block),
+                _ => None,
+            },
             _ => None,
         })
         .collect();
