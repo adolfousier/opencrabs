@@ -9,8 +9,8 @@
 //! rule is that no source file carries a `#[cfg(test)] mod tests` block.
 
 use crate::channels::telegram::suggest_options::{
-    FOLLOWUP_PREFIX, MAX_BUTTON_CHARS, MAX_NUMBERS_PER_ROW, SHARED_ROW_MAX_CHARS, SuggestLayout,
-    folded_list_html, pick_layout, suggestion_rows_rich_html,
+    BUTTON_LABEL_MAX_UNITS, FOLLOWUP_PREFIX, MAX_NUMBERS_PER_ROW, SHARED_ROW_MAX_CHARS,
+    SuggestLayout, enforce_button_fit, folded_list_html, pick_layout, suggestion_rows_rich_html,
 };
 
 fn opts(v: &[&str]) -> Vec<String> {
@@ -45,15 +45,32 @@ fn test_one_long_label_kills_the_shared_row() {
 
 #[test]
 fn test_the_button_width_boundary_is_exclusive() {
-    // Measured on a real client: MAX_BUTTON_CHARS fits one line, past it wraps.
+    // Recalibrated 2026-09-04 (#79 owner smokes): BUTTON_LABEL_MAX_UNITS
+    // rides a full-width button, past it the set folds — a clipped label
+    // is a correctness bug, an over-eager fold is only cosmetic.
     assert_eq!(
-        pick_layout(&["x".repeat(MAX_BUTTON_CHARS)]),
+        pick_layout(&["x".repeat(BUTTON_LABEL_MAX_UNITS)]),
         SuggestLayout::Column
     );
     assert_eq!(
-        pick_layout(&["Ship it".to_string(), "x".repeat(MAX_BUTTON_CHARS + 1)]),
+        pick_layout(&[
+            "Ship it".to_string(),
+            "x".repeat(BUTTON_LABEL_MAX_UNITS + 1)
+        ]),
         SuggestLayout::NumberedProse
     );
+}
+
+#[test]
+fn test_shared_row_respects_the_total_budget() {
+    // #79: shared rows cut at 36 total; only a 24 slim-tail pair held, so
+    // the total budget is 20. Two 12-char labels fit neither the budget
+    // nor one row — they drop to Column (one full-width button per row).
+    let o = vec![
+        "x".repeat(SHARED_ROW_MAX_CHARS),
+        "y".repeat(SHARED_ROW_MAX_CHARS),
+    ];
+    assert_eq!(pick_layout(&o), SuggestLayout::Column);
 }
 
 #[test]
@@ -112,4 +129,50 @@ fn test_callback_data_stays_within_the_cap_at_the_worst_index() {
         "#1204: {} bytes exceeds the callback_data cap",
         widest.len()
     );
+}
+
+#[test]
+fn test_enforce_button_fit_ships_fitting_bodies_byte_identical() {
+    let body = "<p>Готово</p>\n<tg-button-row>\
+                <tg-button type=\"callback_data\" data=\"followup:tok:0\" \
+                style=\"primary\">Полёт</tg-button></tg-button-row>";
+    assert_eq!(enforce_button_fit(body), body);
+}
+
+#[test]
+fn test_enforce_button_fit_folds_oversized_labels_keeping_routing() {
+    // 30-char Cyrillic label: past BUTTON_LABEL_MAX_UNITS=20 -> the set
+    // folds; the button keeps its attrs (routing untouched) but shows its
+    // index, and the original label moves into the <ol>.
+    let long = "Проверка ширины кнопки хххххххххЖЖЖ";
+    let body = format!(
+        "<tg-button-row><tg-button type=\"url\" data=\"https://x/{long}\">{long}\
+         </tg-button></tg-button-row>"
+    );
+    let out = enforce_button_fit(&body);
+    assert!(
+        out.contains("<tg-button type=\"url\" data=\"https://x/"),
+        "{out}"
+    );
+    assert!(out.contains(">1</tg-button>"), "{out}");
+    assert!(out.contains("<li>"), "{out}");
+    assert!(out.contains(long), "{out}");
+    // Idempotent: the folded body passes through unchanged.
+    assert_eq!(enforce_button_fit(&out), out);
+}
+
+#[test]
+fn test_enforce_button_fit_folds_rows_over_the_total_budget() {
+    // Two 12-char labels = 24 total: past SHARED_ROW_TOTAL_UNITS=20 (#79).
+    let body = "<tg-button-row>\
+                <tg-button type=\"callback_data\" data=\"followup:t:0\">Полёт норм!!\
+                </tg-button><tg-button type=\"callback_data\" data=\"followup:t:1\">\
+                Всё чётко!!!</tg-button></tg-button-row>";
+    let out = enforce_button_fit(body);
+    assert!(
+        out.contains(">1</tg-button>") && out.contains(">2</tg-button>"),
+        "{out}"
+    );
+    assert!(out.contains("<li>Полёт норм!!</li>"), "{out}");
+    assert!(out.contains("<li>Всё чётко!!!</li>"), "{out}");
 }
