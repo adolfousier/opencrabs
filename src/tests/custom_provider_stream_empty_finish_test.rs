@@ -113,10 +113,10 @@ async fn empty_finish_reason_does_not_flush_partial_tool_calls() {
     let tool_starts: Vec<&ContentBlock> = events
         .iter()
         .filter_map(|e| match e {
-            StreamEvent::ContentBlockStart { content_block, .. } => match content_block {
-                block @ ContentBlock::ToolUse { .. } => Some(block),
-                _ => None,
-            },
+            StreamEvent::ContentBlockStart {
+                content_block: block @ ContentBlock::ToolUse { .. },
+                ..
+            } => Some(block),
             _ => None,
         })
         .collect();
