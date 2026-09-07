@@ -187,6 +187,9 @@ async fn spawn_cron_scheduler_for_profile(profile_name: String) {
                 shared_session.clone(),
                 config_rx,
             ));
+            // #129: this factory builds agents ONLY for cron execution —
+            // headless backstop flag on every agent it creates.
+            factory.set_headless(true);
             // Wire the tool registry into the daemon's factory — WITHOUT this the
             // cron agents got an empty registry and every job ran toolless
             // ("Tool not found: bash"). The interactive path sets this via

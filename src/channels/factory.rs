@@ -40,6 +40,11 @@ pub struct ChannelFactory {
     /// via [`set_subagent_manager`]; wired into every agent service the factory
     /// creates so compaction can inject running sub-agent IDs into the summary.
     subagent_manager: OnceLock<Arc<crate::brain::tools::subagent::SubAgentManager>>,
+    /// Headless factory (#129): agents built by the daemon's cron scheduler
+    /// have no live user surface. Stamped into every agent service so
+    /// interactive-only tools hard-error (belt-and-braces backstop behind the
+    /// registry-level exclusion). Default `false` (interactive channel factory).
+    headless: std::sync::atomic::AtomicBool,
 }
 
 impl ChannelFactory {
@@ -65,7 +70,17 @@ impl ChannelFactory {
             session_updated_tx: OnceLock::new(),
             runtime_info: OnceLock::new(),
             subagent_manager: OnceLock::new(),
+            headless: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// Mark this factory headless (#129): every agent service it builds gets
+    /// `with_headless(true)` so interactive-only tools hard-error. Used by the
+    /// daemon's cron-scheduler factory; the interactive channel factory never
+    /// calls this.
+    pub fn set_headless(&self, headless: bool) {
+        self.headless
+            .store(headless, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Wire in the runtime info so channel agents rebuild their system brain
@@ -146,6 +161,10 @@ impl ChannelFactory {
 
         if let Some(registry) = self.tool_registry.get() {
             builder = builder.with_tool_registry(registry.clone());
+        }
+
+        if self.headless.load(std::sync::atomic::Ordering::Relaxed) {
+            builder = builder.with_headless(true);
         }
 
         if let Some(tx) = self.session_updated_tx.get() {

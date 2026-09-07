@@ -743,6 +743,9 @@ pub(crate) async fn cmd_run(
         // `run` has no TTY to prompt on, so without the flag only non-approval
         // tools run and approval-gated ones are denied by the loop.
         .with_auto_approve_tools(auto_approve)
+        // #129: backstop flag — interactive-only tools hard-error in the
+        // tool loop even if a future regression re-registers them.
+        .with_headless(true)
         .with_subagent_manager(subagent_manager);
 
     // Create or resume session (#1368): `agent --session <prefix|uuid>`

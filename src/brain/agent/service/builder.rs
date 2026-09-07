@@ -294,6 +294,13 @@ pub struct AgentService {
     /// Whether to auto-approve tool execution
     pub(super) auto_approve_tools: bool,
 
+    /// Headless session (#129): no live user surface (CLI one-shot run, cron
+    /// daemon execute, sub-agent spawn). Stamped into every
+    /// ToolExecutionContext so interactive-only tools (session_notify,
+    /// suggest_options) hard-error if invoked anyway — the belt-and-braces
+    /// backstop behind the registry-level exclusion. Default `false`.
+    pub(super) headless: bool,
+
     /// When true, suppress the playful post-compaction narration.
     /// Mirrors `[agent] silent_compaction` from config.toml. Default
     /// is `false` — users have called out the post-compaction
@@ -442,6 +449,7 @@ impl AgentService {
             auto_approve_tools: crate::utils::approval::policy_auto_approves(
                 &config.agent.approval_policy,
             ),
+            headless: false,
             silent_compaction: config.agent.silent_compaction,
             background_compaction: config.agent.background_compaction,
             pending_compactions: std::sync::Mutex::new(HashMap::new()),
@@ -755,6 +763,15 @@ impl AgentService {
     /// subagents whose spawn the parent already approved.
     pub fn with_auto_approve_tools(mut self, auto_approve: bool) -> Self {
         self.auto_approve_tools |= auto_approve;
+        self
+    }
+
+    /// Mark this service headless (#129): no live user surface. Stamped into
+    /// every ToolExecutionContext so interactive-only tools hard-error on
+    /// invocation — the backstop behind the registry-level exclusion at
+    /// `register_core_agent_tools(headless = true)`.
+    pub fn with_headless(mut self, headless: bool) -> Self {
+        self.headless = headless;
         self
     }
 

@@ -329,6 +329,18 @@ impl Tool for SessionNotifyTool {
     }
 
     async fn execute(&self, input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
+        // #129 belt-and-braces (owner ruling C): a headless session has no
+        // turn-end relay to flush parked notifications — the send would die
+        // with the one-shot process. Fail LOUDLY; the final message is the
+        // sanctioned report channel.
+        if context.headless {
+            return Err(ToolError::Execution(
+                "session_notify is not available headless — a one-shot process cannot \
+                 deliver parked notifications. Put the substance in your final \
+                 message; the harness relays it."
+                    .into(),
+            ));
+        }
         let target = input
             .get("target_session")
             .and_then(|v| v.as_str())

@@ -79,6 +79,12 @@ pub struct ToolExecutionContext {
     pub session_provider: Option<String>,
 
     pub parent_tool_registry: Option<Arc<crate::brain::tools::ToolRegistry>>,
+
+    /// Headless session (#129): the enclosing agent runs on a surface with no
+    /// live user (CLI one-shot run, cron execute, sub-agent). Interactive-only
+    /// tools read this to hard-error instead of parking a verdict no one will
+    /// ever see. `false` by default (interactive).
+    pub headless: bool,
 }
 
 impl std::fmt::Debug for ToolExecutionContext {
@@ -113,6 +119,7 @@ impl ToolExecutionContext {
             subagent_manager: None,
             session_provider: None,
             parent_tool_registry: None,
+            headless: false,
         }
     }
 

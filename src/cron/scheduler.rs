@@ -667,6 +667,9 @@ async fn resolve_job_agent(
     if let Some(registry) = factory.tool_registry() {
         builder = builder.with_tool_registry(registry);
     }
+    // #129: cron execution is headless — backstop flag on the agent so
+    // interactive-only tools hard-error even if re-registered.
+    builder = builder.with_headless(true);
     Ok((config, Arc::new(builder)))
 }
 

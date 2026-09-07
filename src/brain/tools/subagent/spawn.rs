@@ -465,6 +465,9 @@ impl Tool for SpawnAgentTool {
                     .with_tool_registry(child_registry)
                     .with_auto_approve_tools(true) // children auto-approve (parent already approved spawn)
                     .with_working_directory(child_dir)
+                    // #129: a sub-agent is a headless session (owner ruling C)
+                    // — backstop flag so interactive-only tools hard-error.
+                    .with_headless(true)
                     .with_plan_session_override(plan_session_override);
 
             Arc::new(agent)

@@ -13,7 +13,7 @@
 //! a question. If the agent genuinely cannot proceed without a choice, it should
 //! ask directly in your reply instead.
 
-use super::error::Result;
+use super::error::{Result, ToolError};
 use super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
 use crate::brain::agent::ProgressEvent;
 use async_trait::async_trait;
@@ -72,6 +72,16 @@ impl Tool for SuggestOptionsTool {
     }
 
     async fn execute(&self, input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
+        // #129 belt-and-braces: headless surfaces have no UI to render the
+        // options — fail LOUDLY rather than park a verdict nobody sees.
+        if context.headless {
+            return Err(ToolError::Execution(
+                "suggest_options is not available headless — no interactive user \
+                 exists on this surface. State your options and recommendation \
+                 in your final message instead."
+                    .into(),
+            ));
+        }
         let parsed: SuggestInput = serde_json::from_value(input)?;
 
         let options = sanitize_options(parsed.options);
