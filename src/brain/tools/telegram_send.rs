@@ -165,6 +165,17 @@ pub(crate) async fn resolve_thread_id(
     if let Some(tid) = state.session_topic(session_id).await
         && state.session_chat(session_id).await == Some(chat_id)
     {
+        // Returns even when the boundary yields None: a session bound to
+        // General has a KNOWN address (no thread), so falling through to the
+        // chat-wide lookup below would post into whichever topic spoke last
+        // (#1319).
+        //
+        // A remembered topic can outlive its existence on Telegram's side
+        // (deleted while we were away). Its first hard evidence is the send
+        // itself failing with `message thread not found` (#116) — handled at
+        // the send seams (rich + HTML ladder), which evict chat-scoped and
+        // retry unthreaded. Here we just resolve the address; the map
+        // re-registers on the chat's next inbound topic message.
         return crate::channels::telegram::session_resolve::delivery_thread_id(Some(tid));
     }
     crate::channels::telegram::send::latest_thread_id_for_chat(chat_id).await

@@ -382,7 +382,6 @@ pub mod telegram_details_fallback_render_test;
 #[cfg(feature = "telegram")]
 pub mod telegram_general_topic_delivery_test;
 #[cfg(feature = "telegram")]
-#[cfg(feature = "telegram")]
 pub mod telegram_mentions_other_bot_test;
 #[cfg(feature = "telegram")]
 pub mod telegram_menu_scope_test;
@@ -802,6 +801,8 @@ pub mod restart_recovery_test;
 pub mod restart_replay_context_test;
 pub mod shell_scan_test;
 pub mod slack_handler_test;
+#[cfg(feature = "telegram")]
+pub mod stale_topic_eviction_test;
 pub mod subagent_notify_test;
 mod telegram_acl_test;
 mod telegram_attachment_tmp_name_test;

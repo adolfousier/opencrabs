@@ -355,14 +355,12 @@ pub async fn best_effort_note<C>(
 pub(crate) async fn send_markdown_outbox(
     bot: &Bot,
     chat_id: ChatId,
-    thread_id: Option<ThreadId>,
+    mut thread_id: Option<ThreadId>,
     markdown: &str,
     origin: &str,
     origin_detail: &str,
     reply_to: Option<i32>,
 ) -> std::result::Result<Vec<(i32, String)>, String> {
-    let thread = thread_id.map(|t| t.0.0);
-
     // 1. Native rich, as a whole message. `post_rich` owns the telemetry
     // line for this send (with origin + detail threaded through), so the
     // outbox does not double-log the rich success (review F3/F8).
@@ -381,14 +379,58 @@ pub(crate) async fn send_markdown_outbox(
         {
             Ok(id) => return Ok(vec![(id, markdown.to_string())]),
             Err(e) => {
-                tracing::warn!(
-                    "{origin}/{origin_detail}: native rich send failed ({e}) — falling back to HTML"
-                );
+                // Stale-topic auto-route (#116): a remembered topic that was
+                // deleted on Telegram's side makes EVERY thread-carrying send
+                // fail with 400 `message thread not found` — rich AND (before
+                // this fix) the plain fallback below, which re-used the same
+                // poisoned thread. Evict the dead address chat-scoped and
+                // retry this send ONCE unthreaded (General/DM = absence of a
+                // thread, #1319). Any other rich failure falls through to the
+                // HTML ladder with the thread intact.
+                if e.to_string().contains("message thread not found") && thread_id.is_some() {
+                    if let Some(tid) = thread_id {
+                        let evicted = evict_dead_topic(chat_id.0, tid.0.0).await;
+                        tracing::warn!(
+                            "{origin}/{origin_detail}: remembered topic {} is gone \
+                             (message thread not found) — evicted {evicted} rows, retrying unthreaded",
+                            tid.0.0
+                        );
+                    }
+                    thread_id = None;
+                    match super::rich::send_rich_with_mermaid_target_id(
+                        bot.api_url().as_str(),
+                        bot.token(),
+                        chat_id.0,
+                        None,
+                        reply_to,
+                        markdown,
+                        origin,
+                        origin_detail,
+                    )
+                    .await
+                    {
+                        Ok(id) => return Ok(vec![(id, markdown.to_string())]),
+                        Err(e2) => {
+                            tracing::warn!(
+                                "{origin}/{origin_detail}: native rich send failed after \
+                                 stale-topic fallback ({e2}) — falling back to HTML"
+                            );
+                        }
+                    }
+                } else {
+                    tracing::warn!(
+                        "{origin}/{origin_detail}: native rich send failed ({e}) — falling back to HTML"
+                    );
+                }
             }
         }
     }
 
-    // 2. Universal HTML ladder, chunked to Telegram's limit.
+    // 2. Universal HTML ladder, chunked to Telegram's limit. When the
+    // stale-topic eviction above fired, `thread_id` is now None — the
+    // ladder (and its plain-text fallback, the #116 poisoning leg) is
+    // re-addressed to General/DM instead of the dead topic.
+    let thread = thread_id.map(|t| t.0.0);
     let html = super::handler::markdown_to_telegram_html(markdown);
     let chunks = super::handler::split_message(&html, 4096);
     let total = chunks.len();
@@ -415,6 +457,59 @@ pub(crate) async fn send_markdown_outbox(
                 sent.push((mid.0, chunk.to_string()));
             }
             Err(e) => {
+                // Plain-path leg of the #116 poisoning chain: a message that
+                // is NOT rich-shaped never entered the rich arm, so its first
+                // sight of the dead topic is here — the HTML ladder 400s and
+                // (pre-fix) the plain fallback re-used the same thread and
+                // 400'd too. Same medicine: evict chat-scoped, retry the
+                // chunk once unthreaded. Any other error is returned as
+                // before.
+                let es = e.to_string();
+                if es.contains("message thread not found") && thread_id.is_some() {
+                    if let Some(tid) = thread_id {
+                        let evicted = evict_dead_topic(chat_id.0, tid.0.0).await;
+                        tracing::warn!(
+                            "{origin}/{origin_detail}: HTML ladder hit dead topic {} \
+                             — evicted {evicted} rows, retrying chunk unthreaded",
+                            tid.0.0
+                        );
+                    }
+                    thread_id = None;
+                    match super::intermediates::send_html_or_plain(
+                        bot, chat_id, None, chunk, origin, reply_to,
+                    )
+                    .await
+                    {
+                        Ok(mid) => {
+                            super::telemetry::log_send_success(
+                                origin,
+                                origin_detail,
+                                "-",
+                                "outbox",
+                                "html_chunk_unthreaded",
+                                chat_id.0,
+                                None,
+                                mid.0,
+                                chunk.len(),
+                                &super::telemetry::content_hash8(chunk),
+                            );
+                            sent.push((mid.0, chunk.to_string()));
+                            continue;
+                        }
+                        Err(e2) => {
+                            let partial = if sent.is_empty() {
+                                String::new()
+                            } else {
+                                format!(" ({} of {total} chunks already delivered)", sent.len())
+                            };
+                            return Err(format!(
+                                "{origin}/{origin_detail} chunk {}/{total} failed after \
+                                 stale-topic fallback{partial}: {e2}",
+                                i + 1
+                            ));
+                        }
+                    }
+                }
                 let partial = if sent.is_empty() {
                     String::new()
                 } else {
@@ -428,6 +523,31 @@ pub(crate) async fn send_markdown_outbox(
         }
     }
     Ok(sent)
+}
+
+/// Evict a dead forum-topic address chat-scoped (#116): clear the
+/// `thread_id` on `channel_messages` rows of THIS chat that carry it, so
+/// `latest_thread_id_for_chat` never serves the deleted topic again. The
+/// in-memory session-topic map self-heals on the chat's next inbound
+/// `is_topic_message` (re-registered on every event), so only the stored
+/// rows need clearing here.
+pub(crate) async fn evict_dead_topic(chat_id: i64, thread_id: i32) -> u64 {
+    let Some(pool) = crate::db::global_pool().cloned() else {
+        return 0;
+    };
+    let repo = crate::db::ChannelMessageRepository::new(pool);
+    match repo
+        .clear_thread_for_chat("telegram", &chat_id.to_string(), &thread_id.to_string())
+        .await
+    {
+        Ok(n) => n,
+        Err(e) => {
+            tracing::warn!(
+                "stale-topic eviction for chat {chat_id} thread {thread_id} failed: {e}"
+            );
+            0
+        }
+    }
 }
 
 /// Persist delivered outbox messages for reply recovery (#234, #1085 P1b
