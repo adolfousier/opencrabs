@@ -406,6 +406,7 @@ mod send_input_tool {
             plan_session_override: None,
             subagent_manager: None,
             parent_tool_registry: None,
+            headless: false,
         }
     }
 
@@ -567,6 +568,7 @@ mod close_agent_tool {
             plan_session_override: None,
             subagent_manager: None,
             parent_tool_registry: None,
+            headless: false,
         }
     }
 
@@ -695,6 +697,7 @@ mod wait_agent_tool {
             plan_session_override: None,
             subagent_manager: None,
             parent_tool_registry: None,
+            headless: false,
         }
     }
 
@@ -1299,6 +1302,7 @@ mod team_delete_tool {
             plan_session_override: None,
             subagent_manager: None,
             parent_tool_registry: None,
+            headless: false,
         }
     }
 
@@ -1427,6 +1431,7 @@ mod team_broadcast_tool {
             plan_session_override: None,
             subagent_manager: None,
             parent_tool_registry: None,
+            headless: false,
         }
     }
 

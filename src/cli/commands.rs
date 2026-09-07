@@ -2320,6 +2320,7 @@ pub(crate) async fn cmd_evolve(config: &crate::config::Config, check_only: bool)
         plan_session_override: None,
         subagent_manager: None,
         parent_tool_registry: None,
+        headless: false, // evolve is an interactive CLI command
     };
 
     let result = tool.execute(input, &context).await?;

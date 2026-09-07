@@ -27,7 +27,7 @@ use std::sync::Arc;
 /// the one-shot process). Children inherit the parent registry verbatim, so
 /// an interactive parent's copies of these tools would leak into the child
 /// without this strip.
-pub(crate) const ALWAYS_EXCLUDED: &[&str] = &[
+pub const ALWAYS_EXCLUDED: &[&str] = &[
     "spawn_agent",
     "resume_agent",
     "wait_agent",

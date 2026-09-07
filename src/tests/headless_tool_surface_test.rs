@@ -72,7 +72,7 @@ async fn interactive_only_tools_hard_error_on_headless_context() {
     ctx.headless = true;
 
     let suggest_err = <SuggestOptionsTool as Tool>::execute(
-        SuggestOptionsTool,
+        &SuggestOptionsTool,
         json!({ "options": ["Go", "Stop"] }),
         &ctx,
     )
@@ -84,7 +84,7 @@ async fn interactive_only_tools_hard_error_on_headless_context() {
     );
 
     let notify_err = <subagent::SessionNotifyTool as Tool>::execute(
-        subagent::SessionNotifyTool,
+        &subagent::SessionNotifyTool,
         json!({ "target_session": uuid::Uuid::new_v4().to_string(), "text": "hi" }),
         &ctx,
     )
@@ -103,7 +103,7 @@ async fn interactive_only_tools_hard_error_on_headless_context() {
 async fn suggest_options_does_not_trip_guard_on_interactive_context() {
     let ctx = ToolExecutionContext::new(uuid::Uuid::new_v4());
     let result = <SuggestOptionsTool as Tool>::execute(
-        SuggestOptionsTool,
+        &SuggestOptionsTool,
         json!({ "options": ["Go"] }),
         &ctx,
     )
