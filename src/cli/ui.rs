@@ -168,7 +168,10 @@ async fn spawn_cron_scheduler_for_profile(profile_name: String) {
             let service_context = ServiceContext::new(db.pool().clone());
             let provider = crate::brain::provider::create_provider(&config).await?;
             let home = crate::config::opencrabs_home();
-            let system_brain = BrainLoader::new(home.clone()).build_core_brain(None);
+            let mut system_brain = BrainLoader::new(home.clone()).build_core_brain(None);
+            // Headless-only preamble (#129): a cron job's deliver_to carries
+            // only the final message — inject the self-containedness law.
+            system_brain.push_str(crate::cli::tool_setup::HEADLESS_PREAMBLE);
             // ChannelFactory wants a watch::Receiver<Config>, but every reader
             // on the cron path only calls config_rx.borrow() (never .changed()),
             // so we keep just the receiver and let the sender drop right here.
@@ -190,7 +193,11 @@ async fn spawn_cron_scheduler_for_profile(profile_name: String) {
             // `set_tool_registry`; the daemon builds its own factory, so it must
             // populate and wire the registry here too.
             let tool_registry = Arc::new(crate::brain::tools::registry::ToolRegistry::new());
-            let subagent_manager = crate::cli::tool_setup::register_core_agent_tools(&tool_registry, &db, &config);
+            // `true` = headless (#129): cron sessions are one-shot processes
+            // whose only user-visible output is the deliver_to delivery — the
+            // final message. session_notify/suggest_options stay unregistered
+            // and the headless preamble rides on the factory's shared brain.
+            let subagent_manager = crate::cli::tool_setup::register_core_agent_tools(&tool_registry, &db, &config, true);
             // Headless-safe runtime tools (dynamic tools.toml tools, tool_manage,
             // browser) so secondary-profile cron jobs match the primary profile's
             // functional tool set. Channel-send tools are intentionally NOT here
@@ -404,8 +411,10 @@ async fn cmd_chat_inner(
     // session/channel/cron/a2a/config/slash, follow-up, discovery, sub-agents,
     // RSI) live in one place so the headless cron daemon shares the exact same
     // set. Browser/channel-send/media/rebuild/evolve are added below.
+    // `false` = interactive (#129): TUI + channel users see mid-task output,
+    // so session_notify/suggest_options stay registered.
     let subagent_manager =
-        crate::cli::tool_setup::register_core_agent_tools(&tool_registry, &db, config);
+        crate::cli::tool_setup::register_core_agent_tools(&tool_registry, &db, config, false);
 
     // Auto-detect VPS/cloud and disable vector embeddings if needed.
     crate::config::MemoryConfig::auto_apply_vps_defaults();

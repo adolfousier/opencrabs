@@ -21,7 +21,7 @@ async fn register_core_agent_tools_populates_registry_with_cron_tools() {
     let config = Config::default();
 
     let registry = Arc::new(ToolRegistry::new());
-    let _subagent_manager = register_core_agent_tools(&registry, &db, &config);
+    let _subagent_manager = register_core_agent_tools(&registry, &db, &config, false);
 
     assert!(
         registry.count() > 0,
@@ -66,7 +66,7 @@ async fn register_runtime_tools_adds_dynamic_and_browser_tools() {
     let config = Config::default();
 
     let registry = Arc::new(ToolRegistry::new());
-    let _subagent_manager = register_core_agent_tools(&registry, &db, &config);
+    let _subagent_manager = register_core_agent_tools(&registry, &db, &config, false);
     register_runtime_tools(&registry, &config);
 
     assert!(
