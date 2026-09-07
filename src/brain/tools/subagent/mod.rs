@@ -20,6 +20,7 @@ pub mod team;
 mod wait;
 pub(crate) mod worktree;
 
+pub use agent_type::ALWAYS_EXCLUDED;
 pub use agent_type::{build_child_registry, map_deprecated_agent_type};
 pub use close::CloseAgentTool;
 pub use manager::{SubAgent, SubAgentManager, SubAgentState};

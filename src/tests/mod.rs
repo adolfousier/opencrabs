@@ -221,6 +221,7 @@ pub mod cron_scheduler_lock_test;
 pub mod cron_send_scope_test;
 pub mod cron_test;
 pub mod cron_tool_registry_test;
+pub mod headless_tool_surface_test;
 pub mod cross_provider_model_leak_guard_test;
 pub mod custom_model_paste_test;
 pub mod custom_provider_cache_autoenable_test;
