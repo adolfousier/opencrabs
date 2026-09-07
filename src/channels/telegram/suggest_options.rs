@@ -242,6 +242,15 @@ pub(crate) fn mark_picked_button(html: &str, picked_idx: usize) -> String {
 /// display width; plain `chars().count()` overcounts slim-glyph labels,
 /// which errs safe.
 pub(crate) const BUTTON_LABEL_MAX_UNITS: usize = 20;
+/// Full-width clip point for a SINGLE-option button (#119). One button on
+/// its own row carries more than a shared-row label — the old pre-#79
+/// 50-char budget rode this shape — but not unlimited: cuts were measured
+/// at 32 (wide-glyph native) and 40-44 (rich-plane), so 30 keeps a margin
+/// under every datapoint while clearing the 27-char live-smoke label the
+/// 20-unit shared-row gate wrongly folded. One label is also the only
+/// place the owner reads the full text against a single control — the
+/// fold tier's cramming premise never applies at n=1.
+pub(crate) const SINGLE_BUTTON_MAX_UNITS: usize = 30;
 /// Total width one row of buttons may carry before the set folds (issue
 /// #79: 3x12=36 shared-row cut, 4x12=43 cut; only a 24 slim-tail pair
 /// held — same conservative-by-design rule as [`BUTTON_LABEL_MAX_UNITS`]).
@@ -280,6 +289,19 @@ pub(crate) fn pick_layout(options: &[String]) -> SuggestLayout {
         && total <= SHARED_ROW_TOTAL_UNITS
     {
         SuggestLayout::SharedRow
+    } else if options.len() == 1 {
+        // Single-option set (#119): the fold tier's premise — cramming
+        // many long labels into shared rows — never applies at n=1, and
+        // a lone option folded into "1. <label>" prose plus a bare "1"
+        // button renders absurdly. One option rides a full-width button
+        // under its own clip point; only a label too wide even for a
+        // dedicated row folds. The budget sits below every measured cut
+        // datapoint (32 wide-glyph native, 40-44 rich-plane — see #79)
+        // while clearing confirm-style labels ("Smoke OK — ack both
+        // units", 27) that the 20-unit shared-row gate wrongly folded.
+        (width(&options[0]) <= SINGLE_BUTTON_MAX_UNITS)
+            .then_some(SuggestLayout::Column)
+            .unwrap_or(SuggestLayout::NumberedProse)
     } else if options.iter().all(|o| width(o) <= BUTTON_LABEL_MAX_UNITS) {
         SuggestLayout::Column
     } else {
@@ -567,10 +589,11 @@ pub(crate) async fn render_suggestions(
         .register_pending_followups(session_id, options.clone())
         .await;
 
-    // Layout tiers are measured, not guessed (see BUTTON_LABEL_MAX_UNITS):
-    // short
-    // labels share one row, medium labels get a full-width row each, and
-    // anything longer folds into the body as a numbered list with compact
+    // Layout tiers are measured, not guessed (see BUTTON_LABEL_MAX_UNITS
+    // and SINGLE_BUTTON_MAX_UNITS): short labels share one row, medium
+    // labels get a full-width row each, a lone option rides one
+    // full-width button up to its own clip point (#119), and anything
+    // longer folds into the body as a numbered list with compact
     // number buttons (<=4 per row). The absolute index is encoded in the
     // callback data; the option text itself can exceed Telegram's 64-byte
     // callback-data limit, so we never put it there.

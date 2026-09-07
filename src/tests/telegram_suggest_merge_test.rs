@@ -10,8 +10,8 @@
 
 use crate::channels::telegram::suggest_options::{
     BUTTON_LABEL_MAX_UNITS, FOLLOWUP_PREFIX, MAX_NUMBERS_PER_ROW, SHARED_ROW_MAX_CHARS,
-    SuggestLayout, append_rows_and_trailer_md, enforce_button_fit, folded_list_html, pick_layout,
-    suggestion_rows_rich_html,
+    SINGLE_BUTTON_MAX_UNITS, SuggestLayout, append_rows_and_trailer_md, enforce_button_fit,
+    folded_list_html, pick_layout, suggestion_rows_rich_html,
 };
 
 fn opts(v: &[&str]) -> Vec<String> {
@@ -56,6 +56,36 @@ fn test_the_button_width_boundary_is_exclusive() {
     assert_eq!(
         pick_layout(&[
             "Ship it".to_string(),
+            "x".repeat(BUTTON_LABEL_MAX_UNITS + 1)
+        ]),
+        SuggestLayout::NumberedProse
+    );
+}
+
+#[test]
+fn test_single_option_rides_full_width_past_the_shared_budget() {
+    // #119: the fold tier's cramming premise never applies at n=1 — a
+    // lone option folded into "1. <label>" prose plus a bare "1" button
+    // renders absurdly (live smoke on ff234125: 27-char confirm label).
+    // One option rides a full-width button up to its own clip point.
+    let label = "Smoke OK — ack both units".to_string(); // 25 chars, > 20
+    assert!(label.chars().count() > BUTTON_LABEL_MAX_UNITS);
+    assert_eq!(pick_layout(&[label]), SuggestLayout::Column);
+    assert_eq!(
+        pick_layout(&["x".repeat(SINGLE_BUTTON_MAX_UNITS)]),
+        SuggestLayout::Column
+    );
+    // Past the single-button clip point the label still folds — but a
+    // lone option has nothing to share the prose list with, so the fold
+    // is the graceful degradation the issue accepts.
+    assert_eq!(
+        pick_layout(&["x".repeat(SINGLE_BUTTON_MAX_UNITS + 1)]),
+        SuggestLayout::NumberedProse
+    );
+    // n >= 2 behavior unchanged: long labels still fold the whole set.
+    assert_eq!(
+        pick_layout(&[
+            "ok".to_string(),
             "x".repeat(BUTTON_LABEL_MAX_UNITS + 1)
         ]),
         SuggestLayout::NumberedProse
