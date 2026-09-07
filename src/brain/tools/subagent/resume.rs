@@ -88,6 +88,13 @@ impl Tool for ResumeAgentTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidInput("'prompt' is required".into()))?
             .to_string();
+        // #129: a resumed child is still a headless session — re-assert the
+        // final-message law on every resume (the original spawn's preamble
+        // was consumed by the first run's context).
+        let prompt = format!(
+            "{}\n\n{prompt}",
+            crate::cli::tool_setup::HEADLESS_PREAMBLE.trim_start_matches('\n')
+        );
 
         // Check agent exists and is in a resumable state
         match self.manager.get_state(agent_id) {

@@ -19,6 +19,14 @@ use crate::brain::tools::tool_search::ToolSearchTool;
 use std::sync::Arc;
 
 /// Tools that sub-agents must NEVER have access to (prevents recursion / dangerous ops).
+///
+/// #129 (owner ruling C, 2026-09-07): `session_notify` and `suggest_options`
+/// are in this list because a sub-agent IS a headless session — its only
+/// user-visible output is the final message relayed by the harness
+/// (proven live-fire 2026-09-07; a parked session_notify verdict dies with
+/// the one-shot process). Children inherit the parent registry verbatim, so
+/// an interactive parent's copies of these tools would leak into the child
+/// without this strip.
 pub(crate) const ALWAYS_EXCLUDED: &[&str] = &[
     "spawn_agent",
     "resume_agent",
@@ -30,6 +38,8 @@ pub(crate) const ALWAYS_EXCLUDED: &[&str] = &[
     "team_broadcast",
     "rebuild",
     "evolve",
+    "session_notify",
+    "suggest_options",
 ];
 
 /// Build a child registry from the parent's, minus recursive/dangerous tools.

@@ -474,14 +474,22 @@ impl Tool for SpawnAgentTool {
         // gets one factual capability line derived from its actual grant —
         // no role-play text that could drift from what the registry truly
         // allows. Full-access children receive just the task.
+        // #129 (owner ruling A): a sub-agent is a headless session — its
+        // final message is relayed verbatim as the spawn result, so the
+        // self-containedness preamble rides on EVERY child prompt (below the
+        // capability note, above the task).
         let full_prompt = if read_only {
             format!(
                 "[Capability note: you are a READ-ONLY sub-agent. Your tool set \
                  contains file reading/search and web research only — no writes, \
-                 no bash, no spawning. Report findings; do not attempt changes.]\n\n{prompt}"
+                 no bash, no spawning. Report findings; do not attempt changes.]\n{}\n\n{prompt}",
+                crate::cli::tool_setup::HEADLESS_PREAMBLE.trim_start_matches('\n')
             )
         } else {
-            prompt.clone()
+            format!(
+                "{}\n\n{prompt}",
+                crate::cli::tool_setup::HEADLESS_PREAMBLE.trim_start_matches('\n')
+            )
         };
 
         // Create the status file in Pending state before spawning. new()
