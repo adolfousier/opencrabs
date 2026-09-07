@@ -299,9 +299,11 @@ pub(crate) fn pick_layout(options: &[String]) -> SuggestLayout {
         // datapoint (32 wide-glyph native, 40-44 rich-plane — see #79)
         // while clearing confirm-style labels ("Smoke OK — ack both
         // units", 27) that the 20-unit shared-row gate wrongly folded.
-        (width(&options[0]) <= SINGLE_BUTTON_MAX_UNITS)
-            .then_some(SuggestLayout::Column)
-            .unwrap_or(SuggestLayout::NumberedProse)
+        if width(&options[0]) <= SINGLE_BUTTON_MAX_UNITS {
+            SuggestLayout::Column
+        } else {
+            SuggestLayout::NumberedProse
+        }
     } else if options.iter().all(|o| width(o) <= BUTTON_LABEL_MAX_UNITS) {
         SuggestLayout::Column
     } else {
