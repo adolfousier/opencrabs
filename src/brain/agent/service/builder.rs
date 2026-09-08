@@ -729,7 +729,17 @@ impl AgentService {
         let wd = crate::brain::tools::error::collapse_home(
             &self.get_working_directory_for_session(session_id),
         );
-        Some(crate::brain::prompt_builder::override_runtime_working_directory(&brain, &wd))
+        let brain = crate::brain::prompt_builder::override_runtime_working_directory(&brain, &wd);
+        // Headless sessions (#129, owner-approved strip): the FOLLOW-UP
+        // SUGGESTIONS paragraph tells the model it MUST call `suggest_options`
+        // — a tool the registry gate removes from every headless surface.
+        // Strip the paragraph so the prompt stops advertising an absent tool.
+        let brain = if self.headless {
+            crate::brain::prompt_builder::strip_followup_suggestions(&brain)
+        } else {
+            brain
+        };
+        Some(brain)
     }
 
     /// Set maximum tool iterations
