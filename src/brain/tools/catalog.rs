@@ -176,21 +176,47 @@ pub const EXTENDED_TOOL_INVENTORY: &[(&str, &[&str])] = &[
     ),
 ];
 
+/// Interactive-surface-only tool names (#129): unregistered on every headless
+/// path by `register_core_agent_tools(headless = true)` (and `ALWAYS_EXCLUDED`
+/// for sub-agents), so the headless roster must not advertise them either.
+/// Kept adjacent to the registry gate in `cli/tool_setup.rs` — when you gate a
+/// tool there, add its name here so the prompt stops promising it.
+const HEADLESS_UNADVERTISED: &[&str] = &["suggest_options", "session_notify"];
+
 /// Render the flat tool inventory block (#448): the built-in extended tool
 /// names grouped by area, names only. Appended after `LAZY_TOOLS_PROMPT` so the
 /// model has a concrete roster to `tool_search` against instead of guessing a
 /// tool is absent.
-pub fn tool_inventory_prompt() -> String {
+///
+/// `headless` (#129, owner-ruled catalog strip, v0.4.98 ruling a) filters the
+/// roster to tools the headless surface can actually register: the interactive
+/// only pair (`suggest_options`, `session_notify`) is excluded at the registry
+/// level, so advertising their names here would promise a capability the
+/// surface does not have — the same honesty law the registry gate implements.
+pub fn tool_inventory_prompt(headless: bool) -> String {
     let mut out = String::from(
         "\nAVAILABLE EXTENDED TOOLS — you have these too, their schemas just aren't loaded yet. \
          Pick the name and `tool_search` it to activate; NEVER claim one of these is missing \
          without searching first:\n",
     );
     for (category, names) in EXTENDED_TOOL_INVENTORY {
+        let names: Vec<&&str> = names
+            .iter()
+            .filter(|n| !(headless && HEADLESS_UNADVERTISED.contains(&n.as_str())))
+            .collect();
+        if names.is_empty() {
+            continue;
+        }
         out.push_str("  ");
         out.push_str(category);
         out.push_str(": ");
-        out.push_str(&names.join(", "));
+        out.push_str(
+            &names
+                .iter()
+                .map(|n| n.as_str())
+                .collect::<Vec<&str>>()
+                .join(", "),
+        );
         out.push('\n');
     }
     out.push_str(
@@ -204,8 +230,11 @@ pub fn tool_inventory_prompt() -> String {
 /// followed by the flat inventory (#448/#449). Single source for every prompt
 /// assembly site (TUI startup, CLI, and the live brain rebuild) so the guidance
 /// and the roster never drift apart.
-pub fn tool_access_prompt() -> String {
-    format!("{LAZY_TOOLS_PROMPT}{}", tool_inventory_prompt())
+///
+/// `headless` filters the roster (see [`tool_inventory_prompt`]); interactive
+/// surfaces pass `false` and get the full roster verbatim.
+pub fn tool_access_prompt(headless: bool) -> String {
+    format!("{LAZY_TOOLS_PROMPT}{}", tool_inventory_prompt(headless))
 }
 
 /// Built-in tools the RSI must never tell the agent to avoid/ban/stop using.

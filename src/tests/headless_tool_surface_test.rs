@@ -10,6 +10,7 @@
 //!     both tools in ALWAYS_EXCLUDED).
 
 use crate::brain::tools::Tool;
+use crate::brain::tools::catalog;
 use crate::brain::tools::error::ToolError;
 use crate::brain::tools::registry::ToolRegistry;
 use crate::brain::tools::subagent::ALWAYS_EXCLUDED;
@@ -158,5 +159,34 @@ fn child_registry_strips_interactive_only_tools() {
     assert!(
         !child.has_tool("session_notify") && !child.has_tool("suggest_options"),
         "child registry must strip interactive-only tools regardless of parent surface"
+    );
+}
+
+/// (a, v0.4.98 owner ruling) The headless lazy-catalog ROSTER must not
+/// advertise the interactive-only pair: the registry gate removes them, so a
+/// roster that still names them promises a capability the surface lacks. The
+/// interactive roster keeps both (they are real, registered tools there).
+#[test]
+fn headless_roster_excludes_interactive_only_tools() {
+    let headless = catalog::tool_access_prompt(true);
+    assert!(
+        !headless.contains("session_notify"),
+        "headless roster must not advertise session_notify (v0.4.98 ruling a)"
+    );
+    assert!(
+        !headless.contains("suggest_options"),
+        "headless roster must not advertise suggest_options (v0.4.98 ruling a)"
+    );
+    // Sanity: the filter must not gut the roster — a real headless-reachable
+    // tool still shows, and the agents group survives (minus its pair).
+    assert!(
+        headless.contains("spawn_agent") && headless.contains("wait_agent"),
+        "headless roster must keep the agents group's other members"
+    );
+
+    let interactive = catalog::tool_access_prompt(false);
+    assert!(
+        interactive.contains("session_notify") && interactive.contains("suggest_options"),
+        "interactive roster keeps both tools verbatim"
     );
 }

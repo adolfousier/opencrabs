@@ -727,7 +727,9 @@ pub(crate) async fn cmd_run(
     // maintenance warning in ~/.opencrabs/rsi/digest.md, not conversation input.
     let mut system_brain = brain_loader.build_system_brain(Some(&runtime_info));
     if config.agent.lazy_tools {
-        system_brain.push_str(&crate::brain::tools::catalog::tool_access_prompt());
+        // Headless one-shot (#129): the roster drops the interactive-only
+        // pair, matching the registry gate below.
+        system_brain.push_str(&crate::brain::tools::catalog::tool_access_prompt(true));
     }
     // Headless-only preamble (#129): the one-shot run's final message is the
     // ONLY thing the caller sees — inject the self-containedness law.
@@ -1013,7 +1015,7 @@ pub(crate) async fn cmd_agent_interactive(
     // maintenance warning in ~/.opencrabs/rsi/digest.md, not conversation input.
     let mut system_brain = brain_loader.build_system_brain(Some(&runtime_info));
     if config.agent.lazy_tools {
-        system_brain.push_str(&crate::brain::tools::catalog::tool_access_prompt());
+        system_brain.push_str(&crate::brain::tools::catalog::tool_access_prompt(false));
     }
 
     // Headless-safe runtime tools (dynamic tools.toml tools, tool_manage, browser).

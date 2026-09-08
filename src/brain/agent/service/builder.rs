@@ -39,6 +39,10 @@ struct BrainRebuildInner {
     core: bool,
     /// Append `LAZY_TOOLS_PROMPT` after the brain, matching startup assembly.
     lazy_tools: bool,
+    /// Headless surface (#129): the lazy-tools roster filters out the
+    /// interactive-only pair (`suggest_options`, `session_notify`) so the
+    /// prompt never advertises a tool the registry gate removed.
+    headless: bool,
     /// Live working-directory handle shared with tool execution. `/cd` mutates
     /// it, so reading it each render lets the project-directive scan follow the
     /// current directory instead of the frozen startup path baked into
@@ -71,6 +75,7 @@ impl BrainRebuild {
         lazy_tools: bool,
         seed: String,
         live_cwd: Option<Arc<std::sync::RwLock<std::path::PathBuf>>>,
+        headless: bool,
     ) -> Self {
         let mtime = loader.brain_files_mtime();
         let cwd = live_cwd
@@ -85,6 +90,7 @@ impl BrainRebuild {
                 runtime_info,
                 core,
                 lazy_tools,
+                headless,
                 live_cwd,
                 cache: std::sync::RwLock::new(BrainCache {
                     mtime,
@@ -94,6 +100,21 @@ impl BrainRebuild {
                 }),
             }),
         }
+    }
+
+    /// Flip the headless roster filter (#129) on this handle. Called via
+    /// `AgentService::with_headless` (the channel factory sets headless AFTER
+    /// `with_brain_rebuild`, so the handle already exists and must be
+    /// updated in place). Any cached render made under the OLD flag is
+    /// invalidated so the next render rebuilds with the new roster.
+    pub fn set_headless(&mut self, headless: bool) {
+        let inner = Arc::make_mut(&mut self.inner);
+        inner.headless = headless;
+        // A cached render made under the OLD flag is now wrong — drop it so
+        // the next render rebuilds with the new roster instead of returning
+        // the stale (full-roster) render verbatim on the warm path.
+        let mut cache = inner.cache.write().expect("brain cache lock poisoned");
+        cache.mtime = std::time::SystemTime::UNIX_EPOCH;
     }
 
     /// The system brain for this turn. Returns the cached render unless a
@@ -124,7 +145,9 @@ impl BrainRebuild {
             i.loader.build_system_brain(runtime_info.as_ref())
         };
         if i.lazy_tools {
-            brain.push_str(&crate::brain::tools::catalog::tool_access_prompt());
+            brain.push_str(&crate::brain::tools::catalog::tool_access_prompt(
+                i.headless,
+            ));
         }
         let mut cache = i.cache.write().expect("brain cache lock poisoned");
         *cache = BrainCache {
@@ -670,8 +693,11 @@ impl AgentService {
         let seed = self.default_system_brain.clone().unwrap_or_default();
         // Share the live working-directory handle so the directive scan follows
         // `/cd`. Same Arc that tool execution and `set_working_directory` use,
-        // so runtime mutations are visible to `render`.
+        // so runtime mutations are visible on `render`.
         let live_cwd = Some(Arc::clone(&self.working_directory));
+        // Headless propagates into the roster filter: a headless service's
+        // rebuilt brain must not advertise the interactive-only pair (#129).
+        let headless = self.headless;
         self.brain_rebuild = Some(BrainRebuild::new(
             loader,
             runtime_info,
@@ -679,6 +705,7 @@ impl AgentService {
             lazy_tools,
             seed,
             live_cwd,
+            headless,
         ));
         self
     }
@@ -779,9 +806,16 @@ impl AgentService {
     /// Mark this service headless (#129): no live user surface. Stamped into
     /// every ToolExecutionContext so interactive-only tools hard-error on
     /// invocation — the backstop behind the registry-level exclusion at
-    /// `register_core_agent_tools(headless = true)`.
+    /// `register_core_agent_tools(headless = true)`. Also propagates into an
+    /// existing live-brain handle so the rebuilt roster drops the
+    /// interactive-only pair (the channel factory sets headless AFTER
+    /// `with_brain_rebuild`, so the handle already exists here and is updated
+    /// in place via `BrainRebuild::set_headless`).
     pub fn with_headless(mut self, headless: bool) -> Self {
         self.headless = headless;
+        if let Some(rebuild) = self.brain_rebuild.as_mut() {
+            rebuild.set_headless(headless);
+        }
         self
     }
 
