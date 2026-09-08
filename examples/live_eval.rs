@@ -99,7 +99,7 @@ async fn main() {
     // appended, as live_system_brain does when lazy_tools is on), so a
     // mode-specific gap — tool-set awareness especially — is visible (#672).
     let tools = eval_tool_set();
-    let lazy_brain = format!("{system_brain}{}", tool_access_prompt());
+    let lazy_brain = format!("{system_brain}{}", tool_access_prompt(false));
     let modes: [(&str, Option<&str>); 2] = [("non-lazy", sys), ("lazy", Some(lazy_brain.as_str()))];
     for (mode, brain) in modes {
         for sc in SelfAwarenessScenario::seeds() {
