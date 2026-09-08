@@ -366,7 +366,6 @@ pub(crate) fn go_tier_line(label: &str) -> String {
     // Verb match is whole-first-word, not a character prefix: "go fast"
     // qualifies, "Gossip about it" does not (CI r2, E-test 139).
     let first_word = label
-        .trim_start()
         .split_whitespace()
         .next()
         .unwrap_or_default();
