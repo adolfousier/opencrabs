@@ -41,8 +41,11 @@ struct BrainRebuildInner {
     lazy_tools: bool,
     /// Headless surface (#129): the lazy-tools roster filters out the
     /// interactive-only pair (`suggest_options`, `session_notify`) so the
-    /// prompt never advertises a tool the registry gate removed.
-    headless: bool,
+    /// prompt never advertises a tool the registry gate removed. Shared
+    /// atomically so `set_headless` can flip it on an existing handle whose
+    /// `Arc` is cloned elsewhere (channel factory sets headless after
+    /// `with_brain_rebuild`) — every clone observes the flip.
+    headless: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Live working-directory handle shared with tool execution. `/cd` mutates
     /// it, so reading it each render lets the project-directive scan follow the
     /// current directory instead of the frozen startup path baked into
@@ -90,7 +93,7 @@ impl BrainRebuild {
                 runtime_info,
                 core,
                 lazy_tools,
-                headless,
+                headless: Arc::new(std::sync::atomic::AtomicBool::new(headless)),
                 live_cwd,
                 cache: std::sync::RwLock::new(BrainCache {
                     mtime,
@@ -108,12 +111,15 @@ impl BrainRebuild {
     /// updated in place). Any cached render made under the OLD flag is
     /// invalidated so the next render rebuilds with the new roster.
     pub fn set_headless(&mut self, headless: bool) {
-        let inner = Arc::make_mut(&mut self.inner);
-        inner.headless = headless;
+        self.inner
+            .headless
+            .store(headless, std::sync::atomic::Ordering::SeqCst);
         // A cached render made under the OLD flag is now wrong — drop it so
         // the next render rebuilds with the new roster instead of returning
-        // the stale (full-roster) render verbatim on the warm path.
-        let mut cache = inner.cache.write().expect("brain cache lock poisoned");
+        // the stale (full-roster) render verbatim on the warm path. No clone
+        // fork: the atomic flag is shared, so every handle clone observes
+        // the flip; only the cache needs clearing.
+        let mut cache = self.inner.cache.write().expect("brain cache lock poisoned");
         cache.mtime = std::time::SystemTime::UNIX_EPOCH;
     }
 
@@ -146,7 +152,7 @@ impl BrainRebuild {
         };
         if i.lazy_tools {
             brain.push_str(&crate::brain::tools::catalog::tool_access_prompt(
-                i.headless,
+                i.headless.load(std::sync::atomic::Ordering::SeqCst),
             ));
         }
         let mut cache = i.cache.write().expect("brain cache lock poisoned");

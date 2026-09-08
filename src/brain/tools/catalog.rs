@@ -202,7 +202,7 @@ pub fn tool_inventory_prompt(headless: bool) -> String {
     for (category, names) in EXTENDED_TOOL_INVENTORY {
         let names: Vec<&&str> = names
             .iter()
-            .filter(|n| !(headless && HEADLESS_UNADVERTISED.contains(&n.as_str())))
+            .filter(|n| !(headless && HEADLESS_UNADVERTISED.contains(&**n)))
             .collect();
         if names.is_empty() {
             continue;
@@ -210,13 +210,7 @@ pub fn tool_inventory_prompt(headless: bool) -> String {
         out.push_str("  ");
         out.push_str(category);
         out.push_str(": ");
-        out.push_str(
-            &names
-                .iter()
-                .map(|n| n.as_str())
-                .collect::<Vec<&str>>()
-                .join(", "),
-        );
+        out.push_str(&names.iter().map(|n| **n).collect::<Vec<&str>>().join(", "));
         out.push('\n');
     }
     out.push_str(
