@@ -9,9 +9,10 @@
 //! rule is that no source file carries a `#[cfg(test)] mod tests` block.
 
 use crate::channels::telegram::suggest_options::{
-    BUTTON_LABEL_MAX_UNITS, FOLLOWUP_PREFIX, MAX_NUMBERS_PER_ROW, SHARED_ROW_MAX_CHARS,
-    SINGLE_BUTTON_MAX_UNITS, SuggestLayout, append_rows_and_trailer_md, enforce_button_fit,
-    folded_list_html, pick_layout, suggestion_rows_rich_html,
+    BUTTON_LABEL_MAX_UNITS, FOLLOWUP_PREFIX, GO_BUTTON_LABEL, MAX_NUMBERS_PER_ROW,
+    SHARED_ROW_MAX_CHARS, SINGLE_BUTTON_MAX_UNITS, SuggestLayout, append_rows_and_trailer_md,
+    enforce_button_fit, folded_list_html, go_tier_line, go_tier_lines_rich, pick_layout, row_fits,
+    suggestion_rows_rich_html,
 };
 
 fn opts(v: &[&str]) -> Vec<String> {
@@ -116,6 +117,103 @@ fn test_a_folded_list_carries_no_header_and_is_escaped() {
         body.contains("2. Review &amp; merge"),
         "escaping proves the shared renderer ran, not a private one: {body}"
     );
+}
+
+#[test]
+fn test_go_tier_buttons_carry_go_label_not_digits() {
+    // #119 owner design: buttons in the fold tier read `Go!`, never bare
+    // digits. Callback data still carries the absolute index.
+    let token = "ab12cd34";
+    let html = suggestion_rows_rich_html(&opts(&["Ship it", &"x".repeat(30)]), token);
+    assert!(html.contains(&format!(">{GO_BUTTON_LABEL}<")), "{html}");
+    assert!(!html.contains(">1</tg-button>"), "no digit buttons: {html}");
+    assert!(
+        html.contains(&format!("{FOLLOWUP_PREFIX}{token}:0")),
+        "callback data still routes by index: {html}"
+    );
+}
+
+#[test]
+fn test_go_tier_body_lines_carry_the_119_shape() {
+    // #119 owner design 06:42Z: the fold tier renders `Go: <label>?` in the
+    // body — never a numbered list.
+    let body = go_tier_lines_rich(&opts(&["Ship it", "Review & merge"]));
+    assert!(
+        !body.contains("Suggested next"),
+        "#1204: the lines ride under the answer, no header of their own"
+    );
+    assert!(
+        body.contains("Go: Ship it?") && body.contains("Go: Review &amp; merge?"),
+        "one Go line per option, escaping via the shared renderer: {body}"
+    );
+    assert!(
+        !body.contains("1. Ship it") && !body.contains("<ol>"),
+        "the numbered-prose shape is gone, not renamed: {body}"
+    );
+}
+
+#[test]
+fn test_go_tier_verb_repeat_rule() {
+    // #119 owner amendment 06:46Z: a label that already starts with the
+    // verb renders verbatim + `?`; otherwise the `Go:` prefix is added.
+    assert_eq!(
+        go_tier_line("Go — implement #98 after the #96 gate lands"),
+        "Go — implement #98 after the #96 gate lands?"
+    );
+    assert_eq!(
+        go_tier_line("Smoke OK — ack both units"),
+        "Go: Smoke OK — ack both units?"
+    );
+    // Case-insensitive verb match (Go!/go both start the label).
+    assert_eq!(go_tier_line("go fast"), "go fast?");
+    // Prefix-verb must not false-positive mid-word.
+    assert_eq!(go_tier_line("Gossip about it"), "Go: Gossip about it?");
+}
+
+#[test]
+fn test_row_fits_solo_arm_grants_the_solo_budget() {
+    // One button renders full-width: it rides SINGLE_BUTTON_MAX_UNITS,
+    // NOT the 20-unit shared caps — the arm whose absence made the #79
+    // funnel re-fold full-width single-button rows the emitter approved.
+    let label = "x".repeat(SINGLE_BUTTON_MAX_UNITS);
+    assert!(row_fits(&[&label]));
+    assert!(!row_fits(&[&"x".repeat(SINGLE_BUTTON_MAX_UNITS + 1)]));
+    // A solo label past the SHARED caps but inside the solo budget:
+    // exactly the live-failure class (25-27 char confirm labels).
+    let confirm = "Smoke OK — ack both units".to_string();
+    assert!(confirm.chars().count() > BUTTON_LABEL_MAX_UNITS);
+    assert!(row_fits(&[&confirm]));
+}
+
+#[test]
+fn test_row_fits_shared_arm_keeps_the_79_caps() {
+    // Multi-button rows: per-label SHARED_ROW_MAX_CHARS AND row-total
+    // SHARED_ROW_TOTAL_UNITS — byte-identical to the pre-refactor rule.
+    let a = "x".repeat(SHARED_ROW_MAX_CHARS);
+    let b = "y".repeat(SHARED_ROW_MAX_CHARS);
+    // 2x12 = 24 total > 20: does not fit (folds, as before the refactor).
+    assert!(!row_fits(&[&a, &b]));
+    let short = "x".repeat(SHARED_ROW_MAX_CHARS - 4);
+    // 2x8 = 16 total, labels within per-label cap: fits.
+    assert!(row_fits(&[&short, &short]));
+    // One label past the per-label cap kills the row even under budget.
+    let long = "x".repeat(SHARED_ROW_MAX_CHARS + 1);
+    assert!(!row_fits(&[&short, &long]));
+}
+
+#[test]
+fn test_chokepoint_ships_solo_rows_the_emitter_approved() {
+    // THE #119 live regression, pinned at the funnel: a single-button row
+    // with a 25-char label used to be re-folded by enforce_button_fit
+    // (old inline caps) after pick_layout's Column tier approved it —
+    // owner saw "button 1 + 1. <label>" prose on ship ed0ae1d9. Under
+    // the single-verdict refactor the funnel ships it byte-identical.
+    let label = "Smoke OK — ack both units"; // 25 chars: > 20, <= 30
+    let body = format!(
+        "<tg-button-row><tg-button type=\"callback_data\" data=\"followup:tok:0\" \
+         style=\"primary\">{label}</tg-button></tg-button-row>"
+    );
+    assert_eq!(enforce_button_fit(&body), body);
 }
 
 // ── Callback data ─────────────────────────────────────────────────────────

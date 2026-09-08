@@ -348,6 +348,42 @@ pub(crate) fn folded_list_markdown(options: &[String]) -> String {
         .join("\n")
 }
 
+/// The label of every NumberedProse-tier button after the #119 owner
+/// redesign: the option text moves into the body, the button just says Go!.
+pub(crate) const GO_BUTTON_LABEL: &str = "Go!";
+
+/// The verb the #119 fold tier names options with — the first word of the
+/// `Go: <label>?` body line and the GO_BUTTON_LABEL button minus its bang.
+const GO_TIER_VERB: &str = "Go";
+
+/// One #119 fold-tier body line for one option (owner design 06:42Z +
+/// verb-repeat amendment 06:46Z): the label verbatim + `?` when it already
+/// starts with the verb (`Go — implement #98…?`), `<Verb>: <label>?`
+/// otherwise (`Go: Smoke OK — ack both units?`). The label is NOT re-wrapped
+/// in markup here: the rich plane escapes+formats via `go_tier_lines_rich`;
+/// the markdown plane takes the raw line.
+pub(crate) fn go_tier_line(label: &str) -> String {
+    let starts_with_verb = label
+        .trim_start()
+        .get(..GO_TIER_VERB.len())
+        .is_some_and(|first| first.eq_ignore_ascii_case(GO_TIER_VERB));
+    if starts_with_verb {
+        format!("{label}?")
+    } else {
+        format!("{GO_TIER_VERB}: {label}?")
+    }
+}
+
+/// The #119 fold-tier body block: one go_tier_line per option, one line
+/// each, in order.
+pub(crate) fn go_tier_lines(options: &[String]) -> String {
+    options
+        .iter()
+        .map(|o| go_tier_line(o))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// host-aware stale-shell strip: the #597 clear killed the stash, but the
 /// buttons keep rendering inside the body until the body is rewritten clean.
 pub(crate) fn strip_button_rows(html: &str) -> String {
