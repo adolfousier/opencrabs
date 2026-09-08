@@ -363,10 +363,14 @@ const GO_TIER_VERB: &str = "Go";
 /// in markup here: the rich plane escapes+formats via `go_tier_lines_rich`;
 /// the markdown plane takes the raw line.
 pub(crate) fn go_tier_line(label: &str) -> String {
-    let starts_with_verb = label
+    // Verb match is whole-first-word, not a character prefix: "go fast"
+    // qualifies, "Gossip about it" does not (CI r2, E-test 139).
+    let first_word = label
         .trim_start()
-        .get(..GO_TIER_VERB.len())
-        .is_some_and(|first| first.eq_ignore_ascii_case(GO_TIER_VERB));
+        .split_whitespace()
+        .next()
+        .unwrap_or_default();
+    let starts_with_verb = first_word.eq_ignore_ascii_case(GO_TIER_VERB);
     if starts_with_verb {
         format!("{label}?")
     } else {

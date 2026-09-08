@@ -330,7 +330,7 @@ fn test_rows_and_trailer_start_a_fresh_markdown_block() {
         assert!(md.ends_with("Sign-off."));
         assert!(md.contains(&rows));
         if prose {
-            assert!(md.contains("1. One"));
+            assert!(md.contains("Go: One?"), "go-tier body line: {md}");
         }
     }
     // Body already ending in a newline must not grow a triple gap.
