@@ -184,9 +184,19 @@ fn headless_roster_excludes_interactive_only_tools() {
         "headless roster must keep the agents group's other members"
     );
 
+    // The roster only prints EXTENDED groups; suggest_options is a CORE tool
+    // (catalog::CORE_TOOLS) and never appears in the roster on ANY surface —
+    // it is registered in every non-sub-agent registry. session_notify IS an
+    // extended tool, so the interactive roster must still name it.
     let interactive = catalog::tool_access_prompt(false);
     assert!(
-        interactive.contains("session_notify") && interactive.contains("suggest_options"),
-        "interactive roster keeps both tools verbatim"
+        interactive.contains("session_notify"),
+        "interactive roster keeps session_notify verbatim"
+    );
+    // suggest_options lives in CORE_TOOLS, outside the printed roster — pin the
+    // structural truth instead of a string the roster never contained.
+    assert!(
+        catalog::CORE_TOOLS.contains(&"suggest_options"),
+        "suggest_options is core (registered on interactive surfaces), not rostered"
     );
 }
