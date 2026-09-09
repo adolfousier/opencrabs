@@ -49,11 +49,6 @@ pub(crate) const CLI_SENDER_PREFIX: &str = "cli:";
 /// 2026-08-28).
 pub(crate) const DEFAULT_CLI_SENDER_LABEL: &str = "CLI tooling";
 
-/// Cap for an overridden sender label: the label rides inside the
-/// receipt-card summary line, so a pathological value must not eat the
-/// preview budget.
-pub(crate) const CLI_SENDER_LABEL_MAX_CHARS: usize = 64;
-
 /// Handle a `session/notify` JSON-RPC call (#23).
 ///
 /// Business outcomes are returned as JSON-RPC SUCCESSES carrying

@@ -177,14 +177,4 @@ mod tests {
         assert!(long.contains("at most"), "got: {long}");
         assert!(validate_sender_label("x".repeat(SENDER_LABEL_MAX_CHARS).as_str()).is_ok());
     }
-
-    #[test]
-    fn sender_label_cap_matches_the_a2a_constant() {
-        // The A2A handler re-exports the cap for the CLI import path; the
-        // two must never drift.
-        assert_eq!(
-            SENDER_LABEL_MAX_CHARS,
-            crate::a2a::handler::notify::CLI_SENDER_LABEL_MAX_CHARS
-        );
-    }
 }

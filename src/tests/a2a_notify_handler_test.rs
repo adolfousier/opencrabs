@@ -279,8 +279,8 @@ async fn turn_end_mode_queues_instead_of_refusing() {
     // fork #146: `delivery.mode=turn-end` (the deprecated interrupt=true)
     // reaches the same policy through A2A — a mid-turn session QUEUES the
     // message at its next boundary instead of refusing it.
-    let _guard = test_guard();
     let ctx = placeholder_service_context().await;
+    let _guard = test_guard();
     let session = SessionService::new(ctx.clone())
         .create_session(Some("#146 turn-end test".to_string()))
         .await
