@@ -294,13 +294,12 @@ async fn turn_end_mode_queues_instead_of_refusing() {
         }),
     );
 
-    let _guard = test_guard();
-
     let mut p = params(&sid.to_string(), "ping");
     p["delivery"] = serde_json::json!({ "mode": "turn-end" });
     let resp = handle_session_notify(serde_json::json!(13), p, ctx).await;
     assert!(resp.error.is_none(), "{resp:?}");
     assert_eq!(outcome_of(&resp), "delivered");
+    let _guard = test_guard();
     assert!(captured.lock().unwrap().take().is_some());
 }
 
