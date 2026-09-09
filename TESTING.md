@@ -216,6 +216,7 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Config Voice Migration | 5 | `src/tests/config_voice_migration_test.rs` |
 | Tests — Config Watcher | 5 | `src/tests/config_watcher_test.rs` |
 | Tests — Config Write Path | 7 | `src/tests/config_write_path_test.rs` |
+| Tests — Config Write Types | 5 | `src/tests/config_write_types_test.rs` |
 | Tests — Content Vectors Heal | 3 | `src/tests/content_vectors_heal_test.rs` |
 | Tests — Context Provider Anchor | 6 | `src/tests/context_provider_anchor_test.rs` |
 | Tests — Context Store Concurrent Save | 3 | `src/tests/context_store_concurrent_save_test.rs` |
