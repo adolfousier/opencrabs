@@ -27,10 +27,12 @@
 
 use crate::a2a::types::*;
 use crate::brain::agent::service::notify_policy::{
-    CONFIRM_CAP, DeliveryMode, confirm_route, resolve_mode, validate_sender_label,
+    DeliveryMode, confirm_route, resolve_mode, validate_sender_label,
 };
+use crate::brain::agent::service::notify_receipts;
 use crate::brain::agent::service::quiet_delivery;
 use crate::brain::agent::service::session_routes::Delivery;
+use crate::brain::agent::service::session_routes::deliver_to_session;
 use crate::brain::agent::{PushOrigin, QueuedUserMessage};
 use crate::services::{ServiceContext, SessionService};
 

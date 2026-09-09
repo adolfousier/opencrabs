@@ -1,8 +1,6 @@
 //! session_notify tool: delivery-mode resolution, route confirmation, status verdicts, and the schema (#23, fork #50).
 
-use crate::brain::agent::service::notify_policy::{
-    CONFIRM_CAP, DeliveryMode, confirm_route, resolve_mode,
-};
+use crate::brain::agent::service::notify_policy::{DeliveryMode, confirm_route, resolve_mode};
 use crate::brain::tools::subagent::notify::*;
 use crate::brain::tools::r#trait::Tool;
 use std::time::Duration;
