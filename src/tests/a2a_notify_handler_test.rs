@@ -280,7 +280,6 @@ async fn turn_end_mode_queues_instead_of_refusing() {
     // reaches the same policy through A2A — a mid-turn session QUEUES the
     // message at its next boundary instead of refusing it.
     let ctx = placeholder_service_context().await;
-    let _guard = test_guard();
     let session = SessionService::new(ctx.clone())
         .create_session(Some("#146 turn-end test".to_string()))
         .await
@@ -294,6 +293,8 @@ async fn turn_end_mode_queues_instead_of_refusing() {
             *sink.lock().unwrap() = Some(queued);
         }),
     );
+
+    let _guard = test_guard();
 
     let mut p = params(&sid.to_string(), "ping");
     p["delivery"] = serde_json::json!({ "mode": "turn-end" });
