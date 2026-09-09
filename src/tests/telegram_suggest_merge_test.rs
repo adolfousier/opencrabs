@@ -157,8 +157,8 @@ fn test_go_tier_body_lines_carry_the_119_shape() {
 fn test_go_tier_dedupes_trailing_question_mark() {
     // Owner correction 2026-09-09: a label ending in '?' must not gain a
     // second question mark.
-    assert_eq!(go_tier_line("Confirm render?"), "Go: Confirm render?");
-    assert_eq!(go_tier_line("Confirm render??"), "Go: Confirm render??");
+    assert_eq!(go_tier_line("Confirm render?"), "**Go: Confirm render?**");
+    assert_eq!(go_tier_line("Confirm render??"), "**Go: Confirm render??**");
 }
 
 #[test]
@@ -341,7 +341,7 @@ fn test_rows_and_trailer_start_a_fresh_markdown_block() {
         assert!(md.contains(&rows));
         if prose {
             // 2026-09-09: bold Go line, blank-line-separated from the body.
-            assert!(md.contains("<b>Go: One?</b>"), "go-tier body line: {md}");
+            assert!(md.contains("**Go: One?**"), "go-tier body line: {md}");
         }
     }
     // Body already ending in a newline must not grow a triple gap.
