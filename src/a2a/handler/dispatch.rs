@@ -31,6 +31,7 @@ pub async fn dispatch(
         "session/notify" => {
             notify::handle_session_notify(req.id, req.params, service_context).await
         }
+        "session/notify-status" => notify::handle_notify_status(req.id, req.params),
         "tasks/get" => tasks::handle_get_task(req.id, req.params, store).await,
         "tasks/cancel" => {
             tasks::handle_cancel_task(

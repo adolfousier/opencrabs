@@ -232,3 +232,114 @@ async fn archived_session_auto_routes_to_its_successor() {
         queued.context_text
     );
 }
+
+#[tokio::test]
+// test_guard: route-table suite — same serialization rationale as above.
+#[allow(clippy::await_holding_lock)]
+async fn quiet_mode_banks_the_notice_and_returns_the_id() {
+    // fork #146 acceptance: the A2A surface carries the full v2 policy —
+    // `delivery.mode=quiet` banks via the quiet engine and returns a
+    // notification id, the same contract the agent tool honors.
+    let _guard = test_guard();
+    let ctx = placeholder_service_context().await;
+    let session = SessionService::new(ctx.clone())
+        .create_session(Some("#146 quiet test".to_string()))
+        .await
+        .expect("session row created");
+    let sid = session.id;
+
+    let mut p = params(&sid.to_string(), "ping");
+    p["delivery"] = serde_json::json!({ "mode": "quiet", "quiet_for_secs": 3600 });
+    let resp = handle_session_notify(serde_json::json!(11), p, ctx).await;
+    assert!(resp.error.is_none(), "{resp:?}");
+    let result = resp.result.expect("success");
+    assert_eq!(
+        result.get("outcome").and_then(|v| v.as_str()),
+        Some("deferred")
+    );
+    let notify_id = result
+        .get("notify_id")
+        .and_then(|v| v.as_str())
+        .expect("quiet verdict carries the notification id");
+    // The deferred id is status-checkable from birth: queued until the
+    // quiet release drains it.
+    let status = crate::a2a::handler::notify::handle_notify_status(
+        serde_json::json!(12),
+        serde_json::json!({ "notify_id": notify_id }),
+    );
+    let status_body = status.result.expect("status success");
+    assert_eq!(
+        status_body.get("notify_state").and_then(|v| v.as_str()),
+        Some("queued")
+    );
+}
+
+#[tokio::test]
+async fn turn_end_mode_queues_instead_of_refusing() {
+    // fork #146: `delivery.mode=turn-end` (the deprecated interrupt=true)
+    // reaches the same policy through A2A — a mid-turn session QUEUES the
+    // message at its next boundary instead of refusing it.
+    let _guard = test_guard();
+    let ctx = placeholder_service_context().await;
+    let session = SessionService::new(ctx.clone())
+        .create_session(Some("#146 turn-end test".to_string()))
+        .await
+        .expect("session row created");
+    let sid = session.id;
+    let captured: Arc<Mutex<Option<QueuedUserMessage>>> = Arc::new(Mutex::new(None));
+    let sink = captured.clone();
+    register_session_route(
+        sid,
+        Arc::new(move |_id, queued| {
+            *sink.lock().unwrap() = Some(queued);
+        }),
+    );
+
+    let mut p = params(&sid.to_string(), "ping");
+    p["delivery"] = serde_json::json!({ "mode": "turn-end" });
+    let resp = handle_session_notify(serde_json::json!(13), p, ctx).await;
+    assert!(resp.error.is_none(), "{resp:?}");
+    assert_eq!(outcome_of(&resp), "delivered");
+    assert!(captured.lock().unwrap().take().is_some());
+}
+
+#[tokio::test]
+async fn quiet_contradicting_interrupt_is_invalid_params() {
+    // The shared resolve_mode agreement rule fires through A2A too.
+    let ctx = placeholder_service_context().await;
+    let mut p = params(&uuid::Uuid::new_v4().to_string(), "ping");
+    p["delivery"] = serde_json::json!({ "mode": "quiet" });
+    p["interrupt"] = serde_json::json!(true);
+    let resp = handle_session_notify(serde_json::json!(14), p, ctx).await;
+    assert_eq!(
+        resp.error.expect("error response").code,
+        error_codes::INVALID_PARAMS
+    );
+}
+
+#[tokio::test]
+async fn notify_status_reports_unknown_id_honestly() {
+    // fork #146: the A2A status verb exists; an untracked id reports
+    // unknown_id (in-memory receipts die with the process).
+    let resp = crate::a2a::handler::notify::handle_notify_status(
+        serde_json::json!(15),
+        serde_json::json!({ "notify_id": uuid::Uuid::new_v4().to_string() }),
+    );
+    let body = resp.result.expect("business outcome is a success");
+    assert_eq!(
+        body.get("notify_state").and_then(|v| v.as_str()),
+        Some("unknown_id")
+    );
+}
+
+#[tokio::test]
+async fn notify_status_requires_the_id() {
+    let resp = crate::a2a::handler::notify::handle_notify_status(
+        serde_json::json!(16),
+        serde_json::json!({}),
+    );
+    assert_eq!(
+        resp.error.expect("error response").code,
+        error_codes::INVALID_PARAMS
+    );
+}

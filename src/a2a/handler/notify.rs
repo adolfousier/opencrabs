@@ -26,7 +26,7 @@
 //! verbatim; the recipient's model still reads the mechanical frame.
 
 use crate::a2a::types::*;
-use crate::brain::agent::service::session_routes::{Delivery, deliver_to_session};
+use crate::brain::agent::service::session_routes::Delivery;
 use crate::brain::agent::{PushOrigin, QueuedUserMessage};
 use crate::services::{ServiceContext, SessionService};
 
@@ -94,33 +94,20 @@ pub async fn handle_session_notify(
         .map(str::trim)
         .filter(|t| !t.is_empty())
         .map(str::to_string);
-    let interrupt = params
-        .get("interrupt")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false);
     // Sender label (#23): no sender session exists for the CLI lane, so the
     // label is carried verbatim — default DEFAULT_CLI_SENDER_LABEL,
-    // overridable by the caller. Validation: the label rides inside
-    // `[session-notify from=cli:<label>]`, so it may not contain the closing
-    // bracket or newlines, and it is capped to keep the receipt-card summary
-    // readable.
+    // overridable by the caller. Validation lives in the SHARED policy
+    // module (fork #146) — the same rules the tool and the CLI verb run;
+    // only the empty-label default differs (CLI lane defaults, not errors).
     let sender = match params.get("sender").and_then(serde_json::Value::as_str) {
         Some(raw) => {
             let label = raw.trim();
             if label.is_empty() {
                 DEFAULT_CLI_SENDER_LABEL.to_string()
-            } else if label.contains(']') || label.contains('\n') || label.contains('\r') {
-                return JsonRpcResponse::error(
-                    req_id,
-                    error_codes::INVALID_PARAMS,
-                    "'sender' must not contain ']' or newlines",
-                );
-            } else if label.chars().count() > CLI_SENDER_LABEL_MAX_CHARS {
-                return JsonRpcResponse::error(
-                    req_id,
-                    error_codes::INVALID_PARAMS,
-                    format!("'sender' must be at most {CLI_SENDER_LABEL_MAX_CHARS} chars"),
-                );
+            } else if let Err(e) =
+                crate::brain::agent::service::notify_policy::validate_sender_label(label)
+            {
+                return JsonRpcResponse::error(req_id, error_codes::INVALID_PARAMS, e);
             } else {
                 label.to_string()
             }
@@ -167,6 +154,22 @@ pub async fn handle_session_notify(
         Some(t) => format!("📨 {t} (from {sender}):"),
         None => format!("📨 notify from {sender}:"),
     };
+    // Delivery policy (fork #146): the A2A surface carries the SAME policy
+    // ontology as the agent tool — `delivery {mode, quiet_for_secs,
+    // max_delay_secs}` with the deprecated `interrupt` alias resolving
+    // through the shared `resolve_mode`. Quiet banks the notice and returns
+    // its id; every success path records a receipt so `session/notify-status`
+    // can poll the injection stamp.
+    let mode = crate::brain::agent::service::notify_policy::resolve_mode(
+        params
+            .get("delivery")
+            .and_then(|d| d.get("mode"))
+            .and_then(serde_json::Value::as_str),
+        params.get("interrupt").and_then(serde_json::Value::as_bool),
+        params.get("delivery"),
+    )
+    .map_err(|e| JsonRpcResponse::error(req_id, error_codes::INVALID_PARAMS, e))?;
+
     let msg = QueuedUserMessage {
         context_text: format!("[session-notify from={CLI_SENDER_PREFIX}{sender}]\n\n{message}"),
         display_text: format!("{header}\n{message}"),
@@ -174,25 +177,112 @@ pub async fn handle_session_notify(
         bg_meta: None,
     };
 
-    let (outcome, detail) = match deliver_to_session(session_id, msg, interrupt) {
-        Delivery::Delivered => ("delivered", format!("delivered to session {session_id}")),
-        Delivery::Redirected { to } => (
-            "delivered",
-            format!(
-                "redirected to session {to}: session {session_id} no longer owns its \
-                 channel (#19)"
-            ),
-        ),
+    // Quiet mode (fork #43/#50): bank the notice, return the id — accepted,
+    // not yet delivered; the id is the status handle from birth.
+    if let DeliveryMode::Quiet {
+        quiet_for,
+        max_delay,
+    } = mode
+    {
+        let id = quiet_delivery::defer_quiet(session_id, msg, quiet_for, max_delay);
+        notify_receipts::record_queued(id, session_id);
+        return JsonRpcResponse::success(
+            req_id,
+            serde_json::json!({
+                "outcome": "deferred",
+                "detail": format!(
+                    "deferred for session {session_id}: delivers once the session has been \
+                     quiet for {}s (hard cap {}s) — notification id {id}",
+                    quiet_for.as_secs(),
+                    max_delay.as_secs()
+                ),
+                "notify_id": id.to_string(),
+                "notify_state": "deferred",
+            }),
+        );
+    }
+
+    let interrupt = matches!(mode, DeliveryMode::TurnEnd);
+    let confirm = params
+        .get("confirm")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let notify_id = uuid::Uuid::new_v4();
+
+    let (outcome, detail, extra) = match deliver_to_session(session_id, msg, interrupt) {
+        Delivery::Delivered => {
+            notify_receipts::record_queued(notify_id, session_id);
+            if confirm {
+                let (state, cdetail, reason) =
+                    crate::brain::agent::service::notify_policy::confirm_route(
+                        session_id,
+                        crate::brain::agent::service::notify_policy::CONFIRM_CAP,
+                    )
+                    .await;
+                (
+                    "delivered",
+                    cdetail,
+                    serde_json::json!({
+                        "notify_id": notify_id.to_string(),
+                        "notify_state": state,
+                        "notify_reason": reason,
+                    }),
+                )
+            } else {
+                (
+                    "delivered",
+                    format!("delivered to session {session_id}"),
+                    serde_json::json!({ "notify_id": notify_id.to_string() }),
+                )
+            }
+        }
+        Delivery::Redirected { to } => {
+            notify_receipts::record_queued(notify_id, to);
+            if confirm {
+                let (state, cdetail, reason) =
+                    crate::brain::agent::service::notify_policy::confirm_route(
+                        to,
+                        crate::brain::agent::service::notify_policy::CONFIRM_CAP,
+                    )
+                    .await;
+                (
+                    "delivered",
+                    format!("{cdetail} (redirected to session {to})"),
+                    serde_json::json!({
+                        "notify_id": notify_id.to_string(),
+                        "notify_state": state,
+                        "notify_reason": reason,
+                        "notify_occupant": to.to_string(),
+                    }),
+                )
+            } else {
+                (
+                    "delivered",
+                    format!(
+                        "redirected to session {to}: session {session_id} no longer owns its \
+                         channel (#19)"
+                    ),
+                    serde_json::json!({
+                        "notify_id": notify_id.to_string(),
+                        "notify_occupant": to.to_string(),
+                    }),
+                )
+            }
+        }
         // Queued, not lost: the session's channel has not claimed it since
         // the last restart (#1206). Reporting this as a failure would be the
         // opposite of what happened — same reading as the agent tool.
-        Delivery::Parked => (
-            "parked",
-            format!(
-                "queued for session {session_id}: its channel has not claimed it since \
-                 the last restart (#1206) — it delivers on the next claim"
-            ),
-        ),
+        Delivery::Parked => {
+            notify_receipts::record_queued(notify_id, session_id);
+            (
+                "parked",
+                format!(
+                    "queued for session {session_id}: its channel has not claimed it since \
+                     the last restart (#1206) — it delivers on the next claim"
+                ),
+                serde_json::json!({ "notify_id": notify_id.to_string() }),
+            )
+        }
         Delivery::RefusedInFlight { redirected_to } => {
             let who = redirected_to.map_or_else(
                 || session_id.to_string(),
@@ -204,16 +294,102 @@ pub async fn handle_session_notify(
                     "session {who} is mid-turn and interrupt was not set — retry when \
                      idle or resend with interrupt=true (#13 failsafe)"
                 ),
+                serde_json::json!({}),
             )
         }
         Delivery::NoRoute => (
             "no_route",
             format!("no live route for session {session_id} and nothing is holding it"),
+            serde_json::json!({}),
         ),
     };
 
     JsonRpcResponse::success(
         req_id,
-        serde_json::json!({ "outcome": outcome, "detail": detail }),
+        serde_json::json!({ "outcome": outcome, "detail": detail }).merge(extra),
     )
+}
+
+/// Handle a `session/notify-status` JSON-RPC call (fork #146): the A2A twin
+/// of the agent tool's `action: "status"` — poll a notify receipt by id.
+/// Same in-memory honesty: receipts die with the process, an unknown id
+/// after a restart reports `unknown_id` instead of guessing.
+pub fn handle_notify_status(
+    req_id: serde_json::Value,
+    params: serde_json::Value,
+) -> JsonRpcResponse {
+    use crate::brain::agent::service::notify_receipts::{self, ReceiptState};
+
+    let raw = match params.get("notify_id").and_then(serde_json::Value::as_str) {
+        Some(raw) => raw,
+        None => {
+            return JsonRpcResponse::error(
+                req_id,
+                error_codes::INVALID_PARAMS,
+                "'notify_id' is required",
+            );
+        }
+    };
+    let id: uuid::Uuid = match raw.parse() {
+        Ok(id) => id,
+        Err(_) => {
+            return JsonRpcResponse::error(
+                req_id,
+                error_codes::INVALID_PARAMS,
+                format!("'notify_id' is not a valid UUID: {raw}"),
+            );
+        }
+    };
+    match notify_receipts::status(id) {
+        None => JsonRpcResponse::success(
+            req_id,
+            serde_json::json!({
+                "outcome": "unknown_id",
+                "detail": format!(
+                    "no notification {id} is tracked in this process — receipts are \
+                     in-memory and do not survive restarts"
+                ),
+                "notify_id": id.to_string(),
+                "notify_state": "unknown_id",
+            }),
+        ),
+        Some(receipt) => {
+            let (outcome, detail) = match receipt.state {
+                ReceiptState::Injected => {
+                    let at = receipt
+                        .injected_at
+                        .map(|t| t.to_rfc3339())
+                        .unwrap_or_default();
+                    (
+                        "injected",
+                        format!(
+                            "notification {id} was INJECTED into session {}'s model \
+                             context at {at} — the receiving machinery consumed it",
+                            receipt.target
+                        ),
+                    )
+                }
+                ReceiptState::Queued => (
+                    "queued",
+                    format!(
+                        "notification {id} is routed to session {} but NOT yet observed \
+                         at a tool-loop drain point — delivery != queue acceptance",
+                        receipt.target
+                    ),
+                ),
+            };
+            let mut body = serde_json::json!({
+                "outcome": outcome,
+                "detail": detail,
+                "notify_id": id.to_string(),
+                "notify_state": receipt.state.as_str(),
+                "notify_target": receipt.target.to_string(),
+                "queued_at": receipt.queued_at.to_rfc3339(),
+            });
+            if let Some(at) = receipt.injected_at {
+                body["injected_at"] = serde_json::json!(at.to_rfc3339());
+            }
+            JsonRpcResponse::success(req_id, body)
+        }
+    }
 }

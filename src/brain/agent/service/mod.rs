@@ -21,6 +21,7 @@ pub(crate) mod helpers;
 pub(crate) mod loop_break;
 mod messaging;
 mod model_refresh;
+pub(crate) mod notify_policy;
 pub(crate) mod notify_queue;
 pub(crate) mod notify_receipts;
 pub(crate) mod nudge;

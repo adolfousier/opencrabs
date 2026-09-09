@@ -364,20 +364,35 @@ pub enum SessionCommands {
     },
     /// Send a notification to a session (#23)
     Notify {
-        /// Target session UUID
+        /// Target session UUID or unambiguous prefix (#1340 resolver)
         id: String,
-        /// Message text
+        /// Message text (send mode)
         #[arg(long)]
-        text: String,
+        text: Option<String>,
         /// Optional title header
         #[arg(long)]
         title: Option<String>,
         /// Sender label shown to the recipient (default: "CLI tooling")
         #[arg(long)]
         sender: Option<String>,
-        /// Deliver even if the session is mid-turn (#13 failsafe)
+        /// Deliver even if the session is mid-turn (#13 failsafe) — deprecated alias for --mode turn-end
         #[arg(long)]
         interrupt: bool,
+        /// Delivery mode: now (default) | turn-end | quiet
+        #[arg(long)]
+        mode: Option<String>,
+        /// quiet mode: idle window before delivery, seconds (default 60)
+        #[arg(long)]
+        quiet_for_secs: Option<u64>,
+        /// quiet mode: starvation cap, seconds (default 1800)
+        #[arg(long)]
+        max_delay_secs: Option<u64>,
+        /// Verify end-to-end: watch the receiving machinery (~10s) for a wake instead of reporting the route alone
+        #[arg(long)]
+        confirm: bool,
+        /// Poll a notification receipt by id instead of sending (uses <text> as the id)
+        #[arg(long)]
+        status: bool,
         /// CLI output format
         #[arg(short, long, default_value = "text")]
         format: OutputFormat,
