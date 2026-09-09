@@ -256,7 +256,8 @@ impl Tool for SessionNotifyTool {
                 .and_then(Value::as_str),
             input.get("interrupt").and_then(Value::as_bool),
             delivery_obj,
-        )?;
+        )
+        .map_err(ToolError::InvalidInput)?;
 
         use crate::brain::agent::service::notify_receipts;
         use crate::brain::agent::service::quiet_delivery;

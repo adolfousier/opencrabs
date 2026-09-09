@@ -26,6 +26,10 @@
 //! verbatim; the recipient's model still reads the mechanical frame.
 
 use crate::a2a::types::*;
+use crate::brain::agent::service::notify_policy::{
+    CONFIRM_CAP, DeliveryMode, confirm_route, resolve_mode, validate_sender_label,
+};
+use crate::brain::agent::service::quiet_delivery;
 use crate::brain::agent::service::session_routes::Delivery;
 use crate::brain::agent::{PushOrigin, QueuedUserMessage};
 use crate::services::{ServiceContext, SessionService};
@@ -104,9 +108,7 @@ pub async fn handle_session_notify(
             let label = raw.trim();
             if label.is_empty() {
                 DEFAULT_CLI_SENDER_LABEL.to_string()
-            } else if let Err(e) =
-                crate::brain::agent::service::notify_policy::validate_sender_label(label)
-            {
+            } else if let Err(e) = validate_sender_label(label) {
                 return JsonRpcResponse::error(req_id, error_codes::INVALID_PARAMS, e);
             } else {
                 label.to_string()
@@ -160,15 +162,19 @@ pub async fn handle_session_notify(
     // through the shared `resolve_mode`. Quiet banks the notice and returns
     // its id; every success path records a receipt so `session/notify-status`
     // can poll the injection stamp.
-    let mode = crate::brain::agent::service::notify_policy::resolve_mode(
+    let mode = match resolve_mode(
         params
             .get("delivery")
             .and_then(|d| d.get("mode"))
             .and_then(serde_json::Value::as_str),
         params.get("interrupt").and_then(serde_json::Value::as_bool),
         params.get("delivery"),
-    )
-    .map_err(|e| JsonRpcResponse::error(req_id, error_codes::INVALID_PARAMS, e))?;
+    ) {
+        Ok(m) => m,
+        Err(e) => {
+            return JsonRpcResponse::error(req_id, error_codes::INVALID_PARAMS, e);
+        }
+    };
 
     let msg = QueuedUserMessage {
         context_text: format!("[session-notify from={CLI_SENDER_PREFIX}{sender}]\n\n{message}"),
@@ -213,12 +219,7 @@ pub async fn handle_session_notify(
         Delivery::Delivered => {
             notify_receipts::record_queued(notify_id, session_id);
             if confirm {
-                let (state, cdetail, reason) =
-                    crate::brain::agent::service::notify_policy::confirm_route(
-                        session_id,
-                        crate::brain::agent::service::notify_policy::CONFIRM_CAP,
-                    )
-                    .await;
+                let (state, cdetail, reason) = confirm_route(session_id, CONFIRM_CAP).await;
                 (
                     "delivered",
                     cdetail,
@@ -239,12 +240,7 @@ pub async fn handle_session_notify(
         Delivery::Redirected { to } => {
             notify_receipts::record_queued(notify_id, to);
             if confirm {
-                let (state, cdetail, reason) =
-                    crate::brain::agent::service::notify_policy::confirm_route(
-                        to,
-                        crate::brain::agent::service::notify_policy::CONFIRM_CAP,
-                    )
-                    .await;
+                let (state, cdetail, reason) = confirm_route(to, CONFIRM_CAP).await;
                 (
                     "delivered",
                     format!("{cdetail} (redirected to session {to})"),
@@ -304,10 +300,15 @@ pub async fn handle_session_notify(
         ),
     };
 
-    JsonRpcResponse::success(
-        req_id,
-        serde_json::json!({ "outcome": outcome, "detail": detail }).merge(extra),
-    )
+    JsonRpcResponse::success(req_id, {
+        let mut body = serde_json::json!({ "outcome": outcome, "detail": detail });
+        if let (Some(obj), Some(extra_obj)) = (body.as_object_mut(), extra.as_object()) {
+            for (k, v) in extra_obj {
+                obj.insert(k.clone(), v.clone());
+            }
+        }
+        body
+    })
 }
 
 /// Handle a `session/notify-status` JSON-RPC call (fork #146): the A2A twin

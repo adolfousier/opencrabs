@@ -13,7 +13,7 @@ use serde_json::Value;
 
 /// Resolved v2 delivery policy (fork #50).
 #[derive(Debug)]
-pub(crate) enum DeliveryMode {
+pub enum DeliveryMode {
     /// Refuse while the target is mid-turn (the failsafe default).
     Now,
     /// Queue for the target's next tool-loop boundary (alias: interrupt=true).
