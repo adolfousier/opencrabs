@@ -18,8 +18,8 @@ use teloxide::types::MessageId;
 
 use crate::channels::telegram::state::{MergedHost, TelegramState};
 use crate::channels::telegram::suggest_options::{
-    PickRewrite, echo_fallback, folded_list_markdown, go_tier_lines, mark_picked_button,
-    pick_rewrite, picked_block, suggestion_rows_rich_html,
+    PickRewrite, echo_fallback, go_tier_lines, mark_picked_button, pick_rewrite, picked_block,
+    suggestion_rows_rich_html,
 };
 
 const CHOICE: &str = "Update the SKILL.md with the new callback routing";
@@ -430,13 +430,13 @@ fn md_plane_appends_plain_markdown_pick_record() {
 }
 
 #[test]
-fn folded_list_markdown_numbers_each_option() {
-    let list = folded_list_markdown(&["первый".to_string(), "второй|с таблицей".to_string()]);
-    assert_eq!(list, "1. первый\n2. второй|с таблицей");
-}
-
-#[test]
 fn go_tier_lines_markdown_renders_119_lines() {
+    // Set-size split (owner order 2026-09-09): n>=2 = the original plain
+    // numbered list — Cyrillic and `|` stay verbatim (document-level
+    // interpretation deliberately skipped).
     let list = go_tier_lines(&["первый".to_string(), "второй|с таблицей".to_string()]);
-    assert_eq!(list, "**Go: первый?**\n**Go: второй|с таблицей?**");
+    assert_eq!(list, "1. первый\n2. второй|с таблицей");
+    // n=1 = the bold Go! tier line.
+    let single = go_tier_lines(&["первый".to_string()]);
+    assert_eq!(single, "**Go: первый?**");
 }

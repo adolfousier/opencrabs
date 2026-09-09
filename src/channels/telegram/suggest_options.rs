@@ -21,6 +21,12 @@ use super::TelegramState;
 /// Callback-data prefix for a tapped follow-up suggestion: `followup:<session>:<idx>`.
 pub(crate) const FOLLOWUP_PREFIX: &str = "followup:";
 
+/// Cross-turn glue staleness window (#91): the conversation's last rich-md
+/// answer only wears fresh controls while it is still "now" — older answers
+/// fall back to the standalone bubble, because options glued onto a stale
+/// shell read as fresh, answerable questions (the exact #1226 confusion).
+const CROSS_TURN_GLUE_MAX_AGE_SECS: i64 = 900;
+
 /// Body for the standalone fallback bubble (#1226 item 4). Prose mode keeps
 /// just the folded list (it has no buttons, nothing can expire); button
 /// modes carry the bare lamp plus an expiry marker — this fallback fires
@@ -30,7 +36,9 @@ pub(crate) const FOLLOWUP_PREFIX: &str = "followup:";
 /// minutes after its choices were consumed).
 pub(crate) fn standalone_fallback_body(layout: &SuggestLayout, options: &[String]) -> String {
     if *layout == SuggestLayout::NumberedProse {
-        folded_list_html(options).trim_start().to_string()
+        // #119 fold tier: the Go lines carry the questions; nothing else
+        // needed — no lamp, no list.
+        go_tier_lines_rich(options)
     } else {
         String::from("\u{1f4a1} <i>(choices may have expired)</i>")
     }
@@ -263,7 +271,7 @@ pub(crate) const SHARED_ROW_TOTAL_UNITS: usize = 20;
 /// the message body, so 12 keeps a safety margin under the worst bubble
 /// while doubling information per row vs the old 8.
 pub(crate) const SHARED_ROW_MAX_CHARS: usize = 12;
-/// Tap ergonomics (Alexey, 2026-08-25): numbered buttons never pack more
+/// Tap ergonomics (Alexey, 2026-08-25): #119 Go! buttons never pack more
 /// than 4 per row, so every target stays big enough for a finger.
 pub(crate) const MAX_NUMBERS_PER_ROW: usize = 4;
 
@@ -275,53 +283,84 @@ pub(crate) enum SuggestLayout {
     SharedRow,
     /// Every label fits a full-width button: one button per row.
     Column,
-    /// Some label too long even full-width: texts fold into the message
-    /// body as a numbered list, buttons collapse to bare numbers packed
+    /// Some label too long even full-width (#119 owner design): the fold
+    /// tier splits by set size (owner order 2026-09-09): n=1 = one bold
+    /// `Go: <label>?` body line + one `Go!` button; n>=2 = the ORIGINAL
+    /// plain numbered list `1. <label>` + plain digit buttons packed
     /// [`MAX_NUMBERS_PER_ROW`] per row.
     NumberedProse,
 }
 
+/// THE budget verdict — sole authority on whether one button row ships
+/// byte-identical or folds (#119 refactor, option A). Both consumers call
+/// THIS: `pick_layout` at the emitter and `enforce_button_fit` at the
+/// rich/api.rs funnel. Before this function, the two sites carried
+/// divergent copies of the budgets — the funnel re-folded full-width
+/// single-button rows the emitter had just approved, which is exactly
+/// the live #119 regression. One verdict = the divergence class is
+/// structurally impossible.
+///
+/// Row shapes:
+/// - ONE button renders FULL-WIDTH, so it gets the solo budget
+///   [`SINGLE_BUTTON_MAX_UNITS`] (30) — sized below every measured cut
+///   datapoint (32 wide-glyph native, 40-44 rich-plane — see #79) while
+///   clearing confirm-style labels (27 units) that the 20-unit shared
+///   gate wrongly folded.
+/// - Multi-button rows share keyboard width, so every label must fit
+///   [`SHARED_ROW_MAX_CHARS`] and the row total [`SHARED_ROW_TOTAL_UNITS`].
+///
+/// Width is the raw character count of the (already escaped) label text;
+/// entities overcount display width, which errs safe.
+pub(crate) fn row_fits(labels: &[&str]) -> bool {
+    if labels.len() == 1 {
+        labels[0].chars().count() <= SINGLE_BUTTON_MAX_UNITS
+    } else {
+        let total: usize = labels.iter().map(|l| l.chars().count()).sum();
+        labels
+            .iter()
+            .all(|l| l.chars().count() <= SHARED_ROW_MAX_CHARS)
+            && total <= SHARED_ROW_TOTAL_UNITS
+    }
+}
+
 pub(crate) fn pick_layout(options: &[String]) -> SuggestLayout {
     let width = |o: &String| o.chars().count();
-    let total: usize = options.iter().map(&width).sum();
-    if options.len() <= MAX_NUMBERS_PER_ROW
-        && options.iter().all(|o| width(o) <= SHARED_ROW_MAX_CHARS)
-        && total <= SHARED_ROW_TOTAL_UNITS
-    {
+    let refs: Vec<&str> = options.iter().map(|o| o.as_str()).collect();
+    if options.len() > 1 && options.len() <= MAX_NUMBERS_PER_ROW && row_fits(&refs) {
         SuggestLayout::SharedRow
-    } else if options.len() == 1 {
-        // Single-option set (#119): the fold tier's premise — cramming
-        // many long labels into shared rows — never applies at n=1, and
-        // a lone option folded into "1. <label>" prose plus a bare "1"
-        // button renders absurdly. One option rides a full-width button
-        // under its own clip point; only a label too wide even for a
-        // dedicated row folds. The budget sits below every measured cut
-        // datapoint (32 wide-glyph native, 40-44 rich-plane — see #79)
-        // while clearing confirm-style labels ("Smoke OK — ack both
-        // units", 27) that the 20-unit shared-row gate wrongly folded.
-        if width(&options[0]) <= SINGLE_BUTTON_MAX_UNITS {
-            SuggestLayout::Column
-        } else {
-            SuggestLayout::NumberedProse
-        }
-    } else if options.iter().all(|o| width(o) <= BUTTON_LABEL_MAX_UNITS) {
+    } else if options.iter().all(|o| width(o) <= BUTTON_LABEL_MAX_UNITS)
+        || (options.len() == 1 && width(&options[0]) <= SINGLE_BUTTON_MAX_UNITS)
+    {
+        // n=1 with a label past the shared 20-unit cap still rides
+        // full-width up to the solo budget (#119) — row_fits's solo arm.
         SuggestLayout::Column
     } else {
         SuggestLayout::NumberedProse
     }
 }
 
-/// The folded option list as rich HTML. REUSES the canonical inline
-/// primitives from `super::markdown` — `escape_html` → `format_inline`,
-/// the exact pair the outbound renderer's default line branch applies —
-/// instead of a private formatter. Options are independent ONE-line texts,
-/// so they deliberately skip document-level interpretation (a stray `|`
-/// must not turn the list into a table); inline markup (`code`, bold) and
-/// HTML escaping behave identically to every other Telegram surface.
-/// No "Suggested next" header — the list rides directly under the answer
-/// text in the same bubble (#tg-suggest-merge), so the label would only
-/// duplicate what the buttons already say.
-pub(crate) fn folded_list_html(options: &[String]) -> String {
+/// The folded option list as rich HTML (#119 fold tier). Set-size split
+/// (owner order 2026-09-09, "back to the way the numbered lists were
+/// before the Go button introduction"):
+/// n=1 keeps the confirmed Go! tier — one bold `Go: <label>?` line through
+/// the canonical inline primitives (`escape_html` → `format_inline`);
+/// n>=2 reverts to the ORIGINAL plain numbered list (`1. <label>` — no
+/// `Go:` prefix, no `?` mutation, no bold), byte-identical semantics to
+/// the pre-`c92873b1` `folded_list_html`. Options are independent ONE-line
+/// texts, so they deliberately skip document-level interpretation (a
+/// stray `|` must not turn the line into a table). No "Suggested next"
+/// header — the lines ride directly under the answer text in the same
+/// bubble (#tg-suggest-merge).
+pub(crate) fn go_tier_lines_rich(options: &[String]) -> String {
+    if options.len() == 1 {
+        return options
+            .iter()
+            .map(|opt| {
+                super::markdown::format_inline(&super::markdown::escape_html(&go_tier_line(opt)))
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
     options
         .iter()
         .enumerate()
@@ -336,39 +375,34 @@ pub(crate) fn folded_list_html(options: &[String]) -> String {
         .join("\n")
 }
 
-/// NumberedProse fold for the markdown plane (#79 piece 4): a plain
-/// numbered list — the server's markdown render keeps the numbering and
-/// the line breaks, no `<p>` wrapping needed on this plane.
-pub(crate) fn folded_list_markdown(options: &[String]) -> String {
-    options
-        .iter()
-        .enumerate()
-        .map(|(i, opt)| format!("{}. {}", i + 1, opt))
-        .collect::<Vec<_>>()
-        .join("\n")
+/// The fold-tier button label for one option — set-size split (owner
+/// order 2026-09-09): n>=2 = the ORIGINAL plain digit (`1`, `2`, …),
+/// pairing with the restored `1. <label>` body lines; n=1 = the single
+/// `Go!` button of the confirmed Go! tier. `number` is 1-based.
+pub(crate) fn go_button_label(number: usize, is_single: bool) -> String {
+    if is_single {
+        String::from("Go!")
+    } else {
+        number.to_string()
+    }
 }
 
-/// The label of every NumberedProse-tier button after the #119 owner
-/// redesign: the option text moves into the body, the button just says Go!.
-pub(crate) const GO_BUTTON_LABEL: &str = "Go!";
-
-/// The verb the #119 fold tier names options with — the first word of the
-/// `Go: <label>?` body line and the GO_BUTTON_LABEL button minus its bang.
+/// The verb the #119 fold tier names options with — the word the numbered
+/// `N. Go: <label>?` body line prefixes the label with.
 const GO_TIER_VERB: &str = "Go";
 
-/// One #119 fold-tier body line for one option (owner design 06:42Z +
-/// verb-repeat amendment 06:46Z): the label verbatim + `?` when it already
-/// starts with the verb (`Go — implement #98…?`), `<Verb>: <label>?`
-/// otherwise (`Go: Smoke OK — ack both units?`). The label is NOT re-wrapped
-/// in markup here: the rich plane escapes+formats via `go_tier_lines_rich`;
-/// the markdown plane takes the raw line.
+/// One #119 single-option fold-tier body line (n=1 ONLY — owner design
+/// 06:42Z + verb-repeat amendment 06:46Z, render corrections 2026-09-09):
+/// `Go: <label>?` — label verbatim + `?` unless it already ends one
+/// (`Go — implement #98…?`), `Go: <label>?` otherwise (`Go: Smoke OK —
+/// ack both units?`). The label is NOT re-wrapped in markup here: the
+/// rich plane escapes+formats via `go_tier_lines_rich`; the markdown
+/// plane takes the raw line. For n>=2 the fold is the plain numbered
+/// list (owner order 2026-09-09) — this Go! line never fires there.
 pub(crate) fn go_tier_line(label: &str) -> String {
     // Verb match is whole-first-word, not a character prefix: "go fast"
     // qualifies, "Gossip about it" does not (CI r2, E-test 139).
-    let first_word = label
-        .split_whitespace()
-        .next()
-        .unwrap_or_default();
+    let first_word = label.split_whitespace().next().unwrap_or_default();
     let starts_with_verb = first_word.eq_ignore_ascii_case(GO_TIER_VERB);
     // Owner render correction 2026-09-09: a label that already ends with a
     // question mark must not get a second one; the whole line renders bold
@@ -381,12 +415,20 @@ pub(crate) fn go_tier_line(label: &str) -> String {
     }
 }
 
-/// The #119 fold-tier body block: one go_tier_line per option, one line
-/// each, in order.
+/// The #119 fold-tier body block. Set-size split (owner order 2026-09-09,
+/// "back to the way the numbered lists were before the Go button
+/// introduction"): n=1 = one bold `go_tier_line`; n>=2 = the ORIGINAL
+/// plain numbered list `1. <label>` (markdown plane) — byte-identical to
+/// the pre-`c92873b1` `folded_list_markdown`. The n>=2 buttons are digit
+/// buttons whose labels already pair with these lines.
 pub(crate) fn go_tier_lines(options: &[String]) -> String {
+    if options.len() == 1 {
+        return go_tier_line(&options[0]);
+    }
     options
         .iter()
-        .map(|o| go_tier_line(o))
+        .enumerate()
+        .map(|(i, o)| format!("{}. {}", i + 1, o))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -422,27 +464,29 @@ pub(crate) fn empty_keyboard() -> teloxide::types::InlineKeyboardMarkup {
 /// controls passes through here on send and edit (the `rich/api.rs`
 /// funnel), so hand-authored button rows from any lane get the same
 /// measured fit rule the suggestion cards enforce at their own emitter —
-/// the n8n-card cut class. If every label fits [`BUTTON_LABEL_MAX_UNITS`]
-/// and every row's total fits [`SHARED_ROW_TOTAL_UNITS`], the body ships
-/// byte-identical. Otherwise the whole set folds to the NumberedProse
-/// shape (proven cut-free twice in #79): buttons keep their attributes —
-/// callback data and URL routing are untouched — but render their 1-based
-/// index, and the original labels move into an `<ol>` after the last row.
-/// Idempotent: a folded body's digit labels never re-trigger the fold.
-/// Width is the raw character count of the (already escaped) label text;
-/// entities overcount display width, which errs safe.
+/// the n8n-card cut class. Row verdicts go through [`row_fits`] — the
+/// single budget authority (#119 option A): one-button rows ride the
+/// solo budget, shared rows the per-label + row-total caps. If every
+/// row fits, the body ships byte-identical. Otherwise the whole set
+/// folds to the NumberedProse shape (proven cut-free twice in #79):
+/// buttons keep their attributes — callback data and URL routing are
+/// untouched — but render their 1-based index, and the original labels
+/// move into an `<ol>` after the last row. Idempotent: a folded body's
+/// digit labels never re-trigger the fold.
 pub(crate) fn enforce_button_fit(html: &str) -> String {
     const ROW_OPEN: &str = "<tg-button-row>";
     const ROW_CLOSE: &str = "</tg-button-row>";
     const BTN_OPEN: &str = "<tg-button";
     const BTN_CLOSE: &str = "</tg-button>";
 
-    let width = |s: &str| s.chars().count();
-
     // Pass 1 — collect row spans, per-row open tags, and all labels.
+    // Per-row verdicts go through row_fits — THE single budget authority
+    // (#119 option A): the funnel no longer carries its own cap copies,
+    // so it can never re-fold a row the emitter legitimately approved.
     let mut rows: Vec<(usize, usize)> = Vec::new();
     let mut open_tags: Vec<Vec<&str>> = Vec::new();
     let mut labels: Vec<&str> = Vec::new();
+    let mut row_labels: Vec<&str> = Vec::new();
     let mut fits = true;
     let mut scan_from = 0usize;
     while let Some(rel) = html[scan_from..].find(ROW_OPEN) {
@@ -452,8 +496,8 @@ pub(crate) fn enforce_button_fit(html: &str) -> String {
         };
         let row_end = row_start + crel + ROW_CLOSE.len();
         let block = &html[row_start + ROW_OPEN.len()..row_end - ROW_CLOSE.len()];
-        let mut row_total = 0usize;
         let mut tags_in_row: Vec<&str> = Vec::new();
+        row_labels.clear();
         let mut bscan = 0usize;
         while let Some(brel) = block[bscan..].find(BTN_OPEN) {
             let bstart = bscan + brel;
@@ -472,13 +516,12 @@ pub(crate) fn enforce_button_fit(html: &str) -> String {
                 break;
             };
             let label = &block[label_start..label_start + lrel];
-            row_total += width(label);
-            fits &= width(label) <= BUTTON_LABEL_MAX_UNITS;
+            row_labels.push(label);
             tags_in_row.push(open_tag);
             labels.push(label);
             bscan = label_start + lrel + BTN_CLOSE.len();
         }
-        fits &= row_total <= SHARED_ROW_TOTAL_UNITS;
+        fits &= row_fits(&row_labels);
         rows.push((row_start, row_end));
         open_tags.push(tags_in_row);
         scan_from = row_end;
@@ -545,13 +588,13 @@ pub(crate) fn append_rows_and_trailer_md(
     trailer: Option<&str>,
 ) {
     if prose {
-        // Markdown plane, #119 fold tier: one `Go: <label>?` line per
-        // option (label verbatim when it starts with the verb) — never a
-        // numbered list. Raw lines: the markdown plane renders them
-        // plainly, no html primitives needed. Blank line before the block:
-        // owner correction 2026-09-09 — a single \n glued the Go: line to
-        // the body's last line (Telegram rich renderer needs a paragraph
-        // break there).
+        // Markdown plane, #119 fold tier (set-size split, owner order
+        // 2026-09-09): n=1 = one bold `Go: <label>?` line; n>=2 = the
+        // original plain numbered list. Raw lines: the markdown plane
+        // renders them plainly, no html primitives needed. Blank line
+        // before the block: owner correction 2026-09-09 — a single \n
+        // glued the fold block to the body's last line (Telegram rich
+        // renderer needs a paragraph break there).
         push_blank_line(md);
         md.push_str(&go_tier_lines(options));
     }
@@ -592,7 +635,7 @@ pub(crate) fn suggestion_rows_rich_html(options: &[String], token: &str) -> Stri
             .collect::<Vec<_>>()
             .join("\n"),
         SuggestLayout::NumberedProse => (0..options.len())
-            .map(|i| btn(i, &(i + 1).to_string()))
+            .map(|i| btn(i, &go_button_label(i + 1, options.len() == 1)))
             .collect::<Vec<_>>()
             .chunks(MAX_NUMBERS_PER_ROW)
             .map(|c| format!("<tg-button-row>{}</tg-button-row>", c.concat()))
@@ -621,6 +664,12 @@ pub(crate) async fn render_suggestions(
     // shape: its own bubble after placement — content, not chrome, so it
     // ships even when the buttons die.
     trailer: Option<String>,
+    // #91 cross-turn glue: the channel-message repo, when the surface has
+    // one. When this turn captured no merge host, the glue rung looks up the
+    // conversation's last rich-markdown answer and hangs the controls off
+    // THAT bubble instead of posting the bare standalone fallback. None =
+    // glue unavailable (no db surface / tests), standalone as before.
+    glue_repo: Option<crate::db::repository::ChannelMessageRepository>,
 ) {
     if options.is_empty() {
         // Stash cleared between delivery and render (mid-turn tap, newer
@@ -643,16 +692,15 @@ pub(crate) async fn render_suggestions(
     // and SINGLE_BUTTON_MAX_UNITS): short labels share one row, medium
     // labels get a full-width row each, a lone option rides one
     // full-width button up to its own clip point (#119), and anything
-    // longer folds into the body as a numbered list with compact
-    // number buttons (<=4 per row). The absolute index is encoded in the
+    // longer folds into the body (set-size split, owner order 2026-09-09):
+    // n=1 = bold `Go: <label>?` + a Go! button; n>=2 = the original plain
+    // numbered list with digit buttons (<=4 per row). The absolute index
+    // is encoded in the
     // callback data; the option text itself can exceed Telegram's 64-byte
     // callback-data limit, so we never put it there.
     let layout = pick_layout(&options);
     let text_btn = |i: usize, opt: &str| {
         InlineKeyboardButton::callback(opt.to_string(), format!("{FOLLOWUP_PREFIX}{token}:{i}"))
-    };
-    let num_btn = |i: usize| {
-        InlineKeyboardButton::callback((i + 1).to_string(), format!("{FOLLOWUP_PREFIX}{token}:{i}"))
     };
     let rows: Vec<Vec<InlineKeyboardButton>> = match layout {
         SuggestLayout::SharedRow => vec![
@@ -668,7 +716,14 @@ pub(crate) async fn render_suggestions(
             .map(|(i, opt)| vec![text_btn(i, opt)])
             .collect(),
         SuggestLayout::NumberedProse => {
-            let all: Vec<InlineKeyboardButton> = (0..options.len()).map(num_btn).collect();
+            let all: Vec<InlineKeyboardButton> = (0..options.len())
+                .map(|i| {
+                    InlineKeyboardButton::callback(
+                        go_button_label(i + 1, options.len() == 1),
+                        format!("{FOLLOWUP_PREFIX}{token}:{i}"),
+                    )
+                })
+                .collect();
             all.chunks(MAX_NUMBERS_PER_ROW)
                 .map(|c| c.to_vec())
                 .collect()
@@ -678,7 +733,8 @@ pub(crate) async fn render_suggestions(
     let keyboard = InlineKeyboardMarkup::new(rows);
 
     // Primary path: MERGE onto the answer bubble (#tg-suggest-merge). Prose
-    // mode appends the numbered list under the answer text; button modes add
+    // mode appends the `Go: <label>?` lines under the answer text (#119
+    // fold tier); button modes add
     // nothing on the classic surface (the buttons carry everything). Rich
     // bubbles additionally get native <tg-button-row> controls INSIDE the
     // message body. Both placement payloads are built ONCE — before the first
@@ -697,10 +753,12 @@ pub(crate) async fn render_suggestions(
                 let mut body = html;
                 if layout == SuggestLayout::NumberedProse {
                     // Classic hosts preserve the raw newline join via
-                    // go_tier_lines_rich (#119 fold tier: Go: label? lines,
-                    // never a numbered list). Paragraph break before the
-                    // block — owner correction 2026-09-09: a single \n
-                    // glued the Go: line to the body's last line.
+                    // go_tier_lines_rich (#119 fold tier: n=1 = bold
+                    // `Go: <label>?`; n>=2 = the original plain numbered
+                    // list — owner order 2026-09-09). Paragraph break
+                    // before the block — owner correction 2026-09-09: a
+                    // single \n glued the fold block to the body's last
+                    // line.
                     if !body.ends_with('\n') {
                         body.push('\n');
                     }
@@ -737,13 +795,46 @@ pub(crate) async fn render_suggestions(
             new_html,
             rich,
             new_markdown,
+            glue: false,
         }
     });
 
-    // Standalone fallback (no merge candidate, or the edit lost a race / grew
-    // too old): the header sentence is still gone per #tg-suggest-merge —
-    // prose mode shows just the numbered list, button modes need SOME text
-    // for the Bot API to accept the message, so they degrade to the bare 💡.
+    // #91 cross-turn glue: when this turn produced no bubble of its own, the
+    // glue rung looks up the conversation's LAST rich-markdown answer and
+    // hangs the controls off THAT bubble — one message instead of the bare
+    // standalone fallback. Guards live in the lookup (staleness window,
+    // thread match) and in the target check (no live keyboard may already
+    // ride the target — ours would clobber it, and a #59 strip would later
+    // rip the fresh buttons off). Computed ONCE, like the merge payload, so
+    // a Retry-After deferral re-sends byte-identical content.
+    let placement_payload = if merge_payload.is_none() {
+        match glue_repo.as_ref() {
+            Some(repo) => {
+                cross_turn_glue(
+                    state,
+                    repo,
+                    chat_id,
+                    thread_id,
+                    &token,
+                    &layout,
+                    &options,
+                    trailer.as_ref(),
+                )
+                .await
+            }
+            None => None,
+        }
+    } else {
+        None
+    };
+    let placement_payload = placement_payload.or(merge_payload);
+
+    // Standalone fallback (no merge candidate, no glue target, or the edit
+    // lost a race / grew too old): the header sentence is still gone per
+    // #tg-suggest-merge — prose mode shows just the `Go: <label>?` lines
+    // (#119 fold tier; they ARE the questions), button
+    // modes need SOME text for the Bot API to accept the message, so they
+    // degrade to the bare 💡.
     let standalone_body = standalone_fallback_body(&layout, &options);
 
     let option_count = options.len();
@@ -755,7 +846,7 @@ pub(crate) async fn render_suggestions(
         &token,
         option_count,
         &keyboard,
-        merge_payload.as_ref(),
+        placement_payload.as_ref(),
         &standalone_body,
     )
     .await
@@ -812,7 +903,7 @@ pub(crate) async fn render_suggestions(
                         &token,
                         option_count,
                         &keyboard,
-                        merge_payload.as_ref(),
+                        placement_payload.as_ref(),
                         &standalone_body,
                     )
                     .await
@@ -862,8 +953,79 @@ pub(crate) async fn render_suggestions(
     }
 }
 
+/// #91 cross-turn glue: build a placement payload that hangs this turn's
+/// controls off the conversation's LAST rich-markdown answer, or `None` when
+/// no legal target exists (no recent answer, wrong plane, or a live keyboard
+/// already riding it — the standalone bubble fires instead). Same-thread and
+/// staleness guards live in the repo lookup; the clobber guard runs here
+/// against the in-memory registries.
+#[allow(clippy::too_many_arguments)]
+async fn cross_turn_glue(
+    state: &Arc<TelegramState>,
+    repo: &crate::db::repository::ChannelMessageRepository,
+    chat_id: ChatId,
+    thread_id: Option<ThreadId>,
+    token: &str,
+    layout: &SuggestLayout,
+    options: &[String],
+    trailer: Option<&String>,
+) -> Option<MergePayload> {
+    let target = repo
+        .last_bot_rich_md(
+            "telegram",
+            &chat_id.0.to_string(),
+            thread_id.map(|t| t.0.to_string()).as_deref(),
+            CROSS_TURN_GLUE_MAX_AGE_SECS,
+        )
+        .await
+        .ok()
+        .flatten()?;
+    let mid = MessageId(target.0.parse().ok()?);
+    if state.message_hosts_live_keyboard(mid).await {
+        tracing::info!(
+            "Telegram suggest_options: cross-turn glue skipped — msg {} already \
+             hosts a keyboard (#91)",
+            mid.0
+        );
+        return None;
+    }
+    // Payload mirrors the markdown-merge arm exactly (#79 piece 4): stored
+    // markdown + folded list (prose mode) + in-body button rows + trailer,
+    // with the html conversion kept only as the strip source.
+    let mut new_md = target.1;
+    if *layout == SuggestLayout::NumberedProse {
+        // #119 fold tier: Go lines replace the numbered list (mirrors the
+        // markdown-merge arm byte-for-byte in construction). Paragraph
+        // break before the block — owner correction 2026-09-09: a single
+        // \n glued the Go: line to the body's last line.
+        push_blank_line(&mut new_md);
+        new_md.push_str(&go_tier_lines(options));
+    }
+    new_md.push('\n');
+    new_md.push_str(&suggestion_rows_rich_html(options, token));
+    if let Some(t) = trailer {
+        new_md.push('\n');
+        new_md.push_str(t);
+    }
+    let strip_source = super::rich::markdown_to_html_p(&new_md);
+    tracing::info!(
+        "Telegram suggest_options: cross-turn glue target msg {} (token {token}, \
+         {} options)",
+        mid.0,
+        options.len()
+    );
+    Some(MergePayload {
+        message_id: mid,
+        new_html: strip_source,
+        rich: true,
+        new_markdown: Some(new_md),
+        glue: true,
+    })
+}
+
 /// Pre-built merge-edit payload (#30): computed ONCE per suggestion block so
 /// a deferred re-placement after a Retry-After re-sends byte-identical
+/// content. `rich` picks the wire: rich bubbles edit via the rich API with
 /// in-body button rows, classic bubbles via editMessageText + reply_markup.
 #[derive(Clone)]
 struct MergePayload {
@@ -874,6 +1036,12 @@ struct MergePayload {
     /// every later redraw ride `edit_rich_markdown`; `new_html` then only
     /// feeds the host record's strip source.
     new_markdown: Option<String>,
+    /// #91 cross-turn glue: the controls hang off the PREVIOUS turn's
+    /// bubble (its last rich-md answer) instead of this turn's answer.
+    /// Wording-only today — the wire path is identical to a markdown merge —
+    /// but the log lines name the arm, so a tap on a glued keyboard maps
+    /// back to the rung that placed it.
+    glue: bool,
 }
 
 /// Placement error class (#30): decides whether the stash survives the
@@ -1071,10 +1239,13 @@ async fn place_once(
         match outcome {
             Ok(()) => {
                 // Name the arm, the host message and the token so any tap can
-                // be mapped back to its panel from logs alone.
+                // be mapped back to its panel from logs alone. Glue (#91)
+                // names its rung: the controls hang off the previous turn's
+                // bubble, not this turn's answer.
                 tracing::info!(
-                    "Telegram suggest_options: keyboard merged onto msg {mid} \
+                    "Telegram suggest_options: keyboard {} msg {mid} \
                      ({} host, token {token}, {option_count} options)",
+                    if mp.glue { "glued onto" } else { "merged onto" },
                     if mp.new_markdown.is_some() {
                         "rich-md"
                     } else if mp.rich {

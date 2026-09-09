@@ -9,9 +9,9 @@
 //! rule is that no source file carries a `#[cfg(test)] mod tests` block.
 
 use crate::channels::telegram::suggest_options::{
-    BUTTON_LABEL_MAX_UNITS, FOLLOWUP_PREFIX, GO_BUTTON_LABEL, MAX_NUMBERS_PER_ROW,
-    SHARED_ROW_MAX_CHARS, SINGLE_BUTTON_MAX_UNITS, SuggestLayout, append_rows_and_trailer_md,
-    enforce_button_fit, folded_list_html, go_tier_line, go_tier_lines_rich, pick_layout, row_fits,
+    BUTTON_LABEL_MAX_UNITS, FOLLOWUP_PREFIX, MAX_NUMBERS_PER_ROW, SHARED_ROW_MAX_CHARS,
+    SINGLE_BUTTON_MAX_UNITS, SuggestLayout, append_rows_and_trailer_md, enforce_button_fit,
+    go_button_label, go_tier_line, go_tier_lines_rich, pick_layout, row_fits,
     suggestion_rows_rich_html,
 };
 
@@ -85,10 +85,7 @@ fn test_single_option_rides_full_width_past_the_shared_budget() {
     );
     // n >= 2 behavior unchanged: long labels still fold the whole set.
     assert_eq!(
-        pick_layout(&[
-            "ok".to_string(),
-            "x".repeat(BUTTON_LABEL_MAX_UNITS + 1)
-        ]),
+        pick_layout(&["ok".to_string(), "x".repeat(BUTTON_LABEL_MAX_UNITS + 1)]),
         SuggestLayout::NumberedProse
     );
 }
@@ -106,74 +103,52 @@ fn test_shared_row_respects_the_total_budget() {
 }
 
 #[test]
-fn test_a_folded_list_carries_no_header_and_is_escaped() {
-    let body = folded_list_html(&opts(&["Ship it", "Review & merge"]));
-    assert!(
-        !body.contains("Suggested next"),
-        "#1204: the list rides under the answer, so it has no header of its own"
-    );
-    assert!(body.contains("1. Ship it"));
-    assert!(
-        body.contains("2. Review &amp; merge"),
-        "escaping proves the shared renderer ran, not a private one: {body}"
-    );
-}
-
-#[test]
-fn test_go_tier_buttons_carry_go_label_not_digits() {
-    // #119 owner design: buttons in the fold tier read `Go!`, never bare
-    // digits. Callback data still carries the absolute index.
-    let token = "ab12cd34";
-    let html = suggestion_rows_rich_html(&opts(&["Ship it", &"x".repeat(30)]), token);
-    assert!(html.contains(&format!(">{GO_BUTTON_LABEL}<")), "{html}");
-    assert!(!html.contains(">1</tg-button>"), "no digit buttons: {html}");
-    assert!(
-        html.contains(&format!("{FOLLOWUP_PREFIX}{token}:0")),
-        "callback data still routes by index: {html}"
-    );
-}
-
-#[test]
 fn test_go_tier_body_lines_carry_the_119_shape() {
-    // #119 owner design 06:42Z + render corrections 2026-09-09: the fold
-    // tier renders a BOLD `Go: <label>?` line per option, with a blank
-    // line before the block — never a numbered list.
+    // #119 set-size split (owner order 2026-09-09, "back to the way the
+    // numbered lists were before the Go button introduction"):
+    // n>=2 = the ORIGINAL plain numbered list — `1. <label>`, no Go
+    // prefix, no `?` mutation, no bold; n=1 keeps the confirmed Go! tier.
     let body = go_tier_lines_rich(&opts(&["Ship it", "Review & merge"]));
     assert!(
         !body.contains("Suggested next"),
         "#1204: the lines ride under the answer, no header of their own"
     );
     assert!(
-        body.contains("<b>Go: Ship it?</b>") && body.contains("<b>Go: Review &amp; merge?</b>"),
-        "one bold Go line per option, escaping via the shared renderer: {body}"
+        body.contains("1. Ship it") && body.contains("2. Review &amp; merge"),
+        "plain numbered list for n>=2, escaping via the shared renderer: {body}"
     );
     assert!(
-        !body.contains("1. Ship it") && !body.contains("<ol>"),
-        "the numbered-prose shape is gone, not renamed: {body}"
+        !body.contains("Go:") && !body.contains("<b>"),
+        "no Go-tier artifacts on the n>=2 fold: {body}"
     );
+    assert!(
+        !body.contains("<ol>"),
+        "no html <ol> — plain numbered prose: {body}"
+    );
+    // n=1 keeps the confirmed Go! tier (bold, deduped ?).
+    let single = go_tier_lines_rich(&opts(&["Ship it"]));
+    assert_eq!(single, "<b>Go: Ship it?</b>");
 }
 
 #[test]
 fn test_go_tier_dedupes_trailing_question_mark() {
     // Owner correction 2026-09-09: a label ending in '?' must not gain a
-    // second question mark.
+    // second question mark (n=1 Go! tier only).
     assert_eq!(go_tier_line("Confirm render?"), "**Go: Confirm render?**");
     assert_eq!(go_tier_line("Confirm render??"), "**Go: Confirm render??**");
 }
 
 #[test]
 fn test_go_tier_verb_repeat_rule() {
-    // #119 owner amendment 06:46Z: a label that already starts with the
-    // verb renders verbatim + `?` (deduped); otherwise the `Go:` prefix is
-    // added. Whole line is bold per the 2026-09-09 correction.
+    // #119 owner amendment 06:46Z (n=1 Go! tier): a label that already
+    // starts with the verb renders verbatim + `?` (deduped); otherwise
+    // the `Go:` prefix is added. Whole line is bold per the 2026-09-09
+    // correction.
     assert_eq!(
         go_tier_line("Go — implement #98 after the #96 gate lands"),
         "**Go — implement #98 after the #96 gate lands?**"
     );
-    assert_eq!(
-        go_tier_line("Smoke OK — ack both units"),
-        "**Go: Smoke OK — ack both units?**"
-    );
+    assert_eq!(go_tier_line("Smoke OK — ack both units"), "**Go: Smoke OK — ack both units?**");
     // Case-insensitive verb match (Go!/go both start the label).
     assert_eq!(go_tier_line("go fast"), "**go fast?**");
     // Prefix-verb must not false-positive mid-word.
@@ -181,49 +156,34 @@ fn test_go_tier_verb_repeat_rule() {
 }
 
 #[test]
-fn test_row_fits_solo_arm_grants_the_solo_budget() {
-    // One button renders full-width: it rides SINGLE_BUTTON_MAX_UNITS,
-    // NOT the 20-unit shared caps — the arm whose absence made the #79
-    // funnel re-fold full-width single-button rows the emitter approved.
-    let label = "x".repeat(SINGLE_BUTTON_MAX_UNITS);
-    assert!(row_fits(&[&label]));
-    assert!(!row_fits(&[&"x".repeat(SINGLE_BUTTON_MAX_UNITS + 1)]));
-    // A solo label past the SHARED caps but inside the solo budget:
-    // exactly the live-failure class (25-27 char confirm labels).
-    let confirm = "Smoke OK — ack both units".to_string();
-    assert!(confirm.chars().count() > BUTTON_LABEL_MAX_UNITS);
-    assert!(row_fits(&[&confirm]));
-}
-
-#[test]
-fn test_row_fits_shared_arm_keeps_the_79_caps() {
-    // Multi-button rows: per-label SHARED_ROW_MAX_CHARS AND row-total
-    // SHARED_ROW_TOTAL_UNITS — byte-identical to the pre-refactor rule.
-    let a = "x".repeat(SHARED_ROW_MAX_CHARS);
-    let b = "y".repeat(SHARED_ROW_MAX_CHARS);
-    // 2x12 = 24 total > 20: does not fit (folds, as before the refactor).
-    assert!(!row_fits(&[&a, &b]));
-    let short = "x".repeat(SHARED_ROW_MAX_CHARS - 4);
-    // 2x8 = 16 total, labels within per-label cap: fits.
-    assert!(row_fits(&[&short, &short]));
-    // One label past the per-label cap kills the row even under budget.
-    let long = "x".repeat(SHARED_ROW_MAX_CHARS + 1);
-    assert!(!row_fits(&[&short, &long]));
-}
-
-#[test]
-fn test_chokepoint_ships_solo_rows_the_emitter_approved() {
-    // THE #119 live regression, pinned at the funnel: a single-button row
-    // with a 25-char label used to be re-folded by enforce_button_fit
-    // (old inline caps) after pick_layout's Column tier approved it —
-    // owner saw "button 1 + 1. <label>" prose on ship ed0ae1d9. Under
-    // the single-verdict refactor the funnel ships it byte-identical.
-    let label = "Smoke OK — ack both units"; // 25 chars: > 20, <= 30
-    let body = format!(
-        "<tg-button-row><tg-button type=\"callback_data\" data=\"followup:tok:0\" \
-         style=\"primary\">{label}</tg-button></tg-button-row>"
+fn test_go_tier_buttons_carry_their_option_number() {
+    // #119 numbering restored 2026-09-09 (owner defect report), PLAIN
+    // digits per the owner order 2026-09-09: each n>=2 fold-tier button
+    // carries its bare 1-based option number (`1` `2` …), visually paired
+    // with its `1. <label>` body line. Callback data still carries the
+    // absolute index. n=1 folds to the single `Go!` button.
+    let token = "ab12cd34";
+    let html = suggestion_rows_rich_html(&opts(&["Ship it", &"x".repeat(30)]), token);
+    assert!(
+        html.contains(&format!(">{}</tg-button>", go_button_label(1, false)))
+            && html.contains(&format!(">{}</tg-button>", go_button_label(2, false))),
+        "one numbered button per option: {html}"
     );
-    assert_eq!(enforce_button_fit(&body), body);
+    assert!(
+        !html.contains(">Go!<"),
+        "no Go! buttons on the n>=2 fold: {html}"
+    );
+    assert!(
+        html.contains(&format!("{FOLLOWUP_PREFIX}{token}:0")),
+        "callback data still routes by index: {html}"
+    );
+    // n=1: the single Go! button.
+    assert_eq!(go_button_label(1, true), "Go!");
+    let single_html = suggestion_rows_rich_html(&opts(&[&"x".repeat(31)]), token);
+    assert!(
+        single_html.contains(">Go!</tg-button>"),
+        "single fold keeps the Go! button: {single_html}"
+    );
 }
 
 // ── Callback data ─────────────────────────────────────────────────────────
@@ -316,6 +276,54 @@ fn test_enforce_button_fit_folds_rows_over_the_total_budget() {
     assert!(out.contains("<li>Всё чётко!!!</li>"), "{out}");
 }
 
+// ── row_fits — the single budget verdict (#119 option A) ─────────────────
+
+#[test]
+fn test_row_fits_solo_arm_grants_the_solo_budget() {
+    // One button renders full-width: it rides SINGLE_BUTTON_MAX_UNITS,
+    // NOT the 20-unit shared caps — the arm whose absence made the #79
+    // funnel re-fold full-width single-button rows the emitter approved.
+    let label = "x".repeat(SINGLE_BUTTON_MAX_UNITS);
+    assert!(row_fits(&[&label]));
+    assert!(!row_fits(&[&"x".repeat(SINGLE_BUTTON_MAX_UNITS + 1)]));
+    // A solo label past the SHARED caps but inside the solo budget:
+    // exactly the live-failure class (25-27 char confirm labels).
+    let confirm = "Smoke OK — ack both units".to_string();
+    assert!(confirm.chars().count() > BUTTON_LABEL_MAX_UNITS);
+    assert!(row_fits(&[&confirm]));
+}
+
+#[test]
+fn test_row_fits_shared_arm_keeps_the_79_caps() {
+    // Multi-button rows: per-label SHARED_ROW_MAX_CHARS AND row-total
+    // SHARED_ROW_TOTAL_UNITS — byte-identical to the pre-refactor rule.
+    let a = "x".repeat(SHARED_ROW_MAX_CHARS);
+    let b = "y".repeat(SHARED_ROW_MAX_CHARS);
+    // 2x12 = 24 total > 20: does not fit (folds, as before the refactor).
+    assert!(!row_fits(&[&a, &b]));
+    let short = "x".repeat(SHARED_ROW_MAX_CHARS - 4);
+    // 2x8 = 16 total, labels within per-label cap: fits.
+    assert!(row_fits(&[&short, &short]));
+    // One label past the per-label cap kills the row even under budget.
+    let long = "x".repeat(SHARED_ROW_MAX_CHARS + 1);
+    assert!(!row_fits(&[&short, &long]));
+}
+
+#[test]
+fn test_chokepoint_ships_solo_rows_the_emitter_approved() {
+    // THE #119 live regression, pinned at the funnel: a single-button row
+    // with a 25-char label used to be re-folded by enforce_button_fit
+    // (old inline caps) after pick_layout's Column tier approved it —
+    // owner saw "button 1 + 1. <label>" prose on ship ed0ae1d9. Under
+    // the single-verdict refactor the funnel ships it byte-identical.
+    let label = "Smoke OK — ack both units"; // 25 chars: > 20, <= 30
+    let body = format!(
+        "<tg-button-row><tg-button type=\"callback_data\" data=\"followup:tok:0\" \
+         style=\"primary\">{label}</tg-button></tg-button-row>"
+    );
+    assert_eq!(enforce_button_fit(&body), body);
+}
+
 /// #108: the button rows and the trailer must start a FRESH markdown block.
 /// The old construction appended both after a single `\n`, so the server's
 /// parser fused the last text paragraph into the controls block and rendered
@@ -340,8 +348,11 @@ fn test_rows_and_trailer_start_a_fresh_markdown_block() {
         assert!(md.ends_with("Sign-off."));
         assert!(md.contains(&rows));
         if prose {
-            // 2026-09-09: bold Go line, blank-line-separated from the body.
-            assert!(md.contains("**Go: One?**"), "go-tier body line: {md}");
+            // 2026-09-09, owner order: n>=2 fold = the original PLAIN
+            // numbered list — no Go prefix, no bold. Blank-line-separated
+            // from the body.
+            assert!(md.contains("1. One"), "numbered fold body line: {md}");
+            assert!(!md.contains("Go:") && !md.contains("**"), "no Go-tier artifacts: {md}");
         }
     }
     // Body already ending in a newline must not grow a triple gap.
