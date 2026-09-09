@@ -114,6 +114,26 @@ pub async fn handle_session_notify(
         None => DEFAULT_CLI_SENDER_LABEL.to_string(),
     };
 
+    // Delivery policy (fork #146): the A2A surface carries the SAME policy
+    // ontology as the agent tool — `delivery {mode, quiet_for_secs,
+    // max_delay_secs}` with the deprecated `interrupt` alias resolving
+    // through the shared `resolve_mode`. Quiet banks the notice and returns
+    // its id; every success path records a receipt so `session/notify-status`
+    // can poll the injection stamp.
+    let mode = match resolve_mode(
+        params
+            .get("delivery")
+            .and_then(|d| d.get("mode"))
+            .and_then(serde_json::Value::as_str),
+        params.get("interrupt").and_then(serde_json::Value::as_bool),
+        params.get("delivery"),
+    ) {
+        Ok(m) => m,
+        Err(e) => {
+            return JsonRpcResponse::error(req_id, error_codes::INVALID_PARAMS, e);
+        }
+    };
+
     // Zombie-wake guard (#23, #17 class): only a session with a DB row may
     // be notified. `deliver_to_session` is never touched for a uuid with NO
     // row — its local-route fallback would hand the message to this
@@ -153,26 +173,6 @@ pub async fn handle_session_notify(
         Some(t) => format!("📨 {t} (from {sender}):"),
         None => format!("📨 notify from {sender}:"),
     };
-    // Delivery policy (fork #146): the A2A surface carries the SAME policy
-    // ontology as the agent tool — `delivery {mode, quiet_for_secs,
-    // max_delay_secs}` with the deprecated `interrupt` alias resolving
-    // through the shared `resolve_mode`. Quiet banks the notice and returns
-    // its id; every success path records a receipt so `session/notify-status`
-    // can poll the injection stamp.
-    let mode = match resolve_mode(
-        params
-            .get("delivery")
-            .and_then(|d| d.get("mode"))
-            .and_then(serde_json::Value::as_str),
-        params.get("interrupt").and_then(serde_json::Value::as_bool),
-        params.get("delivery"),
-    ) {
-        Ok(m) => m,
-        Err(e) => {
-            return JsonRpcResponse::error(req_id, error_codes::INVALID_PARAMS, e);
-        }
-    };
-
     let msg = QueuedUserMessage {
         context_text: format!("[session-notify from={CLI_SENDER_PREFIX}{sender}]\n\n{message}"),
         display_text: format!("{header}\n{message}"),
