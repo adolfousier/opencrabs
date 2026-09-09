@@ -370,10 +370,14 @@ pub(crate) fn go_tier_line(label: &str) -> String {
         .next()
         .unwrap_or_default();
     let starts_with_verb = first_word.eq_ignore_ascii_case(GO_TIER_VERB);
+    // Owner render correction 2026-09-09: a label that already ends with a
+    // question mark must not get a second one; the whole line renders bold
+    // (`**` survives escape_html, format_inline/native md both turn it <b>).
+    let terminator = if label.ends_with('?') { "" } else { "?" };
     if starts_with_verb {
-        format!("{label}?")
+        format!("**{label}{terminator}**")
     } else {
-        format!("{GO_TIER_VERB}: {label}?")
+        format!("**{GO_TIER_VERB}: {label}{terminator}**")
     }
 }
 
@@ -541,10 +545,15 @@ pub(crate) fn append_rows_and_trailer_md(
     trailer: Option<&str>,
 ) {
     if prose {
-        // Markdown plane: plain numbered list — the server's
-        // markdown render keeps numbering and line breaks.
-        md.push('\n');
-        md.push_str(&folded_list_markdown(options));
+        // Markdown plane, #119 fold tier: one `Go: <label>?` line per
+        // option (label verbatim when it starts with the verb) — never a
+        // numbered list. Raw lines: the markdown plane renders them
+        // plainly, no html primitives needed. Blank line before the block:
+        // owner correction 2026-09-09 — a single \n glued the Go: line to
+        // the body's last line (Telegram rich renderer needs a paragraph
+        // break there).
+        push_blank_line(md);
+        md.push_str(&go_tier_lines(options));
     }
     push_blank_line(md);
     md.push_str(&suggestion_rows_rich_html(options, token));
@@ -688,9 +697,15 @@ pub(crate) async fn render_suggestions(
                 let mut body = html;
                 if layout == SuggestLayout::NumberedProse {
                     // Classic hosts preserve the raw newline join via
-                    // folded_list_html.
+                    // go_tier_lines_rich (#119 fold tier: Go: label? lines,
+                    // never a numbered list). Paragraph break before the
+                    // block — owner correction 2026-09-09: a single \n
+                    // glued the Go: line to the body's last line.
+                    if !body.ends_with('\n') {
+                        body.push('\n');
+                    }
                     body.push('\n');
-                    body.push_str(folded_list_html(&options).trim_start());
+                    body.push_str(&go_tier_lines_rich(&options));
                 }
                 (body, false, None)
             }
@@ -849,7 +864,6 @@ pub(crate) async fn render_suggestions(
 
 /// Pre-built merge-edit payload (#30): computed ONCE per suggestion block so
 /// a deferred re-placement after a Retry-After re-sends byte-identical
-/// content. `rich` picks the wire: rich bubbles edit via the rich API with
 /// in-body button rows, classic bubbles via editMessageText + reply_markup.
 #[derive(Clone)]
 struct MergePayload {

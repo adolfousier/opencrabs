@@ -135,16 +135,17 @@ fn test_go_tier_buttons_carry_go_label_not_digits() {
 
 #[test]
 fn test_go_tier_body_lines_carry_the_119_shape() {
-    // #119 owner design 06:42Z: the fold tier renders `Go: <label>?` in the
-    // body — never a numbered list.
+    // #119 owner design 06:42Z + render corrections 2026-09-09: the fold
+    // tier renders a BOLD `Go: <label>?` line per option, with a blank
+    // line before the block — never a numbered list.
     let body = go_tier_lines_rich(&opts(&["Ship it", "Review & merge"]));
     assert!(
         !body.contains("Suggested next"),
         "#1204: the lines ride under the answer, no header of their own"
     );
     assert!(
-        body.contains("Go: Ship it?") && body.contains("Go: Review &amp; merge?"),
-        "one Go line per option, escaping via the shared renderer: {body}"
+        body.contains("<b>Go: Ship it?</b>") && body.contains("<b>Go: Review &amp; merge?</b>"),
+        "one bold Go line per option, escaping via the shared renderer: {body}"
     );
     assert!(
         !body.contains("1. Ship it") && !body.contains("<ol>"),
@@ -153,21 +154,30 @@ fn test_go_tier_body_lines_carry_the_119_shape() {
 }
 
 #[test]
+fn test_go_tier_dedupes_trailing_question_mark() {
+    // Owner correction 2026-09-09: a label ending in '?' must not gain a
+    // second question mark.
+    assert_eq!(go_tier_line("Confirm render?"), "Go: Confirm render?");
+    assert_eq!(go_tier_line("Confirm render??"), "Go: Confirm render??");
+}
+
+#[test]
 fn test_go_tier_verb_repeat_rule() {
     // #119 owner amendment 06:46Z: a label that already starts with the
-    // verb renders verbatim + `?`; otherwise the `Go:` prefix is added.
+    // verb renders verbatim + `?` (deduped); otherwise the `Go:` prefix is
+    // added. Whole line is bold per the 2026-09-09 correction.
     assert_eq!(
         go_tier_line("Go — implement #98 after the #96 gate lands"),
-        "Go — implement #98 after the #96 gate lands?"
+        "**Go — implement #98 after the #96 gate lands?**"
     );
     assert_eq!(
         go_tier_line("Smoke OK — ack both units"),
-        "Go: Smoke OK — ack both units?"
+        "**Go: Smoke OK — ack both units?**"
     );
     // Case-insensitive verb match (Go!/go both start the label).
-    assert_eq!(go_tier_line("go fast"), "go fast?");
+    assert_eq!(go_tier_line("go fast"), "**go fast?**");
     // Prefix-verb must not false-positive mid-word.
-    assert_eq!(go_tier_line("Gossip about it"), "Go: Gossip about it?");
+    assert_eq!(go_tier_line("Gossip about it"), "**Go: Gossip about it?**");
 }
 
 #[test]
@@ -330,7 +340,8 @@ fn test_rows_and_trailer_start_a_fresh_markdown_block() {
         assert!(md.ends_with("Sign-off."));
         assert!(md.contains(&rows));
         if prose {
-            assert!(md.contains("Go: One?"), "go-tier body line: {md}");
+            // 2026-09-09: bold Go line, blank-line-separated from the body.
+            assert!(md.contains("<b>Go: One?</b>"), "go-tier body line: {md}");
         }
     }
     // Body already ending in a newline must not grow a triple gap.
