@@ -2446,7 +2446,7 @@ pub(crate) async fn handle_redact(arg: &str) -> String {
         _ => return "⚠️ Scope must be one of: `global`, `group`, `dm`.".to_string(),
     };
     match Config::write_key("agent", key, if on { "true" } else { "false" }) {
-        Ok(()) => format!(
+        Ok(_written) => format!(
             "✅ Redaction for {} set to **{}**.",
             label,
             if on { "on" } else { "off" }

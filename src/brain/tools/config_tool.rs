@@ -190,8 +190,8 @@ impl ConfigTool {
         };
 
         match crate::config::Config::write_key(section, key, value) {
-            Ok(()) => Ok(ToolResult::success(format!(
-                "Set [{section}].{key} = \"{value}\" in config.toml"
+            Ok(written) => Ok(ToolResult::success(format!(
+                "Set [{section}].{key} = {written} in config.toml"
             ))),
             Err(e) => Ok(ToolResult::error(format!("Failed to write config: {}", e))),
         }

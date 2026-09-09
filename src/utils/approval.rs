@@ -44,7 +44,7 @@ pub fn check_approval_policy() -> Option<(bool, bool)> {
 /// Persist "auto-session" approval policy to config.toml (single source of truth).
 pub fn persist_auto_session_policy() {
     match crate::config::Config::write_key("agent", "approval_policy", "auto-session") {
-        Ok(_) => tracing::info!("Persisted approval_policy = auto-session to config.toml"),
+        Ok(_written) => tracing::info!("Persisted approval_policy = auto-session to config.toml"),
         Err(e) => tracing::error!("Failed to persist approval_policy to config.toml: {}", e),
     }
 }
@@ -52,7 +52,7 @@ pub fn persist_auto_session_policy() {
 /// Persist "auto-always" (YOLO) approval policy to config.toml — permanent, survives restarts.
 pub fn persist_auto_always_policy() {
     match crate::config::Config::write_key("agent", "approval_policy", "auto-always") {
-        Ok(_) => tracing::info!("Persisted approval_policy = auto-always to config.toml"),
+        Ok(_written) => tracing::info!("Persisted approval_policy = auto-always to config.toml"),
         Err(e) => tracing::error!("Failed to persist approval_policy to config.toml: {}", e),
     }
 }

@@ -109,7 +109,7 @@ pub fn enable_providers_with_keys(config: &Config) -> Vec<String> {
             continue;
         }
         match Config::write_key(meta.config_section, "enabled", "true") {
-            Ok(()) => written.push(meta.config_section.to_string()),
+            Ok(_) => written.push(meta.config_section.to_string()),
             Err(e) => tracing::warn!(
                 "Could not enable {} in the seeded config: {}",
                 meta.config_section,

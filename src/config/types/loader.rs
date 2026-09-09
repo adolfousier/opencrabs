@@ -1030,36 +1030,25 @@ impl Config {
     /// `section` is a dotted path like "agent" or "providers.tts.local".
     /// `key` is the field name inside that section.
     /// `value` is the TOML-serialisable value.
-    pub fn write_key(section: &str, key: &str, value: &str) -> Result<()> {
+    ///
+    /// JSON arrays and objects convert faithfully — objects become inline
+    /// tables, arrays recurse (so arrays-of-tables like `memory.extra_paths`
+    /// survive instead of being silently dropped, #87). Values TOML cannot
+    /// represent (`null`, mixed-type arrays) hard-error BEFORE the file is
+    /// touched. On success the returned `String` is the TOML rendering of the
+    /// value actually written, so callers can echo reality, not the raw input.
+    pub fn write_key(section: &str, key: &str, value: &str) -> Result<String> {
         // Sanitize: trim whitespace/newlines that may leak from TUI input
         let value = value.trim();
 
-        // Parse the value — try JSON array, integer, float, bool, then fall back to string
-        let parsed: toml_edit::Item = if value.starts_with('[') && value.ends_with(']') {
-            // Try parsing as JSON array → TOML array
-            if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(value) {
-                let mut toml_arr = toml_edit::Array::new();
-                for v in arr {
-                    match v {
-                        serde_json::Value::String(s) => {
-                            toml_arr.push(s);
-                        }
-                        serde_json::Value::Number(n) => {
-                            if let Some(i) = n.as_i64() {
-                                toml_arr.push(i);
-                            } else if let Some(f) = n.as_f64() {
-                                toml_arr.push(f);
-                            }
-                        }
-                        serde_json::Value::Bool(b) => {
-                            toml_arr.push(b);
-                        }
-                        _ => {}
-                    }
-                }
-                toml_edit::value(toml_arr)
-            } else {
-                toml_edit::value(value)
+        // Parse the value — try JSON array/object, integer, float, bool, then
+        // fall back to string.
+        let parsed: toml_edit::Item = if value.starts_with('[') || value.starts_with('{') {
+            match serde_json::from_str::<serde_json::Value>(value) {
+                Ok(json) => toml_edit::Item::Value(json_to_toml_value(&json)?),
+                // Bracketed but not valid JSON — a plain string that happens
+                // to start with '['/'{' stays a string (e.g. "[in progress]").
+                Err(_) => toml_edit::value(value),
             }
         } else if let Ok(v) = value.parse::<i64>() {
             toml_edit::value(v)
@@ -1071,7 +1060,9 @@ impl Config {
             toml_edit::value(value)
         };
 
-        Self::write_item(section, key, parsed)
+        let written = parsed.to_string();
+        Self::write_item(section, key, parsed)?;
+        Ok(written)
     }
 
     /// Write a config key as a TOML string, whatever the text looks like.
@@ -1727,6 +1718,80 @@ fn inject_into_agent_section(content: &str, comment_block: &str) -> Result<Strin
     out.push_str(comment_block);
     out.push_str(&content[section_end..]);
     Ok(out)
+}
+
+/// Recursively convert a JSON value into a `toml_edit::Value`.
+///
+/// Faithful for every JSON shape TOML can represent: strings, integers,
+/// floats, booleans, arrays (recursively) and objects → inline tables. Two
+/// shapes hard-error BEFORE any file access because TOML cannot represent
+/// them without silent loss (#87):
+/// - `null` — TOML has no null;
+/// - mixed-type arrays — TOML v1.0 arrays must be homogeneous; integer and
+///   float count as one family (`[0.1, 1, 2]` is legal TOML), but e.g. a
+///   string next to a table would have to be dropped or stringified.
+fn json_to_toml_value(json: &serde_json::Value) -> Result<toml_edit::Value> {
+    use serde_json::Value as J;
+    let v = match json {
+        J::Null => {
+            anyhow::bail!("null is not representable in TOML — the value was NOT written");
+        }
+        J::String(s) => toml_edit::Value::from(s.clone()),
+        J::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                toml_edit::Value::from(i)
+            } else if let Some(f) = n.as_f64() {
+                toml_edit::Value::from(f)
+            } else {
+                anyhow::bail!(
+                    "number `{n}` is not representable as a TOML integer or float — \
+                     the value was NOT written"
+                );
+            }
+        }
+        J::Bool(b) => toml_edit::Value::from(*b),
+        J::Array(items) => {
+            let mut arr = toml_edit::Array::new();
+            let mut family: Option<&'static str> = None;
+            for item in items {
+                let value = json_to_toml_value(item)?;
+                let fam = toml_family(&value);
+                if let Some(prev) = family {
+                    if prev != fam {
+                        anyhow::bail!(
+                            "array mixes types `{prev}` and `{fam}` — TOML arrays must be \
+                             homogeneous (#87). The value was NOT written."
+                        );
+                    }
+                } else {
+                    family = Some(fam);
+                }
+                arr.push(value);
+            }
+            toml_edit::Value::from(arr)
+        }
+        J::Object(map) => {
+            let mut tbl = toml_edit::InlineTable::new();
+            for (k, v) in map {
+                tbl.insert(k.clone(), json_to_toml_value(v)?);
+            }
+            toml_edit::Value::from(tbl)
+        }
+    };
+    Ok(v)
+}
+
+/// The TOML type family of a value, used for the array-homogeneity check.
+/// Integer and float share one family (`[0.1, 1, 2]` is legal TOML #87).
+fn toml_family(v: &toml_edit::Value) -> &'static str {
+    match v {
+        toml_edit::Value::Integer(_) | toml_edit::Value::Float(_) => "number",
+        toml_edit::Value::String(_) => "string",
+        toml_edit::Value::Boolean(_) => "boolean",
+        toml_edit::Value::Array(_) => "array",
+        toml_edit::Value::InlineTable(_) => "table",
+        toml_edit::Value::Datetime(_) => "datetime",
+    }
 }
 
 /// Resolve provider display name and model from config.

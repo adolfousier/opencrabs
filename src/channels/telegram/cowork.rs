@@ -158,6 +158,7 @@ pub fn set_group_open(chat_id: i64) -> Result<(), String> {
         "open",
         "true",
     )
+    .map(|_| ())
     .map_err(|e| format!("Failed to open group {chat_id}: {e}"))
 }
 

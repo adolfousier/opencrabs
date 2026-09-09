@@ -529,7 +529,7 @@ impl SlashCommandTool {
         match policy {
             "approve-only" | "auto-session" | "auto-always" => {
                 match crate::config::Config::write_key("agent", "approval_policy", policy) {
-                    Ok(()) => Ok(ToolResult::success(format!(
+                    Ok(_written) => Ok(ToolResult::success(format!(
                         "Approval policy set to: {}",
                         policy
                     ))),
@@ -589,7 +589,7 @@ impl SlashCommandTool {
                 )));
             };
             return match crate::config::Config::write_key(&section, "default_model", &model) {
-                Ok(()) => Ok(ToolResult::success(format!(
+                Ok(_written) => Ok(ToolResult::success(format!(
                     "Model switched to '{model}' on provider '{provider_id}'. \
                      Config updated at [{section}].default_model. \
                      The change takes effect on the next request."
