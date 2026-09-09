@@ -1050,17 +1050,17 @@ async fn deliver_result(
                 return None;
             };
             tracing::info!("Delivering cron result to session {session_id} (mode turn-end)");
-            let queued = crate::brain::agent::service::types::QueuedUserMessage {
+            let queued = crate::brain::agent::service::QueuedUserMessage {
                 context_text: delivery_msg.clone(),
                 display_text: delivery_msg,
-                origin: crate::brain::agent::service::types::PushOrigin::SessionNotify,
+                origin: crate::brain::agent::PushOrigin::SessionNotify,
                 bg_meta: None,
             };
             let delivery = crate::brain::agent::service::session_routes::deliver_to_session(
                 session_id, queued, false,
             );
             tracing::info!("Cron '{job_name}' session delivery verdict: {delivery:?}");
-            None
+            return None;
         }
         "telegram" => {
             #[cfg(feature = "telegram")]
