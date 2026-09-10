@@ -4554,7 +4554,7 @@ cargo build --release
 # Small release build
 cargo build --profile release-small
 
-# Run tests (8,055 tests across 875 modules: 8,036 of them under src/tests/,
+# Run tests (8,095 tests across 875 modules: 8,036 of them under src/tests/,
 # where tests belong, plus 19 inline in src/tui/render/presets_test.rs and
 # src/channels/telegram/rich/inline.rs;
 # 30 slower ones are #[ignore]d to keep the default
