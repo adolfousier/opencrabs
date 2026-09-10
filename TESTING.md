@@ -366,6 +366,8 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Memory Recall Multilingual | 6 | `src/tests/memory_recall_multilingual_test.rs` |
 | Tests — Memory Recall | 11 | `src/tests/memory_recall_test.rs` |
 | Tests — Memory Search Code Graph | 5 | `src/tests/memory_search_code_graph_test.rs` |
+| Tests — Memory Search Parity | 15 | `src/tests/memory_search_parity_test.rs` |
+| Tests — Memory Search Resolve Path | 5 | `src/tests/memory_search_resolve_path_test.rs` |
 | Tests — Memory Search Rrf | 2 | `src/tests/memory_search_rrf_test.rs` |
 | Tests — Memory Search Scope | 3 | `src/tests/memory_search_scope_test.rs` |
 | Tests — Memory Search | 3 | `src/tests/memory_search_test.rs` |
@@ -702,6 +704,7 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Telegram Outbound Dedup | 3 | `src/tests/telegram_outbound_dedup_test.rs` |
 | Tests — Telegram Outbox Record | 4 | `src/tests/telegram_outbox_record_test.rs` |
 | Tests — Telegram Photo Batching | 8 | `src/tests/telegram_photo_batching_test.rs` |
+| Tests — Telegram Photo Thread Scope | 5 | `src/tests/telegram_photo_thread_scope_test.rs` |
 | Tests — Telegram Plan Card Interrupt Restick | 2 | `src/tests/telegram_plan_card_interrupt_restick_test.rs` |
 | Tests — Telegram Plan Finalize | 4 | `src/tests/telegram_plan_finalize_test.rs` |
 | Tests — Telegram Plan Render | 9 | `src/tests/telegram_plan_render_test.rs` |
