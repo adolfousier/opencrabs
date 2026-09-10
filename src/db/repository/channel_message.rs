@@ -101,6 +101,40 @@ impl ChannelMessageRepository {
             .context("Failed to update channel message content")
     }
 
+    /// Forum-topic dead-key eviction (#116): Telegram answered
+    /// `400 Bad Request: message thread not found` for `(channel, chat,
+    /// thread)` — the remembered topic no longer exists. Clear the
+    /// thread_id on every row of that chat carrying it, so the
+    /// auto-lookup (`latest_thread_id_for_chat`) and the topic listing
+    /// stop serving the dead address. Chat-scoped by design: a deleted
+    /// topic in one chat must never touch another chat's rows.
+    pub async fn clear_thread_for_chat(
+        &self,
+        channel: &str,
+        chat_id: &str,
+        thread_id: &str,
+    ) -> Result<u64> {
+        let ch = channel.to_string();
+        let cid = chat_id.to_string();
+        let tid = thread_id.to_string();
+        let updated = self
+            .pool
+            .get()
+            .await
+            .context("Failed to get connection")?
+            .interact(move |conn| {
+                conn.execute(
+                    "UPDATE channel_messages SET thread_id = NULL \
+                     WHERE channel = ?1 AND channel_chat_id = ?2 AND thread_id = ?3",
+                    params![ch, cid, tid],
+                )
+            })
+            .await
+            .map_err(interact_err)?
+            .context("Failed to clear dead forum topic thread_id")?;
+        Ok(updated as u64)
+    }
+
     /// Get recent messages for a specific chat, optionally filtered by thread_id.
     /// When `thread_id` is Some, only messages belonging to that forum topic are returned.
     pub async fn recent(
