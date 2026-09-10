@@ -70,9 +70,7 @@ fn opaqueness_wall_no_oc_url_parsing_outside_target_resolver() {
             }
 
             // Pattern 2: Ad-hoc URL splitting on `oc://`
-            if line.contains(r#"split("oc://")"#)
-                || line.contains(r#"splitn(2, "oc://")"#)
-            {
+            if line.contains(r#"split("oc://")"#) || line.contains(r#"splitn(2, "oc://")"#) {
                 violations.push(format!(
                     "{}:{}: forbidden oc:// split pattern: `{}`",
                     rel_str,

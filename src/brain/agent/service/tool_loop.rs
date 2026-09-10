@@ -1455,9 +1455,9 @@ impl AgentService {
         // Live resolution world (#148): the same channel manager, handed to
         // targeting tools so `oc://` URLs resolve against the real ownership
         // maps. `None` together with `origin_target` — same refusal law.
-        tool_context.world = self
-            .channel_manager()
-            .map(|mgr| mgr as Arc<dyn crate::channels::target_resolver::TargetResolution + Send + Sync>);
+        tool_context.world = self.channel_manager().map(|mgr| {
+            mgr as Arc<dyn crate::channels::target_resolver::TargetResolution + Send + Sync>
+        });
         tool_context.parent_tool_registry = Some(self.tool_registry.clone());
         // #129 belt-and-braces: interactive-only tools check this flag and
         // hard-error instead of parking a verdict nobody sees.

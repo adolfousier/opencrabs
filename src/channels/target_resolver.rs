@@ -25,7 +25,7 @@
 //! Non-numeric segments are percent-encoded per RFC 3986 (D11); numeric ids
 //! stay bare digits.
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use uuid::Uuid;
 
 use super::telegram::session_resolve::GENERAL_TOPIC_ID;
@@ -168,19 +168,13 @@ pub trait TargetResolution: Send + Sync {
 
     /// The channel target a session is currently bound to (forward map) —
     /// used to confirm a resolved session still owns a live channel.
-    async fn binding_for_session(
-        &self,
-        session: Uuid,
-    ) -> Option<OriginTarget>;
+    async fn binding_for_session(&self, session: Uuid) -> Option<OriginTarget>;
 
     /// The session bound to an `oc://telegram/<chat>` URL with NO thread:
     /// `Ok(None)` when the chat simply has no binding, `Err(list)` when the
     /// chat is a forum with MULTIPLE topic sessions — the caller must pick
     /// a topic; bare-chat resolution would guess (D10/D9 multi-topic rule).
-    async fn telegram_chat_topics(
-        &self,
-        chat_id: i64,
-    ) -> Result<Option<Vec<i32>>>;
+    async fn telegram_chat_topics(&self, chat_id: i64) -> Result<Option<Vec<i32>>>;
 }
 
 /// Resolve an `oc://` URL (or the `here` token) to a concrete target.
@@ -273,9 +267,7 @@ pub async fn resolve_target(
                     Some(t)
                 }
             };
-            let session = world
-                .session_for_channel("telegram", chat_id, thread)
-                .await;
+            let session = world.session_for_channel("telegram", chat_id, thread).await;
             // Bare-chat URL on a forum chat: ambiguous by design (D9/D10).
             if thread.is_none()
                 && session.is_none()
@@ -331,7 +323,9 @@ pub async fn resolve_target(
                 },
             })
         }
-        other => bail!("unknown oc:// authority '{other}' (session|telegram|discord|slack|whatsapp)"),
+        other => {
+            bail!("unknown oc:// authority '{other}' (session|telegram|discord|slack|whatsapp)")
+        }
     }
 }
 
@@ -384,7 +378,8 @@ mod tests {
             }
         }
         fn bind(&mut self, ch: &str, chat: &str, t: Option<i32>, s: Uuid) {
-            self.bindings.insert((ch.to_string(), chat.to_string(), t), s);
+            self.bindings
+                .insert((ch.to_string(), chat.to_string(), t), s);
         }
     }
 
@@ -425,7 +420,9 @@ mod tests {
             chat_id: "-100123".into(),
             thread: Some(GENERAL_TOPIC_ID),
         };
-        let r = resolve_target("here", Some(&origin), &w, &[]).await.unwrap();
+        let r = resolve_target("here", Some(&origin), &w, &[])
+            .await
+            .unwrap();
         assert_eq!(r.deliver_to(), "telegram:-100123");
     }
 
@@ -465,8 +462,7 @@ mod tests {
     #[tokio::test]
     async fn telegram_bare_chat_on_multi_topic_forum_is_ambiguous() {
         let mut w = FakeWorld::new();
-        w.forum_topics
-            .insert(-100123, vec![GENERAL_TOPIC_ID, 42]);
+        w.forum_topics.insert(-100123, vec![GENERAL_TOPIC_ID, 42]);
         let e = resolve_target("oc://telegram/-100123", None, &w, &[])
             .await
             .unwrap_err();
@@ -482,9 +478,14 @@ mod tests {
         let shared = format!("{:08x}", a.as_u128() >> 96);
         // Force a shared 8-char prefix by using the same UUID twice — instead
         // assert the single-match and no-match paths.
-        let r = resolve_target(&format!("oc://session/{a}"), None, &w, &[sess(a, "one"), sess(b, "two")])
-            .await
-            .unwrap();
+        let r = resolve_target(
+            &format!("oc://session/{a}"),
+            None,
+            &w,
+            &[sess(a, "one"), sess(b, "two")],
+        )
+        .await
+        .unwrap();
         assert_eq!(r.session, Some(a));
         let e = resolve_target("oc://session/zzzzzzzz", None, &w, &[sess(a, "one")])
             .await
@@ -502,18 +503,23 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(r.session, Some(s));
-        assert_eq!(
-            r.deliver_to(),
-            "whatsapp:79991234567@s.whatsapp.net"
-        );
+        assert_eq!(r.deliver_to(), "whatsapp:79991234567@s.whatsapp.net");
     }
 
     #[tokio::test]
     async fn unknown_authority_and_bad_paths_are_errors() {
         let w = FakeWorld::new();
         assert!(resolve_target("oc://irc/1", None, &w, &[]).await.is_err());
-        assert!(resolve_target("oc://telegram/", None, &w, &[]).await.is_err());
-        assert!(resolve_target("https://example.com", None, &w, &[]).await.is_err());
+        assert!(
+            resolve_target("oc://telegram/", None, &w, &[])
+                .await
+                .is_err()
+        );
+        assert!(
+            resolve_target("https://example.com", None, &w, &[])
+                .await
+                .is_err()
+        );
     }
 
     #[test]

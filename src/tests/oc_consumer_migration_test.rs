@@ -5,7 +5,7 @@
 
 use crate::brain::tools::cron_manage::bake_delivery_target;
 use crate::brain::tools::{Tool, ToolExecutionContext};
-use crate::channels::target_resolver::{encode_segment, ResolvedTarget, TargetDestination};
+use crate::channels::target_resolver::{ResolvedTarget, TargetDestination, encode_segment};
 use crate::db::{CronJobRepository, Database};
 use uuid::Uuid;
 
@@ -18,11 +18,15 @@ async fn bake_without_world_refuses_url_and_here() {
     let ctx = ToolExecutionContext::new(Uuid::new_v4());
     // Legacy grammar passes through untouched.
     assert_eq!(
-        bake_delivery_target("telegram:-100123:42", &ctx).await.unwrap(),
+        bake_delivery_target("telegram:-100123:42", &ctx)
+            .await
+            .unwrap(),
         "telegram:-100123:42"
     );
     assert_eq!(
-        bake_delivery_target("https://example.com/hook", &ctx).await.unwrap(),
+        bake_delivery_target("https://example.com/hook", &ctx)
+            .await
+            .unwrap(),
         "https://example.com/hook"
     );
     // `here` refuses — no origin on a headless surface.
@@ -104,8 +108,7 @@ async fn cron_create_with_here_bakes_row_target() {
         let db = Database::connect_in_memory().await.unwrap();
         db.run_migrations().await.unwrap();
         let repo = CronJobRepository::new(db.pool().clone());
-        let tool =
-            crate::brain::tools::cron_manage::CronManageTool::new(repo);
+        let tool = crate::brain::tools::cron_manage::CronManageTool::new(repo);
 
         let mut ctx = ToolExecutionContext::new(Uuid::new_v4());
         ctx.origin_target = Some(std::sync::Arc::new(crate::brain::tools::OriginTarget {
@@ -166,7 +169,10 @@ async fn cron_create_here_without_origin_is_refused() {
         .unwrap();
     assert!(!out.success, "here without origin must refuse");
     let text = out.error.unwrap_or_default();
-    assert!(text.contains("live channel surface") || text.contains("no current channel"), "{text}");
+    assert!(
+        text.contains("live channel surface") || text.contains("no current channel"),
+        "{text}"
+    );
     // Nothing was created.
     let jobs = crate::db::CronJobRepository::new(db.pool().clone())
         .list_all()
@@ -209,7 +215,8 @@ fn channel_search_row_format_carries_oc_form() {
     // data flow): raw id stays visible AND the oc:// half rides alongside.
     let channel = "telegram";
     let id = "-100123456";
-    let row = format!("- [{channel}] name (id={id}, target `oc://{channel}/{id}`), 3 msgs, last: x");
+    let row =
+        format!("- [{channel}] name (id={id}, target `oc://{channel}/{id}`), 3 msgs, last: x");
     assert!(row.contains(&format!("target `oc://{channel}/{id}`")));
     assert!(row.contains(&format!("id={id}")));
     // Encoding stays identity for numeric segments.

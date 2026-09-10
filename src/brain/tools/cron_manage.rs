@@ -136,7 +136,11 @@ impl Tool for CronManageTool {
 }
 
 impl CronManageTool {
-    async fn create_job(&self, input: &Value, context: &ToolExecutionContext) -> Result<ToolResult> {
+    async fn create_job(
+        &self,
+        input: &Value,
+        context: &ToolExecutionContext,
+    ) -> Result<ToolResult> {
         let name = match input.get("name").and_then(|v| v.as_str()) {
             Some(n) if !n.is_empty() => n,
             _ => {
@@ -231,9 +235,7 @@ impl CronManageTool {
             Some(raw) => match bake_delivery_target(raw, context).await {
                 Ok(baked) => Some(baked),
                 Err(reason) => {
-                    return Ok(ToolResult::error(format!(
-                        "Cannot create job: {reason}"
-                    )));
+                    return Ok(ToolResult::error(format!("Cannot create job: {reason}")));
                 }
             },
             None => None,
@@ -274,7 +276,11 @@ impl CronManageTool {
         )))
     }
 
-    async fn update_job(&self, input: &Value, context: &ToolExecutionContext) -> Result<ToolResult> {
+    async fn update_job(
+        &self,
+        input: &Value,
+        context: &ToolExecutionContext,
+    ) -> Result<ToolResult> {
         let job_id = match input.get("job_id").and_then(|v| v.as_str()) {
             Some(id) if !id.is_empty() => id,
             _ => {
@@ -821,15 +827,12 @@ pub(crate) async fn bake_delivery_target(
     // agent, when the surface wired one. Interactive sessions have it; cron
     // and daemon surfaces do not — `here` then refuses (no origin) and
     // channel-authority URLs refuse (no reverse maps to prove ownership).
-    let world = context
-        .world
-        .clone()
-        .ok_or_else(|| {
-            format!(
-                "'{raw}' needs a live channel surface to resolve (no channel manager on this \
+    let world = context.world.clone().ok_or_else(|| {
+        format!(
+            "'{raw}' needs a live channel surface to resolve (no channel manager on this \
                  surface) — pass a concrete target like 'telegram:<chat>[:<thread>]'"
-            )
-        })?;
+        )
+    })?;
 
     // Sessions from the DB for the resolver's session-authority arm.
     let sessions = match &context.service_context {
@@ -864,4 +867,3 @@ pub(crate) async fn bake_delivery_target(
     }
     Ok(baked)
 }
-

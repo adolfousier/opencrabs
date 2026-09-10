@@ -605,9 +605,7 @@ impl crate::channels::target_resolver::TargetResolution for ChannelManager {
             #[cfg(feature = "discord")]
             "discord" => {
                 let ch: u64 = chat_id.parse().ok()?;
-                self.discord_state
-                    .session_owner_by_channel(ch)
-                    .await
+                self.discord_state.session_owner_by_channel(ch).await
             }
             #[cfg(feature = "slack")]
             "slack" => self.slack_state.session_owner_by_channel(chat_id).await,
@@ -657,16 +655,11 @@ impl crate::channels::target_resolver::TargetResolution for ChannelManager {
         None
     }
 
-    async fn telegram_chat_topics(
-        &self,
-        chat_id: i64,
-    ) -> anyhow::Result<Option<Vec<i32>>> {
+    async fn telegram_chat_topics(&self, chat_id: i64) -> anyhow::Result<Option<Vec<i32>>> {
         #[cfg(feature = "telegram")]
         {
             Ok(Some(
-                self.telegram_state
-                    .topic_sessions_for_chat(chat_id)
-                    .await,
+                self.telegram_state.topic_sessions_for_chat(chat_id).await,
             ))
         }
         #[cfg(not(feature = "telegram"))]

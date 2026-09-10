@@ -10,7 +10,10 @@ impl WhatsAppState {
     /// Map a session to the chat JID it is being handled in, so a finished
     /// background task can resume that chat (#731). Called on each turn.
     pub async fn register_session_jid(&self, session_id: Uuid, jid: String) {
-        self.session_jids.lock().await.insert(session_id, jid.clone());
+        self.session_jids
+            .lock()
+            .await
+            .insert(session_id, jid.clone());
         // Reverse ownership map (#148): written beside the forward map so the
         // two cannot drift. Last writer wins — a JID re-registers to its
         // newest owning session.

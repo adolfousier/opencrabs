@@ -31,11 +31,9 @@ async fn discord_re_registration_last_writer_wins() {
 async fn slack_reverse_map_resolves_channel_to_session() {
     let st = SlackState::new();
     let s = Uuid::new_v4();
-    st.register_session_channel(s, "C0123ABCDEF".to_string()).await;
-    assert_eq!(
-        st.session_owner_by_channel("C0123ABCDEF").await,
-        Some(s)
-    );
+    st.register_session_channel(s, "C0123ABCDEF".to_string())
+        .await;
+    assert_eq!(st.session_owner_by_channel("C0123ABCDEF").await, Some(s));
     assert_eq!(st.session_owner_by_channel("C999").await, None);
 }
 
@@ -63,13 +61,7 @@ async fn telegram_registration_is_bidirectional_both_ways() {
     let s = Uuid::new_v4();
     st.register_session_chat(s, -100123, Some(7)).await;
     // reverse: (chat, topic) -> session
-    assert_eq!(
-        st.chat_session(-100123, Some(7)).await,
-        Some(s)
-    );
+    assert_eq!(st.chat_session(-100123, Some(7)).await, Some(s));
     // forward: session -> (chat, topic) via the ambient-binding probe
-    assert_eq!(
-        st.session_binding(s).await,
-        Some((-100123, Some(7)))
-    );
+    assert_eq!(st.session_binding(s).await, Some((-100123, Some(7))));
 }

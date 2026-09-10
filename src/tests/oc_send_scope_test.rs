@@ -10,8 +10,8 @@
 //! row — the scheduler refuses fire-time resolution.
 
 use crate::cron::send_scope::{
-    may_send, may_send_to, permission, refusal_for, with_permitted_targets, with_send_target,
-    PermittedTarget, SendPermission,
+    PermittedTarget, SendPermission, may_send, may_send_to, permission, refusal_for,
+    with_permitted_targets, with_send_target,
 };
 
 #[test]
@@ -57,7 +57,10 @@ async fn telegram_authority_scope_pin() {
 
         let r = refusal_for("telegram", "-100999");
         assert!(r.contains("may only send to [telegram:-100123]"), "{r}");
-        assert!(r.contains("attempted telegram:-100999") || r.contains("targeted telegram:-100999"), "{r}");
+        assert!(
+            r.contains("attempted telegram:-100999") || r.contains("targeted telegram:-100999"),
+            "{r}"
+        );
     })
     .await;
 }
@@ -108,7 +111,10 @@ async fn whatsapp_authority_scope_pin() {
         assert!(!may_send("telegram", "-100123"));
 
         let r = refusal_for("whatsapp", "79999999999@s.whatsapp.net");
-        assert!(r.contains("may only send to [whatsapp:79991234567@s.whatsapp.net]"), "{r}");
+        assert!(
+            r.contains("may only send to [whatsapp:79991234567@s.whatsapp.net]"),
+            "{r}"
+        );
     })
     .await;
 }

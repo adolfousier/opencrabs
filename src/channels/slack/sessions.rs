@@ -30,10 +30,6 @@ impl SlackState {
     /// for `oc://slack/<id>` resolution. Reads the reverse map kept in lockstep
     /// with the forward map at `register_session_channel`.
     pub async fn session_owner_by_channel(&self, channel_id: &str) -> Option<Uuid> {
-        self.channel_sessions
-            .lock()
-            .await
-            .get(channel_id)
-            .copied()
+        self.channel_sessions.lock().await.get(channel_id).copied()
     }
 }

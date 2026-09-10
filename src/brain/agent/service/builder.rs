@@ -932,18 +932,13 @@ impl AgentService {
     /// `origin_target` (#148) from the session ownership maps. `None` — the
     /// default on cron/CLI/sub-agent paths — leaves `origin_target` unset
     /// and "here" resolution refused.
-    pub fn with_channel_manager(
-        mut self,
-        manager: Arc<crate::channels::ChannelManager>,
-    ) -> Self {
+    pub fn with_channel_manager(mut self, manager: Arc<crate::channels::ChannelManager>) -> Self {
         self.channel_manager = Some(manager);
         self
     }
 
     /// Clone the channel-manager handle, if wired (#148).
-    pub fn channel_manager(
-        &self,
-    ) -> Option<Arc<crate::channels::ChannelManager>> {
+    pub fn channel_manager(&self) -> Option<Arc<crate::channels::ChannelManager>> {
         self.channel_manager.clone()
     }
 

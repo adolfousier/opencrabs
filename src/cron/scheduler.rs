@@ -814,21 +814,20 @@ async fn execute_job(
     // lives in its session and the scheduler is the only thing that speaks.
     // Scoped across the whole turn so it holds inside every tool call, and
     // task-local so it never reaches a sibling job on the scheduler.
-    let permitted_targets: Option<Vec<crate::cron::send_scope::PermittedTarget>> = job
-        .deliver_to
-        .as_deref()
-        .map(|targets| {
+    let permitted_targets: Option<Vec<crate::cron::send_scope::PermittedTarget>> =
+        job.deliver_to.as_deref().map(|targets| {
             targets
                 .split(',')
                 .map(str::trim)
                 .filter(|t| !t.is_empty())
                 .filter_map(|t| {
                     if let Some(rest) = t.strip_prefix("telegram:") {
-                        parse_telegram_target(rest)
-                            .map(|(chat_id, _)| crate::cron::send_scope::PermittedTarget {
+                        parse_telegram_target(rest).map(|(chat_id, _)| {
+                            crate::cron::send_scope::PermittedTarget {
                                 channel: "telegram",
                                 target_id: chat_id.to_string(),
-                            })
+                            }
+                        })
                     } else if let Some(rest) = t.strip_prefix("discord:") {
                         Some(crate::cron::send_scope::PermittedTarget {
                             channel: "discord",

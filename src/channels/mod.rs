@@ -11,8 +11,8 @@ pub(crate) mod model_menu;
 pub mod question_common;
 pub mod session_init;
 pub mod session_resolve;
-pub mod target_resolver;
 pub mod single_flight;
+pub mod target_resolver;
 pub(crate) mod transport_ready;
 pub(crate) mod typing_tick;
 

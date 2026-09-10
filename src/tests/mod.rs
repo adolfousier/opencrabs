@@ -685,6 +685,10 @@ pub mod model_fetch_test;
 #[cfg(feature = "telegram")]
 pub mod models_picker_dedup_test;
 pub mod nesting_gate_test;
+pub mod oc_consumer_migration_test;
+pub mod oc_opaqueness_wall_test;
+pub mod oc_reverse_maps_test;
+pub mod oc_send_scope_test;
 pub mod parallel_tools_test;
 #[cfg(feature = "telegram")]
 pub mod path_lock_test;
@@ -754,12 +758,8 @@ pub mod template_governance_test;
 pub mod token_report_calibration_test;
 pub mod token_tracking_test;
 pub mod tool_arg_unescape_test;
-pub mod tool_execution_repo_test;
 pub mod tool_context_origin_target_test;
-pub mod oc_reverse_maps_test;
-pub mod oc_consumer_migration_test;
-pub mod oc_send_scope_test;
-pub mod oc_opaqueness_wall_test;
+pub mod tool_execution_repo_test;
 pub mod tool_loop_helpers_test;
 pub mod tool_name_heal_test;
 pub mod tui_drop_path_test;
