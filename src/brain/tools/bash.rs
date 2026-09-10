@@ -460,17 +460,20 @@ impl Tool for BashTool {
             Some(true) => {
                 if is_sudo {
                     return Ok(ToolResult::error(
-                        "Cannot run sudo commands in the background (password prompt requires inline execution)",
+                        "Cannot run sudo commands in the background (password prompt requires inline execution)"
+                            .to_string(),
                     ));
                 }
                 if !nesting_ok {
                     return Ok(ToolResult::error(
-                        "Background execution is disabled in pure worker sessions (allow_nested=false)",
+                        "Background execution is disabled in pure worker sessions (allow_nested=false)"
+                            .to_string(),
                     ));
                 }
                 let Some(ref mgr) = context.background_manager else {
                     return Ok(ToolResult::error(
-                        "Background execution is unavailable on this surface (no background task manager)",
+                        "Background execution is unavailable on this surface (no background task manager)"
+                            .to_string(),
                     ));
                 };
 
