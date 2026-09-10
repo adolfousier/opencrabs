@@ -4,8 +4,8 @@
 //! `session:<uuid|prefix>` — the target is resolved through the shared
 //! session-id resolver (`crate::cli::session_resolve`). These tests pin the
 //! pure resolution core (`resolve_session_target`) against in-memory session
-//! sets: full UUIDs pass through, valid prefixes resolve, garbage and short
-//! prefixes reject. The DB-loading wrapper (`parse_session_target`) is a thin
+//! sets: full UUIDs pass through, unambiguous prefixes of any length
+//! resolve, garbage rejects, duplicate rows are ambiguous. The DB-loading wrapper (`parse_session_target`) is a thin
 //! async shell over this core — prefix behavior against a live DB is the
 //! resolver's own test-suite concern.
 
@@ -63,14 +63,15 @@ fn unknown_prefix_rejects() {
     assert_eq!(resolve_session_target(&sessions, "zzzzzzzz"), None);
 }
 
-/// A prefix below the 8-char minimum `session list` displays behaves like any
-/// other non-match in a limited set — `None`, not a panic.
+/// A prefix shorter than the 8 chars `session list` displays still resolves
+/// when unambiguous — the resolver matches any-length prefixes; the 8-char
+/// figure is a display convention, not a matching rule.
 #[test]
-fn short_prefix_rejects() {
+fn short_unambiguous_prefix_resolves() {
     let id = Uuid::new_v4();
     let sessions = vec![session_with_id(id)];
     let short = id.to_string()[..4].to_string();
-    assert_eq!(resolve_session_target(&sessions, &short), None);
+    assert_eq!(resolve_session_target(&sessions, &short), Some(id));
 }
 
 /// Garbage (not a UUID, not a prefix of anything) is `None`, not a panic.
@@ -83,14 +84,13 @@ fn garbage_rejects() {
     assert_eq!(resolve_session_target(&[], ""), None);
 }
 
-/// The degenerate duplicate-id set still resolves to that id (the resolver's
-/// ambiguity arm can only fire on distinct ids sharing a prefix, which 8 hex
-/// chars of UUIDv4 never produce in practice — the dup shape pins that
-/// same-id rows are not treated as an error).
+/// The resolver is row-count-based: two rows sharing a prefix are ambiguous
+/// even when the rows carry the SAME id — `None`, matching the shared
+/// resolver's contract verbatim (row count, not distinct-id count).
 #[test]
-fn duplicate_id_set_resolves() {
+fn duplicate_rows_are_ambiguous() {
     let id = Uuid::new_v4();
     let sessions = vec![session_with_id(id), session_with_id(id)];
     let prefix = id.to_string()[..8].to_string();
-    assert_eq!(resolve_session_target(&sessions, &prefix), Some(id));
+    assert_eq!(resolve_session_target(&sessions, &prefix), None);
 }
