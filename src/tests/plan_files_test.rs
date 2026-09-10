@@ -315,6 +315,13 @@ async fn sync_refuses_malformed_body_and_restores_previous_mirror() {
         assert!(error.contains("each `**Label:**` must be a single line: label + space + text"));
         assert_eq!(std::fs::read_to_string(&md_path).unwrap(), valid);
         assert_eq!(load_plan(sid).await.unwrap().description, valid);
+
+        let empty_label = "# Guarded design\n\n## Context\n- **Problem:** \n- **Target state:** fixed\n- **Intent:** test\n\n## Implementation steps\n1. Keep old\n";
+        std::fs::write(&md_path, empty_label).unwrap();
+        let error = sync_md_to_json(sid).await.unwrap_err();
+        assert!(error.contains("`**Problem:**` needs non-empty text after the label"));
+        assert_eq!(std::fs::read_to_string(&md_path).unwrap(), valid);
+        assert_eq!(load_plan(sid).await.unwrap().description, valid);
     })
     .await;
 }

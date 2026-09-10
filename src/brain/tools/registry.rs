@@ -376,18 +376,19 @@ impl ToolRegistry {
             .capabilities()
             .contains(&crate::brain::tools::r#trait::ToolCapability::WriteFiles)
             && super::plan_gate::write_targets_session_md(plan_sid, &input).await;
-        let mut result = tool.execute(input, context).await?;
+        let result = tool.execute(input, context).await?;
 
         // Editing mirror: a successful write to the session plan .md syncs
         // the full body into the JSON `description` (tasks stay empty), so
         // the .md remains the Editing source of truth and every JSON reader
         // (TUI chrome, Telegram sections) sees the fresh design. Malformed
         // template writes are refused and restored by the sync boundary.
-        if result.success && is_md_write {
-            if let Err(error) = crate::utils::plan_files::sync_md_to_json(plan_sid).await {
-                tracing::info!("Plan .md write refused by template guard");
-                return Ok(ToolResult::error(error));
-            }
+        if result.success
+            && is_md_write
+            && let Err(error) = crate::utils::plan_files::sync_md_to_json(plan_sid).await
+        {
+            tracing::info!("Plan .md write refused by template guard");
+            return Ok(ToolResult::error(error));
         }
 
         if result.success {
