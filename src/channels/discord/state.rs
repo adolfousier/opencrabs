@@ -27,6 +27,10 @@ pub struct DiscordState {
     pub(super) guild_id: Mutex<Option<u64>>,
     /// Maps session_id → channel_id for approval routing
     pub(super) session_channels: Mutex<HashMap<Uuid, u64>>,
+    /// Reverse ownership map (#148): channel_id → session_id, written in
+    /// lockstep with `session_channels` at `register_session_channel` (the
+    /// ONLY write site for both). Last writer wins — mirrors the forward map.
+    pub(super) channel_sessions: Mutex<HashMap<u64, Uuid>>,
     /// Pending approval channels: approval_id → oneshot sender of (approved, always)
     pub(super) pending_approvals: Mutex<HashMap<String, oneshot::Sender<(bool, bool)>>>,
     /// Per-session cancel tokens for aborting in-flight agent tasks via /stop
@@ -56,6 +60,7 @@ impl DiscordState {
             bot_user_id: Mutex::new(None),
             guild_id: Mutex::new(None),
             session_channels: Mutex::new(HashMap::new()),
+            channel_sessions: Mutex::new(HashMap::new()),
             pending_approvals: Mutex::new(HashMap::new()),
             cancel_tokens: Mutex::new(HashMap::new()),
             pending_selects: Mutex::new(HashMap::new()),

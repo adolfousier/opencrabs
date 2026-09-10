@@ -1681,6 +1681,9 @@ async fn cmd_chat_inner(
         #[cfg(feature = "trello")]
         trello_state.clone(),
     ));
+    // Ambient origin derivation (#148): the manager holds the ownership
+    // maps, so agents the factory builds from here on can resolve "here".
+    channel_factory.set_channel_manager(channel_manager.clone());
 
     // Report what the instance guard preempted on the way in. The preemption
     // itself moved to the top of boot (#1072): it used to run here, after the

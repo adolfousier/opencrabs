@@ -7,7 +7,9 @@
 //! a job posted its report into that group: one it was never configured for,
 //! whose members had asked for nothing.
 
-use crate::cron::send_scope::{SendPermission, may_send_to, permission, with_send_target};
+use crate::cron::send_scope::{
+    PermittedTarget, SendPermission, may_send_to, permission, with_send_target,
+};
 
 const CONFIGURED: i64 = -1004252074515;
 const SOMEWHERE_ELSE: i64 = -1004428873948;
@@ -23,7 +25,13 @@ async fn outside_a_job_nothing_is_restricted() {
 #[tokio::test]
 async fn a_job_may_send_to_the_chat_it_was_given() {
     with_send_target(Some(CONFIGURED), async {
-        assert_eq!(permission(), SendPermission::OnlyChat(CONFIGURED));
+        assert_eq!(
+            permission(),
+            SendPermission::Permitted(vec![PermittedTarget {
+                channel: "telegram",
+                target_id: CONFIGURED.to_string(),
+            }])
+        );
         assert!(may_send_to(CONFIGURED));
     })
     .await;

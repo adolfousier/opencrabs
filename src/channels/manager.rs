@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use uuid::Uuid;
 
 use tokio::task::JoinHandle;
 
@@ -94,6 +95,29 @@ impl ChannelManager {
             #[cfg(feature = "trello")]
             trello_state,
         }
+    }
+
+    /// Channel-state accessors for the #148 target resolver and the tool
+    /// loop's `origin_target` derivation. Read-only handles — targeting
+    /// never spawns or stops channels.
+    #[cfg(feature = "telegram")]
+    pub fn telegram(&self) -> &Arc<crate::channels::telegram::TelegramState> {
+        &self.telegram_state
+    }
+
+    #[cfg(feature = "whatsapp")]
+    pub fn whatsapp(&self) -> &Arc<crate::channels::whatsapp::WhatsAppState> {
+        &self.whatsapp_state
+    }
+
+    #[cfg(feature = "discord")]
+    pub fn discord(&self) -> &Arc<crate::channels::discord::DiscordState> {
+        &self.discord_state
+    }
+
+    #[cfg(feature = "slack")]
+    pub fn slack(&self) -> &Arc<crate::channels::slack::SlackState> {
+        &self.slack_state
     }
 
     /// Compare running channels against config and spawn/stop as needed.
@@ -557,6 +581,98 @@ impl ChannelManager {
                 }
             }
             ChannelAction::Noop => {}
+        }
+    }
+}
+
+/// Live `TargetResolution` for the `oc://` target resolver (#148): the
+/// manager holds every channel-state Arc, so it is the single place that
+/// can answer reverse-ownership questions across authorities.
+#[async_trait::async_trait]
+impl crate::channels::target_resolver::TargetResolution for ChannelManager {
+    async fn session_for_channel(
+        &self,
+        channel: &str,
+        chat_id: &str,
+        thread: Option<i32>,
+    ) -> Option<Uuid> {
+        match channel {
+            #[cfg(feature = "telegram")]
+            "telegram" => {
+                let chat: i64 = chat_id.parse().ok()?;
+                self.telegram_state.chat_session(chat, thread).await
+            }
+            #[cfg(feature = "discord")]
+            "discord" => {
+                let ch: u64 = chat_id.parse().ok()?;
+                self.discord_state
+                    .session_owner_by_channel(ch)
+                    .await
+            }
+            #[cfg(feature = "slack")]
+            "slack" => self.slack_state.session_owner_by_channel(chat_id).await,
+            #[cfg(feature = "whatsapp")]
+            "whatsapp" => self.whatsapp_state.session_owner_by_jid(chat_id).await,
+            _ => None,
+        }
+    }
+
+    async fn binding_for_session(
+        &self,
+        session: Uuid,
+    ) -> Option<crate::brain::tools::OriginTarget> {
+        use crate::brain::tools::OriginTarget;
+        #[cfg(feature = "telegram")]
+        if let Some((chat, topic)) = self.telegram_state.session_binding(session).await {
+            return Some(OriginTarget {
+                channel: "telegram",
+                chat_id: chat.to_string(),
+                thread: topic,
+            });
+        }
+        #[cfg(feature = "discord")]
+        if let Some(ch) = self.discord_state.session_channel(session).await {
+            return Some(OriginTarget {
+                channel: "discord",
+                chat_id: ch.to_string(),
+                thread: None,
+            });
+        }
+        #[cfg(feature = "slack")]
+        if let Some(ch) = self.slack_state.session_channel(session).await {
+            return Some(OriginTarget {
+                channel: "slack",
+                chat_id: ch,
+                thread: None,
+            });
+        }
+        #[cfg(feature = "whatsapp")]
+        if let Some(jid) = self.whatsapp_state.session_jid(session).await {
+            return Some(OriginTarget {
+                channel: "whatsapp",
+                chat_id: jid,
+                thread: None,
+            });
+        }
+        None
+    }
+
+    async fn telegram_chat_topics(
+        &self,
+        chat_id: i64,
+    ) -> anyhow::Result<Option<Vec<i32>>> {
+        #[cfg(feature = "telegram")]
+        {
+            Ok(Some(
+                self.telegram_state
+                    .topic_sessions_for_chat(chat_id)
+                    .await,
+            ))
+        }
+        #[cfg(not(feature = "telegram"))]
+        {
+            let _ = chat_id;
+            Ok(None)
         }
     }
 }

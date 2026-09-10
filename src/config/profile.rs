@@ -110,6 +110,19 @@ pub fn with_home_override<T>(home: PathBuf, f: impl FnOnce() -> T) -> T {
     PROFILE_HOME_OVERRIDE.sync_scope(home, f)
 }
 
+/// Run a future with `opencrabs_home()` pointed at an explicit directory.
+///
+/// Async counterpart of `with_home_override`: the override is a task-local,
+/// so it survives every `.await` inside `fut` and never leaks to sibling
+/// tasks. Use this (not the sync wrapper) inside `#[tokio::test]` bodies —
+/// `sync_scope` cannot host a `.await`.
+pub async fn with_home_override_async<T, F>(home: PathBuf, fut: F) -> T
+where
+    F: std::future::Future<Output = T>,
+{
+    PROFILE_HOME_OVERRIDE.scope(home, fut).await
+}
+
 /// Set the active profile. Must be called before any `opencrabs_home()` call.
 /// Returns `Err` if called more than once (OnceLock semantics).
 pub fn set_active_profile(name: Option<String>) -> Result<()> {

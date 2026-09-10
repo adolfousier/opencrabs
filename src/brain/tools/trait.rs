@@ -7,6 +7,40 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
+/// The channel surface a conversation originated from (#148). The ambient
+/// "where am I?" answer for tools that target sessions or channels: the tool
+/// loop stamps it per execution from the session ownership maps, mirroring
+/// `session_provider` (#1318). `None` on surfaces with no live user binding
+/// (cron turns, CLI one-shots, sub-agents, TUI-internal tools).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OriginTarget {
+    /// Channel authority that owns the id semantics: `telegram`, `discord`,
+    /// `slack`, or `whatsapp`.
+    pub channel: &'static str,
+    /// Platform chat/channel id (Telegram chat id incl. the `-100…` form,
+    /// Discord snowflake, Slack `C…`, WhatsApp JID).
+    pub chat_id: String,
+    /// Forum topic / thread scoping. Telegram only: `Some(1)` is the General
+    /// topic SESSION-SCOPING key (#1220) and must never reach the wire as a
+    /// `message_thread_id` (#1319) — `delivery_thread_id` maps it to absent.
+    pub thread: Option<i32>,
+}
+
+impl OriginTarget {
+    /// Concrete legacy deliver_to form (`telegram:<chat>` or
+    /// `telegram:<chat>:<thread>`), as stored in cron job rows. General
+    /// topics bake WITHOUT the `:1` — the General topic key never becomes a
+    /// wire address.
+    pub fn deliver_to(&self) -> String {
+        match self.thread {
+            Some(t) if t != crate::channels::telegram::session_resolve::GENERAL_TOPIC_ID => {
+                format!("{}:{}:{}", self.channel, self.chat_id, t)
+            }
+            _ => format!("{}:{}", self.channel, self.chat_id),
+        }
+    }
+}
+
 /// Execution context for tools
 #[derive(Clone)]
 pub struct ToolExecutionContext {
@@ -78,6 +112,24 @@ pub struct ToolExecutionContext {
     /// at the configured chain instead.
     pub session_provider: Option<String>,
 
+    /// Ambient conversation origin (#148): the channel, chat id, and thread
+    /// this session's turn is bound to, so targeting tools can resolve
+    /// "here" without the model ever reciting a chat id. Derived by the
+    /// tool loop from the session ownership maps — the SAME single stamping
+    /// site that sets `session_provider` below. `None` on surfaces without
+    /// a live channel binding (cron execute, CLI one-shot, sub-agents, TUI
+    /// internal tools); tools must refuse `here` resolution rather than
+    /// guess.
+    pub origin_target: Option<Arc<OriginTarget>>,
+
+    /// Live resolution world for `oc://` target URLs (#148): the surface's
+    /// ChannelManager, wired per-execution beside `origin_target` (same
+    /// stamping site). Gives targeting tools the reverse ownership maps so
+    /// `oc://telegram/<chat>` / `here` resolve against live bindings. `None`
+    /// on surfaces without a channel manager (cron execute, CLI one-shot,
+    /// tests) — those must refuse URL/`here` targets rather than guess.
+    pub world: Option<Arc<dyn crate::channels::target_resolver::TargetResolution + Send + Sync>>,
+
     pub parent_tool_registry: Option<Arc<crate::brain::tools::ToolRegistry>>,
 
     /// Headless session (#129): the enclosing agent runs on a surface with no
@@ -118,6 +170,8 @@ impl ToolExecutionContext {
             plan_session_override: None,
             subagent_manager: None,
             session_provider: None,
+            origin_target: None,
+            world: None,
             parent_tool_registry: None,
             headless: false,
         }

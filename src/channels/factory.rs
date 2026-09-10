@@ -45,6 +45,11 @@ pub struct ChannelFactory {
     /// interactive-only tools hard-error (belt-and-braces backstop behind the
     /// registry-level exclusion). Default `false` (interactive channel factory).
     headless: std::sync::atomic::AtomicBool,
+    /// Channel-manager handle (#148): wired into every agent service so the
+    /// tool loop can derive the ambient `origin_target` from the session
+    /// ownership maps. Set once at startup via [`set_channel_manager`];
+    /// absent on cron/daemon paths, where "here" resolution must refuse.
+    channel_manager: OnceLock<Arc<crate::channels::ChannelManager>>,
 }
 
 impl ChannelFactory {
@@ -71,6 +76,7 @@ impl ChannelFactory {
             runtime_info: OnceLock::new(),
             subagent_manager: OnceLock::new(),
             headless: std::sync::atomic::AtomicBool::new(false),
+            channel_manager: OnceLock::new(),
         }
     }
 
@@ -109,6 +115,20 @@ impl ChannelFactory {
         manager: Arc<crate::brain::tools::subagent::SubAgentManager>,
     ) {
         let _ = self.subagent_manager.set(manager);
+    }
+
+    /// Set the channel-manager handle for ambient origin derivation (#148).
+    /// The manager already holds the channel-state Arcs, so this is the
+    /// single wiring point; TUI boot sets it after constructing the manager.
+    pub fn set_channel_manager(&self, manager: Arc<crate::channels::ChannelManager>) {
+        let _ = self.channel_manager.set(manager);
+    }
+
+    /// The live channel-manager handle, when one was set at boot (#148).
+    /// Cron/daemon paths construct factories without one — `None` there,
+    /// and "here"/channel-URL resolution refuses rather than guesses.
+    pub fn channel_manager(&self) -> Option<Arc<crate::channels::ChannelManager>> {
+        self.channel_manager.get().cloned()
     }
 
     /// Create a new AgentService configured for channel use.
@@ -173,6 +193,10 @@ impl ChannelFactory {
 
         if let Some(mgr) = self.subagent_manager.get() {
             builder = builder.with_subagent_manager(mgr.clone());
+        }
+
+        if let Some(mgr) = self.channel_manager.get() {
+            builder = builder.with_channel_manager(mgr.clone());
         }
 
         if message_queue_callback.is_some() {

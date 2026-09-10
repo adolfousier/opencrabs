@@ -49,13 +49,19 @@ fn get_id(input: &Value, key: &str) -> std::result::Result<u64, ToolResult> {
 /// Unwrap channel id or return error ToolResult.
 #[allow(clippy::result_large_err)]
 fn channel_or_err(id: Option<u64>) -> std::result::Result<u64, ToolResult> {
-    id.ok_or_else(|| {
+    let raw = id.ok_or_else(|| {
         ToolResult::error(
             "No channel_id provided and no owner channel available. \
              The owner must send a message first, or pass channel_id explicitly."
                 .to_string(),
         )
-    })
+    })?;
+    if !crate::cron::send_scope::may_send("discord", &raw.to_string()) {
+        let reason = crate::cron::send_scope::refusal_for("discord", &raw.to_string());
+        tracing::warn!("discord_send: {reason}");
+        return Err(ToolResult::error(reason));
+    }
+    Ok(raw)
 }
 
 /// Unwrap guild id or return error ToolResult.
@@ -219,7 +225,7 @@ impl Tool for DiscordSendTool {
             }
         };
 
-        // Resolve target channel (owner's last channel if not specified)
+        // Resolve target channel: explicit param > ambient origin fallback > owner's last channel
         let channel_id_opt = if let Some(id_str) = input.get("channel_id").and_then(|v| v.as_str())
         {
             match id_str.parse::<u64>() {
@@ -229,6 +235,12 @@ impl Tool for DiscordSendTool {
                         "Invalid channel_id '{id_str}': must be a numeric string"
                     )));
                 }
+            }
+        } else if let Some(origin) = _context.origin_target.as_deref() {
+            if origin.channel == "discord" {
+                origin.chat_id.parse::<u64>().ok()
+            } else {
+                self.discord_state.owner_channel_id().await
             }
         } else {
             self.discord_state.owner_channel_id().await

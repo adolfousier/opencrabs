@@ -14,8 +14,9 @@ use uuid::Uuid;
 /// 0 matches -> Err, 1 -> Ok(id), several -> Err listing candidates. This is
 /// the single prefix-matching core that both [`resolve_session_id`] and
 /// `resolve_targets`' id branch delegate to, so the ambiguity rules can't
-/// drift between commands.
-pub(crate) fn resolve_one_by_prefix(sessions: &[Session], prefix: &str) -> Result<Uuid, String> {
+/// drift between commands. Also consumed by the `oc://` target resolver
+/// (#148) — the ONE prefix law.
+pub fn resolve_one_by_prefix(sessions: &[Session], prefix: &str) -> Result<Uuid, String> {
     let prefix = prefix.to_lowercase();
     let matches: Vec<&Session> = sessions
         .iter()

@@ -84,6 +84,10 @@ pub struct WhatsAppState {
     /// originating chat (#731). WhatsApp keeps no other session→target map;
     /// registered on each handled turn.
     pub(super) session_jids: Mutex<HashMap<Uuid, String>>,
+    /// Reverse ownership map (#148): chat JID → session_id, written in
+    /// lockstep with `session_jids` at `register_session_jid` (the ONLY
+    /// write site for both). Last writer wins — mirrors the forward map.
+    pub(super) jid_sessions: Mutex<HashMap<String, Uuid>>,
 }
 
 impl Default for WhatsAppState {
@@ -115,6 +119,7 @@ impl WhatsAppState {
             photo_buffer: Mutex::new(HashMap::new()),
             photo_debounce: Mutex::new(HashMap::new()),
             session_jids: Mutex::new(HashMap::new()),
+            jid_sessions: Mutex::new(HashMap::new()),
         }
     }
 }

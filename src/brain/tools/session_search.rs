@@ -253,13 +253,14 @@ impl SessionSearchTool {
                 None => String::new(),
             };
             output.push_str(&format!(
-                "{}. [{}] \"{}\" — last active {}, {} messages{}\n",
+                "{}. [{}] \"{}\" — last active {}, {} messages{}, target `oc://session/{}`\n",
                 i + 1,
                 &session.id.to_string()[..8],
                 title,
                 date,
                 count,
-                turn
+                turn,
+                session.id
             ));
         }
 

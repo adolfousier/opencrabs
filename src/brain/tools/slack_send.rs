@@ -63,13 +63,19 @@ fn get_str<'a>(input: &'a Value, key: &str) -> std::result::Result<&'a str, Tool
 /// Unwrap channel id or return error ToolResult.
 #[allow(clippy::result_large_err)]
 fn channel_or_err(id: Option<String>) -> std::result::Result<String, ToolResult> {
-    id.ok_or_else(|| {
+    let raw = id.ok_or_else(|| {
         ToolResult::error(
             "No channel_id provided and no owner channel available. \
              The owner must send a message first, or pass channel_id explicitly."
                 .to_string(),
         )
-    })
+    })?;
+    if !crate::cron::send_scope::may_send("slack", &raw) {
+        let reason = crate::cron::send_scope::refusal_for("slack", &raw);
+        tracing::warn!("slack_send: {reason}");
+        return Err(ToolResult::error(reason));
+    }
+    Ok(raw)
 }
 
 // Macro to early-return Ok(err_result) when a param helper returns Err.
@@ -172,7 +178,7 @@ impl Tool for SlackSendTool {
         }
     }
 
-    async fn execute(&self, input: Value, _context: &ToolExecutionContext) -> Result<ToolResult> {
+    async fn execute(&self, input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
         let action = match input.get("action").and_then(|v| v.as_str()) {
             Some(a) if !a.is_empty() => a.to_string(),
             _ => {
@@ -204,10 +210,16 @@ impl Tool for SlackSendTool {
         let token = SlackApiToken::new(SlackApiTokenValue::from(bot_token));
         let session = client.open_session(&token);
 
-        // Resolve target channel once: explicit param > owner's last channel
+        // Resolve target channel once: explicit param > ambient origin fallback > owner's last channel
         let channel_id_opt: Option<String> =
             if let Some(ch) = input.get("channel_id").and_then(|v| v.as_str()) {
                 Some(ch.to_string())
+            } else if let Some(origin) = context.origin_target.as_deref() {
+                if origin.channel == "slack" {
+                    Some(origin.chat_id.clone())
+                } else {
+                    self.slack_state.owner_channel_id().await
+                }
             } else {
                 self.slack_state.owner_channel_id().await
             };
