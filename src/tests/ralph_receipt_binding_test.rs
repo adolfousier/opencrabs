@@ -98,6 +98,24 @@ fn multibyte_context_does_not_panic_the_window() {
     assert!(extract_sha_claims("éééééééééééééé 7c1856c9").is_empty());
 }
 
+#[test]
+fn signature_algorithm_tokens_are_not_claims() {
+    // #1501: quoting the signature line of your own commit read the
+    // algorithm name ED25519 (pure hex by coincidence) as a phantom
+    // 7-char sha claim, rejecting a completion whose receipts were real.
+    // The keyword window is exactly 31 bytes here, matching the shape.
+    let text = "Committed as bfe9e032, signed (ED25519, SHA256:nZH20uL)";
+    assert_eq!(extract_sha_claims(text), vec!["bfe9e032"]);
+}
+
+#[test]
+fn signature_token_exclusion_is_case_insensitive() {
+    // The gate excludes the token either case, even in direct
+    // commit-keyword context: the algorithm name is never a commit.
+    assert!(extract_sha_claims("commit ed25519 here").is_empty());
+    assert!(extract_sha_claims("commit ED25519 here").is_empty());
+}
+
 // ── Verification: live git fixtures ─────────────────────────────────
 
 fn git(repo: &Path, args: &[&str]) {

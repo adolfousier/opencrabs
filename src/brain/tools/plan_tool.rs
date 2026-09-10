@@ -1128,6 +1128,13 @@ const SHA_CLAIM_KEYWORDS: [&str; 5] = ["committed", "commit", "pushed", "push", 
 /// count as its claim context.
 const SHA_CLAIM_WINDOW: usize = 32;
 
+/// Hex-looking tokens that are names of other algorithms, not commits
+/// (#1501). Selection criterion: a receipted false positive only — each
+/// entry is a pure-hex identifier that follows a commit-ish keyword in
+/// ordinary completion text ("signed ... with ED25519 key ..."). Do not
+/// speculatively add tokens; every entry needs its own occurrence.
+const NON_COMMIT_HEX_TOKENS: [&str; 1] = ["ed25519"];
+
 /// Extract git-sha claims from free text (#1011).
 ///
 /// A claim is a maximal alphanumeric run consisting only of hex digits,
@@ -1153,7 +1160,8 @@ pub(crate) fn extract_sha_claims(text: &str) -> Vec<String> {
         }
         let run = &text[start..i];
         let is_hex = run.bytes().all(|b| b.is_ascii_hexdigit());
-        if is_hex && (7..=40).contains(&run.len()) {
+        let is_non_commit = NON_COMMIT_HEX_TOKENS.contains(&run.to_ascii_lowercase().as_str());
+        if is_hex && !is_non_commit && (7..=40).contains(&run.len()) {
             // Back up at most SHA_CLAIM_WINDOW bytes for the keyword
             // context, then realign to a char boundary: start-32 can land
             // inside a multi-byte character, and slicing there panics. A
