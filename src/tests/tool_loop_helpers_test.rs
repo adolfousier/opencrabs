@@ -22,9 +22,9 @@
 //! `src/tests/`) keeps the test surface flat.
 
 use crate::brain::agent::service::tool_loop::{
-    RepeatLoopAction, build_tool_result_content, extract_path_for_recent_buffer,
-    is_duplicate_iteration_text, is_implausible_token_report, is_user_correction,
-    repeat_loop_action, strip_ansi_output,
+    DEFAULT_TIME_MARKER_INTERVAL_SECS, RepeatLoopAction, build_tool_result_content,
+    check_intra_turn_time_marker, extract_path_for_recent_buffer, is_duplicate_iteration_text,
+    is_implausible_token_report, is_user_correction, repeat_loop_action, strip_ansi_output,
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -585,4 +585,56 @@ fn duplicate_text_catches_a_substring_of_longer_accumulated_text() {
         accumulated,
         "All 112 passed, 0 failed."
     ));
+}
+
+// ── check_intra_turn_time_marker ────────────────────────────────────
+
+#[test]
+fn intra_turn_time_marker_defaults_and_suppression() {
+    assert_eq!(DEFAULT_TIME_MARKER_INTERVAL_SECS, 900);
+
+    let start = chrono::Utc::now();
+    // 0 interval disables the check entirely
+    assert!(
+        check_intra_turn_time_marker(start, start + chrono::Duration::seconds(1800), 0, None)
+            .is_none()
+    );
+
+    // Less than interval elapsed -> None
+    let under = start + chrono::Duration::seconds(899);
+    assert!(check_intra_turn_time_marker(start, under, 900, None).is_none());
+}
+
+#[test]
+fn intra_turn_time_marker_fires_at_or_above_interval_with_utc_fallback() {
+    let start = chrono::Utc::now();
+    let exact = start + chrono::Duration::seconds(900);
+    let res = check_intra_turn_time_marker(start, exact, 900, None);
+    assert!(res.is_some());
+    let (notice, updated_time) = res.unwrap();
+    assert_eq!(updated_time, exact);
+    assert!(notice.starts_with("[System: Current time: "));
+    assert!(notice.contains("UTC"));
+    assert!(!notice.contains("(user:"));
+    assert!(notice.ends_with(']'));
+}
+
+#[test]
+fn intra_turn_time_marker_resolves_user_timezone_from_brain() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let dir = TempDir::new().unwrap();
+    let user_md = dir.path().join("USER.md");
+    fs::write(&user_md, "Timezone: UTC+3 (MSK)\n").unwrap();
+
+    let start = chrono::Utc::now();
+    let elapsed = start + chrono::Duration::seconds(1200);
+    let res = check_intra_turn_time_marker(start, elapsed, 900, Some(dir.path()));
+    assert!(res.is_some());
+    let (notice, _) = res.unwrap();
+    assert!(notice.starts_with("[System: Current time: "));
+    assert!(notice.contains("UTC"));
+    assert!(notice.contains("MSK"));
+    assert!(notice.ends_with(']'));
 }

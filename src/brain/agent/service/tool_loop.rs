@@ -19,6 +19,34 @@ use uuid::Uuid;
 /// times consecutively successfully, the 4th it sticks".
 const STICKY_FALLBACK_THRESHOLD: u32 = 4;
 
+/// Default interval in seconds between mid-turn intra-loop time markers (#153).
+pub const DEFAULT_TIME_MARKER_INTERVAL_SECS: u64 = 900;
+
+/// Check whether the intra-turn elapsed time warrants injecting a new time notice (#153).
+/// Returns `Some((notice_string, now))` if the interval has passed, or `None`.
+pub(crate) fn check_intra_turn_time_marker(
+    last_marker: chrono::DateTime<chrono::Utc>,
+    now: chrono::DateTime<chrono::Utc>,
+    interval_secs: u64,
+    brain_dir: Option<&std::path::Path>,
+) -> Option<(String, chrono::DateTime<chrono::Utc>)> {
+    if interval_secs == 0 {
+        return None;
+    }
+    let elapsed = (now - last_marker).num_seconds();
+    if elapsed >= interval_secs as i64 {
+        let tz_info = brain_dir
+            .and_then(|dir| crate::brain::timezone::GLOBAL_TZ_CACHE.resolve_from_brain_dir(dir));
+        let time_str = match tz_info {
+            Some(ref info) => info.format_dual_time(&now),
+            None => crate::brain::timezone::format_utc_time(&now),
+        };
+        Some((format!("[System: Current time: {time_str}]"), now))
+    } else {
+        None
+    }
+}
+
 /// True when a provider's reported `input_tokens` is implausibly larger than
 /// the real content size (system + messages + tool schemas) — the signature of
 /// an OVER-REPORTING endpoint. The zhipu "coding" endpoint was observed adding
@@ -1508,6 +1536,11 @@ impl AgentService {
         // approval waits are part of that answer. Monotonic, so it is immune
         // to clock adjustments mid-turn.
         let turn_started_at = std::time::Instant::now();
+        // Last time marker timestamp for intra-turn periodic time notice (#153).
+        let mut last_time_marker = chrono::Utc::now();
+        let time_marker_interval_secs = crate::config::Config::current()
+            .agent
+            .time_marker_interval_secs;
         let mut total_input_tokens = 0u32;
         let mut total_output_tokens = 0u32;
         let mut total_cache_creation = 0u32;
@@ -7317,6 +7350,20 @@ impl AgentService {
             }
             if has_progress_override && let Some(ref cb) = self.progress_callback {
                 cb(session_id, ProgressEvent::TokenCount(context.token_count));
+            }
+
+            // Intra-turn periodic time marker (#153): inject current wall-clock
+            // notice strictly AFTER tool results and repeat verdict, but BEFORE
+            // compaction checks or next assistant generation, if >= interval elapsed.
+            if let Some((notice, updated_time)) = check_intra_turn_time_marker(
+                last_time_marker,
+                chrono::Utc::now(),
+                time_marker_interval_secs,
+                brain_dir.as_deref(),
+            ) {
+                tracing::info!("Injecting mid-turn time notice into context: {notice}");
+                context.add_message(Message::user(notice));
+                last_time_marker = updated_time;
             }
 
             // Enforce 65% budget after tool results. Skip ONLY when the CLI
