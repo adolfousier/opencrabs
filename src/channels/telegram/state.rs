@@ -760,6 +760,23 @@ impl TelegramState {
             .flatten()
     }
 
+    /// The full binding of a session — `(chat_id, topic_id)` — in ONE read
+    /// (#148). Topic follows the `session_topic` rules above: `Some(1)` is
+    /// a known forum's General topic, `None` a DM / non-forum group.
+    /// Consumed by the tool loop's `origin_target` derivation; nothing else
+    /// should need both halves separately.
+    pub async fn session_binding(&self, session_id: Uuid) -> Option<(i64, Option<i32>)> {
+        let chat = self.session_chats.lock().await.get(&session_id).copied()?;
+        let topic = self
+            .session_topic
+            .lock()
+            .await
+            .get(&session_id)
+            .copied()
+            .flatten();
+        Some((chat, topic))
+    }
+
     /// Does `session_id` still own the channel it was bound to (fork #17)?
     /// Reads the sync ownership mirror (see field doc): `Owned` when the bound
     /// chat/topic still resolves back to this session, `Occupied` naming the
@@ -1797,5 +1814,20 @@ impl TelegramState {
     /// Clear the profile-create flow state.
     pub async fn clear_prof_create(&self, chat_id: i64) {
         self.prof_create_states.lock().await.remove(&chat_id);
+    }
+
+    /// All topic-scoped session keys for a chat (#148): the topic ids the
+    /// reverse map currently holds for `chat_id`, used by the target resolver's
+    /// multi-topic ambiguity rule (a bare `oc://telegram/<chat>` on a forum with
+    /// several topic sessions must refuse and list the topic URLs, never guess).
+    /// Empty when the chat is unbound or a DM / non-forum group.
+    pub async fn topic_sessions_for_chat(&self, chat_id: i64) -> Vec<i32> {
+        let map = self.chat_sessions.lock().await;
+        let mut topics: Vec<i32> = map
+            .keys()
+            .filter_map(|(c, t)| if *c == chat_id { *t } else { None })
+            .collect();
+        topics.sort();
+        topics
     }
 }

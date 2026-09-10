@@ -1446,6 +1446,18 @@ impl AgentService {
         // Vision resolves the CURRENT provider first (#1318); a tool cannot
         // ask AgentService for it, and this loop has both.
         tool_context.session_provider = Some(self.provider_name_for_session(session_id));
+        // Ambient conversation origin (#148): derived HERE — the single
+        // stamping site, mirroring `session_provider` directly above — from
+        // the session ownership maps via the channel manager. `None` on
+        // surfaces without a manager or binding (cron, CLI, sub-agents),
+        // where `here` resolution must be refused, never guessed.
+        tool_context.origin_target = self.origin_target_for_session(session_id).await;
+        // Live resolution world (#148): the same channel manager, handed to
+        // targeting tools so `oc://` URLs resolve against the real ownership
+        // maps. `None` together with `origin_target` — same refusal law.
+        tool_context.world = self
+            .channel_manager()
+            .map(|mgr| mgr as Arc<dyn crate::channels::target_resolver::TargetResolution + Send + Sync>);
         tool_context.parent_tool_registry = Some(self.tool_registry.clone());
 
         // Tool execution loop
@@ -6540,25 +6552,8 @@ impl AgentService {
                                 }
                                 tracing::info!("User approved tool '{}'", tool_name);
                                 // Create approved context for this tool execution
-                                let approved_tool_context = ToolExecutionContext {
-                                    session_provider: None,
-                                    session_id: tool_context.session_id,
-                                    working_directory: tool_context.working_directory.clone(),
-                                    env_vars: tool_context.env_vars.clone(),
-                                    auto_approve: true, // User approved this execution
-                                    timeout_secs: tool_context.timeout_secs,
-                                    sudo_callback: tool_context.sudo_callback.clone(),
-                                    ssh_callback: tool_context.ssh_callback.clone(),
-                                    shared_working_directory: tool_context
-                                        .shared_working_directory
-                                        .clone(),
-                                    service_context: tool_context.service_context.clone(),
-                                    progress_callback: tool_context.progress_callback.clone(),
-                                    background_manager: tool_context.background_manager.clone(),
-                                    plan_session_override: tool_context.plan_session_override,
-                                    subagent_manager: tool_context.subagent_manager.clone(),
-                                    parent_tool_registry: tool_context.parent_tool_registry.clone(),
-                                };
+                                let mut approved_tool_context = tool_context.clone();
+                                approved_tool_context.auto_approve = true; // User approved this execution
 
                                 // Execute the tool with approved context, racing against cancel
                                 // #1178 M1: set inside the Ok arm below when the tool ends the turn

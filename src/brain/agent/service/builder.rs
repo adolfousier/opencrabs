@@ -395,6 +395,11 @@ pub struct AgentService {
     /// manager (child agents, tests that don't need it).
     pub(super) subagent_manager: Option<Arc<crate::brain::tools::subagent::SubAgentManager>>,
 
+    /// Channel-manager handle (#148): lets the tool loop derive the ambient
+    /// `origin_target` from the session ownership maps. `None` on surfaces
+    /// with no channel manager (cron, CLI one-shot, sub-agents, tests).
+    pub(super) channel_manager: Option<Arc<crate::channels::ChannelManager>>,
+
     /// Plan-state session override (#908 option A). When set, this agent's
     /// tool contexts resolve plan state (plan JSON, design `.md`, pre-init
     /// and autonomy markers, plan-task goal) against the given session
@@ -466,6 +471,7 @@ impl AgentService {
                 Self::build_fallback_providers(config).await,
             ),
             subagent_manager: None,
+            channel_manager: None,
             plan_session_override: None,
         }
     }
@@ -853,6 +859,25 @@ impl AgentService {
     ) -> Self {
         self.subagent_manager = Some(manager);
         self
+    }
+
+    /// Wire the channel manager so the tool loop can derive the ambient
+    /// `origin_target` (#148) from the session ownership maps. `None` — the
+    /// default on cron/CLI/sub-agent paths — leaves `origin_target` unset
+    /// and "here" resolution refused.
+    pub fn with_channel_manager(
+        mut self,
+        manager: Arc<crate::channels::ChannelManager>,
+    ) -> Self {
+        self.channel_manager = Some(manager);
+        self
+    }
+
+    /// Clone the channel-manager handle, if wired (#148).
+    pub fn channel_manager(
+        &self,
+    ) -> Option<Arc<crate::channels::ChannelManager>> {
+        self.channel_manager.clone()
     }
 
     /// Clone the sub-agent manager handle (for carrying across service rebuilds).
@@ -1568,6 +1593,58 @@ impl AgentService {
         let p = self.provider_for_session(session_id);
         p.active_subprovider_model()
             .unwrap_or_else(|| p.default_model().to_string())
+    }
+
+    /// Derive the ambient conversation origin for a session (#148): which
+    /// channel + chat (+ telegram topic) the session is currently bound to.
+    ///
+    /// Single derivation path for the tool-loop stamp — tools never reach
+    /// the ownership maps themselves. Consults each channel's session map
+    /// in turn and takes the FIRST binding found; a session is bound to at
+    /// most one channel surface in practice, so priority order only matters
+    /// for tests. `None` when no manager is wired or no map holds the
+    /// session — "here" is then unresolvable and must be refused, never
+    /// guessed.
+    pub async fn origin_target_for_session(
+        &self,
+        session_id: Uuid,
+    ) -> Option<Arc<crate::brain::tools::OriginTarget>> {
+        use crate::brain::tools::OriginTarget;
+        let mgr = self.channel_manager.as_ref()?;
+        // Telegram first: the richest binding (chat + forum topic).
+        #[cfg(feature = "telegram")]
+        if let Some((chat_id, topic)) = mgr.telegram().session_binding(session_id).await {
+            return Some(Arc::new(OriginTarget {
+                channel: "telegram",
+                chat_id: chat_id.to_string(),
+                thread: topic,
+            }));
+        }
+        #[cfg(feature = "discord")]
+        if let Some(ch) = mgr.discord().session_channel(session_id).await {
+            return Some(Arc::new(OriginTarget {
+                channel: "discord",
+                chat_id: ch.to_string(),
+                thread: None,
+            }));
+        }
+        #[cfg(feature = "slack")]
+        if let Some(ch) = mgr.slack().session_channel(session_id).await {
+            return Some(Arc::new(OriginTarget {
+                channel: "slack",
+                chat_id: ch,
+                thread: None,
+            }));
+        }
+        #[cfg(feature = "whatsapp")]
+        if let Some(jid) = mgr.whatsapp().session_jid(session_id).await {
+            return Some(Arc::new(OriginTarget {
+                channel: "whatsapp",
+                chat_id: jid,
+                thread: None,
+            }));
+        }
+        None
     }
 
     /// Install a per-session model override. Pair with

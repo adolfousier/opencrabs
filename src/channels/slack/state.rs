@@ -25,6 +25,10 @@ pub struct SlackState {
     pub(super) owner_channel_id: Mutex<Option<String>>,
     /// Maps session_id → channel_id for approval routing
     pub(super) session_channels: Mutex<HashMap<Uuid, String>>,
+    /// Reverse ownership map (#148): channel_id → session_id, written in
+    /// lockstep with `session_channels` at `register_session_channel` (the
+    /// ONLY write site for both). Last writer wins — mirrors the forward map.
+    pub(super) channel_sessions: Mutex<HashMap<String, Uuid>>,
     /// Pending approval channels: approval_id → oneshot sender of (approved, always)
     pub(super) pending_approvals: Mutex<HashMap<String, oneshot::Sender<(bool, bool)>>>,
     /// Pending follow-up questions: question_id → (oneshot sender,
@@ -57,6 +61,7 @@ impl SlackState {
             bot_token: Mutex::new(None),
             owner_channel_id: Mutex::new(None),
             session_channels: Mutex::new(HashMap::new()),
+            channel_sessions: Mutex::new(HashMap::new()),
             pending_approvals: Mutex::new(HashMap::new()),
             pending_followups: Mutex::new(HashMap::new()),
             cancel_tokens: Mutex::new(HashMap::new()),

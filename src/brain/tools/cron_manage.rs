@@ -5,6 +5,7 @@
 
 use super::error::Result;
 use super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
+use crate::channels::target_resolver::{is_target_url, resolve_target};
 use crate::db::models::CronJob;
 use crate::db::{CronJobPatch, CronJobRepository};
 use async_trait::async_trait;
@@ -78,7 +79,7 @@ impl Tool for CronManageTool {
                 },
                 "deliver_to": {
                     "type": "string",
-                    "description": "Where to deliver results. Format: 'telegram:chat_id', 'telegram:chat_id:thread_id' (opt-in delivery into that forum topic; the chat must be a forum and the topic must exist — invalid thread targets are rejected loudly at fire time, never re-routed to the default topic), 'discord:channel_id', 'slack:channel_id', or an HTTP(S) URL for webhook delivery. On update, pass an empty string to clear delivery."
+                    "description": "Where to deliver results. Formats: an oc:// target URL ('oc://telegram/<chat>[/<thread>]', 'oc://discord/<channel>', 'oc://slack/<channel>', 'oc://whatsapp/<phone|jid>', 'oc://session/<uuid-or-prefix>') or 'here' (deliver to this conversation's channel; refused on headless surfaces) — URLs are resolved ONCE at create/update time and the concrete channel target is baked into the job; or legacy 'telegram:chat_id', 'telegram:chat_id:thread_id' (opt-in delivery into that forum topic; the chat must be a forum and the topic must exist — invalid thread targets are rejected loudly at fire time, never re-routed to the default topic), 'discord:channel_id', 'slack:channel_id', or an HTTP(S) URL for webhook delivery. On update, pass an empty string to clear delivery."
                 },
                 "deliver_api_key": {
                     "type": "string",
@@ -113,17 +114,17 @@ impl Tool for CronManageTool {
         )
     }
 
-    async fn execute(&self, input: Value, _context: &ToolExecutionContext) -> Result<ToolResult> {
+    async fn execute(&self, input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
         let action = input
             .get("action")
             .and_then(|v| v.as_str())
             .unwrap_or("list");
 
         match action {
-            "create" => self.create_job(&input).await,
+            "create" => self.create_job(&input, context).await,
             "list" => self.list_jobs().await,
             "delete" => self.delete_job(&input).await,
-            "update" => self.update_job(&input).await,
+            "update" => self.update_job(&input, context).await,
             "enable" => self.toggle_job(&input, true).await,
             "disable" => self.toggle_job(&input, false).await,
             "test" => self.test_job(&input).await,
@@ -135,7 +136,7 @@ impl Tool for CronManageTool {
 }
 
 impl CronManageTool {
-    async fn create_job(&self, input: &Value) -> Result<ToolResult> {
+    async fn create_job(&self, input: &Value, context: &ToolExecutionContext) -> Result<ToolResult> {
         let name = match input.get("name").and_then(|v| v.as_str()) {
             Some(n) if !n.is_empty() => n,
             _ => {
@@ -222,6 +223,35 @@ impl CronManageTool {
             .and_then(|v| v.as_str())
             .map(String::from);
 
+        // Bake `oc://` URLs / `here` to their CONCRETE form at create time
+        // (#148): the row stores only `channel:chat[:thread]`, resolved once
+        // against live ownership maps — the job never re-resolves at fire
+        // time, so a later channel re-bind never silently moves delivery.
+        let deliver_to = match &deliver_to {
+            Some(raw) => match bake_delivery_target(raw, context).await {
+                Ok(baked) => Some(baked),
+                Err(reason) => {
+                    return Ok(ToolResult::error(format!(
+                        "Cannot create job: {reason}"
+                    )));
+                }
+            },
+            None => None,
+        };
+
+        // Fail-fast delivery validation (#107): a deliver_to whose credential
+        // cannot be resolved means EVERY future run would silently drop its
+        // result (scheduler logs a warning nobody associates with the job).
+        // Refuse at the boundary instead — the same lookup the delivery path
+        // itself uses, so this can never disagree with runtime reality.
+        if let Some(ref target) = deliver_to
+            && let Err(reason) = validate_delivery_target(target)
+        {
+            return Ok(ToolResult::error(format!(
+                "Cannot create job: delivery target would silently fail — {reason} \
+                 Fix the channel credential in keys.toml (or omit deliver_to) and retry."
+            )));
+        }
         let job = CronJob::new(
             name.to_string(),
             cron_expr.to_string(),
@@ -258,7 +288,7 @@ impl CronManageTool {
         )))
     }
 
-    async fn update_job(&self, input: &Value) -> Result<ToolResult> {
+    async fn update_job(&self, input: &Value, context: &ToolExecutionContext) -> Result<ToolResult> {
         let job_id = match input.get("job_id").and_then(|v| v.as_str()) {
             Some(id) if !id.is_empty() => id,
             _ => {
@@ -385,7 +415,37 @@ impl CronManageTool {
             match key {
                 "provider" => patch.provider = Some(value),
                 "model" => patch.model = Some(value),
-                "deliver_to" => patch.deliver_to = Some(value),
+                "deliver_to" => {
+                    // Fail-fast on update too (#107): a newly-set target whose
+                    // credential can't resolve would silently drop every
+                    // future run's result. override_change yields
+                    // Option<String>: None = clear (legal), Some(v) = set —
+                    // validate before accepting.
+                    match value {
+                        None => patch.deliver_to = Some(None),
+                        Some(v) if v.is_empty() => patch.deliver_to = Some(None),
+                        Some(v) => {
+                            // Bake `oc://` URLs / `here` at update time too
+                            // (#148) — same create-time law: the row keeps
+                            // only the concrete baked form.
+                            let v = match bake_delivery_target(&v, context).await {
+                                Ok(baked) => baked,
+                                Err(reason) => {
+                                    return Ok(ToolResult::error(format!(
+                                        "Cannot update job: {reason}"
+                                    )));
+                                }
+                            };
+                            if let Err(reason) = validate_delivery_target(&v) {
+                                return Ok(ToolResult::error(format!(
+                                    "Cannot update job: delivery target would silently fail — {reason} \
+                                     Fix the channel credential in keys.toml (or clear deliver_to) and retry."
+                                )));
+                            }
+                            patch.deliver_to = Some(Some(v));
+                        }
+                    }
+                }
                 _ => patch.deliver_api_key = Some(value),
             }
         }
@@ -752,4 +812,128 @@ fn override_change(
         String::new()
     };
     (true, Some(new_val), line)
+}
+/// Validate a `deliver_to` target BEFORE a job goes live (#107). Mirrors the
+/// credential resolution the scheduler's delivery path performs, so a target
+/// that passes here can still fail transiently at send time — but never
+/// fails on a *missing* credential. Returns Err(reason) when every future
+/// run would silently drop its result.
+/// Resolve an `oc://` target URL (or the `here` token) to its CONCRETE
+/// deliver_to form at CREATE/UPDATE time (#148, D11 bake law). The cron job
+/// row stores only `telegram:<chat>[:<thread>]` / `discord:<id>` / … — never
+/// a URL — so the fire-time delivery path stays legacy-grammar-only and the
+/// job's target survives the originating session's death. `here` and session
+/// URLs resolve against the ambient `origin_target` stamp + the live session
+/// table; a headless surface (no origin) refuses `here` loudly.
+///
+/// Cron turns deliver ONLY to the baked target: a URL is resolved once, at
+/// the moment the human approved the job — later channel re-binds never
+/// silently move an existing job's delivery.
+pub(crate) async fn bake_delivery_target(
+    raw: &str,
+    context: &ToolExecutionContext,
+) -> std::result::Result<String, String> {
+    if !is_target_url(raw) {
+        return Ok(raw.to_string()); // legacy grammar or webhook — untouched
+    }
+
+    // Live world: the ChannelManager behind the tool context's session's
+    // agent, when the surface wired one. Interactive sessions have it; cron
+    // and daemon surfaces do not — `here` then refuses (no origin) and
+    // channel-authority URLs refuse (no reverse maps to prove ownership).
+    let world = context
+        .world
+        .clone()
+        .ok_or_else(|| {
+            format!(
+                "'{raw}' needs a live channel surface to resolve (no channel manager on this \
+                 surface) — pass a concrete target like 'telegram:<chat>[:<thread>]'"
+            )
+        })?;
+
+    // Sessions from the DB for the resolver's session-authority arm.
+    let sessions = match &context.service_context {
+        Some(sc) => crate::services::SessionService::new(sc.clone())
+            .list_sessions(crate::db::repository::SessionListOptions {
+                include_archived: false,
+                limit: None,
+                offset: 0,
+                query: None,
+                include_subagents: false,
+            })
+            .await
+            .map_err(|e| format!("cannot list sessions to resolve '{raw}': {e}"))?,
+        None => Vec::new(),
+    };
+
+    let origin = context
+        .origin_target
+        .as_deref()
+        .map(std::borrow::ToOwned::to_owned);
+
+    let resolved = resolve_target(raw, origin.as_ref(), world.as_ref(), &sessions)
+        .await
+        .map_err(|e| format!("cannot resolve delivery target '{raw}': {e}"))?;
+
+    let baked = resolved.deliver_to();
+    if baked.is_empty() {
+        return Err(format!(
+            "'{raw}' resolved to a bare session with no channel binding — \
+             nothing concrete to bake into deliver_to"
+        ));
+    }
+    Ok(baked)
+}
+
+pub(crate) fn validate_delivery_target(target: &str) -> std::result::Result<(), String> {
+    // Generic webhook: no credential read at delivery time (Bearer key is
+    // job-supplied and optional) — always valid.
+    if target.starts_with("http://") || target.starts_with("https://") {
+        return Ok(());
+    }
+
+    let Some((channel, target_id)) = target.split_once(':') else {
+        return Err(format!(
+            "'{target}' is not 'channel:id' or an HTTP(S) URL"
+        ));
+    };
+    if target_id.trim().is_empty() {
+        return Err(format!("'{target}' has an empty id"));
+    }
+
+    match channel {
+        "telegram" => {
+            #[cfg(feature = "telegram")]
+            {
+                if crate::cron::scheduler::read_channel_secret("telegram", "token").is_none() {
+                    return Err("no Telegram bot token in keys.toml (channels.telegram.token)"
+                        .to_string());
+                }
+            }
+            Ok(())
+        }
+        "discord" => {
+            #[cfg(feature = "discord")]
+            {
+                if crate::cron::scheduler::read_channel_secret("discord", "token").is_none() {
+                    return Err("no Discord bot token in keys.toml (channels.discord.token)"
+                        .to_string());
+                }
+            }
+            Ok(())
+        }
+        "slack" => {
+            #[cfg(feature = "slack")]
+            {
+                if crate::cron::scheduler::read_channel_secret("slack", "token").is_none() {
+                    return Err("no Slack bot token in keys.toml (channels.slack.token)"
+                        .to_string());
+                }
+            }
+            Ok(())
+        }
+        other => Err(format!(
+            "unknown delivery channel '{other}' (valid: telegram, discord, slack, or an HTTP(S) URL)"
+        )),
+    }
 }

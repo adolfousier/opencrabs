@@ -2291,30 +2291,16 @@ pub(crate) async fn cmd_evolve(config: &crate::config::Config, check_only: bool)
     use crate::brain::tools::evolve::EvolveTool;
     use crate::brain::tools::{Tool, ToolExecutionContext};
     use serde_json::json;
-    use std::collections::HashMap;
 
     let tool = EvolveTool::new(None);
     let input = json!({
         "check_only": false,
         "current_user_version": current_user_version
     });
-    let context = ToolExecutionContext {
-        session_provider: None,
-        session_id: uuid::Uuid::new_v4(),
-        working_directory: std::env::current_dir().unwrap_or_default(),
-        env_vars: HashMap::new(),
-        auto_approve: true, // CLI user explicitly invoked evolve
-        timeout_secs: 300,
-        sudo_callback: None,
-        ssh_callback: None,
-        shared_working_directory: None,
-        service_context: None,
-        progress_callback: None,
-        background_manager: None,
-        plan_session_override: None,
-        subagent_manager: None,
-        parent_tool_registry: None,
-    };
+    let mut context = ToolExecutionContext::new(uuid::Uuid::new_v4())
+        .with_working_directory(std::env::current_dir().unwrap_or_default())
+        .with_auto_approve(true);
+    context.timeout_secs = 300;
 
     let result = tool.execute(input, &context).await?;
     println!("{}", result.output);

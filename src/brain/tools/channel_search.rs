@@ -116,10 +116,18 @@ impl Tool for ChannelSearchTool {
                         // One id, in one place (#985). This used to print the
                         // chat id twice, the first time quoted directly after
                         // the name, where it read as a handle rather than the
-                        // same number again.
+                        // same number again. The oc:// form (#148) is the
+                        // target-URL half of the dual-form listing: raw id
+                        // for humans, URL for targeting tools.
                         format!(
-                            "- [{}] {} (id={}), {} msgs, last: {}",
-                            c.channel, name, c.channel_chat_id, c.message_count, ts
+                            "- [{}] {} (id={}, target `oc://{}/{}`), {} msgs, last: {}",
+                            c.channel,
+                            name,
+                            c.channel_chat_id,
+                            c.channel,
+                            c.channel_chat_id,
+                            c.message_count,
+                            ts
                         )
                     })
                     .collect();

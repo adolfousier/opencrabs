@@ -102,6 +102,11 @@ async fn resolve_jid(
         let jid: Jid = jid_str
             .parse()
             .map_err(|e| ToolResult::error(format!("Invalid phone number format: {}", e)))?;
+        if !crate::cron::send_scope::may_send("whatsapp", &jid_str) {
+            let reason = crate::cron::send_scope::refusal_for("whatsapp", &jid_str);
+            tracing::warn!("whatsapp_send: {reason}");
+            return Err(ToolResult::error(reason));
+        }
         Ok((jid, jid_str))
     } else {
         let jid_str = whatsapp_state.owner_jid().await.ok_or_else(|| {
@@ -114,6 +119,11 @@ async fn resolve_jid(
         let jid: Jid = jid_str
             .parse()
             .map_err(|e| ToolResult::error(format!("Invalid owner JID: {}", e)))?;
+        if !crate::cron::send_scope::may_send("whatsapp", &jid_str) {
+            let reason = crate::cron::send_scope::refusal_for("whatsapp", &jid_str);
+            tracing::warn!("whatsapp_send: {reason}");
+            return Err(ToolResult::error(reason));
+        }
         Ok((jid, jid_str))
     }
 }

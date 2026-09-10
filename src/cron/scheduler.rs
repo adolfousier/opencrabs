@@ -805,28 +805,52 @@ async fn execute_job(
         }
     }
 
-    // The only chat this turn may send to, taken from the job's own
-    // configuration. A job with no `deliver_to` may send to none: its output
+    // Permitted destinations for this turn, taken from the job's own
+    // configuration (#148: authority-aware across telegram, discord, slack,
+    // whatsapp). A job with no `deliver_to` may send to none: its output
     // lives in its session and the scheduler is the only thing that speaks.
     // Scoped across the whole turn so it holds inside every tool call, and
     // task-local so it never reaches a sibling job on the scheduler.
-    // The scope is chat-level: a `telegram:<chat_id>:<thread_id>` target
-    // (#104) still permits exactly that chat.
-    let permitted_chat = job
+    let permitted_targets: Option<Vec<crate::cron::send_scope::PermittedTarget>> = job
         .deliver_to
         .as_deref()
-        .and_then(|targets| {
+        .map(|targets| {
             targets
                 .split(',')
                 .map(str::trim)
-                .find_map(|t| t.strip_prefix("telegram:"))
-                .and_then(parse_telegram_target)
-        })
-        .map(|(chat_id, _)| chat_id);
+                .filter(|t| !t.is_empty())
+                .filter_map(|t| {
+                    if let Some(rest) = t.strip_prefix("telegram:") {
+                        parse_telegram_target(rest)
+                            .map(|(chat_id, _)| crate::cron::send_scope::PermittedTarget {
+                                channel: "telegram",
+                                target_id: chat_id.to_string(),
+                            })
+                    } else if let Some(rest) = t.strip_prefix("discord:") {
+                        Some(crate::cron::send_scope::PermittedTarget {
+                            channel: "discord",
+                            target_id: rest.to_string(),
+                        })
+                    } else if let Some(rest) = t.strip_prefix("slack:") {
+                        Some(crate::cron::send_scope::PermittedTarget {
+                            channel: "slack",
+                            target_id: rest.to_string(),
+                        })
+                    } else {
+                        t.strip_prefix("whatsapp:").map(|rest| {
+                            crate::cron::send_scope::PermittedTarget {
+                                channel: "whatsapp",
+                                target_id: rest.to_string(),
+                            }
+                        })
+                    }
+                })
+                .collect()
+        });
 
     // Execute with auto-approved tools (no interactive user)
-    let result = crate::cron::send_scope::with_send_target(
-        permitted_chat,
+    let result = crate::cron::send_scope::with_permitted_targets(
+        permitted_targets,
         agent.send_message_with_tools_and_callback(
             session_id,
             job.prompt.clone(),
@@ -977,6 +1001,19 @@ async fn deliver_result(
     // HTTP(S) URL — generic webhook delivery
     if deliver_to.starts_with("http://") || deliver_to.starts_with("https://") {
         deliver_http(deliver_to, job_name, content, api_key).await;
+        return None;
+    }
+
+    // Leaked `oc://` target URL at fire time (#148 loud failure pin):
+    // cron targets must be baked at create/update time. A leaked URL here
+    // means the bake step was bypassed — refuse loudly and record the failure.
+    if crate::channels::target_resolver::is_target_url(deliver_to) {
+        let reason = format!(
+            "Unbaked target URL '{deliver_to}' reached delivery — oc:// targets must be baked at \
+             create/update time (#148); refusing fire-time resolution"
+        );
+        tracing::error!("{} for job '{}'", reason, job_name);
+        record_delivery_failure(pool, run_id, &reason).await;
         return None;
     }
 
