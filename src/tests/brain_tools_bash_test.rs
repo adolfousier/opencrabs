@@ -123,10 +123,11 @@ async fn test_bash_background_explicit_true_fails_when_unavailable() {
 
     let result = tool.execute(input, &context).await.unwrap();
     assert!(!result.success);
+    let err = result.error.as_deref().unwrap_or(&result.output);
     assert!(
+        err.contains("Background execution is unavailable"),
+        "expected error message, got: {:?}",
         result
-            .output
-            .contains("Background execution is unavailable")
     );
 }
 
@@ -143,10 +144,11 @@ async fn test_bash_background_explicit_true_refuses_sudo() {
 
     let result = tool.execute(input, &context).await.unwrap();
     assert!(!result.success);
+    let err = result.error.as_deref().unwrap_or(&result.output);
     assert!(
+        err.contains("Cannot run sudo commands in the background"),
+        "expected error message, got: {:?}",
         result
-            .output
-            .contains("Cannot run sudo commands in the background")
     );
 }
 
