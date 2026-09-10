@@ -648,7 +648,7 @@ pub(crate) async fn handle_message(
         let agent_c = agent.clone();
         let tid = topic_id;
         let handle = tokio::spawn(async move {
-            save_incoming_files_to_tmp(&bot_c, &msg_c, &bt).await;
+            save_incoming_files_to_tmp(&bot_c, &msg_c, &bt, msg_c.thread_id.map(|t| t.0.0)).await;
 
             // Archive photos to project dir on arrival when a session is
             // already bound to this chat. This eliminates the race entirely
@@ -657,7 +657,8 @@ pub(crate) async fn handle_message(
             let chat_id = msg_c.chat.id.0;
             if msg_c.photo().is_some()
                 && let Some(session_id) = ts_inner.chat_session(chat_id, tid).await
-                && let Some(photo_path) = find_recent_tmp_file(chat_id, "photo", 300)
+                && let Some(photo_path) =
+                    find_recent_tmp_file(chat_id, "photo", 300, tid.unwrap_or(0))
             {
                 // Ephemeral feedback so the user sees something immediately
                 let feedback_id = match message_in_thread(
@@ -1277,7 +1278,8 @@ pub(crate) async fn handle_message(
     if !is_dm
         && msg.voice().is_none()
         && voice_config.stt_enabled
-        && let Some(voice_path) = find_recent_voice_in_tmp(msg.chat.id.0, 300)
+        && let Some(voice_path) =
+            find_recent_voice_in_tmp(msg.chat.id.0, 300, topic_id.unwrap_or(0))
     {
         match std::fs::read(&voice_path) {
             Ok(audio_bytes) => {
@@ -1309,7 +1311,9 @@ pub(crate) async fn handle_message(
         // tasks have finished writing to disk before we scan.
         telegram_state.drain_pending_saves(msg.chat.id.0).await;
 
-        for photo_path in find_all_recent_tmp_files(msg.chat.id.0, "photo", 300) {
+        for photo_path in
+            find_all_recent_tmp_files(msg.chat.id.0, "photo", 300, topic_id.unwrap_or(0))
+        {
             tracing::info!(
                 "Telegram: picked up recent photo from tmp: {}",
                 photo_path.display()
