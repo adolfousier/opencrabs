@@ -867,6 +867,26 @@ impl AgentService {
         self
     }
 
+    /// Carry an ALREADY-BUILT background manager and its enqueue route into a
+    /// rebuilt service (#1504).
+    ///
+    /// Unlike [`Self::with_message_enqueue_callback`], this does NOT create a
+    /// fresh manager: it reuses the existing `Arc`. A provider switch rebuilds
+    /// the whole service (`rebuild_agent_service`), and that path used to drop
+    /// the enqueue callback, so the rebuilt service had no background manager
+    /// and long commands stopped detaching for every session after the switch.
+    /// Reusing the same manager keeps detachment working AND keeps any in-flight
+    /// detached task tracked by the one manager rather than orphaning it.
+    pub fn with_existing_background_manager(
+        mut self,
+        manager: Option<std::sync::Arc<super::background_tasks::BackgroundTaskManager>>,
+        enqueue: Option<super::types::MessageEnqueueCallback>,
+    ) -> Self {
+        self.background_manager = manager;
+        self.message_enqueue_callback = enqueue;
+        self
+    }
+
     /// The background-task manager, if an enqueue producer was wired (#722).
     pub fn background_manager(
         &self,

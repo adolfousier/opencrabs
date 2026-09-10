@@ -814,6 +814,7 @@ pub mod pdf_vision_test;
 pub mod question_common_test;
 pub mod quiet_delivery_test;
 pub mod read_state_test;
+pub mod rebuild_preserves_background_manager_test;
 pub mod repetition_error_message_test;
 pub mod restart_recovery_test;
 pub mod restart_replay_context_test;

@@ -1661,6 +1661,15 @@ impl App {
             .with_working_directory(working_dir)
             .with_auto_approve_tools(self.approval_auto_always);
 
+        // Carry the existing background-task manager and its enqueue route into
+        // the rebuilt service (#1504). Without this, a provider switch rebuilds
+        // the service without a background manager, and long commands (cargo
+        // test/build/clippy, …) stop detaching for every session afterward.
+        new_agent_service = new_agent_service.with_existing_background_manager(
+            self.agent_service.background_manager(),
+            self.agent_service.message_enqueue_callback(),
+        );
+
         if let Some(mgr) = self.agent_service.subagent_manager() {
             new_agent_service = new_agent_service.with_subagent_manager(mgr);
         }
