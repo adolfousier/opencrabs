@@ -150,6 +150,18 @@ impl Tool for CodeExecTool {
     async fn execute(&self, input: Value, context: &ToolExecutionContext) -> Result<ToolResult> {
         let input: CodeExecInput = serde_json::from_value(input)?;
 
+        // The bash hard blocklist applies here too (OC-06). execute_code writes
+        // and runs code on the host; a bash/sh body, or a destructive command
+        // embedded in any interpreter payload, must not slip past the floor
+        // that bash enforces. Scanned for every language, since os.system /
+        // subprocess can carry the same command from python or node.
+        if let Some(reason) = super::bash::assert_command_allowed(&input.code) {
+            return Ok(ToolResult::error(format!(
+                "execute_code refused: {reason}. This is on the command blocklist and cannot be \
+                 run through execute_code either (OC-06)."
+            )));
+        }
+
         // Determine interpreter and file extension
         let (interpreter, extension, extra_args) = match input.language.as_str() {
             "python" | "python3" => ("python3", "py", vec![]),

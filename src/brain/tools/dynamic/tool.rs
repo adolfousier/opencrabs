@@ -484,6 +484,15 @@ impl DynamicTool {
                 ));
             }
         };
+        // The bash hard blocklist applies to dynamic shell tools too (OC-06):
+        // a `sh -c` executor ran with no floor, so a dynamic tool (or a
+        // `{{param}}` expanded into one) could run what bash refuses. Checked
+        // on the rendered command, after parameter substitution.
+        if let Some(reason) = super::super::bash::assert_command_allowed(&cmd) {
+            return Ok(ToolResult::error(format!(
+                "dynamic shell tool refused: {reason}. This is on the command blocklist (OC-06)."
+            )));
+        }
         // Detach stdin from the parent TTY so mouse-capture bytes don't
         // leak into captured stdout (same TUI-bleed issue as bash.rs).
         let output = tokio::process::Command::new("sh")

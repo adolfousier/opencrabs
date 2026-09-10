@@ -852,6 +852,22 @@ fn normalize_rm_target(tok: &str) -> String {
     }
 }
 
+/// The single command-safety floor for every execution tool (OC-06).
+///
+/// `bash` documents its hard blocklist as applying even under approval, but
+/// `execute_code`, dynamic shell executors, and cron-embedded shell ran their
+/// commands without it, so `rm -rf ~` (and fork bombs, `/etc/shadow` reads, …)
+/// through those tools was a complete bypass of the "immovable floor". This
+/// runs the hardcoded blocklist and the runtime TOML blocklist, the same pair
+/// `bash` itself uses, and is what those other tools now call. Returns the
+/// reason a command is refused, or None when it is allowed.
+pub(crate) fn assert_command_allowed(command: &str) -> Option<String> {
+    if let Some(reason) = check_blocked_command(command) {
+        return Some(reason.to_string());
+    }
+    check_toml_blocklist(command)
+}
+
 pub(crate) fn check_blocked_command(command: &str) -> Option<&'static str> {
     check_blocked_inner(command, 0)
 }

@@ -60,6 +60,31 @@ impl DynamicToolLoader {
         // tools.toml and destroy every existing tool (issue #235).
         let mut config = Self::read_config(path)?;
         let name = def.name.clone();
+
+        // A dynamic tool must not shadow a core tool (OC-06). `add_tool`
+        // unregisters any existing tool of that name before registering, so a
+        // dynamic tool named `bash` would replace the real, blocklist-enforcing
+        // one with a model-authored, unguarded stand-in. Reserve the names of
+        // the security-critical execution and file tools.
+        const RESERVED: &[&str] = &[
+            "bash",
+            "execute_code",
+            "read_file",
+            "write_file",
+            "edit_file",
+            "http_request",
+            "web_scrape",
+            "evolve",
+            "rebuild",
+            "cron_manage",
+            "tool_manage",
+        ];
+        if RESERVED.contains(&name.as_str()) {
+            anyhow::bail!(
+                "'{name}' is a reserved core tool name and cannot be redefined as a dynamic tool"
+            );
+        }
+
         config.tools.retain(|d| d.name != name);
         let should_register = def.enabled;
         config.tools.push(def.clone());
