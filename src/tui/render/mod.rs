@@ -28,8 +28,6 @@ pub(crate) mod theme;
 pub(crate) mod theme_picker;
 // Boot-apply in tui::runner references presets::by_name at startup.
 pub(crate) mod presets;
-#[cfg(test)]
-mod presets_test;
 mod title;
 mod tools;
 pub(crate) mod user_themes;

@@ -5,12 +5,12 @@
 //! fail. Sources are named per preset; the audit trail lives in
 //! ~/.opencrabs/projects/opencrabs/research (verification receipts).
 
-use super::palette;
-use super::presets::{
+use crate::tui::render::palette;
+use crate::tui::render::presets::{
     self, ALUCARD, CATPPUCCIN_LATTE, CATPPUCCIN_MOCHA, DRACULA, MONOKAI, SOLARIZED_DARK,
     SOLARIZED_LIGHT,
 };
-use super::theme::{self, Role};
+use crate::tui::render::theme::{self, Role};
 use ratatui::style::Color;
 
 const fn rgb(hex: u32) -> Color {
