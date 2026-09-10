@@ -146,6 +146,18 @@ impl Tool for ReadTool {
             Err(msg) => return Ok(ToolResult::error(msg)),
         };
 
+        // Confidential-path deny (OC-08): keys.toml, SSH private keys, .env,
+        // .pem, /etc/shadow and friends are refused at the harness, not left to
+        // a brain-file instruction the model may ignore. Reading them would put
+        // raw secrets into the conversation, the DB, and any channel.
+        if let Some(reason) = super::confidential::is_confidential(&path) {
+            return Ok(ToolResult::error(format!(
+                "read_file refused: {} is confidential ({reason}) and is not readable through \
+                 tools (OC-08). Handle it outside the agent if you truly need to.",
+                path.display()
+            )));
+        }
+
         // Bounce binary media (images/video/docs) to the right tool — reading
         // their bytes as text is meaningless, and the model otherwise loops on
         // read_file for a dropped screenshot instead of calling analyze_image.

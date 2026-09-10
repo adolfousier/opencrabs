@@ -7,6 +7,7 @@ pub mod brain_file_safety;
 pub mod brain_verify;
 pub mod catalog;
 pub(crate) mod classify;
+pub(crate) mod confidential;
 pub mod epistemic;
 pub mod error;
 pub mod registry;
