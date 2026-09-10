@@ -1907,6 +1907,29 @@ pub(crate) async fn cmd_service(operation: ServiceCommands) -> Result<()> {
                         .collect::<Vec<_>>()
                         .join("\n");
 
+                // Daemon stdout/stderr go to the same private log directory as
+                // every other log, not /tmp (OC-05). /tmp is world-readable, and
+                // daemon stderr carries URLs, tracing events, and chat-adjacent
+                // text. The directory is created 0700 so a second local user
+                // cannot list or read it.
+                let log_dir = crate::logging::log_dir();
+                if let Err(e) = std::fs::create_dir_all(&log_dir) {
+                    tracing::warn!(
+                        "service install: could not create log dir {}: {e}",
+                        log_dir.display()
+                    );
+                }
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ =
+                        std::fs::set_permissions(&log_dir, std::fs::Permissions::from_mode(0o700));
+                }
+                let out_log = log_dir.join(format!("daemon{log_suffix}.out.log"));
+                let err_log = log_dir.join(format!("daemon{log_suffix}.err.log"));
+                let out_log_str = out_log.to_string_lossy();
+                let err_log_str = err_log.to_string_lossy();
+
                 let plist = format!(
                     r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -1923,9 +1946,9 @@ pub(crate) async fn cmd_service(operation: ServiceCommands) -> Result<()> {
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/tmp/opencrabs-daemon{log_suffix}.out.log</string>
+    <string>{out_log_str}</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/opencrabs-daemon{log_suffix}.err.log</string>
+    <string>{err_log_str}</string>
 </dict>
 </plist>"#
                 );

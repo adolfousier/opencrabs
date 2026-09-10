@@ -819,6 +819,23 @@ pub fn atomic_write(path: &std::path::Path, contents: &str) -> std::io::Result<(
     ));
 
     fs::write(&tmp, contents)?;
+
+    // Owner-only before the file is ever visible at its final name (OC-05).
+    // config.toml and especially keys.toml hold provider keys and channel
+    // tokens; every writer funnels through here, and they were landing at the
+    // process umask (0644), world-readable on a default home. Set 0600 on the
+    // temp file so the rename publishes an already-private file rather than a
+    // readable one that a later chmod would race.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(e) = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600)) {
+            // Do not publish a secret file we could not lock down.
+            let _ = fs::remove_file(&tmp);
+            return Err(e);
+        }
+    }
+
     if let Err(e) = fs::rename(&tmp, path) {
         // Never strand the temp file beside the config it failed to become.
         if let Err(cleanup) = fs::remove_file(&tmp) {

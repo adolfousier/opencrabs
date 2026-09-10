@@ -41,12 +41,26 @@ pub(crate) const REDACTED: &str = ":<redacted>";
 /// Borrows when there is nothing to redact, which is the overwhelming majority
 /// of log lines, so the common path allocates nothing.
 pub(crate) fn scrub(text: &str) -> Cow<'_, str> {
-    // Cheap reject before the regex: a line with no "bot" substring cannot
-    // hold a token, and that is nearly every line.
-    if !text.contains("bot") {
-        return Cow::Borrowed(text);
+    // Telegram bot tokens first: they have their own shape (bot<id>:<secret>)
+    // and their own replacement that keeps the public bot id for diagnosis. The
+    // "bot" cheap-reject keeps this off nearly every line.
+    let tg: Cow<'_, str> = if text.contains("bot") {
+        token_re().replace_all(text, format!("bot${{1}}{REDACTED}").as_str())
+    } else {
+        Cow::Borrowed(text)
+    };
+
+    // Broad secret scrub on top (OC-05): provider keys (sk-, xoxb-, ghp_, …),
+    // Authorization: Bearer, PEM blocks — everything the channel-output redactor
+    // covers, now at the log writer too and unconditional. The log scrub used to
+    // catch only Telegram bot tokens, so any other credential that rode a
+    // provider error's Display landed in the daily log in plaintext.
+    match crate::utils::sanitize::redact_secrets_for_logs(&tg) {
+        // Broad pass changed something: take its owned result.
+        Cow::Owned(s) => Cow::Owned(s),
+        // Broad pass found nothing: keep whatever the Telegram pass produced.
+        Cow::Borrowed(_) => tg,
     }
-    token_re().replace_all(text, format!("bot${{1}}{REDACTED}").as_str())
 }
 
 /// True when `text` still carries something shaped like a bot token. Exists so

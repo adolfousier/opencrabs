@@ -556,6 +556,23 @@ pub fn redact_secrets_scoped(text: &str, is_dm: bool) -> String {
 
 /// The secret-scrubbing core, with NO config check — gated by
 /// [`redact_secrets`] (global flag) or [`redact_secrets_scoped`] (scope).
+/// Unconditional secret scrub for the log writer (OC-05).
+///
+/// The channel-output redactor is gated by `agent.redact_sensitive_data`, which
+/// is a display concern: a DM may deliberately show the owner their own keys.
+/// Logs are different — a provider key or channel token written to
+/// `~/.opencrabs/logs/` or a daemon stderr is a credential on disk regardless of
+/// that flag, so this ignores the flag and always scrubs. Borrows when there is
+/// nothing to redact, so the common log line allocates nothing.
+pub(crate) fn redact_secrets_for_logs(text: &str) -> std::borrow::Cow<'_, str> {
+    let out = redact_secrets_core(text);
+    if out == text {
+        std::borrow::Cow::Borrowed(text)
+    } else {
+        std::borrow::Cow::Owned(out)
+    }
+}
+
 fn redact_secrets_core(text: &str) -> String {
     let mut result = text.to_string();
 
