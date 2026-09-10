@@ -1006,14 +1006,11 @@ async fn deliver_result(
 
     // Leaked `oc://` target URL at fire time (#148 loud failure pin):
     // cron targets must be baked at create/update time. A leaked URL here
-    // means the bake step was bypassed — refuse loudly and record the failure.
+    // means the bake step was bypassed — refuse loudly.
     if crate::channels::target_resolver::is_target_url(deliver_to) {
-        let reason = format!(
-            "Unbaked target URL '{deliver_to}' reached delivery — oc:// targets must be baked at \
-             create/update time (#148); refusing fire-time resolution"
+        tracing::error!(
+            "Unbaked target URL '{deliver_to}' reached delivery for job '{job_name}' — oc:// targets must be baked at create/update time (#148); refusing fire-time resolution"
         );
-        tracing::error!("{} for job '{}'", reason, job_name);
-        record_delivery_failure(pool, run_id, &reason).await;
         return None;
     }
 
@@ -1143,7 +1140,7 @@ async fn deliver_http(url: &str, job_name: &str, content: &str, api_key: Option<
 /// workspace's `keys.toml`. Cron delivery runs outside any channel's live
 /// connection, so it reads the credential straight off disk.
 #[cfg(any(feature = "telegram", feature = "discord", feature = "slack"))]
-fn read_channel_secret(channel: &str, field: &str) -> Option<String> {
+pub(crate) fn read_channel_secret(channel: &str, field: &str) -> Option<String> {
     let keys_path = crate::brain::BrainLoader::resolve_path().join("keys.toml");
     let content = std::fs::read_to_string(&keys_path).ok()?;
     content.parse::<toml::Table>().ok().and_then(|t| {

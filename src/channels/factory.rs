@@ -71,7 +71,6 @@ impl ChannelFactory {
             session_updated_tx: OnceLock::new(),
             runtime_info: OnceLock::new(),
             subagent_manager: OnceLock::new(),
-            subagent_manager: OnceLock::new(),
             channel_manager: OnceLock::new(),
         }
     }
