@@ -40,6 +40,23 @@ impl EvolveTool {
             }
         };
 
+        // Root-swap opt-out (OC-03). Default allows it, so an existing root
+        // daemon keeps auto-updating and a forgotten flag never breaks updates.
+        // Only an operator who explicitly set evolve_allow_root=false is
+        // refused here, with a note on what to do. The checksum verification
+        // below is the real integrity gate and runs regardless.
+        if super::verify::running_as_root()
+            && !crate::config::Config::current().agent.evolve_allow_root
+        {
+            return Ok(ToolResult::error(
+                "Refusing to self-update while running as root: [agent] evolve_allow_root is \
+                 false. A root binary swap means a compromised release would run as root. To \
+                 proceed, set [agent] evolve_allow_root = true (the default), or run /rebuild to \
+                 build from source under a non-root user."
+                    .to_string(),
+            ));
+        }
+
         let is_windows = std::env::consts::OS == "windows";
         let ext = if is_windows { "zip" } else { "tar.gz" };
         let expected_asset = format!("opencrabs-{}-{}.{}", latest_tag, suffix, ext);
@@ -90,6 +107,15 @@ impl EvolveTool {
                 )));
             }
         };
+
+        // Pin the asset host before fetching (OC-03): a release JSON whose
+        // browser_download_url points off-GitHub must not be fetched at all.
+        if !super::verify::is_allowed_download_host(&download_url) {
+            return Ok(ToolResult::error(format!(
+                "Refusing to download the release asset from an unexpected host: {download_url}. \
+                 Use /rebuild to build from source."
+            )));
+        }
 
         // Download
         if let Some(ref cb) = self.progress {
@@ -183,6 +209,43 @@ impl EvolveTool {
             bytes = archive_bytes.len(),
             session_id = %sid,
             "evolve: download complete"
+        );
+
+        // Integrity: verify the archive against the release's SHA256SUMS before
+        // it is ever extracted or swapped in (OC-03). The prior gate was only a
+        // `--version` health probe, which a hostile binary passes. Fails closed:
+        // no SHA256SUMS, no entry, or a mismatch aborts the swap. The asset name
+        // in SHA256SUMS is the download URL's basename.
+        let sums_asset =
+            super::verify::asset_basename(&download_url).unwrap_or_else(|| expected_asset.clone());
+        if let Some(ref cb) = self.progress {
+            cb(
+                sid,
+                ProgressEvent::IntermediateText {
+                    text: "Verifying release checksum...".into(),
+                    reasoning: None,
+                },
+            );
+        }
+        if let Err(reason) =
+            super::verify::verify_asset_checksum(client, release, &sums_asset, &archive_bytes).await
+        {
+            tracing::error!(
+                target: "evolve",
+                asset = %sums_asset,
+                %reason,
+                session_id = %sid,
+                "evolve: checksum verification failed, refusing to swap"
+            );
+            return Ok(ToolResult::error(format!(
+                "Refusing to update: {reason}. Use /rebuild to build from source."
+            )));
+        }
+        tracing::info!(
+            target: "evolve",
+            asset = %sums_asset,
+            session_id = %sid,
+            "evolve: checksum verified against SHA256SUMS"
         );
 
         // Extract

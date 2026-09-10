@@ -25,6 +25,7 @@ pub(crate) mod release_check;
 mod restart_status;
 pub(crate) mod systemd;
 mod tool;
+pub(crate) mod verify;
 mod via_binary_download;
 mod via_cargo_install;
 

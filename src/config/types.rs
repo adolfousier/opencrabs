@@ -1240,6 +1240,15 @@ pub struct AgentConfig {
     #[serde(default = "default_auto_update")]
     pub auto_update: bool,
 
+    /// Allow an auto-update / `/evolve` binary swap while running as root
+    /// (default: true). Kept true so an existing root daemon keeps updating and
+    /// a forgotten flag never silently breaks updates (OC-03). A
+    /// security-conscious operator can set this false to refuse root swaps; the
+    /// TUI then explains what to do. The checksum verification (SHA256SUMS) is
+    /// the real integrity gate and applies regardless of this flag.
+    #[serde(default = "default_evolve_allow_root")]
+    pub evolve_allow_root: bool,
+
     /// Days to keep a spawned sub-agent's session before it is pruned
     /// (default: 7). `0` disables pruning and keeps them forever.
     ///
@@ -1441,6 +1450,10 @@ fn default_max_tokens() -> u32 {
     65536
 }
 
+fn default_evolve_allow_root() -> bool {
+    true
+}
+
 fn default_auto_update() -> bool {
     true
 }
@@ -1487,6 +1500,7 @@ impl Default for AgentConfig {
             plan_worker_allow_nested: false,
             plan_worker_allow_write: false,
             auto_update: default_auto_update(),
+            evolve_allow_root: default_evolve_allow_root(),
             subagent_session_ttl_days: default_subagent_session_ttl_days(),
             self_improvement_provider: None,
             rsi_enabled: None,

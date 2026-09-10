@@ -407,8 +407,17 @@ profile_id = ""
 # Auto-install new releases on startup (default: true).
 # When true, OpenCrabs checks GitHub on startup and silently installs any
 # new release, then hot-restarts. Set to false if you prefer to be prompted
-# before each update (or to /evolve manually).
+# before each update (or to /evolve manually). Every downloaded binary is
+# verified against the release's published SHA256SUMS before it is swapped in,
+# so a tampered or wrong-host asset is refused regardless of this setting.
 # auto_update = true
+
+# Allow an auto-update or /evolve binary swap while running as root (default:
+# true). Left true so a root daemon keeps updating and a forgotten flag never
+# silently breaks updates. Set false to refuse root swaps; a root binary swap
+# means a compromised release would run as root, so a security-conscious
+# operator may prefer to update under a non-root user via /rebuild.
+# evolve_allow_root = true
 
 # Redact sensitive data from tool outputs and display (default: true).
 # When true, API keys, tokens, passwords, and IP addresses are redacted
