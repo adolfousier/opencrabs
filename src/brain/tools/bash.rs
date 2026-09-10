@@ -266,6 +266,10 @@ struct BashInput {
     /// Optional timeout in seconds (overrides context default)
     #[serde(skip_serializing_if = "Option::is_none")]
     timeout_secs: Option<u64>,
+
+    /// Optional flag to run detached in background (true) or force inline (false)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    background: Option<bool>,
 }
 
 #[async_trait]
@@ -308,6 +312,10 @@ impl Tool for BashTool {
                 "timeout_secs": {
                     "type": "integer",
                     "description": "Optional: Timeout in seconds (default 120, max 600). Use higher values for builds."
+                },
+                "background": {
+                    "type": "boolean",
+                    "description": "Optional: Set to true to run the command in the background (detached), or false to force inline execution. If omitted, uses automatic heuristic detection."
                 }
             },
             "required": ["command"]
@@ -433,50 +441,101 @@ impl Tool for BashTool {
         // Anything else falls through and runs inline exactly as before.
         // #1195: pure workers (allow_nested=false) lose detachment too -
         // their long commands run inline so nothing outlives their verdict.
+        let is_sudo = input.command.trim_start().starts_with("sudo ");
         let nesting_ok = context
             .subagent_manager
             .as_ref()
             .map(|m| m.nesting_allowed_for_session(context.session_id))
             .unwrap_or(true);
-        if let Some(ref mgr) = context.background_manager
-            && !input.command.trim_start().starts_with("sudo ")
-            && nesting_ok
-        {
-            match crate::utils::long_command::classify(&input.command) {
-                Detach::Yes { marker } => {
-                    let label =
-                        crate::brain::agent::service::background_tasks::short_label(&input.command);
-                    tracing::info!(
-                        target: "background_task",
-                        "Detaching '{label}' for session {}: '{marker}' starts a command",
-                        context.session_id
-                    );
-                    mgr.clone().spawn_command(
-                        context.session_id,
-                        context.working_directory.clone(),
-                        label.clone(),
-                        input.command.clone(),
-                    );
-                    return Ok(ToolResult::success(format!(
-                        "Started in the background: {label}\n\nThis is a long-running task, so it \
-                         is running detached. I'll continue this session automatically when it \
-                         finishes — no need to poll or wait. Do other independent work meanwhile \
-                         if there is any."
-                    )));
-                }
-                // Worth a line: the command looks long to a reader, and the
-                // reason it ran inline is not visible anywhere else.
-                Detach::Mentioned { marker } => tracing::debug!(
+
+        // Check explicit background override or heuristic auto-detection
+        match input.background {
+            Some(false) => {
+                tracing::debug!(
                     target: "background_task",
-                    "Running inline: '{marker}' appears only as data (heredoc body or quoted \
-                     argument), not as a command"
-                ),
-                Detach::No => {}
+                    "Forced inline execution (background: false) for session {}",
+                    context.session_id
+                );
+            }
+            Some(true) => {
+                if is_sudo {
+                    return Ok(ToolResult::error(
+                        "Cannot run sudo commands in the background (password prompt requires inline execution)",
+                    ));
+                }
+                if !nesting_ok {
+                    return Ok(ToolResult::error(
+                        "Background execution is disabled in pure worker sessions (allow_nested=false)",
+                    ));
+                }
+                let Some(ref mgr) = context.background_manager else {
+                    return Ok(ToolResult::error(
+                        "Background execution is unavailable on this surface (no background task manager)",
+                    ));
+                };
+
+                let label =
+                    crate::brain::agent::service::background_tasks::short_label(&input.command);
+                tracing::info!(
+                    target: "background_task",
+                    "Explicitly detaching '{label}' for session {} (background: true)",
+                    context.session_id
+                );
+                mgr.clone().spawn_command(
+                    context.session_id,
+                    context.working_directory.clone(),
+                    label.clone(),
+                    input.command.clone(),
+                );
+                return Ok(ToolResult::success(format!(
+                    "Started in the background: {label}\n\nThis is a long-running task, so it \
+                     is running detached. I'll continue this session automatically when it \
+                     finishes — no need to poll or wait. Do other independent work meanwhile \
+                     if there is any."
+                )));
+            }
+            None => {
+                if let Some(ref mgr) = context.background_manager
+                    && !is_sudo
+                    && nesting_ok
+                {
+                    match crate::utils::long_command::classify(&input.command) {
+                        Detach::Yes { marker } => {
+                            let label = crate::brain::agent::service::background_tasks::short_label(
+                                &input.command,
+                            );
+                            tracing::info!(
+                                target: "background_task",
+                                "Detaching '{label}' for session {}: '{marker}' starts a command",
+                                context.session_id
+                            );
+                            mgr.clone().spawn_command(
+                                context.session_id,
+                                context.working_directory.clone(),
+                                label.clone(),
+                                input.command.clone(),
+                            );
+                            return Ok(ToolResult::success(format!(
+                                "Started in the background: {label}\n\nThis is a long-running task, so it \
+                                 is running detached. I'll continue this session automatically when it \
+                                 finishes — no need to poll or wait. Do other independent work meanwhile \
+                                 if there is any."
+                            )));
+                        }
+                        // Worth a line: the command looks long to a reader, and the
+                        // reason it ran inline is not visible anywhere else.
+                        Detach::Mentioned { marker } => tracing::debug!(
+                            target: "background_task",
+                            "Running inline: '{marker}' appears only as data (heredoc body or quoted \
+                             argument), not as a command"
+                        ),
+                        Detach::No => {}
+                    }
+                }
             }
         }
 
         // Detect sudo commands and request password via callback
-        let is_sudo = input.command.trim_start().starts_with("sudo ");
         let sudo_password = if is_sudo {
             if let Some(ref callback) = context.sudo_callback {
                 match callback(input.command.clone()).await {

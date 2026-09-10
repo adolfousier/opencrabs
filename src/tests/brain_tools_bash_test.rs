@@ -85,6 +85,69 @@ fn test_bash_tool_schema() {
     let capabilities = tool.capabilities();
     assert!(capabilities.contains(&ToolCapability::ExecuteShell));
     assert!(capabilities.contains(&ToolCapability::SystemModification));
+
+    let schema = tool.input_schema();
+    assert_eq!(
+        schema["properties"]["background"]["type"],
+        serde_json::json!("boolean")
+    );
+}
+
+#[tokio::test]
+async fn test_bash_background_explicit_false_runs_inline() {
+    let tool = BashTool;
+    let session_id = Uuid::new_v4();
+    let context = ToolExecutionContext::new(session_id).with_auto_approve(true);
+
+    let input = serde_json::json!({
+        "command": "echo 'forced inline'",
+        "background": false
+    });
+
+    let result = tool.execute(input, &context).await.unwrap();
+    assert!(result.success);
+    assert!(result.output.contains("forced inline"));
+}
+
+#[tokio::test]
+async fn test_bash_background_explicit_true_fails_when_unavailable() {
+    let tool = BashTool;
+    let session_id = Uuid::new_v4();
+    // context without background_manager
+    let context = ToolExecutionContext::new(session_id).with_auto_approve(true);
+
+    let input = serde_json::json!({
+        "command": "echo 'background test'",
+        "background": true
+    });
+
+    let result = tool.execute(input, &context).await.unwrap();
+    assert!(!result.success);
+    assert!(
+        result
+            .output
+            .contains("Background execution is unavailable")
+    );
+}
+
+#[tokio::test]
+async fn test_bash_background_explicit_true_refuses_sudo() {
+    let tool = BashTool;
+    let session_id = Uuid::new_v4();
+    let context = ToolExecutionContext::new(session_id).with_auto_approve(true);
+
+    let input = serde_json::json!({
+        "command": "sudo echo 'background sudo'",
+        "background": true
+    });
+
+    let result = tool.execute(input, &context).await.unwrap();
+    assert!(!result.success);
+    assert!(
+        result
+            .output
+            .contains("Cannot run sudo commands in the background")
+    );
 }
 
 #[test]
