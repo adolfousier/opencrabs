@@ -597,3 +597,37 @@ fn followup_guidance_is_free_of_magic_numbers() {
         "guidance must keep naming the tool"
     );
 }
+
+// ── #129: headless brains must not advertise suggest_options ────────────────
+
+#[test]
+fn strip_followup_suggestions_removes_the_paragraph() {
+    let preamble = crate::brain::prompt_builder::BRAIN_PREAMBLE;
+    let stripped = crate::brain::prompt_builder::strip_followup_suggestions(preamble);
+    assert!(
+        !stripped.contains("FOLLOW-UP SUGGESTIONS"),
+        "stripped brain must not contain the FOLLOW-UP SUGGESTIONS header"
+    );
+    assert!(
+        !stripped.contains("suggest_options"),
+        "stripped brain must not name suggest_options anywhere"
+    );
+    // Neighbouring paragraphs must survive untouched.
+    assert!(
+        stripped.contains("CLARIFY BEFORE YOU BUILD")
+            && stripped.contains("WEB / GITHUB / BROWSER ROUTING"),
+        "paragraphs adjacent to the stripped block must survive"
+    );
+    // The stock preamble itself still carries the paragraph (interactive).
+    assert!(preamble.contains("FOLLOW-UP SUGGESTIONS"));
+}
+
+#[test]
+fn strip_followup_suggestions_is_idempotent_on_custom_brains() {
+    let without = "You are OpenCrabs.\n\nFOLLOW-UP SUGGESTIONS is mentioned in prose but the real paragraph header is absent.\n\nMore text.";
+    let out = crate::brain::prompt_builder::strip_followup_suggestions(without);
+    assert_eq!(
+        out, without,
+        "brains without the exact header are unchanged"
+    );
+}

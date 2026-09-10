@@ -1447,6 +1447,9 @@ impl AgentService {
         // ask AgentService for it, and this loop has both.
         tool_context.session_provider = Some(self.provider_name_for_session(session_id));
         tool_context.parent_tool_registry = Some(self.tool_registry.clone());
+        // #129 belt-and-braces: interactive-only tools check this flag and
+        // hard-error instead of parking a verdict nobody sees.
+        tool_context.headless = self.headless;
 
         // Tool execution loop
         let mut iteration = 0;
@@ -6558,6 +6561,7 @@ impl AgentService {
                                     plan_session_override: tool_context.plan_session_override,
                                     subagent_manager: tool_context.subagent_manager.clone(),
                                     parent_tool_registry: tool_context.parent_tool_registry.clone(),
+                                    headless: tool_context.headless,
                                 };
 
                                 // Execute the tool with approved context, racing against cancel

@@ -63,7 +63,7 @@ fn lazy_tools_block_stays_in_cached_prefix_runtime_in_suffix() {
     // deterministic lazy block in the CACHED prefix and pull only the volatile
     // Runtime Info into the suffix (#662). Guards against a refactor pushing
     // volatile content into the cached prefix or lazy content into the suffix.
-    let lazy = tool_access_prompt();
+    let lazy = tool_access_prompt(false);
     let brain = format!(
         "--- SOUL.md ---\nbe kind\n\n\
          --- Runtime Info ---\nModel: qwen3.8-max-preview\nCurrent date: 2026-07-21 (UTC)\n\n\

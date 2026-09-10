@@ -266,6 +266,7 @@ pub mod glob_tool_test;
 pub mod goal_command_test;
 pub mod goal_judge_test;
 pub mod goal_manage_test;
+pub mod headless_tool_surface_test;
 pub mod install_homebrew_test;
 pub mod instance_lock_test;
 pub mod intermediate_text_strip_guard_test;

@@ -21,10 +21,24 @@ use crate::db::Database;
 ///
 /// Browser, channel-send, media, and rebuild/evolve tools are registered
 /// separately by the interactive path — they need managers the daemon lacks.
+///
+/// `headless` gates the two tools that are meaningless without a live user
+/// surface (#129, owner-ruled design in fork issue body, 2026-09-07):
+/// - `session_notify` (parks the notification until a turn-end that never
+///   comes on a one-shot run; sub-agents report via the harness's
+///   final-message relay instead)
+/// - `suggest_options` (renders nowhere headless — no TUI, no channel
+///   handler to consume the option message)
+///
+/// Excluding them here is the PRIMARY gate; the tool-level context guard
+/// (`ToolExecutionContext.headless` → hard `ToolError`) is the
+/// belt-and-braces backstop, so a registration leak fails loudly instead
+/// of silently parking a verdict. Interactive callers pass `false`.
 pub(crate) fn register_core_agent_tools(
     tool_registry: &Arc<ToolRegistry>,
     db: &Database,
     config: &Config,
+    headless: bool,
 ) -> Arc<crate::brain::tools::subagent::SubAgentManager> {
     use crate::brain::tools::{
         bash::BashTool, code_exec::CodeExecTool, config_tool::ConfigTool, context::ContextTool,
@@ -106,9 +120,16 @@ pub(crate) fn register_core_agent_tools(
     tool_registry.register(Arc::new(SlashCommandTool));
     // Session rename — agent can update the current session's title
     tool_registry.register(Arc::new(RenameSessionTool));
-    // Follow-up question — agent asks the user a multi-choice question
-    // mid-task and blocks until they click an option button.
-    tool_registry.register(Arc::new(SuggestOptionsTool));
+    // #129: interactive-surface-only tools. On headless paths (CLI one-shot
+    // run, cron daemon execute, sub-agent spawn) neither tool can reach a
+    // user: session_notify parks until a turn-end relay that never fires on
+    // a one-shot process, and suggest_options renders nowhere. Skipped at
+    // registration; the ToolExecutionContext.headless guard backstops.
+    if !headless {
+        // Follow-up question — agent asks the user a multi-choice question
+        // mid-task and blocks until they click an option button.
+        tool_registry.register(Arc::new(SuggestOptionsTool));
+    }
     // Tool discovery — lets the agent activate extended tools on demand
     // (lazy-tools mode). Holds the registry Arc so it can search all tools;
     // harmless when lazy_tools is off (just one more always-available tool).
@@ -145,7 +166,13 @@ pub(crate) fn register_core_agent_tools(
     ));
     // Cross-session push (issue #1203): needs no manager — deliver_to_session
     // is a free function on the in-process session-route registry.
-    tool_registry.register(Arc::new(crate::brain::tools::subagent::SessionNotifyTool));
+    // #129: interactive-only — parked notifications die with the process on
+    // headless paths (owner ruling C: sub-agents report via the harness's
+    // final-message relay, proven live-fire 2026-09-07). Gated with
+    // suggest_options above; the context guard backstops both.
+    if !headless {
+        tool_registry.register(Arc::new(crate::brain::tools::subagent::SessionNotifyTool));
+    }
 
     // Phase 6: Team orchestration
     let team_manager = Arc::new(crate::brain::tools::subagent::TeamManager::new());
@@ -275,3 +302,15 @@ pub(crate) fn register_runtime_tools(tool_registry: &Arc<ToolRegistry>, config: 
         ));
     }
 }
+
+/// Headless-only preamble (#129, owner-ruled design): appended to the system
+/// brain on headless paths ONLY (CLI one-shot `run`, cron daemon execute,
+/// sub-agent spawn). The user cannot see a headless session's intermediate
+/// messages — only the final one — so the agent must make that final message
+/// self-contained instead of narrating progress nobody receives.
+///
+/// Deliberately NOT in AGENTS.md: that file is always-loaded on every surface
+/// (TUI, channels), where the directive is wrong — there, intermediate
+/// messages ARE visible and narrating progress is correct behaviour. A
+/// brain-only rule cannot be headless-scoped; this preamble can.
+pub const HEADLESS_PREAMBLE: &str = "\n\n## Headless session\n\nYou are running HEADLESS: the user cannot see your intermediate messages, tool calls, or progress updates — they receive ONLY your final message. That final message must be SELF-CONTAINED: state what was done with the concrete specifics (commit shas, file paths, test results, numbers), anything that failed and why, and what is needed next. Do not ask questions mid-task (no answer channel exists); make the reasonable assumption, state it, finish. Do not use `session_notify` or `suggest_options` — neither can reach a user from here. If you cannot complete the task, your final message is the only report: say what blocked you with the evidence.\n";

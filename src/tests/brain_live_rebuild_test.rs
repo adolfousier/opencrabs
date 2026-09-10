@@ -48,7 +48,8 @@ fn render_returns_seed_until_a_brain_file_changes() {
         true,  // core brain
         false, // no lazy-tools suffix
         "SEED-VERBATIM".to_string(),
-        None, // no live-cwd handle
+        None,  // no live-cwd handle
+        false, // interactive surface
     );
 
     // Nothing changed since construction → exact seed, no disk rebuild.
@@ -77,7 +78,7 @@ fn rebuild_is_cached_after_a_change_until_the_next_change() {
     write_with_mtime(&soul, "--- SOUL.md ---\nv1\n", t0());
 
     let loader = BrainLoader::new(dir.path().to_path_buf());
-    let rebuild = BrainRebuild::new(loader, None, true, false, "SEED".to_string(), None);
+    let rebuild = BrainRebuild::new(loader, None, true, false, "SEED".to_string(), None, false);
 
     // Trigger a rebuild.
     write_with_mtime(
@@ -101,7 +102,15 @@ fn no_rebuild_handle_falls_back_to_static_brain() {
     // seed is what render hands back when the dir has no newer files.
     let dir = TempDir::new().unwrap();
     let loader = BrainLoader::new(dir.path().to_path_buf());
-    let rebuild = BrainRebuild::new(loader, None, true, false, "ONLY-SEED".to_string(), None);
+    let rebuild = BrainRebuild::new(
+        loader,
+        None,
+        true,
+        false,
+        "ONLY-SEED".to_string(),
+        None,
+        false,
+    );
     assert_eq!(rebuild.render(), "ONLY-SEED");
 }
 
@@ -126,6 +135,7 @@ fn render_follows_working_directory_change() {
         false,
         "SEED".to_string(),
         Some(Arc::clone(&cwd)),
+        false, // interactive surface
     );
 
     // Simulate `/cd` into project B.
@@ -161,6 +171,7 @@ fn render_rebuilds_when_a_directive_file_is_added() {
         false,
         "SEED".to_string(),
         Some(Arc::clone(&cwd)),
+        false, // interactive surface
     );
 
     // No directive files yet and no brain-file change → warm seed.

@@ -92,7 +92,7 @@ fn tool_access_prompt_pairs_directive_with_roster() {
     // #449: the behavioural nudge only works if the tool_search directive AND a
     // concrete roster reach the model together. Pin that the assembled section
     // carries both, so a formatter/wiring regression can't silently drop either.
-    let prompt = catalog::tool_access_prompt();
+    let prompt = catalog::tool_access_prompt(false);
     assert!(
         prompt.contains("tool_search"),
         "tool-access prompt must keep the tool_search directive"

@@ -704,10 +704,11 @@ pub(crate) async fn cmd_run(
 
     // Create tool registry (Arc-wrapped early so SpawnAgentTool can reference it).
     // Core + runtime tools come from the shared tool_setup helpers so this
-    // headless path never drifts from the TUI/daemon tool set.
+    // headless path never drifts from the TUI/daemon tool set. `true` =
+    // headless (#129): session_notify/suggest_options stay unregistered.
     let tool_registry = Arc::new(ToolRegistry::new());
     let subagent_manager =
-        crate::cli::tool_setup::register_core_agent_tools(&tool_registry, &db, config);
+        crate::cli::tool_setup::register_core_agent_tools(&tool_registry, &db, config, true);
 
     // Build dynamic system brain from workspace files
     let brain_path = BrainLoader::resolve_path();
@@ -726,11 +727,13 @@ pub(crate) async fn cmd_run(
     // maintenance warning in ~/.opencrabs/rsi/digest.md, not conversation input.
     let mut system_brain = brain_loader.build_system_brain(Some(&runtime_info));
     if config.agent.lazy_tools {
-        system_brain.push_str(&crate::brain::tools::catalog::tool_access_prompt());
+        // Headless one-shot (#129): the roster drops the interactive-only
+        // pair, matching the registry gate below.
+        system_brain.push_str(&crate::brain::tools::catalog::tool_access_prompt(true));
     }
-
-    // Headless-safe runtime tools (dynamic tools.toml tools, tool_manage, browser).
-    crate::cli::tool_setup::register_runtime_tools(&tool_registry, config);
+    // Headless-only preamble (#129): the one-shot run's final message is the
+    // ONLY thing the caller sees — inject the self-containedness law.
+    system_brain.push_str(crate::cli::tool_setup::HEADLESS_PREAMBLE);
 
     // Create service context and agent service
     let service_context = ServiceContext::new(db.pool().clone());
@@ -742,6 +745,9 @@ pub(crate) async fn cmd_run(
         // `run` has no TTY to prompt on, so without the flag only non-approval
         // tools run and approval-gated ones are denied by the loop.
         .with_auto_approve_tools(auto_approve)
+        // #129: backstop flag — interactive-only tools hard-error in the
+        // tool loop even if a future regression re-registers them.
+        .with_headless(true)
         .with_subagent_manager(subagent_manager);
 
     // Create or resume session (#1368): `agent --session <prefix|uuid>`
@@ -988,11 +994,13 @@ pub(crate) async fn cmd_agent_interactive(
     let provider = crate::brain::provider::create_provider(config).await?;
 
     // Core tools come from the shared tool_setup helper so this REPL path never
-    // drifts from the TUI/daemon tool set. Runtime tools (dynamic/browser) are
-    // added after the system brain is built, below.
+    // drifts from the TUI/daemon tool set. `false` = interactive (#129): the
+    // REPL user sees mid-task output, so session_notify/suggest_options stay.
+    // Runtime tools (dynamic/browser) are added after the system brain is
+    // built, below.
     let tool_registry = Arc::new(ToolRegistry::new());
     let subagent_manager =
-        crate::cli::tool_setup::register_core_agent_tools(&tool_registry, &db, config);
+        crate::cli::tool_setup::register_core_agent_tools(&tool_registry, &db, config, false);
 
     let brain_path = BrainLoader::resolve_path();
     let brain_loader = BrainLoader::new(brain_path);
@@ -1007,7 +1015,7 @@ pub(crate) async fn cmd_agent_interactive(
     // maintenance warning in ~/.opencrabs/rsi/digest.md, not conversation input.
     let mut system_brain = brain_loader.build_system_brain(Some(&runtime_info));
     if config.agent.lazy_tools {
-        system_brain.push_str(&crate::brain::tools::catalog::tool_access_prompt());
+        system_brain.push_str(&crate::brain::tools::catalog::tool_access_prompt(false));
     }
 
     // Headless-safe runtime tools (dynamic tools.toml tools, tool_manage, browser).
@@ -2347,6 +2355,7 @@ pub(crate) async fn cmd_evolve(config: &crate::config::Config, check_only: bool)
         plan_session_override: None,
         subagent_manager: None,
         parent_tool_registry: None,
+        headless: false, // evolve is an interactive CLI command
     };
 
     let result = tool.execute(input, &context).await?;

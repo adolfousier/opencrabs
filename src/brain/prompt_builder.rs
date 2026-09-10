@@ -729,6 +729,31 @@ pub fn split_runtime_suffix(brain: &str) -> (String, Option<String>) {
     (stable, Some(block))
 }
 
+/// Strip the FOLLOW-UP SUGGESTIONS paragraph from a rendered brain (#129,
+/// owner-approved 2026-09-08). Headless sessions have `suggest_options`
+/// removed from the registry (and hard-error as a backstop), so the preamble
+/// paragraph instructing the model to call it must not ride along. The
+/// paragraph is one logical block in `BRAIN_PREAMBLE`: its header line plus
+/// the paragraph body, terminated by the next blank line. Brains without the
+/// paragraph (already stripped, or custom templates) are returned unchanged.
+pub fn strip_followup_suggestions(brain: &str) -> String {
+    const HEADER: &str = "FOLLOW-UP SUGGESTIONS — optional, end of turn:";
+    let Some(start) = brain.find(HEADER) else {
+        return brain.to_string();
+    };
+    // End of paragraph = next blank line after the header line.
+    let after_header = start + HEADER.len();
+    let end = brain[after_header..]
+        .find("\n\n")
+        .map(|i| after_header + i)
+        .unwrap_or(brain.len());
+    let mut out = String::with_capacity(brain.len());
+    out.push_str(brain[..start].trim_end());
+    out.push_str("\n\n");
+    out.push_str(brain[end..].trim_start());
+    out
+}
+
 /// Runtime information injected into the system brain.
 #[derive(Debug, Clone, Default)]
 pub struct RuntimeInfo {
