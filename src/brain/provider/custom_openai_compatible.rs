@@ -4201,7 +4201,16 @@ impl Provider for OpenAIProvider {
 
                                         // Check finish_reason — emit accumulated tool calls when done
                                         let finish_reason_str = chunk.choices.first()
-                                            .and_then(|c| c.finish_reason.as_ref());
+                                            .and_then(|c| c.finish_reason.as_ref())
+                                            // Some routes (cbcn/glm-5.3-flash, cb/gpt-5.6-*,
+                                            // cb/kimi-k3) emit an EMPTY finish_reason between
+                                            // content chunks — that is a continuation marker,
+                                            // not a terminal reason (#105). Treating it as
+                                            // Some("") flushed partial tool calls mid-stream
+                                            // and could end the turn early. Ignore empty
+                                            // reasons: [DONE] / the usage-only chunk remain
+                                            // the terminal authorities.
+                                            .filter(|r| !r.is_empty());
 
                                         // Flush accumulated tool calls on any terminal finish_reason.
                                         // Some providers (MiniMax) send "stop" even with tool_calls.

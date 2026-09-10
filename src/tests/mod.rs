@@ -423,6 +423,7 @@ pub mod write_opencrabs_file_inline_test;
 // test hook in Config::load — out of scope for what the test verifies.
 #[cfg(unix)]
 pub mod custom_provider_no_models_test;
+pub mod custom_provider_stream_empty_finish_test;
 pub mod custom_provider_test;
 pub mod daemon_health_test;
 pub mod doc_parser_page_range_test;
