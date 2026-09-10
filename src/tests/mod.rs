@@ -846,6 +846,7 @@ pub mod telegram_mermaid_test;
 pub mod telegram_model_callback_data_test;
 pub mod telegram_outbox_record_test;
 pub mod telegram_photo_batching_test;
+mod telegram_photo_thread_scope_test;
 pub mod telegram_plan_card_interrupt_restick_test;
 pub mod telegram_plan_finalize_test;
 pub mod telegram_plan_render_test;

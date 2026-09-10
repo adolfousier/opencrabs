@@ -170,7 +170,12 @@ pub(crate) fn migrate_flat_attachments_in(base: &std::path::Path, platform: &str
     moved
 }
 
-pub(crate) async fn save_incoming_files_to_tmp(bot: &Bot, msg: &Message, bot_token: &str) {
+pub(crate) async fn save_incoming_files_to_tmp(
+    bot: &Bot,
+    msg: &Message,
+    bot_token: &str,
+    thread_id: Option<i32>,
+) {
     use std::path::PathBuf;
 
     // Skip private chats — the bot will process those directly
@@ -185,6 +190,9 @@ pub(crate) async fn save_incoming_files_to_tmp(bot: &Bot, msg: &Message, bot_tok
 
     let chat_id = msg.chat.id.0;
     let ts = chrono::Utc::now().timestamp();
+    // #124: embed the forum thread in the filename so scans can scope
+    // pickup to the owning topic. 0 = General topic / DM / non-forum.
+    let thread_id = thread_id.unwrap_or(0);
 
     // Voice messages (.ogg)
     if let Some(voice) = msg.voice() {
@@ -193,7 +201,7 @@ pub(crate) async fn save_incoming_files_to_tmp(bot: &Bot, msg: &Message, bot_tok
             bot_token,
             voice.file.id.clone(),
             &tmp_dir,
-            &format!("voice-{chat_id}-{ts}.ogg"),
+            &format!("voice-{chat_id}-t{thread_id}-{ts}.ogg"),
         )
         .await;
     }
@@ -228,7 +236,7 @@ pub(crate) async fn save_incoming_files_to_tmp(bot: &Bot, msg: &Message, bot_tok
             bot_token,
             largest.file.id.clone(),
             &tmp_dir,
-            &format!("photo-{chat_id}-{ts}.jpg"),
+            &format!("photo-{chat_id}-t{thread_id}-{ts}.jpg"),
         )
         .await;
     }
@@ -275,8 +283,9 @@ pub(crate) async fn save_telegram_file(
 pub(crate) fn find_recent_voice_in_tmp(
     chat_id: i64,
     max_age_secs: i64,
+    thread_id: i32,
 ) -> Option<std::path::PathBuf> {
-    find_recent_tmp_file(chat_id, "voice", max_age_secs)
+    find_recent_tmp_file(chat_id, "voice", max_age_secs, thread_id)
 }
 
 /// Find the newest `~/.opencrabs/tmp/{kind}-{chat_id}-{ts}.*` file within
@@ -287,6 +296,7 @@ pub(crate) fn find_recent_tmp_file(
     chat_id: i64,
     kind: &str,
     max_age_secs: i64,
+    thread_id: i32,
 ) -> Option<std::path::PathBuf> {
     use std::path::PathBuf;
 
@@ -307,9 +317,37 @@ pub(crate) fn find_recent_tmp_file(
             continue;
         }
         // Extract timestamp from filename: voice-{chat_id}-{ts}.ogg
-        let ts_str = name_str.strip_prefix(&prefix)?.split('.').next()?;
+        let Some(rest) = name_str
+            .strip_prefix(&prefix)
+            .and_then(|s| s.split('.').next())
+        else {
+            continue;
+        };
+        // #124: thread-scoped names are photo-{chat}-t{thread}-{ts}.jpg, so
+        // rest = "t{thread}-{ts}" — the thread comes FIRST. Legacy names are
+        // bare {ts} and only ever match their saving topic's fallback scan.
+        let (name_thread, ts_str) = match rest.strip_prefix('t') {
+            Some(after_t) => match after_t.split_once('-') {
+                Some((thread_part, ts)) => match thread_part.parse::<i32>() {
+                    Ok(t) => (Some(t), ts),
+                    Err(_) => (None, rest),
+                },
+                None => (None, rest),
+            },
+            None => (None, rest),
+        };
         let ts: i64 = ts_str.parse().ok()?;
         if now - ts > max_age_secs {
+            continue;
+        }
+        // Thread gate: new-format names must carry OUR thread; legacy
+        // (pre-#124) names have no thread, so they only match when the
+        // scanning topic IS the General/DM scope (0) that saved them.
+        if let Some(t) = name_thread {
+            if t != thread_id {
+                continue;
+            }
+        } else if thread_id != 0 {
             continue;
         }
         match &best {
@@ -327,6 +365,7 @@ pub(crate) fn find_all_recent_tmp_files(
     chat_id: i64,
     kind: &str,
     max_age_secs: i64,
+    thread_id: i32,
 ) -> Vec<std::path::PathBuf> {
     use std::path::PathBuf;
 
@@ -345,20 +384,40 @@ pub(crate) fn find_all_recent_tmp_files(
         if !name_str.starts_with(&prefix) {
             continue;
         }
-        let ts_str = match name_str
+        let Some(rest) = name_str
             .strip_prefix(&prefix)
             .and_then(|s| s.split('.').next())
-        {
-            Some(s) => s,
-            None => continue,
+        else {
+            continue;
+        };
+        // #124 thread gate — same rule as find_recent_tmp_file: new-format
+        // names are "t{thread}-{ts}" after the prefix; legacy bare names only
+        // match the scope-0 (General/DM) scanner that saved them.
+        let (name_thread, ts_str) = match rest.strip_prefix('t') {
+            Some(after_t) => match after_t.split_once('-') {
+                Some((thread_part, ts)) => match thread_part.parse::<i32>() {
+                    Ok(t) => (Some(t), ts),
+                    Err(_) => (None, rest),
+                },
+                None => (None, rest),
+            },
+            None => (None, rest),
         };
         let ts: i64 = match ts_str.parse() {
             Ok(t) => t,
             Err(_) => continue,
         };
-        if now - ts <= max_age_secs {
-            results.push((ts, entry.path()));
+        if now - ts > max_age_secs {
+            continue;
         }
+        if let Some(t) = name_thread {
+            if t != thread_id {
+                continue;
+            }
+        } else if thread_id != 0 {
+            continue;
+        }
+        results.push((ts, entry.path()));
     }
     results.sort_by_key(|(ts, _)| *ts);
     results.into_iter().map(|(_, p)| p).collect()
