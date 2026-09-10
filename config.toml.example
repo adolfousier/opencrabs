@@ -450,6 +450,12 @@ debug_logs = false
 # Set to 0 to disable. Hot-reloads with no restart.
 thinking_loop_timeout_secs = 600
 
+# Cadence (in seconds) for injecting periodic wall-clock notices during
+# long-running tool execution turns. Keeps autonomous multi-step loops
+# grounded without stale time drift or prompt-cache busting. Default: 900 (15 min).
+# Set to 0 to disable intra-turn periodic markers while retaining turn-ingress time.
+time_marker_interval_secs = 900
+
 [image.generation]
 enabled = false
 model = "gemini-3.1-flash-image-preview"   # Gemini image-gen model ("Nano Banana")

@@ -330,6 +330,26 @@ default_provider = "anthropic"
 }
 
 #[test]
+fn test_agent_config_time_marker_interval_secs() {
+    let agent = AgentConfig::default();
+    assert_eq!(agent.time_marker_interval_secs, 900);
+
+    let toml_content = r#"
+[agent]
+time_marker_interval_secs = 1200
+    "#;
+    let config: Config = toml::from_str(toml_content).unwrap();
+    assert_eq!(config.agent.time_marker_interval_secs, 1200);
+
+    let toml_disabled = r#"
+[agent]
+time_marker_interval_secs = 0
+    "#;
+    let config_disabled: Config = toml::from_str(toml_disabled).unwrap();
+    assert_eq!(config_disabled.agent.time_marker_interval_secs, 0);
+}
+
+#[test]
 fn test_agent_config_save_with_default_provider() {
     let temp_file = NamedTempFile::new().unwrap();
     let mut config = Config::default();
