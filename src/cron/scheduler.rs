@@ -959,10 +959,46 @@ pub(crate) fn parse_telegram_target(target: &str) -> Option<(i64, Option<i64>)> 
     }
 }
 
+/// Parse a session target out of a `deliver_to` entry (fork #144).
+/// Grammar: `session:<uuid-or-8+-char-prefix>` → the target session id.
+/// Full UUIDs pass through untouched; anything else is matched as a
+/// case-insensitive prefix against the session DB via the shared resolver
+/// (`crate::cli::session_resolve`) so operators can paste the short id that
+/// `session list` prints. Anything else → `None`; the caller owns the loud
+/// failure.
+pub(crate) async fn parse_session_target(target: &str) -> Option<Uuid> {
+    // Full UUID fast path — no DB needed (resolver passthrough parity).
+    if let Ok(uuid) = Uuid::parse_str(target) {
+        return Some(uuid);
+    }
+    let config = crate::config::Config::load().ok()?;
+    let db = crate::db::Database::connect(&config.database.path)
+        .await
+        .ok()?;
+    let sessions = crate::db::repository::SessionRepository::new(db.pool().clone())
+        .list(crate::db::repository::SessionListOptions::default())
+        .await
+        .ok()?;
+    resolve_session_target(&sessions, target)
+}
+
+/// Pure resolution over a session set — the testable core. Full UUIDs are
+/// already consumed by the fast path in [`parse_session_target`], so
+/// everything reaching here is a prefix: the shared resolver's rules apply
+/// verbatim (0 matches and ambiguity are both `None`; the caller logs loudly).
+pub(crate) fn resolve_session_target(
+    sessions: &[crate::db::models::Session],
+    target: &str,
+) -> Option<Uuid> {
+    crate::cli::session_resolve::resolve_session_id(sessions, target).ok()
+}
+
 /// Deliver a cron job result to the specified channel.
 /// Format: "telegram:chat_id", "telegram:chat_id:thread_id" (opt-in forum
-/// topic), "discord:channel_id", "slack:channel_id", or an HTTP(S) URL for
-/// generic webhook delivery.
+/// topic), "discord:channel_id", "slack:channel_id", "session:<id|prefix>"
+/// (fork #144: into a session's notify queue through the shared
+/// `notify_policy` path — default mode `turn-end`, cron results are turn
+/// outputs), or an HTTP(S) URL for generic webhook delivery.
 async fn deliver_result(
     deliver_to: &str,
     job_name: &str,
@@ -1006,6 +1042,31 @@ async fn deliver_result(
     let delivery_msg = format!("⏰ **Cron: {job_name}**\n\n{msg}");
 
     match channel {
+        "session" => {
+            // Fork #144: deliver into a session's notify queue. Cron results
+            // are turn outputs, so the default mode is `turn-end` (never
+            // derail a mid-turn session — the target drains at its next
+            // boundary); `quiet` rides the same policy when configured.
+            let Some(session_id) = parse_session_target(target_id).await else {
+                tracing::error!(
+                    "Invalid session deliver_to target '{target_id}' for job '{job_name}' \
+                     — no session matches; not delivering"
+                );
+                return None;
+            };
+            tracing::info!("Delivering cron result to session {session_id} (mode turn-end)");
+            let queued = crate::brain::agent::service::QueuedUserMessage {
+                context_text: delivery_msg.clone(),
+                display_text: delivery_msg,
+                origin: crate::brain::agent::PushOrigin::SessionNotify,
+                bg_meta: None,
+            };
+            let delivery = crate::brain::agent::service::session_routes::deliver_to_session(
+                session_id, queued, false,
+            );
+            tracing::info!("Cron '{job_name}' session delivery verdict: {delivery:?}");
+            return None;
+        }
         "telegram" => {
             #[cfg(feature = "telegram")]
             {

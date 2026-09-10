@@ -21,7 +21,6 @@
 //! sender session, so the recipient's echo shows the carried label —
 //! default "CLI tooling", overridable with `--sender`.
 
-use crate::a2a::handler::notify::CLI_SENDER_LABEL_MAX_CHARS;
 use crate::cli::args::OutputFormat;
 use crate::config::Config;
 use anyhow::Result;
@@ -31,15 +30,37 @@ pub const EXIT_NO_ROUTE: i32 = 2;
 pub const EXIT_REFUSED: i32 = 3;
 pub const EXIT_TRANSPORT: i32 = 4;
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn run(
     config: &Config,
     id_raw: &str,
-    text: &str,
+    text: Option<&str>,
     title: Option<&str>,
     sender: Option<&str>,
     interrupt: bool,
+    mode: Option<&str>,
+    quiet_for_secs: Option<u64>,
+    max_delay_secs: Option<u64>,
+    confirm: bool,
+    status: bool,
     format: OutputFormat,
 ) -> Result<()> {
+    // Status mode (fork #146): poll a notification receipt by id instead of
+    // sending. Rides the same A2A surface (); the id
+    // is passed as the positional arg,  is unused.
+    if status {
+        let Some(notify_id) = text else {
+            return finish(
+                format,
+                id_raw,
+                "usage_error",
+                EXIT_TRANSPORT,
+                "--status requires the notification id as the <ID> argument",
+            );
+        };
+        return run_status(config, notify_id, id_raw, format).await;
+    }
+
     // Local usage errors: the gateway would reject these with INVALID_PARAMS
     // anyway, but failing here keeps the journal honest about who noticed.
     let target: uuid::Uuid = match id_raw.parse() {
@@ -54,6 +75,15 @@ pub(crate) async fn run(
             );
         }
     };
+    let Some(text) = text else {
+        return finish(
+            format,
+            &target.to_string(),
+            "usage_error",
+            EXIT_TRANSPORT,
+            "--text is required for sending (or pass --status to poll a receipt id)",
+        );
+    };
     if text.trim().is_empty() {
         return finish(
             format,
@@ -63,9 +93,9 @@ pub(crate) async fn run(
             "--text must not be empty",
         );
     }
-    // Local mirror of the handler's sender validation: failing here keeps
-    // the journal honest about who noticed. The label rides inside
-    // `[session-notify from=cli:<label>]` — no `]`, no newlines, capped.
+    // Shared sender validation (fork #146): the SAME policy rules the A2A
+    // handler and the agent tool run — one copy, no drift. Failing here
+    // keeps the journal honest about who noticed.
     if let Some(raw) = sender {
         let label = raw.trim();
         if label.is_empty() {
@@ -77,22 +107,13 @@ pub(crate) async fn run(
                 "--sender must not be empty",
             );
         }
-        if label.contains(']') || label.contains('\n') || label.contains('\r') {
+        if let Err(e) = crate::brain::agent::service::notify_policy::validate_sender_label(label) {
             return finish(
                 format,
                 &target.to_string(),
                 "transport_error",
                 EXIT_TRANSPORT,
-                "--sender must not contain ']' or newlines",
-            );
-        }
-        if label.chars().count() > CLI_SENDER_LABEL_MAX_CHARS {
-            return finish(
-                format,
-                &target.to_string(),
-                "transport_error",
-                EXIT_TRANSPORT,
-                &format!("--sender must be at most {CLI_SENDER_LABEL_MAX_CHARS} chars"),
+                &format!("--sender: {e}"),
             );
         }
     }
@@ -123,6 +144,24 @@ pub(crate) async fn run(
     }
     if let Some(s) = sender {
         params["sender"] = serde_json::json!(s.trim());
+    }
+    // Delivery policy (fork #146): the full v2 ontology rides to the
+    // A2A method, which resolves it through the shared policy module.
+    if interrupt || mode.is_some() || quiet_for_secs.is_some() || max_delay_secs.is_some() {
+        let mut delivery = serde_json::json!({});
+        if let Some(m) = mode {
+            delivery["mode"] = serde_json::json!(m);
+        }
+        if let Some(q) = quiet_for_secs {
+            delivery["quiet_for_secs"] = serde_json::json!(q);
+        }
+        if let Some(m) = max_delay_secs {
+            delivery["max_delay_secs"] = serde_json::json!(m);
+        }
+        params["delivery"] = delivery;
+    }
+    if confirm {
+        params["confirm"] = serde_json::json!(true);
     }
     let body = serde_json::json!({
         "jsonrpc": "2.0",
@@ -172,7 +211,7 @@ pub(crate) async fn run(
                             .unwrap_or("")
                             .to_string();
                         let code = match outcome.as_str() {
-                            "delivered" | "parked" => EXIT_OK,
+                            "delivered" | "parked" | "deferred" => EXIT_OK,
                             "no_route" => EXIT_NO_ROUTE,
                             "refused_in_flight" => EXIT_REFUSED,
                             _ => EXIT_TRANSPORT,
@@ -191,6 +230,105 @@ pub(crate) async fn run(
     };
 
     finish(format, &target.to_string(), &outcome, exit_code, &detail)
+}
+
+/// Status mode (fork #146): POST the notify id to the A2A
+/// `session/notify-status` method and render the receipt lifecycle.
+/// Exit codes: 0 = injected (consumed by the machinery) or queued-but-live;
+/// 2 = unknown id (not tracked — in-memory receipts die with the process);
+/// 4 = transport.
+async fn run_status(
+    config: &Config,
+    notify_id: &str,
+    id_raw: &str,
+    format: OutputFormat,
+) -> Result<()> {
+    if notify_id.parse::<uuid::Uuid>().is_err() {
+        return finish(
+            format,
+            id_raw,
+            "unknown_id",
+            EXIT_NO_ROUTE,
+            &format!("'{notify_id}' is not a valid notification UUID"),
+        );
+    }
+    if !config.a2a.enabled {
+        return finish(
+            format,
+            id_raw,
+            "transport_error",
+            EXIT_TRANSPORT,
+            "the [a2a] gateway is disabled in this profile's config — the daemon cannot be reached",
+        );
+    }
+    let host = match config.a2a.bind.as_str() {
+        "0.0.0.0" | "::" | "[::]" => "127.0.0.1",
+        other => other,
+    };
+    let url = format!("http://{}:{}/a2a/v1", host, config.a2a.port);
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "session/notify-status",
+        "params": { "notify_id": notify_id },
+    });
+    let mut req = reqwest::Client::new()
+        .post(&url)
+        .timeout(std::time::Duration::from_secs(10))
+        .json(&body);
+    if let Some(key) = config.a2a.api_key.as_deref() {
+        req = req.bearer_auth(key);
+    }
+    let (outcome, exit_code, detail) = match req.send().await {
+        Err(e) => (
+            "transport_error".to_string(),
+            EXIT_TRANSPORT,
+            format!("cannot reach the A2A gateway at {url}: {e}"),
+        ),
+        Ok(resp) => {
+            let status = resp.status();
+            match resp.json::<crate::a2a::types::JsonRpcResponse>().await {
+                Err(e) => (
+                    "transport_error".into(),
+                    EXIT_TRANSPORT,
+                    format!("gateway at {url} returned HTTP {status} without a JSON-RPC body: {e}"),
+                ),
+                Ok(rpc) => {
+                    if let Some(err) = rpc.error {
+                        (
+                            "transport_error".into(),
+                            EXIT_TRANSPORT,
+                            format!("gateway error {}: {}", err.code, err.message),
+                        )
+                    } else if let Some(result) = rpc.result {
+                        let outcome = result
+                            .get("outcome")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("unknown")
+                            .to_string();
+                        let detail = result
+                            .get("detail")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("")
+                            .to_string();
+                        let code = match outcome.as_str() {
+                            "injected" | "queued" => EXIT_OK,
+                            "unknown_id" => EXIT_NO_ROUTE,
+                            _ => EXIT_TRANSPORT,
+                        };
+                        (outcome, code, detail)
+                    } else {
+                        (
+                            "transport_error".into(),
+                            EXIT_TRANSPORT,
+                            "gateway response carried neither result nor error".into(),
+                        )
+                    }
+                }
+            }
+        }
+    };
+    finish(format, id_raw, &outcome, exit_code, &detail)
 }
 
 /// Journal + output + exit. One append-only journal line per invocation,

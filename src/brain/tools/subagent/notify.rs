@@ -8,26 +8,13 @@
 //! — the calling model can neither forge nor omit the `[session-notify
 //! from=<uuid>]` header prepended to every delivery.
 
+use crate::brain::agent::service::notify_policy::{
+    CONFIRM_CAP, DeliveryMode, confirm_route, resolve_mode,
+};
 use crate::brain::tools::error::{Result, ToolError};
 use crate::brain::tools::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
-use std::time::Duration;
-
-/// Resolved v2 delivery policy (fork #50).
-#[derive(Debug)]
-pub(crate) enum DeliveryMode {
-    /// Refuse while the target is mid-turn (the failsafe default).
-    Now,
-    /// Queue for the target's next tool-loop boundary (alias: interrupt=true).
-    TurnEnd,
-    /// Defer until the target has been quiet for `quiet_for`; `max_delay`
-    /// forces delivery into a busy turn (fork #43/#50).
-    Quiet {
-        quiet_for: Duration,
-        max_delay: Duration,
-    },
-}
 
 /// Tool that pushes a queued user message into another session.
 pub struct SessionNotifyTool;
@@ -50,11 +37,6 @@ fn redirect_message(target: uuid::Uuid, occupant: uuid::Uuid) -> String {
     )
 }
 
-/// Confirmation budget for `confirm: true`: how long the sender watches the
-/// receiving machinery for a wake before falling back to an honest
-/// "routed, unconfirmed" verdict.
-const CONFIRM_CAP: Duration = Duration::from_secs(10);
-
 /// Machine-readable send verdict (Notifications v2, fork #50): the external
 /// `notify_state` mirrors the internal `Delivery` enum 1:1 — delivered /
 /// queued / redirected / refused (+ `notify_reason`, `notify_occupant`, …) —
@@ -76,55 +58,6 @@ pub(crate) fn verdict(
         result = result.with_metadata((*key).to_string(), value.clone());
     }
     result
-}
-
-/// Post-route confirmation (owner-approved state-diag, 2026-09-01): watch
-/// the receiving machinery for a bounded budget instead of reporting
-/// "delivered" as a mere queue hand-off. The wake path is verifiable
-/// in-process — a channel-registered turn probe flips to true the moment
-/// the target's loop starts — so the sender gets `woke` (idle target
-/// started a turn), `queued_pending_drain` (already mid-turn; the message
-/// injects at its next tool-loop boundary), or an honest `delivered`
-/// (routed, but no wake observed within `cap`).
-pub(crate) async fn confirm_route(
-    target: uuid::Uuid,
-    cap: Duration,
-) -> (&'static str, String, &'static str) {
-    use crate::brain::agent::service::session_routes::turn_probe;
-    let mid_turn = |t| turn_probe(t).is_some_and(|probe| probe());
-
-    if mid_turn(target) {
-        return (
-            "queued_pending_drain",
-            "Confirmed queued: the target is mid-turn; the message injects at its next \
-             tool-loop boundary."
-                .into(),
-            "mid_turn",
-        );
-    }
-    let deadline = tokio::time::Instant::now() + cap;
-    while tokio::time::Instant::now() < deadline {
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        if mid_turn(target) {
-            return (
-                "woke",
-                "Confirmed end-to-end: the target was idle and has started a turn on the \
-                 message."
-                    .into(),
-                "wake_confirmed",
-            );
-        }
-    }
-    (
-        "delivered",
-        format!(
-            "Routed to session {target}, but no wake was observed within {}s — the \
-             target may be parked (channel not claimed since boot) or slow to pick the \
-             message up. Re-check via session_search before resending.",
-            cap.as_secs()
-        ),
-        "unconfirmed",
-    )
 }
 
 /// Depth-3 status check (fork #50): `action: "status"` polls the receipt a
@@ -184,66 +117,6 @@ pub(crate) fn status_verdict(input: &Value) -> Result<ToolResult> {
             };
             Ok(verdict(true, receipt.state.as_str(), detail, &extra))
         }
-    }
-}
-
-/// Resolve the v2 delivery policy against the deprecated `interrupt` alias
-/// (fork #50). `interrupt=true` was always "queue for the in-flight turn's
-/// next tool-loop boundary" — that is mode `turn-end`; unset/false was
-/// "refuse while streaming" — mode `now`. Both may be passed only when they
-/// agree; a disagreement is an error, never a silent precedence. `quiet`
-/// defers until the target has been idle for `quiet_for_secs` (starvation
-/// cap `max_delay_secs` forces delivery into a busy turn).
-pub(crate) fn resolve_mode(
-    mode: Option<&str>,
-    interrupt: Option<bool>,
-    delivery: Option<&Value>,
-) -> Result<DeliveryMode> {
-    fn secs(parent: Option<&Value>, key: &str, default: u64) -> Result<Duration> {
-        match parent.and_then(|d| d.get(key)) {
-            None => Ok(Duration::from_secs(default)),
-            Some(v) => {
-                let n = v.as_u64().ok_or_else(|| {
-                    ToolError::InvalidInput(format!(
-                        "delivery.{key} must be a non-negative integer"
-                    ))
-                })?;
-                Ok(Duration::from_secs(n))
-            }
-        }
-    }
-    let resolved = match mode {
-        None => None,
-        Some(known @ ("now" | "turn-end")) => Some(known),
-        Some("quiet") => {
-            // quiet contradicts interrupt=true by definition: quiet WAITS,
-            // turn-end DERAILS. interrupt=false/unset is the natural form.
-            if interrupt == Some(true) {
-                return Err(ToolError::InvalidInput(
-                    "delivery.mode 'quiet' and interrupt=true disagree — quiet defers, \
-                     interrupt derails"
-                        .into(),
-                ));
-            }
-            let quiet_for = secs(delivery, "quiet_for_secs", 60)?;
-            let max_delay = secs(delivery, "max_delay_secs", 1800)?;
-            return Ok(DeliveryMode::Quiet {
-                quiet_for,
-                max_delay,
-            });
-        }
-        Some(other) => {
-            return Err(ToolError::InvalidInput(format!(
-                "delivery.mode '{other}' is not available yet — use 'now', 'turn-end' or 'quiet'"
-            )));
-        }
-    };
-    match (resolved, interrupt) {
-        (Some("turn-end"), None | Some(true)) | (None, Some(true)) => Ok(DeliveryMode::TurnEnd),
-        (Some("now"), None | Some(false)) | (None, None | Some(false)) => Ok(DeliveryMode::Now),
-        _ => Err(ToolError::InvalidInput(
-            "delivery.mode and interrupt disagree — pass one, not both".into(),
-        )),
     }
 }
 
@@ -383,7 +256,8 @@ impl Tool for SessionNotifyTool {
                 .and_then(Value::as_str),
             input.get("interrupt").and_then(Value::as_bool),
             delivery_obj,
-        )?;
+        )
+        .map_err(ToolError::InvalidInput)?;
 
         use crate::brain::agent::service::notify_receipts;
         use crate::brain::agent::service::quiet_delivery;
