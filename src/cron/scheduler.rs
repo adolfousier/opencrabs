@@ -966,26 +966,31 @@ pub(crate) fn parse_telegram_target(target: &str) -> Option<(i64, Option<i64>)> 
 /// (`crate::cli::session_resolve`) so operators can paste the short id that
 /// `session list` prints. Anything else → `None`; the caller owns the loud
 /// failure.
-pub(crate) fn parse_session_target(target: &str) -> Option<Uuid> {
+pub(crate) async fn parse_session_target(target: &str) -> Option<Uuid> {
     // Full UUID fast path — no DB needed (resolver passthrough parity).
     if let Ok(uuid) = Uuid::parse_str(target) {
         return Some(uuid);
     }
     let config = crate::config::Config::load().ok()?;
-    let db = tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current()
-            .block_on(async { crate::db::Database::connect(&config.database.path).await })
-    })
-    .ok()?;
-    let sessions = tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current().block_on(async {
-            crate::db::repository::SessionRepository::new(db.pool().clone())
-                .list(crate::db::repository::SessionListOptions::default())
-                .await
-        })
-    })
-    .ok()?;
-    crate::cli::session_resolve::resolve_session_id(&sessions, target).ok()
+    let db = crate::db::Database::connect(&config.database.path)
+        .await
+        .ok()?;
+    let sessions = crate::db::repository::SessionRepository::new(db.pool().clone())
+        .list(crate::db::repository::SessionListOptions::default())
+        .await
+        .ok()?;
+    resolve_session_target(&sessions, target)
+}
+
+/// Pure resolution over a session set — the testable core. Full UUIDs are
+/// already consumed by the fast path in [`parse_session_target`], so
+/// everything reaching here is a prefix: the shared resolver's rules apply
+/// verbatim (0 matches and ambiguity are both `None`; the caller logs loudly).
+pub(crate) fn resolve_session_target(
+    sessions: &[crate::db::models::Session],
+    target: &str,
+) -> Option<Uuid> {
+    crate::cli::session_resolve::resolve_session_id(sessions, target).ok()
 }
 
 /// Deliver a cron job result to the specified channel.
@@ -1042,7 +1047,7 @@ async fn deliver_result(
             // are turn outputs, so the default mode is `turn-end` (never
             // derail a mid-turn session — the target drains at its next
             // boundary); `quiet` rides the same policy when configured.
-            let Some(session_id) = parse_session_target(target_id) else {
+            let Some(session_id) = parse_session_target(target_id).await else {
                 tracing::error!(
                     "Invalid session deliver_to target '{target_id}' for job '{job_name}' \
                      — no session matches; not delivering"
