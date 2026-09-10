@@ -34,7 +34,7 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — A2A Debate | 8 | `src/tests/a2a_debate_test.rs` |
 | Tests — A2A Handler Tasks | 1 | `src/tests/a2a_handler_tasks_test.rs` |
 | Tests — A2A Handler | 2 | `src/tests/a2a_handler_test.rs` |
-| Tests — A2A Notify Handler | 5 | `src/tests/a2a_notify_handler_test.rs` |
+| Tests — A2A Notify Handler | 10 | `src/tests/a2a_notify_handler_test.rs` |
 | Tests — A2A Server | 2 | `src/tests/a2a_server_test.rs` |
 | Tests — A2A Session Notify | 4 | `src/tests/a2a_session_notify_test.rs` |
 | Tests — A2A Types | 6 | `src/tests/a2a_types_test.rs` |
@@ -55,7 +55,7 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Analytics Render | 16 | `src/tests/analytics_render_test.rs` |
 | Tests — Analyze Video Fallback | 9 | `src/tests/analyze_video_fallback_test.rs` |
 | Tests — Approval Policy Resolution | 7 | `src/tests/approval_policy_resolution_test.rs` |
-| Tests — Auto Title E2e | 1 | `src/tests/auto_title_e2e_test.rs` |
+| Tests — Auto Title E2e | 3 | `src/tests/auto_title_e2e_test.rs` |
 | Tests — Auto Title | 39 | `src/tests/auto_title_test.rs` |
 | Tests — Background Indicator | 9 | `src/tests/background_indicator_test.rs` |
 | Tests — Background Session | 14 | `src/tests/background_session_test.rs` |
@@ -87,7 +87,7 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Brain Hints | 8 | `src/tests/brain_hints_test.rs` |
 | Tests — Brain Live Rebuild | 5 | `src/tests/brain_live_rebuild_test.rs` |
 | Tests — Brain Project Overlay | 3 | `src/tests/brain_project_overlay_test.rs` |
-| Tests — Brain Prompt Builder | 35 | `src/tests/brain_prompt_builder_test.rs` |
+| Tests — Brain Prompt Builder | 37 | `src/tests/brain_prompt_builder_test.rs` |
 | Tests — Brain Provider Anthropic | 7 | `src/tests/brain_provider_anthropic_test.rs` |
 | Tests — Brain Provider Codex Oauth | 6 | `src/tests/brain_provider_codex_oauth_test.rs` |
 | Tests — Brain Provider Copilot | 8 | `src/tests/brain_provider_copilot_test.rs` |
@@ -108,7 +108,7 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Brain Tools Bash | 24 | `src/tests/brain_tools_bash_test.rs` |
 | Tests — Brain Tools Brave Search | 12 | `src/tests/brain_tools_brave_search_test.rs` |
 | Tests — Brain Tools Browser Manager | 12 | `src/tests/brain_tools_browser_manager_test.rs` |
-| Tests — Brain Tools Config Tool | 5 | `src/tests/brain_tools_config_tool_test.rs` |
+| Tests — Brain Tools Config Tool | 7 | `src/tests/brain_tools_config_tool_test.rs` |
 | Tests — Brain Tools Doc Parser | 10 | `src/tests/brain_tools_doc_parser_test.rs` |
 | Tests — Brain Tools Dynamic Loader | 6 | `src/tests/brain_tools_dynamic_loader_test.rs` |
 | Tests — Brain Tools Dynamic Tool | 25 | `src/tests/brain_tools_dynamic_tool_test.rs` |
@@ -644,7 +644,7 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Subagent Push Result | 11 | `src/tests/subagent_push_result_test.rs` |
 | Tests — Subagent Session Ttl | 10 | `src/tests/subagent_session_ttl_test.rs` |
 | Tests — Subagent | 82 | `src/tests/subagent_test.rs` |
-| Tests — Subagent Tool Description | 7 | `src/tests/subagent_tool_description_test.rs` |
+| Tests — Subagent Tool Description | 8 | `src/tests/subagent_tool_description_test.rs` |
 | Tests — Subagent Worktree | 8 | `src/tests/subagent_worktree_test.rs` |
 | Tests — Suggest Options | 10 | `src/tests/suggest_options_test.rs` |
 | Tests — System Continuation | 6 | `src/tests/system_continuation_test.rs` |
@@ -723,7 +723,7 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Telegram State | 7 | `src/tests/telegram_state_test.rs` |
 | Tests — Telegram Status Message | 15 | `src/tests/telegram_status_message_test.rs` |
 | Tests — Telegram Stream Loop Resume | 1 | `src/tests/telegram_stream_loop_resume_test.rs` |
-| Tests — Telegram Suggest Merge | 12 | `src/tests/telegram_suggest_merge_test.rs` |
+| Tests — Telegram Suggest Merge | 19 | `src/tests/telegram_suggest_merge_test.rs` |
 | Tests — Telegram System Chrome Reclaim | 7 | `src/tests/telegram_system_chrome_reclaim_test.rs` |
 | Tests — Telegram Table Blank Line | 6 | `src/tests/telegram_table_blank_line_test.rs` |
 | Tests — Telegram Table Render | 2 | `src/tests/telegram_table_render_test.rs` |
@@ -752,7 +752,7 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Tool Description Redaction | 6 | `src/tests/tool_description_redaction_test.rs` |
 | Tests — Tool Execution Repo | 8 | `src/tests/tool_execution_repo_test.rs` |
 | Tests — Tool Execution Stats | 2 | `src/tests/tool_execution_stats_test.rs` |
-| Tests — Tool Loop Helpers | 40 | `src/tests/tool_loop_helpers_test.rs` |
+| Tests — Tool Loop Helpers | 42 | `src/tests/tool_loop_helpers_test.rs` |
 | Tests — Tool Name Heal | 11 | `src/tests/tool_name_heal_test.rs` |
 | Tests — Tool Process Kill On Drop | 2 | `src/tests/tool_process_kill_on_drop_test.rs` |
 | Tests — Tool Repeat | 13 | `src/tests/tool_repeat_test.rs` |
@@ -826,7 +826,7 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Web Scrape Fetch | 4 | `src/tests/web_scrape_fetch_test.rs` |
 | Tests — Web Scrape Markdown | 6 | `src/tests/web_scrape_markdown_test.rs` |
 | Tests — Web Scrape Sitemap | 6 | `src/tests/web_scrape_sitemap_test.rs` |
-| Tests — Web Scrape Ssrf | 8 | `src/tests/web_scrape_ssrf_test.rs` |
+| Tests — Web Scrape Ssrf | 14 | `src/tests/web_scrape_ssrf_test.rs` |
 | Tests — Web Scrape Tool | 6 | `src/tests/web_scrape_tool_test.rs` |
 | Tests — Web Search | 4 | `src/tests/web_search_test.rs` |
 | Tests — Whatsapp Handler | 6 | `src/tests/whatsapp_handler_test.rs` |
@@ -960,3 +960,29 @@ When the agent outputs one of these phrases with zero tool calls, the phantom de
 ### Test Count
 
 88 tests covering phrase detection, edge cases, and integration with the tool loop.
+| Tests — A2A Gate Auth | 8 | `src/tests/a2a_gate_auth_test.rs` |
+| Tests — Browser Default Linux | 4 | `src/tests/browser_default_linux_test.rs` |
+| Tests — Browser Default Windows | 6 | `src/tests/browser_default_windows_test.rs` |
+| Tests — Channel Approval Owner Gate | 2 | `src/tests/channel_approval_owner_gate_test.rs` |
+| Tests — Channel Deny By Default | 4 | `src/tests/channel_deny_by_default_test.rs` |
+| Tests — Confidential Read Deny | 5 | `src/tests/confidential_read_deny_test.rs` |
+| Tests — Cron Session Target | 7 | `src/tests/cron_session_target_test.rs` |
+| Tests — Custom Provider Stream Empty Finish | 1 | `src/tests/custom_provider_stream_empty_finish_test.rs` |
+| Tests — DB Thread ID Stamp Heal | 3 | `src/tests/db_thread_id_stamp_heal_test.rs` |
+| Tests — Error Scenarios | 9 | `src/tests/error_scenarios_test.rs` |
+| Tests — Evolve Verify | 8 | `src/tests/evolve_verify_test.rs` |
+| Tests — Execution Blocklist Floor | 4 | `src/tests/execution_blocklist_floor_test.rs` |
+| Tests — Headless Tool Surface | 7 | `src/tests/headless_tool_surface_test.rs` |
+| Tests — Integration | 9 | `src/tests/integration_test.rs` |
+| Tests — Plan Mode Integration | 9 | `src/tests/plan_mode_integration_test.rs` |
+| Tests — Secret Hygiene Oc05 | 4 | `src/tests/secret_hygiene_oc05_test.rs` |
+| Tests — Service Scope | 11 | `src/tests/service_scope_test.rs` |
+| Tests — Streaming | 10 | `src/tests/streaming_test.rs` |
+| Tests — Subagent Brain | 8 | `src/tests/subagent_brain_test.rs` |
+| Tests — Tool Context Origin Target | 3 | `src/tests/tool_context_origin_target_test.rs` |
+| Tests — Work Status Output Full | 4 | `src/tests/work_status_output_full_test.rs` |
+| Tests — Stale Topic Eviction | 3 | `src/tests/stale_topic_eviction_test.rs` |
+| Tests — OC Consumer Migration | 7 | `src/tests/oc_consumer_migration_test.rs` |
+| Tests — OC Opaqueness Wall | 2 | `src/tests/oc_opaqueness_wall_test.rs` |
+| Tests — OC Reverse Maps | 5 | `src/tests/oc_reverse_maps_test.rs` |
+| Tests — OC Send Scope | 8 | `src/tests/oc_send_scope_test.rs` |
