@@ -148,7 +148,10 @@ fn test_go_tier_verb_repeat_rule() {
         go_tier_line("Go — implement #98 after the #96 gate lands"),
         "**Go — implement #98 after the #96 gate lands?**"
     );
-    assert_eq!(go_tier_line("Smoke OK — ack both units"), "**Go: Smoke OK — ack both units?**");
+    assert_eq!(
+        go_tier_line("Smoke OK — ack both units"),
+        "**Go: Smoke OK — ack both units?**"
+    );
     // Case-insensitive verb match (Go!/go both start the label).
     assert_eq!(go_tier_line("go fast"), "**go fast?**");
     // Prefix-verb must not false-positive mid-word.
@@ -352,7 +355,10 @@ fn test_rows_and_trailer_start_a_fresh_markdown_block() {
             // numbered list — no Go prefix, no bold. Blank-line-separated
             // from the body.
             assert!(md.contains("1. One"), "numbered fold body line: {md}");
-            assert!(!md.contains("Go:") && !md.contains("**"), "no Go-tier artifacts: {md}");
+            assert!(
+                !md.contains("Go:") && !md.contains("**"),
+                "no Go-tier artifacts: {md}"
+            );
         }
     }
     // Body already ending in a newline must not grow a triple gap.
