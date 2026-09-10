@@ -409,6 +409,7 @@ pub mod telegram_userbot_runner_test;
 pub mod telegram_userbot_session_test;
 pub mod tool_search_child_registry_test;
 pub mod tools_md_regression_test;
+pub mod work_status_output_full_test;
 pub mod work_status_parent_binding_test;
 pub mod write_opencrabs_file_inline_test;
 // Unix-only: drives Config::load via a temp HOME override. On Windows

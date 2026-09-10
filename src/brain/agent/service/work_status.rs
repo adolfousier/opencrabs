@@ -148,7 +148,7 @@ pub struct ProgressSnapshot {
 ///
 /// Commands fill the exit side (`success`/`code`/`elapsed_secs`/
 /// `output_bytes`, #1160), agents the outcome side (`error`/
-/// `output_summary`, #1038). `completed_at` is shared and is what the
+/// `output_full`, #147). `completed_at` is shared and is what the
 /// stale sweep ages files out by.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkFinish {
@@ -164,8 +164,12 @@ pub struct WorkFinish {
     pub output_bytes: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// The COMPLETE final output of a finished agent (#147). Replaces the
+    /// 200-char `output_summary` stub — zero production code paths ever
+    /// read the summary's content, so the full report replaces it as the
+    /// only persisted record. `None` for commands and legacy files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_summary: Option<String>,
+    pub output_full: Option<String>,
 }
 
 /// Exit information for a detached command (#1160). Bundled so
@@ -187,7 +191,7 @@ fn finish_now() -> WorkFinish {
         elapsed_secs: None,
         output_bytes: None,
         error: None,
-        output_summary: None,
+        output_full: None,
     }
 }
 
@@ -342,11 +346,11 @@ impl WorkStatus {
         self.write()
     }
 
-    /// Mark the work completed with a short output summary.
-    pub fn mark_completed(&mut self, output_summary: String) -> std::io::Result<()> {
+    /// Mark the work completed with the COMPLETE final output (#147).
+    pub fn mark_completed(&mut self, output_full: String) -> std::io::Result<()> {
         self.state = WorkState::Completed;
         let mut finish = finish_now();
-        finish.output_summary = Some(output_summary);
+        finish.output_full = Some(output_full);
         self.finish = Some(finish);
         self.write()
     }
@@ -459,8 +463,6 @@ struct LegacySubagentStatus {
     completed_at: Option<String>,
     #[serde(default)]
     error: Option<String>,
-    #[serde(default)]
-    output_summary: Option<String>,
 }
 
 /// Move pre-#26 sub-agent status files from `legacy` into [`status_dir`],
@@ -527,10 +529,9 @@ pub fn migrate_legacy_dir(legacy: &Path) -> usize {
                     elapsed_secs: None,
                     output_bytes: None,
                     error: None,
-                    output_summary: None,
+                    output_full: None,
                 };
                 finish.error = old.error.clone();
-                finish.output_summary = old.output_summary.clone();
                 finish
             }),
         };
