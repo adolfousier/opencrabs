@@ -32,7 +32,7 @@ use crate::db::Database;
 use crate::services::{ServiceContext, SessionService};
 use async_trait::async_trait;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 // Both scenarios are folded into a SINGLE `#[tokio::test]` because
 // `Database::GLOBAL_POOL` is a `OnceLock` set by the first
@@ -168,8 +168,8 @@ async fn run_auto_title_round_trip(
         .await
         .expect("first turn should complete");
 
-    let deadline = Instant::now() + Duration::from_secs(3);
-    while Instant::now() < deadline {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    while tokio::time::Instant::now() < deadline {
         let s = session_service
             .get_session(session_id)
             .await
@@ -211,6 +211,17 @@ fn auto_title_end_to_end_covers_all_scenarios() {
 }
 
 async fn inner_auto_title_end_to_end() {
+    // Virtual time (#1455): under CI load the single current-thread runtime
+    // can stall for seconds between polls, so a WALL-CLOCK 3s deadline
+    // flaked on unrelated PR-lane runs (3 pinned failures in the issue,
+    // same panic line, branches not touching auto-title). With paused
+    // time, `tokio::time::sleep` auto-advances only when the runtime has
+    // no ready work: the poll below still caps at ~60 scheduler-idle
+    // iterations (a real hang still fails fast), but can no longer expire
+    // just because the machine was busy. `tokio::time::Instant` respects
+    // the pause; std Instant does not.
+    tokio::time::pause();
+
     // Three phases run inside a SINGLE #[tokio::test] because adding more
     // tokio tests to this file makes the first one fail with
     // `Database("Failed to create message")` — even when each test creates
@@ -330,9 +341,9 @@ async fn run_two_message_round_trip(
         .expect("first turn should complete");
 
     // Wait for the auto-title task to land.
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
     let mut after_first: Option<String> = None;
-    while Instant::now() < deadline {
+    while tokio::time::Instant::now() < deadline {
         let s = session_service
             .get_session(session_id)
             .await
