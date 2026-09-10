@@ -465,6 +465,7 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Phantom Post Success Exemption | 11 | `src/tests/phantom_post_success_exemption_test.rs` |
 | Tests — Phantom Pronoun Drop | 8 | `src/tests/phantom_pronoun_drop_test.rs` |
 | Tests — Phantom Side Effect | 12 | `src/tests/phantom_side_effect_test.rs` |
+| Tests — Phantom Structured Report | 14 | `src/tests/phantom_structured_report_test.rs` |
 | Tests — Phantom Trigger Gap | 3 | `src/tests/phantom_trigger_gap_test.rs` |
 | Tests — Phantom Unbacked Evidence | 11 | `src/tests/phantom_unbacked_evidence_test.rs` |
 | Tests — Phantom Unbacked Facts | 16 | `src/tests/phantom_unbacked_facts_test.rs` |

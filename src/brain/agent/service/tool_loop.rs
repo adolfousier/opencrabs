@@ -5010,102 +5010,99 @@ impl AgentService {
                         continue;
                     }
                 }
-                if phantom_retries_used < MAX_PHANTOM_RETRIES
+                // #1506: the detectors hoist into a NAMED list of fired
+                // branches. The old anonymous || chain made the WARN
+                // unattributable — the 2026-09-10 kills could not be
+                // diagnosed from logs alone. Eager by design: attribution
+                // wants ALL fired branches, and each scan is a cheap
+                // string pass at turn end.
+                let fired_branches: Vec<&str> = {
+                    let candidates = [
+                        (
+                            "intent_no_tools",
+                            super::phantom::has_phantom_tool_intent_no_tools(&iteration_text),
+                        ),
+                        (
+                            "intent_full_text",
+                            super::phantom::has_phantom_tool_intent(&iteration_text),
+                        ),
+                        (
+                            "tool_name_narrated",
+                            tool_calls_completed_this_turn == 0
+                                && super::phantom::mentions_registered_tool(
+                                    &iteration_text,
+                                    &phantom_tool_names,
+                                ),
+                        ),
+                        (
+                            "shell_fence_narrated",
+                            tool_calls_completed_this_turn == 0
+                                && super::fenced_command::narrates_unrun_shell_block(
+                                    &iteration_text,
+                                ),
+                        ),
+                        (
+                            "unbacked_side_effects",
+                            tool_calls_completed_this_turn == 0
+                                && super::phantom::claims_unbacked_side_effects(&iteration_text),
+                        ),
+                        (
+                            "bare_completion_delivery",
+                            tool_calls_completed_this_turn == 0
+                                && super::phantom::is_bare_completion_only(&iteration_text)
+                                && super::phantom::is_delivery_intent(
+                                    display_text_override.as_deref().unwrap_or(&user_message),
+                                ),
+                        ),
+                        (
+                            "media_claim_no_marker",
+                            tool_calls_completed_this_turn == 0
+                                && super::phantom::claims_unbacked_media_result(&iteration_text),
+                        ),
+                        ("uncalled_commands", !uncalled_commands.is_empty()),
+                        (
+                            "unbacked_evidence",
+                            super::phantom::claims_unbacked_evidence(
+                                &iteration_text,
+                                &turn_tool_output,
+                            ),
+                        ),
+                        ("unbacked_facts", !unbacked_facts.is_empty()),
+                    ];
+                    candidates
+                        .into_iter()
+                        .filter(|(_, fired)| *fired)
+                        .map(|(branch, _)| branch)
+                        .collect()
+                };
+                // #1506: the summary genre. Every detector matches verbatim
+                // strings and a distilled completion report paraphrases by
+                // construction — four legitimate 2KB batch reports with
+                // verdict tables died on 2026-09-10. Owner directive: a
+                // report with tables and structured data is NEVER discarded.
+                // It ships untouched, spends no retry budget, and drains no
+                // streamed buffer; the would-be branches land in the WARN
+                // for forensics, so #1423's fabricated-table shape trades a
+                // silent discard for a visible delivery with a trail.
+                let structured_report = super::phantom::is_structured_report(&iteration_text);
+                let kill = phantom_retries_used < MAX_PHANTOM_RETRIES
                     && phantom_detections_total < MAX_PHANTOM_DETECTIONS_TOTAL
                     && phantom_eligible
-                    && (super::phantom::has_phantom_tool_intent_no_tools(&iteration_text)
-                        // Strict full-text detector (#589): the lead-in-only
-                        // gate above misses a narrated plan when a structured
-                        // preamble (a numbered task-restatement or table)
-                        // precedes it, because prose_lead_in truncates at the
-                        // first structural line and the real "Let me …" /
-                        // numbered-step narration sits after it. The strict
-                        // detector scans the whole text and catches it.
-                        // Language-agnostic — works for every phantom_lang locale.
-                        || super::phantom::has_phantom_tool_intent(&iteration_text)
-                        // Language-agnostic tell (#463): a zero-tool turn
-                        // whose text NAMES a registered tool is narrating
-                        // usage it never executed, in any language.
-                        || (tool_calls_completed_this_turn == 0
-                            && super::phantom::mentions_registered_tool(
-                                &iteration_text,
-                                &phantom_tool_names,
-                            ))
-                        // Structural tell (#1194): a zero-tool iteration whose
-                        // text hands back a runnable shell command in a
-                        // shell-tagged fence. Caught here as well as at turn
-                        // end so the self-heal nudge still has budget to make
-                        // the call, rather than only replacing the answer.
-                        || (tool_calls_completed_this_turn == 0
-                            && super::fenced_command::narrates_unrun_shell_block(
-                                &iteration_text,
-                            ))
-                        // Verify-by-construction (#680): a zero-tool turn that
-                        // claims 2+ high-stakes side-effects (ship / push / tag /
-                        // version bump / changelog write / post) is fabricating —
-                        // those cannot happen without a tool call. Scans full text
-                        // incl. table cells, so a "shipped" scoreboard TABLE (which
-                        // slipped every prose-shaped detector) is caught.
-                        || (tool_calls_completed_this_turn == 0
-                            && super::phantom::claims_unbacked_side_effects(&iteration_text))
-                        // Bare-completion phantom (#680 follow-up): a zero-tool
-                        // turn answering a delivery request ("build/create/write
-                        // X") with a content-free completion word ("Done.",
-                        // "Ready.") produced no artifact and ran no tool — the
-                        // claim is empty. The 5-byte "Done." slips every other
-                        // detector's length floor, so match it explicitly. Gated
-                        // on the request being a delivery intent so a legitimate
-                        // cross-turn ack ("did you commit? — Done.") is untouched.
-                        || (tool_calls_completed_this_turn == 0
-                            && super::phantom::is_bare_completion_only(&iteration_text)
-                            && super::phantom::is_delivery_intent(
-                                display_text_override.as_deref().unwrap_or(&user_message),
-                            ))
-                        // Image-generation hallucination (#747): a zero-tool turn
-                        // asserting it produced/delivered an image or media result
-                        // but carrying no <<IMG:>>/<<VID:>> marker is fabricating —
-                        // generate_image delivers via those markers.
-                        || (tool_calls_completed_this_turn == 0
-                            && super::phantom::claims_unbacked_media_result(&iteration_text))
-                        // Fact-based, not wording-based (#1073). Every branch
-                        // above reads the wording for a signal, so a fabricated
-                        // PAST-TENSE result claim matched none of them: no
-                        // forward intent, no registered tool name, no
-                        // side-effect verb, not a bare completion, no media
-                        // claim. These two do not infer — the loop knows what
-                        // it executed, so a named command absent from every
-                        // tool input was not run, and quoted output absent from
-                        // every tool result was written rather than read.
-                        //
-                        // Both already gate `phantom_eligible` above. Without
-                        // them here the strongest evidence we hold could not
-                        // fire the correction it was computed for: the turn was
-                        // ruled eligible, every wording branch missed, and the
-                        // fabrication shipped with no nudge and no log line.
-                        //
-                        // Deliberately NOT gated on
-                        // `tool_calls_completed_this_turn == 0`: #785 and #825
-                        // exist precisely because a turn that DID run tools can
-                        // still fabricate a separate claim alongside them.
-                        || !uncalled_commands.is_empty()
-                        || super::phantom::claims_unbacked_evidence(
-                            &iteration_text,
-                            &turn_tool_output,
-                        )
-                        // The check the exemption was missing (#1423): a sha or
-                        // tally absent from every tool result and message in
-                        // the conversation. Deliberately NOT gated on a
-                        // zero-tool turn, because the case it exists for is a
-                        // turn that DID run tools and then invented the report
-                        // about them.
-                        || !unbacked_facts.is_empty())
-                {
+                    && !fired_branches.is_empty();
+                if kill && structured_report {
+                    tracing::warn!(
+                        branches = ?fired_branches,
+                        text_len = iteration_text.len(),
+                        "phantom suppressed: structured completion report delivered despite fired detectors",
+                    );
+                } else if kill {
                     phantom_detections_total += 1;
                     phantom_retries_used += 1;
                     tracing::warn!(
-                        "Phantom tool call detected (local={}) — model described \
+                        "Phantom tool call detected (local={}, branches={:?}) — model described \
                          actions without executing tools. Injecting retry prompt.",
-                        is_local_provider
+                        is_local_provider,
+                        fired_branches
                     );
                     // Analytics (#897): record the phantom detection. Tagged with
                     // the active provider/model so Mission Control can break

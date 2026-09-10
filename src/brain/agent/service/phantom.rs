@@ -1639,3 +1639,47 @@ pub fn claims_unsent_file(text: &str, tool_inputs: &[String]) -> bool {
         .flat_map(|l| l.file_context_words.iter())
         .any(|w| lower.contains(w.as_str()))
 }
+
+/// Structured completion report (#1506): the text carries real report
+/// furniture — a markdown table (header + separator row + at least one data
+/// row) or two or more `##` section headings.
+///
+/// Every detector above matches verbatim strings: intent phrases, quoted
+/// commands, sha/tally tokens checked against tool output. A distilled turn
+/// summary paraphrases by construction, so the genre structurally
+/// misfires — four legitimate batch reports (1.8-2.0 KB, tables included)
+/// were discarded on 2026-09-10 while every fact in them was real. The
+/// owner's standing directive: reports with tables and structured data are
+/// NEVER discarded. The mid-loop kill exempts this genre wholesale; the
+/// fired branches still land in the log for forensics, so a genuinely
+/// fabricated table report (#1423's shape) trades a silent discard for a
+/// visible delivery with a WARN trail.
+///
+/// Prose-shaped completions keep the full detector set: a short fabricated
+/// "Done, shipped abc1234" matches nothing here and dies as before.
+pub fn is_structured_report(text: &str) -> bool {
+    let mut pipe_rows = 0usize;
+    let mut separator_seen = false;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if !trimmed.starts_with('|') {
+            continue;
+        }
+        pipe_rows += 1;
+        let inner = trimmed.trim_start_matches('|').trim_end_matches('|');
+        // A separator row is pipes and dashes only: `|---|---|`. A data row
+        // carries alphanumerics, so `| a--b |` never counts as a separator.
+        if inner.contains("---") && !inner.chars().any(|c| c.is_alphanumeric()) {
+            separator_seen = true;
+        }
+    }
+    // Header + separator + at least one data row.
+    if separator_seen && pipe_rows >= 3 {
+        return true;
+    }
+    // Two or more `##` headings: a structured document, not prose.
+    text.lines()
+        .filter(|line| line.trim_start().starts_with("## "))
+        .count()
+        >= 2
+}
