@@ -287,16 +287,34 @@ async fn design_md_scaffold_and_mirror() {
                     - **Target state:** X works\n- **Intent:** user asked\n\n\
                     ## Implementation steps\n1. Fix X in module Y\n";
         std::fs::write(&md_path, body).unwrap();
-        let warnings = sync_md_to_json(sid).await;
-        assert!(
-            warnings.is_empty(),
-            "complete template warned: {warnings:?}"
-        );
+        sync_md_to_json(sid).await.unwrap();
 
         let mirrored = load_plan(sid).await.unwrap();
         assert_eq!(mirrored.description, body);
         assert!(mirrored.tasks.is_empty());
         assert_eq!(mirrored.status, PlanStatus::Editing);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn sync_refuses_malformed_body_and_restores_previous_mirror() {
+    in_temp_home(async {
+        let sid = Uuid::new_v4();
+        let plan = PlanDocument::new(sid, "Guarded design".to_string());
+        save_plan(&plan).await.unwrap();
+        let md_path = create_design_md(sid, "Guarded design").await.unwrap();
+        let valid = "# Guarded design\n\n## Context\n- **Problem:** old\n- **Target state:** fixed\n- **Intent:** test\n\n## Implementation steps\n1. Keep old\n";
+        std::fs::write(&md_path, valid).unwrap();
+        sync_md_to_json(sid).await.unwrap();
+
+        let malformed = "# Guarded design\n\n## Context\n- **Problem:**\n  text moved to the next line\n- **Target state:** fixed\n- **Intent:** test\n\n## Implementation steps\n1. Keep old\n";
+        std::fs::write(&md_path, malformed).unwrap();
+        let error = sync_md_to_json(sid).await.unwrap_err();
+        assert!(error.contains("`**Problem:**` needs non-empty text after the label"));
+        assert!(error.contains("each `**Label:**` must be a single line: label + space + text"));
+        assert_eq!(std::fs::read_to_string(&md_path).unwrap(), valid);
+        assert_eq!(load_plan(sid).await.unwrap().description, valid);
     })
     .await;
 }

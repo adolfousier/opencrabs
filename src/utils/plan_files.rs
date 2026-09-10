@@ -865,29 +865,45 @@ pub fn template_nudge(session_id: Uuid, warnings: &[String]) -> Option<String> {
 
 /// Sync the session `.md` body into the plan JSON `description` (the
 /// Editing mirror). Tasks are never touched: Editing cannot persist a
-/// checklist. Returns any template-section warnings (advisory only; a
-/// missing section never blocks the write).
-pub async fn sync_md_to_json(session_id: Uuid) -> Vec<String> {
+/// checklist. Malformed template bodies are refused and restored from the
+/// previous mirror, so callers can return the validator's exact guidance to
+/// the writing model.
+pub async fn sync_md_to_json(session_id: Uuid) -> Result<(), String> {
     // Read the `.md` and `.json` from the same active location (resolved or
     // legacy), so an in-place edit is mirrored regardless of which dir the
     // plan currently lives in.
     let json = plan_json_read_path(session_id).await;
     let md = md_path_for(&json);
     let Ok(body) = std::fs::read_to_string(&md) else {
-        return Vec::new();
+        return Ok(());
     };
     let Some(mut plan) = load_plan_from_path(&json) else {
-        return Vec::new();
+        return Ok(());
     };
     if plan.status != PlanStatus::Editing {
-        return Vec::new();
+        return Ok(());
     }
-    plan.description = body.clone();
+
+    let warnings = template_section_warnings(&body);
+    if !warnings.is_empty() {
+        // The generic write tool has already updated the .md by the time the
+        // registry reaches this mirror. Restore the last accepted body so a
+        // refused write has no observable persistence side effect.
+        if let Err(e) = std::fs::write(&md, &plan.description) {
+            tracing::warn!("Failed to restore refused plan .md write: {e}");
+        }
+        return Err(format!(
+            "PLAN TEMPLATE WRITE REFUSED: {}\n\nPlan template contract: each `**Label:**` must be a single line: label + space + text",
+            warnings.join("; ")
+        ));
+    }
+
+    plan.description = body;
     plan.updated_at = chrono::Utc::now();
     if let Err(e) = save_plan(&plan).await {
         tracing::warn!("Failed to mirror plan .md into JSON description: {e}");
     }
-    template_section_warnings(&body)
+    Ok(())
 }
 
 /// Advisory light-template-B checks for the design `.md`: `## Context`
