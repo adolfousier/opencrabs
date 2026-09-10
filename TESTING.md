@@ -32,6 +32,7 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — A2A Agent Card | 2 | `src/tests/a2a_agent_card_test.rs` |
 | Tests — A2A Context Continuity | 4 | `src/tests/a2a_context_continuity_test.rs` |
 | Tests — A2A Debate | 8 | `src/tests/a2a_debate_test.rs` |
+| Tests — A2A Gate Auth | 8 | `src/tests/a2a_gate_auth_test.rs` |
 | Tests — A2A Handler Tasks | 1 | `src/tests/a2a_handler_tasks_test.rs` |
 | Tests — A2A Handler | 2 | `src/tests/a2a_handler_test.rs` |
 | Tests — A2A Notify Handler | 10 | `src/tests/a2a_notify_handler_test.rs` |
@@ -55,7 +56,7 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Analytics Render | 16 | `src/tests/analytics_render_test.rs` |
 | Tests — Analyze Video Fallback | 9 | `src/tests/analyze_video_fallback_test.rs` |
 | Tests — Approval Policy Resolution | 7 | `src/tests/approval_policy_resolution_test.rs` |
-| Tests — Auto Title E2e | 3 | `src/tests/auto_title_e2e_test.rs` |
+| Tests — Auto Title E2e | 1 | `src/tests/auto_title_e2e_test.rs` |
 | Tests — Auto Title | 39 | `src/tests/auto_title_test.rs` |
 | Tests — Background Indicator | 9 | `src/tests/background_indicator_test.rs` |
 | Tests — Background Session | 14 | `src/tests/background_session_test.rs` |
@@ -154,9 +155,11 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Cancel Restore Query | 2 | `src/tests/cancel_restore_query_test.rs` |
 | Tests — Candle Whisper | 6 | `src/tests/candle_whisper_test.rs` |
 | Tests — Channel Action | 4 | `src/tests/channel_action_test.rs` |
+| Tests — Channel Approval Owner Gate | 2 | `src/tests/channel_approval_owner_gate_test.rs` |
 | Tests — Channel Command Media Marker | 3 | `src/tests/channel_command_media_marker_test.rs` |
 | Tests — Channel Command Owner Gate | 5 | `src/tests/channel_command_owner_gate_test.rs` |
 | Tests — Channel Commands | 21 | `src/tests/channel_commands_test.rs` |
+| Tests — Channel Deny By Default | 4 | `src/tests/channel_deny_by_default_test.rs` |
 | Tests — Channel Factory Subagent | 2 | `src/tests/channel_factory_subagent_test.rs` |
 | Tests — Channel Restart Target | 6 | `src/tests/channel_restart_target_test.rs` |
 | Tests — Channel Route Expectation | 5 | `src/tests/channel_route_expectation_test.rs` |
@@ -177,11 +180,11 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — CLI Headless Tools | 4 | `src/tests/cli_headless_tools_test.rs` |
 | Tests — CLI Session Id Prefix | 9 | `src/tests/cli_session_id_prefix_test.rs` |
 | Tests — CLI Session Set Model | 6 | `src/tests/cli_session_set_model_test.rs` |
+| Tests — Cli Silent Failure | 5 | `src/tests/cli_silent_failure_test.rs` |
 | Tests — CLI Supported Models | 14 | `src/tests/cli_supported_models_test.rs` |
 | Tests — CLI | 28 | `src/tests/cli_test.rs` |
 | Tests — CLIck To Expand | 7 | `src/tests/click_to_expand_test.rs` |
 | Tests — CLIpboard Image Paste | 2 | `src/tests/clipboard_image_paste_test.rs` |
-| Tests — Cli Silent Failure | 5 | `src/tests/cli_silent_failure_test.rs` |
 | Tests — Codex CLI | 10 | `src/tests/codex_cli_test.rs` |
 | Tests — Collapse Build Output | 9 | `src/tests/collapse_build_output_test.rs` |
 | Tests — Collapse Home | 8 | `src/tests/collapse_home_test.rs` |
@@ -193,9 +196,10 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Compaction Fallback Chain | 19 | `src/tests/compaction_fallback_chain_test.rs` |
 | Tests — Compaction Prompts | 16 | `src/tests/compaction_prompts_test.rs` |
 | Tests — Compaction Signal | 16 | `src/tests/compaction_signal_test.rs` |
-| Tests — Compaction | 28 | `src/tests/compaction_test.rs` |
 | Tests — Compaction Single Continuation Path | 2 | `src/tests/compaction_single_continuation_path_test.rs` |
+| Tests — Compaction | 28 | `src/tests/compaction_test.rs` |
 | Tests — Compaction Truncation Marker | 5 | `src/tests/compaction_truncation_marker_test.rs` |
+| Tests — Confidential Read Deny | 5 | `src/tests/confidential_read_deny_test.rs` |
 | Tests — Config Alias Merge | 17 | `src/tests/config_alias_merge_test.rs` |
 | Tests — Config Dotted Caps | 6 | `src/tests/config_dotted_caps_test.rs` |
 | Tests — Config Guard | 5 | `src/tests/config_guard_test.rs` |
@@ -232,6 +236,7 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Cron Scheduler Dedup Job | 1 | `src/tests/cron_scheduler_dedup_job_test.rs` |
 | Tests — Cron Scheduler Lock | 4 | `src/tests/cron_scheduler_lock_test.rs` |
 | Tests — Cron Send Scope | 6 | `src/tests/cron_send_scope_test.rs` |
+| Tests — Cron Session Target | 7 | `src/tests/cron_session_target_test.rs` |
 | Tests — Cron | 74 | `src/tests/cron_test.rs` |
 | Tests — Cron Tool Registry | 2 | `src/tests/cron_tool_registry_test.rs` |
 | Tests — Cross Provider Model Leak Guard | 6 | `src/tests/cross_provider_model_leak_guard_test.rs` |
@@ -242,8 +247,10 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Custom Provider No Models | 3 | `src/tests/custom_provider_no_models_test.rs` |
 | Tests — Custom Provider Rename Keys Toml | 11 | `src/tests/custom_provider_rename_keys_toml_test.rs` |
 | Tests — Custom Provider Section Resolver | 2 | `src/tests/custom_provider_section_resolver_test.rs` |
+| Tests — Custom Provider Stream Empty Finish | 1 | `src/tests/custom_provider_stream_empty_finish_test.rs` |
 | Tests — Custom Provider | 31 | `src/tests/custom_provider_test.rs` |
 | Tests — Daemon Health | 10 | `src/tests/daemon_health_test.rs` |
+| Tests — Daily Backup Rotation | 3 | `src/tests/daily_backup_rotation_test.rs` |
 | Tests — DB Database | 7 | `src/tests/db_database_test.rs` |
 | Tests — DB Migration 33 Heal | 4 | `src/tests/db_migration_33_heal_test.rs` |
 | Tests — DB Models | 5 | `src/tests/db_models_test.rs` |
@@ -254,7 +261,7 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — DB Repository Project | 5 | `src/tests/db_repository_project_test.rs` |
 | Tests — DB Repository Session | 2 | `src/tests/db_repository_session_test.rs` |
 | Tests — DB Retry | 8 | `src/tests/db_retry_test.rs` |
-| Tests — Daily Backup Rotation | 3 | `src/tests/daily_backup_rotation_test.rs` |
+| Tests — DB Thread ID Stamp Heal | 3 | `src/tests/db_thread_id_stamp_heal_test.rs` |
 | Tests — Deepseek Reasoning | 13 | `src/tests/deepseek_reasoning_test.rs` |
 | Tests — Directive Discovery | 13 | `src/tests/directive_discovery_test.rs` |
 | Tests — Discord Handler | 2 | `src/tests/discord_handler_test.rs` |
@@ -290,7 +297,9 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Evolve Diagnose | 7 | `src/tests/evolve_diagnose_test.rs` |
 | Tests — Evolve Systemd Restart | 14 | `src/tests/evolve_systemd_restart_test.rs` |
 | Tests — Evolve | 23 | `src/tests/evolve_test.rs` |
+| Tests — Evolve Verify | 8 | `src/tests/evolve_verify_test.rs` |
 | Tests — Exa Search | 4 | `src/tests/exa_search_test.rs` |
+| Tests — Execution Blocklist Floor | 4 | `src/tests/execution_blocklist_floor_test.rs` |
 | Tests — External Scope | 3 | `src/tests/external_scope_test.rs` |
 | Tests — Fallback Chain Hot Reload | 3 | `src/tests/fallback_chain_hot_reload_test.rs` |
 | Tests — Fallback Cli Tool Ownership | 6 | `src/tests/fallback_cli_tool_ownership_test.rs` |
@@ -321,6 +330,7 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Governor Internals | 5 | `src/tests/governor_internals_test.rs` |
 | Tests — Handshake Timeout | 4 | `src/tests/handshake_timeout_test.rs` |
 | Tests — Hashline | 32 | `src/tests/hashline_test.rs` |
+| Tests — Headless Tool Surface | 7 | `src/tests/headless_tool_surface_test.rs` |
 | Tests — Html Comment Strip | 14 | `src/tests/html_comment_strip_test.rs` |
 | Tests — HTTP Request | 5 | `src/tests/http_request_test.rs` |
 | Tests — Image Util | 9 | `src/tests/image_util_test.rs` |
@@ -392,6 +402,10 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Nonstream Compat | 5 | `src/tests/nonstream_compat_test.rs` |
 | Tests — Notify Receipts | 4 | `src/tests/notify_receipts_test.rs` |
 | Tests — Nudge Text | 9 | `src/tests/nudge_text_test.rs` |
+| Tests — OC Consumer Migration | 7 | `src/tests/oc_consumer_migration_test.rs` |
+| Tests — OC Opaqueness Wall | 2 | `src/tests/oc_opaqueness_wall_test.rs` |
+| Tests — OC Reverse Maps | 5 | `src/tests/oc_reverse_maps_test.rs` |
+| Tests — OC Send Scope | 8 | `src/tests/oc_send_scope_test.rs` |
 | Tests — Onboard Channel | 13 | `src/tests/onboard_channel_test.rs` |
 | Tests — Onboarding Brain | 23 | `src/tests/onboarding_brain_test.rs` |
 | Tests — Onboarding Channel Deep Link | 7 | `src/tests/onboarding_channel_deep_link_test.rs` |
@@ -587,6 +601,7 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Sanitize Reasoning Leak | 7 | `src/tests/sanitize_reasoning_leak_test.rs` |
 | Tests — Sanitize Redaction | 31 | `src/tests/sanitize_redaction_test.rs` |
 | Tests — Scope All Recency | 5 | `src/tests/scope_all_recency_test.rs` |
+| Tests — Secret Hygiene Oc05 | 4 | `src/tests/secret_hygiene_oc05_test.rs` |
 | Tests — Seen Skills | 11 | `src/tests/seen_skills_test.rs` |
 | Tests — Self Healing | 88 | `src/tests/self_healing_test.rs` |
 | Tests — Self Improve Failure Log Guard | 3 | `src/tests/self_improve_failure_log_guard_test.rs` |
@@ -627,6 +642,7 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Slash Command Resolution | 4 | `src/tests/slash_command_resolution_test.rs` |
 | Tests — Slash Models Target | 12 | `src/tests/slash_models_target_test.rs` |
 | Tests — Split Pane | 21 | `src/tests/split_pane_test.rs` |
+| Tests — Stale Topic Eviction | 3 | `src/tests/stale_topic_eviction_test.rs` |
 | Tests — Start Gate Allowed User | 7 | `src/tests/start_gate_allowed_user_test.rs` |
 | Tests — Startup Checks | 10 | `src/tests/startup_checks_test.rs` |
 | Tests — Stop Intent | 11 | `src/tests/stop_intent_test.rs` |
@@ -637,6 +653,7 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Streaming Tok Per Sec Guard | 10 | `src/tests/streaming_tok_per_sec_guard_test.rs` |
 | Tests — Streaming Tps Accumulator | 12 | `src/tests/streaming_tps_accumulator_test.rs` |
 | Tests — Stt Fallback Chain | 10 | `src/tests/stt_fallback_chain_test.rs` |
+| Tests — Subagent Brain | 8 | `src/tests/subagent_brain_test.rs` |
 | Tests — Subagent Compaction Preamble | 7 | `src/tests/subagent_compaction_preamble_test.rs` |
 | Tests — Subagent Natural Completion | 3 | `src/tests/subagent_natural_completion_test.rs` |
 | Tests — Subagent Notify | 15 | `src/tests/subagent_notify_test.rs` |
@@ -741,7 +758,6 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Telegram Userbot Session | 4 | `src/tests/telegram_userbot_session_test.rs` |
 | Tests — Template Governance | 20 | `src/tests/template_governance_test.rs` |
 | Tests — Text Complete | 21 | `src/tests/text_complete_test.rs` |
-| Tests — TUI Theme Picker | 10 | `src/tests/tui_theme_picker_test.rs` |
 | Tests — Theme Persist Roundtrip | 4 | `src/tests/theme_persist_roundtrip_test.rs` |
 | Tests — Thinking Loop Fallback | 5 | `src/tests/thinking_loop_fallback_test.rs` |
 | Tests — Token Report Calibration | 9 | `src/tests/token_report_calibration_test.rs` |
@@ -749,10 +765,11 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Toml Hot Reload | 6 | `src/tests/toml_hot_reload_test.rs` |
 | Tests — Toml Merge | 9 | `src/tests/toml_merge_test.rs` |
 | Tests — Tool Arg Unescape | 10 | `src/tests/tool_arg_unescape_test.rs` |
+| Tests — Tool Context Origin Target | 3 | `src/tests/tool_context_origin_target_test.rs` |
 | Tests — Tool Description Redaction | 6 | `src/tests/tool_description_redaction_test.rs` |
 | Tests — Tool Execution Repo | 8 | `src/tests/tool_execution_repo_test.rs` |
 | Tests — Tool Execution Stats | 2 | `src/tests/tool_execution_stats_test.rs` |
-| Tests — Tool Loop Helpers | 42 | `src/tests/tool_loop_helpers_test.rs` |
+| Tests — Tool Loop Helpers | 40 | `src/tests/tool_loop_helpers_test.rs` |
 | Tests — Tool Name Heal | 11 | `src/tests/tool_name_heal_test.rs` |
 | Tests — Tool Process Kill On Drop | 2 | `src/tests/tool_process_kill_on_drop_test.rs` |
 | Tests — Tool Repeat | 13 | `src/tests/tool_repeat_test.rs` |
@@ -781,10 +798,12 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — TUI Process Commands | 3 | `src/tests/tui_process_commands_test.rs` |
 | Tests — TUI Remote Upload | 12 | `src/tests/tui_remote_upload_test.rs` |
 | Tests — TUI Render Clear | 4 | `src/tests/tui_render_clear_test.rs` |
-| Tests — TUI Theme Presets | 15 | `src/tests/tui_theme_presets_test.rs` |
 | Tests — TUI Render Utils | 12 | `src/tests/tui_render_utils_test.rs` |
 | Tests — TUI Session Switch State | 7 | `src/tests/tui_session_switch_state_test.rs` |
+| Tests — TUI Theme Picker | 10 | `src/tests/tui_theme_picker_test.rs` |
+| Tests — Tui Theme Presets | 15 | `src/tests/tui_theme_presets_test.rs` |
 | Tests — TUI Tool Stack | 10 | `src/tests/tui_tool_stack_test.rs` |
+| Tests — TUI User Themes | 10 | `src/tests/tui_user_themes_test.rs` |
 | Tests — Turn Duration | 6 | `src/tests/turn_duration_test.rs` |
 | Tests — Turn Ranges | 40 | `src/tests/turn_ranges_test.rs` |
 | Tests — Usage Activity Columns | 9 | `src/tests/usage_activity_columns_test.rs` |
@@ -797,7 +816,6 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Usage Ledger Attribution | 3 | `src/tests/usage_ledger_attribution_test.rs` |
 | Tests — Usage Ledger | 5 | `src/tests/usage_ledger_test.rs` |
 | Tests — User Correction Metadata | 3 | `src/tests/user_correction_metadata_test.rs` |
-| Tests — TUI User Themes | 10 | `src/tests/tui_user_themes_test.rs` |
 | Tests — Utc Timestamp | 4 | `src/tests/utc_timestamp_test.rs` |
 | Tests — Utils File Extract | 8 | `src/tests/utils_file_extract_test.rs` |
 | Tests — Utils Install | 6 | `src/tests/utils_install_test.rs` |
@@ -836,6 +854,7 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Whatsapp State | 8 | `src/tests/whatsapp_state_test.rs` |
 | Tests — Whatsapp Store | 15 | `src/tests/whatsapp_store_test.rs` |
 | Tests — Word Delete Keybinding | 7 | `src/tests/word_delete_keybinding_test.rs` |
+| Tests — Work Status Output Full | 4 | `src/tests/work_status_output_full_test.rs` |
 | Tests — Work Status Parent Binding | 4 | `src/tests/work_status_parent_binding_test.rs` |
 | Tests — Write Opencrabs File Inline | 4 | `src/tests/write_opencrabs_file_inline_test.rs` |
 | Tests — Write Partial View Guard | 4 | `src/tests/write_partial_view_guard_test.rs` |
