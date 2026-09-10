@@ -2009,6 +2009,33 @@ impl TelegramAgent {
                                     return ResponseResult::Ok(());
                                 };
 
+                            // OC-01: the approval keyboard sits in the chat where
+                            // any allowlisted user can tap it, so re-check the
+                            // tapper is the owner before acting, same as cd:/plan:
+                            // above. A non-owner tap otherwise runs the pending
+                            // tool, and a YOLO tap persists auto-always instance-wide.
+                            let caller_is_owner = config_rx
+                                .borrow()
+                                .channels
+                                .telegram
+                                .is_owner(&query.from.id.0.to_string());
+                            if !caller_is_owner {
+                                tracing::warn!(
+                                    "Telegram: non-owner {} tapped '{}' — refused (OC-01)",
+                                    query.from.id.0,
+                                    data
+                                );
+                                if let Err(e) = bot
+                                    .answer_callback_query(query.id.clone())
+                                    .text("🔒 Owner only")
+                                    .show_alert(true)
+                                    .await
+                                {
+                                    tracing::warn!("Telegram: callback UI update failed: {e}");
+                                }
+                                return ResponseResult::Ok(());
+                            }
+
                             // Persist YOLO (permanent) directly from callback
                             if yolo {
                                 crate::utils::persist_auto_always_policy();

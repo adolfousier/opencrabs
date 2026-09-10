@@ -779,6 +779,41 @@ impl EventHandler for Handler {
                     return;
                 };
 
+            // OC-01: the approval keyboard sits in a channel where any member
+            // can press it, so re-check that the tapper is the owner before
+            // acting. Without this a non-owner tap runs the pending tool, and a
+            // YOLO tap persists auto-always for the whole instance. The session
+            // switch branch above already re-checks; the tool-approval buttons
+            // did not. Uses the canonical owner resolver, so an empty allowlist
+            // is unconfigured (deny), not "everyone is owner".
+            {
+                let cfg = self.config_rx.borrow().clone();
+                let caller = comp.user.id.get().to_string();
+                let is_owner = crate::config::owner::is_owner(
+                    &cfg.channels.discord.allowed_users,
+                    &cfg.channels.discord.bot_owner,
+                    &caller,
+                );
+                if !is_owner {
+                    tracing::warn!(
+                        "Discord: non-owner {} tapped '{}' — refused (OC-01)",
+                        caller,
+                        custom_id
+                    );
+                    let _ = comp
+                        .create_response(
+                            &ctx.http,
+                            serenity::builder::CreateInteractionResponse::Message(
+                                serenity::builder::CreateInteractionResponseMessage::new()
+                                    .content("⛔ Only the owner can approve tool calls.")
+                                    .ephemeral(true),
+                            ),
+                        )
+                        .await;
+                    return;
+                }
+            }
+
             if yolo {
                 crate::utils::persist_auto_always_policy();
             }

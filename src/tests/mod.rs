@@ -144,6 +144,7 @@ pub mod cancel_persists_completion_test;
 pub mod cancel_restore_query_test;
 pub mod candle_whisper_test;
 pub mod channel_action_test;
+pub mod channel_approval_owner_gate_test;
 pub mod channel_command_media_marker_test;
 pub mod channel_command_owner_gate_test;
 pub mod channel_factory_subagent_test;

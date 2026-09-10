@@ -380,6 +380,27 @@ pub async fn on_interaction(
                         tracing::warn!("Slack: unknown action_id: {}", action_id);
                         continue;
                     };
+                // OC-01: the approval buttons sit in a channel where any member
+                // can click them, so re-check the clicker is the owner before
+                // acting, same as the session branch above. A non-owner click
+                // otherwise runs the pending tool, and a YOLO click persists
+                // auto-always instance-wide.
+                {
+                    let cfg = state.config_rx.borrow().clone();
+                    let caller_id = block_actions
+                        .user
+                        .as_ref()
+                        .map(|u| u.id.0.as_str())
+                        .unwrap_or("");
+                    if !cfg.channels.slack.is_owner(caller_id) {
+                        tracing::warn!(
+                            "Slack: non-owner {} clicked '{}' — refused (OC-01)",
+                            caller_id,
+                            action_id
+                        );
+                        continue;
+                    }
+                }
                 if yolo {
                     crate::utils::persist_auto_always_policy();
                 }
