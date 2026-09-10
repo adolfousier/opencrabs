@@ -145,6 +145,19 @@ impl ConfigTool {
             Some("provider_registry") => format_toml(&config.provider_registry),
             Some("database") => format_toml(&config.database),
             Some("providers") => format_toml(&config.providers),
+            // Remaining struct sections (#86): the resolver resolves them fine,
+            // but the render match only carried the first eight arms, so every
+            // other known section fell into the catch-all error arm — the
+            // error named the section unknown while listing it as valid.
+            Some("a2a") => format_toml(&config.a2a),
+            Some("brain") => format_toml(&config.brain),
+            Some("browser") => format_toml(&config.browser),
+            Some("cron") => format_toml(&config.cron),
+            Some("daemon") => format_toml(&config.daemon),
+            Some("doctor") => format_toml(&config.doctor),
+            Some("image") => format_toml(&config.image),
+            Some("memory") => format_toml(&config.memory),
+            Some("tui") => format_toml(&config.tui),
             Some(other) => {
                 return Ok(ToolResult::error(format!(
                     "Unknown config section: '{}'. Valid: {}. Nested paths and child names \
