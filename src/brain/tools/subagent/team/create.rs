@@ -79,6 +79,10 @@ impl Tool for TeamCreateTool {
                                 "type": "boolean",
                                 "description": "Spawn this member with a read-restricted tool registry (#1173): reads/search/research only. Omit or false for full capability."
                             },
+                            "include_brain": {
+                                "type": "boolean",
+                                "description": "Whether to pre-inject workspace brain files (SOUL.md, USER.md, AGENTS.md) into this team member (#145). Default false (lean execution). Set true when delegating full co-worker tasks."
+                            },
                             "provider": {
                                 "type": "string",
                                 "description": "Optional per-member provider override (e.g., 'zhipu', 'openrouter', 'custom:my-provider'). Highest precedence — overrides config.agent.subagent_provider for THIS member only."
@@ -190,6 +194,17 @@ impl Tool for TeamCreateTool {
                 }
             };
 
+            // Brain pre-injection flag (#145): absent = false; non-boolean = hard error.
+            let member_include_brain = match agent_def.get("include_brain") {
+                None => false,
+                Some(serde_json::Value::Bool(b)) => *b,
+                Some(_) => {
+                    return Ok(ToolResult::error(format!(
+                        "Team member '{label}': 'include_brain' must be a boolean"
+                    )));
+                }
+            };
+
             let (read_only, member_grant_note) = match (member_read_only, deprecated_raw) {
                 (Some(ro), _) => (ro, None),
                 (None, Some(raw)) => {
@@ -284,26 +299,33 @@ impl Tool for TeamCreateTool {
                 );
             }
 
-            let child_service = Arc::new(
+            let child_dir = context.working_dir();
+            let system_brain = super::super::brain::child_system_brain(
+                member_include_brain,
+                &child_dir,
+                model_override.as_deref(),
+                effective_provider_name.as_deref(),
+            );
+
+            let mut child_service_builder =
                 crate::brain::agent::AgentService::new(provider, service_context.clone(), &config)
                     .await
                     .with_tool_registry(child_registry)
                     .with_auto_approve_tools(true)
-                    .with_working_directory(context.working_dir()),
-            );
+                    .with_working_directory(child_dir);
+
+            if let Some(brain) = system_brain {
+                child_service_builder = child_service_builder.with_system_brain(brain);
+            }
+
+            let child_service = Arc::new(child_service_builder);
 
             // Typed preambles are gone (#1173, Proposal B): restricted
             // members get one factual capability line, full members just the
             // task.
-            let full_prompt = if read_only {
-                format!(
-                    "[Capability note: you are a READ-ONLY team member. Your tool \
-                     set contains file reading/search and web research only — no \
-                     writes, no bash, no spawning.]\n\n{prompt}"
-                )
-            } else {
-                prompt
-            };
+            // #145: stacked capability + lean context note.
+            let full_prompt =
+                super::super::brain::child_prompt(read_only, member_include_brain, &prompt);
 
             let cancel_clone = cancel_token.clone();
             let manager = self.subagent_manager.clone();
@@ -391,6 +413,7 @@ impl Tool for TeamCreateTool {
             // Register in subagent manager
             self.subagent_manager.insert(SubAgent {
                 read_only,
+                include_brain: member_include_brain,
                 allow_nested: member_allow_nested,
                 cancel_token,
                 join_handle: Some(handle),

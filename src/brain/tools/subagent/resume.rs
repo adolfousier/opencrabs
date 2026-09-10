@@ -214,13 +214,27 @@ impl Tool for ResumeAgentTool {
                 );
             }
 
-            Arc::new(
+            let child_dir = context.working_dir();
+            let include_brain = self.manager.get_include_brain(agent_id).unwrap_or(false);
+            let system_brain = super::brain::child_system_brain(
+                include_brain,
+                &child_dir,
+                subagent_model.as_deref(),
+                effective_provider_name.as_deref(),
+            );
+
+            let mut builder =
                 crate::brain::agent::AgentService::new(provider, service_context, &config)
                     .await
                     .with_tool_registry(child_registry)
                     .with_auto_approve_tools(true)
-                    .with_working_directory(context.working_dir()),
-            )
+                    .with_working_directory(child_dir);
+
+            if let Some(brain) = system_brain {
+                builder = builder.with_system_brain(brain);
+            }
+
+            Arc::new(builder)
         };
 
         // Spawn resumed task with input loop

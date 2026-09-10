@@ -198,6 +198,10 @@ impl Tool for SpawnAgentTool {
                     "type": "boolean",
                     "description": "Spawn this child with a read-restricted tool registry (#1173): file reads, glob/grep/ls and web research only — no writes, no bash, no spawning. Use for exploration, code review, and research children. Omit or false for a full-capability worker (still minus recursive/dangerous tools)."
                 },
+                "include_brain": {
+                    "type": "boolean",
+                    "description": "Whether to pre-inject workspace brain files (SOUL.md, USER.md, AGENTS.md) into the child agent (#145). Default false (lean execution — sub-agents query workspace files on demand via load_brain_file). Set true when delegating full co-worker tasks that need immediate ambient access to all workspace rules and personality."
+                },
                 "provider": {
                     "type": "string",
                     "description": "Optional provider override for THIS spawn (e.g., 'zhipu', 'openrouter', 'custom:my-provider'). Highest precedence — overrides config.agent.subagent_provider and parent inheritance. Use to route this single sub-agent differently from the global subagent config."
@@ -276,6 +280,21 @@ impl Tool for SpawnAgentTool {
                 )
             })?),
             None => None,
+        };
+
+        // Brain pre-injection flag (#145): absent = false (lean default).
+        // Non-boolean is a hard error.
+        let include_brain = match input.get("include_brain") {
+            None | Some(serde_json::Value::Bool(_)) => input
+                .get("include_brain")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+            Some(_) => {
+                return Ok(ToolResult::error(
+                    "'include_brain' must be a boolean (true = pre-inject workspace brain, false = lean)"
+                        .to_string(),
+                ));
+            }
         };
         let deprecated_raw = input
             .get("agent_type")
@@ -459,13 +478,24 @@ impl Tool for SpawnAgentTool {
                 .map(|w| w.path.clone())
                 .unwrap_or_else(|| context.working_dir());
 
-            let agent =
+            let system_brain = super::brain::child_system_brain(
+                include_brain,
+                &child_dir,
+                model_override.as_deref(),
+                effective_provider_name.as_deref(),
+            );
+
+            let mut agent =
                 crate::brain::agent::AgentService::new(provider, service_context.clone(), &config)
                     .await
                     .with_tool_registry(child_registry)
                     .with_auto_approve_tools(true) // children auto-approve (parent already approved spawn)
                     .with_working_directory(child_dir)
                     .with_plan_session_override(plan_session_override);
+
+            if let Some(brain) = system_brain {
+                agent = agent.with_system_brain(brain);
+            }
 
             Arc::new(agent)
         };
@@ -474,15 +504,8 @@ impl Tool for SpawnAgentTool {
         // gets one factual capability line derived from its actual grant —
         // no role-play text that could drift from what the registry truly
         // allows. Full-access children receive just the task.
-        let full_prompt = if read_only {
-            format!(
-                "[Capability note: you are a READ-ONLY sub-agent. Your tool set \
-                 contains file reading/search and web research only — no writes, \
-                 no bash, no spawning. Report findings; do not attempt changes.]\n\n{prompt}"
-            )
-        } else {
-            prompt.clone()
-        };
+        // #145: stacked capability + lean context note.
+        let full_prompt = super::brain::child_prompt(read_only, include_brain, &prompt);
 
         // Create the status file in Pending state before spawning. new()
         // writes the file; we don't need the returned handle, but we do
@@ -691,6 +714,7 @@ impl Tool for SpawnAgentTool {
         // Register in manager
         self.manager.insert(SubAgent {
             read_only,
+            include_brain,
             allow_nested,
             cancel_token,
             join_handle: Some(handle),
@@ -704,7 +728,7 @@ impl Tool for SpawnAgentTool {
         });
 
         Ok(ToolResult::success(format!(
-            "Spawned sub-agent '{}' with id: {}\nSession: {}\nAccess: {}\nPrompt: {}{}",
+            "Spawned sub-agent '{}' with id: {}\nSession: {}\nAccess: {}\nBrain: {}\nPrompt: {}{}",
             label,
             agent_id,
             child_session_id,
@@ -713,6 +737,7 @@ impl Tool for SpawnAgentTool {
             } else {
                 "full (minus recursive/dangerous tools)"
             },
+            super::brain::brain_status_label(include_brain),
             prompt,
             deprecation_note
                 .as_deref()
