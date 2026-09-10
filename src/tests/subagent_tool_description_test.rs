@@ -170,6 +170,23 @@ fn team_create_each_member_can_pick_its_own_provider_and_model() {
 }
 
 #[test]
+fn spawn_agent_schema_exposes_include_brain_param() {
+    let tool = SpawnAgentTool::new(
+        std::sync::Arc::new(crate::brain::tools::subagent::SubAgentManager::new()),
+        std::sync::Arc::new(crate::brain::tools::ToolRegistry::new()),
+    );
+    let schema = tool.input_schema();
+    let props = schema
+        .get("properties")
+        .and_then(|v| v.as_object())
+        .expect("schema must have properties");
+    assert!(
+        props.contains_key("include_brain"),
+        "spawn_agent must expose optional `include_brain` parameter (#145)"
+    );
+}
+
+#[test]
 fn readme_documents_subagent_provider_and_model_keys() {
     // Bundled at compile time so the test is hermetic and a doc tidy-up
     // that drops the section can't slip past CI.

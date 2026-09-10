@@ -8,6 +8,7 @@
 //! close, or resume any child by agent_id.
 
 pub mod agent_type;
+pub mod brain;
 mod close;
 pub mod manager;
 pub(crate) mod notify;

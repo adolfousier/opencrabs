@@ -53,6 +53,11 @@ pub struct SubAgent {
     /// manager's `get_read_only` instead of reaching through the lock.
     pub read_only: bool,
 
+    /// Whether this child was spawned with workspace brain files pre-injected (#145).
+    ///
+    /// Frozen for the agent's lifetime: resume re-attaches system brain when true.
+    pub include_brain: bool,
+
     /// Whether this child may spawn further sub-agents or background tasks
     /// (#1195). Frozen for the agent's lifetime like [`SubAgent::read_only`]:
     /// enforcement live-queries the manager by the caller's session id, so
@@ -109,6 +114,7 @@ impl SubAgent {
             session_id,
             parent_session_id,
             read_only: false,
+            include_brain: false,
             allow_nested: true,
             state: SubAgentState::Running,
             cancel_token: CancellationToken::new(),
@@ -167,6 +173,15 @@ impl SubAgentManager {
             .expect("subagent manager lock poisoned")
             .get(id)
             .map(|a| a.read_only)
+    }
+
+    /// Whether the agent was spawned with workspace brain files pre-injected (#145).
+    pub fn get_include_brain(&self, id: &str) -> Option<bool> {
+        self.agents
+            .read()
+            .expect("subagent manager lock poisoned")
+            .get(id)
+            .map(|a| a.include_brain)
     }
 
     /// May the agent operating on `session_id` spawn further sub-agents or
