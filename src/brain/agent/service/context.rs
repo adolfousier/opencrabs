@@ -27,11 +27,34 @@ impl AgentService {
     /// only the reminder, and the two blocks were otherwise identical. Whether
     /// memory surfaced therefore depended on which code path a session took,
     /// which is not a property of the memory.
-    pub(super) async fn augment_user_message(session_id: Uuid, user_message: &str) -> String {
-        let mut out = match Self::active_plan_reminder(session_id).await {
-            Some(reminder) => format!("{user_message}\n\n{reminder}"),
-            None => user_message.to_string(),
+    /// Augment the user message for LLM context:
+    /// 1. Temporal grounding: inject [Current time: YYYY-MM-DD HH:MM:SS UTC (user: ...)] (#153).
+    /// 2. Active plan reminder.
+    /// 3. Memory recall.
+    pub(super) async fn augment_user_message(
+        session_id: Uuid,
+        user_message: &str,
+        brain_dir: Option<&std::path::Path>,
+    ) -> String {
+        // Temporal grounding (#153): inject context-only time marker at turn start.
+        let now = chrono::Utc::now();
+        let tz_info = brain_dir
+            .and_then(|dir| crate::brain::timezone::GLOBAL_TZ_CACHE.resolve_from_brain_dir(dir));
+        let time_marker = match tz_info {
+            Some(ref info) => format!("[Current time: {}]", info.format_dual_time(&now)),
+            None => format!(
+                "[Current time: {}]",
+                crate::brain::timezone::format_utc_time(&now)
+            ),
         };
+
+        let mut out = format!("{time_marker}\n\n{user_message}");
+
+        if let Some(reminder) = Self::active_plan_reminder(session_id).await {
+            out.push_str("\n\n");
+            out.push_str(&reminder);
+        }
+
         // Ride relevant memory along with the message (#799). MEMORY.md was
         // written constantly and read almost never; #800 made reading cheap,
         // but a cheap read still has to be chosen, and the model cannot decide
@@ -139,7 +162,9 @@ impl AgentService {
         // recency window in a long conversation and the model forgets it was
         // mid-plan (discussion #177). Regenerated each turn from the plan file;
         // the DB only ever stores the clean user message, so it never piles up.
-        let context_user_message = Self::augment_user_message(session_id, &user_message).await;
+        let brain_dir = self.brain_workspace_path();
+        let context_user_message =
+            Self::augment_user_message(session_id, &user_message, brain_dir.as_deref()).await;
         let user_msg = Message::user(context_user_message);
         context.add_message(user_msg);
 
@@ -1249,4 +1274,36 @@ pub(crate) fn format_plan_reminder(plan: &crate::tui::plan::PlanDocument) -> Opt
         }
     }
     Some(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn augment_user_message_injects_time_marker() {
+        let dir = TempDir::new().unwrap();
+        let user_md = dir.path().join("USER.md");
+        fs::write(&user_md, "Timezone: UTC+3 (MSK)\n").unwrap();
+
+        let session_id = Uuid::new_v4();
+        let augmented =
+            AgentService::augment_user_message(session_id, "hello world", Some(dir.path())).await;
+        assert!(augmented.contains("[Current time:"));
+        assert!(augmented.contains("UTC"));
+        assert!(augmented.contains("MSK"));
+        assert!(augmented.ends_with("hello world"));
+    }
+
+    #[tokio::test]
+    async fn augment_user_message_falls_back_to_utc() {
+        let session_id = Uuid::new_v4();
+        let augmented = AgentService::augment_user_message(session_id, "test message", None).await;
+        assert!(augmented.contains("[Current time:"));
+        assert!(augmented.contains("UTC"));
+        assert!(!augmented.contains("(user:"));
+        assert!(augmented.ends_with("test message"));
+    }
 }

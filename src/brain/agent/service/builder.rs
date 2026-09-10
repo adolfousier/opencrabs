@@ -736,6 +736,13 @@ impl AgentService {
         self.brain_rebuild.clone()
     }
 
+    /// The root workspace path for brain files, if a brain rebuild handle is wired.
+    pub fn brain_workspace_path(&self) -> Option<std::path::PathBuf> {
+        self.brain_rebuild
+            .as_ref()
+            .map(|r| r.inner.loader.workspace_path().to_path_buf())
+    }
+
     /// The system brain to send THIS turn. Rebuilds from disk when a brain
     /// file changed (#213); otherwise returns the cached/static brain. This is
     /// the single source of truth for the prompt — `default_system_brain` is

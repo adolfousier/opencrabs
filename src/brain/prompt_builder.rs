@@ -289,6 +289,11 @@ impl BrainLoader {
         Self { workspace_path }
     }
 
+    /// The root workspace path for brain files.
+    pub fn workspace_path(&self) -> &Path {
+        &self.workspace_path
+    }
+
     /// Latest modification time across the brain markdown files at the
     /// workspace root (SOUL.md, USER.md, AGENTS.md, MEMORY.md, …) — the
     /// files that feed the system brain. Cheap: stats `*.md` dir entries,

@@ -1210,7 +1210,9 @@ impl AgentService {
         // still stores the clean `user_message` below (persistence uses it
         // directly), so the reminder is context-only and never piles up (#571
         // follow-up).
-        let context_user_message = Self::augment_user_message(session_id, &user_message).await;
+        let brain_dir = self.brain_workspace_path();
+        let context_user_message =
+            Self::augment_user_message(session_id, &user_message, brain_dir.as_deref()).await;
         let user_msg = Self::build_user_message(&context_user_message);
         context.add_message(user_msg);
 
