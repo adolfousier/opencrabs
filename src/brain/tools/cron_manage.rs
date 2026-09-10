@@ -238,20 +238,6 @@ impl CronManageTool {
             },
             None => None,
         };
-
-        // Fail-fast delivery validation (#107): a deliver_to whose credential
-        // cannot be resolved means EVERY future run would silently drop its
-        // result (scheduler logs a warning nobody associates with the job).
-        // Refuse at the boundary instead — the same lookup the delivery path
-        // itself uses, so this can never disagree with runtime reality.
-        if let Some(ref target) = deliver_to
-            && let Err(reason) = validate_delivery_target(target)
-        {
-            return Ok(ToolResult::error(format!(
-                "Cannot create job: delivery target would silently fail — {reason} \
-                 Fix the channel credential in keys.toml (or omit deliver_to) and retry."
-            )));
-        }
         let job = CronJob::new(
             name.to_string(),
             cron_expr.to_string(),
@@ -436,12 +422,6 @@ impl CronManageTool {
                                     )));
                                 }
                             };
-                            if let Err(reason) = validate_delivery_target(&v) {
-                                return Ok(ToolResult::error(format!(
-                                    "Cannot update job: delivery target would silently fail — {reason} \
-                                     Fix the channel credential in keys.toml (or clear deliver_to) and retry."
-                                )));
-                            }
                             patch.deliver_to = Some(Some(v));
                         }
                     }
@@ -885,55 +865,3 @@ pub(crate) async fn bake_delivery_target(
     Ok(baked)
 }
 
-pub(crate) fn validate_delivery_target(target: &str) -> std::result::Result<(), String> {
-    // Generic webhook: no credential read at delivery time (Bearer key is
-    // job-supplied and optional) — always valid.
-    if target.starts_with("http://") || target.starts_with("https://") {
-        return Ok(());
-    }
-
-    let Some((channel, target_id)) = target.split_once(':') else {
-        return Err(format!(
-            "'{target}' is not 'channel:id' or an HTTP(S) URL"
-        ));
-    };
-    if target_id.trim().is_empty() {
-        return Err(format!("'{target}' has an empty id"));
-    }
-
-    match channel {
-        "telegram" => {
-            #[cfg(feature = "telegram")]
-            {
-                if crate::cron::scheduler::read_channel_secret("telegram", "token").is_none() {
-                    return Err("no Telegram bot token in keys.toml (channels.telegram.token)"
-                        .to_string());
-                }
-            }
-            Ok(())
-        }
-        "discord" => {
-            #[cfg(feature = "discord")]
-            {
-                if crate::cron::scheduler::read_channel_secret("discord", "token").is_none() {
-                    return Err("no Discord bot token in keys.toml (channels.discord.token)"
-                        .to_string());
-                }
-            }
-            Ok(())
-        }
-        "slack" => {
-            #[cfg(feature = "slack")]
-            {
-                if crate::cron::scheduler::read_channel_secret("slack", "token").is_none() {
-                    return Err("no Slack bot token in keys.toml (channels.slack.token)"
-                        .to_string());
-                }
-            }
-            Ok(())
-        }
-        other => Err(format!(
-            "unknown delivery channel '{other}' (valid: telegram, discord, slack, or an HTTP(S) URL)"
-        )),
-    }
-}
