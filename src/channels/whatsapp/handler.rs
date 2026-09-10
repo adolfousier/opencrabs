@@ -12,7 +12,6 @@ use crate::db::models::ChannelMessage as DbChannelMessage;
 use crate::services::SessionService;
 use crate::utils::sanitize::redact_secrets;
 use crate::utils::truncate_str;
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::Mutex as TokioMutex;
@@ -415,7 +414,6 @@ pub(crate) async fn handle_message(
     // Read latest config from watch channel — single source of truth
     let cfg = config_rx.borrow().clone();
     let wa_cfg = &cfg.channels.whatsapp;
-    let allowed: HashSet<String> = wa_cfg.allowed_phones.iter().cloned().collect();
     let idle_timeout_hours = wa_cfg.session_idle_hours;
     let voice_config = cfg.voice_config();
 
@@ -698,8 +696,17 @@ pub(crate) async fn handle_message(
 
     // is_owner gates /new archiving and owner-only flows. The self-chat is
     // always the owner even though its LID sender won't match the configured PN.
-    let is_owner =
-        is_owner_self_chat || allowed.is_empty() || owner_number.as_deref() == Some(phone.as_str());
+    //
+    // `allowed.is_empty()` used to be an owner condition (OC-02): an empty
+    // allowed_phones under response_policy=auto answered everyone AND elevated
+    // every contact to owner, handing them /evolve, /exit, /rebuild, /cd. Open
+    // DM access (answering an unlisted contact) is a separate policy decision
+    // and is not the same as ownership, so it is gone from here. Ownership is
+    // now the self-chat, the configured owner number, or the canonical owner
+    // resolver over allowed_phones + bot_owner.
+    let is_owner = is_owner_self_chat
+        || owner_number.as_deref() == Some(phone.as_str())
+        || crate::config::owner::is_owner(&wa_cfg.allowed_phones, &wa_cfg.bot_owner, &phone);
 
     // Sessions are keyed by a stable `[chat:wa-<phone>]` suffix so auto-rename
     // of the visible label still resolves to the same row (issue #121).

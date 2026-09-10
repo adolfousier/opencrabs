@@ -364,6 +364,17 @@ profile_id = ""
 # Useful for enforcing a specific model across all sessions without manual /models switching.
 # Priority: agent defaults > most recent session > config active provider.
 [agent]
+# Tool-approval policy (default: "auto-always"). OpenCrabs ships tools that run
+# unattended so you are not asked to approve every step, which is the point of
+# an autonomous agent. If you would rather confirm each tool call, set this to
+# "ask" and OpenCrabs prompts before every tool that declares it needs approval:
+#   approval_policy = "ask"
+# "auto-session" approves for the current session only. Note that channel
+# allowlists are the access boundary: only the owner and allow-listed users can
+# drive tools at all, so a stranger cannot reach this policy (an unconfigured
+# channel denies everyone).
+# approval_policy = "auto-always"
+
 # context_limit = 200000  # Context window in tokens (default: 200000)
 # default_provider = "xiaomi"
 # default_model = "mimo-v2.5-pro"

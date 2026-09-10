@@ -913,9 +913,18 @@ async fn handle_message(
     let idle_timeout_hours = sl_cfg.session_idle_hours;
     let voice_config = cfg.voice_config();
 
-    // Allowlist check — if allowed list is empty, accept all
-    if !allowed.is_empty() && !allowed.contains(&user_id) {
-        tracing::debug!("Slack: ignoring message from non-allowed user {}", user_id);
+    // Deny-by-default allowlist (OC-02). An empty allowlist used to accept
+    // everyone, unlike Telegram. Now an unconfigured workspace (no allowed_users
+    // and no bot_owner) denies, and a configured one admits only allowlisted
+    // users or the owner.
+    let is_owner =
+        crate::config::owner::is_owner(&sl_cfg.allowed_users, &sl_cfg.bot_owner, &user_id);
+    let unconfigured = allowed.is_empty() && sl_cfg.bot_owner.is_empty();
+    if unconfigured || !(is_owner || allowed.contains(&user_id)) {
+        tracing::debug!(
+            "Slack: ignoring message from non-allowed user {} (deny-by-default, OC-02)",
+            user_id
+        );
         return;
     }
 

@@ -161,26 +161,37 @@ pub(crate) async fn handle_message(
         }
     };
 
-    // Allowlist check — if allowed list is empty, accept all. Guild members
-    // may alternatively qualify through `allowed_roles` (#387): carrying ANY
-    // configured role grants access, evaluated per message.
-    if !allowed.is_empty() && !allowed.contains(&user_id) {
-        let role_granted = !dc_cfg.allowed_roles.is_empty()
-            && msg.member.as_ref().is_some_and(|m| {
-                m.roles.iter().any(|r| {
-                    dc_cfg
-                        .allowed_roles
-                        .iter()
-                        .any(|ar| ar == &r.get().to_string())
-                })
-            });
-        if !role_granted {
-            tracing::debug!(
-                "Discord: ignoring message from non-allowed user {} (no allowed role)",
-                user_id
-            );
-            return;
-        }
+    // Deny-by-default allowlist (OC-02). An empty allowlist used to accept
+    // everyone, unlike Telegram, which denies an unconfigured channel. Now a
+    // channel with no allowed_users, no allowed_roles, and no bot_owner denies;
+    // a configured one admits only allowlisted users, holders of an allowed
+    // role (#387, evaluated per message), or the owner. Roles are evaluated
+    // even when allowed_users is empty, and a DM is never treated as
+    // role-granted (guild roles do not apply to a DM).
+    let is_owner = crate::config::owner::is_owner(
+        &dc_cfg.allowed_users,
+        &dc_cfg.bot_owner,
+        &user_id.to_string(),
+    );
+    let in_allowlist = allowed.contains(&user_id);
+    let role_granted = msg.guild_id.is_some()
+        && !dc_cfg.allowed_roles.is_empty()
+        && msg.member.as_ref().is_some_and(|m| {
+            m.roles.iter().any(|r| {
+                dc_cfg
+                    .allowed_roles
+                    .iter()
+                    .any(|ar| ar == &r.get().to_string())
+            })
+        });
+    let unconfigured =
+        allowed.is_empty() && dc_cfg.allowed_roles.is_empty() && dc_cfg.bot_owner.is_empty();
+    if unconfigured || !(is_owner || in_allowlist || role_granted) {
+        tracing::debug!(
+            "Discord: ignoring message from non-allowed user {} (deny-by-default, OC-02)",
+            user_id
+        );
+        return;
     }
 
     // respond_to / allowed_channels filtering — DMs always pass
