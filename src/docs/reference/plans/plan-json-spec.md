@@ -30,6 +30,12 @@ Only **3 fields required** at the root and **3 per task** for a valid import:
 | `complexity` | `number` | `3` | 1-5 scale: 1=trivial, 2=simple, 3=moderate, 4=complex, 5=very complex |
 | `acceptance_criteria` | `string[]` | `[]` | List of conditions that mark this task complete |
 
+## Optional Plan Field
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `working_directory` | `string` | *(omitted)* | **Optional (#1452).** Absolute path to the repo the plan's work executes in. Receipt binding (#1011) verifies claimed commit shas against this repo instead of the session cwd, so cross-repo plans (session in repo A, work in repo B) can carry mechanical commit receipts. Must exist and be absolute; validated on import and on the `init` param (an explicit `init` param overrides a JSON-carried value). Omit for plans executed in the session's own repo. |
+
 ## Auto-Generated Fields (Do NOT Provide)
 
 These are always overwritten on import:

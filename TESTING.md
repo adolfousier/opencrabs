@@ -525,7 +525,7 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Qwen Tool Extractor | 72 | `src/tests/qwen_tool_extractor_test.rs` |
 | Tests — Qwen Tool Marker Strip | 7 | `src/tests/qwen_tool_marker_strip_test.rs` |
 | Tests — Ralph Loop Config | 5 | `src/tests/ralph_loop_config_test.rs` |
-| Tests — Ralph Receipt Binding | 15 | `src/tests/ralph_receipt_binding_test.rs` |
+| Tests — Ralph Receipt Binding | 23 | `src/tests/ralph_receipt_binding_test.rs` |
 | Tests — Ralph Verification Gate | 28 | `src/tests/ralph_verification_gate_test.rs` |
 | Tests — Rate Limit Reporting | 7 | `src/tests/rate_limit_reporting_test.rs` |
 | Tests — Rate Limiter | 8 | `src/tests/rate_limiter_test.rs` |

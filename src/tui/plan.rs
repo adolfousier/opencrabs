@@ -269,6 +269,14 @@ pub struct PlanDocument {
     /// [`PlanDocument::pre_init_editing`].
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub pending_approval: bool,
+
+    /// Repo the plan's work executes in (#1452). Optional: when set (an
+    /// absolute path, validated at init), receipt binding (#1011) verifies
+    /// claimed commit shas against THIS repo instead of the session cwd, so
+    /// cross-repo plans (session in repo A, work in repo B) can carry
+    /// mechanical commit receipts. Absent keeps the session-cwd behavior.
+    #[serde(default)]
+    pub working_directory: Option<String>,
 }
 
 impl PlanDocument {
@@ -287,6 +295,7 @@ impl PlanDocument {
             approval_source: None,
             pre_init_editing: false,
             pending_approval: false,
+            working_directory: None,
         }
     }
 

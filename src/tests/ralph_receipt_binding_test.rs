@@ -11,8 +11,10 @@
 //! repos (pattern from rsi_git_history_test.rs). Fixtures are synthetic
 //! and carry no user identifiers.
 
-use crate::brain::tools::plan_tool::{extract_sha_claims, verify_sha_receipts};
-use std::path::Path;
+use crate::brain::tools::plan_tool::{
+    extract_sha_claims, receipt_binding_dir, validate_plan_working_directory, verify_sha_receipts,
+};
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 // ── Extraction: what counts as a commit claim ───────────────────────
@@ -114,14 +116,16 @@ fn git(repo: &Path, args: &[&str]) {
     );
 }
 
-/// A fresh repo with one commit; returns (dir, sha).
-fn fixture_repo_with_commit() -> (tempfile::TempDir, String) {
+/// A fresh repo with one commit of `content`; returns (dir, sha). The
+/// content parameter keeps two fixture repos from colliding on an
+/// identical commit sha (same tree, same second).
+fn fixture_repo_with_content(content: &[u8]) -> (tempfile::TempDir, String) {
     let dir = tempfile::tempdir().expect("tmpdir");
     let repo = dir.path();
     git(repo, &["init", "-q"]);
     git(repo, &["config", "user.email", "receipt@test.local"]);
     git(repo, &["config", "user.name", "Receipt Test"]);
-    std::fs::write(repo.join("fixture.txt"), b"receipt").expect("write fixture");
+    std::fs::write(repo.join("fixture.txt"), content).expect("write fixture");
     git(repo, &["add", "fixture.txt"]);
     git(repo, &["commit", "-q", "-m", "fixture commit"]);
     let out = Command::new("git")
@@ -132,6 +136,11 @@ fn fixture_repo_with_commit() -> (tempfile::TempDir, String) {
         .expect("rev-parse");
     let sha = String::from_utf8_lossy(&out.stdout).trim().to_string();
     (dir, sha)
+}
+
+/// A fresh repo with one commit; returns (dir, sha).
+fn fixture_repo_with_commit() -> (tempfile::TempDir, String) {
+    fixture_repo_with_content(b"receipt")
 }
 
 #[test]
@@ -180,4 +189,84 @@ fn non_git_dir_skips_the_check() {
 fn output_without_claims_passes_in_a_repo() {
     let (dir, _sha) = fixture_repo_with_commit();
     assert!(verify_sha_receipts("Did the work, tests green", dir.path()).is_ok());
+}
+
+// ── #1452: binding resolves the repo from the plan working_directory ──
+
+#[test]
+fn binding_dir_prefers_the_plan_binding() {
+    let resolved = receipt_binding_dir(Some("/plan/repo"), Path::new("/session/cwd"));
+    assert_eq!(resolved, PathBuf::from("/plan/repo"));
+}
+
+#[test]
+fn binding_dir_falls_back_to_session_cwd_without_a_binding() {
+    let resolved = receipt_binding_dir(None, Path::new("/session/cwd"));
+    assert_eq!(resolved, PathBuf::from("/session/cwd"));
+}
+
+#[test]
+fn binding_dir_ignores_a_blank_binding() {
+    let resolved = receipt_binding_dir(Some("   "), Path::new("/session/cwd"));
+    assert_eq!(resolved, PathBuf::from("/session/cwd"));
+}
+
+#[test]
+fn cross_repo_sha_verifies_against_the_plan_binding() {
+    // The #1452 incident shape: session cwd is repo A, the plan's work
+    // lives in repo B. Against A the B-sha is (correctly) missing — that
+    // was the bug's face; the binding must resolve to B, where the sha
+    // exists.
+    let (repo_a, _sha_a) = fixture_repo_with_content(b"session repo work");
+    let (repo_b, sha_b) = fixture_repo_with_content(b"plan repo work");
+    let output = format!("Committed {sha_b}: did the work in the plan's repo");
+
+    // Bug shape documented: checked against the session repo it fails.
+    assert!(
+        verify_sha_receipts(&output, repo_a.path()).is_err(),
+        "sha_b must not exist in repo_a — if this fails the fixtures collided"
+    );
+
+    // The fix: the binding resolves to the plan's repo and accepts.
+    let receipt_dir = receipt_binding_dir(
+        Some(repo_b.path().to_str().expect("utf8 tempdir")),
+        repo_a.path(),
+    );
+    assert!(verify_sha_receipts(&output, &receipt_dir).is_ok());
+}
+
+#[test]
+fn validate_working_directory_rejects_relative_paths() {
+    assert!(validate_plan_working_directory("srv/rs/bolina-rs").is_err());
+    assert!(validate_plan_working_directory("./bolina-rs").is_err());
+}
+
+#[test]
+fn validate_working_directory_rejects_missing_dirs() {
+    assert!(validate_plan_working_directory("/definitely/not/a/real/dir_1452").is_err());
+}
+
+#[test]
+fn validate_working_directory_accepts_an_existing_dir() {
+    let dir = tempfile::tempdir().expect("tmpdir");
+    let path = dir.path().to_str().expect("utf8 tempdir");
+    assert!(validate_plan_working_directory(path).is_ok());
+}
+
+#[test]
+fn wiring_complete_passes_the_resolved_binding_dir() {
+    // Source-level sentinel: the receipt-binding call site must consult
+    // the plan's working_directory via receipt_binding_dir, not pass the
+    // session cwd directly (the #1452 regression). Reverting the call
+    // site to `verify_sha_receipts(&output, &context.working_dir())`
+    // fails this test.
+    let source = include_str!("../brain/tools/plan_tool.rs");
+    assert!(
+        source.contains("receipt_binding_dir("),
+        "complete must resolve the verification repo via receipt_binding_dir (#1452)"
+    );
+    assert!(
+        source.contains("current_plan.working_directory.as_deref()"),
+        "complete must consult the plan's working_directory for the receipt binding (#1452)"
+    );
 }
