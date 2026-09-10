@@ -29,7 +29,8 @@ pub async fn fetch_static(url: &str, timeout_secs: u64) -> Result<String, String
     let client = Client::builder()
         .timeout(Duration::from_secs(timeout_secs))
         .user_agent(BROWSER_UA)
-        .redirect(reqwest::redirect::Policy::limited(10))
+        // Re-validate every redirect hop against the SSRF guard (OC-04).
+        .redirect(crate::brain::tools::ssrf::redirect_policy(10))
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
 

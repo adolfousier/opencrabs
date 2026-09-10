@@ -174,6 +174,14 @@ impl Tool for HttpClientTool {
     async fn execute(&self, input: Value, _context: &ToolExecutionContext) -> Result<ToolResult> {
         let input: HttpInput = serde_json::from_value(input)?;
 
+        // SSRF guard (OC-04): http_request had none. Resolve the host and refuse
+        // any URL that is, or resolves to, a loopback / private / link-local /
+        // metadata / CGNAT address before a single byte goes out. Redirect hops
+        // are re-validated by the shared policy below.
+        if let Err(reason) = super::ssrf::validate_url_resolved(&input.url).await {
+            return Ok(ToolResult::error(format!("http_request refused: {reason}")));
+        }
+
         let method = parse_method(&input.method)?;
 
         // Build client with timeout. Always set a default User-Agent —
@@ -189,7 +197,9 @@ impl Tool for HttpClientTool {
             .timeout(StdDuration::from_secs(input.timeout_secs))
             .user_agent(concat!("opencrabs/", env!("CARGO_PKG_VERSION")))
             .redirect(if input.follow_redirects {
-                reqwest::redirect::Policy::limited(10)
+                // Re-validate every hop (OC-04): a public URL that 302s to an
+                // internal address is stopped, not followed.
+                super::ssrf::redirect_policy(10)
             } else {
                 reqwest::redirect::Policy::none()
             })

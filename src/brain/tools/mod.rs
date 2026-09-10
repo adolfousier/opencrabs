@@ -10,6 +10,7 @@ pub(crate) mod classify;
 pub mod epistemic;
 pub mod error;
 pub mod registry;
+pub(crate) mod ssrf;
 pub(crate) mod r#trait;
 
 pub mod fuzzy;

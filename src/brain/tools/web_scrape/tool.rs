@@ -19,8 +19,9 @@
 //! can be captured to disk without the agent pasting the whole document back.
 
 use super::super::error::{Result, ToolError};
+use super::super::ssrf;
 use super::super::r#trait::{Tool, ToolCapability, ToolExecutionContext, ToolResult};
-use super::{clean, export, extract, fetch, sitemap, ssrf, to_markdown};
+use super::{clean, export, extract, fetch, sitemap, to_markdown};
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -97,7 +98,7 @@ impl WebScrapeTool {
         session_id: Uuid,
         timeout: u64,
     ) -> std::result::Result<String, String> {
-        let base = ssrf::validate_url(url)?;
+        let base = ssrf::validate_url_resolved(url).await?;
         let html = self.fetch_html(url, session_id, timeout).await?;
 
         let content = match mode {
@@ -123,7 +124,7 @@ impl WebScrapeTool {
         context: &ToolExecutionContext,
     ) -> Result<ToolResult> {
         // Root URL is SSRF-checked before we start touching robots.txt/sitemaps.
-        if let Err(e) = ssrf::validate_url(url) {
+        if let Err(e) = ssrf::validate_url_resolved(url).await {
             return Ok(ToolResult::error(format!("web_scrape: {e}")));
         }
 
