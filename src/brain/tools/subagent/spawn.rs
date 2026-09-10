@@ -29,9 +29,11 @@ pub(crate) fn completion_message(
     let (context_text, display_text) = match outcome {
         Ok(output) => {
             let full_report_hint = if output.chars().count() > PUSHED_OUTPUT_LIMIT {
+                let path = crate::brain::agent::service::work_status::status_path(agent_id);
                 format!(
-                    "Preview truncated - the FULL untruncated report is available via the \
-                     wait_agent tool with agent id {agent_id}.\n"
+                    "Preview truncated - the FULL untruncated report is persisted in {} \
+                     (field output_full).\n",
+                    path.display()
                 )
             } else {
                 String::new()
@@ -656,8 +658,10 @@ impl Tool for SpawnAgentTool {
                 }
             };
 
-            if let Err(write_err) = status.mark_completed(final_output.chars().take(200).collect())
-            {
+            // #147: persist the COMPLETE output — the 200-char stub lost
+            // every full report to restarts/compaction, and nothing in
+            // production ever read the summary's content.
+            if let Err(write_err) = status.mark_completed(final_output.clone()) {
                 tracing::error!(
                     "Sub-agent {} completed but its status could not be written, so it will keep \
                      reading as running: {write_err}",

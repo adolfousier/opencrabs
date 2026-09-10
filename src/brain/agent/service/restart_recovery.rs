@@ -546,7 +546,7 @@ fn finalize_revived_status(
 ) {
     match outcome {
         Ok(output) => {
-            if let Err(e) = status.mark_completed(output.chars().take(512).collect()) {
+            if let Err(e) = status.mark_completed(output.to_string()) {
                 tracing::warn!(
                     target: "background_task",
                     "Could not finalize revived sub-agent status '{}': {e}",
