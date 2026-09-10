@@ -11,6 +11,7 @@ fn result(path: &str, snippet: &str, rank: f64) -> MemoryResult {
         path: path.to_string(),
         snippet: snippet.to_string(),
         rank,
+        corpus: "",
     }
 }
 

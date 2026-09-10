@@ -6,6 +6,10 @@ pub struct MemoryResult {
     pub path: String,
     pub snippet: String,
     pub rank: f64,
+    /// Source corpus (COLLECTION_*), shown as a `[tag]` when scope=all merges
+    /// corpora (#89). Empty when the source collection is unknown (the
+    /// collection-wide `search()` used by a2a debate context).
+    pub corpus: &'static str,
 }
 
 /// Collection name for daily compaction logs.
