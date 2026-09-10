@@ -138,19 +138,23 @@ pub(crate) fn has_mermaid_fence(text: &str) -> bool {
         let line_end = pos + line.len();
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix("```") {
+            // Tolerant pairing (14:23Z bug class): an info-carrying fence
+            // line is ALWAYS an opener — it implicitly closes any open
+            // block. Only a BARE fence line closes cleanly. A stray bare
+            // fence before ```mermaid used to pair with the tagged opener,
+            // desyncing the machine so the real diagram never located and
+            // raw fences shipped.
+            let info = rest.trim();
             if in_fence {
                 let body = text[body_start..pos].trim_end_matches('\n');
                 if tagged_mermaid || (untagged && looks_like_mermaid_source(body)) {
                     return true;
                 }
-                in_fence = false;
-            } else {
-                in_fence = true;
-                let info = rest.trim();
-                tagged_mermaid = info.eq_ignore_ascii_case("mermaid");
-                untagged = info.is_empty();
-                body_start = line_end;
             }
+            in_fence = true;
+            tagged_mermaid = info.eq_ignore_ascii_case("mermaid");
+            untagged = info.is_empty();
+            body_start = line_end;
         }
         pos = line_end;
     }
@@ -178,25 +182,26 @@ pub(crate) fn find_mermaid_fences(text: &str) -> Vec<MermaidFence> {
         let line_end = pos + line.len();
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix("```") {
+            // Tolerant pairing — see `has_mermaid_fence`: info-carrying
+            // lines always open (implicitly closing the previous block, at
+            // THIS line's start so the opener is never swallowed); only a
+            // bare fence closes, and its own line is part of the range.
+            let info = rest.trim();
             if in_fence {
                 let source = &text[source_start..pos];
                 if is_mermaid || (untagged && looks_like_mermaid_source(source)) {
                     fences.push(MermaidFence {
                         start: block_start,
-                        end: line_end,
+                        end: if info.is_empty() { line_end } else { pos },
                         source: source.to_string(),
                     });
                 }
-                in_fence = false;
-                is_mermaid = false;
-            } else {
-                block_start = pos;
-                source_start = line_end;
-                let info = rest.trim();
-                is_mermaid = info.eq_ignore_ascii_case("mermaid");
-                untagged = info.is_empty();
-                in_fence = true;
             }
+            block_start = pos;
+            source_start = line_end;
+            is_mermaid = info.eq_ignore_ascii_case("mermaid");
+            untagged = info.is_empty();
+            in_fence = true;
         }
         pos = line_end;
     }
@@ -667,4 +672,58 @@ fn escape(t: &str) -> String {
     t.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const DIAGRAM: &str = "flowchart TD\n    A --> B";
+
+    #[test]
+    fn clean_tagged_block_locates() {
+        let text = format!("```mermaid\n{DIAGRAM}\n```\nafter");
+        assert!(has_mermaid_fence(&text));
+        let fences = find_mermaid_fences(&text);
+        assert_eq!(fences.len(), 1);
+        assert_eq!(fences[0].source.trim(), DIAGRAM);
+    }
+
+    #[test]
+    fn stray_bare_fence_before_tagged_no_longer_desyncs() {
+        // 14:23Z bug class: the stray bare opener used to pair with the
+        // ```mermaid line as its CLOSER, desyncing the machine so the real
+        // diagram never located and the raw fence shipped.
+        let text = format!("```\n```mermaid\n{DIAGRAM}\n```\nafter");
+        assert!(has_mermaid_fence(&text));
+        let fences = find_mermaid_fences(&text);
+        assert_eq!(
+            fences.len(),
+            1,
+            "tagged diagram must locate past a stray bare opener"
+        );
+        assert_eq!(fences[0].source.trim(), DIAGRAM);
+        // The range must cover the diagram fence, not swallow the next line.
+        let replaced = text[..fences[0].start].to_string() + &text[fences[0].end..];
+        assert!(
+            replaced.contains("after"),
+            "trailing text must survive the swap"
+        );
+    }
+
+    #[test]
+    fn two_clean_blocks_both_locate() {
+        let text = "```mermaid\nflowchart TD\n    A --> B\n```\ntext\n```mermaid\nflowchart LR\n    C --> D\n```\n";
+        let fences = find_mermaid_fences(text);
+        assert_eq!(fences.len(), 2);
+        assert!(fences[0].source.contains("A --> B"));
+        assert!(fences[1].source.contains("C --> D"));
+    }
+
+    #[test]
+    fn non_mermaid_untagged_block_ignored() {
+        let text = "```\njust some text\n```";
+        assert!(!has_mermaid_fence(text));
+        assert!(find_mermaid_fences(text).is_empty());
+    }
 }
