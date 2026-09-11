@@ -196,7 +196,7 @@ completion_claims = [
 
 line_start_re = "(?im)^[\\s\\-*•>]*(?:(?:ok|oke|baik|siap|okeh)\\s*,?\\s+)?(?:sekarang\\s+)?(?:biar\\s+(?:gue|aku|saya)|gue|aku|saya\\s+akan|saya\\s+perlu|saya\\s+harus|mari\\s+kita|coba\\s+(?:gue|aku|saya))\\s+\\w"
 
-work_announcement_re = "(?i)^[\\s\\-*•>]*(?:(?:(?:dan\\s+)?lalu|(?:dan\\s+)?kemudian|setelah\\s+itu|terus|dan)[,]?\\s+)?(?:(?:ok|oke|baik|siap|okeh)[,.!:]?\\s+)?(?:sekarang\\s+|biar\\s+(?:gue|aku|saya)\\s+)?(?:sedang\\s+)?(?:menjalankan|mengecek|memeriksa|membaca|membuat|memperbarui|memperbaiki|menghapus|mengganti|menambah|mengubah|mengirim|meng-commit|meng-push|meng-deploy|meng-install|mengunduh|mengunggah|menyimpan|menyelesaikan|menganalisis|menginvestigasi|mengumpulkan|mengambil|mengunduh)\\b[^.!?:\\n]{0,60}?(?:\\s+(?:sekarang|saat\\s+ini)(?:[.!…,:]+|\\s*$)|\\.{3}|…|:\\s*$)"
+work_announcement_re = "(?i)^[\\s\\-*•>]*(?:(?:(?:dan\\s+)?lalu|(?:dan\\s+)?kemudian|setelah\\s+itu|terus|dan)[,]?\\s+)?(?:(?:ok|oke|baik|siap|okeh)[,.!:]?\\s+)?(?:sekarang\\s+|biar\\s+(?:gue|aku|saya)\\s+)?(?:sedang\\s+)?(?:menjalankan|mengecek|memeriksa|membaca|membuat|memperbarui|memperbaiki|menghapus|mengganti|menambah|mengubah|mengirim|meng-commit|meng-push|meng-deploy|meng-install|mengunduh|mengunggah|menyimpan|menyelesaikan|menganalisis|menginvestigasi|mengumpulkan|mengambil|mengunduh)\\b[^.!?:\\n]{0,60}?(?:\\s+(?:sekarang|saat\\s+ini)(?:[.!…,:]+|\\s*(?:\\n|$))|\\.{3}|…|:\\s*(?:\\n|$))"
 # Gerund-led plan announcement carrying NO imminence marker — "Setting up the
 # plan, then mapping every call site before touching anything." Two reasons
 # the patterns above cannot see it (#1261): the verb is a PREPARATION verb

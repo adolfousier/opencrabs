@@ -249,7 +249,7 @@ line_start_re = "(?im)^[\\s\\-*•>]*(?:(?:ok|okay|bem|certo|tá|ta)\\s*,?\\s+)?
 # Anúncio de trabalho em curso que encerra o turno sem chamar nenhuma
 # ferramenta — "Executando os testes agora.", "Verificando…". Exige gerúndio
 # de ação + marcador de iminência (agora / … / : ).
-work_announcement_re = "(?i)^[\\s\\-*•>]*(?:(?:(?:e\\s+)?depois|(?:e\\s+)?ent[ãa]o|em\\s+seguida|logo\\s+ap[óo]s|e)[,]?\\s+)?(?:(?:ok|okay|bem|certo|tá|ta)[,.!:]?\\s+)?(?:estou\\s+|agora\\s+)?(?:executando|rodando|verificando|revisando|checando|construindo|compilando|testando|buscando|lendo|escrevendo|criando|gerando|atualizando|modificando|instalando|aplicando|implantando|baixando|enviando|removendo|deletando|corrigindo|consertando|analisando|investigando)\\b[^.!?:\\n]{0,60}?(?:\\s+agora(?:[.!…,:]+|\\s*$)|\\.{3}|…|:\\s*$)"
+work_announcement_re = "(?i)^[\\s\\-*•>]*(?:(?:(?:e\\s+)?depois|(?:e\\s+)?ent[ãa]o|em\\s+seguida|logo\\s+ap[óo]s|e)[,]?\\s+)?(?:(?:ok|okay|bem|certo|tá|ta)[,.!:]?\\s+)?(?:estou\\s+|agora\\s+)?(?:executando|rodando|verificando|revisando|checando|construindo|compilando|testando|buscando|lendo|escrevendo|criando|gerando|atualizando|modificando|instalando|aplicando|implantando|baixando|enviando|removendo|deletando|corrigindo|consertando|analisando|investigando)\\b[^.!?:\\n]{0,60}?(?:\\s+agora(?:[.!…,:]+|\\s*(?:\\n|$))|\\.{3}|…|:\\s*(?:\\n|$))"
 # Gerund-led plan announcement carrying NO imminence marker — "Setting up the
 # plan, then mapping every call site before touching anything." Two reasons
 # the patterns above cannot see it (#1261): the verb is a PREPARATION verb

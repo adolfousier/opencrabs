@@ -259,7 +259,7 @@ line_start_re = "(?im)^[\\s\\-*•>]*(?:(?:ok|okay|bon|d'accord|bien|oui)\\s*,?\
 # statut comme l'anglais, donc on couvre « je <verbe> … maintenant » et le
 # nominal « <nom> en cours ». Exige un marqueur d'imminence (maintenant / en
 # cours / … / : ).
-work_announcement_re = "(?i)^[\\s\\-*•>]*(?:(?:(?:et\\s+)?puis|(?:et\\s+)?ensuite|apr[èe]s\\s+[çc]a|et)[,]?\\s+)?(?:(?:ok|okay|bon|d['’]accord|bien|oui)[,.!:]?\\s+)?(?:(?:je\\s+|j['’])(?:lance|relance|vérifie|exécute|teste|compile|construis|installe|recherche|cherche|lis|écris|crée|génère|corrige|analyse|inspecte|déploie|télécharge|mets à jour)\\b[^.!?:\\n]{0,60}?(?:\\s+maintenant(?:[.!…,:]+|\\s*$)|\\.{3}|…|:\\s*$)|(?:lancement|vérification|exécution|compilation|installation|recherche|analyse|déploiement|téléchargement|mise à jour|tests?)\\s+en\\s+cours(?:[.!…,:]+|\\s*$))"
+work_announcement_re = "(?i)^[\\s\\-*•>]*(?:(?:(?:et\\s+)?puis|(?:et\\s+)?ensuite|apr[èe]s\\s+[çc]a|et)[,]?\\s+)?(?:(?:ok|okay|bon|d['’]accord|bien|oui)[,.!:]?\\s+)?(?:(?:je\\s+|j['’])(?:lance|relance|vérifie|exécute|teste|compile|construis|installe|recherche|cherche|lis|écris|crée|génère|corrige|analyse|inspecte|déploie|télécharge|mets à jour)\\b[^.!?:\\n]{0,60}?(?:\\s+maintenant(?:[.!…,:]+|\\s*(?:\\n|$))|\\.{3}|…|:\\s*(?:\\n|$))|(?:lancement|vérification|exécution|compilation|installation|recherche|analyse|déploiement|téléchargement|mise à jour|tests?)\\s+en\\s+cours(?:[.!…,:]+|\\s*(?:\\n|$)))"
 # Gerund-led plan announcement carrying NO imminence marker — "Setting up the
 # plan, then mapping every call site before touching anything." Two reasons
 # the patterns above cannot see it (#1261): the verb is a PREPARATION verb
