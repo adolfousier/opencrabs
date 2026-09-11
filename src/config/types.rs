@@ -1436,7 +1436,7 @@ fn default_thinking_loop_timeout_secs() -> u64 {
 }
 
 fn default_time_marker_interval_secs() -> u64 {
-    900
+    crate::brain::agent::service::tool_loop::DEFAULT_TIME_MARKER_INTERVAL_SECS
 }
 
 fn default_approval_policy() -> String {

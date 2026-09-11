@@ -50,10 +50,7 @@ pub fn format_utc_time(dt: &DateTime<Utc>) -> String {
 /// - `Timezone: America/New_York`
 pub fn parse_timezone_heuristic(text: &str) -> Option<TzInfo> {
     for line in text.lines() {
-        let line_clean = line
-            .trim()
-            .trim_start_matches(|c| c == '-' || c == '*' || c == '#')
-            .trim();
+        let line_clean = line.trim().trim_start_matches(['-', '*', '#']).trim();
         let lower = line_clean.to_lowercase();
 
         let is_tz_line = lower.starts_with("timezone:")
@@ -165,7 +162,7 @@ fn parse_utc_offset_or_iana(s: &str) -> Option<Tz> {
     let hours_str = sign_and_num.1.split(':').next()?.trim();
     let hours: i32 = hours_str.parse().ok()?;
 
-    if hours > 14 || hours < 0 {
+    if !(0..=14).contains(&hours) {
         return None;
     }
 
@@ -241,10 +238,11 @@ impl UserTimezoneCache {
 
         {
             let guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(ref entry) = *guard {
-                if entry.mtime == current_mtime && entry.file_len == current_len {
-                    return entry.resolved.clone();
-                }
+            if let Some(ref entry) = *guard
+                && entry.mtime == current_mtime
+                && entry.file_len == current_len
+            {
+                return entry.resolved.clone();
             }
         }
 
@@ -352,7 +350,7 @@ Timezone: Europe/Paris
     #[test]
     fn test_caching_and_invalidation() {
         let mut tmp = NamedTempFile::new().unwrap();
-        write!(tmp, "Timezone: UTC+2 (EET)\n").unwrap();
+        writeln!(tmp, "Timezone: UTC+2 (EET)").unwrap();
         tmp.flush().unwrap();
 
         let cache = UserTimezoneCache::new();
@@ -366,7 +364,7 @@ Timezone: Europe/Paris
             .truncate(true)
             .open(tmp.path())
             .unwrap();
-        write!(file, "Timezone: UTC+7 (NOVT)\n").unwrap();
+        writeln!(file, "Timezone: UTC+7 (NOVT)").unwrap();
         file.flush().unwrap();
 
         let res2 = cache.resolve_from_file(tmp.path()).expect("second resolve");
