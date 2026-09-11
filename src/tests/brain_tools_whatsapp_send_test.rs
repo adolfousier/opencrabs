@@ -1,7 +1,8 @@
 //! Tests for whatsapp_send helpers and schema.
 
 use crate::brain::tools::whatsapp_send::{
-    build_vcard, get_f64, get_str, mime_from_extension, tag_with_header,
+    build_vcard, delivered_prefix, get_f64, get_str, mime_from_extension, partial_failure_report,
+    tag_with_header,
 };
 use serde_json::json;
 
@@ -225,8 +226,10 @@ fn every_persist_call_uses_the_tagged_form() {
     // Bug E was drift: send persisted `tagged` (MSG_HEADER + text) while
     // reply persisted the bare `formatted`, so history held two formats for
     // one event class. Both paths now share tag_with_header and every
-    // persist_outgoing call must pass the tagged binding. If this sentinel
-    // fires, some path persists header-less text again.
+    // persist_outgoing call must pass the tagged binding — or `&prefix`,
+    // the delivered portion of tagged persisted by the #1490-B partial-
+    // failure branch. If this sentinel fires, some path persists header-less
+    // text again.
     const SRC: &str = include_str!("../brain/tools/whatsapp_send.rs");
     let call_sites: Vec<&str> = SRC
         .lines()
@@ -239,8 +242,81 @@ fn every_persist_call_uses_the_tagged_form() {
     );
     for site in &call_sites {
         assert!(
-            site.contains("&tagged"),
+            site.contains("&tagged") || site.contains("&prefix"),
             "persist call not using the tagged form: {site}"
         );
     }
+}
+
+// ── #1490-B: partial-failure accounting on chunked sends ─────────────
+
+/// Premise for the delivered-prefix logic: split_message returns
+/// CONTIGUOUS slices of its input, so the chunks re-concatenate to the
+/// exact original text with no separator loss.
+#[test]
+fn split_message_chunks_reconcatenate_to_original() {
+    let text = "word ".repeat(2000); // ~10k chars, forces multiple chunks
+    let chunks = crate::channels::whatsapp::handler::split_message(&text, 4000);
+    assert!(chunks.len() > 1, "test text must exceed the chunk limit");
+    assert_eq!(
+        chunks.concat(),
+        text.as_str(),
+        "chunks must tile the original text exactly"
+    );
+}
+
+#[test]
+fn delivered_prefix_concats_the_delivered_chunks() {
+    assert_eq!(delivered_prefix(&[]), "");
+    assert_eq!(
+        delivered_prefix(&["alpha ", "beta"]),
+        "alpha beta".to_string()
+    );
+}
+
+#[test]
+fn partial_failure_report_names_delivery_state() {
+    let none = partial_failure_report(3, 0, "net down");
+    assert!(none.contains("net down"));
+    assert!(none.contains("No chunks were delivered"));
+    assert!(none.contains("safe to retry the whole message"));
+
+    let partial = partial_failure_report(3, 2, "net down");
+    assert!(partial.contains("chunk 3 of 3 failed"));
+    assert!(partial.contains("net down"));
+    assert!(partial.contains("Chunks 1-2 were DELIVERED and persisted"));
+    assert!(partial.contains("do NOT resend"));
+    assert!(partial.contains("remaining text"));
+}
+
+/// Source-scan sentinel: the send arm tracks delivered chunks, persists
+/// the delivered prefix on failure, and reports through the accounting
+/// helper. No client trait exists to mock a chunk-2-of-3 failure (the
+/// issue's suggestion), so the wiring is pinned here while the accounting
+/// math is behavior-tested above.
+#[test]
+fn send_arm_accounts_for_partial_delivery() {
+    const SRC: &str = include_str!("../brain/tools/whatsapp_send.rs");
+    let (_, rest) = SRC.split_once("\"send\" =>").expect("send arm not found");
+    let (arm, _) = rest.split_once("// ── reply").expect("reply arm not found");
+    assert!(
+        arm.contains("let mut delivered: Vec<&str>"),
+        "no delivery tracking"
+    );
+    assert!(
+        arm.contains("delivered.push(chunk)"),
+        "loop does not record successes"
+    );
+    assert!(
+        arm.contains("delivered_prefix(&delivered)"),
+        "failure branch does not compute the delivered prefix"
+    );
+    assert!(
+        arm.contains("persist_outgoing(&jid, &prefix)"),
+        "delivered prefix not persisted on failure"
+    );
+    assert!(
+        arm.contains("partial_failure_report("),
+        "failure branch does not use the accounting report"
+    );
 }

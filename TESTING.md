@@ -128,7 +128,7 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Brain Tools Subagent Reconcile | 12 | `src/tests/brain_tools_subagent_reconcile_test.rs` |
 | Tests — Brain Tools Tool Manage | 11 | `src/tests/brain_tools_tool_manage_test.rs` |
 | Tests — Brain Tools Trait | 3 | `src/tests/brain_tools_trait_test.rs` |
-| Tests — Brain Tools Whatsapp Send | 21 | `src/tests/brain_tools_whatsapp_send_test.rs` |
+| Tests — Brain Tools Whatsapp Send | 25 | `src/tests/brain_tools_whatsapp_send_test.rs` |
 | Tests — Brain Tools Write Opencrabs File | 20 | `src/tests/brain_tools_write_opencrabs_file_tests.rs` |
 | Tests — Brain Tools Write | 5 | `src/tests/brain_tools_write_test.rs` |
 | Tests — Brain Verify Inline | 15 | `src/tests/brain_verify_inline_test.rs` |

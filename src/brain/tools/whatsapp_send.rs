@@ -140,6 +140,32 @@ pub(crate) fn tag_with_header(message: &str) -> String {
     )
 }
 
+/// Concatenate the chunks that actually left. `split_message` returns
+/// contiguous slices of its input, so the concat is the exact delivered
+/// prefix of the tagged text (#1490-B).
+pub(crate) fn delivered_prefix(delivered: &[&str]) -> String {
+    delivered.concat()
+}
+
+/// Error text for a chunked send that died partway: names how many chunks
+/// were delivered (and persisted) vs which one failed, and tells the model
+/// what a retry may and must-not resend (#1490-B; blind retries used to
+/// duplicate chunk 1).
+pub(crate) fn partial_failure_report(total: usize, delivered: usize, err: &str) -> String {
+    if delivered == 0 {
+        format!(
+            "Failed to send WhatsApp message: {err}. No chunks were delivered; safe to retry the whole message."
+        )
+    } else {
+        format!(
+            "Failed to send WhatsApp message: chunk {} of {} failed: {err}. Chunks 1-{} were DELIVERED and persisted; do NOT resend them. Retry only the remaining text if needed.",
+            delivered + 1,
+            total,
+            delivered
+        )
+    }
+}
+
 /// Persist outgoing messages to `channel_messages` for reply-recovery.
 async fn persist_outgoing(jid: &Jid, content: &str) {
     if content.trim().is_empty() {
@@ -386,17 +412,29 @@ impl Tool for WhatsAppSendTool {
                 let message = crate::utils::slack_fmt::markdown_to_mrkdwn(&message);
                 let tagged = tag_with_header(&message);
                 let chunks = crate::channels::whatsapp::handler::split_message(&tagged, 4000);
+                let total = chunks.len();
+                let mut delivered: Vec<&str> = Vec::with_capacity(total);
                 for chunk in chunks {
                     let wa_msg = waproto::whatsapp::Message {
                         conversation: Some(chunk.to_string()),
                         ..Default::default()
                     };
                     if let Err(e) = client.send_message(jid.clone(), wa_msg).await {
-                        return Ok(ToolResult::error(format!(
-                            "Failed to send WhatsApp message: {}",
-                            e
+                        // #1490-B: account for what already left the building.
+                        // Delivered chunks are persisted so history matches
+                        // reality, and the error names exactly what arrived vs
+                        // what failed so a retry cannot duplicate chunk 1.
+                        let prefix = delivered_prefix(&delivered);
+                        if !prefix.trim().is_empty() {
+                            persist_outgoing(&jid, &prefix).await;
+                        }
+                        return Ok(ToolResult::error(partial_failure_report(
+                            total,
+                            delivered.len(),
+                            &e.to_string(),
                         )));
                     }
+                    delivered.push(chunk);
                 }
 
                 persist_outgoing(&jid, &tagged).await;
