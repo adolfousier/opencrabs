@@ -309,3 +309,72 @@ fn halts_turn_false_for_unknown_tool() {
     let registry = ToolRegistry::new();
     assert!(!registry.halts_turn("does_not_exist"));
 }
+
+// --- skill glob gate wiring (issue #150) ---
+
+/// End-to-end config toggle: with a real SKILL.md (globs declared) in a
+/// temp home's skills dir, `skill_glob_gate = true` blocks the first
+/// matching call (body in the rejection) and arms the identical retry
+/// (B1); `false` passes straight through.
+#[tokio::test]
+async fn skill_gate_config_toggle_end_to_end() {
+    use crate::config::profile::with_home_override_async;
+
+    let tmp = tempfile::tempdir().expect("tmpdir");
+    let skills_dir = tmp.path().join("skills").join("gate-probe");
+    std::fs::create_dir_all(&skills_dir).expect("mkdir");
+    std::fs::write(
+        skills_dir.join("SKILL.md"),
+        "---\nname: gate-probe\ndescription: probe\nglobs: **/gate-probe/**\n---\nGATE-PROBE-BODY\n",
+    )
+    .expect("write skill");
+
+    with_home_override_async(tmp.path().to_path_buf(), async {
+        crate::brain::skills::invalidate_globs_cache();
+        let mut registry = ToolRegistry::new();
+        registry.register(Arc::new(MockTool {
+            name: "write_file".to_string(),
+            requires_approval: false,
+        }));
+
+        let session = Uuid::new_v4();
+        let context = ToolExecutionContext::new(session);
+        let input = serde_json::json!({
+            "path": format!("{}/gate-probe/inner/file.md", tmp.path().display()),
+            "content": "x"
+        });
+
+        // Enabled (default): first call rejected with the body.
+        let blocked = registry
+            .execute("write_file", input.clone(), &context)
+            .await
+            .expect("execute");
+        let err_text = blocked.error.as_deref().unwrap_or(&blocked.output);
+        assert!(
+            err_text.contains("[SKILL GATE]") && err_text.contains("GATE-PROBE-BODY"),
+            "enabled gate must reject with the body, got: {}",
+            &err_text[..err_text.len().min(200)]
+        );
+        // Identical retry passes (mark_seen armed it — B1).
+        let retried = registry
+            .execute("write_file", input.clone(), &context)
+            .await
+            .expect("execute");
+        assert!(retried.success, "identical retry after the gate must pass");
+
+        // Disabled: the SAME call (fresh session, never seen) passes.
+        registry.set_skill_gate_enabled(false);
+        let fresh = Uuid::new_v4();
+        let ctx2 = ToolExecutionContext::new(fresh);
+        let passed = registry
+            .execute("write_file", input, &ctx2)
+            .await
+            .expect("execute");
+        let ptxt = passed.error.as_deref().unwrap_or(&passed.output);
+        assert!(
+            !ptxt.contains("[SKILL GATE]"),
+            "disabled gate must never emit a [SKILL GATE] rejection"
+        );
+    })
+    .await;
+}

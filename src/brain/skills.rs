@@ -43,6 +43,7 @@
 //! preserved for forward-compat but ignored.
 
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 /// Compile-time table of built-in skills shipped with the binary.
 ///
@@ -109,6 +110,11 @@ pub struct Skill {
     pub description: String,
     /// Prompt body (everything after the closing `---`, trimmed).
     pub body: String,
+    /// Cursor-style glob paths. When non-empty, the skill gate rejects
+    /// tool calls touching a matching path until the skill body has been
+    /// loaded (seen) in the current session context. Opt-in: no `globs`
+    /// key → empty vec → invisible to the gate.
+    pub globs: Vec<String>,
     /// `review_gate: true` in frontmatter: slash invocation of this skill
     /// is the user reaching for the brake on purpose. The agent must
     /// present the skill's output and wait for explicit user approval
@@ -144,17 +150,52 @@ impl Skill {
         let mut fm_name: Option<String> = None;
         let mut fm_description: Option<String> = None;
         let mut fm_review_gate = false;
+        let mut fm_globs: Vec<String> = Vec::new();
+
+        // Open-key state: a top-level `key:` with no inline value opens a
+        // block list; subsequent indented `- item` lines belong to it.
+        // Modeled on directives.rs::field but re-implemented here — those
+        // helpers are private and return the wrong shape.
+        let mut open_key: Option<String> = None;
 
         for line in frontmatter.lines() {
             let trimmed = line.trim();
             if trimmed.is_empty() || trimmed.starts_with('#') {
                 continue;
             }
+
+            // Indented list item under an open block key.
+            let indent = line.len() - line.trim_start().len();
+            if indent > 0 && trimmed.starts_with('-') && open_key.as_deref() == Some("globs") {
+                let item = trimmed[1..].trim().trim_matches('"').trim_matches('\'');
+                if !item.is_empty() {
+                    fm_globs.push(item.to_string());
+                }
+                continue;
+            }
+            if indent > 0 && trimmed.starts_with('-') {
+                continue;
+            }
+            // Indented non-list line (e.g. `globs: x/**` nested under
+            // `metadata:`) — belongs to a nested block, never to the
+            // top-level key set. Skip it and close any open block key:
+            // a nested region means the previous block list is over.
+            if indent > 0 {
+                open_key = None;
+                continue;
+            }
+
+            // Top-level key — closes any open block key.
+            open_key = None;
+
             let Some((key, value)) = trimmed.split_once(':') else {
                 continue;
             };
             let key = key.trim();
-            let value = value.trim().trim_matches('"').trim_matches('\'');
+            let value = value.trim();
+            // Inline value: strip quoting, then optional `[a, b]` flow form.
+            let value = value.trim_matches('"').trim_matches('\'');
+
             match key {
                 "name" => fm_name = Some(value.to_string()),
                 "description" => fm_description = Some(value.to_string()),
@@ -164,7 +205,32 @@ impl Skill {
                         "true" | "yes" | "1" | "on"
                     );
                 }
-                _ => {}
+                "globs" => {
+                    if value.is_empty() {
+                        // Block list form: `globs:` with items on the
+                        // following indented lines.
+                        open_key = Some(key.to_string());
+                    } else if let Some(inner) =
+                        value.strip_prefix('[').and_then(|s| s.strip_suffix(']'))
+                    {
+                        // Inline flow form: `globs: [a, b]`.
+                        for part in inner.split(',') {
+                            let item = part.trim().trim_matches('"').trim_matches('\'');
+                            if !item.is_empty() {
+                                fm_globs.push(item.to_string());
+                            }
+                        }
+                    } else {
+                        // Cursor comma-separated string form: `globs: a, b`.
+                        for part in value.split(',') {
+                            let item = part.trim().trim_matches('"').trim_matches('\'');
+                            if !item.is_empty() {
+                                fm_globs.push(item.to_string());
+                            }
+                        }
+                    }
+                }
+                _ => {} // unknown keys (incl. nested metadata blocks) ignored
             }
         }
 
@@ -178,6 +244,7 @@ impl Skill {
             slash_name,
             description,
             body: body.trim().to_string(),
+            globs: fm_globs,
             review_gate: fm_review_gate,
             source,
         })
@@ -342,4 +409,40 @@ pub fn load_all_skills() -> Vec<Skill> {
 /// `load_all_skills` (user overlay wins).
 pub fn resolve_skill(name: &str) -> Option<Skill> {
     load_all_skills().into_iter().find(|s| s.name == name)
+}
+
+type GlobsCache = std::sync::Mutex<Option<(std::time::Instant, PathBuf, Vec<Skill>)>>;
+static GLOBS_CACHE: OnceLock<GlobsCache> = OnceLock::new();
+
+/// Clear the globs cache (for tests or explicit reload).
+pub fn invalidate_globs_cache() {
+    if let Some(cache) = GLOBS_CACHE.get()
+        && let Ok(mut guard) = cache.lock()
+    {
+        *guard = None;
+    }
+}
+
+/// The skills that declare `globs` — the skill-gate's working set (#150).
+/// Cached for 60s: the gate runs on EVERY tool call, and re-scanning the
+/// skills tree per call would dominate it. A freshly added globs skill
+/// becomes visible within a minute or on restart; failure to read the
+/// cache source is fail-open (empty vec → gate passes everything).
+pub fn skills_with_globs() -> Vec<Skill> {
+    static TTL: std::time::Duration = std::time::Duration::from_secs(60);
+    let cache = GLOBS_CACHE.get_or_init(|| std::sync::Mutex::new(None));
+    let current_home = crate::config::opencrabs_home();
+    let mut guard = cache.lock().expect("skills_with_globs cache poisoned");
+    if let Some((at, home, skills)) = guard.as_ref()
+        && at.elapsed() < TTL
+        && home == &current_home
+    {
+        return skills.clone();
+    }
+    let fresh: Vec<Skill> = load_all_skills()
+        .into_iter()
+        .filter(|s| !s.globs.is_empty())
+        .collect();
+    *guard = Some((std::time::Instant::now(), current_home, fresh.clone()));
+    fresh
 }

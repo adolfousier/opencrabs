@@ -46,6 +46,7 @@ fn audit_skill() -> Skill {
         slash_name: "/security-audit".to_string(),
         description: "Audit the repo".to_string(),
         body: "Run a full security audit and report findings.".to_string(),
+        globs: Vec::new(),
         review_gate: false,
         source: SkillSource::User,
     }

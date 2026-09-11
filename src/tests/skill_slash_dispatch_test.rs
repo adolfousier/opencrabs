@@ -17,6 +17,7 @@ fn skill(name: &str, body: &str) -> Skill {
         slash_name: format!("/{name}"),
         description: format!("test skill {name}"),
         body: body.to_string(),
+        globs: Vec::new(),
         review_gate: false,
         source: SkillSource::Builtin,
     }
@@ -102,6 +103,7 @@ fn review_gated_skill_dispatch_prepends_reminder() {
         slash_name: "/drop-release".to_string(),
         description: "gated release flow".to_string(),
         body: "Draft the release.".to_string(),
+        globs: Vec::new(),
         review_gate: true,
         source: crate::brain::skills::SkillSource::User,
     };

@@ -466,7 +466,13 @@ impl AgentService {
             last_compaction_elapsed: std::sync::RwLock::new(HashMap::new()),
             session_outgoing_text_ring: std::sync::RwLock::new(HashMap::new()),
             context,
-            tool_registry: Arc::new(ToolRegistry::new()),
+            tool_registry: {
+                let mut registry = ToolRegistry::new();
+                // Skill glob gate master switch (#150) — resolved from
+                // config once at construction.
+                registry.set_skill_gate_enabled(config.agent.skill_glob_gate);
+                Arc::new(registry)
+            },
             max_tool_iterations: 0, // 0 = unlimited (loop detection is the safety net)
             default_system_brain: None,
             brain_rebuild: None,
