@@ -320,3 +320,63 @@ fn send_arm_accounts_for_partial_delivery() {
         "failure branch does not use the accounting report"
     );
 }
+
+// ── #1490-C: reply-path chunking ──────────────────────────────────────
+
+/// Chunk 0 of a chunked tagged reply carries the attribution header - the
+/// quoted reply (the only chunk with context_info) keeps the agent marker.
+#[test]
+fn tagged_reply_lead_chunk_carries_the_header() {
+    let tagged = tag_with_header(&"x".repeat(9000));
+    let chunks = crate::channels::whatsapp::handler::split_message(&tagged, 4000);
+    assert!(chunks.len() > 1, "test text must exceed the chunk limit");
+    assert!(
+        chunks[0].starts_with(crate::channels::whatsapp::handler::MSG_HEADER),
+        "lead chunk lost the attribution header"
+    );
+}
+
+/// Source-scan sentinel: the reply arm must chunk like send (the old code
+/// rode a single ExtendedTextMessage with the full text - WhatsApp
+/// truncates or rejects over-long messages), keep the quote on chunk 0
+/// only, and reuse the #1490-B partial-failure accounting.
+#[test]
+fn reply_arm_chunks_with_quote_only_on_lead() {
+    const SRC: &str = include_str!("../brain/tools/whatsapp_send.rs");
+    let (_, rest) = SRC.split_once("\"reply\" =>").expect("reply arm not found");
+    let (arm, _) = rest
+        .split_once("// ── delete")
+        .expect("delete arm anchor not found");
+    assert!(
+        arm.contains("split_message(&tagged, 4000)"),
+        "reply arm does not chunk the tagged text"
+    );
+    assert!(
+        arm.contains("for (i, chunk) in chunks.into_iter().enumerate()"),
+        "reply arm does not iterate chunks"
+    );
+    assert!(
+        arm.contains("if i == 0"),
+        "reply arm does not single out the lead chunk"
+    );
+    assert!(
+        arm.contains("extended_text_message: Some"),
+        "lead chunk lost the quote message form"
+    );
+    assert!(
+        arm.contains("conversation: Some"),
+        "follow-up chunks must be plain conversation messages"
+    );
+    assert!(
+        arm.contains("delivered_prefix(&delivered)"),
+        "reply failure branch lost the #1490-B accounting"
+    );
+    assert!(
+        arm.contains("partial_failure_report("),
+        "reply failure branch lost the accounting report"
+    );
+    assert!(
+        arm.contains("persist_outgoing(&jid, &tagged)"),
+        "reply success must persist the tagged form"
+    );
+}

@@ -455,30 +455,57 @@ impl Tool for WhatsAppSendTool {
                 // #1490-E: the reply carries and persists the same tagged form
                 // as the send path - one event class, one format.
                 let tagged = tag_with_header(&formatted);
-                let wa_msg = waproto::whatsapp::Message {
-                    extended_text_message: Some(Box::new(
-                        waproto::whatsapp::message::ExtendedTextMessage {
-                            text: Some(tagged.clone()),
-                            context_info: Some(Box::new(waproto::whatsapp::ContextInfo {
-                                stanza_id: Some(msg_id),
-                                remote_jid: Some(jid_str.clone()),
-                                ..Default::default()
-                            })),
+                // #1490-C: chunk the reply like send does. WhatsApp rejects
+                // or truncates over-long message text, so a long reply must
+                // not ride a single ExtendedTextMessage. Chunk 0 keeps the
+                // quote context; later chunks go as plain conversation
+                // messages (one quoted reply plus N-1 normal follow-ups -
+                // quoting the same stanza N times is noise).
+                let chunks = crate::channels::whatsapp::handler::split_message(&tagged, 4000);
+                let total = chunks.len();
+                let mut delivered: Vec<&str> = Vec::with_capacity(total);
+                for (i, chunk) in chunks.into_iter().enumerate() {
+                    let wa_msg = if i == 0 {
+                        waproto::whatsapp::Message {
+                            extended_text_message: Some(Box::new(
+                                waproto::whatsapp::message::ExtendedTextMessage {
+                                    text: Some(chunk.to_string()),
+                                    context_info: Some(Box::new(waproto::whatsapp::ContextInfo {
+                                        stanza_id: Some(msg_id.clone()),
+                                        remote_jid: Some(jid_str.clone()),
+                                        ..Default::default()
+                                    })),
+                                    ..Default::default()
+                                },
+                            )),
                             ..Default::default()
-                        },
-                    )),
-                    ..Default::default()
-                };
-                match client.send_message(jid.clone(), wa_msg).await {
-                    Ok(_) => {
-                        persist_outgoing(&jid, &tagged).await;
-                        Ok(ToolResult::success(format!(
-                            "Reply sent to {} via WhatsApp.",
-                            jid_str
-                        )))
+                        }
+                    } else {
+                        waproto::whatsapp::Message {
+                            conversation: Some(chunk.to_string()),
+                            ..Default::default()
+                        }
+                    };
+                    if let Err(e) = client.send_message(jid.clone(), wa_msg).await {
+                        // Same accounting as the send path (#1490-B).
+                        let prefix = delivered_prefix(&delivered);
+                        if !prefix.trim().is_empty() {
+                            persist_outgoing(&jid, &prefix).await;
+                        }
+                        return Ok(ToolResult::error(partial_failure_report(
+                            total,
+                            delivered.len(),
+                            &e.to_string(),
+                        )));
                     }
-                    Err(e) => Ok(ToolResult::error(format!("Failed to reply: {}", e))),
+                    delivered.push(chunk);
                 }
+
+                persist_outgoing(&jid, &tagged).await;
+                Ok(ToolResult::success(format!(
+                    "Reply sent to {} via WhatsApp.",
+                    jid_str
+                )))
             }
 
             // ── delete ───────────────────────────────────────────────────────
