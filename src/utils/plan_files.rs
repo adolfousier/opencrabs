@@ -857,6 +857,23 @@ pub async fn sync_md_to_json(session_id: Uuid) -> Result<(), String> {
         ));
     }
 
+    #[cfg(feature = "telegram")]
+    if crate::channels::telegram::rich::mermaid::should_render_mermaid(&body) {
+        let parse_errors =
+            crate::channels::telegram::rich::mermaid::preflight_parse_errors(&body).await;
+        if !parse_errors.is_empty() {
+            if let Err(e) = std::fs::write(&md, &plan.description) {
+                tracing::warn!("Failed to restore refused plan .md write: {e}");
+            }
+            return Err(format!(
+                "PLAN WRITE REFUSED: Mermaid diagram syntax error in plan markdown.\n\n\
+                 Renderer diagnostic:\n{}\n\n\
+                 Please fix the Mermaid diagram syntax in the plan design and try again.",
+                parse_errors.join("\n")
+            ));
+        }
+    }
+
     plan.description = body;
     plan.updated_at = chrono::Utc::now();
     if let Err(e) = save_plan(&plan).await {
