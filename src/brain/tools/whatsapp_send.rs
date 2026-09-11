@@ -128,6 +128,18 @@ async fn resolve_jid(
     }
 }
 
+/// Prefix outgoing text with the channel attribution header. Shared by the
+/// send and reply paths so persisted history carries ONE consistent format
+/// for every agent-authored message (#1490-E: reply persisted bare text
+/// while send persisted the tagged form).
+pub(crate) fn tag_with_header(message: &str) -> String {
+    format!(
+        "{}\n\n{}",
+        crate::channels::whatsapp::handler::MSG_HEADER,
+        message
+    )
+}
+
 /// Persist outgoing messages to `channel_messages` for reply-recovery.
 async fn persist_outgoing(jid: &Jid, content: &str) {
     if content.trim().is_empty() {
@@ -372,11 +384,7 @@ impl Tool for WhatsAppSendTool {
 
                 // Convert markdown to WhatsApp format and prepend agent header
                 let message = crate::utils::slack_fmt::markdown_to_mrkdwn(&message);
-                let tagged = format!(
-                    "{}\n\n{}",
-                    crate::channels::whatsapp::handler::MSG_HEADER,
-                    message
-                );
+                let tagged = tag_with_header(&message);
                 let chunks = crate::channels::whatsapp::handler::split_message(&tagged, 4000);
                 for chunk in chunks {
                     let wa_msg = waproto::whatsapp::Message {
@@ -406,10 +414,13 @@ impl Tool for WhatsAppSendTool {
                 let msg_id = pget!(get_str(&input, "message_id")).to_string();
 
                 let formatted = crate::utils::slack_fmt::markdown_to_mrkdwn(&message);
+                // #1490-E: the reply carries and persists the same tagged form
+                // as the send path - one event class, one format.
+                let tagged = tag_with_header(&formatted);
                 let wa_msg = waproto::whatsapp::Message {
                     extended_text_message: Some(Box::new(
                         waproto::whatsapp::message::ExtendedTextMessage {
-                            text: Some(formatted.clone()),
+                            text: Some(tagged.clone()),
                             context_info: Some(Box::new(waproto::whatsapp::ContextInfo {
                                 stanza_id: Some(msg_id),
                                 remote_jid: Some(jid_str.clone()),
@@ -422,7 +433,7 @@ impl Tool for WhatsAppSendTool {
                 };
                 match client.send_message(jid.clone(), wa_msg).await {
                     Ok(_) => {
-                        persist_outgoing(&jid, &formatted).await;
+                        persist_outgoing(&jid, &tagged).await;
                         Ok(ToolResult::success(format!(
                             "Reply sent to {} via WhatsApp.",
                             jid_str

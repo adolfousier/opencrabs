@@ -1,6 +1,8 @@
 //! Tests for whatsapp_send helpers and schema.
 
-use crate::brain::tools::whatsapp_send::{build_vcard, get_f64, get_str, mime_from_extension};
+use crate::brain::tools::whatsapp_send::{
+    build_vcard, get_f64, get_str, mime_from_extension, tag_with_header,
+};
 use serde_json::json;
 
 // ── get_str ──────────────────────────────────────────────────────────
@@ -201,4 +203,44 @@ async fn unknown_action_returns_error() {
     assert!(error_msg.contains("nonexistent_action"));
     assert!(error_msg.contains("send_poll"));
     assert!(error_msg.contains("mark_read"));
+}
+
+// ── #1490-E: one persistence format across send/reply ────────────────
+
+#[test]
+fn tag_with_header_prepends_attribution() {
+    let tagged = tag_with_header("hello world");
+    assert!(
+        tagged.starts_with(crate::channels::whatsapp::handler::MSG_HEADER),
+        "tagged text must start with the attribution header, got: {tagged:?}"
+    );
+    assert!(
+        tagged.ends_with("\n\nhello world"),
+        "header and body must be separated by a blank line, got: {tagged:?}"
+    );
+}
+
+#[test]
+fn every_persist_call_uses_the_tagged_form() {
+    // Bug E was drift: send persisted `tagged` (MSG_HEADER + text) while
+    // reply persisted the bare `formatted`, so history held two formats for
+    // one event class. Both paths now share tag_with_header and every
+    // persist_outgoing call must pass the tagged binding. If this sentinel
+    // fires, some path persists header-less text again.
+    const SRC: &str = include_str!("../brain/tools/whatsapp_send.rs");
+    let call_sites: Vec<&str> = SRC
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.contains("persist_outgoing(") && !l.contains("fn persist_outgoing"))
+        .collect();
+    assert!(
+        call_sites.len() >= 2,
+        "expected send + reply persist calls, got {call_sites:?}"
+    );
+    for site in &call_sites {
+        assert!(
+            site.contains("&tagged"),
+            "persist call not using the tagged form: {site}"
+        );
+    }
 }
