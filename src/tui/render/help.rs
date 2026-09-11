@@ -45,8 +45,10 @@ pub(super) fn render_help(f: &mut Frame, app: &App, area: Rect) {
     let cyan = Color::Cyan;
 
     let version_line = format!("v{}", env!("CARGO_PKG_VERSION"));
-    let provider_name = app.agent_service.provider_name().to_string();
-    let model_name = app.default_model_name.clone();
+    // Session-aware: the global name lies when the loaded session runs a
+    // per-session provider swap or a sticky fallback (#1464).
+    let provider_name = app.provider_name_for_current_session();
+    let model_name = app.provider_model_for_current_session();
 
     let mut left = vec![
         Line::from(""),
@@ -356,12 +358,15 @@ pub(super) fn render_settings(f: &mut Frame, app: &App, area: Rect) {
     let brain_display = collapse_home(&app.brain_path.display().to_string());
     let wd_display = collapse_home(&app.working_directory.display().to_string());
 
-    let provider_name = app.provider_name();
+    // Session-aware: /debug must show what actually serves this session,
+    // not the global default (#1464).
+    let provider_name = app.provider_name_for_current_session();
+    let model_name = app.provider_model_for_current_session();
     let mut lines = vec![
         Line::from(""),
         section("PROVIDER"),
         kv("Provider", &provider_name),
-        kv("Model", &app.default_model_name),
+        kv("Model", &model_name),
         Line::from(""),
         section("APPROVAL"),
         kv("Policy", approval),

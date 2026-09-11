@@ -524,6 +524,7 @@ Born from two real incidents (#646, #1178): hard-coded fixture constants broke o
 | Tests — Provider Factory Regression | 31 | `src/tests/provider_factory_regression_test.rs` |
 | Tests — Provider Matches Session | 3 | `src/tests/provider_matches_session_test.rs` |
 | Tests — Provider Models Isolation | 5 | `src/tests/provider_models_isolation_test.rs` |
+| Tests — Provider Name For Session | 3 | `src/tests/provider_name_for_session_test.rs` |
 | Tests — Provider Never Ignored | 5 | `src/tests/provider_never_ignored_test.rs` |
 | Tests — Provider Picker Setup Hint | 4 | `src/tests/provider_picker_setup_hint_test.rs` |
 | Tests — Provider Registry | 8 | `src/tests/provider_registry_test.rs` |

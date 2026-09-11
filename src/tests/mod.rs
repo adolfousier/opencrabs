@@ -814,6 +814,7 @@ pub mod pdf_page_range_parser_test;
 pub mod pdf_smart_routing_test;
 pub mod pdf_to_images_test;
 pub mod pdf_vision_test;
+pub mod provider_name_for_session_test;
 pub mod question_common_test;
 pub mod quiet_delivery_test;
 pub mod read_state_test;

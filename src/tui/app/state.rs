@@ -1070,6 +1070,28 @@ impl App {
         self.agent_service.provider_model()
     }
 
+    /// Provider name serving the CURRENT session: the per-session override
+    /// (including sticky-fallback sub-provider) when a session is loaded,
+    /// the global provider otherwise. Display surfaces must use this over
+    /// `provider_name()` so they never report a provider that isn't the
+    /// one actually serving the session (#1464).
+    pub fn provider_name_for_current_session(&self) -> String {
+        match self.current_session.as_ref().map(|s| s.id) {
+            Some(id) => self.agent_service.provider_name_for_session(id),
+            None => self.agent_service.provider_name(),
+        }
+    }
+
+    /// Model serving the CURRENT session: per-session override / sticky
+    /// sub-model when a session is loaded, the global default otherwise
+    /// (#1464).
+    pub fn provider_model_for_current_session(&self) -> String {
+        match self.current_session.as_ref().map(|s| s.id) {
+            Some(id) => self.agent_service.provider_model_for_session(id),
+            None => self.agent_service.provider_model(),
+        }
+    }
+
     /// Check if a session_id matches the currently active session
     pub(crate) fn is_current_session(&self, session_id: Uuid) -> bool {
         self.current_session.as_ref().map(|s| s.id) == Some(session_id)
@@ -1362,8 +1384,8 @@ impl App {
 
         tracing::info!(
             "Session loaded — provider: {} / {}, session: {:?}",
-            self.agent_service.provider_name(),
-            self.default_model_name,
+            self.provider_name_for_current_session(),
+            self.provider_model_for_current_session(),
             self.current_session.as_ref().map(|s| s.id),
         );
 
